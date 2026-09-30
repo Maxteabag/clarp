@@ -1,0 +1,106 @@
+import { LineEdit, ListView } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+
+export struct SwitcherRow {
+    kind: string,
+    label: string,
+    detail: string,
+    key: string,
+    group: string,
+}
+
+// The quick switcher (QuickSwitcher.qml): type to find an agent, command or
+// setting; Up/Down move, Enter chooses, Escape or a click outside closes.
+export component Switcher inherits Rectangle {
+    in property <[SwitcherRow]> rows;
+    in-out property <int> current;
+    in property <string> placeholder: "Agent, contact, setting or command";
+    out property <string> query: search.text;
+    callback edited(string);
+    callback chosen(int);
+    callback moved(int);
+    callback dismissed();
+    public function open() {
+        search.text = "";
+        search.focus();
+    }
+    background: #00000080;
+    // A click outside the panel closes it.
+    TouchArea { clicked => { root.dismissed(); } }
+    panel := Rectangle {
+        width: Math.min(560px, root.width - 32px);
+        height: Math.min(500px, root.height - 80px);
+        x: (root.width - self.width) / 2;
+        y: Math.min(145px, root.height * 0.15);
+        border-radius: 3px;
+        background: Palette.window;
+        border-width: 1px;
+        border-color: Palette.border;
+        TouchArea { }
+        keys := FocusScope {
+            capture-key-pressed(event) => {
+                if (event.text == Key.DownArrow) {
+                    root.moved(Math.min(root.current + 1, root.rows.length - 1));
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    root.moved(Math.max(root.current - 1, 0));
+                    return accept;
+                }
+                if (event.text == Key.Return) {
+                    root.chosen(root.current);
+                    return accept;
+                }
+                reject
+            }
+            VerticalLayout {
+                padding: 5px;
+                spacing: 4px;
+                search := LineEdit {
+                    height: 43px;
+                    font-size: 14px;
+                    placeholder-text: root.placeholder;
+                    edited(text) => { root.edited(text); }
+                }
+                list := ListView {
+                    vertical-stretch: 1;
+                    for row[index] in root.rows: Rectangle {
+                        height: 38px;
+                        border-radius: 3px;
+                        background: index == root.current ? Palette.control : touch.has-hover ? Palette.hover : transparent;
+                        touch := TouchArea { clicked => { root.chosen(index); } }
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            spacing: 10px;
+                            Text {
+                                text: row.kind == "agent" ? "●" : "›";
+                                color: row.kind == "agent" ? Palette.success : Palette.faint;
+                                vertical-alignment: center;
+                                width: 12px;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+                                Text { text: row.label; color: Palette.text; overflow: elide; }
+                                if row.detail != "": Text { text: row.detail; color: Palette.muted; font-size: 11px; overflow: elide; }
+                            }
+                            if row.key != "": Text {
+                                text: row.key;
+                                color: Palette.accent;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Keep the chosen row in view as Up/Down move it.
+    changed current => {
+        if (root.current >= 0) {
+            list.content-y = Math.min(Math.max(list.content-y, -root.current * 38px), list.visible-height - (root.current + 1) * 38px);
+        }
+    }
+}

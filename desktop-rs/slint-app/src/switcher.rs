@@ -1,0 +1,198 @@
+//! The quick switcher (QuickSwitcher.qml): one search over agents, commands
+//! and settings. With a query, agents come first (best match first); with
+//! none, commands do. The selection is kept by identity while results
+//! rebuild, so a streaming agent cannot move Enter onto another row.
+
+use clarp_core::protocol::display_name;
+use clarp_engine::Engine;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kind {
+    Agent,
+    Command,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    pub kind: Kind,
+    /// The session (agent) or action (command).
+    pub target: String,
+    pub label: String,
+    pub detail: String,
+    pub key: String,
+    pub group: &'static str,
+    keywords: &'static str,
+}
+
+impl Item {
+    pub fn key_of(&self) -> String {
+        format!("{:?}:{}", self.kind, self.target)
+    }
+}
+
+fn command(label: &str, action: &str, key: &str, group: &'static str, keywords: &'static str) -> Item {
+    Item { kind: Kind::Command, target: action.into(), label: label.into(), detail: String::new(), key: key.into(), group, keywords }
+}
+
+/// What the commands' labels depend on.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Toggles {
+    pub sidebar_visible: bool,
+    pub muted: bool,
+    pub show_when_ready: bool,
+    pub timestamps_visible: bool,
+    pub workspace_bar: bool,
+    pub shared_filesystem: bool,
+    pub activity_mode: i32,
+}
+
+fn toggle(on: bool, label: &str, action: &str, key: &str, keywords: &'static str) -> Item {
+    command(&format!("{} · {label}", if on { "On → Off" } else { "Off → On" }), action, key, "settings", keywords)
+}
+
+pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
+    let mut rows = vec![
+        command("Customize key bindings", "edit-keymap", "Ctrl+Alt+,", "view", ""),
+        command("Next workspace", "next-workspace", "Ctrl+Alt+W", "view", ""),
+        command("New contact & chat", "quick-new-agent", "Ctrl+Shift+N", "agent", "new session hub create"),
+        command("Rename contact", "rename-agent", "F2", "agent", "rename name title relabel persona"),
+        command("New session", "new", "Ctrl+N", "agent", "new agent start chat provider contact hub"),
+        command("Open agent in terminal", "agent-terminal", "Ctrl+Alt+T", "agent", ""),
+        command("Split right", "split-right", "Ctrl+Alt+V", "layout", ""),
+        command("Split down", "split-down", "Ctrl+Alt+S", "layout", ""),
+        command("Close pane", "close-pane", "Ctrl+Alt+X", "layout", ""),
+        command("Zoom pane", "zoom", "Ctrl+Alt+Z", "layout", ""),
+        command("Balance panes", "balance", "Ctrl+Alt+=", "layout", ""),
+        command(if toggles.sidebar_visible { "Hide sidebar" } else { "Show sidebar" }, "sidebar", "Ctrl+B", "view", ""),
+        command("Show/hide keybindings", "shortcut-bar", "Ctrl+Shift+K", "view", ""),
+        command("Larger interface", "ui-larger", "Ctrl+=", "view", ""),
+        command("Smaller interface", "ui-smaller", "Ctrl+-", "view", ""),
+        command("Reset interface size", "ui-reset", "Ctrl+0", "view", ""),
+        command("Jump to latest", "jump-latest", "Ctrl+End", "view", "bottom newest scroll follow"),
+        command("Retry latest failed message", "retry-message", "Ctrl+Alt+R", "view", "resend send delivery not delivered"),
+        command("Dismiss conversation error", "dismiss-error", "Esc", "view", "clear close error warning banner voice synthesis failed"),
+        command("Change directory", "change-directory", "Ctrl+Alt+D", "agent", "folder workspace cwd new chat"),
+        command("Refresh conversation", "refresh", "Ctrl+R", "view", ""),
+        command("Agent overview", "overview", "Ctrl+Shift+O", "view", ""),
+        command("Chats", "chats", "Ctrl+1", "destination", ""),
+        command("Updates", "updates", "Ctrl+2", "destination", ""),
+        command("Teams", "teams", "Ctrl+3", "destination", ""),
+        command("Settings", "settings", "Ctrl+,", "destination", ""),
+        command("Host connection", "connection", "", "settings", ""),
+        command("Orchestrator settings", "orchestrator", "", "view", ""),
+        command("Next agent needing attention", "next-attention", "Ctrl+J", "agent", ""),
+        command("Release agent", "release-agent", "Ctrl+Shift+R", "agent", ""),
+        command("Stop agent", "stop-agent", "Ctrl+.", "agent", ""),
+        command(if toggles.muted { "Enable voice replies" } else { "Mute voice replies" }, "mute", "Ctrl+M", "settings", ""),
+        command("Talk", "talk", "Ctrl+Shift+Space", "audio", ""),
+        toggle(toggles.workspace_bar, "Workspace bar", "setting:workspaceBarVisible", "", "hide show workspaces tabs top strip"),
+        toggle(toggles.timestamps_visible, "Timestamps", "setting:timestampsVisible", "", "date time messages"),
+        toggle(toggles.show_when_ready, "Show when ready", "setting:showWhenReady", "", "stream streaming answers typing"),
+        toggle(toggles.shared_filesystem, "Shared filesystem access (trusted Host)", "setting:sharedFilesystem", "", "files local folders"),
+    ];
+    for (mode, label) in ["Grouped", "Always visible", "Group old"].iter().enumerate() {
+        let current = if toggles.activity_mode == mode as i32 { " (current)" } else { "" };
+        rows.push(command(&format!("Tool activity: {label}{current}"), &format!("setting:activity:{mode}"), if mode == 1 { "Ctrl+Shift+T" } else { "" }, "settings", "tool calls collapse expand grouping"));
+    }
+    for theme in clarp_core::reading_theme::themes() {
+        let text = |key: &str| theme.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+        let current = if text("id") == reading_theme { " (current)" } else { "" };
+        rows.push(Item {
+            detail: text("detail"),
+            ..command(
+                &format!("Reading theme: {} · {}{current}", text("label"), text("fontFamily")),
+                &format!("setting:reading:{}", text("id")),
+                "",
+                "settings",
+                "font typeface text contrast readable legible eyes appearance colours",
+            )
+        });
+    }
+    rows
+}
+
+/// Agents matching `query`, best first (C++ `matchingAgents`).
+pub fn agents(engine: &Engine, query: &str) -> Vec<Item> {
+    let needle = query.trim().to_lowercase();
+    let mut rows: Vec<(u8, Item)> = engine
+        .roster()
+        .agents()
+        .iter()
+        .filter(|agent| {
+            needle.is_empty()
+                || [display_name(agent), agent.session.as_str(), agent.working_directory.as_str()]
+                    .iter()
+                    .any(|field| field.to_lowercase().contains(&needle))
+        })
+        .map(|agent| {
+            let rank = if needle.is_empty() { 0 } else { clarp_core::roster::switcher_rank(display_name(agent), &agent.session, &needle) };
+            let state = if agent.unread { format!("{} · unread", agent.latest_state) } else { agent.latest_state.clone() };
+            let item = Item {
+                kind: Kind::Agent,
+                target: agent.session.clone(),
+                label: display_name(agent).to_owned(),
+                detail: format!("{} · {state}", agent.backend),
+                key: String::new(),
+                group: "agent",
+                keywords: "",
+            };
+            (rank, item)
+        })
+        .collect();
+    rows.sort_by_key(|(rank, _)| *rank);
+    rows.into_iter().map(|(_, item)| item).collect()
+}
+
+/// The switcher's rows for `query`.
+pub fn results(engine: &Engine, query: &str, toggles: Toggles) -> Vec<Item> {
+    let terms: Vec<String> = query.trim().to_lowercase().split_whitespace().map(str::to_owned).collect();
+    let commands: Vec<Item> = commands(toggles, &engine.reading_theme())
+        .into_iter()
+        .filter(|c| {
+            let searchable = format!("{} {} {} {}", c.label, c.group, c.key, c.keywords).to_lowercase();
+            terms.iter().all(|term| searchable.contains(term))
+        })
+        .collect();
+    let agents = agents(engine, query);
+    if terms.is_empty() { commands.into_iter().chain(agents).collect() } else { agents.into_iter().chain(commands).collect() }
+}
+
+/// The row to select after a rebuild: the one selected before, else the first.
+pub fn keep_selection(results: &[Item], selected_key: &str) -> i32 {
+    match results.iter().position(|item| item.key_of() == selected_key) {
+        Some(index) => index as i32,
+        None if results.is_empty() => -1,
+        None => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commands_filter_by_every_term_and_label_their_state() {
+        let rows = commands(Toggles { sidebar_visible: true, muted: true, activity_mode: 1, ..Toggles::default() }, "paper");
+        assert!(rows.iter().any(|c| c.label == "Hide sidebar"));
+        assert!(rows.iter().any(|c| c.label == "Enable voice replies"));
+        assert!(rows.iter().any(|c| c.label == "Tool activity: Always visible (current)"));
+        assert!(rows.iter().any(|c| c.target == "setting:reading:paper" && c.label.ends_with("(current)")));
+        let keep = |item: &Item, terms: &[&str]| {
+            let searchable = format!("{} {} {} {}", item.label, item.group, item.key, item.keywords).to_lowercase();
+            terms.iter().all(|t| searchable.contains(t))
+        };
+        let split: Vec<_> = rows.iter().filter(|c| keep(c, &["split", "right"])).collect();
+        assert_eq!(split.len(), 1);
+        assert_eq!(split[0].target, "split-right");
+    }
+
+    #[test]
+    fn the_selection_survives_a_rebuild() {
+        let a = Item { kind: Kind::Agent, target: "rachel".into(), label: "Rachel".into(), detail: String::new(), key: String::new(), group: "agent", keywords: "" };
+        let b = Item { target: "mike".into(), label: "Mike".into(), ..a.clone() };
+        assert_eq!(keep_selection(&[a.clone(), b.clone()], &b.key_of()), 1);
+        assert_eq!(keep_selection(&[b.clone(), a.clone()], &b.key_of()), 0, "the row moved; the selection follows it");
+        assert_eq!(keep_selection(&[a], "Agent:gone"), 0);
+        assert_eq!(keep_selection(&[], "x"), -1);
+    }
+}

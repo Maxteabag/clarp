@@ -5,8 +5,9 @@ import { NavRail } from "navrail.slint";
 import { Attachment } from "composer.slint";
 import { MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
+import { Switcher, SwitcherRow } from "switcher.slint";
 
-export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab }
+export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow }
 
 export struct Hint {
     label: string,
@@ -109,6 +110,15 @@ export component AppWindow inherits Window {
     callback save-layout-instead();
     callback resize-split(string, float);
     callback balance();
+    in property <bool> switcher-open;
+    in property <[SwitcherRow]> switcher-rows;
+    in property <int> switcher-current;
+    out property <string> switcher-query: switcher.query;
+    callback switcher-edited(string);
+    callback switcher-chosen(int);
+    callback switcher-moved(int);
+    callback switcher-dismissed();
+    public function show-switcher() { switcher.open(); }
 
     changed search-focused => { root.focus-moved(); }
     changed sidebar-focused => { root.focus-moved(); }
@@ -202,6 +212,17 @@ export component AppWindow inherits Window {
                     hints: root.hints;
                 }
             }
+        }
+        switcher := Switcher {
+            visible: root.switcher-open;
+            width: parent.width;
+            height: parent.height;
+            rows: root.switcher-rows;
+            current: root.switcher-current;
+            edited(text) => { root.switcher-edited(text); }
+            chosen(index) => { root.switcher-chosen(index); }
+            moved(index) => { root.switcher-moved(index); }
+            dismissed => { root.switcher-dismissed(); }
         }
     }
 }

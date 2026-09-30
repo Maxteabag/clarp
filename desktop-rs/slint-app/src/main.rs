@@ -13,6 +13,7 @@ mod headless;
 #[allow(dead_code)]
 mod keymap;
 mod panes;
+mod switcher;
 mod view;
 
 use view::{apply_theme, chat_row, initial, open_link};
@@ -42,6 +43,34 @@ pub struct App {
     workspaces: RefCell<clarp_core::workspace::WorkspaceContext>,
     /// Messages whose tool calls the reader opened (not groups).
     expanded: RefCell<std::collections::HashSet<String>>,
+    pub prefs: RefCell<Prefs>,
+    pub switcher: RefCell<SwitcherState>,
+}
+
+/// View preferences the window keeps (the Qt controller's names).
+#[derive(Debug, Clone, Copy)]
+pub struct Prefs {
+    pub timestamps: bool,
+    pub workspace_bar: bool,
+}
+
+impl Prefs {
+    fn load(settings: &Settings) -> Self {
+        Self {
+            timestamps: settings.boolean("conversation/timestampsVisible", false),
+            workspace_bar: settings.boolean("appearance/workspaceBar", true),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SwitcherState {
+    pub open: bool,
+    pub query: String,
+    pub items: Vec<switcher::Item>,
+    pub selected: String,
+    /// The composer had the keyboard when the switcher opened.
+    pub restore_composer: bool,
 }
 
 pub fn app() -> Option<Rc<App>> {
@@ -159,6 +188,9 @@ impl App {
         if changes.iter().any(|c| matches!(c, Change::Selection | Change::Panes | Change::Composer(_))) {
             commands::show_hints(self, &window);
         }
+        if changes.iter().any(|c| matches!(c, Change::Roster | Change::Preferences)) {
+            commands::refresh_switcher(self, &window);
+        }
     }
 }
 
@@ -195,6 +227,7 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| settings.string("appearance/readingTheme", clarp_core::reading_theme::default_theme_id()));
     apply_theme(&window, &theme);
+    let prefs = Prefs::load(&settings);
     let engine = match Engine::new(Config::from_env(settings), || {
         if let Err(error) = slint::invoke_from_event_loop(pump) {
             eprintln!("clarp-slint: dropped an engine wake: {error}");
@@ -224,6 +257,8 @@ fn main() {
         pane_state: RefCell::new(Vec::new()),
         sidebar: RefCell::new(clarp_core::sidebar::Sidebar::default()),
         workspaces: RefCell::new(clarp_core::workspace::WorkspaceContext::default()),
+        prefs: RefCell::new(prefs),
+        switcher: RefCell::new(SwitcherState::default()),
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
@@ -291,6 +326,32 @@ fn main() {
         }
     });
     window.on_shortcut(|text, control, alt, shift| commands::shortcut(&text, control, alt, shift));
+    window.on_open_switcher(|| {
+        if let (Some(app), Some(window)) = (app(), crate::window()) {
+            commands::open_switcher(&app, &window);
+        }
+    });
+    window.on_switcher_edited(|text| {
+        if let (Some(app), Some(window)) = (app(), crate::window()) {
+            app.switcher.borrow_mut().query = text.to_string();
+            commands::refresh_switcher(&app, &window);
+        }
+    });
+    window.on_switcher_moved(|index| {
+        if let (Some(app), Some(window)) = (app(), crate::window()) {
+            commands::switcher_moved(&app, &window, index);
+        }
+    });
+    window.on_switcher_chosen(|index| {
+        if let (Some(app), Some(window)) = (app(), crate::window()) {
+            commands::switcher_chosen(&app, &window, index);
+        }
+    });
+    window.on_switcher_dismissed(|| {
+        if let (Some(app), Some(window)) = (app(), crate::window()) {
+            commands::close_switcher(&app, &window, None);
+        }
+    });
     window.on_switch_workspace(|id| {
         if let Some(app) = app() {
             app.engine.borrow_mut().with_panes(|p| p.switch_workspace(&id));

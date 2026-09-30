@@ -97,6 +97,13 @@ impl Engine {
             || self.settings.boolean(&clarp_core::settings::shared_filesystem_key(&self.base_url), false)
     }
 
+    /// Trusts (or stops trusting) this Host with local paths.
+    pub fn set_shared_filesystem(&mut self, shared: bool) {
+        let key = clarp_core::settings::shared_filesystem_key(&self.base_url);
+        self.settings.set(&key, shared);
+        self.changes.push(Change::Preferences);
+    }
+
     /// Attaches a local file to the chat's composer: referenced in place on
     /// a shared filesystem, else uploaded to `/upload`.
     pub fn attach_file(&mut self, session: &str, path: &std::path::Path) {
