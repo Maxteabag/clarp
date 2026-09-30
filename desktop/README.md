@@ -95,7 +95,10 @@ The client defaults to `http://127.0.0.1:7682`. A local native installation
 reads the existing administrator token from `~/.config/clarp/config.toml` when
 present. Remote installations should use `clarp-admin pair create` and enter
 the one-time `clp_…` code; the resulting revocable `cld_…` credential is kept
-through the freedesktop Secret Service DBus API.
+through the freedesktop Secret Service DBus API. The local administrator token
+is only sent to `localhost`/loopback URLs; a remote Host always uses its own
+paired credential. Switch Hosts from Settings → Host or **Host connection** in
+the command palette; the choice is remembered.
 
 Environment overrides are useful for development:
 
