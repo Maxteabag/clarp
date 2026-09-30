@@ -413,6 +413,12 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: push one SSE event to every stream.
             broadcast(body)
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/attention":
+            # Test control: replace the attention items and say so.
+            with state_lock:
+                attention[:] = body.get("items", [])
+            broadcast({"type": "attention-updated"})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/jobs":
             # Test control: replace the job list, then push an optional event.
             global jobs

@@ -35,7 +35,7 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
     let engine = app.engine.borrow();
     let selected = engine.selected_session();
     Facts {
-        attention: false,
+        attention: !engine.next_attention_session().is_empty(),
         agent: !selected.is_empty() && !selected.starts_with("pair:"),
         rows: window.get_chats().row_count() > 0,
         can_send: engine.can_send(selected),
@@ -206,6 +206,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             let muted = app.engine.borrow().muted();
             app.engine.borrow_mut().set_muted(!muted);
         }
+        // ---- updates and teams
+        "updates" => crate::updates_view::open(app, window),
+        "teams" => crate::teams_view::open(app, window),
+        "next-attention" => crate::updates_view::next_attention(app, window),
+        "refresh" if window.get_surface() == "updates" => app.engine.borrow_mut().load_updates(),
         "refresh" => app.engine.borrow_mut().refresh_session(&selected),
         "tools" => {
             let mode = app.engine.borrow().activity_mode();
@@ -393,11 +398,18 @@ pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
     show_hints(app, window);
 }
 
-/// Closes the dialog; the active pane's composer gets the keyboard back.
+/// Closes the dialog; the surface under it (the active pane's composer on
+/// the chats) gets the keyboard back.
 pub fn close_overlay(app: &App, window: &AppWindow) {
     app.overlay.borrow_mut().clear();
     window.set_overlay("".into());
-    app.focus_composer();
+    // ---- updates and teams
+    match window.get_surface().as_str() {
+        "updates" => window.invoke_focus_updates(),
+        "teams" => window.invoke_focus_teams(),
+        "settings" => window.invoke_focus_settings(),
+        _ => app.focus_composer(),
+    }
     show_hints(app, window);
 }
 

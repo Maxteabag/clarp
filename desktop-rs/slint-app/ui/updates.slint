@@ -1,0 +1,274 @@
+import { Button, ScrollView, Spinner, ProgressIndicator } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+
+// A decision waiting on the user (UpdatesPanel.qml's attention cards).
+export struct AttentionView {
+    id: string,
+    title: string,
+    question: string,
+    context: string,
+    meta: string,
+    no-label: string,
+    yes-label: string,
+    revision: int,
+    pending: bool,
+}
+
+export struct JobView {
+    id: string,
+    title: string,
+    detail: string,
+    status: string,
+    active: bool,
+    failed: bool,
+    // 0..1, or negative when the job reports no progress.
+    progress: float,
+    can-cancel: bool,
+    pending: bool,
+}
+
+// ArtifactSummaryCard.qml.
+export struct ArtifactView {
+    id: string,
+    kind: string,
+    outcome: string,
+    failed: bool,
+    title: string,
+    summary: string,
+    progress: string,
+    countdown: string,
+    readable: bool,
+    session: string,
+    form: bool,
+}
+
+// A square icon button with a tooltip-like accessible label.
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <color> tint: Palette.muted;
+    in property <length> size: 28px;
+    callback clicked();
+    width: root.size;
+    height: root.size;
+    border-radius: 3px;
+    background: touch.has-hover && root.enabled ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    Image {
+        source: root.icon;
+        width: root.size * 0.58;
+        height: root.size * 0.58;
+        colorize: root.enabled ? root.tint : Palette.faint;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SectionTitle inherits Text {
+    color: Palette.muted;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+component ArtifactCard inherits Rectangle {
+    in property <ArtifactView> artifact;
+    callback open(string);
+    callback chat(string);
+    background: Palette.window;
+    border-width: 1px;
+    border-color: root.artifact.failed ? Palette.danger : Palette.border;
+    border-radius: 6px;
+    VerticalLayout {
+        padding: 12px;
+        spacing: 6px;
+        HorizontalLayout {
+            Text { text: root.artifact.kind; color: Palette.muted; font-size: 11px; horizontal-stretch: 1; }
+            Text { text: root.artifact.outcome; color: root.artifact.failed ? Palette.danger : Palette.text; font-size: 12px; }
+        }
+        Text { text: root.artifact.title; color: Palette.text; font-size: 15px; wrap: word-wrap; }
+        if root.artifact.summary != "": Text {
+            text: root.artifact.summary;
+            color: Palette.text;
+            font-size: 12px;
+            wrap: word-wrap;
+            overflow: elide;
+            max-height: 36px;
+        }
+        if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
+        if root.artifact.countdown != "": Text { text: root.artifact.countdown; color: Palette.text; font-size: 12px; wrap: word-wrap; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            if root.artifact.readable: Button {
+                text: "Read";
+                accessible-label: "Read " + root.artifact.title;
+                clicked => { root.open(root.artifact.id); }
+            }
+            if root.artifact.session != "": Button { text: "Open chat"; clicked => { root.chat(root.artifact.session); } }
+            if root.artifact.form: Text {
+                text: "Interactive form unavailable";
+                color: Palette.warning;
+                font-size: 12px;
+                vertical-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// UpdatesPanel.qml: what needs the user, what runs in the background and
+// what the agents produced. Ctrl+R refreshes; Escape goes back to the chats.
+export component Updates inherits Rectangle {
+    in property <[AttentionView]> attention;
+    in property <[JobView]> jobs;
+    in property <[ArtifactView]> artifacts;
+    in property <bool> loading;
+    in property <string> error;
+    callback refresh();
+    callback resolve(string, string, int);
+    callback cancel-job(string);
+    callback open-report(string);
+    callback open-chat(string);
+    background: Palette.window;
+    // Holds the keyboard while the surface shows (keys go to the keyboard map).
+    public function take-focus() { keys.focus(); }
+    out property <bool> focused: keys.has-focus;
+    keys := FocusScope { }
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 10px;
+            vertical-stretch: 0;
+            Text {
+                text: "UPDATES";
+                color: Palette.text;
+                font-size: 17px;
+                font-weight: 600;
+                letter-spacing: 1.6px;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.attention.length > 0 ? root.attention.length + " need attention" : "All caught up";
+                color: root.attention.length > 0 ? Palette.danger : Palette.muted;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if root.loading: Spinner { width: 18px; height: 18px; indeterminate: true; y: 5px; }
+            IconButton {
+                icon: @image-url("icons/refresh.svg");
+                label: "Refresh updates (Ctrl+R)";
+                clicked => { root.refresh(); }
+            }
+        }
+        if root.error != "": Rectangle {
+            background: Palette.danger-surface;
+            border-radius: 3px;
+            border-width: 1px;
+            border-color: Palette.danger.with-alpha(0.55);
+            VerticalLayout {
+                padding: 7px;
+                Text { text: root.error; color: Palette.danger; font-size: 12px; wrap: word-wrap; }
+            }
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: 14px;
+                padding-right: 12px;
+                if root.attention.length > 0: SectionTitle { text: "NEEDS ATTENTION"; }
+                for item in root.attention: Rectangle {
+                    background: Palette.control;
+                    border-radius: 3px;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 7px;
+                        Text { text: item.title; color: Palette.text; font-size: 14px; font-weight: 600; overflow: elide; }
+                        if item.question != "": Text { text: item.question; color: Palette.chrome-text; font-size: 13px; wrap: word-wrap; }
+                        if item.context != "": Text {
+                            text: item.context;
+                            color: Palette.muted;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                            overflow: elide;
+                            max-height: 60px;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: item.meta;
+                                color: Palette.muted;
+                                font-size: 11px;
+                                overflow: elide;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            Button {
+                                text: item.no-label;
+                                enabled: !item.pending;
+                                clicked => { root.resolve(item.id, "no", item.revision); }
+                            }
+                            Button {
+                                text: item.pending ? "Resolving…" : item.yes-label;
+                                primary: true;
+                                enabled: !item.pending;
+                                clicked => { root.resolve(item.id, "yes", item.revision); }
+                            }
+                        }
+                    }
+                }
+                if root.jobs.length > 0: SectionTitle { text: "BACKGROUND JOBS"; }
+                for job in root.jobs: HorizontalLayout {
+                    padding: 8px;
+                    spacing: 9px;
+                    Rectangle {
+                        width: 6px;
+                        height: 6px;
+                        y: 8px;
+                        border-radius: 3px;
+                        background: job.active ? Palette.chrome-text : job.failed ? Palette.danger : Palette.muted;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+                        Text { text: job.title; color: Palette.text; font-size: 13px; font-weight: 600; overflow: elide; }
+                        if job.detail != "": Text { text: job.detail; color: Palette.muted; font-size: 11px; overflow: elide; }
+                        if job.active && job.progress >= 0: ProgressIndicator { height: 3px; progress: job.progress; }
+                    }
+                    Text {
+                        text: job.status;
+                        color: job.active ? Palette.chrome-text : Palette.muted;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                    }
+                    if job.active && job.can-cancel: IconButton {
+                        icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                        label: "Cancel background job";
+                        size: 26px;
+                        enabled: !job.pending;
+                        clicked => { root.cancel-job(job.id); }
+                    }
+                }
+                if root.artifacts.length > 0: SectionTitle { text: "RECENT ARTIFACTS"; }
+                for artifact in root.artifacts: ArtifactCard {
+                    artifact: artifact;
+                    open(id) => { root.open-report(id); }
+                    chat(session) => { root.open-chat(session); }
+                }
+                if !root.loading && root.attention.length == 0 && root.jobs.length == 0 && root.artifacts.length == 0: VerticalLayout {
+                    padding-top: 80px;
+                    spacing: 7px;
+                    Text { text: "✓"; color: Palette.chrome-text; font-size: 17px; horizontal-alignment: center; }
+                    Text { text: "Nothing needs you right now"; color: Palette.text; font-size: 14px; horizontal-alignment: center; }
+                }
+            }
+        }
+    }
+}

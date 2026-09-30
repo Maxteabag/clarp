@@ -8,8 +8,15 @@ import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
 import { KeymapEditor, ConnectionPage } from "dialogs.slint";
+// ---- updates and teams
+import { Updates, AttentionView, JobView, ArtifactView } from "updates.slint";
+import { ReportView } from "report.slint";
+import { Teams, TeamView, TeamMessageView, TeamMemberView, TeamCreateDialog, TeamEditDialog, TeamMemberDialog, TeamDeleteDialog } from "teams.slint";
+import { ProcessPopover, ProcessJob, ProcessHelper } from "processes.slint";
 
 export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow }
+// ---- updates and teams
+export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
 
 export struct Hint {
     label: string,
@@ -128,6 +135,57 @@ export component AppWindow inherits Window {
     callback run-command(string);
     // The dialog over the window ("" for none): Escape closes it.
     in property <string> overlay;
+    // ---- updates and teams
+    in property <[AttentionView]> update-attention;
+    in property <[JobView]> update-jobs;
+    in property <[ArtifactView]> update-artifacts;
+    in property <bool> updates-loading;
+    in property <string> updates-error;
+    out property <bool> updates-focused: updates.focused;
+    callback updates-refresh();
+    callback resolve-decision(string, string, int);
+    callback cancel-job(string);
+    callback open-report(string);
+    // Opens a chat from a panel (and goes back to the chats).
+    callback open-chat(string);
+    public function focus-updates() { updates.take-focus(); }
+    in property <string> report-title;
+    in property <string> report-summary;
+    in property <bool> report-html;
+    in property <[MessageBlock]> report-blocks;
+    in property <[TeamView]> team-list;
+    in property <[TeamMessageView]> team-messages;
+    in property <[TeamMemberView]> team-members;
+    in property <string> team-selected;
+    in property <string> team-title;
+    in property <string> team-subtitle;
+    in property <bool> team-nudging;
+    in property <bool> teams-loading;
+    in property <string> teams-error;
+    in property <bool> teams-grouped: true;
+    in property <[string]> team-leaders;
+    in-out property <int> team-leader-index;
+    in property <[string]> team-agents;
+    in-out property <int> team-agent-index;
+    out property <bool> teams-focused: teams.focused;
+    // select, refresh, grouping, create, edit, nudging, delete, add-member, remove-member
+    callback team-action(string, string);
+    callback team-created(string);
+    callback team-saved(string, string, int);
+    callback team-member-added(int);
+    callback team-deleted();
+    public function focus-teams() { teams.take-focus(); }
+    public function open-team-create() { team-create.open(); }
+    public function open-team-edit(name: string, colour: string) { team-edit.open(name, colour); }
+    in property <string> process-name;
+    in property <string> process-count;
+    in property <[ProcessJob]> process-jobs;
+    in property <[ProcessHelper]> process-helpers;
+    in property <string> process-note;
+    in property <length> process-x;
+    in property <length> process-y;
+    callback show-processes(string, length, length);
+    callback process-helper-opened(string);
     in property <[string]> keymap-actions;
     in property <string> keymap-error;
     in-out property <string> keymap-profile;
@@ -190,6 +248,7 @@ export component AppWindow inherits Window {
                 hide => { root.run-command("sidebar"); }
                 new-agent => { root.run-command("new"); }
                 chosen(session) => { root.chat-chosen(session); }
+                processes(session, x, y) => { root.show-processes(session, x, y); }
                 filter-changed => { root.filter-changed(); }
             }
             if root.sidebar-visible: Rectangle { width: 1px; background: Palette.rule; }
@@ -226,7 +285,7 @@ export component AppWindow inherits Window {
                 Rectangle {
                     vertical-stretch: 1;
                     Workspace {
-                    visible: root.surface != "settings";
+                    visible: root.surface != "settings" && root.surface != "updates" && root.surface != "teams";
                     width: parent.width;
                     height: parent.height;
                     panes: root.panes;
@@ -265,6 +324,47 @@ export component AppWindow inherits Window {
                     activated(id) => { root.setting-changed(id, 1); }
                     adjusted(id, delta) => { root.setting-changed(id, delta); }
                 }
+                // ---- updates and teams
+                updates := Updates {
+                    visible: root.surface == "updates";
+                    width: parent.width;
+                    height: parent.height;
+                    attention: root.update-attention;
+                    jobs: root.update-jobs;
+                    artifacts: root.update-artifacts;
+                    loading: root.updates-loading;
+                    error: root.updates-error;
+                    refresh => { root.updates-refresh(); }
+                    resolve(id, choice, revision) => { root.resolve-decision(id, choice, revision); }
+                    cancel-job(id) => { root.cancel-job(id); }
+                    open-report(id) => { root.open-report(id); }
+                    open-chat(session) => { root.open-chat(session); }
+                }
+                teams := Teams {
+                    visible: root.surface == "teams";
+                    width: parent.width;
+                    height: parent.height;
+                    teams: root.team-list;
+                    messages: root.team-messages;
+                    members: root.team-members;
+                    selected: root.team-selected;
+                    title: root.team-title;
+                    subtitle: root.team-subtitle;
+                    nudging: root.team-nudging;
+                    loading: root.teams-loading;
+                    error: root.teams-error;
+                    grouped: root.teams-grouped;
+                    select(id) => { root.team-action("select", id); }
+                    refresh => { root.team-action("refresh", ""); }
+                    toggle-grouping => { root.team-action("grouping", ""); }
+                    create => { root.team-action("create", ""); }
+                    edit => { root.team-action("edit", ""); }
+                    toggle-nudging => { root.team-action("nudging", ""); }
+                    delete => { root.team-action("delete", ""); }
+                    add-member => { root.team-action("add-member", ""); }
+                    remove-member(id) => { root.team-action("remove-member", id); }
+                    open-chat(session) => { root.open-chat(session); }
+                }
                 }
                 if root.shortcuts-visible: ShortcutBar {
                     mode: root.keyboard-mode;
@@ -300,6 +400,65 @@ export component AppWindow inherits Window {
             export-profile => { root.keymap-export(); }
             reset => { root.keymap-reset(); }
             done => { root.overlay-closed(); }
+        }
+        // ---- updates and teams
+        ReportView {
+            visible: root.overlay == "report";
+            width: parent.width;
+            height: parent.height;
+            title: root.report-title;
+            summary: root.report-summary;
+            html: root.report-html;
+            blocks: root.report-blocks;
+            link-clicked(url) => { root.link-clicked(url); }
+            done => { root.overlay-closed(); }
+        }
+        team-create := TeamCreateDialog {
+            visible: root.overlay == "team-create";
+            width: parent.width;
+            height: parent.height;
+            create(name) => { root.team-created(name); }
+            done => { root.overlay-closed(); }
+        }
+        team-edit := TeamEditDialog {
+            visible: root.overlay == "team-edit";
+            width: parent.width;
+            height: parent.height;
+            leaders: root.team-leaders;
+            leader-index <=> root.team-leader-index;
+            save(name, colour, leader) => { root.team-saved(name, colour, leader); }
+            done => { root.overlay-closed(); }
+        }
+        TeamMemberDialog {
+            visible: root.overlay == "team-member";
+            width: parent.width;
+            height: parent.height;
+            agents: root.team-agents;
+            agent-index <=> root.team-agent-index;
+            add(index) => { root.team-member-added(index); }
+            done => { root.overlay-closed(); }
+        }
+        TeamDeleteDialog {
+            visible: root.overlay == "team-delete";
+            width: parent.width;
+            height: parent.height;
+            team: root.team-title;
+            confirm => { root.team-deleted(); }
+            done => { root.overlay-closed(); }
+        }
+        ProcessPopover {
+            visible: root.overlay == "processes";
+            width: parent.width;
+            height: parent.height;
+            name: root.process-name;
+            count: root.process-count;
+            jobs: root.process-jobs;
+            helpers: root.process-helpers;
+            note: root.process-note;
+            anchor-x: root.process-x;
+            anchor-y: root.process-y;
+            helper-opened(session) => { root.process-helper-opened(session); }
+            dismissed => { root.overlay-closed(); }
         }
         switcher := Switcher {
             visible: root.switcher-open;
