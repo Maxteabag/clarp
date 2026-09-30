@@ -302,6 +302,8 @@ pub fn start_check(name: &str, out: String) {
         "keymap" => keymap_check(out),
         "voice" => voice_check(out),
         "desktop" => desktop_check(out),
+        "instance" => instance_check(out),
+        "diagnostics" => diagnostics_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
@@ -996,6 +998,63 @@ fn desktop_check(_out: String) {
             let Some(active) = reports.iter().find(|r| r["body"]["active"] == true) else { return false };
             check(active["body"]["instance_id"].as_str().is_some_and(|i| !i.is_empty()), "someone typing at the window is reported present");
             check(!posts("/application-activity").is_empty(), "and the window's activity with it");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check instance` (with `CLARP_TEST_INSTANCE=1`): a second launch of
+/// this desktop hands its arguments to this window and exits at once.
+fn instance_check(_out: String) {
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, _window, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            let started = Instant::now();
+            let second = std::env::current_exe()
+                .and_then(|exe| std::process::Command::new(exe).args(["--new-agent", "--backend", "codex"]).output());
+            match second {
+                Ok(output) => check(
+                    output.status.success() && started.elapsed() < Duration::from_secs(3),
+                    &format!("a second launch hands over and exits in {} ms (status {})", started.elapsed().as_millis(), output.status),
+                ),
+                Err(error) => check(false, &format!("the second launch did not run: {error}")),
+            }
+            true
+        })),
+        ("forwarded", Box::new(|app, _window, _| {
+            let Some(request) = app.launch.borrow().clone() else { return false };
+            check(request.backend == "codex", &format!("this window takes the launch it was handed: {request:?}"));
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check diagnostics` (with `CLARP_STALL_THRESHOLD_MS` and
+/// `CLARP_STALL_LOG`): blocking the UI thread is caught with its stack.
+fn diagnostics_check(_out: String) {
+    let stages: Vec<Stage> = vec![
+        ("started", Box::new(|_, _window, elapsed| {
+            if elapsed < Duration::from_millis(1600) {
+                return false;
+            }
+            // Block the UI thread past the threshold, as a slow handler would.
+            std::thread::sleep(Duration::from_millis(600));
+            true
+        })),
+        ("caught", Box::new(|_, _window, elapsed| {
+            let log = std::env::var_os("CLARP_STALL_LOG").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+            if !log.contains("-- stall ended") {
+                return elapsed < Duration::from_secs(5) || {
+                    check(false, &format!("no stall logged: {log:?}"));
+                    true
+                };
+            }
+            check(log.contains("== stall at") && log.contains("diagnostics_check"), "a blocked UI thread is logged with the stack that blocked it");
+            crate::platform::diagnostics::log_memory();
             true
         })),
     ];

@@ -88,6 +88,12 @@ impl App {
         }
     }
 
+    /// Panes and transcript rows the window holds, for the memory line.
+    pub fn memory_counters(&self) -> (usize, usize) {
+        let panes = self.pane_state.borrow();
+        (panes.len(), panes.iter().map(|p| p.messages.row_count()).sum())
+    }
+
     /// Each pane's chat and composer text, in layout order.
     pub fn pane_drafts(&self) -> Vec<(String, String, String)> {
         self.pane_state.borrow().iter().map(|p| (p.id.clone(), p.session.clone(), p.draft.clone())).collect()
