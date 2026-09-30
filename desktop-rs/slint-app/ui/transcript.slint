@@ -1,5 +1,6 @@
 import { Palette } from "theme.slint";
 import { ListView } from "std-widgets.slint";
+import { DisplayCell, DisplayCellCard, ArtifactItem, ArtifactCard } from "cells.slint";
 
 export struct TableRow {
     cells: [styled-text],
@@ -37,6 +38,10 @@ export struct MessageRow {
     group-id: string,
     expanded: bool,
     tools: [ToolRow],
+    // The Host's display cells, shown with the tool cards.
+    cells: [DisplayCell],
+    // Artifacts the agent made while writing this reply.
+    artifacts: [ArtifactItem],
 }
 
 // One tool call (ToolCard.qml): name, summary, status; details on request.
@@ -215,8 +220,10 @@ export component Transcript inherits FocusScope {
                     }
                     if row.expanded: VerticalLayout {
                         spacing: 1px;
+                        for cell in row.cells: DisplayCellCard { cell: cell; }
                         for tool in row.tools: ToolCard { tool: tool; }
                     }
+                    for artifact in row.artifacts: ArtifactCard { artifact: artifact; }
                     if row.pending || row.failed || row.stamp != "": Text {
                         text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
                         color: row.failed ? Palette.danger : Palette.faint;

@@ -13,6 +13,9 @@ use crate::headless;
 // ---- launch dialogs
 #[path = "launch_checks.rs"]
 mod launch_checks;
+// ---- profile and overview
+#[path = "profile_checks.rs"]
+mod profile_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -318,6 +321,10 @@ pub fn start_check(name: &str, out: String) {
         // ---- launch dialogs
         "launch" => launch_checks::launch_check(out),
         "agent-dialogs" => launch_checks::agent_dialogs_check(out),
+        // ---- profile and overview
+        "profile" => profile_checks::profile_check(out),
+        "overview" => profile_checks::overview_check(out),
+        "extras" => profile_checks::extras_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();

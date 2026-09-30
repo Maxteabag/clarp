@@ -1,0 +1,439 @@
+import { Palette } from "theme.slint";
+import { ComboBox, ScrollView, Switch } from "std-widgets.slint";
+import { Modal } from "dialogs.slint";
+import { AgentAvatar, StatusPill } from "avatar.slint";
+import { IconButton, TextButton, SectionTitle, InfoRow, ToggleRow, Busy } from "agent_controls.slint";
+import { MediaGallery, MediaItem, MediaViewer } from "media.slint";
+
+export struct ProfileInfo {
+    session: string,
+    name: string,
+    initial: string,
+    symbol: string,
+    portrait: image,
+    backend: string,
+    folder: string,
+    state: string,
+    model-index: int,
+    effort-index: int,
+    heartbeat: bool,
+    dreaming: bool,
+    push-alerts: bool,
+    context-fraction: float,
+    context-used: string,
+    compacting: bool,
+    queue-text: string,
+    // The current plan: shown while it loads or when the agent has one.
+    plan-shown: bool,
+    plan-loading: bool,
+    plan-title: string,
+    plan-progress: string,
+    heartbeat-state: string,
+    heartbeat-empty: string,
+    prompts-loading: bool,
+    prompts-more: bool,
+    mcp-shown: bool,
+    error: string,
+}
+
+export struct PlanItem {
+    title: string,
+    // completed, in_progress, or pending
+    status: string,
+    steps: string,
+}
+
+export struct PromptItem {
+    text: string,
+    meta: string,
+}
+
+export struct NamedItem {
+    id: string,
+    name: string,
+    detail: string,
+    on: bool,
+}
+
+export struct ProfileArtifact {
+    title: string,
+    kind: string,
+    summary: string,
+}
+
+// The profile's state and commands (Rust sets and handles them).
+export global ProfileBridge {
+    in property <ProfileInfo> info;
+    in property <[PlanItem]> plan;
+    in property <[PromptItem]> prompts;
+    in property <[string]> heartbeat-history;
+    in property <[NamedItem]> teams;
+    in property <[NamedItem]> mcp;
+    in property <[NamedItem]> schedules;
+    in property <[ProfileArtifact]> artifacts;
+    in property <[MediaItem]> media;
+    in property <[string]> models;
+    in property <[string]> efforts;
+    // appearance/reducedMotion: activity animations hold still.
+    in property <bool> reduced-motion;
+    // A confirmation over the profile: "compact", "release" or "".
+    in-out property <string> confirm;
+    // The image the viewer shows, or -1.
+    in-out property <int> viewing: -1;
+    callback close();
+    callback open-for-pane(string);
+    callback open-files();
+    callback open-terminal();
+    callback voice();
+    callback queue();
+    callback relaunch();
+    callback load-older();
+    callback set-model(int);
+    callback set-effort(int);
+    callback set-heartbeat(bool);
+    callback set-dreaming(bool);
+    callback set-push-alerts(bool);
+    callback set-mcp(string, bool);
+    callback set-schedule(string, bool);
+    callback compact();
+    callback release();
+}
+
+component Card inherits VerticalLayout {
+    in property <string> title;
+    padding: 10px;
+    spacing: 8px;
+    SectionTitle { text: root.title; }
+    @children
+}
+
+// A yes/cancel question over the profile (its compact and release dialogs).
+component Confirm inherits Modal {
+    in property <string> title;
+    in property <string> message;
+    in property <string> yes-tip;
+    callback accepted();
+    card-width: 420px;
+    card-height: 150px;
+    dismissed => { ProfileBridge.confirm = ""; }
+    VerticalLayout {
+        padding: 18px;
+        spacing: 10px;
+        Text { text: root.title; color: Palette.text; font-size: 15px; font-weight: 600; }
+        Text { text: root.message; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            IconButton { icon: @image-url("icons/close.svg"); tip: "Cancel"; clicked => { ProfileBridge.confirm = ""; } }
+            IconButton { icon: @image-url("icons/check.svg"); tip: root.yes-tip; clicked => { root.accepted(); } }
+        }
+    }
+}
+
+// AgentProfilePanel.qml: everything about one agent, and the settings that
+// change it.
+export component AgentProfile inherits Modal {
+    property <ProfileInfo> info: ProfileBridge.info;
+    card-width: 820px;
+    card-height: 760px;
+    dismissed => { ProfileBridge.close(); }
+    // The panel's own surface (Theme.raised), under the card's contents.
+    Rectangle {
+        x: 1px;
+        y: 1px;
+        width: Math.min(root.card-width, root.width - 40px) - 2px;
+        height: Math.min(root.card-height, root.height - 40px) - 2px;
+        border-radius: 3px;
+        background: Palette.raised;
+    }
+    changed info => {
+        model-box.current-index = root.info.model-index;
+        effort-box.current-index = root.info.effort-index;
+    }
+    VerticalLayout {
+        HorizontalLayout {
+            height: 58px;
+            padding-left: 16px;
+            padding-right: 10px;
+            spacing: 11px;
+            AgentAvatar {
+                y: (parent.height - self.height) / 2;
+                portrait: root.info.portrait;
+                name: root.info.name;
+                initial: root.info.initial;
+                symbol: root.info.symbol;
+                size: 34px;
+                radius: 8px;
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 1px;
+                horizontal-stretch: 1;
+                Text { text: root.info.name; color: Palette.text; font-size: 15px; font-weight: 600; }
+                Text {
+                    text: root.info.backend + "  ·  " + root.info.session;
+                    color: Palette.muted;
+                    font-family: "JetBrains Mono";
+                    font-size: 11px;
+                    overflow: elide;
+                }
+            }
+            StatusPill { status: root.info.state; }
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("icons/close.svg");
+                tip: "Close";
+                clicked => { ProfileBridge.close(); }
+            }
+        }
+        Rectangle { height: 1px; background: Palette.border; }
+        if root.info.error != "": Text {
+            text: root.info.error;
+            color: Palette.danger;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
+        ScrollView {
+            vertical-stretch: 1;
+            content-width: self.visible-width;
+            content-height: content.preferred-height;
+            content := VerticalLayout {
+                width: parent.width;
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-top: 3px;
+                padding-bottom: 8px;
+                spacing: 3px;
+                Card {
+                    title: "THIS CHAT";
+                    InfoRow { label: "Session"; value: root.info.session; }
+                    InfoRow { label: "Folder"; value: root.info.folder; }
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        IconButton { icon: @image-url("icons/folder.svg"); tip: "Open files"; clicked => { ProfileBridge.open-files(); } }
+                        IconButton { icon: @image-url("icons/terminal.svg"); tip: "Open terminal"; clicked => { ProfileBridge.open-terminal(); } }
+                        IconButton { icon: @image-url("icons/voice.svg"); tip: "Voice"; clicked => { ProfileBridge.voice(); } }
+                    }
+                }
+                if root.info.plan-shown: Card {
+                    title: "CURRENT PLAN";
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: root.info.plan-title != "" ? root.info.plan-title : "Loading plan…";
+                            color: Palette.text;
+                            font-size: 13px;
+                            font-weight: 600;
+                            horizontal-stretch: 1;
+                        }
+                        if !root.info.plan-loading: Text { text: root.info.plan-progress; color: Palette.chrome-text; font-family: "JetBrains Mono"; font-size: 11px; }
+                        if root.info.plan-loading: Busy { reduced-motion: ProfileBridge.reduced-motion; }
+                    }
+                    for task in ProfileBridge.plan: HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle {
+                            width: 7px;
+                            height: 7px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 2px;
+                            background: task.status == "completed" || task.status == "in_progress" ? Palette.chrome-text : Palette.faint;
+                        }
+                        Text { text: task.title; color: Palette.chrome-text; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+                        if task.steps != "": Text { text: task.steps; color: Palette.faint; font-size: 11px; }
+                    }
+                }
+                Card {
+                    title: "PROMPT HISTORY";
+                    for prompt in ProfileBridge.prompts: Rectangle {
+                        border-radius: 2px;
+                        background: Palette.raised;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        VerticalLayout {
+                            padding: 7px;
+                            spacing: 4px;
+                            Text { text: prompt.text; color: Palette.text; font-size: 12px; wrap: word-wrap; }
+                            Text { text: prompt.meta; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11px; overflow: elide; }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        if ProfileBridge.prompts.length == 0 && !root.info.prompts-loading: Text {
+                            text: "No authenticated prompts recorded yet";
+                            color: Palette.muted;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                        if root.info.prompts-loading: Busy { reduced-motion: ProfileBridge.reduced-motion; }
+                        if root.info.prompts-more: TextButton {
+                            text: "Load older";
+                            enabled: !root.info.prompts-loading;
+                            clicked => { ProfileBridge.load-older(); }
+                        }
+                    }
+                }
+                Card {
+                    title: "MODEL & EFFORT";
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Model"; color: Palette.chrome-text; font-size: 12px; width: 50px; vertical-alignment: center; }
+                        model-box := ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.models;
+                            current-index: root.info.model-index;
+                            accessible-label: "Model";
+                            selected => { ProfileBridge.set-model(self.current-index); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: "Effort"; color: Palette.chrome-text; font-size: 12px; width: 50px; vertical-alignment: center; }
+                        effort-box := ComboBox {
+                            horizontal-stretch: 1;
+                            model: ProfileBridge.efforts;
+                            current-index: root.info.effort-index;
+                            accessible-label: "Effort";
+                            selected => { ProfileBridge.set-effort(self.current-index); }
+                        }
+                    }
+                }
+                Card {
+                    title: "AUTONOMY & NOTIFICATIONS";
+                    ToggleRow { label: "Heartbeat"; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } }
+                    ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } }
+                    ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } }
+                }
+                Card {
+                    title: "HEARTBEAT";
+                    InfoRow { label: "State"; value: root.info.heartbeat-state; }
+                    for line in ProfileBridge.heartbeat-history: HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { width: 6px; height: 6px; y: (parent.height - self.height) / 2; border-radius: 2px; background: Palette.chrome-text; }
+                        Text { text: line; color: Palette.text; font-size: 11px; overflow: elide; horizontal-stretch: 1; }
+                    }
+                    if ProfileBridge.heartbeat-history.length == 0: Text { text: root.info.heartbeat-empty; color: Palette.muted; font-size: 11px; }
+                }
+                if ProfileBridge.teams.length > 0: Card {
+                    title: "TEAMS";
+                    for team in ProfileBridge.teams: HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: team.name; color: Palette.chrome-text; font-size: 12px; horizontal-stretch: 1; }
+                        Text { text: team.id; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; }
+                    }
+                }
+                if root.info.mcp-shown: Card {
+                    title: "MCP SERVERS";
+                    for server in ProfileBridge.mcp: ToggleRow {
+                        label: server.name;
+                        checked: server.on;
+                        toggled(on) => { ProfileBridge.set-mcp(server.name, on); }
+                    }
+                }
+                Card {
+                    title: "CONTEXT";
+                    Rectangle {
+                        height: 4px;
+                        border-radius: 2px;
+                        background: Palette.border;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * Math.clamp(root.info.context-fraction, 0, 1);
+                            border-radius: 2px;
+                            background: Palette.muted;
+                        }
+                    }
+                    InfoRow { label: "Used"; value: root.info.context-used; }
+                    HorizontalLayout {
+                        alignment: start;
+                        TextButton {
+                            text: "Compact context";
+                            enabled: !root.info.compacting;
+                            clicked => { ProfileBridge.confirm = "compact"; }
+                        }
+                    }
+                }
+                Card {
+                    title: "IMAGES";
+                    MediaGallery {
+                        items: ProfileBridge.media;
+                        compact: false;
+                        reduced-motion: ProfileBridge.reduced-motion;
+                        view(index) => { ProfileBridge.viewing = index; }
+                    }
+                    if ProfileBridge.media.length == 0: Text { text: "No images in this chat yet"; color: Palette.muted; font-size: 11px; }
+                }
+                Card {
+                    title: "ARTIFACTS";
+                    for artifact in ProfileBridge.artifacts: Rectangle {
+                        border-radius: 2px;
+                        background: Palette.raised;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        VerticalLayout {
+                            padding: 7px;
+                            spacing: 2px;
+                            HorizontalLayout {
+                                Text { text: artifact.title; color: Palette.text; font-size: 12px; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
+                                Text { text: artifact.kind; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11px; }
+                            }
+                            if artifact.summary != "": Text { text: artifact.summary; color: Palette.muted; font-size: 11px; wrap: word-wrap; overflow: elide; max-height: 48px; }
+                        }
+                    }
+                    if ProfileBridge.artifacts.length == 0: Text { text: "No artifacts for this agent yet"; color: Palette.muted; font-size: 11px; }
+                }
+                Card {
+                    title: "QUEUED MESSAGES";
+                    HorizontalLayout {
+                        Text { text: root.info.queue-text; color: Palette.chrome-text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+                        IconButton { icon: @image-url("icons/queue.svg"); tip: "Manage"; clicked => { ProfileBridge.queue(); } }
+                    }
+                }
+                if ProfileBridge.schedules.length > 0: Card {
+                    title: "SCHEDULED TASKS";
+                    for schedule in ProfileBridge.schedules: ToggleRow {
+                        label: schedule.name;
+                        checked: schedule.on;
+                        toggled(on) => { ProfileBridge.set-schedule(schedule.id, on); }
+                    }
+                }
+                Card {
+                    title: "CHAT ACTIONS";
+                    HorizontalLayout {
+                        IconButton { icon: @image-url("icons/relaunch.svg"); tip: "Relaunch"; clicked => { ProfileBridge.relaunch(); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        IconButton { icon: @image-url("icons/release.svg"); tip: "Release…"; danger: true; clicked => { ProfileBridge.confirm = "release"; } }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The profile's confirmations and its image viewer, over the whole window.
+export component ProfileLayers inherits Rectangle {
+    if ProfileBridge.confirm == "compact": Confirm {
+        width: root.width;
+        height: root.height;
+        title: "Compact this conversation?";
+        message: "Older context is summarized while the session stays open.";
+        yes-tip: "Compact";
+        accepted => { ProfileBridge.compact(); }
+    }
+    if ProfileBridge.confirm == "release": Confirm {
+        width: root.width;
+        height: root.height;
+        title: "Release this chat?";
+        message: "The contact, history, files, and artifacts remain.";
+        yes-tip: "Release";
+        accepted => { ProfileBridge.release(); }
+    }
+    if ProfileBridge.viewing >= 0 && ProfileBridge.viewing < ProfileBridge.media.length: MediaViewer {
+        width: root.width;
+        height: root.height;
+        item: ProfileBridge.media[ProfileBridge.viewing];
+        dismissed => { ProfileBridge.viewing = -1; }
+    }
+}

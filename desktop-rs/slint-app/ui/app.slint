@@ -18,6 +18,14 @@ import { ProcessPopover, ProcessJob, ProcessHelper } from "processes.slint";
 import { NewSessionHub, StartAgentDialog, LaunchHub, StartAgent, ProviderChip, ContactCard, DirRow, PastRow, McpChoice } from "launch.slint";
 import { RenameAgentDialog, AssignAgentDialog, QueueDialog, AgentDialogs, QueuedTurn } from "agent_dialogs.slint";
 export { LaunchHub, StartAgent, ProviderChip, ContactCard, DirRow, PastRow, McpChoice, AgentDialogs, QueuedTurn }
+// ---- profile and overview
+import { AgentProfile, ProfileLayers, ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact } from "profile.slint";
+import { MediaItem } from "media.slint";
+import { AgentOverview, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact } from "overview.slint";
+import { VoiceDialog, VoiceBridge, VoiceItem } from "voice.slint";
+import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
+import { DisplayCell, CellLine, ArtifactItem } from "cells.slint";
+export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem }
 
 export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
@@ -529,6 +537,32 @@ export component AppWindow inherits Window {
             current <=> root.preview-current;
             choose(hash) => { root.preview-choose(hash); }
             done => { root.overlay-closed(); }
+        }
+        // ---- profile and overview
+        AgentOverview {
+            visible: root.overlay == "overview";
+            width: parent.width;
+            height: parent.height;
+        }
+        AgentProfile {
+            visible: root.overlay == "profile";
+            width: parent.width;
+            height: parent.height;
+        }
+        ProfileLayers {
+            visible: root.overlay == "profile";
+            width: parent.width;
+            height: parent.height;
+        }
+        VoiceDialog {
+            visible: root.overlay == "voices";
+            width: parent.width;
+            height: parent.height;
+        }
+        OrchestratorDialog {
+            visible: root.overlay == "orchestrator";
+            width: parent.width;
+            height: parent.height;
         }
         switcher := Switcher {
             visible: root.switcher-open;

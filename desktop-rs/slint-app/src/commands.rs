@@ -80,6 +80,11 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool) -> bool {
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
     let state = context(&app, &window);
     let Some(action) = keymap::action_for(state, &chord, &overrides(&app), facts(&app, &window)) else { return false };
+    // ---- profile and overview: in the composer Ctrl+Shift+O attaches a
+    // file (Composer.qml's own shortcut), elsewhere it opens the overview.
+    if action == "overview" && state == "composer" {
+        return false;
+    }
     let ran = run(&app, &window, action);
     show_hints(&app, &window);
     ran
@@ -106,6 +111,18 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         "switcher" => open_switcher(app, window),
         "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
+        // ---- profile and overview
+        "escape" if crate::profile_view::owns(app) => crate::profile_view::escape(app, window),
+        "overview" => crate::overview_view::open(app, window),
+        "orchestrator" => crate::orchestrator_view::open(app, window),
+        "agent-profile" => crate::profile_view::open(app, window, &selected),
+        // The profile's and overview's Relaunch: the Start dialog, replacing
+        // the agent (Main.qml opens it the same way).
+        "relaunch-agent" if !selected.is_empty() => {
+            let name = app.engine.borrow().chat_name(&selected);
+            crate::launch_view::open_start_agent(app, window, &selected, &name);
+        }
+        "manage-queue" if !selected.is_empty() => crate::agent_dialogs_view::open_queue(app, window, &selected),
         "escape" if !app.overlay.borrow().is_empty() => close_overlay(app, window),
         "connection" => {
             open_overlay(app, window, "connection");

@@ -143,6 +143,16 @@ pub fn press_with(modifiers: &[slint::platform::Key], key: impl Into<SharedStrin
     }
 }
 
+/// A left click at a logical position, as a mouse sends it.
+pub fn click(x: f32, y: f32) {
+    use slint::platform::PointerEventButton;
+    let Some(window) = window() else { return };
+    let position = slint::LogicalPosition::new(x, y);
+    window.dispatch_event(WindowEvent::PointerMoved { position });
+    window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+    window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+}
+
 pub fn type_text(text: &str) {
     for character in text.chars() {
         press(SharedString::from(character.to_string()));

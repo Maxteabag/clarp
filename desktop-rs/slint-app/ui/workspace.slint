@@ -2,6 +2,8 @@ import { Palette } from "theme.slint";
 import { Composer, Attachment } from "composer.slint";
 import { Transcript, MessageRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
+import { TypingIndicator } from "cells.slint";
+import { ProfileBridge } from "profile.slint";
 
 // One pane of the workspace: where it sits (fractions of the workspace),
 // the chat it shows, and that chat's composer state. The counters ask the
@@ -16,6 +18,8 @@ export struct PaneView {
     model: string,
     effort: string,
     busy: bool,
+    // "Working…" under the transcript (Show when ready, agent working).
+    working: bool,
     pair: bool,
     x: float,
     y: float,
@@ -67,12 +71,20 @@ component Header inherits Rectangle {
         spacing: 10px;
         Text {
             text: root.pane.session == "" ? "No agent selected" : root.pane.name;
-            color: Palette.chrome-text;
+            color: name-touch.has-hover && root.pane.session != "" && !root.pane.pair ? Palette.accent : Palette.chrome-text;
             font-weight: 700;
             font-size: 13px;
             vertical-alignment: center;
             overflow: elide;
             max-width: root.width * 0.3;
+            accessible-role: button;
+            accessible-label: "Agent profile";
+            // The agent's name opens its profile (the pane menu's "Agent profile").
+            name-touch := TouchArea {
+                enabled: root.pane.session != "" && !root.pane.pair;
+                mouse-cursor: pointer;
+                clicked => { ProfileBridge.open-for-pane(root.pane.id); }
+            }
         }
         if root.pane.workspace-label != "": HorizontalLayout {
             spacing: 5px;
@@ -201,6 +213,17 @@ export component Pane inherits Rectangle {
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             reached-top => { root.load-older(); }
+        }
+        // The transcript's footer (ConversationPane.qml).
+        if root.pane.working: Rectangle {
+            background: Palette.window;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-top: 7px;
+                padding-bottom: 7px;
+                alignment: start;
+                TypingIndicator { reduced-motion: ProfileBridge.reduced-motion; }
+            }
         }
         // Pair rooms are the Host's read-only projection: no composer.
         composer := Composer {

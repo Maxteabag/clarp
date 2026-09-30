@@ -1,0 +1,119 @@
+import { Palette } from "theme.slint";
+import { Switch } from "std-widgets.slint";
+
+// A square icon button with a tooltip-style accessible label.
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> tip;
+    in property <bool> enabled: true;
+    in property <bool> danger;
+    in property <length> size: 28px;
+    in property <length> icon-size: 16px;
+    callback clicked();
+    width: root.size;
+    height: root.size;
+    border-radius: 3px;
+    background: touch.pressed ? Palette.control : touch.has-hover && root.enabled ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.tip;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    Image {
+        source: root.icon;
+        width: root.icon-size;
+        height: root.icon-size;
+        colorize: !root.enabled ? Palette.faint : root.danger ? Palette.danger : Palette.chrome-text;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A small text button (TuiButton.qml) for labels an icon cannot carry.
+export component TextButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <bool> primary;
+    callback clicked();
+    height: 26px;
+    min-width: label.preferred-width + 20px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: root.primary ? Palette.accent : Palette.border;
+    background: root.primary ? Palette.accent : touch.has-hover && root.enabled ? Palette.hover : Palette.control;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    label := Text {
+        text: root.text;
+        color: !root.enabled ? Palette.faint : root.primary ? Palette.accent-text : Palette.chrome-text;
+        font-size: 12px;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A card's title (ProfileCard in AgentProfilePanel.qml).
+export component SectionTitle inherits Text {
+    color: Palette.muted;
+    font-family: "JetBrains Mono";
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+// ProfileInfo: a label and a value on one line.
+export component InfoRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 8px;
+    Text { text: root.label; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+    Rectangle { horizontal-stretch: 1; }
+    Text {
+        text: root.value;
+        color: Palette.text;
+        font-family: "JetBrains Mono";
+        font-size: 11px;
+        overflow: elide;
+        max-width: 520px;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+    }
+}
+
+// ProfileToggle: a label and a switch.
+export component ToggleRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <bool> checked;
+    callback toggled(bool);
+    spacing: 8px;
+    Text { text: root.label; color: Palette.chrome-text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+    switch := Switch {
+        checked: root.checked;
+        accessible-label: root.label;
+        toggled => { root.toggled(self.checked); }
+    }
+    // A change from the Host (or a refused one) resets the switch.
+    changed checked => { switch.checked = root.checked; }
+}
+
+// TuiBusyIndicator.qml: three dots that pulse while something loads.
+export component Busy inherits HorizontalLayout {
+    in property <bool> running: true;
+    in property <bool> reduced-motion;
+    property <float> phase: root.running && !root.reduced-motion ? Math.mod(animation-tick() / 900ms, 1.0) : 0.0;
+    spacing: 3px;
+    alignment: center;
+    accessible-role: progress-indicator;
+    accessible-label: "Loading";
+    for index in 3: Rectangle {
+        width: 5px;
+        height: 5px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 2.5px;
+        background: Palette.accent;
+        opacity: root.reduced-motion ? 0.7 : 0.35 + 0.65 * Math.max(0, Math.cos((root.phase - index / 3) * 360deg));
+    }
+}
