@@ -300,6 +300,7 @@ pub fn start_check(name: &str, out: String) {
         "switcher" => switcher_check(out),
         "settings" => settings_check(out),
         "keymap" => keymap_check(out),
+        "voice" => voice_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
@@ -878,6 +879,82 @@ fn keymap_check(out: String) {
                 return false;
             }
             check(true, "the new key does");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check voice --out DIR`: a clip waiting for the opened chat plays
+/// (silently: `CLARP_AUDIO_OUTPUT=null`) and is acknowledged, Talk records
+/// the fixture "microphone", and the dictation is sent with its ids.
+fn voice_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    fn acks() -> Vec<String> {
+        posts("/clips/ack").iter().map(|a| a["body"]["status"].as_str().unwrap_or_default().to_owned()).collect()
+    }
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, window, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            if !open || !report().composer_focused {
+                return false;
+            }
+            window.invoke_chat_chosen("mike".into());
+            true
+        })),
+        ("clip played", Box::new(|_, _window, _| {
+            let acks = acks();
+            if !acks.iter().any(|s| s == "play-ok") {
+                return false;
+            }
+            check(acks == ["queued", "play-start", "play-ok"], &format!("a clip waiting for the chat is queued, played and acknowledged in order: {acks:?}"));
+            headless::press_with(&[Key::Control, Key::Shift], " ");
+            true
+        })),
+        ("recording", Box::new(move |_, _window, _| {
+            let recording = crate::platform::audio::with(|audio| audio.recording()).unwrap_or(false);
+            if !recording || !view().recording {
+                return false;
+            }
+            check(true, "Ctrl+Shift+Space records for the open chat");
+            shot(&out2, "voice-01-recording");
+            true
+        })),
+        ("recorded", Box::new(|_, _window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            headless::press_with(&[Key::Control, Key::Shift], " ");
+            true
+        })),
+        ("sent", Box::new(|_, _window, _| {
+            let Some(send) = sends().into_iter().find(|s| s["body"]["text"] == "dictated words") else { return false };
+            let transcribe = posts("/transcribe").pop().unwrap_or_default();
+            check(transcribe["body"]["riff"] == "RIFF" && transcribe["body"]["size"].as_u64().unwrap_or(0) > 1000, "the recording goes to /transcribe as WAV");
+            check(
+                send["body"]["session"] == "mike" && send["body"]["trace_id"] == "trace-dictation" && send["body"]["transcription_id"] == transcribe["body"]["transcription_id"],
+                &format!("the dictation is sent to its chat with its trace and transcription ids: {}", send["body"]),
+            );
+            check(!view().recording && view().transcribing == 0, "recording and transcribing end");
+            true
+        })),
+        ("mpris", Box::new(|_, _window, _| {
+            // The check's own private session bus (dbus-run-session), never the user's.
+            let property = |interface: &str, name: &str| {
+                std::process::Command::new("dbus-send")
+                    .args(["--session", "--print-reply", &format!("--dest=org.mpris.MediaPlayer2.Clarp.instance{}", std::process::id()),
+                           "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties.Get", &format!("string:{interface}"), &format!("string:{name}")])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                    .unwrap_or_default()
+            };
+            let identity = property("org.mpris.MediaPlayer2", "Identity");
+            if identity.is_empty() {
+                return false;
+            }
+            check(identity.contains("\"Clarp\""), "the voice is a media player on the session bus");
+            check(property("org.mpris.MediaPlayer2.Player", "PlaybackStatus").contains("\"Stopped\""), "stopped once the clip ended");
             true
         })),
     ];

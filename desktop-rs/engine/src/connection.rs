@@ -164,6 +164,7 @@ impl Engine {
         }
         self.token.clear();
         self.sse.stop();
+        self.changes.push(Change::Endpoint);
         self.set_connecting(false);
         self.set_connection_state("offline");
         self.set_error("");

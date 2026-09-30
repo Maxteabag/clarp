@@ -193,6 +193,13 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         "jump-latest" => app.to_latest(),
         "stop-agent" => app.engine.borrow_mut().stop(),
+        "talk" => {
+            let agent = !selected.is_empty() && !selected.starts_with("pair:");
+            let recording = crate::platform::audio::with(|audio| audio.recording()).unwrap_or(false);
+            if agent || recording {
+                crate::platform::audio::with(|audio| audio.toggle_recording_for_session(&selected));
+            }
+        }
         "mute" => {
             let muted = app.engine.borrow().muted();
             app.engine.borrow_mut().set_muted(!muted);

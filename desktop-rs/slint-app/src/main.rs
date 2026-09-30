@@ -11,6 +11,7 @@ mod driver;
 mod headless;
 mod keymap;
 mod panes;
+mod platform;
 mod settings_view;
 mod switcher;
 mod view;
@@ -207,10 +208,66 @@ impl App {
         if changes.iter().any(|c| matches!(c, Change::Roster | Change::Preferences)) {
             commands::refresh_switcher(self, &window);
         }
+        self.voice(changes);
         if changes.iter().any(|c| matches!(c, Change::HostStatus | Change::Preferences | Change::Connection | Change::ServerInfo)) {
             settings_view::show(self, &window);
         }
     }
+}
+
+impl App {
+    /// Engine changes the voice follows: clips to play, the Host, mute,
+    /// and a sent message silencing speech.
+    fn voice(&self, changes: &[Change]) {
+        for change in changes {
+            match change {
+                Change::Clips(clips) => {
+                    for clip in clips {
+                        platform::audio::with(|audio| audio.enqueue_clip(clip.clone()));
+                    }
+                }
+                Change::Silence => {
+                    platform::audio::with(platform::audio::Audio::silence);
+                }
+                Change::Endpoint => {
+                    let endpoint = self.engine.borrow().endpoint();
+                    platform::audio::with(|audio| match &endpoint {
+                        Some((url, token)) => audio.set_endpoint(Some(url.clone()), token),
+                        None => audio.set_endpoint(None, ""),
+                    });
+                }
+                Change::Preferences => {
+                    let muted = self.engine.borrow().muted();
+                    platform::audio::with(|audio| audio.set_muted(muted));
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// What the voice asks of the window (`platform::audio::Notice`).
+pub fn audio_notices(notices: Vec<platform::audio::Notice>) {
+    use platform::audio::Notice;
+    let Some(app) = app() else { return };
+    for notice in notices {
+        match notice {
+            Notice::Muted(muted) => {
+                if app.engine.borrow().muted() != muted {
+                    app.engine.borrow_mut().set_muted(muted);
+                }
+            }
+            Notice::Error(message) => app.engine.borrow_mut().report_error(&message),
+            Notice::Transcribed { text, trace, transcription, hands_free, target } => {
+                app.engine.borrow_mut().send_dictation(&text, &trace, &transcription, hands_free, &target);
+            }
+            Notice::Changed => {
+                app.voice_state();
+                platform::publish_playback();
+            }
+        }
+    }
+    pump_now(&app);
 }
 
 /// Applies what the engine has queued; scheduled on the UI thread by wake.
@@ -335,6 +392,13 @@ fn main() {
             }
         }
     });
+    window.on_silence(|| {
+        platform::audio::with(platform::audio::Audio::silence);
+    });
+    window.on_cancel_transcription(|pane| with_window(|app, _| {
+        let session = app.session_of(&pane);
+        platform::audio::with(|audio| audio.cancel_transcriptions_for_session(&session));
+    }));
     window.on_pane_reported(|pane, follows, at_end, offset, transcript, composer| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             let report = panes::Report { follows, at_end, offset, transcript_focused: transcript, composer_focused: composer };
@@ -487,6 +551,10 @@ fn main() {
         state.engine.borrow_mut().set_reading_theme(&theme);
         state.engine.borrow_mut().pump();
     }
+    platform::runtime::set(state.engine.borrow().runtime());
+    let muted = state.engine.borrow().muted();
+    platform::audio::start(muted);
+    platform::serve_mpris();
     state.engine.borrow_mut().start();
     drop(state);
     if let Some(out) = e2e_out {
@@ -499,6 +567,11 @@ fn main() {
     if let Err(error) = window.run() {
         eprintln!("clarp-slint: {error}");
         std::process::exit(1);
+    }
+    platform::audio::stop();
+    // exit() runs no destructors: save drafts and the layout first.
+    if let Some(app) = app() {
+        app.engine.borrow_mut().shutdown();
     }
     std::process::exit(driver::exit_code());
 }
