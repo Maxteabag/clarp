@@ -21,5 +21,5 @@ env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0
     CLARP_TEST_ATTACH_FILE="$scratch/photo.png" CLARP_TEST_NOTIFY_LOG="$scratch/notifications" \
     CLARP_TEST_FOREGROUND=1 CLARP_TEST_CLIPBOARD="$scratch/clipboard" \
     timeout 120 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
-    target/debug/clarp-slint --check "$name" --out "$out" 2>&1 | tee "$scratch/run.log" | grep -E "^(ok|FAIL|E2E)"
+    target/debug/clarp-slint --check "$name" --out "$out" 2>&1 | tee "$scratch/run.log" | grep -E "^(ok|FAIL|E2E)|panicked"
 grep -q "^E2E_PASS" "$scratch/run.log"

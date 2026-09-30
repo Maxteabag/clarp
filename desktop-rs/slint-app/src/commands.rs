@@ -91,7 +91,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
     let selected = app.engine.borrow().selected_session().to_owned();
     let mut layout_changed = false;
     match action {
-        "shortcut-bar" => window.set_shortcuts_visible(!window.get_shortcuts_visible()),
+        "shortcut-bar" => {
+            let visible = !window.get_shortcuts_visible();
+            window.set_shortcuts_visible(visible);
+            app.engine.borrow_mut().settings_mut().set("appearance/shortcutsVisible", visible);
+        }
         "switcher" => open_switcher(app, window),
         "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
         "escape" if !app.overlay.borrow().is_empty() => close_overlay(app, window),
@@ -228,6 +232,17 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         _ if action.starts_with("setting:") => apply_setting(app, window, action),
         "settings" => crate::settings_view::open(app, window),
+        "ui-larger" | "ui-smaller" | "ui-reset" => {
+            let current = app.engine.borrow().settings().get("appearance/uiScale").and_then(serde_json::Value::as_f64).unwrap_or(1.15);
+            let next = match action {
+                "ui-larger" => current + 0.05,
+                "ui-smaller" => current - 0.05,
+                _ => 1.15,
+            };
+            let next = ((next * 20.0).round() / 20.0).clamp(1.0, 1.4);
+            app.engine.borrow_mut().settings_mut().set("appearance/uiScale", next);
+            crate::platform::desktop::set_ui_scale(next as f32);
+        }
         "chats" => {
             window.set_surface("chats".into());
             app.focus_composer();

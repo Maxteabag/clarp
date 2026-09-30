@@ -903,6 +903,30 @@ fn keymap_check(out: String) {
                 return false;
             }
             check(true, "the new key does");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("larger", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "=");
+            true
+        })),
+        ("scaled", Box::new(|app, window, _| {
+            let scale = window.window().scale_factor();
+            if (scale - 1.2).abs() > 0.01 {
+                return false;
+            }
+            check(app.engine.borrow().settings().get("appearance/uiScale").and_then(|v| v.as_f64()) == Some(1.2), "Ctrl+= scales the interface up a step, and keeps it");
+            headless::press_with(&[Key::Control], "0");
+            true
+        })),
+        ("reset", Box::new(|_, window, _| {
+            if (window.window().scale_factor() - 1.15).abs() > 0.01 {
+                return false;
+            }
+            check(true, "Ctrl+0 resets it to the Qt app's 1.15");
             true
         })),
     ];

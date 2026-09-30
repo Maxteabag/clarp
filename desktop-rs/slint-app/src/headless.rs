@@ -59,9 +59,9 @@ impl Platform for Headless {
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
-        let (width, height) = (self.size.0 as usize, self.size.1 as usize);
         self.window.set_size(PhysicalSize::new(self.size.0, self.size.1));
         self.window.dispatch_event(WindowEvent::WindowActiveChanged(true));
+        let mut last_scale = self.window.scale_factor();
         loop {
             slint::platform::update_timers_and_animations();
             let tasks: Vec<Task> = match self.queue.tasks.lock() {
@@ -74,13 +74,25 @@ impl Platform for Headless {
             if self.queue.quit.load(Ordering::SeqCst) {
                 return Ok(());
             }
+            // A scale change keeps the logical size and so grows the window;
+            // a real window keeps its pixels and scales its content instead.
+            let scale = self.window.scale_factor();
+            if scale != last_scale {
+                last_scale = scale;
+                self.window.set_size(PhysicalSize::new(self.size.0, self.size.1));
+            }
+            let size = self.window.size();
+            let (width, height) = (size.width as usize, size.height as usize);
             self.window.draw_if_needed(|renderer| {
                 FRAME.with(|frame| {
                     let mut frame = frame.borrow_mut();
-                    if frame.2.len() != width * height {
-                        *frame = (width, height, vec![PremultipliedRgbaColor::default(); width * height], frame.3);
+                    // A margin: at a fractional scale the renderer may round
+                    // the window a pixel past its size. Saving crops it.
+                    let stride = width + MARGIN;
+                    if frame.0 != width || frame.1 != height {
+                        *frame = (width, height, vec![PremultipliedRgbaColor::default(); stride * (height + MARGIN)], frame.3);
                     }
-                    renderer.render(&mut frame.2, width);
+                    renderer.render(&mut frame.2, stride);
                     frame.3 += 1;
                 });
             });
@@ -137,6 +149,8 @@ pub fn type_text(text: &str) {
     }
 }
 
+const MARGIN: usize = 8;
+
 /// Saves the last drawn frame as PNG.
 pub fn save_frame(path: &str) -> Result<(), String> {
     FRAME.with(|frame| {
@@ -145,8 +159,10 @@ pub fn save_frame(path: &str) -> Result<(), String> {
         if pixels.is_empty() {
             return Err("nothing has been drawn yet".into());
         }
+        let stride = width + MARGIN;
         let mut image = image::RgbaImage::new(width as u32, height as u32);
-        for (pixel, color) in image.pixels_mut().zip(pixels.iter()) {
+        for (x, y, pixel) in image.enumerate_pixels_mut() {
+            let color = pixels[y as usize * stride + x as usize];
             *pixel = image::Rgba([color.red, color.green, color.blue, 255]);
         }
         image.save(path).map_err(|e| format!("cannot save {path}: {e}"))

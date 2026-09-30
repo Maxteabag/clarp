@@ -323,6 +323,9 @@ fn main() {
     apply_theme(&window, &theme);
     view::load_fonts(theme.clone());
     window.set_minimal_ui(settings.boolean("appearance/minimalUi", false));
+    window.set_shortcuts_visible(settings.boolean("appearance/shortcutsVisible", true));
+    // The reader's interface scale (1.15 as in the Qt app); checks draw at 1.0.
+    let ui_scale = if headless { 1.0 } else { settings.get("appearance/uiScale").and_then(serde_json::Value::as_f64).unwrap_or(1.15) as f32 };
     let prefs = Prefs::load(&settings);
     let engine = match Engine::new(Config::from_env(settings), || {
         if let Err(error) = slint::invoke_from_event_loop(pump) {
@@ -606,6 +609,9 @@ fn main() {
     platform::audio::start(muted);
     platform::serve_mpris();
     platform::desktop::start();
+    platform::desktop::set_ui_scale(ui_scale);
+    // The window system's window exists once the loop runs: scale it then.
+    slint::Timer::single_shot(std::time::Duration::from_millis(50), move || platform::desktop::set_ui_scale(ui_scale));
     platform::diagnostics::start(headless);
     if let Some(socket) = &socket {
         launch::listen(socket);
