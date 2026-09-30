@@ -21,7 +21,7 @@ def test_manifest_pins_supported_platforms_and_exact_cli_versions():
     package = json.loads((ROOT / "toolchain/package.json").read_text())
     assert package["dependencies"] == {
         "@anthropic-ai/claude-code": "2.1.283",
-        "@openai/codex": "0.154.0",
+        "@openai/codex": "0.159.2",
     }
     lock = json.loads((ROOT / "toolchain/package-lock.json").read_text())
     assert lock["packages"][""]["dependencies"] == package["dependencies"]
