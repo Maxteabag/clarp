@@ -78,6 +78,8 @@ enum Action {
     Show,
     Mute(bool),
     Quit,
+    /// An AudioController playback command from MPRIS.
+    Playback(&'static str),
 }
 
 struct ClarpTray {
@@ -125,6 +127,7 @@ impl ksni::Tray for ClarpTray {
 pub struct DesktopServicesRust {
     window: usize,
     tray: Option<ksni::Handle<ClarpTray>>,
+    mpris: Option<Arc<crate::mpris::Mpris>>,
     guards: Vec<QMetaObjectConnectionGuard>,
     presence: clarp_core::presence::Presence,
     presence_on: bool,
@@ -139,6 +142,7 @@ impl Default for DesktopServicesRust {
         Self {
             window: 0,
             tray: None,
+            mpris: None,
             guards: Vec::new(),
             presence: clarp_core::presence::Presence::default(),
             presence_on: false,
@@ -158,6 +162,15 @@ impl Drop for DesktopServicesRust {
             crate::runtime::handle().spawn(async move { tray.shutdown().await });
         }
     }
+}
+
+/// The first window's audio controller.
+///
+/// # Safety
+/// Only on the GUI thread, and only while the controller lives.
+unsafe fn window_audio<'a>() -> Option<Pin<&'a mut super::audio_controller::qobject::AudioController>> {
+    let controller = unsafe { super::controller::window_controller() }?;
+    unsafe { controller.audio_pub().as_mut() }.map(|audio| unsafe { Pin::new_unchecked(audio) })
 }
 
 const ICON: &[u8] = include_bytes!("../../../../static/icon.png");
@@ -201,7 +214,8 @@ impl qobject::DesktopServices {
             }
         });
         let icons = [22, 48].iter().filter_map(|&side| clarp_core::media::argb_icon(ICON, side)).map(|(width, height, data)| ksni::Icon { width, height, data }).collect();
-        let tray = ClarpTray { muted, icons, act };
+        let tray = ClarpTray { muted, icons, act: act.clone() };
+        self.as_mut().start_mpris(act);
         let qt = self.qt_thread();
         crate::runtime::handle().spawn(async move {
             use ksni::TrayMethods;
@@ -239,6 +253,44 @@ impl qobject::DesktopServices {
         rust.tray = Some(handle);
     }
 
+
+    // ---- MPRIS -----------------------------------------------------------------------
+
+    fn start_mpris(self: Pin<&mut Self>, act: Arc<dyn Fn(Action) + Send + Sync>) {
+        use crate::mpris::{Mpris, Request};
+        let status = unsafe { window_audio() }.map(|audio| audio.playback_state()).unwrap_or_default();
+        let qt = self.qt_thread();
+        crate::runtime::handle().spawn(async move {
+            let served = Mpris::serve(status, move |request| {
+                act(match request {
+                    Request::Raise => Action::Show,
+                    Request::Quit => Action::Quit,
+                    Request::Playback(command) => Action::Playback(command),
+                })
+            })
+            .await;
+            match served {
+                Ok(mpris) => {
+                    if qt.queue(move |services| services.mpris_ready(mpris)).is_err() {
+                        eprintln!("DesktopServices: MPRIS outlived its window");
+                    }
+                }
+                // No session bus: media keys do not reach speech, as in the C++ client.
+                Err(error) => eprintln!("DesktopServices: no MPRIS player: {error}"),
+            }
+        });
+    }
+
+    fn mpris_ready(mut self: Pin<&mut Self>, mpris: crate::mpris::Mpris) {
+        let mpris = Arc::new(mpris);
+        let Some(audio) = (unsafe { window_audio() }) else { return };
+        mpris.publish(audio.playback_state());
+        let published = mpris.clone();
+        let changed = audio.connect_playing_changed(move |audio| published.publish(audio.playback_state()), cxx_qt::ConnectionType::QueuedConnection);
+        let mut rust = self.as_mut().rust_mut();
+        rust.guards.push(changed);
+        rust.mpris = Some(mpris);
+    }
 
     // ---- presence ------------------------------------------------------------------
 
@@ -340,6 +392,11 @@ impl qobject::DesktopServices {
                 }
             }
             Action::Quit => qobject::QCoreApplication::quit_application(),
+            Action::Playback(command) => {
+                if let Some(audio) = unsafe { window_audio() } {
+                    audio.playback_command(command);
+                }
+            }
         }
     }
 }

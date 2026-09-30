@@ -583,12 +583,34 @@ impl qobject::AudioController {
     }
 
     /// Stops speech in whichever window plays it.
-    pub fn silence(mut self: Pin<&mut Self>) {
+    pub fn silence(self: Pin<&mut Self>) {
+        self.playback_command("stop");
+    }
+
+    /// "stop", "pause", "resume" or "toggle", in whichever window plays
+    /// (C++ `pausePlayback`, `resumePlayback`, `togglePlaybackPause`).
+    pub fn playback_command(mut self: Pin<&mut Self>, action: &str) {
         if let Some(coordinator) = self.coordinator.as_ref().filter(|c| c.configured()) {
-            coordinator.command("stop", false);
+            coordinator.command(action, false);
             return;
         }
-        let effects = self.as_mut().rust_mut().player.silence();
+        let effects = {
+            let player = &mut self.as_mut().rust_mut().player;
+            match action {
+                "stop" => player.silence(),
+                "pause" => player.pause(),
+                "resume" => player.resume(),
+                "toggle" => player.toggle(),
+                _ => Vec::new(),
+            }
+        };
         self.apply(effects);
+    }
+
+    /// Playing, paused, and whether there is a clip to control (C++
+    /// `playbackAvailable`), as the window shows them.
+    pub fn playback_state(&self) -> crate::mpris::Status {
+        let available = if self.remote_view() { self.remote.available } else { self.player.has_current() };
+        crate::mpris::Status { playing: self.playing_value(), paused: self.paused_value(), available }
     }
 }

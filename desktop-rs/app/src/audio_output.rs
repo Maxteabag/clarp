@@ -207,6 +207,12 @@ pub struct Silent {
 
 pub const SILENT_CLIP_MS: u64 = 150;
 
+/// How long a silent clip lasts; `CLARP_TEST_SILENT_CLIP_MS` lengthens it
+/// for checks that control playback from outside (MPRIS).
+fn silent_clip_ms() -> u64 {
+    std::env::var("CLARP_TEST_SILENT_CLIP_MS").ok().and_then(|ms| ms.parse().ok()).unwrap_or(SILENT_CLIP_MS)
+}
+
 impl AudioOutput for Silent {
     fn play(&mut self, _playback: Playback, _rate: f64, events: Sink) {
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -214,7 +220,7 @@ impl AudioOutput for Silent {
         events(OutputEvent::Started);
         let (current, paused) = (self.generation.clone(), self.paused.clone());
         fn wait(current: Arc<AtomicU64>, paused: Arc<std::sync::atomic::AtomicBool>, generation: u64, events: Sink) {
-            crate::runtime::after(Duration::from_millis(SILENT_CLIP_MS), move || {
+            crate::runtime::after(Duration::from_millis(silent_clip_ms()), move || {
                 if current.load(Ordering::SeqCst) != generation {
                     return;
                 }

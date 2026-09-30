@@ -118,6 +118,40 @@ try:
     check(wait(lambda: notes), "a reply in a closed chat notifies")
     check(notes and notes[0]["summary"] == "Mike" and notes[0]["body"] == "A new reply" and notes[0]["timeout"] == 8000,
           "notification: " + json.dumps(notes[:1]))
+
+    # MPRIS: media keys and the panel's player controls reach speech.
+    players = [str(n) for n in bus.list_names() if str(n).startswith("org.mpris.MediaPlayer2.Clarp.instance")]
+    check(len(players) == 1, "an MPRIS player is on the bus: " + ", ".join(players))
+    player_object = bus.get_object(players[0], "/org/mpris/MediaPlayer2")
+    def prop(interface, name):
+        return player_object.Get(interface, name, dbus_interface=dbus.PROPERTIES_IFACE)
+    ROOT, PLAYER = "org.mpris.MediaPlayer2", "org.mpris.MediaPlayer2.Player"
+    check(prop(ROOT, "Identity") == "Clarp" and prop(ROOT, "CanRaise") and prop(ROOT, "DesktopEntry") == "com.maxteabag.Clarp",
+          "the player names Clarp")
+    check(prop(PLAYER, "PlaybackStatus") == "Stopped" and not prop(PLAYER, "CanPause") and len(prop(PLAYER, "Metadata")) == 0,
+          "nothing playing yet")
+    changes = []
+    bus.add_signal_receiver(lambda interface, changed, invalidated: changes.append(dict(changed)),
+                            signal_name="PropertiesChanged", dbus_interface=dbus.PROPERTIES_IFACE, path="/org/mpris/MediaPlayer2")
+    menu.Event(entries["Mute voice replies"], "clicked", dbus.String(""), dbus.UInt32(0))
+    check(wait(lambda: muted() is False), "unmuted from the tray")
+    control = lambda body: urllib.request.urlopen(urllib.request.Request(
+        base + "/__control/event", method="POST", headers={"Content-Type": "application/json"}, data=json.dumps(body).encode())).read()
+    control({"type": "audio", "clip_id": 1, "session": "rachel", "url": "/clips/1/complete.mp3", "complete_url": "/clips/1/complete.mp3"})
+    status = lambda: prop(PLAYER, "PlaybackStatus")
+    check(wait(lambda: status() == "Playing", 10), "a voice reply plays: " + status())
+    metadata = prop(PLAYER, "Metadata")
+    check(metadata.get("xesam:title") == "Clarp voice reply" and list(metadata.get("xesam:artist", [])) == ["Clarp"]
+          and str(metadata.get("mpris:trackid")) == "/org/mpris/MediaPlayer2/Track/Voice", "voice reply metadata")
+    check(wait(lambda: any(c.get("PlaybackStatus") == "Playing" and c.get("CanPause") for c in changes), 3), "the panel is told it plays, in one signal")
+    player = dbus.Interface(player_object, PLAYER)
+    player.PlayPause()
+    check(wait(lambda: status() == "Paused") and prop(PLAYER, "CanPlay") and not prop(PLAYER, "CanPause"), "PlayPause pauses speech")
+    player.Play()
+    check(wait(lambda: status() == "Playing"), "Play resumes it")
+    player.Stop()
+    check(wait(lambda: status() == "Stopped"), "Stop silences it")
+    dbus.Interface(player_object, ROOT).Raise()
     menu.Event(entries["Show Clarp"], "clicked", dbus.String(""), dbus.UInt32(0))
 
     def activity():
