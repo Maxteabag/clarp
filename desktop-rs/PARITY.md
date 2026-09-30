@@ -86,7 +86,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::relaunchPreservesHostSessionAndDraft` | `core/tests/preview.rs::relaunch_preserves_host_and_session` + `app/tests/qml/controller_restore_probe.qml` | verified: relaunch environment and arguments, restored chat before and after the roster; drafts are durable per Host and chat (`controller_lifecycle_probe.qml`) |
 | `tst_native_core::previewRestartCapturesContextAndRejectsBusy` | `core/tests/preview.rs::preview_restart_captures_context_and_rejects_busy` | verified |
 | `tst_native_core::restoredSessionDoesNotFallBackToAnotherAgent` | `app/tests/qml/controller_restore_missing_probe.qml` (+ `controller_restore_probe.qml`) | verified |
-| `tst_native_core::localReportsRequireOriginAndSafeReadableFiles` | | todo |
+| `tst_native_core::localReportsRequireOriginAndSafeReadableFiles` | `app/tests/qml/controller_local_reports_probe.qml` (shared filesystem and origin gating, refused kinds, openExternalLink) + `core/tests/links.rs` (unreadable, symlinks, content rules) | verified |
 | `tst_native_core::leadingDayTracksVisibleHistory` | `core/tests/presentation.rs::leading_day_tracks_visible_history` | verified (core) |
 | `tst_native_core::oldActivityGroupsAreLazyAndVisitScoped` | `core/tests/presentation.rs::old_activity_groups_are_lazy_and_visit_scoped` | verified (core) |
 | `tst_native_core::consecutiveExplanationsCollapseWithoutChangingTranscript` | `core/tests/presentation.rs::consecutive_explanations_collapse_without_changing_transcript` | verified (core) |
@@ -117,7 +117,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::subagentCellsDescribePhaseNameAndTask` | `protocol.rs::subagent_cells_describe_phase_name_and_task` + `conversation.rs::subagent_cells_are_annotated_on_the_way_out_only` | verified |
 | `tst_native_core::controllerTracksJobsFromListAndEvents` | `app/tests/qml/controller_jobs_probe.qml` | verified |
 | `tst_native_core::rosterLookupIsConsistentDuringStructuralSignals` | adapter `indexOfSession` reads the replayed mirror | wip: needs a probe that checks lookups inside rowsInserted/Removed/Moved handlers |
-| `tst_native_core::circularPortraitsAreBoundedAndAntialiased` | | todo |
+| `tst_native_core::circularPortraitsAreBoundedAndAntialiased` | `core/tests/media.rs::a_portrait_is_a_192px_circle` (size, transparent corner, antialiased edge, JPEG and BMP) | verified |
 | `tst_native_core::agentTerminalLaunchesNativeCliThroughDefaultTerminal` | `app/tests/qml/controller_terminal_probe.qml` | verified (stub `xdg-terminal-exec` and CLIs on PATH; exact command per backend; refused without a shared filesystem) |
 | `tst_native_core::sseParserHandlesChunksCommentsAndReplayIds` | `core/tests/protocol.rs::sse_parser_handles_chunks_comments_and_replay_ids` | verified |
 | `tst_native_core::nextAttentionCyclesWaitingUnreadAndPending` | `core/tests/roster.rs::next_attention_cycles_waiting_unread_and_pending` | verified |
@@ -151,7 +151,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::microphoneCanCaptureNativePcm` | | todo: needs a real input device; probes never open the microphone |
 | `tst_native_core::backgroundTranscriptionsKeepTheirChatOwnership` | `core/tests/audio.rs::background_transcriptions_keep_their_chat_ownership` + `app/tests/qml/controller_dictation_probe.qml` | verified |
 | `tst_native_core::clipFailsFastWithoutMediaBackend` | `app/tests/qml/controller_audio_nobackend_probe.qml` + `core/tests/audio.rs::clips_fail_fast_without_a_media_backend_and_report_it_once` | verified |
-| `tst_native_core::narrationClipWithoutMediaBackendStaysBounded` | | todo |
+| `tst_native_core::narrationClipWithoutMediaBackendStaysBounded` | `app/tests/qml/controller_audio_decode_probe.qml` (real decoders, RSS growth < 200 MB) | verified |
 | `tst_native_core::sharedPlaybackDoesNotDuplicateDownloads` | `app/tests/qml/controller_shared_playback_probe.qml` | wip: one download and cross-window mute verified; the microphone-held part is covered by `core/tests/audio.rs::recording_holds_the_queue_and_mute_or_silence_drains_it` rather than a second process holding the lease |
 | `tst_native_core::markdownParagraphsBecomeVisibleDisplayBlocks` | `core/tests/protocol.rs::markdown_paragraphs_become_visible_display_blocks` | verified |
 | `tst_native_core::hugeMarkdownBlocksAreNotRetainedInTheStyleCache` | `app/tests/qml/markdown_style_cache_probe.qml` (counts the UTF-8 held, so the 4 MB bound takes more rows than the C++ UTF-16 count) | verified |

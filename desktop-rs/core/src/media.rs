@@ -75,6 +75,8 @@ fn format_of(bytes: &[u8]) -> Option<image::ImageFormat> {
         Some(image::ImageFormat::Gif)
     } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
         Some(image::ImageFormat::WebP)
+    } else if bytes.starts_with(b"BM") {
+        Some(image::ImageFormat::Bmp)
     } else {
         None
     }

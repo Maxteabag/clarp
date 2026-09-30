@@ -28,4 +28,14 @@ fn a_portrait_is_a_192px_circle() {
     assert_eq!(portrait.get_pixel(0, 0)[3], 0, "transparent corner");
     assert_eq!(portrait.get_pixel(96, 96)[0], 200);
     assert_eq!(rounded_portrait(b"not an image"), None);
+    // The circle's edge is antialiased (tst_native_core::circularPortraitsAreBoundedAndAntialiased).
+    assert!((0..192).any(|x| (1..255).contains(&portrait.get_pixel(x, 20)[3])), "antialiased edge");
+    // Formats are named from their magic bytes; JPEG and BMP must decode.
+    let rgb = image::RgbImage::from_pixel(400, 240, image::Rgb([255, 0, 0]));
+    for format in [image::ImageFormat::Jpeg, image::ImageFormat::Bmp] {
+        let mut encoded = Vec::new();
+        rgb.write_to(&mut std::io::Cursor::new(&mut encoded), format).unwrap();
+        let portrait = image::load_from_memory(&rounded_portrait(&encoded).unwrap_or_else(|| panic!("{format:?} portrait"))).unwrap();
+        assert_eq!((portrait.width(), portrait.height()), (192, 192), "{format:?}");
+    }
 }

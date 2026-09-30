@@ -49,5 +49,12 @@ fn only_readable_non_executable_reports_open() {
     assert!(local_report_path(&write("real.png", b"\x89PNG\r\n\x1a\nrest", 0o600)).is_some());
     assert!(local_report_path(&write("locked.txt", b"secret", 0o000)).is_none(), "no read bits");
     assert!(local_report_path("/definitely/not/there.html").is_none());
+    assert!(local_report_path(&write("write-only.txt", b"text", 0o200)).is_none(), "write-only");
+    // A link opens its target, by the target's canonical path.
+    let alias = directory.join("alias.html");
+    std::os::unix::fs::symlink(&report, &alias).unwrap();
+    let canonical = std::fs::canonicalize(&report).unwrap();
+    assert_eq!(local_report_path(&format!("file://{}", alias.display())), Some(canonical.clone()));
+    assert!(local_report_path(&directory.to_string_lossy()).is_none(), "a directory");
     std::fs::remove_dir_all(directory).ok();
 }
