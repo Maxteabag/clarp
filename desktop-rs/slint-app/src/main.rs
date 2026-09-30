@@ -23,6 +23,12 @@ mod updates_view;
 // ---- launch dialogs
 mod agent_dialogs_view;
 mod launch_view;
+// ---- profile and overview
+mod cells_view;
+mod orchestrator_view;
+mod overview_view;
+mod profile_view;
+mod voice_view;
 
 use view::{apply_theme, chat_row, initial, open_link};
 
@@ -235,6 +241,8 @@ impl App {
             launch_view::refresh(&app, &window, changes);
             agent_dialogs_view::refresh(&app, &window, changes);
         }
+        // ---- profile and overview
+        profile_view::refresh(self, &window, changes);
     }
 }
 
@@ -606,6 +614,11 @@ fn main() {
     window.on_team_saved(|name, colour, leader| with_window(|app, window| teams_view::saved(app, window, &name, &colour, leader)));
     window.on_team_member_added(|index| with_window(|app, window| teams_view::member_added(app, window, index)));
     window.on_team_deleted(|| with_window(|app, window| teams_view::deleted(app, window)));
+    // ---- profile and overview
+    profile_view::wire(&window);
+    overview_view::wire(&window);
+    voice_view::wire(&window);
+    orchestrator_view::wire(&window);
     window.on_dismiss_error(|| {
         if let Some(app) = app() {
             app.engine.borrow_mut().clear_error();

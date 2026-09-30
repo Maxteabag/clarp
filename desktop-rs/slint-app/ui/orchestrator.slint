@@ -1,0 +1,129 @@
+import { Palette } from "theme.slint";
+import { ComboBox, LineEdit, Slider, SpinBox, Switch } from "std-widgets.slint";
+import { Modal } from "dialogs.slint";
+import { IconButton, Busy } from "agent_controls.slint";
+
+// The orchestrator dialog's fields (set from the Host's settings when they
+// load) and commands.
+export global OrchestratorBridge {
+    in-out property <bool> enabled;
+    in-out property <bool> fallback-only: true;
+    in-out property <float> confidence: 0.78;
+    in-out property <int> provider-index;
+    in-out property <int> effort-index;
+    in-out property <string> model;
+    in-out property <int> timeout-ms: 30000;
+    in property <bool> loading;
+    in property <bool> loaded;
+    in property <string> last-decision;
+    in property <[string]> providers: ["openai", "claude", "codex", "agy"];
+    // The first effort is the provider's own (QML's empty entry).
+    in property <[string]> efforts: ["default", "minimal", "low", "medium", "high", "xhigh"];
+    in property <bool> reduced-motion;
+    callback close();
+    callback save();
+}
+
+// OrchestratorDialog.qml: whether and how a routing model resolves
+// delegations that name matching cannot.
+export component OrchestratorDialog inherits Modal {
+    card-width: 590px;
+    card-height: 600px;
+    dismissed => { OrchestratorBridge.close(); }
+    // The panel's own surface (Theme.raised), under the card's contents.
+    Rectangle {
+        x: 1px;
+        y: 1px;
+        width: Math.min(root.card-width, root.width - 40px) - 2px;
+        height: Math.min(root.card-height, root.height - 40px) - 2px;
+        border-radius: 3px;
+        background: Palette.raised;
+    }
+    VerticalLayout {
+        padding: 28px;
+        spacing: 11px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: "Orchestrator"; color: Palette.text; font-size: 17px; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
+            if OrchestratorBridge.loading: Busy { reduced-motion: OrchestratorBridge.reduced-motion; }
+            IconButton { icon: @image-url("icons/close.svg"); tip: "Close"; clicked => { OrchestratorBridge.close(); } }
+        }
+        Text {
+            text: "Name matching runs first. The routing model resolves delegations that do not clearly select one agent.";
+            color: Palette.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Switch { checked <=> OrchestratorBridge.enabled; accessible-label: "Use AI to resolve failed delegations"; }
+            Text { text: "Use AI to resolve failed delegations"; color: Palette.chrome-text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Switch { checked <=> OrchestratorBridge.fallback-only; accessible-label: "Only when name matching cannot decide"; }
+            Text { text: "Only when name matching cannot decide"; color: Palette.chrome-text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+        }
+        Text {
+            text: "Automatic routing confidence  " + Math.round(OrchestratorBridge.confidence * 100) / 100;
+            color: Palette.chrome-text;
+            font-size: 12px;
+        }
+        Slider {
+            minimum: 0.5;
+            maximum: 0.99;
+            step: 0.01;
+            value <=> OrchestratorBridge.confidence;
+            accessible-label: "Automatic routing confidence";
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout {
+                spacing: 4px;
+                horizontal-stretch: 1;
+                Text { text: "Provider"; color: Palette.chrome-text; font-size: 12px; }
+                ComboBox { model: OrchestratorBridge.providers; current-index <=> OrchestratorBridge.provider-index; accessible-label: "Provider"; }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                horizontal-stretch: 1;
+                Text { text: "Effort"; color: Palette.chrome-text; font-size: 12px; }
+                ComboBox { model: OrchestratorBridge.efforts; current-index <=> OrchestratorBridge.effort-index; accessible-label: "Effort"; }
+            }
+        }
+        Text { text: "Model override"; color: Palette.chrome-text; font-size: 12px; }
+        LineEdit { text <=> OrchestratorBridge.model; placeholder-text: "Provider default"; accessible-label: "Model override"; }
+        Text { text: "Timeout (milliseconds)"; color: Palette.chrome-text; font-size: 12px; }
+        HorizontalLayout {
+            alignment: start;
+            SpinBox {
+                width: 160px;
+                minimum: 250;
+                maximum: 60000;
+                step-size: 250;
+                value <=> OrchestratorBridge.timeout-ms;
+                accessible-label: "Timeout (milliseconds)";
+            }
+        }
+        if OrchestratorBridge.last-decision != "": Rectangle {
+            border-radius: 2px;
+            background: Palette.window;
+            VerticalLayout {
+                padding: 9px;
+                Text { text: "Last decision: " + OrchestratorBridge.last-decision; color: Palette.muted; font-size: 11px; wrap: word-wrap; }
+            }
+        }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            IconButton { icon: @image-url("icons/close.svg"); tip: "Cancel"; clicked => { OrchestratorBridge.close(); } }
+            IconButton {
+                icon: @image-url("icons/save.svg");
+                tip: "Save";
+                enabled: OrchestratorBridge.loaded && !OrchestratorBridge.loading;
+                clicked => { OrchestratorBridge.save(); }
+            }
+        }
+    }
+}

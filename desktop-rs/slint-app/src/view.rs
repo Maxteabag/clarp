@@ -264,9 +264,13 @@ pub(crate) fn choose_attachment(session: String) {
 /// rows kept at the start and end are updated in place (and only when their
 /// source differs), so streaming does not rebuild the list and an older page
 /// is inserted above rather than replacing everything.
-pub(crate) fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<(PresentedRow, bool)>, fresh: Vec<(PresentedRow, bool)>, rows: Vec<MessageRow>) {
+/// A shown row's source: the presented row, whether it is open, and its
+/// artifacts' ids and revisions.
+pub(crate) type Shown = (PresentedRow, bool, String);
+
+pub(crate) fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<Shown>, fresh: Vec<Shown>, rows: Vec<MessageRow>) {
     use slint::Model;
-    let id = |row: &(PresentedRow, bool)| row.0.message.id.clone();
+    let id = |row: &Shown| row.0.message.id.clone();
     let prefix = shown.iter().zip(&fresh).take_while(|(a, b)| id(a) == id(b)).count();
     let most = shown.len().min(fresh.len()) - prefix;
     let suffix = shown.iter().rev().zip(fresh.iter().rev()).take(most).take_while(|(a, b)| id(a) == id(b)).count();
@@ -331,7 +335,7 @@ pub(crate) fn message_row(
         clarp_engine::blocks::blocks(&text)
     };
     let from_agent = author == "user" && m.origin == "agent" && !m.sender_name.is_empty();
-    let count = (row.activity_count as usize).max(row.tools.len());
+    let count = (row.activity_count as usize).max(row.tools.len()).max(row.display_cells.len());
     let has_activity = !row.activity && count > 0;
     let inline = always_show_tools || row.activity_inline;
     let label = if !has_activity || inline {
@@ -358,7 +362,11 @@ pub(crate) fn message_row(
         activity_label: label.into(),
         group_id: group_id.into(),
         expanded: open,
-        tools: ModelRc::new(VecModel::from(row.tools.iter().map(tool_row).collect::<Vec<_>>())),
+        tools: ModelRc::new(VecModel::from(
+            row.tools.iter().filter(|t| crate::cells_view::shows_tool(row, t)).map(tool_row).collect::<Vec<_>>(),
+        )),
+        cells: ModelRc::new(VecModel::from(crate::cells_view::cells(row))),
+        artifacts: ModelRc::new(VecModel::<crate::ArtifactItem>::default()),
     }
 }
 

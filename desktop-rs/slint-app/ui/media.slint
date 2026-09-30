@@ -1,0 +1,133 @@
+import { Palette } from "theme.slint";
+import { ScrollView } from "std-widgets.slint";
+import { Busy } from "agent_controls.slint";
+
+export struct MediaItem {
+    id: string,
+    caption: string,
+    image: image,
+    // The image is still being fetched.
+    loading: bool,
+}
+
+// MediaGallery.qml: a chat's images in a row; a compact gallery folds to
+// its title. Choosing a loaded image asks for the full-size viewer.
+export component MediaGallery inherits Rectangle {
+    in property <[MediaItem]> items;
+    in property <bool> compact: true;
+    in property <bool> reduced-motion;
+    in-out property <bool> expanded;
+    callback view(int);
+    property <bool> showing: root.items.length > 0 && (!root.compact || root.expanded);
+    visible: root.items.length > 0;
+    height: !self.visible ? 0px : root.compact && !root.expanded ? 27px : root.compact ? 116px : 224px;
+    background: Palette.raised;
+    border-width: 1px;
+    border-color: Palette.border;
+    border-radius: 2px;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 5px;
+        HorizontalLayout {
+            height: 18px;
+            Text {
+                text: "MEDIA  " + root.items.length;
+                color: Palette.muted;
+                font-family: "JetBrains Mono";
+                font-size: 9px;
+                font-weight: 600;
+                letter-spacing: 0.8px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            if root.compact: Rectangle {
+                width: 20px;
+                accessible-role: button;
+                accessible-label: root.expanded ? "Collapse media" : "Show recent media";
+                Text { text: root.expanded ? "−" : "+"; color: Palette.chrome-text; }
+                TouchArea { clicked => { root.expanded = !root.expanded; } }
+            }
+        }
+        if root.showing: ScrollView {
+            vertical-stretch: 1;
+            content-width: strip.preferred-width;
+            content-height: self.visible-height;
+            strip := HorizontalLayout {
+                height: parent.height;
+                spacing: 7px;
+                for item[index] in root.items: Rectangle {
+                    width: root.compact ? 142px : 190px;
+                    border-radius: 2px;
+                    background: Palette.window;
+                    border-width: 1px;
+                    border-color: Palette.border;
+                    clip: true;
+                    accessible-role: button;
+                    accessible-label: item.caption;
+                    Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: item.image;
+                        image-fit: cover;
+                    }
+                    Rectangle {
+                        y: parent.height - self.height;
+                        height: caption.preferred-height + 10px;
+                        background: Palette.window.with-alpha(0.75);
+                        caption := Text {
+                            x: 6px;
+                            width: parent.width - 12px;
+                            text: item.caption;
+                            color: Palette.text;
+                            font-size: 10px;
+                            overflow: elide;
+                        }
+                    }
+                    if item.loading: Busy { reduced-motion: root.reduced-motion; }
+                    TouchArea {
+                        enabled: !item.loading;
+                        clicked => { root.view(index); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The gallery's full-size viewer (its Popup): the image fitted, its caption
+// below; Escape and a click outside close it.
+export component MediaViewer inherits Rectangle {
+    in property <MediaItem> item;
+    callback dismissed();
+    background: #00000080;
+    TouchArea { clicked => { root.dismissed(); } }
+    Rectangle {
+        width: Math.min(root.width - 48px, 1100px);
+        height: Math.min(root.height - 48px, 820px);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        border-radius: 3px;
+        background: Palette.window;
+        border-width: 1px;
+        border-color: Palette.faint;
+        TouchArea { }
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
+            Image {
+                vertical-stretch: 1;
+                source: root.item.image;
+                image-fit: contain;
+                accessible-role: image;
+                accessible-label: root.item.caption;
+            }
+            Text {
+                text: root.item.caption;
+                color: Palette.text;
+                font-size: 11px;
+                overflow: elide;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}

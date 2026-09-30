@@ -61,6 +61,14 @@ turns = {
               "- core models\n- **Qt bridges**\n\n| step | state |\n|---|---|\n| port | done |\n| verify | running |"}],
 }
 jobs = []
+# /artifacts; /__control/artifacts replaces it.
+artifacts = [
+    {"artifact_id": "art1", "title": "Report"},
+    {"artifact_id": "doc1", "title": "Findings", "summary": "What we found", "type": "document", "session": "rachel",
+     "content": "# Findings\n\nAll *good*."},
+    {"artifact_id": "html1", "title": "Page", "type": "research", "session": "rachel",
+     "content": "<!doctype html><html><body><h1>Page</h1><img src=\"https://tracker.example/p.gif\"></body></html>"},
+    {"artifact_id": "link1", "title": "Link", "type": "link", "session": "mike", "content": "https://example.com"}]
 # /agents behaviour: "modern" returns the created agent row; "session-only"
 # returns just the id and shows the row only after /__control/publish-pending.
 explanation_polls = {}
@@ -180,13 +188,8 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 return self.reply(200, {"jobs": jobs})
         if url.path == "/artifacts":
-            return self.reply(200, {"artifacts": [
-                {"artifact_id": "art1", "title": "Report"},
-                {"artifact_id": "doc1", "title": "Findings", "summary": "What we found", "type": "document", "session": "rachel",
-                 "content": "# Findings\n\nAll *good*."},
-                {"artifact_id": "html1", "title": "Page", "type": "research", "session": "rachel",
-                 "content": "<!doctype html><html><body><h1>Page</h1><img src=\"https://tracker.example/p.gif\"></body></html>"},
-                {"artifact_id": "link1", "title": "Link", "type": "link", "session": "mike", "content": "https://example.com"}]})
+            with state_lock:
+                return self.reply(200, {"artifacts": artifacts})
         if url.path == "/message-tool-details":
             return self.reply(200, {"tools": [{"name": "Bash", "input": {"command": "ls"}}], "display_cells": []})
         if url.path == "/agent-model-options":
@@ -427,6 +430,13 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 attention[:] = body.get("items", [])
             broadcast({"type": "attention-updated"})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/artifacts":
+            # Test control: replace the artifact list and announce it.
+            global artifacts
+            with state_lock:
+                artifacts = body.get("artifacts", [])
+            broadcast({"type": "artifact-updated", "session": body.get("session", "")})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/jobs":
             # Test control: replace the job list, then push an optional event.

@@ -4,11 +4,10 @@
 
 use std::rc::Rc;
 
-use clarp_core::presentation::PresentedRow;
 use clarp_engine::{Change, Engine};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
-use crate::view::{attachment, message_row, sync_rows};
+use crate::view::{Shown, attachment, message_row, sync_rows};
 use crate::{App, AppWindow, Attachment, MessageRow, PaneView, SplitView, WorkspaceTab};
 
 /// What a pane last told the window.
@@ -25,7 +24,7 @@ pub struct PaneState {
     pub id: String,
     pub session: String,
     pub messages: Rc<VecModel<MessageRow>>,
-    shown: Vec<(PresentedRow, bool)>,
+    shown: Vec<Shown>,
     pub report: Report,
     draft: String,
     draft_set: i32,
@@ -56,6 +55,10 @@ impl PaneState {
 
 fn number(row: &serde_json::Map<String, serde_json::Value>, key: &str) -> f32 {
     row.get(key).and_then(serde_json::Value::as_f64).unwrap_or(0.0) as f32
+}
+
+fn text_of(value: &serde_json::Value, key: &str) -> String {
+    value.get(key).and_then(serde_json::Value::as_str).unwrap_or_default().to_owned()
 }
 
 fn text(row: &serde_json::Map<String, serde_json::Value>, key: &str) -> String {
@@ -190,6 +193,7 @@ impl App {
         view.model = agent.map(|a| a.model.clone()).unwrap_or_default().into();
         view.effort = agent.map(|a| a.effort.clone()).unwrap_or_default().into();
         view.busy = agent.is_some_and(|a| a.busy);
+        view.working = crate::cells_view::working(engine, session);
         let path = agent.map(|a| a.working_directory.clone()).unwrap_or_default();
         if path.is_empty() {
             view.workspace_kind = SharedString::new();
@@ -237,13 +241,17 @@ impl App {
         let always = self.engine.borrow().activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE;
         let expanded = self.expanded.borrow();
         let stamps = self.prefs.borrow().timestamps;
+        let artifacts = crate::cells_view::artifacts_by_row(&presented, &self.engine.borrow().artifacts_for_session(&pane.session));
         let rows: Vec<MessageRow> = presented
             .iter()
-            .map(|row| {
+            .zip(&artifacts)
+            .map(|(row, artifacts)| {
                 let mut shown = message_row(row, always, &expanded);
                 if !stamps {
                     shown.stamp = SharedString::new();
                 }
+                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(crate::cells_view::artifact_item).collect();
+                shown.artifacts = ModelRc::new(VecModel::from(cards));
                 shown
             })
             .collect();
@@ -264,7 +272,11 @@ impl App {
             }
         }
         drop(engine);
-        let fresh: Vec<(PresentedRow, bool)> = presented.into_iter().zip(rows.iter().map(|r| r.expanded)).collect();
+        let signature = |artifacts: &Vec<serde_json::Value>| {
+            artifacts.iter().map(|a| format!("{}@{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default())).collect::<Vec<_>>().join(",")
+        };
+        let fresh: Vec<Shown> =
+            presented.into_iter().zip(rows.iter().map(|r| r.expanded)).zip(&artifacts).map(|((row, open), a)| (row, open, signature(a))).collect();
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
     }
 
@@ -340,7 +352,7 @@ impl App {
             let session = pane.session.clone();
             let fresh = rebound.contains(&pane.id);
             let conversation = fresh
-                || changes.iter().any(|c| matches!(c, Change::Preferences | Change::Narrator) || matches!(c, Change::Conversation(s) if *s == session));
+                || changes.iter().any(|c| matches!(c, Change::Preferences | Change::Narrator | Change::Updates) || matches!(c, Change::Conversation(s) if *s == session));
             if conversation {
                 self.messages(pane);
             }
