@@ -13,6 +13,9 @@ pub mod controller;
 pub mod conversation_model;
 pub mod desktop;
 pub mod desktop_services;
+// eventLoopAwake is emitted by Qt through a string connection.
+#[allow(dead_code)]
+pub mod diagnostics;
 pub mod directory_models;
 // windowRequested carries the whole launch (seven arguments).
 #[allow(clippy::too_many_arguments)]

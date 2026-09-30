@@ -271,7 +271,7 @@ fn parse_object(text: &QString, what: &str) -> Option<serde_json::Map<String, se
 }
 
 impl qobject::AgentListModel {
-    fn count_value(&self) -> i32 {
+    pub fn count_value(&self) -> i32 {
         self.rows.len() as i32
     }
 

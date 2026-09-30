@@ -9,6 +9,7 @@ pub mod avatar_motion;
 pub mod catalog;
 pub mod conversation;
 pub mod delivery;
+pub mod diagnostics;
 pub mod directory;
 pub mod endpoint;
 pub mod jobs;

@@ -21,6 +21,8 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 cxx = "1.0.202"
 cxx-qt = "0.10.0"
 cxx-qt-lib = { version = "0.10.0", features = ["qt_full"] }
+libc = "0.2"
+backtrace = { version = "0.3", features = ["cpp_demangle"] }
 
 [build-dependencies]
 cxx-qt-build = "0.10.0"

@@ -143,6 +143,14 @@ try:
     check(second.returncode == 0 and took < 2, f"a second launch hands over and exits ({took:.2f} s, exit {second.returncode})")
     check(wait(lambda: gets().count(startup) > before), f"the running app opens a second window, which loads {startup}")
     check(app.poll() is None, "the first window keeps running")
+    def memory_lines():
+        return [json.loads(line.split(" ", 1)[1]) for line in open(os.environ["CLARP_APP_LOG"]) if line.startswith("memory {")]
+    check(wait(lambda: memory_lines(), 10), "the memory line is logged")
+    line = memory_lines()[-1]
+    check(line["items"] > 50 and 0 < line["textItems"] < line["items"] and line["VmRSS"] > 0 and line["conversations"] >= 0,
+          "memory line counts the real window: " + json.dumps({k: line[k] for k in ("items", "textItems", "VmRSS", "agents", "stalls")}))
+    stall_log = os.path.join(os.environ["XDG_STATE_HOME"], "clarp", "desktop-stalls.log")
+    check(not os.path.exists(stall_log) or os.path.getsize(stall_log) < 1_000_000, "the watchdog runs by default, logging under the state dir")
     menu.Event(entries["Quit"], "clicked", dbus.String(""), dbus.UInt32(0))
     check(wait(lambda: app.poll() is not None, 10) and app.returncode == 0, "Quit ends the app cleanly")
     check(not any(name.endswith(".sock") for name in os.listdir(runtime)), "quitting removes the instance socket")

@@ -2496,6 +2496,22 @@ impl AppController {
     fn muted_value(&self) -> bool {
         self.muted
     }
+    /// The controller's share of the minute memory line (C++ `memoryCounters`).
+    pub fn memory_counters(&self) -> serde_json::Value {
+        let rows: i64 = self.conversations.values().filter_map(|model| model.as_ref()).map(|model| i64::from(model.count_value())).sum();
+        serde_json::json!({
+            "conversations": self.conversations.len(),
+            "conversationRows": rows,
+            "agents": self.agents.as_ref().map_or(0, |agents| agents.count_value()),
+            "avatarSources": self.avatars.sources.len(),
+            "contactAvatarSources": self.contact_avatars.sources.len(),
+            "avatarRequests": self.avatars.requests.len() + self.contact_avatars.requests.len(),
+            "styledMarkdownCacheBytes": self.styled_markdown.borrow().1,
+            "narratorCache": self.narrator.as_ref().map_or(0, |narrator| narrator.cache_size()),
+            "logRequestsInFlight": self.log_in_flight.len(),
+        })
+    }
+
     pub fn muted_pub(&self) -> bool {
         self.muted
     }

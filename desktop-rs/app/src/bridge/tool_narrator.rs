@@ -132,6 +132,10 @@ fn activity(object: &QJsonObject) -> serde_json::Map<String, Value> {
 }
 
 impl qobject::ToolNarrator {
+    pub fn cache_size(&self) -> usize {
+        self.core.borrow().cache_size()
+    }
+
     fn enabled_value(&self) -> bool {
         self.core.borrow().enabled()
     }

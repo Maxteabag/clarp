@@ -2,7 +2,9 @@
 # Run every offscreen QML probe against the built Rust desktop binary.
 # Usage (from desktop-rs/): app/tests/run-qml-probes.sh [target/debug/clarp-desktop]
 set -u
-binary=${1:-target/debug/clarp-desktop}
+# [binary] [probe.qml...]
+binary=target/debug/clarp-desktop
+if [ $# -gt 0 ] && [[ "$1" != *.qml ]]; then binary=$1; shift; fi
 status=0
 # Probes must never reach the user's real Host (default 127.0.0.1:7682, token
 # from ~/.config/clarp/config.toml): point at a refused port with a dummy
@@ -18,8 +20,11 @@ export CLARP_AUDIO_OUTPUT="${CLARP_AUDIO_OUTPUT:-none}"
 # Nor the microphone: "// env: CLARP_AUDIO_INPUT=file:$FIXTURES/dictation.wav".
 export CLARP_AUDIO_INPUT="${CLARP_AUDIO_INPUT:-none}"
 scratch=$(mktemp -d /var/tmp/clarp-qml-probes.XXXXXX)
-trap 'rm -rf "$scratch"' EXIT
-for probe in app/tests/qml/*_probe.qml; do
+# KEEP_PROBE_SCRATCH=1 keeps the scratch directory for a look afterwards.
+[ -n "${KEEP_PROBE_SCRATCH:-}" ] || trap 'rm -rf "$scratch"' EXIT
+# Arguments name probes to run; none runs them all.
+if [ $# -gt 0 ]; then probes=("$@"); else probes=(app/tests/qml/*_probe.qml); fi
+for probe in "${probes[@]}"; do
     # Each probe gets its own workspace store, never the user's layout.
     name=$(basename "$probe" .qml)
     store="$scratch/$name/workspaces.json"
@@ -59,7 +64,7 @@ for probe in app/tests/qml/*_probe.qml; do
     fi
     output=$(env $probe_env QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen CLARP_RS_QML="$PWD/$probe" \
         CLARP_WORKSPACE_STORE="$store" QML_XHR_ALLOW_FILE_READ=1 QML_XHR_ALLOW_FILE_WRITE=1 \
-        CLARP_BASE_URL="$base_url" XDG_CONFIG_HOME="$scratch/$name/config" XDG_CACHE_HOME="$scratch/$name/cache" XDG_DATA_HOME="$scratch/$name/data" \
+        CLARP_BASE_URL="$base_url" XDG_CONFIG_HOME="$scratch/$name/config" XDG_CACHE_HOME="$scratch/$name/cache" XDG_DATA_HOME="$scratch/$name/data" XDG_STATE_HOME="$scratch/$name/state" \
         CLARP_TEST_OPEN_URL="$scratch/$name/opened-urls" CLARP_TEST_CLIPBOARD="$scratch/$name/clipboard" \
         timeout 60 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
         sh -c "$keyring"' exec "$@"' probe "$binary" "--probe-store=$store" "--probe-host-log=$scratch/$name/host.log" 2>&1)
