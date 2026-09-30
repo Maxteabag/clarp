@@ -195,6 +195,8 @@ impl App {
         view.pair = session.starts_with("pair:");
         view.model = agent.map(|a| a.model.clone()).unwrap_or_default().into();
         view.effort = agent.map(|a| a.effort.clone()).unwrap_or_default().into();
+        view.status = agent.map(|a| a.status_text.clone()).unwrap_or_default().into();
+        view.default_effort = agent.map(|a| engine.default_effort_for_model(&a.backend, &a.model)).unwrap_or_default().into();
         view.busy = agent.is_some_and(|a| a.busy);
         view.working = crate::cells_view::working(engine, session);
         let path = agent.map(|a| a.working_directory.clone()).unwrap_or_default();

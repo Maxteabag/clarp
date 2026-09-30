@@ -518,6 +518,14 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 attention[:] = [a for a in attention if a.get("id") != decision]
             return self.reply(200, {"ok": True, "decision_id": decision, "status": body.get("choice")})
+        if url.path == "/agent-archive":
+            # Archive or restore: the agent's row moves and the roster says so.
+            with state_lock:
+                for agent in agents:
+                    if agent["session"] == body.get("session"):
+                        agent["archived_at"] = int(time.time()) if body.get("archived") else None
+            broadcast({"type": "agent-roster", "session": body.get("session"), "kind": "updated"})
+            return self.reply(200, {"ok": True})
         if url.path in ("/select", "/stop", "/compact", "/agent-schedules/toggle", "/team-nudging") or url.path.startswith("/agent-"):
             return self.reply(200, {"ok": True})
         if url.path == "/agents":

@@ -17,6 +17,9 @@ export struct PaneView {
     workspace-label: string,
     model: string,
     effort: string,
+    // The agent's status line and the effort its provider runs at unset.
+    status: string,
+    default-effort: string,
     busy: bool,
     // "Working…" under the transcript (Show when ready, agent working).
     working: bool,
@@ -108,11 +111,37 @@ component Header inherits Rectangle {
             }
         }
         if root.pane.workspace-label == "": Rectangle { horizontal-stretch: 1; }
-        if root.pane.model != "": Text {
-            text: root.pane.model + (root.pane.effort != "" ? " · " + root.pane.effort : "");
+        // HeaderContext.qml's runtime: status, model and effort, saying
+        // plainly what is not reported or not set.
+        if root.pane.session != "" && !root.pane.pair && root.pane.status != "": Text {
+            text: root.pane.status;
             color: Palette.muted;
             font-size: 11px;
             vertical-alignment: center;
+            overflow: elide;
+            max-width: root.width * 0.28;
+            accessible-label: "Status: " + root.pane.status;
+        }
+        if root.pane.session != "" && !root.pane.pair: Text {
+            text: root.pane.model != "" ? root.pane.model : "model not reported";
+            color: Palette.muted;
+            font-size: 11px;
+            vertical-alignment: center;
+            overflow: elide;
+            max-width: root.width * 0.19;
+            accessible-label: root.pane.model != "" ? "Agent model: " + root.pane.model : "This session has not reported its model yet";
+        }
+        if root.pane.session != "" && !root.pane.pair: Text {
+            text: root.pane.effort != "" ? "effort: " + root.pane.effort
+                : root.pane.default-effort != "" ? "effort: " + root.pane.default-effort + " (default)" : "effort: default";
+            color: Palette.muted;
+            font-size: 11px;
+            vertical-alignment: center;
+            overflow: elide;
+            max-width: root.width * 0.15;
+            accessible-label: root.pane.effort != "" ? "Configured effort: " + root.pane.effort
+                : root.pane.default-effort != "" ? "Not set for this agent; the provider runs at " + root.pane.default-effort
+                : "Not set for this agent; the provider decides";
         }
         if root.pane.busy: Text {
             text: "working";

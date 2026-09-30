@@ -107,9 +107,13 @@ export component AppWindow inherits Window {
     out property <bool> search-focused: sidebar.search-has-focus;
     out property <bool> sidebar-focused: sidebar.list-has-focus;
     public function focus-search() { sidebar.focus-search(); }
+    public function choose-scope(scope: string) { sidebar.choose-scope(scope); }
+    public function show-archive(on: bool) { sidebar.show-archive(on); }
     public function focus-sidebar() { sidebar.focus-list(); }
 
     callback chat-chosen(string);
+    callback done-helpers-toggled(string);
+    callback restore-agent(string);
     callback filter-changed();
     callback toggle-muted();
     callback open-switcher();
@@ -280,6 +284,8 @@ export component AppWindow inherits Window {
                 chosen(session) => { root.chat-chosen(session); }
                 processes(session, x, y) => { root.show-processes(session, x, y); }
                 filter-changed => { root.filter-changed(); }
+                done-toggled(parent) => { root.done-helpers-toggled(parent); }
+                restore(session) => { root.restore-agent(session); }
             }
             if root.sidebar-visible: Rectangle { width: 1px; background: Palette.rule; }
             VerticalLayout {
