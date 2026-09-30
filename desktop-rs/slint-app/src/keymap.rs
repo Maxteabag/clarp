@@ -87,6 +87,10 @@ fn state(name: &str) -> Vec<Binding> {
             b("ui-reset", &["Ctrl+0"], "Reset scale", false, Always, false),
         ],
         "workspace" => vec![
+            // Ctrl+E / Ctrl+H reach the explorer and the chat from anywhere,
+            // typing included (no Escape first).
+            b("focus-sidebar", &["Ctrl+E"], "Explorer", false, Always, false),
+            b("focus-pane", &["Ctrl+H"], "Chat", false, Always, false),
             b("retry-message", &["Ctrl+Alt+R"], "Retry failed message", false, Agent, false),
             b("jump-latest", &["Ctrl+End"], "Latest", true, Agent, false),
             b("assign-agent", &["Ctrl+A"], "Assign contact", false, Agent, false),
@@ -108,8 +112,8 @@ fn state(name: &str) -> Vec<Binding> {
         ],
         "navigation" => vec![
             b("next-attention", &["N", "Ctrl+J"], "Next attention", true, Attention, false),
-            b("focus-sidebar", &["E"], "Explorer", true, Always, false),
-            b("focus-pane", &["C"], "Chat", true, Always, false),
+            b("focus-sidebar", &["E", "Ctrl+E"], "Explorer", true, Always, false),
+            b("focus-pane", &["C", "Ctrl+H"], "Chat", true, Always, false),
             b("focus-composer", &["I"], "Insert", true, Agent, false),
             b("toggle-focus", &["Tab", "Shift+Tab"], "Switch focus", true, Always, false),
             b("switcher", &["Space", "Ctrl+K"], "Commands", true, Always, false),
@@ -131,6 +135,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("agent-previous", &["K", "Up"], "Previous", true, Rows, false),
             b("agent-open", &["Return", "Enter"], "Open", true, Rows, false),
             b("agent-search", &["/"], "Search", true, Always, false),
+            b("toggle-preview", &["P"], "Preview", true, Always, false),
             b("fold", &["H", "Left"], "Fold", true, Rows, false),
             b("unfold", &["L", "Right"], "Unfold", true, Rows, false),
             // The explorer's header buttons, shown while it has the keyboard.
@@ -140,8 +145,10 @@ fn state(name: &str) -> Vec<Binding> {
         "composer" => vec![
             b("jump-latest", &["Ctrl+End"], "Latest", true, Agent, true),
             b("send", &["Return"], "Send", true, Send, true),
-            b("newline", &["Shift+Return"], "New line", true, Always, true),
+            b("newline", &["Shift+Return"], "New line", false, Always, true),
             b("queue", &["Ctrl+Return"], "Queue", true, Send, true),
+            b("focus-pane", &["Ctrl+H"], "Chat", true, Always, false),
+            b("focus-sidebar", &["Ctrl+E"], "Explorer", true, Always, false),
             // The composer has no buttons: its actions are keys, shown here.
             b("attach", &["Ctrl+Shift+O"], "Attach", true, Agent, true),
             b("stop-agent", &["Ctrl+."], "Stop", true, Busy, false),
@@ -363,6 +370,10 @@ mod tests {
         assert!(pane.iter().any(|b| b.action == "settings"), "main's bindings reach a pane");
         assert_eq!(action_for("pane", "E", &none, all()), Some("focus-sidebar"));
         assert_eq!(action_for("sidebar", "H", &none, all()), Some("fold"));
+        assert_eq!(action_for("sidebar", "P", &none, all()), Some("toggle-preview"));
+        assert_eq!(action_for("composer", "Ctrl+E", &none, all()), Some("focus-sidebar"));
+        assert_eq!(action_for("composer", "Ctrl+H", &none, all()), Some("focus-pane"));
+        assert_eq!(action_for("pane", "Ctrl+E", &none, all()), Some("focus-sidebar"));
         assert_eq!(action_for("sidebar", "Right", &none, all()), Some("unfold"));
         assert_eq!(action_for("composer", "E", &none, all()), None, "letters type in the composer");
         assert_eq!(action_for("composer", "Return", &none, all()), None, "the composer sends by itself");

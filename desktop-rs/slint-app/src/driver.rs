@@ -504,6 +504,22 @@ fn composer_check(out: String) {
             let chip = view().attachments.row_data(0);
             let Some(chip) = chip.filter(|c| c.status == "ready") else { return false };
             check(chip.name.ends_with(".png") && app_now().active_draft().is_empty(), &format!("Ctrl+V with an image copied attaches it without typing: {}", chip.name));
+            headless::press_with(&[Key::Control], "e");
+            true
+        })),
+        ("explorer", Box::new(|_, window, _| {
+            if !window.get_sidebar_focused() {
+                return false;
+            }
+            check(true, "Ctrl+E goes from the composer straight to the explorer");
+            headless::press_with(&[Key::Control], "h");
+            true
+        })),
+        ("chat", Box::new(|_, window, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "CHAT", "and Ctrl+H to the chat");
             true
         })),
     ];

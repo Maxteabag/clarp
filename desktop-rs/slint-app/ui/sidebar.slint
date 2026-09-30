@@ -258,8 +258,14 @@ export component Sidebar inherits Rectangle {
     public function focus-search() { search.focus(); }
     public function clear-search() { search.text = ""; root.filter-changed(); }
     background: Palette.raised;
+    // The [e] Explorer frame holds the whole sidebar: search, New agent,
+    // scope and the list.
+    property <bool> explorer-active: Focus.mode == "sidebar" || Focus.mode == "search";
     VerticalLayout {
-        padding-top: 10px;
+        padding-top: 6px + Frame.top;
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-bottom: 8px + Frame.bottom;
         spacing: 8px;
         HorizontalLayout {
             padding-left: 10px;
@@ -269,6 +275,7 @@ export component Sidebar inherits Rectangle {
             Rectangle {
                 height: 34px;
                 horizontal-stretch: 1;
+                opacity: root.explorer-active ? 1 : 0.45;
                 search := Field {
                     width: parent.width;
                     height: parent.height;
@@ -310,10 +317,6 @@ export component Sidebar inherits Rectangle {
         list := FocusScope {
           vertical-stretch: 1;
           flick := Flickable {
-            x: 8px + Frame.side;
-            y: Frame.top;
-            width: parent.width - 16px - 2 * Frame.side;
-            height: parent.height - Frame.top - Frame.bottom - 8px;
             viewport := VerticalLayout {
                 for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
                     chat: row;
@@ -340,7 +343,6 @@ export component Sidebar inherits Rectangle {
                 }
             }
         }
-          PaneFrame { x: 8px; width: parent.width - 16px; height: parent.height - 8px; y: 0; key: "e"; label: "Explorer"; active: Focus.mode == "sidebar"; surface: Palette.raised; }
         }
         if !root.showing-pairs && (!root.minimal || root.showing-archive): ListSwitch {
             glyph: root.showing-archive ? "‹" : "≡";
@@ -348,5 +350,15 @@ export component Sidebar inherits Rectangle {
             count: root.archived.length;
             clicked => { root.showing-archive = !root.showing-archive; }
         }
+    }
+    PaneFrame {
+        x: 4px;
+        y: 6px;
+        width: parent.width - 8px;
+        height: parent.height - 10px;
+        key: Focus.mode == "composer" ? "ctrl+e" : "e";
+        label: "Explorer";
+        active: root.explorer-active;
+        surface: Palette.raised;
     }
 }
