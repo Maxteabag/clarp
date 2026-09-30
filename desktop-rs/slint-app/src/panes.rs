@@ -105,8 +105,10 @@ impl App {
         self.panes.set_row_data(index, view);
     }
 
+    /// An empty pane has no composer to type into; its transcript keeps
+    /// the keyboard so shortcuts still reach the map.
     pub fn focus_composer(&self) {
-        self.bump(|p| p.focus_composer += 1);
+        self.bump(|p| if p.session.is_empty() { p.focus_transcript += 1 } else { p.focus_composer += 1 });
     }
     pub fn focus_transcript(&self) {
         self.bump(|p| p.focus_transcript += 1);
