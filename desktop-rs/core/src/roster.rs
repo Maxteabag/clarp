@@ -613,3 +613,28 @@ pub fn describe_agent_processes(roster: &Roster, jobs: &JobTracker, session: &st
     .as_object()
     .cloned()
 }
+
+/// How well a quick-switcher row matches `needle` (C++ `matchingAgents`):
+/// the exact name, then a name that starts with it, then one with a word
+/// starting with it, then any name containing it, then the session. Enter
+/// opens the first row, so typing "Ada" must open Ada, not a more recently
+/// active Adam; rows keep their recency order within a rank.
+pub fn switcher_rank(name: &str, session: &str, needle: &str) -> u8 {
+    let (name, needle) = (name.to_lowercase(), needle.trim().to_lowercase());
+    if name == needle {
+        return 0;
+    }
+    if name.starts_with(&needle) {
+        return 1;
+    }
+    let word_start = name.match_indices(&needle).any(|(at, _)| at > 0 && name[..at].chars().next_back().is_some_and(|c| !c.is_alphanumeric()));
+    if word_start {
+        2
+    } else if name.contains(&needle) {
+        3
+    } else if session.to_lowercase().contains(&needle) {
+        4
+    } else {
+        5
+    }
+}

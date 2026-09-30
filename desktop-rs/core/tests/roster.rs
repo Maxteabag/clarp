@@ -345,3 +345,18 @@ fn job_progress_prefers_fraction_then_counts_then_percent() {
     assert_eq!(p(json!({"completed": 3})), -1.0);
     assert_eq!(job_progress(&obj(json!({}))), -1.0);
 }
+
+/// tst_native_core::quickSwitcherPutsTheExactNameFirst
+#[test]
+fn quick_switcher_puts_the_exact_name_first() {
+    // Roster order is recency: Adam was active most recently.
+    let rows = [("adam", "Adam"), ("kada", "Kada"), ("team-ada", "Team Ada"), ("ada", "Ada"), ("ada-helper", "Adaline")];
+    let mut ranked = rows.to_vec();
+    ranked.sort_by_key(|(session, name)| clarp_core::roster::switcher_rank(name, session, " Ada "));
+    let names: Vec<&str> = ranked.iter().map(|(_, name)| *name).collect();
+    assert_eq!(names.len(), 5);
+    assert_eq!(names[0], "Ada");
+    assert!(names.iter().position(|n| *n == "Team Ada") > names.iter().position(|n| *n == "Adaline"));
+    assert_eq!(names.last(), Some(&"Kada"));
+    assert_eq!(names, ["Ada", "Adam", "Adaline", "Team Ada", "Kada"]);
+}
