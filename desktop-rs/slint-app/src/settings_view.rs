@@ -73,7 +73,7 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         choice("tool-detail", "Tool detail", clarp_engine::Engine::narrator_detail_levels()[engine.narrator_detail_level().clamp(0, 4) as usize]),
         info(engine.narrator_level_description(), &engine.narrator_status()),
         section("STARTUP"),
-        toggle("new-agent-on-startup", "Start a new agent when opening Clarp", settings.boolean("launch/newAgentOnStartup", true)),
+        toggle("new-agent-on-startup", "Start a new agent when opening Clarp", settings.boolean("launch/newAgentOnStartup", false)),
         section("AGENT IDENTITY"),
         toggle("anonymous-agents", "Anonymous agents by default", settings.boolean("launch/anonymousAgents", true)),
         section("APPEARANCE"),
@@ -184,7 +184,7 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
             let level = app.engine.borrow().narrator_detail_level();
             app.engine.borrow_mut().set_narrator_detail_level((level + delta).rem_euclid(5));
         }
-        "new-agent-on-startup" => flip(app, "launch/newAgentOnStartup", true),
+        "new-agent-on-startup" => flip(app, "launch/newAgentOnStartup", false),
         "anonymous-agents" => flip(app, "launch/anonymousAgents", true),
         "nav-rail" => {
             flip(app, "appearance/navRail", true);

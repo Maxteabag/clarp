@@ -86,7 +86,7 @@ fn forwarded(arguments: Vec<String>) {
     if let Err(error) = window.show() {
         eprintln!("clarp-slint: cannot show the window: {error}");
     }
-    let setting = app.engine.borrow().settings().boolean("launch/newAgentOnStartup", true);
+    let setting = app.engine.borrow().settings().boolean("launch/newAgentOnStartup", false);
     if options.launch_on_startup(false, setting, false) {
         start(&app, &window, Request::from_options(&options));
     }

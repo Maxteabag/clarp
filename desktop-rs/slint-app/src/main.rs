@@ -764,7 +764,7 @@ fn main() {
         launch::listen(socket);
     }
     state.engine.borrow_mut().start();
-    let setting = state.engine.borrow().settings().boolean("launch/newAgentOnStartup", true);
+    let setting = state.engine.borrow().settings().boolean("launch/newAgentOnStartup", false);
     if options.launch_on_startup(false, setting, headless) {
         launch::start(&state, &window, launch::Request::from_options(&options));
     }
