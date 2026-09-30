@@ -119,6 +119,18 @@ pub fn press(key: impl Into<SharedString>) {
     window.dispatch_event(WindowEvent::KeyReleased { text });
 }
 
+/// `key` with `modifiers` held (e.g. Control, Shift), as a keyboard sends it.
+pub fn press_with(modifiers: &[slint::platform::Key], key: impl Into<SharedString>) {
+    let Some(window) = window() else { return };
+    for modifier in modifiers {
+        window.dispatch_event(WindowEvent::KeyPressed { text: (*modifier).into() });
+    }
+    press(key);
+    for modifier in modifiers.iter().rev() {
+        window.dispatch_event(WindowEvent::KeyReleased { text: (*modifier).into() });
+    }
+}
+
 pub fn type_text(text: &str) {
     for character in text.chars() {
         press(SharedString::from(character.to_string()));

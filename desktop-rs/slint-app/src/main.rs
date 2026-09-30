@@ -200,6 +200,66 @@ fn open_link(url: &str) {
     }
 }
 
+/// A composer chip; images show a thumbnail of the local file.
+fn attachment(value: &serde_json::Value) -> Attachment {
+    let text = |key: &str| value.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+    let local = if !text("local_source").is_empty() {
+        text("local_source")
+    } else if value.get("local").and_then(serde_json::Value::as_bool) == Some(true) {
+        text("path")
+    } else {
+        String::new()
+    };
+    let thumbnail = if text("content_type").starts_with("image/") && !local.is_empty() {
+        slint::Image::load_from_path(std::path::Path::new(&local)).unwrap_or_else(|_| {
+            eprintln!("clarp-slint: no thumbnail for {local}");
+            slint::Image::default()
+        })
+    } else {
+        slint::Image::default()
+    };
+    let status = text("status");
+    Attachment {
+        id: text("id").into(),
+        name: if text("name").is_empty() { "file".into() } else { text("name").into() },
+        status: if status.is_empty() { "ready".into() } else { status.into() },
+        thumbnail,
+    }
+}
+
+/// Picks files to attach to the open chat. The chooser is the desktop's
+/// portal dialog, opened off the UI thread; `CLARP_TEST_ATTACH_FILE` names
+/// the file instead, so checks never open a chooser.
+fn choose_attachment() {
+    let Some(session) = app().map(|state| state.engine.borrow().selected_session().to_owned()) else { return };
+    if session.is_empty() {
+        return;
+    }
+    let attach = move |paths: Vec<std::path::PathBuf>| {
+        let Some(app) = app() else { return };
+        for path in paths {
+            app.engine.borrow_mut().attach_file(&session, &path);
+        }
+        pump_now(&app);
+    };
+    if let Some(path) = std::env::var_os("CLARP_TEST_ATTACH_FILE") {
+        attach(vec![path.into()]);
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("attach-dialog".into()).spawn(move || {
+        let chosen = rfd::FileDialog::new().set_title("Attach files").pick_files().unwrap_or_default();
+        if chosen.is_empty() {
+            return;
+        }
+        if let Err(error) = slint::invoke_from_event_loop(move || attach(chosen)) {
+            eprintln!("clarp-slint: dropped the chosen files: {error}");
+        }
+    });
+    if let Err(error) = spawned {
+        eprintln!("clarp-slint: cannot open the attach dialog: {error}");
+    }
+}
+
 /// Brings the transcript model to `rows` touching only what changed: the
 /// rows kept at the start and end are updated in place (and only when their
 /// source differs), so streaming does not rebuild the list and an older page
@@ -408,6 +468,24 @@ impl App {
             }
         }
         let engine = self.engine.borrow();
+        let composer_changed = changes
+            .iter()
+            .any(|c| matches!(c, Change::Selection | Change::Roster) || matches!(c, Change::Composer(s) if *s == selected));
+        if composer_changed {
+            let attachments: Vec<Attachment> = engine.attachments(&selected).iter().map(attachment).collect();
+            window.set_attachments(ModelRc::new(VecModel::from(attachments)));
+            window.set_can_send(engine.can_send(&selected));
+            window.set_queued(engine.queue_count(&selected));
+            window.set_quota_notice(engine.quota_notice(&selected).into());
+        }
+        if changes.contains(&Change::Selection) {
+            // The draft is the chat's: the editor shows the one it left.
+            window.set_draft(engine.draft(&selected).into());
+            // A chat opens ready to type into, unless the reader is scrolling.
+            if !window.get_transcript_focused() {
+                window.invoke_focus_composer();
+            }
+        }
         let agent = engine.selected_agent();
         window.set_selected_name(if selected.is_empty() { String::new() } else { engine.chat_name(&selected) }.into());
         window.set_selected_detail(agent.map(|a| format!("{} · {}", a.backend, a.working_directory)).unwrap_or_default().into());
@@ -498,16 +576,32 @@ fn main() {
             pump_now(&app);
         }
     });
-    window.on_send(|text| {
+    window.on_send(|text, queue| {
         if let Some(app) = app() {
-            app.engine.borrow_mut().send(&text);
-            pump_now(&app);
-            // Your own message always brings the latest into view.
-            if let Some(window) = app.window.upgrade() {
+            let selected = app.engine.borrow().selected_session().to_owned();
+            let sent = app.engine.borrow_mut().send_composer(&selected, &text, queue);
+            if sent && let Some(window) = app.window.upgrade() {
+                window.set_draft(SharedString::new());
+                // Your own message always brings the latest into view.
                 window.invoke_transcript_to_latest();
             }
+            pump_now(&app);
         }
     });
+    window.on_draft_edited(|text| {
+        if let Some(app) = app() {
+            let selected = app.engine.borrow().selected_session().to_owned();
+            app.engine.borrow_mut().set_draft(&selected, &text);
+        }
+    });
+    window.on_remove_attachment(|id| {
+        if let Some(app) = app() {
+            let selected = app.engine.borrow().selected_session().to_owned();
+            app.engine.borrow_mut().remove_attachment(&selected, &id);
+            pump_now(&app);
+        }
+    });
+    window.on_attach(choose_attachment);
     window.on_stop(|| {
         if let Some(app) = app() {
             app.engine.borrow_mut().stop();

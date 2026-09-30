@@ -281,11 +281,135 @@ fn rows(window: &crate::AppWindow) -> Vec<crate::MessageRow> {
 /// details the Host left out), a reader scrolling up stops following while
 /// rows arrive, and End resumes it. Needs the fake Host.
 pub fn start_check(name: &str, out: String) {
-    if name != "transcript" {
-        check(false, &format!("no check named {name}"));
-        finish();
-        return;
+    match name {
+        "transcript" => transcript_check(out),
+        "composer" => composer_check(out),
+        _ => {
+            check(false, &format!("no check named {name}"));
+            finish();
+        }
     }
+}
+
+/// The fake Host's request log (`CLARP_TEST_HOST_LOG`): its `/send`s.
+fn sends() -> Vec<serde_json::Value> {
+    let Some(log) = std::env::var_os("CLARP_TEST_HOST_LOG") else { return Vec::new() };
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|entry| entry["method"] == "POST" && entry["path"] == "/send")
+        .collect()
+}
+
+/// `--check composer --out DIR`: drafts belong to their chat, a file is
+/// attached (Ctrl+Shift+O, `CLARP_TEST_ATTACH_FILE`), uploaded and removed,
+/// the queue and quota notices show, Ctrl+Enter queues the text with the
+/// attachment's path, and Escape hands the keyboard to the transcript.
+fn composer_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    let stages: Vec<Stage> = vec![
+        ("rachel open", Box::new(|app, window, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
+            if !open {
+                return false;
+            }
+            window.invoke_focus_composer();
+            headless::type_text("draft one");
+            true
+        })),
+        ("typed", Box::new(|app, window, _| {
+            if window.get_draft() != "draft one" {
+                return false;
+            }
+            check(window.get_composer_focused(), "the composer has the keyboard");
+            check(app.engine.borrow().draft("rachel") == "draft one", "typing keeps the chat's draft");
+            window.invoke_chat_chosen("mike".into());
+            true
+        })),
+        ("other chat", Box::new(|app, window, _| {
+            if app.engine.borrow().selected_session() != "mike" {
+                return false;
+            }
+            check(window.get_draft().is_empty(), "another chat has its own (empty) draft");
+            window.invoke_chat_chosen("rachel".into());
+            true
+        })),
+        ("back", Box::new(|_, window, _| {
+            if window.get_draft() != "draft one" {
+                return false;
+            }
+            check(true, "returning restores the chat's draft");
+            window.invoke_focus_composer();
+            headless::press_with(&[Key::Control, Key::Shift], "O");
+            true
+        })),
+        ("uploading", Box::new(|_, window, _| {
+            if window.get_attachments().row_count() == 0 {
+                return false;
+            }
+            let chip = window.get_attachments().row_data(0).expect("chip");
+            check(chip.name == "photo.png", &format!("Ctrl+Shift+O attaches the file: {} ({})", chip.name, chip.status));
+            check(chip.thumbnail.size().width > 0, "an image shows its thumbnail");
+            true
+        })),
+        ("uploaded", Box::new(|_, window, _| {
+            let ready = window.get_attachments().row_data(0).is_some_and(|c| c.status == "ready");
+            if !ready || !window.get_can_send() {
+                return false;
+            }
+            check(true, "the upload finishes and the message can be sent");
+            let id = window.get_attachments().row_data(0).expect("chip").id;
+            window.invoke_remove_attachment(id);
+            true
+        })),
+        ("removed", Box::new(|_, window, _| {
+            if window.get_attachments().row_count() != 0 {
+                return false;
+            }
+            check(true, "a chip's remove button drops the attachment");
+            window.invoke_attach();
+            let quota = serde_json::json!({"session": "rachel", "set": {"queued_turn_count": 2,
+                "backend_quota": {"state": "exhausted", "provider_id": "claude", "reason": "rate_limited"}}});
+            check(control("/__control/agent", &quota).is_ok(), "the Host reports a queue and an exhausted quota");
+            true
+        })),
+        ("notices", Box::new(move |_, window, elapsed| {
+            let ready = window.get_attachments().row_data(0).is_some_and(|c| c.status == "ready");
+            if !ready || window.get_queued() != 2 || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_quota_notice().starts_with("Claude is out of quota"), &format!("the quota notice shows: {:?}", window.get_quota_notice()));
+            shot(&out2, "composer-01-notices");
+            window.invoke_focus_composer();
+            headless::press_with(&[Key::Control], Key::Return);
+            true
+        })),
+        ("queued", Box::new(|app, window, _| {
+            let Some(send) = sends().pop() else { return false };
+            check(
+                send["body"]["text"] == "draft one /srv/uploads/photo.png" && send["body"]["queue_if_busy"] == true,
+                &format!("Ctrl+Enter queues the text with the attachment's path: {}", send["body"]),
+            );
+            check(window.get_draft().is_empty() && window.get_attachments().row_count() == 0, "sending clears the draft and the chips");
+            check(app.engine.borrow().draft("rachel").is_empty(), "and the saved draft");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("escape", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(window.get_transcript_focused() && !window.get_composer_focused(), "Escape hands the keyboard to the transcript");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+fn transcript_check(out: String) {
+    {
     let tools = serde_json::json!({"session": "rachel", "turns": [
         {"id": "t1", "role": "user", "text": "Run the build"},
         {"id": "t2", "role": "assistant", "text": "", "activity_count": 2, "tool_details_available": true},
@@ -444,4 +568,5 @@ pub fn start_check(name: &str, out: String) {
     ];
     let _ = out;
     run_stages(stages);
+    }
 }

@@ -9,6 +9,7 @@
 //! changed. No toolkit type crosses into the engine.
 
 pub mod blocks;
+mod composer;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -46,6 +47,8 @@ pub enum Change {
     Error,
     /// A preference (mute, theme, …) changed.
     Preferences,
+    /// A chat's composer attachments changed.
+    Composer(String),
     /// A reply in a chat that is not open: the desktop may notify.
     Notification { title: String, body: String },
 }
@@ -57,6 +60,7 @@ enum Message {
     SnapshotDue,
     RoomsDue(u64),
     DeliveryDue { client_id: String, token: u64 },
+    DraftsDue(u64),
 }
 
 pub struct Config {
@@ -122,6 +126,11 @@ pub struct Engine {
     sending: bool,
     /// In-flight `/message-tool-details` requests: tag → (session, message).
     tool_detail_requests: HashMap<String, (String, String)>,
+    /// Drafts not yet written to settings (see `composer.rs`).
+    pending_drafts: HashMap<String, String>,
+    draft_flush_token: u64,
+    /// In-flight `/upload`s: tag → the pending attachment.
+    pending_uploads: HashMap<String, Object>,
 }
 
 impl Engine {
@@ -194,6 +203,9 @@ impl Engine {
             log_in_flight: HashSet::new(),
             pending_log_mode: HashMap::new(),
             tool_detail_requests: HashMap::new(),
+            pending_drafts: HashMap::new(),
+            draft_flush_token: 0,
+            pending_uploads: HashMap::new(),
             deliveries: HashMap::new(),
             delivery_counter: 0,
             sending: false,
@@ -227,6 +239,7 @@ impl Engine {
                     self.request_snapshot();
                 }
                 Message::DeliveryDue { client_id, token } => self.delivery_timed_out(&client_id, token),
+                Message::DraftsDue(token) => self.drafts_due(token),
             }
         }
         let mut changes = std::mem::take(&mut self.changes);
@@ -861,6 +874,10 @@ impl Engine {
             self.apply_agent_conversations(&json::array(object, "conversations"));
             return;
         }
+        if tag.starts_with("composer-upload:") {
+            self.finish_upload(tag, Some(object));
+            return;
+        }
         if tag.starts_with("tool-details:") {
             if let Some((session, message_id)) = self.tool_detail_requests.remove(tag) {
                 self.ensure_conversation(&session);
@@ -897,6 +914,11 @@ impl Engine {
     }
 
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
+        if tag.starts_with("composer-upload:") {
+            self.finish_upload(tag, None);
+            self.set_error(&if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() });
+            return;
+        }
         if let Some((session, message_id)) = self.tool_detail_requests.remove(tag) {
             // Left available, so opening the row again retries.
             eprintln!("Engine: tool details for {session}/{message_id} failed ({status}): {message}");
@@ -1049,6 +1071,7 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         self.sse.stop();
+        self.flush_drafts();
     }
 }
 

@@ -161,3 +161,63 @@ fn preferences_are_remembered() {
     d.engine.set_reading_theme("no-such-theme");
     assert_eq!(d.engine.reading_theme(), "terminal", "an unknown theme falls back to the default");
 }
+
+#[test]
+fn drafts_and_attachments_belong_to_the_chat_and_survive_a_restart() {
+    let host = Host::start("composer");
+    let file = host.dir.join("settings.json");
+    let driver = |base: &str| {
+        let mut d = Driver::new(base);
+        let settings = Settings::at(file.clone());
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings };
+        let signal = d.woken.clone();
+        d.engine = Engine::new(config, move || {
+            let (flag, condvar) = &*signal;
+            *flag.lock().unwrap() = true;
+            condvar.notify_all();
+        })
+        .unwrap();
+        d
+    };
+    let mut d = driver(&host.base);
+    d.engine.start();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    d.engine.set_draft("rachel", "half a thought");
+    assert_eq!(d.engine.draft("rachel"), "half a thought");
+    assert_eq!(d.engine.draft("mike"), "", "a draft is the chat's own");
+
+    let notes = host.dir.join("notes.txt");
+    std::fs::write(&notes, "some notes").unwrap();
+    d.engine.attach_file("rachel", &notes);
+    assert_eq!(d.engine.attachments("rachel")[0]["status"], "uploading");
+    assert!(!d.engine.can_send("rachel"), "an upload in flight holds the send");
+    assert!(!d.engine.send_composer("rachel", "now", false));
+    d.engine.clear_error();
+    d.until("uploaded", |e| e.attachments("rachel").first().is_some_and(|a| a["status"] == "ready"));
+    assert_eq!(d.engine.attachments("rachel")[0]["path"], "/srv/uploads/notes.txt");
+    let upload = host.requests("POST", "/upload").pop().unwrap();
+    assert_eq!((upload["body"]["name"].as_str(), upload["body"]["session"].as_str(), upload["body"]["size"].as_u64()), (Some("notes.txt"), Some("rachel"), Some(10)));
+
+    let broken = host.dir.join("fail.txt");
+    std::fs::write(&broken, "x").unwrap();
+    d.engine.attach_file("mike", &broken);
+    d.until("refused", |e| e.attachments("mike").first().is_some_and(|a| a["status"] == "failed"));
+    assert!(d.engine.error().contains("upload refused"), "{:?}", d.engine.error());
+    let failed = d.engine.attachments("mike")[0]["id"].as_str().unwrap().to_owned();
+    d.engine.remove_attachment("mike", &failed);
+    assert!(d.engine.attachments("mike").is_empty() && d.engine.can_send("mike"));
+    d.engine.clear_error();
+
+    // Restarting keeps the draft (written on close) and the attachment.
+    drop(d);
+    let mut d = driver(&host.base);
+    assert_eq!(d.engine.draft("rachel"), "half a thought");
+    assert_eq!(d.engine.attachments("rachel").len(), 1);
+    d.engine.start();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    assert!(d.engine.send_composer("rachel", "Read this", true));
+    assert!(d.engine.draft("rachel").is_empty() && d.engine.attachments("rachel").is_empty(), "sending clears both");
+    d.until("sent", |_| host.requests("POST", "/send").iter().any(|r| r["body"]["text"] == "Read this /srv/uploads/notes.txt"));
+    let send = host.requests("POST", "/send").pop().unwrap();
+    assert_eq!(send["body"]["queue_if_busy"], true, "Ctrl+Enter queues behind the running turn");
+}

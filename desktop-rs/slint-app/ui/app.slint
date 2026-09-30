@@ -2,9 +2,10 @@ import { TextEdit, Button, Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
+import { Composer, Attachment } from "composer.slint";
 import { Transcript, MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
 
-export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette }
+export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment }
 
 export component AppWindow inherits Window {
     title: root.selected-name == "" ? "Clarp" : root.selected-name + " — Clarp";
@@ -34,6 +35,12 @@ export component AppWindow inherits Window {
     in property <bool> sending;
     in property <bool> busy;
     in-out property <string> draft;
+    in property <[Attachment]> attachments;
+    in property <int> queued;
+    in property <string> quota-notice;
+    in property <int> transcribing;
+    in property <bool> can-send: true;
+    out property <bool> composer-focused: composer.editor-focused;
     callback chat-chosen(string);
     callback filter-changed();
     callback toggle-muted();
@@ -49,7 +56,11 @@ export component AppWindow inherits Window {
     // A newly opened chat starts at its latest message.
     public function transcript-to-latest() { transcript.scroll-to-latest(); }
     public function focus-composer() { composer.focus(); }
-    callback send(string);
+    // Ctrl+Enter queues behind a running turn.
+    callback send(string, bool);
+    callback draft-edited(string);
+    callback attach();
+    callback remove-attachment(string);
     callback stop();
     callback dismiss-error();
 
@@ -147,44 +158,23 @@ export component AppWindow inherits Window {
                 reached-top => { root.load-older(); }
             }
             Rectangle { height: 1px; background: Palette.rule; }
-            // Composer: Enter sends, Shift+Enter is a new line.
-            Rectangle {
-                height: 96px;
-                background: Palette.sunken;
-                HorizontalLayout {
-                    padding: 10px;
-                    spacing: 10px;
-                    keys := FocusScope {
-                        horizontal-stretch: 1;
-                        capture-key-pressed(event) => {
-                            if (event.text == Key.Escape) {
-                                transcript.focus();
-                                return accept;
-                            }
-                            if (event.text == Key.Return && !event.modifiers.shift) {
-                                if (composer.text != "") {
-                                    root.send(composer.text);
-                                    composer.text = "";
-                                }
-                                return accept;
-                            }
-                            reject
-                        }
-                        composer := TextEdit {
-                            text <=> root.draft;
-                            wrap: word-wrap;
-                            font-size: Palette.body-size;
-                        }
-                    }
-                    Button {
-                        text: root.busy ? "Stop" : "Send";
-                        enabled: root.busy || composer.text != "";
-                        clicked => {
-                            if (root.busy) { root.stop(); }
-                            else if (composer.text != "") { root.send(composer.text); composer.text = ""; }
-                        }
-                    }
-                }
+            composer := Composer {
+                draft <=> root.draft;
+                attachments: root.attachments;
+                queued: root.queued;
+                quota-notice: root.quota-notice;
+                transcribing: root.transcribing;
+                busy: root.busy;
+                can-send: root.can-send;
+                active: root.selected-name != "";
+                agent-name: root.selected-name;
+                send(text, queue) => { root.send(text, queue); }
+                stop => { root.stop(); }
+                edited(text) => { root.draft-edited(text); }
+                attach => { root.attach(); }
+                remove-attachment(id) => { root.remove-attachment(id); }
+                escape => { transcript.focus(); }
+                jump-to-latest => { transcript.scroll-to-latest(); }
             }
         }
     }

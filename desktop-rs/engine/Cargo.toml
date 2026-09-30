@@ -5,6 +5,7 @@ edition = "2024"
 description = "The Clarp desktop's behaviour as plain Rust: Host connection, roster, conversations and commands, for any UI toolkit"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 clarp-core = { path = "../core" }
 clarp-net = { path = "../net" }
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
