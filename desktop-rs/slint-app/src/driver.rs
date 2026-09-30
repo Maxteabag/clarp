@@ -299,6 +299,7 @@ pub fn start_check(name: &str, out: String) {
         "panes" => panes_check(out),
         "switcher" => switcher_check(out),
         "settings" => settings_check(out),
+        "keymap" => keymap_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
@@ -817,6 +818,66 @@ fn settings_check(out: String) {
                 return false;
             }
             check(true, "Escape goes back to the chat, ready to type");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check keymap --out DIR`: Ctrl+Alt+, opens the editor, a rebinding
+/// is validated and saved, Escape closes it, and the new key works.
+fn keymap_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, _window, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            if !open || !report().composer_focused {
+                return false;
+            }
+            headless::press_with(&[Key::Control, Key::Alt], ",");
+            true
+        })),
+        ("open", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "keymap" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(window.get_keymap_actions().row_count() == 7 && window.get_keymap_profile().contains("\"version\": 1"), "Ctrl+Alt+, opens the key bindings with the profile");
+            window.invoke_keymap_apply("zoom".into(), "Ctrl+V".into());
+            check(window.get_keymap_error().contains("Reserved"), &format!("a text editing key is refused: {}", window.get_keymap_error()));
+            window.invoke_keymap_apply("switcher".into(), "Ctrl+P".into());
+            check(window.get_keymap_error().is_empty() && window.get_keymap_profile().contains("Ctrl+P"), "a valid chord is saved into the profile");
+            true
+        })),
+        ("drawn", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            shot(&out2, "keymap-01");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("closed", Box::new(|app, window, _| {
+            if !window.get_overlay().is_empty() || !report().composer_focused {
+                return false;
+            }
+            check(app.engine.borrow().settings().get("keymap/bindings").is_some_and(|b| b["switcher"] == "Ctrl+P"), "the binding is kept in settings");
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("old key", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(!window.get_switcher_open(), "the old key no longer opens the switcher");
+            headless::press_with(&[Key::Control], "p");
+            true
+        })),
+        ("new key", Box::new(|_, window, _| {
+            if !window.get_switcher_open() {
+                return false;
+            }
+            check(true, "the new key does");
             true
         })),
     ];

@@ -7,6 +7,7 @@ import { MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
+import { KeymapEditor } from "dialogs.slint";
 
 export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow }
 
@@ -122,6 +123,17 @@ export component AppWindow inherits Window {
     callback surface-chosen(string);
     callback sidebar-hide();
     callback run-command(string);
+    // The dialog over the window ("" for none): Escape closes it.
+    in property <string> overlay;
+    in property <[string]> keymap-actions;
+    in property <string> keymap-error;
+    in-out property <string> keymap-profile;
+    callback keymap-apply(string, string);
+    callback keymap-import(string);
+    callback keymap-export();
+    callback keymap-reset();
+    callback overlay-closed();
+    public function open-keymap() { keymap.open(); }
     in property <bool> switcher-open;
     in property <[SwitcherRow]> switcher-rows;
     in property <int> switcher-current;
@@ -244,6 +256,19 @@ export component AppWindow inherits Window {
                     hints: root.hints;
                 }
             }
+        }
+        keymap := KeymapEditor {
+            visible: root.overlay == "keymap";
+            width: parent.width;
+            height: parent.height;
+            actions: root.keymap-actions;
+            error: root.keymap-error;
+            profile <=> root.keymap-profile;
+            apply(action, key) => { root.keymap-apply(action, key); }
+            import-profile(text) => { root.keymap-import(text); }
+            export-profile => { root.keymap-export(); }
+            reset => { root.keymap-reset(); }
+            done => { root.overlay-closed(); }
         }
         switcher := Switcher {
             visible: root.switcher-open;
