@@ -89,9 +89,34 @@ fn later(act: impl FnOnce() + Send + 'static) {
 }
 
 /// Starts the tray and presence a second after launch (not needed for the
-/// first frame).
+/// first frame); the window's events are watched at once (scale).
 pub fn start() {
+    watch_window();
     runtime::after(Duration::from_secs(1), || later(start_now));
+}
+
+thread_local! {
+    /// The interface scale the reader chose (Ctrl+= / Ctrl+- / Ctrl+0).
+    static UI_SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+    /// The monitor's own scale, as the window system last said.
+    static MONITOR_SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(1.0) };
+}
+
+/// Scales the whole interface by `scale` on top of the monitor's factor.
+pub fn set_ui_scale(scale: f32) {
+    UI_SCALE.with(|s| s.set(scale));
+    apply_scale();
+}
+
+fn apply_scale() {
+    use slint::ComponentHandle;
+    use slint::winit_030::WinitWindowAccessor;
+    let Some(window) = crate::window() else { return };
+    if let Some(monitor) = window.window().with_winit_window(|w| w.scale_factor() as f32) {
+        MONITOR_SCALE.with(|s| s.set(monitor));
+    }
+    let scale = MONITOR_SCALE.with(|s| s.get()) * UI_SCALE.with(|s| s.get());
+    window.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
 }
 
 fn start_now() {
@@ -107,7 +132,6 @@ fn start_now() {
             focused: false,
         })
     });
-    watch_window();
     presence_tick();
     runtime::handle().spawn(watch_login_session());
     let act: Arc<dyn Fn(Action) + Send + Sync> = Arc::new(|action| later(move || perform(action)));
@@ -134,6 +158,19 @@ fn watch_window() {
     use slint::ComponentHandle;
     window.window().on_winit_window_event(|_, event| {
         match event {
+            // The monitor changed: keep the reader's scale on top of it.
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                MONITOR_SCALE.with(|s| s.set(*scale_factor as f32));
+                let scale = *scale_factor as f32 * UI_SCALE.with(|s| s.get());
+                if let Err(error) = slint::invoke_from_event_loop(move || {
+                    if let Some(window) = crate::window() {
+                        use slint::ComponentHandle;
+                        window.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+                    }
+                }) {
+                    eprintln!("clarp-slint: dropped a scale change: {error}");
+                }
+            }
             WindowEvent::Focused(focused) => {
                 let focused = *focused;
                 SERVICES.with(|slot| {
