@@ -103,6 +103,11 @@ export component Composer inherits FocusScope {
     in property <string> quota-notice;
     in property <string> starting;
     in property <int> transcribing;
+    // Speech is playing (or paused): the Silence button shows.
+    in property <bool> playing;
+    // This chat's dictation is recording.
+    in property <bool> recording;
+    callback silence();
     in property <bool> busy;
     in property <bool> can-send: true;
     in property <bool> active: true;
@@ -134,6 +139,11 @@ export component Composer inherits FocusScope {
         if root.starting != "": Text {
             text: "Starting " + root.starting + "…";
             color: Palette.muted;
+            font-size: 12px;
+        }
+        if root.recording: Text {
+            text: "● Recording · Ctrl+Shift+Space sends";
+            color: Palette.danger;
             font-size: 12px;
         }
         if root.transcribing > 0: HorizontalLayout {
@@ -190,6 +200,11 @@ export component Composer inherits FocusScope {
             VerticalLayout {
                 alignment: end;
                 spacing: 2px;
+                if root.playing: IconButton {
+                    icon: @image-url("../../../desktop/resources/icons/rail-muted.svg");
+                    label: "Stop voice playback";
+                    clicked => { root.silence(); }
+                }
                 IconButton {
                     icon: @image-url("icons/attach.svg");
                     label: "Attach a file (Ctrl+Shift+O)";

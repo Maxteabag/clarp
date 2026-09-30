@@ -1012,11 +1012,18 @@ dependencies = [
  "chrono",
  "clarp-core",
  "clarp-engine",
+ "clarp-net",
  "image",
  "rfd",
+ "rodio",
+ "serde",
  "serde_json",
  "slint",
  "slint-build",
+ "tokio",
+ "url",
+ "uuid",
+ "zbus",
 ]
 
 [[package]]

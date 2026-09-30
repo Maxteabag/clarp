@@ -31,6 +31,9 @@ export struct PaneView {
     queued: int,
     quota-notice: string,
     can-send: bool,
+    transcribing: int,
+    recording: bool,
+    playing: bool,
     focus-composer: int,
     focus-transcript: int,
     to-latest: int,
@@ -119,6 +122,8 @@ export component Pane inherits Rectangle {
     callback link-clicked(string);
     callback load-older();
     callback toggle-activity(string, string);
+    callback silence();
+    callback cancel-transcription();
     // The transcript and composer tell the window where the keyboard is and
     // whether the reader follows, for shortcuts and checks.
     callback reported(bool, bool, length, bool, bool);
@@ -205,6 +210,11 @@ export component Pane inherits Rectangle {
             quota-notice: root.pane.quota-notice;
             busy: root.pane.busy;
             can-send: root.pane.can-send;
+            transcribing: root.pane.transcribing;
+            recording: root.pane.recording;
+            playing: root.pane.playing && root.pane.active;
+            silence => { root.silence(); }
+            cancel-transcription => { root.cancel-transcription(); }
             active: root.pane.session != "";
             agent-name: root.pane.name;
             send(text, queue) => { root.send(text, queue); }
@@ -271,6 +281,8 @@ export component Workspace inherits Rectangle {
     callback link-clicked(string);
     callback load-older(string);
     callback toggle-activity(string, string, string);
+    callback silence();
+    callback cancel-transcription(string);
     callback reported(string, bool, bool, length, bool, bool);
     callback switch-workspace(string);
     callback create-workspace();
@@ -354,6 +366,8 @@ export component Workspace inherits Rectangle {
         link-clicked(url) => { root.link-clicked(url); }
         load-older => { root.load-older(pane.id); }
         toggle-activity(id, group) => { root.toggle-activity(pane.id, id, group); }
+        silence => { root.silence(); }
+        cancel-transcription => { root.cancel-transcription(pane.id); }
         reported(follows, at-end, offset, transcript, composer) => { root.reported(pane.id, follows, at-end, offset, transcript, composer); }
     }
     for split in root.splits: Handle {

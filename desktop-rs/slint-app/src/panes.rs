@@ -195,6 +195,29 @@ impl App {
         }
     }
 
+    /// Recording, transcribing and playback, for every pane.
+    pub fn voice_state(&self) {
+        let (recording_session, playing) =
+            crate::platform::audio::with(|audio| (audio.recording().then(|| audio.recording_target()), audio.playing() || audio.paused()))
+                .unwrap_or((None, false));
+        let mut panes = self.pane_state.borrow_mut();
+        for index in 0..panes.len() {
+            let pane = &mut panes[index];
+            let session = pane.session.clone();
+            let transcribing = crate::platform::audio::with(|audio| audio.transcriptions_for_session(&session)).unwrap_or(0);
+            let recording = recording_session.as_deref() == Some(session.as_str());
+            if pane.view.transcribing == transcribing && pane.view.recording == recording && pane.view.playing == playing {
+                continue;
+            }
+            pane.view.transcribing = transcribing;
+            pane.view.recording = recording;
+            pane.view.playing = playing;
+            let view = self.pane_view(pane);
+            pane.view = view.clone();
+            self.panes.set_row_data(index, view);
+        }
+    }
+
     fn composer(engine: &Engine, view: &mut PaneView, session: &str) {
         let attachments: Vec<Attachment> = engine.attachments(session).iter().map(attachment).collect();
         view.attachments = ModelRc::new(VecModel::from(attachments));

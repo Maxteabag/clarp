@@ -11,6 +11,7 @@
 pub mod blocks;
 mod composer;
 mod connection;
+mod voice;
 mod host_status;
 pub mod lifecycle;
 mod queue;
@@ -58,6 +59,12 @@ pub enum Change {
     Preferences,
     /// The pane layout, the active pane or the save warning changed.
     Panes,
+    /// Voice clips to play (announced, or recovered for the open chat).
+    Clips(Vec<Object>),
+    /// Speech should stop (a message was sent).
+    Silence,
+    /// The Host or token changed: `endpoint()` says where audio goes.
+    Endpoint,
     /// Diagnostics, speech to text or the voice providers changed.
     HostStatus,
     /// A chat's composer attachments changed.
@@ -527,6 +534,7 @@ impl Engine {
         self.sse.set_endpoint(endpoint.clone(), &self.token);
         self.reset_transient_state();
         self.api.set_endpoint(endpoint, &self.token);
+        self.changes.push(Change::Endpoint);
         self.set_error("");
         self.set_connecting(true);
         self.set_connection_state("connecting");
@@ -789,6 +797,7 @@ impl Engine {
             self.api.post_json(&format!("select:{session}"), "/select", json!({"session": session}), None);
         }
         self.request_tail(session, false);
+        self.request_recoverable_clips(session);
     }
 
     fn ensure_conversation(&mut self, session: &str) {
@@ -910,6 +919,12 @@ impl Engine {
     }
 
     pub fn send_to(&mut self, session: &str, text: &str, queue_if_busy: bool) {
+        self.send_with_voice(session, text, queue_if_busy, "", "", false);
+    }
+
+    /// A send, carrying the dictation it came from (trace and
+    /// transcription ids, hands-free) when there was one.
+    pub(crate) fn send_with_voice(&mut self, session: &str, text: &str, queue_if_busy: bool, trace: &str, transcription: &str, hands_free: bool) {
         let trimmed = text.trim();
         if trimmed.is_empty() || session.is_empty() {
             return;
@@ -919,10 +934,18 @@ impl Engine {
         let client_id = uuid::Uuid::new_v4().to_string();
         self.with_conversation(session, |c| c.add_optimistic(&client_id, trimmed));
         self.set_sending(true);
-        let body = json!({
+        let mut body = json!({
             "session": session, "text": trimmed, "client_msg_id": client_id,
-            "synthesize_audio": !self.muted, "hands_free": false, "queue_if_busy": queue_if_busy,
+            "synthesize_audio": !self.muted, "hands_free": hands_free, "queue_if_busy": queue_if_busy,
         });
+        if !trace.is_empty() {
+            body["trace_id"] = json!(trace);
+        }
+        if !transcription.is_empty() {
+            body["transcription_id"] = json!(transcription);
+        }
+        // Your own words stop the voice that was speaking.
+        self.changes.push(Change::Silence);
         self.api.post_json(&format!("send:{client_id}"), "/send", body, None);
         self.delivery_counter += 1;
         let token = self.delivery_counter;
@@ -984,6 +1007,9 @@ impl Engine {
         }
         if tag.starts_with("composer-upload:") {
             self.finish_upload(tag, Some(object));
+            return;
+        }
+        if self.voice_json(tag, object) {
             return;
         }
         if self.host_status_json(tag, object) {
@@ -1132,6 +1158,14 @@ impl Engine {
         let session = json::string(event, "session");
         self.lifecycle_event(&kind, &session);
         match kind.as_str() {
+            "audio" => {
+                // A clip for the chat means its voice works again.
+                if !session.is_empty() {
+                    self.ensure_conversation(&session);
+                    self.with_conversation(&session, |c| c.set_voice_error(""));
+                }
+                self.changes.push(Change::Clips(vec![event.clone()]));
+            }
             "tts-error" => {
                 let message = event.get("message").and_then(Value::as_str).map_or_else(|| json::string(event, "error"), str::to_owned);
                 if session.is_empty() {
@@ -1193,6 +1227,16 @@ impl Engine {
             // Unknown types are ignored by contract (additive-only).
             _ => {}
         }
+    }
+}
+
+impl Engine {
+    /// Writes what waits in memory (drafts, the pane layout) and stops the
+    /// event stream; for a window that exits without dropping the engine.
+    pub fn shutdown(&mut self) {
+        self.sse.stop();
+        self.flush_drafts();
+        self.flush_panes();
     }
 }
 
