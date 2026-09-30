@@ -343,3 +343,40 @@ fn stamps_and_day_headings_follow_the_calendar() {
     assert_eq!(clock_time("2026-09-17T16:10:00Z", &zone), "6:10 PM");
     assert_eq!(clock_time("", &zone), "");
 }
+
+/// tst_native_core::agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent
+#[test]
+fn agent_reply_keeps_its_author_and_names_the_answered_agent() {
+    let mut h = Harness::new("hugo");
+    // The incoming prompt names its author; the answering row names the
+    // agent it answers instead of claiming a sender.
+    let prompt = json!({"id": "u-1", "role": "user", "text": "Status: survey done", "revision": 1, "origin": "agent",
+        "sender_agent_id": "agent-cpp", "sender_name": "C++ Junior", "sender_session": "cjunior-0940",
+        "reply_to_agent_id": "", "delivery": "sent"});
+    let reply = json!({"id": "m-1", "role": "assistant", "text": "Good, that matches the agreed scope.", "revision": 2,
+        "origin": "agent", "sender_agent_id": "", "sender_name": "", "reply_to_agent_id": "agent-cpp",
+        "reply_to_name": "C++ Junior", "reply_to_session": "cjunior-0940", "delivery": "private"});
+    h.log(json!({"turns": [prompt, reply.clone()]}), LoadKind::Tail);
+    let rows = h.model.rows();
+    assert_eq!(rows.len(), 2);
+    assert_eq!((rows[0].sender_name.as_str(), rows[0].reply_to_name.as_str(), rows[0].delivery.as_str()), ("C++ Junior", "", "sent"));
+    let answer = &rows[1];
+    assert_eq!((answer.sender_name.as_str(), answer.sender_agent_id.as_str()), ("", ""));
+    assert_eq!(
+        (answer.reply_to_agent_id.as_str(), answer.reply_to_name.as_str(), answer.reply_to_session.as_str(), answer.delivery.as_str()),
+        ("agent-cpp", "C++ Junior", "cjunior-0940", "private")
+    );
+
+    // A delta that only changes the marker still notifies the reply roles.
+    h.ops.clear();
+    let mut renamed = reply;
+    renamed["reply_to_name"] = json!("C++ Renamed");
+    renamed["revision"] = json!(3);
+    h.log(json!({"turns": [renamed]}), LoadKind::Delta);
+    assert_eq!(h.model.rows()[1].reply_to_name, "C++ Renamed");
+    assert!(h.data_changes().iter().any(|roles| roles.contains(&Role::ReplyToName)), "{:?}", h.data_changes());
+
+    let mut restored = Conversation::new();
+    assert!(restored.restore_cache_snapshot(&h.model.cache_snapshot()));
+    assert_eq!((restored.rows()[1].reply_to_agent_id.as_str(), restored.rows()[1].delivery.as_str()), ("agent-cpp", "private"));
+}

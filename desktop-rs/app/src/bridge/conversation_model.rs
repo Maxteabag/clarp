@@ -40,8 +40,8 @@ pub mod qobject {
         #[qproperty(i64, latest_revision, cxx_name = "latestRevision", READ = latest_revision_value, NOTIFY = latest_revision_changed)]
         #[qproperty(bool, has_more, cxx_name = "hasMore", READ = has_more_value, NOTIFY = has_more_changed)]
         #[qproperty(bool, loading, READ = loading_value, NOTIFY = loading_changed)]
-        #[qproperty(QString, error, READ = error_value, NOTIFY = error_changed)]
-        #[qproperty(QString, voice_error, cxx_name = "voiceError", READ = voice_error_value, NOTIFY = voice_error_changed)]
+        #[qproperty(QString, error, READ = error_value, WRITE = set_error_value, NOTIFY = error_changed)]
+        #[qproperty(QString, voice_error, cxx_name = "voiceError", READ = voice_error_value, WRITE = set_voice_error_value, NOTIFY = voice_error_changed)]
         #[qproperty(i32, count, READ = count_value, NOTIFY = count_changed)]
         type ConversationModel = super::ConversationModelRust;
     }
@@ -54,6 +54,11 @@ pub mod qobject {
         fn loading_value(self: &ConversationModel) -> bool;
         fn error_value(self: &ConversationModel) -> QString;
         fn voice_error_value(self: &ConversationModel) -> QString;
+        /// Main dismisses a banner by clearing these.
+        #[cxx_name = "setError"]
+        fn set_error_value(self: Pin<&mut ConversationModel>, error: QString);
+        #[cxx_name = "setVoiceError"]
+        fn set_voice_error_value(self: Pin<&mut ConversationModel>, error: QString);
         fn count_value(self: &ConversationModel) -> i32;
 
         #[qsignal]
@@ -338,6 +343,12 @@ impl qobject::ConversationModel {
     }
     fn voice_error_value(&self) -> QString {
         qs(self.core.voice_error())
+    }
+    fn set_error_value(self: Pin<&mut Self>, error: QString) {
+        self.mutate(|core| core.set_error(&error.to_string()));
+    }
+    pub fn set_voice_error_value(self: Pin<&mut Self>, error: QString) {
+        self.mutate(|core| core.set_voice_error(&error.to_string()));
     }
     pub fn count_value(&self) -> i32 {
         self.rows.len() as i32

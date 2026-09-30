@@ -313,3 +313,42 @@ fn diff_updates_in_place_and_keeps_order() {
     clarp_core::list_ops::replay(&mut mirror, &diff(&new, &moved));
     assert_eq!(mirror, moved);
 }
+
+/// tst_native_core::streamedTokenAnnouncesOnlyItsRows: with narration on,
+/// one streamed token must not re-announce every row of the transcript.
+#[test]
+fn streamed_token_announces_only_its_rows() {
+    let mut rows: Vec<Message> = (0..60)
+        .map(|i| {
+            if i % 2 == 0 {
+                tool_row(&format!("m{i}"), &format!("step {i}"), "")
+            } else {
+                let mut row = tool_row(&format!("m{i}"), "", &format!("Reply {i}"));
+                row.tools.clear();
+                row
+            }
+        })
+        .collect();
+    let mut settings = Settings::default();
+    let lookup: Lookup = &summary_lookup;
+    let before = present(&rows, &mut settings, Some(lookup));
+    rows[59].display_text = "Reply 59, streaming more".into();
+    rows[59].text = rows[59].display_text.clone();
+    let after = present(&rows, &mut settings, Some(lookup));
+    let ops = diff(&before.rows, &after.rows);
+    assert!(!ops.is_empty());
+    let mut touched = std::collections::BTreeSet::new();
+    for op in &ops {
+        match op {
+            Op::Update { first, items, .. } => touched.extend(*first..*first + items.len()),
+            other => panic!("a token only updates rows, got {other:?}"),
+        }
+    }
+    assert!(touched.len() <= 3, "{} rows announced for one token", touched.len());
+    assert_eq!(after.rows.len(), before.rows.len());
+    assert_eq!(after.rows.last().unwrap().message.display_text, "Reply 59, streaming more");
+
+    // A change that does alter a run keeps the row count.
+    rows[58].tools = vec![json!({"name": "Bash", "summary": "step 56"})];
+    assert_eq!(present(&rows, &mut settings, Some(lookup)).rows.len(), after.rows.len());
+}
