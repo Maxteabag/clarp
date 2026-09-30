@@ -1,0 +1,344 @@
+import { Button, ComboBox, LineEdit, ListView, TextEdit } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+import { Modal } from "dialogs.slint";
+import { IconButton } from "launch.slint";
+
+// ---- launch dialogs: managing an agent --------------------------------------
+
+// One turn waiting in a chat's queue.
+export struct QueuedTurn {
+    id: string,
+    text: string,
+    stamp: string,
+}
+
+// What the rename, assign and queue dialogs show; Rust
+// (`agent_dialogs_view.rs`) owns the state.
+export global AgentDialogs {
+    in property <bool> connected;
+    in property <string> error;
+    in property <bool> submitting;
+    // Bumped to give the keyboard to `focus-target` ("rename" or "assign").
+    in property <int> focus-request;
+    in property <string> focus-target;
+    // RenameAgentDialog.qml
+    in property <string> rename-session;
+    in-out property <string> rename-name;
+    callback rename-submit();
+    // AssignAgentDialog.qml: "auto", "choose" or "create".
+    in property <string> assign-mode: "auto";
+    in property <[string]> assign-contacts;
+    in-out property <int> assign-contact: -1;
+    in-out property <string> assign-name;
+    callback assign-mode-chosen(string);
+    callback assign-step(int);
+    callback assign-submit();
+    // QueueDialog.qml
+    in property <string> queue-title;
+    in property <bool> queue-paused;
+    in property <bool> queue-loading;
+    in property <string> queue-error;
+    in property <[QueuedTurn]> queue-items;
+    // A composer's queue line asks for its chat's queue.
+    callback queue-open(string);
+    callback queue-refresh();
+    callback queue-save(string, string);
+    callback queue-send(string);
+    callback queue-delete(string);
+    callback cancel();
+}
+
+// Rename the chat's contact; its session id (and so history and pairings)
+// stays. Enter renames.
+export component RenameAgentDialog inherits Modal {
+    card-width: 480px;
+    card-height: 250px;
+    dismissed => { AgentDialogs.cancel(); }
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+        Text { text: "Rename contact"; color: Palette.text; font-size: 17px; }
+        field := LineEdit {
+            placeholder-text: "Name";
+            text <=> AgentDialogs.rename-name;
+            enabled: !AgentDialogs.submitting;
+            accessible-label: "Name";
+            accepted => { AgentDialogs.rename-submit(); }
+            property <int> request: AgentDialogs.focus-request;
+            changed request => { if (AgentDialogs.focus-target == "rename") { self.focus(); self.select-all(); } }
+        }
+        if AgentDialogs.rename-session != "": Text {
+            text: "Chat id " + AgentDialogs.rename-session + " stays the same, so history and pairings are kept.";
+            color: Palette.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+        if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
+            text: AgentDialogs.error != "" ? AgentDialogs.error : "Connect to the Host to rename a contact";
+            color: Palette.warning;
+            wrap: word-wrap;
+        }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            IconButton {
+                icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                label: "Cancel";
+                clicked => { AgentDialogs.cancel(); }
+            }
+            Button {
+                text: AgentDialogs.submitting ? "Renaming…" : "Rename · Enter";
+                primary: true;
+                enabled: !AgentDialogs.submitting && AgentDialogs.connected && AgentDialogs.rename-name != "";
+                clicked => { AgentDialogs.rename-submit(); }
+            }
+        }
+    }
+}
+
+component Radio inherits Rectangle {
+    in property <string> text;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 28px;
+    accessible-role: radio-button;
+    accessible-label: root.text;
+    accessible-checked: root.checked;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        spacing: 10px;
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            y: 6px;
+            border-radius: 8px;
+            border-width: 1.5px;
+            border-color: root.checked ? Palette.accent : Palette.border;
+            Rectangle {
+                visible: root.checked;
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: Palette.accent;
+            }
+        }
+        Text {
+            text: root.text;
+            color: root.enabled ? Palette.text : Palette.faint;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+// Assign a contact to a chat: automatically, a chosen idle contact, or a
+// new one by name. Up/Down change the choice, Enter assigns.
+export component AssignAgentDialog inherits Modal {
+    card-width: 580px;
+    card-height: 330px;
+    dismissed => { AgentDialogs.cancel(); }
+    keys := FocusScope {
+        property <int> request: AgentDialogs.focus-request;
+        changed request => { if (AgentDialogs.focus-target == "assign" && AgentDialogs.assign-mode != "create") { self.focus(); } }
+        capture-key-pressed(event) => {
+            if (event.text == Key.UpArrow || event.text == Key.DownArrow) {
+                AgentDialogs.assign-step(event.text == Key.DownArrow ? 1 : -1);
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                AgentDialogs.assign-submit();
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 20px;
+            spacing: 10px;
+            Text { text: "Assign contact"; color: Palette.text; font-size: 18px; }
+            Radio {
+                text: "Automatic";
+                checked: AgentDialogs.assign-mode == "auto";
+                enabled: !AgentDialogs.submitting;
+                clicked => { AgentDialogs.assign-mode-chosen("auto"); }
+            }
+            Radio {
+                text: "Choose contact";
+                checked: AgentDialogs.assign-mode == "choose";
+                enabled: !AgentDialogs.submitting;
+                clicked => { AgentDialogs.assign-mode-chosen("choose"); }
+            }
+            if AgentDialogs.assign-mode == "choose" && AgentDialogs.assign-contacts.length > 0: ComboBox {
+                model: AgentDialogs.assign-contacts;
+                current-index <=> AgentDialogs.assign-contact;
+                enabled: !AgentDialogs.submitting;
+                accessible-label: "Contact";
+            }
+            if AgentDialogs.assign-mode == "choose" && AgentDialogs.assign-contacts.length == 0: Text {
+                text: "No contacts available";
+                color: Palette.muted;
+                wrap: word-wrap;
+            }
+            Radio {
+                text: "New contact";
+                checked: AgentDialogs.assign-mode == "create";
+                enabled: !AgentDialogs.submitting;
+                clicked => { AgentDialogs.assign-mode-chosen("create"); }
+            }
+            if AgentDialogs.assign-mode == "create": LineEdit {
+                placeholder-text: "Name";
+                text <=> AgentDialogs.assign-name;
+                enabled: !AgentDialogs.submitting;
+                accessible-label: "New contact name";
+                init => { if (AgentDialogs.focus-target == "assign") { self.focus(); } }
+            }
+            if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
+                text: AgentDialogs.error != "" ? AgentDialogs.error : "Connect to the Host to assign a contact.";
+                color: Palette.warning;
+                wrap: word-wrap;
+            }
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                IconButton {
+                    icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                    label: "Cancel";
+                    enabled: !AgentDialogs.submitting;
+                    clicked => { AgentDialogs.cancel(); }
+                }
+                Button {
+                    text: AgentDialogs.submitting ? "Assigning…" : "Assign";
+                    primary: true;
+                    enabled: !AgentDialogs.submitting && AgentDialogs.connected
+                        && (AgentDialogs.assign-mode == "auto"
+                            || (AgentDialogs.assign-mode == "create" ? AgentDialogs.assign-name != "" : AgentDialogs.assign-contact >= 0));
+                    clicked => { AgentDialogs.assign-submit(); }
+                }
+            }
+        }
+    }
+}
+
+component QueueRow inherits Rectangle {
+    in property <QueuedTurn> item;
+    in property <bool> loading;
+    border-radius: 3px;
+    background: Palette.control;
+    border-width: 1px;
+    border-color: Palette.border;
+    height: body.preferred-height;
+    body := VerticalLayout {
+        padding: 9px;
+        spacing: 7px;
+        editor := TextEdit {
+            text: root.item.text;
+            wrap: word-wrap;
+            font-size: 12px;
+            min-height: 54px;
+            accessible-label: "Queued message";
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            Text {
+                text: root.item.stamp;
+                color: Palette.faint;
+                font-size: 9px;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            IconButton {
+                icon: @image-url("icons/check.svg");
+                label: "Save";
+                enabled: !root.loading && editor.text != "" && editor.text != root.item.text;
+                clicked => { AgentDialogs.queue-save(root.item.id, editor.text); }
+            }
+            IconButton {
+                icon: @image-url("icons/send.svg");
+                label: "Send now";
+                tint: Palette.accent;
+                enabled: !root.loading;
+                clicked => { AgentDialogs.queue-send(root.item.id); }
+            }
+            IconButton {
+                icon: @image-url("icons/trash.svg");
+                label: "Remove queued message";
+                tint: Palette.danger;
+                enabled: !root.loading;
+                clicked => { AgentDialogs.queue-delete(root.item.id); }
+            }
+        }
+    }
+}
+
+// The turns waiting behind the running one: edit, send now or delete each.
+export component QueueDialog inherits Modal {
+    card-width: 660px;
+    card-height: 620px;
+    dismissed => { AgentDialogs.cancel(); }
+    // Holds the keyboard while open, so typing never reaches the composer behind.
+    FocusScope {
+        property <int> request: AgentDialogs.focus-request;
+        changed request => { if (AgentDialogs.focus-target == "queue") { self.focus(); } }
+    }
+    VerticalLayout {
+        padding: 14px;
+        spacing: 9px;
+        HorizontalLayout {
+            spacing: 6px;
+            VerticalLayout {
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: "QUEUED MESSAGES";
+                    color: Palette.text;
+                    font-size: 14px;
+                    font-weight: 600;
+                    letter-spacing: 1.2px;
+                }
+                Text {
+                    text: AgentDialogs.queue-title + (AgentDialogs.queue-paused ? "  ·  paused" : "");
+                    color: AgentDialogs.queue-paused ? Palette.warning : Palette.muted;
+                    font-size: 10px;
+                }
+            }
+            if AgentDialogs.queue-loading: Text { text: "…"; color: Palette.muted; vertical-alignment: center; }
+            IconButton {
+                icon: @image-url("icons/refresh.svg");
+                label: "Reload";
+                clicked => { AgentDialogs.queue-refresh(); }
+            }
+            IconButton {
+                icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                label: "Close";
+                clicked => { AgentDialogs.cancel(); }
+            }
+        }
+        if AgentDialogs.queue-error != "": Text {
+            text: AgentDialogs.queue-error;
+            color: Palette.danger;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            ListView {
+                for item in AgentDialogs.queue-items: VerticalLayout {
+                    padding-bottom: 7px;
+                    QueueRow { item: item; loading: AgentDialogs.queue-loading; }
+                }
+            }
+            if AgentDialogs.queue-items.length == 0 && !AgentDialogs.queue-loading: Text {
+                text: "No queued messages";
+                color: Palette.faint;
+                font-size: 11px;
+            }
+        }
+    }
+}

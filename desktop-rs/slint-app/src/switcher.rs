@@ -10,6 +10,8 @@ use clarp_engine::Engine;
 pub enum Kind {
     Agent,
     Command,
+    /// An idle contact to start (launch dialogs).
+    Contact,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +61,7 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         command("New contact & chat", "quick-new-agent", "Ctrl+Shift+N", "agent", "new session hub create"),
         command("Rename contact", "rename-agent", "F2", "agent", "rename name title relabel persona"),
         command("New session", "new", "Ctrl+N", "agent", "new agent start chat provider contact hub"),
+        command("Start an idle contact", "new-contact", "Ctrl+Alt+N", "agent", "new session hub"),
         command("Open agent in terminal", "agent-terminal", "Ctrl+Alt+T", "agent", ""),
         command(
             if toggles.narration { "Disable plain-English tools" } else { "Enable plain-English tools (Spark · extra usage)" },
@@ -157,8 +160,31 @@ pub fn agents(engine: &Engine, query: &str) -> Vec<Item> {
     rows.into_iter().map(|(_, item)| item).collect()
 }
 
-/// The switcher's rows for `query`.
-pub fn results(engine: &Engine, query: &str, toggles: Toggles) -> Vec<Item> {
+// ---- launch dialogs
+/// Idle contacts matching `query`, each started with the quick-start backend.
+pub fn contacts(engine: &Engine, query: &str) -> Vec<Item> {
+    let backend = engine.quick_start_backend();
+    engine
+        .matching_contacts(query)
+        .iter()
+        .filter_map(|c| c.get("name").and_then(|n| n.as_str()))
+        .map(|name| Item {
+            kind: Kind::Contact,
+            target: name.to_owned(),
+            label: format!("Start {name}"),
+            detail: format!("New session · {backend} · ~"),
+            key: String::new(),
+            group: "contact",
+            keywords: "",
+        })
+        .collect()
+}
+
+/// The switcher's rows for `query`; `contacts_only` lists idle contacts only.
+pub fn results(engine: &Engine, query: &str, toggles: Toggles, contacts_only: bool) -> Vec<Item> {
+    if contacts_only {
+        return contacts(engine, query);
+    }
     let terms: Vec<String> = query.trim().to_lowercase().split_whitespace().map(str::to_owned).collect();
     let commands: Vec<Item> = commands(toggles, &engine.reading_theme())
         .into_iter()
@@ -168,7 +194,12 @@ pub fn results(engine: &Engine, query: &str, toggles: Toggles) -> Vec<Item> {
         })
         .collect();
     let agents = agents(engine, query);
-    if terms.is_empty() { commands.into_iter().chain(agents).collect() } else { agents.into_iter().chain(commands).collect() }
+    let contacts = contacts(engine, query);
+    if terms.is_empty() {
+        commands.into_iter().chain(agents).chain(contacts).collect()
+    } else {
+        agents.into_iter().chain(contacts).chain(commands).collect()
+    }
 }
 
 /// The row to select after a rebuild: the one selected before, else the first.

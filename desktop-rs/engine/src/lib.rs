@@ -203,6 +203,8 @@ pub struct Engine {
     has_stored_credential: bool,
     /// Optional requests whose failure was already logged once.
     quiet_failures: HashSet<String>,
+    /// The request whose failure the error shows (empty for other errors).
+    error_source: String,
     narrator: std::cell::RefCell<clarp_core::narrator::Narrator>,
 
     // lifecycle
@@ -298,6 +300,7 @@ impl Engine {
             keyring,
             has_stored_credential: false,
             quiet_failures: HashSet::new(),
+            error_source: String::new(),
             narrator,
             panes: workspace::Panes::new(workspace_store),
             deliveries: HashMap::new(),
@@ -580,6 +583,7 @@ impl Engine {
         }
     }
     fn set_error(&mut self, message: &str) {
+        self.error_source.clear();
         if self.error != message {
             self.error = message.into();
             self.changes.push(Change::Error);
@@ -1068,6 +1072,7 @@ impl Engine {
 
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        eprintln!("Engine: {tag} failed: {detail}");
         if self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) {
             return;
         }
@@ -1116,6 +1121,7 @@ impl Engine {
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         self.set_error(&detail);
+        self.error_source = tag.to_owned();
         // No HTTP status: the Host was unreachable. Reconnecting answers it.
         self.error_is_transport = status == 0;
         if tag == "server-info" || tag == "pairing" {

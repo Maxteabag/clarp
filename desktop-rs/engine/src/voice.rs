@@ -15,6 +15,12 @@ impl Engine {
         (!self.token.is_empty()).then(|| (url, self.token.clone()))
     }
 
+    /// The request whose failure the error shows ("" when it came from
+    /// elsewhere).
+    pub fn error_source(&self) -> &str {
+        &self.error_source
+    }
+
     /// Shows an error from the desktop side (audio, a device).
     pub fn report_error(&mut self, message: &str) {
         self.set_error(message);

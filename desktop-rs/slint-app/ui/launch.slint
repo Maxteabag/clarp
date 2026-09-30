@@ -1,0 +1,695 @@
+import { Button, CheckBox, ComboBox, LineEdit, ListView } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+import { Modal } from "dialogs.slint";
+
+// ---- launch dialogs: shared pieces ------------------------------------------
+
+// A provider mark in the New Session hub.
+export struct ProviderChip {
+    id: string,
+    label: string,
+    initial: string,
+}
+
+// A contact card: an idle contact to start, or (with Show all) a chat.
+export struct ContactCard {
+    key: string,
+    name: string,
+    subtitle: string,
+    initial: string,
+    in-chat: bool,
+}
+
+// A folder the directory picker offers.
+export struct DirRow {
+    path: string,
+    label: string,
+}
+
+// A past native session the Start dialog can resume or fork.
+export struct PastRow {
+    title: string,
+    cwd: string,
+}
+
+// A server the Start dialog can give a new Claude agent.
+export struct McpChoice {
+    name: string,
+    on: bool,
+}
+
+// An icon-only action with its name for screen readers and hover.
+export component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <color> tint: Palette.muted;
+    callback clicked();
+    width: 30px;
+    height: 30px;
+    border-radius: 3px;
+    background: touch.has-hover && root.enabled ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    Image {
+        source: root.icon;
+        width: 16px;
+        height: 16px;
+        colorize: root.enabled ? root.tint : Palette.faint;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A small caption above a section ("PROVIDER", "MODEL", …).
+export component Caption inherits Text {
+    color: Palette.muted;
+    font-size: 11px;
+    letter-spacing: 0.8px;
+    vertical-alignment: center;
+}
+
+// A text action that toggles or opens something inline.
+export component LinkButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 26px;
+    min-width: label.preferred-width + 20px;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: Palette.border;
+    background: touch.has-hover && root.enabled ? Palette.hover : Palette.control;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    label := Text {
+        text: root.text;
+        color: root.enabled ? Palette.text : Palette.faint;
+        font-size: 12px;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ---- NewSessionHub.qml + LaunchDirectoryPicker.qml ------------------------
+
+// What the hub shows and asks for; Rust (`launch_view.rs`) owns the state.
+export global LaunchHub {
+    in property <bool> connected;
+    in property <[ProviderChip]> providers;
+    in property <int> provider-index;
+    in property <string> model-summary;
+    in property <bool> editing-model;
+    in property <[string]> model-labels;
+    in-out property <int> model-index;
+    in property <[string]> effort-labels;
+    in-out property <int> effort-index;
+    in property <string> directory;
+    in property <bool> choosing-directory;
+    in property <[DirRow]> directory-rows;
+    in property <int> directory-current;
+    in property <string> directory-empty;
+    in-out property <string> directory-text;
+    in property <bool> show-all;
+    in property <bool> new-contact;
+    in-out property <string> query;
+    in-out property <string> name;
+    in property <[ContactCard]> rows;
+    in property <int> current: -1;
+    in property <string> empty-text;
+    in property <string> confirm-label;
+    in property <bool> can-confirm;
+    in property <string> error;
+    // Bumped to move the keyboard to `focus-target` ("search", "name", "directory").
+    in property <int> focus-request;
+    in property <string> focus-target;
+    // True while the hub is shown: a field built then takes the keyboard.
+    in property <bool> open;
+    callback step-provider(int);
+    callback choose-provider(int);
+    callback search-edited(string);
+    callback name-edited(string);
+    callback move(int);
+    callback choose-row(int);
+    callback activate-row(int);
+    callback toggle-show-all();
+    callback toggle-new-contact();
+    callback toggle-edit-model();
+    callback model-chosen(int);
+    callback effort-chosen(int);
+    callback change-directory();
+    callback directory-edited(string);
+    callback directory-move(int);
+    callback directory-complete();
+    callback directory-chosen(int);
+    callback confirm();
+    callback cancel();
+    callback open-connection();
+}
+
+component ProviderMark inherits Rectangle {
+    in property <ProviderChip> chip;
+    in property <bool> selected;
+    callback clicked();
+    height: 40px;
+    width: mark-row.preferred-width + 22px;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Palette.accent : Palette.border;
+    background: root.selected ? Palette.raised : touch.has-hover ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.chip.label;
+    accessible-checked: root.selected;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    mark-row := HorizontalLayout {
+        padding-left: 11px;
+        padding-right: 11px;
+        spacing: 8px;
+        alignment: center;
+        Rectangle {
+            width: 24px;
+            height: 24px;
+            y: 8px;
+            border-radius: 12px;
+            background: root.selected ? Palette.accent : Palette.control;
+            Text {
+                text: root.chip.initial;
+                color: root.selected ? Palette.accent-text : Palette.text;
+                font-size: 12px;
+                font-weight: 700;
+            }
+        }
+        Text {
+            text: root.chip.label;
+            color: root.selected ? Palette.text : Palette.muted;
+            font-size: 13px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component Card inherits Rectangle {
+    in property <ContactCard> card;
+    in property <bool> selected;
+    callback clicked();
+    callback double-clicked();
+    height: 56px;
+    border-width: 1px;
+    border-color: root.selected ? Palette.accent : Palette.rule;
+    background: root.selected ? Palette.raised : touch.has-hover ? Palette.hover : transparent;
+    accessible-role: list-item;
+    accessible-label: root.card.name;
+    accessible-item-selected: root.selected;
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { root.double-clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 12px;
+        Rectangle {
+            width: 36px;
+            height: 36px;
+            y: 10px;
+            border-radius: 18px;
+            background: Palette.control;
+            border-width: 1px;
+            border-color: Palette.border;
+            Text { text: root.card.initial; color: Palette.text; font-size: 15px; font-weight: 600; }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 1px;
+            Text { text: root.card.name; color: Palette.text; font-size: 14px; font-weight: 500; overflow: elide; }
+            if root.card.subtitle != "": Text { text: root.card.subtitle; color: Palette.muted; font-size: 11px; overflow: elide; }
+        }
+        if root.card.in-chat: Rectangle {
+            width: in-chat.preferred-width + 14px;
+            height: 20px;
+            y: 18px;
+            background: Palette.control;
+            border-width: 1px;
+            border-color: Palette.border;
+            in-chat := Text { text: "In chat"; color: Palette.muted; font-size: 11px; }
+        }
+        if root.selected: Rectangle {
+            width: 22px;
+            height: 22px;
+            y: 17px;
+            border-radius: 11px;
+            background: Palette.accent;
+            Text { text: "✓"; color: Palette.accent-text; font-size: 13px; font-weight: 700; }
+        }
+    }
+}
+
+// LaunchDirectoryPicker.qml: type to find a Host launch folder; Up/Down
+// move, Tab completes the highlighted folder, Enter chooses.
+component DirectoryPicker inherits VerticalLayout {
+    spacing: 12px;
+    search := LineEdit {
+        placeholder-text: "~";
+        text <=> LaunchHub.directory-text;
+        accessible-label: "Launch directory";
+        edited(text) => { LaunchHub.directory-edited(text); }
+        init => { if (LaunchHub.open && LaunchHub.focus-target == "directory") { self.focus(); } }
+        property <int> request: LaunchHub.focus-request;
+        changed request => { if (LaunchHub.focus-target == "directory") { self.focus(); } }
+    }
+    Rectangle {
+        height: 224px;
+        results := ListView {
+            for row[index] in LaunchHub.directory-rows: Rectangle {
+                height: 32px;
+                background: index == LaunchHub.directory-current ? Palette.border : transparent;
+                Text {
+                    x: 10px;
+                    width: parent.width - 20px;
+                    text: row.label;
+                    color: Palette.text;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                TouchArea { clicked => { LaunchHub.directory-chosen(index); } }
+            }
+        }
+        if LaunchHub.directory-empty != "": Text {
+            text: LaunchHub.directory-empty;
+            color: Palette.muted;
+        }
+    }
+    // The spare height goes below the list, not into the search field.
+    Rectangle { vertical-stretch: 1; }
+    property <int> current: LaunchHub.directory-current;
+    changed current => {
+        if (self.current >= 0) {
+            results.content-y = Math.min(Math.max(results.content-y, -self.current * 32px), results.visible-height - (self.current + 1) * 32px);
+        }
+    }
+}
+
+// The one-screen New Session hub (NewSessionHub.qml): provider marks, the
+// model summary with its inline editor, the directory row, contact cards
+// with search and "Show all", a New contact row, and one confirm action.
+// Enter confirms, Up/Down move, Ctrl+Left/Right switch provider; Escape
+// (through the keyboard map) steps back through the inline editors.
+export component NewSessionHub inherits Modal {
+    card-width: 760px;
+    card-height: 660px;
+    dismissed => { LaunchHub.cancel(); }
+    keys := FocusScope {
+        capture-key-pressed(event) => {
+            if (event.text == Key.Return) {
+                if (!event.repeat) {
+                    if (LaunchHub.choosing-directory) { LaunchHub.directory-chosen(-1); } else { LaunchHub.confirm(); }
+                }
+                return accept;
+            }
+            if (event.text == Key.DownArrow || event.text == Key.UpArrow) {
+                if (LaunchHub.choosing-directory) {
+                    LaunchHub.directory-move(event.text == Key.DownArrow ? 1 : -1);
+                } else {
+                    LaunchHub.move(event.text == Key.DownArrow ? 1 : -1);
+                }
+                return accept;
+            }
+            if (event.text == Key.Tab && LaunchHub.choosing-directory) {
+                LaunchHub.directory-complete();
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == Key.LeftArrow || event.text == Key.RightArrow)) {
+                LaunchHub.step-provider(event.text == Key.RightArrow ? 1 : -1);
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 18px;
+            spacing: 12px;
+            HorizontalLayout {
+                spacing: 10px;
+                Text { text: "New Session"; color: Palette.text; font-size: 18px; font-weight: 600; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                IconButton {
+                    icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                    label: "Cancel · Esc";
+                    clicked => { LaunchHub.cancel(); }
+                }
+                Button {
+                    text: LaunchHub.confirm-label;
+                    primary: true;
+                    enabled: LaunchHub.can-confirm;
+                    clicked => { LaunchHub.confirm(); }
+                }
+            }
+            if !LaunchHub.connected: HorizontalLayout {
+                spacing: 12px;
+                Text {
+                    text: "Connect to a server first";
+                    color: Palette.warning;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                Button { text: "Host connection…"; clicked => { LaunchHub.open-connection(); } }
+            }
+            if LaunchHub.connected: VerticalLayout {
+                spacing: 6px;
+                Caption { text: "PROVIDER"; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    for chip[index] in LaunchHub.providers: ProviderMark {
+                        chip: chip;
+                        selected: index == LaunchHub.provider-index;
+                        clicked => { LaunchHub.choose-provider(index); }
+                    }
+                }
+            }
+            if LaunchHub.connected: VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    Caption { text: "MODEL"; }
+                    Text {
+                        text: LaunchHub.model-summary;
+                        color: Palette.text;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    LinkButton {
+                        text: LaunchHub.editing-model ? "Done" : "Edit";
+                        clicked => { LaunchHub.toggle-edit-model(); }
+                    }
+                }
+                if LaunchHub.editing-model: HorizontalLayout {
+                    spacing: 10px;
+                    ComboBox {
+                        horizontal-stretch: 1;
+                        model: LaunchHub.model-labels;
+                        current-index <=> LaunchHub.model-index;
+                        accessible-label: "Model";
+                        selected => { LaunchHub.model-chosen(self.current-index); }
+                    }
+                    ComboBox {
+                        width: 200px;
+                        model: LaunchHub.effort-labels;
+                        current-index <=> LaunchHub.effort-index;
+                        accessible-label: "Effort";
+                        selected => { LaunchHub.effort-chosen(self.current-index); }
+                    }
+                }
+            }
+            if LaunchHub.connected && !LaunchHub.choosing-directory: HorizontalLayout {
+                spacing: 10px;
+                Caption { text: "DIRECTORY"; }
+                Text {
+                    text: LaunchHub.directory;
+                    color: Palette.muted;
+                    overflow: elide;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                LinkButton { text: "Change…"; clicked => { LaunchHub.change-directory(); } }
+            }
+            if LaunchHub.connected && LaunchHub.choosing-directory: DirectoryPicker { vertical-stretch: 1; }
+            if LaunchHub.connected && !LaunchHub.choosing-directory: VerticalLayout {
+                spacing: 6px;
+                vertical-stretch: 1;
+                HorizontalLayout {
+                    spacing: 10px;
+                    Caption { text: "CONTACT"; }
+                    Rectangle { horizontal-stretch: 1; }
+                    CheckBox {
+                        text: "Show all";
+                        checked: LaunchHub.show-all;
+                        toggled => { LaunchHub.toggle-show-all(); }
+                    }
+                    LinkButton {
+                        y: 3px;
+                        text: LaunchHub.new-contact ? "Choose a contact" : "New contact";
+                        clicked => { LaunchHub.toggle-new-contact(); }
+                    }
+                }
+                if LaunchHub.new-contact: LineEdit {
+                    placeholder-text: "Name for the new contact";
+                    text <=> LaunchHub.name;
+                    accessible-label: "Name for the new contact";
+                    edited(text) => { LaunchHub.name-edited(text); }
+                    init => { if (LaunchHub.open && LaunchHub.focus-target == "name") { self.focus(); } }
+                    property <int> request: LaunchHub.focus-request;
+                    changed request => { if (LaunchHub.focus-target == "name") { self.focus(); } }
+                }
+                if LaunchHub.new-contact: Rectangle { vertical-stretch: 1; }
+                if !LaunchHub.new-contact: LineEdit {
+                    placeholder-text: "Search contacts";
+                    text <=> LaunchHub.query;
+                    accessible-label: "Search contacts";
+                    edited(text) => { LaunchHub.search-edited(text); }
+                    init => { if (LaunchHub.open && LaunchHub.focus-target == "search") { self.focus(); } }
+                    property <int> request: LaunchHub.focus-request;
+                    changed request => { if (LaunchHub.focus-target == "search") { self.focus(); } }
+                }
+                if !LaunchHub.new-contact: Rectangle {
+                    vertical-stretch: 1;
+                    cards := ListView {
+                        for card[index] in LaunchHub.rows: VerticalLayout {
+                            padding-bottom: 4px;
+                            Card {
+                                card: card;
+                                selected: index == LaunchHub.current;
+                                clicked => { LaunchHub.choose-row(index); }
+                                double-clicked => { LaunchHub.activate-row(index); }
+                            }
+                        }
+                    }
+                    if LaunchHub.rows.length == 0: Text {
+                        text: LaunchHub.empty-text;
+                        color: Palette.muted;
+                        font-size: 12px;
+                    }
+                    property <int> current: LaunchHub.current;
+                    changed current => {
+                        if (self.current >= 0) {
+                            cards.content-y = Math.min(Math.max(cards.content-y, -self.current * 60px), cards.visible-height - (self.current + 1) * 60px);
+                        }
+                    }
+                }
+            }
+            if !LaunchHub.connected: Rectangle { vertical-stretch: 1; }
+            if LaunchHub.error != "": Text {
+                text: LaunchHub.error;
+                color: Palette.warning;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// ---- StartAgentDialog.qml ---------------------------------------------------
+
+// The named start (and relaunch) form; Rust (`launch_view.rs`) owns it.
+export global StartAgent {
+    in property <bool> relaunch;
+    in-out property <string> name;
+    in-out property <string> workspace;
+    in property <[string]> suggestions;
+    in property <[string]> favorites;
+    in property <[string]> backend-labels;
+    in-out property <int> backend-index;
+    in property <[string]> model-labels;
+    in-out property <int> model-index;
+    in property <[string]> effort-labels;
+    in-out property <int> effort-index;
+    in property <[McpChoice]> mcp-servers;
+    in property <bool> can-resume;
+    in property <bool> can-fork;
+    in property <string> mode: "fresh";
+    in property <[PastRow]> past-sessions;
+    in property <int> past-current: -1;
+    in property <bool> past-loading;
+    // A fresh start, or a past session chosen to resume or fork.
+    in property <bool> past-ready: true;
+    out property <bool> can-start: name != "" && workspace != "" && past-ready;
+    in property <string> error;
+    in property <int> focus-request;
+    callback workspace-edited(string);
+    callback suggestion-chosen(int);
+    callback favorite-chosen(int);
+    callback backend-chosen(int);
+    callback model-chosen(int);
+    callback effort-chosen(int);
+    callback mcp-toggled(int);
+    callback mode-chosen(string);
+    callback past-chosen(int);
+    callback start();
+    callback cancel();
+}
+
+component Label inherits Text {
+    color: Palette.muted;
+    font-size: 12px;
+}
+
+component ModeButton inherits LinkButton {
+    in property <bool> on;
+    background: root.on ? Palette.accent.with-alpha(0.25) : Palette.control;
+    border-color: root.on ? Palette.accent : Palette.border;
+    accessible-checked: root.on;
+}
+
+// Start an agent (or relaunch one): name, workspace with typed-path and
+// favourite suggestions, backend, effort, model, MCP servers for Claude,
+// and a fresh, resumed or forked conversation. Enter starts.
+export component StartAgentDialog inherits Modal {
+    card-width: 620px;
+    card-height: 760px;
+    dismissed => { StartAgent.cancel(); }
+    keys := FocusScope {
+        capture-key-pressed(event) => {
+            if (event.text == Key.Return && !event.modifiers.shift && (name.has-focus || workspace.has-focus)) {
+                if (StartAgent.can-start) { StartAgent.start(); }
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 10px;
+            Text {
+                text: StartAgent.relaunch ? "Relaunch agent" : "Start an agent";
+                color: Palette.text;
+                font-size: 17px;
+                font-weight: 600;
+            }
+            Label { text: "Name"; }
+            name := LineEdit {
+                placeholder-text: "Rachel";
+                text <=> StartAgent.name;
+                accessible-label: "Name";
+                property <int> request: StartAgent.focus-request;
+                changed request => { self.focus(); }
+            }
+            Label { text: "Workspace"; }
+            workspace := LineEdit {
+                placeholder-text: "~/Projects/example";
+                text <=> StartAgent.workspace;
+                accessible-label: "Workspace";
+                edited(text) => { StartAgent.workspace-edited(text); }
+            }
+            if StartAgent.suggestions.length > 0: HorizontalLayout {
+                spacing: 5px;
+                alignment: start;
+                for path[index] in StartAgent.suggestions: LinkButton {
+                    text: path;
+                    clicked => { StartAgent.suggestion-chosen(index); }
+                }
+            }
+            if StartAgent.favorites.length > 0: HorizontalLayout {
+                spacing: 5px;
+                alignment: start;
+                for path[index] in StartAgent.favorites: LinkButton {
+                    text: "★ " + path;
+                    clicked => { StartAgent.favorite-chosen(index); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 10px;
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Label { text: "Backend"; }
+                    ComboBox {
+                        model: StartAgent.backend-labels;
+                        current-index <=> StartAgent.backend-index;
+                        accessible-label: "Backend";
+                        selected => { StartAgent.backend-chosen(self.current-index); }
+                    }
+                }
+                VerticalLayout {
+                    spacing: 4px;
+                    horizontal-stretch: 1;
+                    Label { text: "Effort"; }
+                    ComboBox {
+                        model: StartAgent.effort-labels;
+                        current-index <=> StartAgent.effort-index;
+                        accessible-label: "Effort";
+                        selected => { StartAgent.effort-chosen(self.current-index); }
+                    }
+                }
+            }
+            Label { text: "Model"; }
+            ComboBox {
+                model: StartAgent.model-labels;
+                current-index <=> StartAgent.model-index;
+                accessible-label: "Model";
+                selected => { StartAgent.model-chosen(self.current-index); }
+            }
+            if StartAgent.mcp-servers.length > 0: VerticalLayout {
+                spacing: 4px;
+                Label { text: "MCP servers"; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    for server[index] in StartAgent.mcp-servers: CheckBox {
+                        text: server.name;
+                        checked: server.on;
+                        toggled => { StartAgent.mcp-toggled(index); }
+                    }
+                }
+            }
+            Label { text: "Conversation"; }
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                ModeButton { text: "Fresh"; on: StartAgent.mode == "fresh"; clicked => { StartAgent.mode-chosen("fresh"); } }
+                if StartAgent.can-resume: ModeButton { text: "Resume"; on: StartAgent.mode == "resume"; clicked => { StartAgent.mode-chosen("resume"); } }
+                if StartAgent.can-fork: ModeButton { text: "Fork"; on: StartAgent.mode == "fork"; clicked => { StartAgent.mode-chosen("fork"); } }
+            }
+            if StartAgent.mode != "fresh": Rectangle {
+                height: 132px;
+                ListView {
+                    for past[index] in StartAgent.past-sessions: Rectangle {
+                        height: 42px;
+                        background: index == StartAgent.past-current ? Palette.border : touch.has-hover ? Palette.hover : transparent;
+                        touch := TouchArea { clicked => { StartAgent.past-chosen(index); } }
+                        VerticalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            alignment: center;
+                            Text { text: past.title; color: Palette.text; font-size: 11px; overflow: elide; }
+                            Text { text: past.cwd; color: Palette.muted; font-size: 9px; overflow: elide; }
+                        }
+                    }
+                }
+                if StartAgent.past-loading: Text { text: "Loading…"; color: Palette.muted; }
+            }
+            if StartAgent.error != "": Text { text: StartAgent.error; color: Palette.warning; wrap: word-wrap; font-size: 12px; }
+            Rectangle { vertical-stretch: 1; }
+            Rectangle { height: 1px; background: Palette.border; }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                IconButton {
+                    icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                    label: "Cancel";
+                    clicked => { StartAgent.cancel(); }
+                }
+                Button {
+                    text: StartAgent.relaunch ? "Relaunch" : "Start";
+                    primary: true;
+                    enabled: StartAgent.can-start;
+                    clicked => { StartAgent.start(); }
+                }
+            }
+        }
+    }
+}

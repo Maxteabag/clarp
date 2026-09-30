@@ -1,6 +1,7 @@
 import { Palette } from "theme.slint";
 import { Composer, Attachment } from "composer.slint";
 import { Transcript, MessageRow } from "transcript.slint";
+import { AgentDialogs } from "agent_dialogs.slint";
 
 // One pane of the workspace: where it sits (fractions of the workspace),
 // the chat it shows, and that chat's composer state. The counters ask the
@@ -226,6 +227,7 @@ export component Pane inherits Rectangle {
             remove-attachment(id) => { root.remove-attachment(id); }
             escape => { transcript.focus(); }
             jump-to-latest => { transcript.scroll-to-latest(); }
+            queue-requested => { AgentDialogs.queue-open(root.pane.session); }
         }
     }
 }

@@ -95,8 +95,12 @@ fn forwarded(arguments: Vec<String>) {
 /// Starts `request` in the window: the New Session hub, or at once when it
 /// names a backend.
 pub fn start(app: &std::rc::Rc<crate::App>, window: &crate::AppWindow, request: Request) {
-    *app.launch.borrow_mut() = Some(request);
-    if !crate::commands::run(app, window, "launch") {
-        eprintln!("clarp-slint: starting an agent from the launch is not available yet");
-    }
+    *app.launch.borrow_mut() = Some(request.clone());
+    // Anonymous or contact as asked, else as Settings say.
+    let anonymous = match request.anonymous {
+        1 => true,
+        0 => false,
+        _ => app.engine.borrow().settings().boolean("launch/anonymousAgents", true),
+    };
+    crate::launch_view::open_launch(app, window, &request.backend, &request.model, &request.effort, anonymous, &request.directory);
 }
