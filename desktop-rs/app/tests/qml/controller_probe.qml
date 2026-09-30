@@ -55,6 +55,7 @@ Window {
             check(app.serverName === "Fake Host" && app.serverVersion === "9.9.9", "server info")
             check(app.connectionState === "live", "connection state live")
             check(app.agents.count === 2 && app.contacts.count === 1, "roster and contacts from the snapshot")
+            check(app.availableMcpServers.length === 1 && app.availableMcpServers[0].name === "github", "MCP servers the Host offers: " + JSON.stringify(app.availableMcpServers))
             check(app.selectedSession === "rachel" && app.selectedName === "Rachel", "first agent auto-selected")
             check(app.panes.activeSession === "rachel", "pane follows the selection")
             const sent = requests()

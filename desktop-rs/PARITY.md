@@ -72,7 +72,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | Record microphone PCM, upload it to `/transcribe`, and carry the returned trace/transcription ids into `/send`. | `app/tests/qml/controller_dictation_probe.qml` (fixture input) + `core/tests/audio.rs` | verified with a fixture input; live microphone not machine-verified |
 | Play announced clips, select sources by protocol precedence, and acknowledge queued/start/success/failure states. | `core/tests/audio.rs` + `app/tests/qml/controller_audio_probe.qml` (test sink) | wip: verified through the silent sink; audible output pending |
 | Treat `user-notification` as the only unread/desktop-notification decision. | `app/tests/qml/controller_probe.qml` (fake Host) (no notification for the open chat) + `roster.rs` | wip: notification for a background chat not probed |
-| Create/relaunch/fork/release agents and expose the desktop overview, voice-selection, and orchestrator settings workflows. | | todo |
+| Create/relaunch/fork/release agents and expose the desktop overview, voice-selection, and orchestrator settings workflows. | `app/tests/qml/controller_agent_lifecycle_probe.qml` (anonymous, relaunch with replace_sid and MCP by name, resume, fork, muted, native resume, archive, release) + `controller_launch_probe.qml` + `controller_profile_probe.qml` (voices, choose voice, orchestrator) | verified: the overview is the shared QML over these |
 | Preserve the desktop pane workspace, collapsible agent rail, keyboard-driven navigation, quick switcher, tool visibility, and scroll-to-latest behavior. | | todo |
 
 ## C++ test cases to port
