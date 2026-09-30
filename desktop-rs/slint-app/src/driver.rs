@@ -1248,14 +1248,24 @@ fn connection_check(out: String) {
                 return false;
             }
             check(window.get_sidebar_visible(), "the sidebar shows");
+            if let Some(app) = crate::app() {
+                app.focus_transcript();
+            }
+            true
+        })),
+        ("in the chat", Box::new(|_, _window, _| {
+            if !report().transcript_focused {
+                return false;
+            }
             headless::press_with(&[Key::Control], "b");
             true
         })),
-        ("hidden", Box::new(|_, window, _| {
-            if window.get_sidebar_visible() {
+        ("hidden", Box::new(|_, window, elapsed| {
+            if window.get_sidebar_visible() || elapsed < Duration::from_millis(200) {
                 return false;
             }
             check(true, "Ctrl+B hides the sidebar");
+            check(report().transcript_focused && !report().composer_focused, "and the keyboard stays in the chat, not the composer");
             headless::press_with(&[Key::Control], "b");
             true
         })),

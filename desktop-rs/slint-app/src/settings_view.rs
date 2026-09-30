@@ -78,6 +78,7 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         toggle("anonymous-agents", "Anonymous agents by default", settings.boolean("launch/anonymousAgents", true)),
         section("APPEARANCE"),
         toggle("minimal-ui", "Minimal UI", settings.boolean("appearance/minimalUi", false)),
+        toggle("nav-rail", "Navigation rail (Chats, Updates, Teams, Settings)", settings.boolean("appearance/navRail", true)),
         toggle("workspace-bar", "Workspace bar", prefs.workspace_bar),
         choice("reading-theme", "Reading theme", &format!("{} · {}", text(theme, "label"), crate::view::theme_font(theme))),
         section("VOICE & AUDIO"),
@@ -185,6 +186,10 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
         }
         "new-agent-on-startup" => flip(app, "launch/newAgentOnStartup", true),
         "anonymous-agents" => flip(app, "launch/anonymousAgents", true),
+        "nav-rail" => {
+            flip(app, "appearance/navRail", true);
+            window.set_nav_rail_visible(app.engine.borrow().settings().boolean("appearance/navRail", true));
+        }
         "minimal-ui" => {
             flip(app, "appearance/minimalUi", false);
             let minimal = app.engine.borrow().settings().boolean("appearance/minimalUi", false);
