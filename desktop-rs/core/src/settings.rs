@@ -134,7 +134,25 @@ pub fn token_from_config(contents: &str) -> String {
         .unwrap_or_default()
 }
 
-pub fn default_token() -> String {
+/// Whether `base_url` names this machine (`localhost` or a loopback address).
+pub fn is_loopback_url(base_url: &str) -> bool {
+    let Ok(url) = url::Url::parse(base_url) else { return false };
+    match url.host() {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
+/// The administrator token in config.toml belongs to the Host on this
+/// machine. Sending it to a remote Host would leak it and would hide that
+/// Host's own paired device credential, so only loopback URLs get it
+/// (C++ `defaultToken(baseUrl)`).
+pub fn default_token(base_url: &str) -> String {
+    if !is_loopback_url(base_url) {
+        return String::new();
+    }
     config_home()
         .and_then(|config| std::fs::read_to_string(config.join("clarp").join("config.toml")).ok())
         .map(|contents| token_from_config(&contents))

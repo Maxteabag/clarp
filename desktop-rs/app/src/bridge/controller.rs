@@ -1100,7 +1100,7 @@ impl cxx_qt::Initialize for AppController {
                 .map(|root| clarp_core::transcript_cache::TranscriptCache::new(root.join("transcripts")));
             let saved = rust.settings.string("connection/baseUrl", "http://127.0.0.1:7682");
             rust.base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
-            rust.token = std::env::var("CLARP_TOKEN").unwrap_or_else(|_| default_token());
+            rust.token = std::env::var("CLARP_TOKEN").unwrap_or_else(|_| default_token(&rust.base_url));
             rust.show_when_ready = rust.settings.boolean("conversation/showWhenReady", false);
             let tools_visible = rust.settings.boolean("conversation/toolsVisible", false);
             rust.activity_display_mode =
@@ -1828,6 +1828,7 @@ impl AppController {
         }
         let stored = !token.is_empty();
         if self.token.is_empty() {
+            let token = if token.is_empty() { default_token(&self.base_url) } else { token };
             self.as_mut().rust_mut().token = token;
         }
         self.as_mut().set_has_stored_credential(stored);
