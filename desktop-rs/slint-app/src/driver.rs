@@ -118,7 +118,7 @@ fn step(out: &str) {
             advance();
         }
         2 => {
-            let draft = app.window.upgrade().map(|w| w.get_draft().to_string()).unwrap_or_default();
+            let draft = app.active_draft();
             if draft != PROMPT {
                 return;
             }
@@ -132,7 +132,7 @@ fn step(out: &str) {
             if !texts().iter().any(|t| t.contains(PROMPT)) {
                 return;
             }
-            let draft = app.window.upgrade().map(|w| w.get_draft().to_string()).unwrap_or_default();
+            let draft = app.active_draft();
             check(draft.is_empty(), "sending clears the composer");
             shot(out, "03-sent");
             advance();
@@ -259,7 +259,7 @@ fn run_stages(mut stages: Vec<Stage>) {
         };
         let elapsed = since.get().elapsed();
         if elapsed > Duration::from_secs(15) {
-            check(false, &format!("timed out: {name}"));
+            check(false, &format!("timed out: {name} (active pane {:?}, report {:?}, panes {:?})", app.active_id(), app.active_report(), app.pane_drafts()));
             TIMER.with(|t| t.borrow_mut().take());
             finish();
             return;
@@ -273,8 +273,20 @@ fn run_stages(mut stages: Vec<Stage>) {
     TIMER.with(|t| *t.borrow_mut() = Some(timer));
 }
 
-fn rows(window: &crate::AppWindow) -> Vec<crate::MessageRow> {
-    window.get_messages().iter().collect()
+fn rows(_window: &crate::AppWindow) -> Vec<crate::MessageRow> {
+    crate::app().and_then(|app| app.active_messages()).map(|m| m.iter().collect()).unwrap_or_default()
+}
+
+fn app_now() -> std::rc::Rc<crate::App> {
+    crate::app().expect("the app runs")
+}
+
+fn report() -> crate::panes::Report {
+    app_now().active_report()
+}
+
+fn view() -> crate::PaneView {
+    app_now().active_view().unwrap_or_default()
 }
 
 /// `--check transcript --out DIR`: tool activity folds and opens (fetching
@@ -284,6 +296,7 @@ pub fn start_check(name: &str, out: String) {
     match name {
         "transcript" => transcript_check(out),
         "composer" => composer_check(out),
+        "panes" => panes_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
@@ -293,12 +306,16 @@ pub fn start_check(name: &str, out: String) {
 
 /// The fake Host's request log (`CLARP_TEST_HOST_LOG`): its `/send`s.
 fn sends() -> Vec<serde_json::Value> {
+    posts("/send")
+}
+
+fn posts(path: &str) -> Vec<serde_json::Value> {
     let Some(log) = std::env::var_os("CLARP_TEST_HOST_LOG") else { return Vec::new() };
     std::fs::read_to_string(log)
         .unwrap_or_default()
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter(|entry| entry["method"] == "POST" && entry["path"] == "/send")
+        .filter(|entry| entry["method"] == "POST" && entry["path"] == path)
         .collect()
 }
 
@@ -310,20 +327,20 @@ fn composer_check(out: String) {
     use slint::platform::Key;
     let out2 = out.clone();
     let stages: Vec<Stage> = vec![
-        ("rachel open", Box::new(|app, window, _| {
+        ("rachel open", Box::new(|app, _window, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
             if !open {
                 return false;
             }
-            window.invoke_focus_composer();
+            app_now().focus_composer();
             headless::type_text("draft one");
             true
         })),
         ("typed", Box::new(|app, window, _| {
-            if window.get_draft() != "draft one" {
+            if app_now().active_draft() != "draft one" {
                 return false;
             }
-            check(window.get_composer_focused(), "the composer has the keyboard");
+            check(report().composer_focused, "the composer has the keyboard");
             check(app.engine.borrow().draft("rachel") == "draft one", "typing keeps the chat's draft");
             window.invoke_chat_chosen("mike".into());
             true
@@ -332,76 +349,228 @@ fn composer_check(out: String) {
             if app.engine.borrow().selected_session() != "mike" {
                 return false;
             }
-            check(window.get_draft().is_empty(), "another chat has its own (empty) draft");
+            check(app_now().active_draft().is_empty(), "another chat has its own (empty) draft");
             window.invoke_chat_chosen("rachel".into());
             true
         })),
-        ("back", Box::new(|_, window, _| {
-            if window.get_draft() != "draft one" {
+        ("back", Box::new(|_, _window, _| {
+            if app_now().active_draft() != "draft one" {
                 return false;
             }
             check(true, "returning restores the chat's draft");
-            window.invoke_focus_composer();
+            app_now().focus_composer();
             headless::press_with(&[Key::Control, Key::Shift], "O");
             true
         })),
-        ("uploading", Box::new(|_, window, _| {
-            if window.get_attachments().row_count() == 0 {
+        ("uploading", Box::new(|_, _window, _| {
+            if view().attachments.row_count() == 0 {
                 return false;
             }
-            let chip = window.get_attachments().row_data(0).expect("chip");
+            let chip = view().attachments.row_data(0).expect("chip");
             check(chip.name == "photo.png", &format!("Ctrl+Shift+O attaches the file: {} ({})", chip.name, chip.status));
             check(chip.thumbnail.size().width > 0, "an image shows its thumbnail");
             true
         })),
         ("uploaded", Box::new(|_, window, _| {
-            let ready = window.get_attachments().row_data(0).is_some_and(|c| c.status == "ready");
-            if !ready || !window.get_can_send() {
+            let ready = view().attachments.row_data(0).is_some_and(|c| c.status == "ready");
+            if !ready || !view().can_send {
                 return false;
             }
             check(true, "the upload finishes and the message can be sent");
-            let id = window.get_attachments().row_data(0).expect("chip").id;
-            window.invoke_remove_attachment(id);
+            let id = view().attachments.row_data(0).expect("chip").id;
+            window.invoke_remove_attachment(app_now().active_id(), id);
             true
         })),
         ("removed", Box::new(|_, window, _| {
-            if window.get_attachments().row_count() != 0 {
+            if view().attachments.row_count() != 0 {
                 return false;
             }
             check(true, "a chip's remove button drops the attachment");
-            window.invoke_attach();
+            window.invoke_attach(app_now().active_id());
             let quota = serde_json::json!({"session": "rachel", "set": {"queued_turn_count": 2,
                 "backend_quota": {"state": "exhausted", "provider_id": "claude", "reason": "rate_limited"}}});
             check(control("/__control/agent", &quota).is_ok(), "the Host reports a queue and an exhausted quota");
             true
         })),
-        ("notices", Box::new(move |_, window, elapsed| {
-            let ready = window.get_attachments().row_data(0).is_some_and(|c| c.status == "ready");
-            if !ready || window.get_queued() != 2 || elapsed < Duration::from_millis(300) {
+        ("notices", Box::new(move |_, _window, elapsed| {
+            let ready = view().attachments.row_data(0).is_some_and(|c| c.status == "ready");
+            if !ready || view().queued != 2 || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            check(window.get_quota_notice().starts_with("Claude is out of quota"), &format!("the quota notice shows: {:?}", window.get_quota_notice()));
+            check(view().quota_notice.starts_with("Claude is out of quota"), &format!("the quota notice shows: {:?}", view().quota_notice));
             shot(&out2, "composer-01-notices");
-            window.invoke_focus_composer();
+            app_now().focus_composer();
             headless::press_with(&[Key::Control], Key::Return);
             true
         })),
-        ("queued", Box::new(|app, window, _| {
+        ("queued", Box::new(|app, _window, _| {
             let Some(send) = sends().pop() else { return false };
             check(
                 send["body"]["text"] == "draft one /srv/uploads/photo.png" && send["body"]["queue_if_busy"] == true,
                 &format!("Ctrl+Enter queues the text with the attachment's path: {}", send["body"]),
             );
-            check(window.get_draft().is_empty() && window.get_attachments().row_count() == 0, "sending clears the draft and the chips");
+            check(app_now().active_draft().is_empty() && view().attachments.row_count() == 0, "sending clears the draft and the chips");
             check(app.engine.borrow().draft("rachel").is_empty(), "and the saved draft");
+            true
+        })),
+        ("working", Box::new(|app, _window, _| {
+            let state = app.engine.borrow().roster().find("rachel").map(|a| a.latest_state.clone()).unwrap_or_default();
+            if state != "thinking" {
+                return false;
+            }
             headless::press(Key::Escape);
             true
         })),
-        ("escape", Box::new(|_, window, elapsed| {
+        ("stopped", Box::new(|_, _window, _| {
+            if posts("/stop").is_empty() {
+                return false;
+            }
+            check(report().composer_focused, "Escape stops a working agent and keeps the keyboard in the composer");
+            let now = chrono::Utc::now().timestamp_millis();
+            let idle = serde_json::json!({"type": "agent-state", "session": "rachel", "kind": "idle", "ts": now});
+            check(control("/__control/event", &idle).is_ok(), "the agent goes idle");
+            true
+        })),
+        ("idle", Box::new(|app, _window, _| {
+            let state = app.engine.borrow().roster().find("rachel").map(|a| a.latest_state.clone()).unwrap_or_default();
+            if state != "idle" {
+                return false;
+            }
+            headless::press(Key::Escape);
+            true
+        })),
+        ("escape", Box::new(|_, _window, elapsed| {
             if elapsed < Duration::from_millis(200) {
                 return false;
             }
-            check(window.get_transcript_focused() && !window.get_composer_focused(), "Escape hands the keyboard to the transcript");
+            check(report().transcript_focused && !report().composer_focused, "Escape hands the keyboard to the transcript");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check panes --out DIR`: splitting, a draft shared by panes on one
+/// chat, moving between panes, the sidebar's J/K/Enter, zoom, close, and
+/// the shortcut bar following the keyboard. Keys go through the keyboard
+/// map exactly as typed.
+fn panes_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    fn drafts() -> Vec<(String, String, String)> {
+        app_now().pane_drafts()
+    }
+    let stages: Vec<Stage> = vec![
+        ("rachel open", Box::new(|app, window, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
+            if !open || !report().composer_focused {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "INSERT", &format!("the shortcut bar says INSERT in the composer: {}", window.get_keyboard_mode()));
+            headless::press_with(&[Key::Control, Key::Alt], "v");
+            true
+        })),
+        ("split", Box::new(move |app, _window, _| {
+            if app.engine.borrow().panes().pane_count() != 2 || !report().composer_focused {
+                return false;
+            }
+            let panes = drafts();
+            check(panes.iter().all(|(_, session, _)| session == "rachel"), "Ctrl+Alt+V splits the chat into a second pane");
+            check(app.engine.borrow().panes().active_pane_id() == panes[1].0, &format!("the new pane is active, its composer focused: {} of {panes:?}", app.engine.borrow().panes().active_pane_id()));
+            headless::type_text("shared");
+            true
+        })),
+        ("shared draft", Box::new(|_, window, _| {
+            let panes = drafts();
+            if panes.iter().any(|(_, _, draft)| draft != "shared") {
+                return false;
+            }
+            check(true, "typing in one pane shows the draft in the other pane on that chat");
+            window.invoke_chat_chosen("mike".into());
+            true
+        })),
+        ("two chats", Box::new(move |app, _window, elapsed| {
+            let panes = drafts();
+            let loaded = app.engine.borrow().conversation("mike").is_some_and(|c| !c.rows().is_empty());
+            if panes.get(1).is_none_or(|p| p.1 != "mike") || !loaded || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(panes[0].1 == "rachel", "choosing a chat opens it in the active pane only");
+            check(panes[1].2.is_empty(), "the other chat has its own draft");
+            shot(&out2, "panes-01-split");
+            headless::press_with(&[Key::Control, Key::Alt], Key::LeftArrow);
+            true
+        })),
+        ("moved left", Box::new(|app, _window, _| {
+            if app.engine.borrow().selected_session() != "rachel" {
+                return false;
+            }
+            check(app.engine.borrow().panes().active_pane_id() == drafts()[0].0, "Ctrl+Alt+Left moves to the left pane and selects its chat");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("navigating", Box::new(|_, window, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "CONVERSATION", &format!("Escape leaves the composer for the conversation: {}", window.get_keyboard_mode()));
+            headless::press("e");
+            true
+        })),
+        ("sidebar", Box::new(|_, window, _| {
+            if !window.get_sidebar_focused() {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "AGENTS" && window.get_sidebar_cursor() == "rachel", "E moves to the agents list, on the open chat");
+            headless::press("j");
+            true
+        })),
+        ("cursor", Box::new(|_, window, _| {
+            if window.get_sidebar_cursor() == "rachel" {
+                return false;
+            }
+            check(window.get_sidebar_cursor() == "mike", &format!("J moves the cursor down: {}", window.get_sidebar_cursor()));
+            headless::press(Key::Return);
+            true
+        })),
+        ("opened", Box::new(|app, _window, _| {
+            if app.engine.borrow().selected_session() != "mike" || !report().composer_focused {
+                return false;
+            }
+            check(drafts()[0].1 == "mike", "Enter opens the chat in the active pane, ready to type");
+            headless::press_with(&[Key::Control, Key::Alt], "z");
+            true
+        })),
+        ("zoomed", Box::new(|app, _window, _| {
+            if app.engine.borrow().panes().zoomed_pane_id().is_empty() {
+                return false;
+            }
+            let shown = view();
+            check(shown.shown && shown.width == 1.0, "Ctrl+Alt+Z zooms the active pane to the whole workspace");
+            headless::press_with(&[Key::Control, Key::Alt], "z");
+            true
+        })),
+        ("unzoomed", Box::new(|app, _window, _| {
+            if !app.engine.borrow().panes().zoomed_pane_id().is_empty() {
+                return false;
+            }
+            headless::press_with(&[Key::Control, Key::Alt], "x");
+            true
+        })),
+        ("closed", Box::new(|app, window, _| {
+            if app.engine.borrow().panes().pane_count() != 1 {
+                return false;
+            }
+            check(true, "Ctrl+Alt+X closes the active pane");
+            check(window.get_shortcuts_visible(), "the shortcut bar shows by default");
+            headless::press_with(&[Key::Control, Key::Shift], "K");
+            true
+        })),
+        ("bar hidden", Box::new(|_, window, _| {
+            if window.get_shortcuts_visible() {
+                return false;
+            }
+            check(true, "Ctrl+Shift+K hides the shortcut bar");
             true
         })),
     ];
@@ -440,8 +609,8 @@ fn transcript_check(out: String) {
             check(!group.expanded && group.tools.row_count() == 0, "a folded group shows no tool cards");
             let read = rows.iter().find(|r| r.id == "t4");
             check(read.is_some_and(|r| r.activity_label == "1 tool call" && !r.expanded), "a reply's own tool call is folded behind its toggle");
-            window.invoke_toggle_activity(group.id.clone(), group.group_id.clone());
-            window.invoke_toggle_activity("t4".into(), "".into());
+            window.invoke_toggle_activity(app_now().active_id(), group.id.clone(), group.group_id.clone());
+            window.invoke_toggle_activity(app_now().active_id(), "t4".into(), "".into());
             true
         })),
         ("tools open with details", Box::new(move |_, window, _| {
@@ -467,7 +636,7 @@ fn transcript_check(out: String) {
             }
             let rows_now = rows(window);
             let group = rows_now.iter().find(|r| !r.group_id.is_empty()).expect("group");
-            window.invoke_toggle_activity(group.id.clone(), group.group_id.clone());
+            window.invoke_toggle_activity(app_now().active_id(), group.id.clone(), group.group_id.clone());
             let folded = rows(window).iter().find(|r| !r.group_id.is_empty()).is_some_and(|r| !r.expanded);
             check(folded, "a second toggle folds the group");
             check(control("/__control/fill", &fill(80)).is_ok(), "the Host takes a long chat");
@@ -479,19 +648,25 @@ fn transcript_check(out: String) {
             if rows(window).len() < 80 || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            check(window.get_transcript_follows() && window.get_transcript_at_end(), &format!("a chat opens at its latest message (follows {}, at end {}, offset {})", window.get_transcript_follows(), window.get_transcript_at_end(), window.get_transcript_offset()));
-            window.invoke_focus_transcript();
+            check(report().follows && report().at_end, &format!("a chat opens at its latest message (follows {}, at end {}, offset {})", report().follows, report().at_end, report().offset));
+            app_now().focus_transcript();
+            true
+        })),
+        ("transcript keyboard", Box::new(|_, _window, _| {
+            if !report().transcript_focused {
+                return false;
+            }
             headless::press(slint::platform::Key::PageUp);
             headless::press(slint::platform::Key::PageUp);
             true
         })),
-        ("paused", Box::new(move |_, window, elapsed| {
+        ("paused", Box::new(move |_, _window, elapsed| {
             if elapsed < Duration::from_millis(300) {
                 return false;
             }
-            check(window.get_transcript_focused(), "Escape-style focus gives the transcript the keyboard");
-            check(!window.get_transcript_follows() && !window.get_transcript_at_end(), "Page Up scrolls back and stops following");
-            offset.set(window.get_transcript_offset());
+            check(report().transcript_focused, "Escape-style focus gives the transcript the keyboard");
+            check(!report().follows && !report().at_end, "Page Up scrolls back and stops following");
+            offset.set(report().offset);
             check(control("/__control/fill", &fill(90)).is_ok(), "the Host adds rows");
             true
         })),
@@ -499,17 +674,17 @@ fn transcript_check(out: String) {
             if rows(window).len() < 90 || elapsed < Duration::from_millis(500) {
                 return false;
             }
-            check(!window.get_transcript_follows(), "new rows do not pull a reader who scrolled up");
-            let moved = (window.get_transcript_offset() - offset2.get()).abs();
+            check(!report().follows, "new rows do not pull a reader who scrolled up");
+            let moved = (report().offset - offset2.get()).abs();
             check(moved < 1.0, &format!("the reader's place holds ({moved}px)"));
             headless::press(slint::platform::Key::End);
             true
         })),
-        ("resumes", Box::new(move |_, window, elapsed| {
+        ("resumes", Box::new(move |_, _window, elapsed| {
             if elapsed < Duration::from_millis(300) {
                 return false;
             }
-            check(window.get_transcript_follows() && window.get_transcript_at_end(), "End returns to the latest and follows again");
+            check(report().follows && report().at_end, "End returns to the latest and follows again");
             check(control("/__control/fill", &fill(100)).is_ok(), "the Host adds more rows");
             true
         })),
@@ -517,7 +692,7 @@ fn transcript_check(out: String) {
             if rows(window).len() < 100 || elapsed < Duration::from_millis(500) {
                 return false;
             }
-            check(window.get_transcript_at_end(), "following keeps the latest in view as rows arrive");
+            check(report().at_end, "following keeps the latest in view as rows arrive");
             shot(&out3, "transcript-02-following");
             let long = serde_json::json!({"session": "long", "count": 250, "prefix": "Line"});
             check(
@@ -550,8 +725,8 @@ fn transcript_check(out: String) {
             }
             check(rows[0].id == "long-50" && rows.len() == 200, &format!("reaching the top loads the page before: first {}", rows[0].id));
             check(
-                !window.get_transcript_follows() && window.get_transcript_offset() < -1000.0,
-                &format!("the reader stays on the row they were reading ({}px)", window.get_transcript_offset()),
+                !report().follows && report().offset < -1000.0,
+                &format!("the reader stays on the row they were reading ({}px)", report().offset),
             );
             headless::press(slint::platform::Key::Home);
             true

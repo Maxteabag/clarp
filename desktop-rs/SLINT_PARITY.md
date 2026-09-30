@@ -34,11 +34,11 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/ChatRow.qml` | 301 | `slint-app/ui/sidebar.slint` `Row` (name, stamp, preview, activity line, queue, muted, unread, busy ring, helper depth) | wip: portraits, process glyph, done-helpers lines pending |
 | `qml/components/Composer.qml` | 461 | `slint-app/ui/composer.slint` + `engine/src/composer.rs` (per-chat drafts flushed after 1 s idle and on close, attachments with upload/shared-filesystem, chips with thumbnails, queue and quota notices, Enter/Shift+Enter/Ctrl+Enter/Ctrl+End/Escape/Ctrl+Shift+O, send/stop) | verified: `engine/tests/host_flow.rs::drafts_and_attachments_belong_to_the_chat_and_survive_a_restart`, `slint-app/tests/check.sh composer` (`docs/checks/composer-01-notices.png`); clipboard image paste, transcription line and Silence button arrive with the platform/audio step; starting-contact line with the start-agent dialog |
 | `qml/components/ConnectionPage.qml` | 151 | ui/panels/connectionpage.slint | todo |
-| `qml/components/ConversationPane.qml` | 575 | ui/workspace.slint | todo |
+| `qml/components/ConversationPane.qml` | 575 | `slint-app/ui/workspace.slint` `Pane` (header, transcript, composer per pane; pair rooms read-only) | verified: `slint-app/tests/check.sh panes` (`docs/checks/panes-01-split.png`), `engine/tests/host_flow.rs::panes_follow_the_selection_and_their_layout_is_restored`; typing indicator and pair participants pending |
 | `qml/components/DeferredPanel.qml` | 74 | ui/workspace.slint | todo |
 | `qml/components/DisplayCellCard.qml` | 200 | ui/transcript.slint | todo |
-| `qml/components/HeaderContext.qml` | 115 | ui/workspace.slint | todo |
-| `qml/components/KeyboardMap.qml` | 146 | ui/workspace.slint | todo |
+| `qml/components/HeaderContext.qml` | 115 | `slint-app/ui/workspace.slint` `Header` (name, workspace kind icon and label via `clarp_core::workspace`, model · effort, working) | wip: in `panes-01-split.png`; runtime popover pending |
+| `qml/components/KeyboardMap.qml` | 146 | `slint-app/src/keymap.rs` (same states, parents, guards, overrides, import validation) + `slint-app/src/commands.rs` (Main.qml `runCommand`) with one root key handler in `app.slint` | verified: `keymap::tests` (4) and `check.sh panes` (Ctrl+Alt+V/Left/Z/X, Escape, E, J, Enter, Ctrl+Shift+K typed through the map); actions of unported dialogs fall through to the focused control until their step |
 | `qml/components/KeymapEditor.qml` | 32 | ui/workspace.slint | todo |
 | `qml/components/LaunchDirectoryPicker.qml` | 113 | ui/panels/launchdirectorypicker.slint | todo |
 | `qml/components/MediaGallery.qml` | 163 | ui/panels/mediagallery.slint | todo |
@@ -47,7 +47,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/NewSessionHub.qml` | 458 | ui/panels/newsessionhub.slint | todo |
 | `qml/components/OrchestratorDialog.qml` | 193 | ui/panels/orchestratordialog.slint | todo |
 | `qml/components/PairRow.qml` | 117 | `slint-app/ui/sidebar.slint` room rows + `engine` rooms (unread from seen revisions; `engine/tests/host_flow.rs::pair_rooms_load_unread_and_are_read_once_opened`) | wip: participants' portraits pending |
-| `qml/components/PaneLeaf.qml` | 69 | ui/workspace.slint | todo |
+| `qml/components/PaneLeaf.qml` | 69 | `slint-app/ui/workspace.slint` `Pane` (active highlight, click to activate) | verified: `slint-app/tests/check.sh panes` (`docs/checks/panes-01-split.png`), `engine/tests/host_flow.rs::panes_follow_the_selection_and_their_layout_is_restored` |
 | `qml/components/PreviewVersionPanel.qml` | 114 | ui/panels/previewversionpanel.slint | todo |
 | `qml/components/ProcessGlyph.qml` | 118 | ui/sidebar.slint | todo |
 | `qml/components/ProcessIndicator.qml` | 85 | ui/sidebar.slint | todo |
@@ -57,7 +57,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/RenameAgentDialog.qml` | 99 | ui/panels/renameagentdialog.slint | todo |
 | `qml/components/ReportView.qml` | 154 | ui/panels/reportview.slint | todo |
 | `qml/components/SettingsPanel.qml` | 625 | ui/panels/settingspanel.slint | todo |
-| `qml/components/ShortcutBar.qml` | 50 | ui/workspace.slint | todo |
+| `qml/components/ShortcutBar.qml` | 50 | `slint-app/ui/app.slint` `ShortcutBar` (mode, hints from `keymap::hints`, connection state) | verified: `check.sh panes` (INSERT/CONVERSATION/AGENTS, hide) |
 | `qml/components/StartAgentDialog.qml` | 368 | ui/panels/startagentdialog.slint | todo |
 | `qml/components/StatusPill.qml` | 49 | ui/sidebar.slint | todo |
 | `qml/components/TeamsPanel.qml` | 564 | ui/panels/teamspanel.slint | todo |
@@ -79,7 +79,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/TypingIndicator.qml` | 42 | ui/transcript.slint | todo |
 | `qml/components/UpdatesPanel.qml` | 331 | ui/panels/updatespanel.slint | todo |
 | `qml/components/VoiceDialog.qml` | 123 | ui/panels/voicedialog.slint | todo |
-| `qml/components/Workspace.qml` | 171 | ui/workspace.slint | todo |
+| `qml/components/Workspace.qml` | 171 | `slint-app/ui/workspace.slint` `Workspace` (panes from `PaneTree::view_layout`, split handles with drag/double-click balance, workspace tabs, save-conflict warning) + `engine/src/workspace.rs` (persistence off the UI thread, joined on close) + `slint-app/src/panes.rs` | verified: `slint-app/tests/check.sh panes` (`docs/checks/panes-01-split.png`), `engine/tests/host_flow.rs::panes_follow_the_selection_and_their_layout_is_restored`; split dragging and the workspace tabs are not driven by a check yet |
 
 ## REWRITE_PLAN behaviours (against the Slint app)
 

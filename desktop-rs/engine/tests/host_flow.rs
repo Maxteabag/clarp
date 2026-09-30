@@ -63,7 +63,7 @@ impl Driver {
     fn new(base: &str) -> Self {
         let woken = Arc::new((Mutex::new(false), Condvar::new()));
         let signal = woken.clone();
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory() };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: None };
         let engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
             *flag.lock().unwrap() = true;
@@ -169,7 +169,7 @@ fn drafts_and_attachments_belong_to_the_chat_and_survive_a_restart() {
     let driver = |base: &str| {
         let mut d = Driver::new(base);
         let settings = Settings::at(file.clone());
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None };
         let signal = d.woken.clone();
         d.engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
@@ -220,4 +220,44 @@ fn drafts_and_attachments_belong_to_the_chat_and_survive_a_restart() {
     d.until("sent", |_| host.requests("POST", "/send").iter().any(|r| r["body"]["text"] == "Read this /srv/uploads/notes.txt"));
     let send = host.requests("POST", "/send").pop().unwrap();
     assert_eq!(send["body"]["queue_if_busy"], true, "Ctrl+Enter queues behind the running turn");
+}
+
+#[test]
+fn panes_follow_the_selection_and_their_layout_is_restored() {
+    let host = Host::start("panes");
+    let store = host.dir.join("workspaces.json");
+    let driver = |base: &str| {
+        let mut d = Driver::new(base);
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: Some(store.clone()) };
+        let signal = d.woken.clone();
+        d.engine = Engine::new(config, move || {
+            let (flag, condvar) = &*signal;
+            *flag.lock().unwrap() = true;
+            condvar.notify_all();
+        })
+        .unwrap();
+        d
+    };
+    let mut d = driver(&host.base);
+    d.engine.start();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    assert_eq!(d.engine.panes().active_session(), "rachel", "the selection is the active pane's chat");
+    d.engine.with_panes(|p| p.split_active("vertical", "mike"));
+    assert_eq!(d.engine.panes().pane_count(), 2);
+    assert_eq!(d.engine.selected_session(), "mike", "the new pane is active and its chat selected");
+    d.until("mike loads in its pane", |e| e.conversation("mike").is_some_and(|c| !c.rows().is_empty()));
+    let left = d.engine.panes().pane_layout().iter().find(|p| p["session"] == "rachel").unwrap()["id"].as_str().unwrap().to_owned();
+    d.engine.with_panes(|p| p.focus_pane(&left));
+    assert_eq!(d.engine.selected_session(), "rachel", "focusing a pane selects its chat");
+    d.engine.select("mike");
+    assert_eq!(d.engine.panes().active_session(), "mike", "choosing a chat puts it in the active pane");
+    assert_eq!(d.engine.panes().pane_count(), 2);
+    d.until("saved", |_| std::fs::read_to_string(&store).is_ok_and(|s| s.contains("mike") && s.contains("vertical")));
+
+    drop(d);
+    let mut d = driver(&host.base);
+    assert_eq!(d.engine.panes().pane_count(), 2, "the layout is restored");
+    d.engine.start();
+    d.until("both panes load", |e| e.conversation("mike").is_some_and(|c| !c.rows().is_empty()) && e.selected_session() == "mike");
+    assert!(d.engine.panes().pane_layout().iter().all(|p| p["session"] == "mike"), "{:?}", d.engine.panes().pane_layout());
 }
