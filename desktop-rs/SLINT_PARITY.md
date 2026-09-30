@@ -93,9 +93,9 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | Open one SSE stream, resume with `Last-Event-ID`, reconnect on silence or failure, and ignore unknown additive fields/events. |  | todo |
 | Send idempotent messages with an optimistic `u-<client_msg_id>` row and keep delivery pending until that id appears in `/log`. | `engine/tests/host_flow.rs::a_send_shows_at_once_and_is_confirmed_by_the_log`; the e2e sends through the Slint composer against tests/qa/host.py; `check.sh composer` checks the `/send` body (text + attachment path, `queue_if_busy`) | verified |
 | Stop a running turn and represent queued, waiting, interrupted, and active states accurately. |  | todo |
-| Record microphone PCM, upload it to `/transcribe`, and carry the returned trace/transcription ids into `/send`. |  | todo |
-| Play announced clips, select sources by protocol precedence, and acknowledge queued/start/success/failure states. |  | todo |
-| Treat `user-notification` as the only unread/desktop-notification decision. |  | todo |
+| Record microphone PCM, upload it to `/transcribe`, and carry the returned trace/transcription ids into `/send`. | `slint-app/tests/check.sh voice` (Ctrl+Shift+Space records the fixture "microphone" `CLARP_AUDIO_INPUT=file:`, WAV to `/transcribe`, `/send` carries `trace_id` and the same `transcription_id`) | verified |
+| Play announced clips, select sources by protocol precedence, and acknowledge queued/start/success/failure states. | `slint-app/tests/check.sh voice` (a recoverable clip is queued, downloaded, played on the silent output and acknowledged `queued`, `play-start`, `play-ok` in order); source precedence and failure acks are `clarp_core::audio` unit tests | verified |
+| Treat `user-notification` as the only unread/desktop-notification decision. | `slint-app/tests/check.sh desktop` (a `user-notification` for a chat that is not open raises the notification, recorded via `CLARP_TEST_NOTIFY_LOG`); unread from `clarp_core::roster` tests | verified |
 | Create/relaunch/fork/release agents and expose the desktop overview, voice-selection, and orchestrator settings workflows. |  | todo |
 | Preserve the desktop pane workspace, collapsible agent rail, keyboard-driven navigation, quick switcher, tool visibility, and scroll-to-latest behavior. | `slint-app/tests/check.sh transcript` covers tool visibility and scroll-to-latest | partial: panes, rail collapse, switcher pending |
 
@@ -106,3 +106,14 @@ loopback-only network namespace (isolated HOME, system PATH), headless on
 Slint's software renderer. The driver (`slint-app/src/driver.rs`) types and
 sends through the real composer, sees the reply stream and complete, and opens
 a second chat. Screenshots: `slint-app/docs/e2e/`.
+
+
+## Platform (no QML counterpart)
+
+| Qt app piece | Slint app | Status |
+|---|---|---|
+| `app/src/bridge/audio_controller.rs` + `audio_output.rs`, `audio_input.rs`, `audio_coordinator.rs` | `slint-app/src/platform/audio.rs` (same logic, notices instead of Qt signals) + the three modules copied unchanged | verified: `check.sh voice`; checks run with `CLARP_AUDIO_OUTPUT=null` and a fixture microphone, never the user's devices |
+| `app/src/mpris.rs` | `slint-app/src/platform/mpris.rs` (copied) + `platform::serve_mpris` / `publish_playback` | verified: `check.sh voice` queries Identity and PlaybackStatus on the check's private bus |
+| `app/src/bridge/desktop_services.rs` (tray, notifications, presence, logind) | `slint-app/src/platform/desktop.rs` (input from winit window events and the root key handler instead of a Qt event filter) | verified: `check.sh desktop` (notification, presence and activity reports); the tray needs a StatusNotifier host, which the checks' private bus has not |
+| `app/src/bridge/instance_server.rs` | `slint-app/src/launch.rs` over `clarp_core::instance` | verified: `CLARP_TEST_INSTANCE=1 check.sh instance` (a second launch hands over in ~4 ms and exits 0) |
+| `app/src/bridge/diagnostics.rs` + `stall_monitor.rs` | `slint-app/src/platform/diagnostics.rs` + `stall_monitor.rs` (copied); engine wakes stand in for the dispatcher's `awake` | verified: `CLARP_STALL_THRESHOLD_MS=150 CLARP_STALL_LOG=… check.sh diagnostics` (a 600 ms block is logged with its stack) |

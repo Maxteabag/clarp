@@ -10,6 +10,7 @@ mod commands;
 mod driver;
 mod headless;
 mod keymap;
+mod launch;
 mod panes;
 mod platform;
 mod settings_view;
@@ -47,6 +48,8 @@ pub struct App {
     pub switcher: RefCell<SwitcherState>,
     /// The dialog over the window ("" for none).
     pub overlay: RefCell<String>,
+    /// An agent the launch asked for, until the window starts it.
+    pub launch: RefCell<Option<launch::Request>>,
 }
 
 /// View preferences the window keeps (the Qt controller's names).
@@ -274,6 +277,7 @@ pub fn audio_notices(notices: Vec<platform::audio::Notice>) {
 
 /// Applies what the engine has queued; scheduled on the UI thread by wake.
 pub fn pump() {
+    platform::diagnostics::awake();
     let Some(app) = app() else { return };
     let changes = app.engine.borrow_mut().pump();
     if !changes.is_empty() {
@@ -288,6 +292,9 @@ fn main() {
     let shot = arg("--shot");
     let check = arg("--check");
     let headless = e2e_out.is_some() || shot.is_some() || check.is_some() || args.iter().any(|a| a == "--headless");
+    let options = launch::options(&launch_arguments(&args));
+    // Checks run alone; a desktop launch shares one process per desktop.
+    let socket = if headless && std::env::var_os("CLARP_TEST_INSTANCE").is_none() { None } else { launch::forward_or_socket(&launch_arguments(&args)) };
     if headless && let Err(error) = headless::install(1280, 800, 1.0) {
         eprintln!("clarp-slint: {error}");
         std::process::exit(1);
@@ -340,6 +347,7 @@ fn main() {
         prefs: RefCell::new(prefs),
         switcher: RefCell::new(SwitcherState::default()),
         overlay: RefCell::new(String::new()),
+        launch: RefCell::new(None),
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
@@ -558,7 +566,15 @@ fn main() {
     platform::audio::start(muted);
     platform::serve_mpris();
     platform::desktop::start();
+    platform::diagnostics::start(headless);
+    if let Some(socket) = &socket {
+        launch::listen(socket);
+    }
     state.engine.borrow_mut().start();
+    let setting = state.engine.borrow().settings().boolean("launch/newAgentOnStartup", true);
+    if options.launch_on_startup(false, setting, headless) {
+        launch::start(&state, &window, launch::Request::from_options(&options));
+    }
     drop(state);
     if let Some(out) = e2e_out {
         driver::start(out);
@@ -577,6 +593,21 @@ fn main() {
         app.engine.borrow_mut().shutdown();
     }
     std::process::exit(driver::exit_code());
+}
+
+/// The launch options, without the check harness's own flags.
+fn launch_arguments(args: &[String]) -> Vec<String> {
+    const WITH_VALUE: [&str; 6] = ["--e2e-out", "--shot", "--select", "--check", "--out", "--theme"];
+    let mut rest = Vec::new();
+    let mut arguments = args.iter();
+    while let Some(argument) = arguments.next() {
+        if WITH_VALUE.contains(&argument.as_str()) {
+            arguments.next();
+        } else if argument != "--headless" {
+            rest.push(argument.clone());
+        }
+    }
+    rest
 }
 
 /// Runs `act` with the app and its window, when both are there.

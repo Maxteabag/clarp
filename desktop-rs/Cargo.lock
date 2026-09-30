@@ -1009,6 +1009,7 @@ dependencies = [
 name = "clarp-slint"
 version = "0.1.0"
 dependencies = [
+ "backtrace",
  "chrono",
  "clarp-core",
  "clarp-engine",
@@ -1016,6 +1017,7 @@ dependencies = [
  "futures-util",
  "image",
  "ksni",
+ "libc",
  "rfd",
  "rodio",
  "serde",

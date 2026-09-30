@@ -9,6 +9,8 @@ pub mod audio_coordinator;
 pub mod audio_input;
 pub mod audio_output;
 pub mod desktop;
+pub mod diagnostics;
+pub mod stall_monitor;
 pub mod mpris;
 pub mod runtime;
 
