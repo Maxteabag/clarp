@@ -316,6 +316,7 @@ pub fn start_check(name: &str, out: String) {
         "diagnostics" => diagnostics_check(out),
         "preview" => preview_check(out),
         "connection" => connection_check(out),
+        "lifecycle" => lifecycle_check(out),
         // ---- updates and teams
         "updates" => updates_check(out),
         "teams" => teams_check(out),
@@ -1251,6 +1252,85 @@ fn connection_check(out: String) {
                 return false;
             }
             check(true, "and shows it again");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check lifecycle --out DIR`: Relaunch (profile or overview) opens the
+/// Start dialog replacing the agent; it relaunches fresh, and forks a past
+/// conversation of the same folder.
+fn lifecycle_check(out: String) {
+    use crate::StartAgent;
+    let out2 = out.clone();
+    let catalog = serde_json::json!({"providers": {
+        "codex": {"label": "Codex", "sort_index": 1, "supports_resume": true, "supports_fork": true, "models": [{"id": "gpt-5", "label": "GPT-5"}]},
+    }});
+    fn created() -> Vec<serde_json::Value> {
+        posts("/agents").into_iter().map(|r| r["body"].clone()).collect()
+    }
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(move |app, _window, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/catalog", &catalog).is_ok(), "the Host's Codex can resume and fork");
+            app.engine.borrow_mut().reconnect();
+            crate::pump();
+            true
+        })),
+        ("relaunch", Box::new(|app, window, _| {
+            if app.engine.borrow().connection_state() != "live" || !app.engine.borrow().backend_supports_fork("codex") {
+                return false;
+            }
+            app.engine.borrow_mut().select("mike");
+            crate::pump();
+            check(crate::commands::run(&app_now(), window, "relaunch-agent"), "Relaunch runs");
+            true
+        })),
+        ("start dialog", Box::new(move |_, window, elapsed| {
+            let start = window.global::<StartAgent>();
+            if window.get_overlay() != "start-agent" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(start.get_relaunch() && start.get_name() == "Mike", &format!("Relaunch opens the Start dialog for Mike: {}", start.get_name()));
+            check(start.get_can_fork(), "Codex offers fork");
+            start.set_workspace("/tmp".into());
+            start.invoke_workspace_edited("/tmp".into());
+            shot(&out2, "lifecycle-01-relaunch");
+            start.invoke_start();
+            true
+        })),
+        ("fresh", Box::new(|_, _window, _| {
+            let Some(body) = created().pop() else { return false };
+            check(body["replace_sid"] == "mike" && body.get("fork_session_id").is_none(), &format!("it relaunches Mike fresh, replacing the old session: {body}"));
+            check(crate::commands::run(&app_now(), &crate::window().expect("window"), "relaunch-agent"), "Relaunch again");
+            true
+        })),
+        ("fork mode", Box::new(|_, window, elapsed| {
+            let start = window.global::<StartAgent>();
+            if window.get_overlay() != "start-agent" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            start.set_workspace("/tmp".into());
+            start.invoke_workspace_edited("/tmp".into());
+            start.invoke_mode_chosen("fork".into());
+            true
+        })),
+        ("past sessions", Box::new(|_, window, _| {
+            let start = window.global::<StartAgent>();
+            if start.get_past_sessions().row_count() == 0 {
+                return false;
+            }
+            start.invoke_past_chosen(0);
+            start.invoke_start();
+            true
+        })),
+        ("forked", Box::new(|_, _window, _| {
+            let bodies = created();
+            let Some(body) = bodies.iter().find(|b| b.get("fork_session_id").is_some()) else { return false };
+            check(body["fork_session_id"] == "old-1" && body["replace_sid"].as_str().is_some_and(|s| s.starts_with("mike")), &format!("fork starts from the chosen past conversation: {body}"));
             true
         })),
     ];
