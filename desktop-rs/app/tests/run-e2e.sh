@@ -32,7 +32,7 @@ timeout 180 unshare --user --map-root-user --net bash -c '
         "$E2E_VENV/bin/python" "$E2E_REPO/tests/qa/host.py" --state-dir "$s/host" --port 0 > "$s/host.log" 2>&1 &
     host=$!
     for _ in $(seq 100); do [ -s "$s/host/host.json" ] && break; sleep 0.1; done
-    base=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"url\"])" "$s/host/host.json") || { kill $host; exit 1; }
+    base=$(/usr/bin/python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[\"url\"])" "$s/host/host.json") || { kill $host; exit 1; }
     case "$base" in http://127.0.0.1:*) ;; *) echo "refusing a Host that is not on loopback: $base"; kill $host; exit 1 ;; esac
     env -i HOME="$s/home" PATH=/usr/bin:/bin LANG=C.UTF-8 \
         CLARP_BASE_URL="$base" CLARP_TOKEN=qa-host-test CLARP_SETTINGS="$s/settings.json" \

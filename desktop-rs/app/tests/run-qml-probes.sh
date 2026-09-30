@@ -2,6 +2,9 @@
 # Run every offscreen QML probe against the built Rust desktop binary.
 # Usage (from desktop-rs/): app/tests/run-qml-probes.sh [target/debug/clarp-desktop]
 set -u
+# The system Python (dbus, gi and the fake Host need nothing else); a
+# version manager on PATH must not decide which interpreter runs the checks.
+python3=${CLARP_TEST_PYTHON:-/usr/bin/python3}
 # [binary] [probe.qml...]
 binary=target/debug/clarp-desktop
 if [ $# -gt 0 ] && [[ "$1" != *.qml ]]; then binary=$1; shift; fi
@@ -32,7 +35,7 @@ for probe in "${probes[@]}"; do
     base_url="$CLARP_BASE_URL"
     host_pid=""
     if grep -q 'needs: fake-host' "$probe"; then
-        python3 app/tests/fake_host.py --port-file "$scratch/$name/port" --log "$scratch/$name/host.log" &
+        "$python3" app/tests/fake_host.py --port-file "$scratch/$name/port" --log "$scratch/$name/host.log" &
         host_pid=$!
         for _ in $(seq 50); do [ -s "$scratch/$name/port" ] && break; sleep 0.1; done
         base_url="http://127.0.0.1:$(cat "$scratch/$name/port")"
