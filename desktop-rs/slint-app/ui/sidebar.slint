@@ -1,0 +1,87 @@
+import { Palette } from "theme.slint";
+
+export struct ChatRow {
+    session: string,
+    name: string,
+    detail: string,
+    initial: string,
+    busy: bool,
+    unread: bool,
+    selected: bool,
+}
+
+// The chat list (ChatList/ChatRow in QML): one row per agent.
+export component Sidebar inherits Rectangle {
+    in property <[ChatRow]> rows;
+    callback chosen(string);
+    background: Palette.raised;
+    VerticalLayout {
+        padding: 8px;
+        spacing: 4px;
+        Text {
+            text: "Chats";
+            color: Palette.muted;
+            font-size: 12px;
+            vertical-stretch: 0;
+        }
+        list := Flickable {
+            vertical-stretch: 1;
+            content-height: root.rows.length * 60px;
+            for row[index] in root.rows: Rectangle {
+                y: index * 60px;
+                height: 56px;
+                width: parent.width;
+                background: row.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
+                accessible-role: list-item;
+                accessible-label: row.name;
+                touch := TouchArea {
+                    clicked => { root.chosen(row.session); }
+                }
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 10px;
+                    Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 18px;
+                        border-width: 1px;
+                        border-color: row.busy ? Palette.success : Palette.border;
+                        Text {
+                            text: row.initial;
+                            color: Palette.chrome-text;
+                            font-size: 15px;
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: row.name;
+                                color: Palette.chrome-text;
+                                font-weight: row.unread ? 700 : 500;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+                            if row.unread: Rectangle {
+                                width: 8px;
+                                height: 8px;
+                                border-radius: 4px;
+                                background: Palette.accent;
+                                y: (parent.height - self.height) / 2;
+                            }
+                        }
+                        Text {
+                            text: row.detail;
+                            color: row.busy ? Palette.warning : Palette.muted;
+                            font-size: 12px;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -18,7 +18,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 
 | QML file | Lines | Slint target | Status |
 |---|---|---|---|
-| `qml/Main.qml` | 874 | app shell (ui/main.slint) | todo |
+| `qml/Main.qml` | 874 | `slint-app/ui/app.slint` + `slint-app/src/main.rs` | wip: window, header with connection state, error banner, sidebar/transcript/composer layout on `clarp-engine`; e2e `slint-app/tests/run-e2e.sh` (roster, send, streaming, second chat) passes |
 | `qml/PreviewVersionWindow.qml` | 42 | preview versions window | todo |
 | `qml/components/ActivityExplanation.qml` | 134 | ui/transcript.slint | todo |
 | `qml/components/ActivitySweep.qml` | 15 | ui/sidebar.slint | todo |
@@ -98,3 +98,11 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | Treat `user-notification` as the only unread/desktop-notification decision. |  | todo |
 | Create/relaunch/fork/release agents and expose the desktop overview, voice-selection, and orchestrator settings workflows. |  | todo |
 | Preserve the desktop pane workspace, collapsible agent rail, keyboard-driven navigation, quick switcher, tool visibility, and scroll-to-latest behavior. |  | todo |
+
+## End-to-end
+
+`slint-app/tests/run-e2e.sh` runs the Slint app against `tests/qa/host.py` in a
+loopback-only network namespace (isolated HOME, system PATH), headless on
+Slint's software renderer. The driver (`slint-app/src/driver.rs`) types and
+sends through the real composer, sees the reply stream and complete, and opens
+a second chat. Screenshots: `slint-app/docs/e2e/`.

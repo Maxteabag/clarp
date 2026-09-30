@@ -1,0 +1,22 @@
+[package]
+name = "clarp-slint"
+version = "0.1.0"
+edition = "2024"
+description = "The Clarp desktop in Slint (Rust-native UI, no Qt) on clarp-engine"
+
+[[bin]]
+name = "clarp-slint"
+path = "src/main.rs"
+
+[dependencies]
+clarp-core = { path = "../core" }
+clarp-engine = { path = "../engine" }
+image = { version = "0.25", default-features = false, features = ["png"] }
+slint = { version = "1.18", default-features = false, features = [
+    "std", "compat-1-2", "accessibility",
+    "backend-winit", "backend-winit-wayland", "backend-winit-x11",
+    "renderer-software", "software-renderer-systemfonts",
+] }
+
+[build-dependencies]
+slint-build = "1.18"
