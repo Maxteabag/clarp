@@ -124,6 +124,7 @@ export component Pane inherits Rectangle {
     callback toggle-activity(string, string);
     callback silence();
     callback cancel-transcription();
+    callback paste-image() -> bool;
     // The transcript and composer tell the window where the keyboard is and
     // whether the reader follows, for shortcuts and checks.
     callback reported(bool, bool, length, bool, bool);
@@ -215,6 +216,7 @@ export component Pane inherits Rectangle {
             playing: root.pane.playing && root.pane.active;
             silence => { root.silence(); }
             cancel-transcription => { root.cancel-transcription(); }
+            paste-image => { return root.paste-image(); }
             active: root.pane.session != "";
             agent-name: root.pane.name;
             send(text, queue) => { root.send(text, queue); }
@@ -283,6 +285,7 @@ export component Workspace inherits Rectangle {
     callback toggle-activity(string, string, string);
     callback silence();
     callback cancel-transcription(string);
+    callback paste-image(string) -> bool;
     callback reported(string, bool, bool, length, bool, bool);
     callback switch-workspace(string);
     callback create-workspace();
@@ -368,6 +371,7 @@ export component Workspace inherits Rectangle {
         toggle-activity(id, group) => { root.toggle-activity(pane.id, id, group); }
         silence => { root.silence(); }
         cancel-transcription => { root.cancel-transcription(pane.id); }
+        paste-image => { return root.paste-image(pane.id); }
         reported(follows, at-end, offset, transcript, composer) => { root.reported(pane.id, follows, at-end, offset, transcript, composer); }
     }
     for split in root.splits: Handle {

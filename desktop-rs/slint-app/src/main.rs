@@ -402,6 +402,15 @@ fn main() {
             }
         }
     });
+    window.on_paste_image(|pane| {
+        let Some(app) = app() else { return false };
+        let session = app.session_of(&pane);
+        let pasted = platform::clipboard::paste_image(&mut app.engine.borrow_mut(), &session);
+        if pasted {
+            pump_now(&app);
+        }
+        pasted
+    });
     window.on_silence(|| {
         platform::audio::with(platform::audio::Audio::silence);
     });

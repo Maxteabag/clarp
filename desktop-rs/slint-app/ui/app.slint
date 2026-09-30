@@ -110,6 +110,7 @@ export component AppWindow inherits Window {
     callback toggle-activity(string, string, string);
     callback silence();
     callback cancel-transcription(string);
+    callback paste-image(string) -> bool;
     callback pane-reported(string, bool, bool, length, bool, bool);
     callback switch-workspace(string);
     callback create-workspace();
@@ -244,6 +245,7 @@ export component AppWindow inherits Window {
                     toggle-activity(id, message, group) => { root.toggle-activity(id, message, group); }
                     silence => { root.silence(); }
                     cancel-transcription(id) => { root.cancel-transcription(id); }
+                    paste-image(id) => { return root.paste-image(id); }
                     reported(id, follows, at-end, offset, transcript, composer) => {
                         root.pane-reported(id, follows, at-end, offset, transcript, composer);
                     }
