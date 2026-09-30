@@ -44,7 +44,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/views/TranscriptLayout` | 890 | `core/src/transcript_layout.rs` + `app/src/bridge/transcript_layout.rs` + `app/src/bridge/quick.rs` | verified: geometry in `core/tests/transcript_layout.rs`; the native QQuickItem (cxx-qt base QQuickItem, C++ creation semantics via QQmlComponent begin/complete + indexOfProperty + QQmlPropertyMap, signature-forwarded model/Flickable signals) runs the C++ test scene in `app/tests/qml/transcript_layout_probe.qml` |
 | `src/views/TranscriptRows` | 310 | `core/src/transcript_rows.rs` + `app/src/bridge/transcript_rows.rs` | verified (`core/tests/transcript_rows.rs`; list model over any source via signature-forwarded signals in `app/tests/qml/transcript_rows_probe.qml`: finishing splits without reset, rows map around split messages) |
 | `src/app/AvatarMotionClock.h` (header-only) | 224 | `core/src/avatar_motion.rs` + `app/src/bridge/avatar_motion.rs` | verified (`core/tests/avatar_motion.rs`; the real Main.qml binds `avatarMotion` without errors); pending: window-visibility watching (`watchMotionWindow`) with the platform step, and observers are released by QML `onDestruction` rather than a `destroyed` hook |
-| `src/app/DesktopPalette.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
+| `src/app/DesktopPalette.h` (header-only) | 40 | Main.qml's window palette (shared QML) | verified: the C++ mirror into the application palette is not needed, Main sets every role and state and popups inherit it (`palette_probe.qml`) |
 | `src/app/KeyboardSmokeCheck.h` (header-only) | 330 | `desktop-rs/src/app/` | todo |
 | `src/app/LocalReport.h` (header-only) | 40 | `core/src/links.rs::local_report_path` | verified (`core/tests/links.rs::only_readable_non_executable_reports_open`); content is checked by magic bytes/UTF-8 instead of the freedesktop MIME database |
 | `src/app/MemoryDiagnostics.h` (header-only) | 71 | `core/src/diagnostics.rs` + `app/src/bridge/diagnostics.rs` | verified: minute `memory {...}` line (RSS split, window items/text items, controller `memoryCounters`, CPU, stalls); `app/tests/run-desktop-services.sh` checks it on the real window |
@@ -167,13 +167,13 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_tool_narrator::sharedHostPollsWithoutStartingLocalCodex` | `core/tests/narrator.rs::shared_host_polls_until_ready_and_caches + narrator_probe.qml` | verified |
 | `tst_tool_narrator::optInDeduplicatesBatchesAndPreservesCache` | `core/tests/narrator.rs::identical_requests_are_deduplicated_* + payload_redacts_and_never_sends_results` | wip: local-codex argv/diagnostics assertions not applicable (not ported) |
 | `tst_tool_narrator::disableCancelsAndRejectsLateReplies` | `core/tests/narrator.rs::late_replies_after_disable_are_rejected` | verified |
-| `tst_tool_narrator::failureFallsBackWithoutRetryStorm_data` | | todo |
+| `tst_tool_narrator::failureFallsBackWithoutRetryStorm_data` | `core/tests/narrator.rs::failures_fall_back_without_a_retry_storm` (its failure/invalid/timeout rows are that test's cases) | verified |
 | `tst_tool_narrator::failureFallsBackWithoutRetryStorm` | `core/tests/narrator.rs::failures_fall_back_without_a_retry_storm` | verified (Host failure, invalid reply, timeout, failed row) |
 | `tst_tool_narrator::scriptContextIsOptInBoundedAndInvalidatesCache` | `core/tests/narrator.rs::—` | not ported: local-codex script evidence only |
 | `tst_tool_narrator::memoizedLookupsFollowEveryFieldThatIsSent` | `core/tests/narrator.rs::memoized_lookups_follow_every_field_that_is_sent` | verified |
 | `tst_tool_narrator::detailLevelsChangeInstructionsAndDiscardPreviousTranslations` | `core/tests/narrator.rs::detail_levels_discard_previous_translations` | verified (instructions are the Host's now) |
 | `tst_avatar_motion::main` (standalone program) | `core/tests/avatar_motion.rs` | wip: ticking lifecycle (observe, reduced motion, foreground, reconcile) verified; window-visibility half pending with `watchMotionWindow` |
-| `tst_avatar_render::main` (standalone program) | | todo |
+| `tst_avatar_render::main` (standalone program) | `app/tests/qml/avatar_render_probe.qml` (real AvatarActivity/ActivitySweep on the controller clock; frames compared byte for byte) | verified: working frames differ, reduced motion and idle hold still, hidden window stops the clock; application-inactive is covered by `core/tests/avatar_motion.rs` |
 | `tst_desktop_presence::eligibilityExpiresWithoutUserInput` | `core/tests/presence.rs::eligibility_expires_without_user_input` | verified (core) |
 | `tst_desktop_presence::focusLockSleepAndPreferenceReleasePresence` | `core/tests/presence.rs::focus_lock_sleep_and_preference_release_presence` | verified (core) |
 | `tst_desktop_presence::maintenanceActivityDoesNotDependOnPushPreference` | `core/tests/presence.rs::maintenance_activity_does_not_depend_on_push_preference` | verified (core) |
@@ -185,7 +185,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_markdown_style::quotesAndTablesAreStyled` | `core/tests/markdown_style.rs::quotes_lists_and_tables_are_styled` | verified (core) |
 | `tst_markdown_style::secondPassIsANoOp` | `app/tests/qml/markdown_style_probe.qml` (cached re-render) | verified: rendering is pure and cached; there is no in-place restyle pass to repeat |
 | `tst_markdown_style::styledHtmlCarriesTheFinalLayout` | `core/tests/markdown_style.rs::styled_html_carries_the_final_layout` | verified (core) |
-| `tst_palette::overridesLightHostInEveryState` | | todo |
+| `tst_palette::overridesLightHostInEveryState` | `app/tests/qml/palette_probe.qml` (the real Main over offscreen's light palette, every state) | verified |
 | `tst_reading_theme::bodySizeAndMeasureStayInReadingRange` | `core/tests/reading_theme.rs::body_size_and_measure_stay_in_reading_range` | verified |
 | `tst_reading_theme::bodyTextMeetsAaaOnEverySurface` | `core/tests/reading_theme.rs::body_text_meets_aaa_on_every_surface` | verified |
 | `tst_reading_theme::chromeRolesStayReadableOnEveryTheme` | `core/tests/reading_theme.rs::chrome_roles_stay_readable_on_every_theme` | verified |
