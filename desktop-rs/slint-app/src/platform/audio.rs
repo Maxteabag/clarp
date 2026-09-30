@@ -144,6 +144,11 @@ impl Audio {
     pub fn recording(&self) -> bool {
         self.recording
     }
+    /// Dictations still being transcribed, for any chat.
+    pub fn transcriptions_in_flight(&self) -> i32 {
+        self.transcriptions.in_flight()
+    }
+
     /// The chat the recording in progress is for.
     pub fn recording_target(&self) -> String {
         self.recording_session.clone()

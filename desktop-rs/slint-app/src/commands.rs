@@ -207,6 +207,13 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         "jump-latest" => app.to_latest(),
         "stop-agent" => app.engine.borrow_mut().stop(),
+        "preview-versions" => {
+            if !crate::preview_view::enabled() {
+                return false;
+            }
+            crate::preview_view::open(app, window);
+        }
+        "update-preview" => return crate::preview_view::update_or_open(app, window),
         "tool-narration" => {
             let enabled = app.engine.borrow().narrator_enabled();
             app.engine.borrow_mut().set_narrator_enabled(!enabled);
@@ -286,6 +293,7 @@ fn toggles(app: &App, window: &AppWindow) -> switcher::Toggles {
         shared_filesystem: engine.shared_filesystem(),
         activity_mode: engine.activity_mode(),
         narration: engine.narrator_enabled(),
+        preview_versions: crate::preview_view::enabled(),
         detail_level: engine.narrator_detail_level(),
     }
 }

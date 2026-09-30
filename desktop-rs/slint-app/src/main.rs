@@ -12,6 +12,7 @@ mod headless;
 mod keymap;
 mod launch;
 mod panes;
+mod preview_view;
 mod platform;
 mod settings_view;
 mod switcher;
@@ -318,6 +319,9 @@ fn main() {
         eprintln!("clarp-slint: {error}");
         std::process::exit(1);
     }
+    if options.preview_versions {
+        preview_view::run_manager();
+    }
     let window = match AppWindow::new() {
         Ok(window) => window,
         Err(error) => {
@@ -622,6 +626,9 @@ fn main() {
     platform::audio::start(muted);
     platform::serve_mpris();
     platform::desktop::start();
+    preview_view::start(false);
+    preview_view::wire(&window);
+    preview_view::show();
     platform::desktop::set_ui_scale(ui_scale);
     // The window system's window exists once the loop runs: scale it then.
     slint::Timer::single_shot(std::time::Duration::from_millis(50), move || platform::desktop::set_ui_scale(ui_scale));
