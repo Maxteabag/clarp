@@ -144,7 +144,7 @@ fn state(name: &str) -> Vec<Binding> {
         ],
         "composer" => vec![
             b("jump-latest", &["Ctrl+End"], "Latest", true, Agent, true),
-            b("send", &["Return"], "Send", true, Send, true),
+            b("send", &["Return"], "Send", false, Send, true),
             b("newline", &["Shift+Return"], "New line", false, Always, true),
             b("queue", &["Ctrl+Return"], "Queue", true, Send, true),
             b("focus-pane", &["Ctrl+H"], "Chat", true, Always, false),
@@ -388,8 +388,8 @@ mod tests {
         assert_eq!(action_for("pane", "N", &none, nothing), None);
         assert_eq!(action_for("pane", "N", &none, Facts { attention: true, ..nothing }), Some("next-attention"));
         assert_eq!(action_for("pane", "Ctrl+End", &none, nothing), None);
-        assert!(!hints("composer", &none, nothing).iter().any(|b| b.action == "send"));
-        assert!(hints("composer", &none, all()).iter().any(|b| b.action == "send"));
+        assert!(!hints("composer", &none, nothing).iter().any(|b| b.action == "queue"));
+        assert!(hints("composer", &none, all()).iter().any(|b| b.action == "queue"));
     }
 
     #[test]
