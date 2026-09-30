@@ -31,6 +31,7 @@ Main {
     property int screenshotDelay: 2000
     property int screenshotWidth: 0
     property int screenshotHeight: 0
+    property string instanceSocket: ""
     Component.onCompleted: {
         if (screenshotWidth > 0 && screenshotHeight > 0) {
             root.width = Math.max(760, screenshotWidth)
@@ -40,6 +41,24 @@ Main {
             Qt.callLater(() => root.openLaunchAgent(launchBackend, launchModel, launchEffort, launchAnonymous, launchDirectory))
     }
     DesktopServices { window: root }
+    // A second launch opens its window here. A closed extra window is
+    // destroyed with its controller, so it stops costing memory; the first
+    // window keeps the process state, tray and presence.
+    InstanceServer {
+        socketPath: root.instanceSocket
+        onWindowRequested: (launch, sidebarVisible, backend, model, effort, anonymous, directory) => {
+            const window = extraWindow.createObject(null, { launchOnStartup: launch, sidebarVisible: sidebarVisible })
+            if (!window) {
+                console.warn("Clarp: could not open a window for a second launch:", extraWindow.errorString())
+                return
+            }
+            window.visibleChanged.connect(() => { if (!window.visible) window.destroy() })
+            if (launch)
+                Qt.callLater(() => window.openLaunchAgent(backend, model, effort, anonymous, directory))
+            window.requestActivate()
+        }
+    }
+    Component { id: extraWindow; Main {} }
     WindowCapture { id: capture }
     Timer {
         interval: root.screenshotDelay
@@ -67,6 +86,16 @@ fn main() {
     }
     if options.version {
         println!("clarp-desktop {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    // A second launch of this desktop opens its window in the running
+    // process (~57 ms against ~210 ms for the C++ client) and exits here.
+    let instance_socket = std::env::current_exe()
+        .ok()
+        .and_then(|executable| clarp_core::instance::socket_path(&arguments, &executable, |name| std::env::var(name).ok()));
+    if let Some(socket) = &instance_socket
+        && clarp_core::instance::forward(socket, &arguments)
+    {
         return;
     }
     let screenshot = std::env::var_os("CLARP_SCREENSHOT_PATH").is_some();
@@ -124,6 +153,9 @@ fn main() {
             properties.insert(QString::from("launchEffort"), text(options.effort.as_deref().unwrap_or_default()));
             properties.insert(QString::from("launchAnonymous"), QVariant::from(&options.anonymous_mode()));
             properties.insert(QString::from("launchDirectory"), text(options.cwd.as_deref().unwrap_or_default()));
+            if let Some(socket) = &instance_socket {
+                properties.insert(QString::from("instanceSocket"), text(&socket.to_string_lossy()));
+            }
             if let Ok(path) = std::env::var("CLARP_SCREENSHOT_PATH") {
                 let delay = std::env::var("CLARP_SCREENSHOT_DELAY_MS").ok().and_then(|d| d.parse::<i32>().ok());
                 let delay = delay.filter(|d| *d > 0).map_or(2_000, |d| d.clamp(2_400, 60_000));
@@ -148,7 +180,10 @@ fn main() {
     // The restore request stays in the environment: worker threads run by
     // now, so it cannot be removed safely. Processes the controller starts
     // drop it themselves (see `clarp_core::launch::RESTORE_VARIABLES`).
-    if let Some(app) = app.as_mut() {
-        std::process::exit(app.exec());
-    }
+    let code = app.as_mut().map_or(1, |app| app.exec());
+    // Tear the windows down before exiting, so what their objects release
+    // on destruction happens: drafts are saved, the instance socket goes.
+    drop(engine);
+    drop(app);
+    std::process::exit(code);
 }

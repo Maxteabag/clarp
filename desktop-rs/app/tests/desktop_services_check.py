@@ -126,8 +126,31 @@ try:
     check(wait(lambda: any(a.get("foreground") for a in activity())), "the shown window reports foreground activity")
     first = activity()[0]
     check(first["instance_id"] and first["sequence"] >= 1 and "input_age_ms" in first, "activity report: " + json.dumps(first))
+
+    # A second launch opens its window in this process and exits at once.
+    def gets():
+        log = [json.loads(line) for line in open(os.environ["CLARP_HOST_LOG"]) if line.strip()]
+        return [r["path"] for r in log if r["method"] == "GET"]
+    runtime = os.environ["XDG_RUNTIME_DIR"]
+    sockets = [name for name in os.listdir(runtime) if name.startswith("clarp-desktop-") and name.endswith(".sock")]
+    check(len(sockets) == 1 and os.stat(os.path.join(runtime, sockets[0])).st_mode & 0o777 == 0o700,
+          "the first window listens on a private instance socket: " + ", ".join(sockets))
+    startup = gets()[0]
+    before = gets().count(startup)
+    started = time.time()
+    second = subprocess.run([binary, "--no-new-agent"], capture_output=True, timeout=20)
+    took = time.time() - started
+    check(second.returncode == 0 and took < 2, f"a second launch hands over and exits ({took:.2f} s, exit {second.returncode})")
+    check(wait(lambda: gets().count(startup) > before), f"the running app opens a second window, which loads {startup}")
+    check(app.poll() is None, "the first window keeps running")
     menu.Event(entries["Quit"], "clicked", dbus.String(""), dbus.UInt32(0))
     check(wait(lambda: app.poll() is not None, 10) and app.returncode == 0, "Quit ends the app cleanly")
+    check(not any(name.endswith(".sock") for name in os.listdir(runtime)), "quitting removes the instance socket")
+    alone = subprocess.Popen([binary, "--no-new-agent"], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    check(wait(lambda: any(n.endswith(".sock") for n in os.listdir(runtime)) or alone.poll() is not None, 15)
+          and alone.poll() is None, "with nobody listening, the next launch runs and listens itself")
+    alone.terminate()
+    alone.wait(10)
 finally:
     if app.poll() is None:
         app.kill()
