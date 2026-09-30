@@ -53,7 +53,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/ProcessIndicator.qml` | 85 | ui/sidebar.slint | todo |
 | `qml/components/ProcessPopover.qml` | 236 | ui/sidebar.slint | todo |
 | `qml/components/QueueDialog.qml` | 167 | ui/panels/queuedialog.slint | todo |
-| `qml/components/QuickSwitcher.qml` | 440 | ui/switcher.slint (prototype exists) | todo |
+| `qml/components/QuickSwitcher.qml` | 440 | `slint-app/ui/switcher.slint` + `slint-app/src/switcher.rs` (commands, settings toggles incl. reading themes and tool activity, agents ranked by `switcher_rank`, selection kept by identity) + `commands.rs` | verified: `switcher::tests` (2), `slint-app/tests/check.sh switcher` (Ctrl+K, ranking, Up/Down/Enter, a command, a setting, Escape, click outside; `docs/checks/switcher-01-search.png`); contacts arrive with the start-agent flow, tool-detail levels with the narrator |
 | `qml/components/RenameAgentDialog.qml` | 99 | ui/panels/renameagentdialog.slint | todo |
 | `qml/components/ReportView.qml` | 154 | ui/panels/reportview.slint | todo |
 | `qml/components/SettingsPanel.qml` | 625 | ui/panels/settingspanel.slint | todo |

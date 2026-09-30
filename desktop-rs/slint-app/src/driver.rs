@@ -297,6 +297,7 @@ pub fn start_check(name: &str, out: String) {
         "transcript" => transcript_check(out),
         "composer" => composer_check(out),
         "panes" => panes_check(out),
+        "switcher" => switcher_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
@@ -589,7 +590,7 @@ fn panes_check(out: String) {
                 return false;
             }
             check((view().height - 0.7).abs() < 0.01 || (view().height - 0.3).abs() < 0.01, "dragging the split resizes the panes");
-            check(!window.get_workspace_bar(), "one workspace needs no tabs");
+            check(window.get_workspace_bar(), "the workspace bar shows by default, as in the Qt app");
             window.invoke_create_workspace();
             true
         })),
@@ -598,7 +599,7 @@ fn panes_check(out: String) {
                 return false;
             }
             let active = window.get_workspaces().iter().find(|w| w.active).map(|w| w.name.to_string()).unwrap_or_default();
-            check(window.get_workspace_bar() && active == "Workspace 2", &format!("a new workspace shows the tabs and opens: {active}"));
+            check(active == "Workspace 2", &format!("a new workspace gets a tab and opens: {active}"));
             check(app.engine.borrow().panes().pane_count() == 1, "with a single pane");
             headless::press_with(&[Key::Control, Key::Alt], "w");
             true
@@ -609,6 +610,140 @@ fn panes_check(out: String) {
                 return false;
             }
             check(app.engine.borrow().panes().pane_count() == 2, "Ctrl+Alt+W returns to the first workspace and its two panes");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check switcher --out DIR`: Ctrl+K opens it from the composer, typing
+/// ranks agents first, Up/Down/Enter choose, commands and settings run, and
+/// Escape closes it with the composer's keyboard back.
+fn switcher_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    fn first(window: &crate::AppWindow) -> String {
+        window.get_switcher_rows().row_data(0).map(|r| format!("{}:{}", r.kind, r.label)).unwrap_or_default()
+    }
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, _window, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            if !open || !report().composer_focused {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("open", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "MODAL", "Ctrl+K opens the switcher over everything");
+            check(first(window).starts_with("command:"), &format!("with no query, commands come first: {}", first(window)));
+            headless::press(Key::DownArrow);
+            true
+        })),
+        ("down", Box::new(|_, window, _| {
+            if window.get_switcher_current() != 1 {
+                return false;
+            }
+            headless::press(Key::UpArrow);
+            true
+        })),
+        ("up", Box::new(|_, window, _| {
+            if window.get_switcher_current() != 0 {
+                return false;
+            }
+            check(true, "Up and Down move the selection");
+            headless::type_text("mik");
+            true
+        })),
+        ("typed", Box::new(move |_, window, elapsed| {
+            if window.get_switcher_query() != "mik" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(first(window) == "agent:Mike", &format!("typing puts the matching agent first: {}", first(window)));
+            shot(&out2, "switcher-01-search");
+            headless::press(Key::Return);
+            true
+        })),
+        ("agent chosen", Box::new(|app, window, _| {
+            if window.get_switcher_open() || app.engine.borrow().selected_session() != "mike" || !report().composer_focused {
+                return false;
+            }
+            check(true, "Enter opens the agent, ready to type");
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("reopened", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(window.get_switcher_query().is_empty(), "the switcher reopens empty");
+            headless::type_text("split right");
+            true
+        })),
+        ("command", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "split right" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(first(window) == "command:Split right", &format!("every term must match: {}", first(window)));
+            headless::press(Key::Return);
+            true
+        })),
+        ("split", Box::new(|app, window, _| {
+            if window.get_switcher_open() || app.engine.borrow().panes().pane_count() != 2 {
+                return false;
+            }
+            check(true, "choosing a command runs it");
+            check(rows(window).iter().all(|r| r.stamp.is_empty()), "timestamps are off by default");
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("settings", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("timestamps");
+            true
+        })),
+        ("toggle", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "timestamps" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(first(window) == "command:Off → On · Timestamps", &format!("a setting says what it will do: {}", first(window)));
+            headless::press(Key::Return);
+            true
+        })),
+        ("stamps", Box::new(|_, window, _| {
+            if window.get_switcher_open() || rows(window).iter().all(|r| r.stamp.is_empty()) {
+                return false;
+            }
+            check(true, "the setting applies at once");
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("escape", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press(Key::Escape);
+            true
+        })),
+        ("closed", Box::new(|_, window, _| {
+            if window.get_switcher_open() || !report().composer_focused {
+                return false;
+            }
+            check(true, "Escape closes it and gives the composer the keyboard back");
+            window.invoke_open_switcher();
+            true
+        })),
+        ("outside", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            window.invoke_switcher_dismissed();
+            check(!window.get_switcher_open(), "a click outside closes it");
             true
         })),
     ];

@@ -7,10 +7,13 @@ use clarp_engine::Change;
 use slint::{Model, ModelRc, VecModel};
 
 use crate::keymap::{self, Facts};
-use crate::{App, AppWindow, Hint, pump_now};
+use crate::{App, AppWindow, Hint, SwitcherRow, pump_now, switcher};
 
 /// The keyboard map's state for where the keyboard is now.
 pub fn context(app: &App, window: &AppWindow) -> &'static str {
+    if app.switcher.borrow().open {
+        return "modal";
+    }
     match window.get_surface().as_str() {
         "updates" => return "updates",
         "teams" => return "teams",
@@ -87,6 +90,8 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
     let mut layout_changed = false;
     match action {
         "shortcut-bar" => window.set_shortcuts_visible(!window.get_shortcuts_visible()),
+        "switcher" => open_switcher(app, window),
+        "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
         "escape" => {
             let state = app.engine.borrow().roster().find(&selected).map(|a| a.latest_state.clone()).unwrap_or_default();
             let context = context(app, window);
@@ -181,6 +186,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             let always = clarp_core::presentation::ALWAYS_VISIBLE;
             app.engine.borrow_mut().set_activity_mode(if mode == always { 0 } else { always });
         }
+        _ if action.starts_with("setting:") => apply_setting(app, window, action),
         "chats" | "updates" | "teams" | "settings" => {
             window.set_surface(action.into());
             if action == "chats" {
@@ -202,4 +208,154 @@ fn focus_sidebar(app: &App, window: &AppWindow) {
     let selected = app.engine.borrow().selected_session().to_owned();
     window.set_sidebar_cursor(selected.into());
     window.invoke_focus_sidebar();
+}
+
+// ---- the quick switcher ------------------------------------------------------
+
+fn toggles(app: &App, window: &AppWindow) -> switcher::Toggles {
+    let engine = app.engine.borrow();
+    let prefs = *app.prefs.borrow();
+    switcher::Toggles {
+        sidebar_visible: window.get_sidebar_visible(),
+        muted: engine.muted(),
+        show_when_ready: engine.show_when_ready(),
+        timestamps_visible: prefs.timestamps,
+        workspace_bar: prefs.workspace_bar,
+        shared_filesystem: engine.shared_filesystem(),
+        activity_mode: engine.activity_mode(),
+    }
+}
+
+pub fn open_switcher(app: &App, window: &AppWindow) {
+    {
+        let mut state = app.switcher.borrow_mut();
+        state.open = true;
+        state.query.clear();
+        state.selected.clear();
+        state.restore_composer = app.active_report().composer_focused;
+    }
+    window.set_switcher_open(true);
+    window.invoke_show_switcher();
+    refresh_switcher(app, window);
+}
+
+/// Rebuilds the results (a query typed, or the roster changed while open).
+pub fn refresh_switcher(app: &App, window: &AppWindow) {
+    if !app.switcher.borrow().open {
+        return;
+    }
+    let toggles = toggles(app, window);
+    let query = app.switcher.borrow().query.clone();
+    let items = switcher::results(&app.engine.borrow(), &query, toggles);
+    let mut state = app.switcher.borrow_mut();
+    let current = switcher::keep_selection(&items, &state.selected);
+    state.selected = usize::try_from(current).ok().and_then(|i| items.get(i)).map(switcher::Item::key_of).unwrap_or_default();
+    let rows: Vec<SwitcherRow> = items
+        .iter()
+        .map(|item| SwitcherRow {
+            kind: if item.kind == switcher::Kind::Agent { "agent".into() } else { "command".into() },
+            label: item.label.clone().into(),
+            detail: item.detail.clone().into(),
+            key: item.key.clone().into(),
+            group: item.group.into(),
+        })
+        .collect();
+    state.items = items;
+    drop(state);
+    window.set_switcher_rows(ModelRc::new(VecModel::from(rows)));
+    window.set_switcher_current(current);
+}
+
+pub fn switcher_moved(app: &App, window: &AppWindow, index: i32) {
+    let mut state = app.switcher.borrow_mut();
+    if let Some(item) = usize::try_from(index).ok().and_then(|i| state.items.get(i)) {
+        state.selected = item.key_of();
+        drop(state);
+        window.set_switcher_current(index);
+    }
+}
+
+/// Closes the switcher; the composer gets the keyboard back when it had it
+/// (or `restore` says so).
+pub fn close_switcher(app: &App, window: &AppWindow, restore: Option<bool>) {
+    let restore = {
+        let mut state = app.switcher.borrow_mut();
+        state.open = false;
+        restore.unwrap_or(state.restore_composer)
+    };
+    window.set_switcher_open(false);
+    if restore {
+        app.focus_composer();
+    } else {
+        app.focus_transcript();
+    }
+    show_hints(app, window);
+}
+
+/// Enter on a row (QuickSwitcher.qml `choose`).
+pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
+    let Some(item) = usize::try_from(index).ok().and_then(|i| app.switcher.borrow().items.get(i).cloned()) else { return };
+    let mut restore = app.switcher.borrow().restore_composer;
+    // Closed without moving the keyboard: the choice decides where it goes.
+    app.switcher.borrow_mut().open = false;
+    window.set_switcher_open(false);
+    match item.kind {
+        switcher::Kind::Agent => {
+            app.engine.borrow_mut().select(&item.target);
+            pump_now(app);
+            restore = true;
+        }
+        switcher::Kind::Command => {
+            let leaves = ["quick-new-agent", "rename-agent", "new", "overview", "connection", "orchestrator", "updates", "teams", "settings"];
+            if leaves.contains(&item.target.as_str()) {
+                restore = false;
+            }
+            if !run(app, window, &item.target) {
+                eprintln!("clarp-slint: {} is not available yet", item.target);
+            }
+        }
+    }
+    if restore {
+        app.focus_composer();
+    } else if !window.get_switcher_open() {
+        app.focus_transcript();
+    }
+    show_hints(app, window);
+}
+
+fn apply_setting(app: &App, window: &AppWindow, action: &str) {
+    let setting = action.trim_start_matches("setting:");
+    if let Some(mode) = setting.strip_prefix("activity:").and_then(|m| m.parse::<i32>().ok()) {
+        app.engine.borrow_mut().set_activity_mode(mode);
+    } else if let Some(theme) = setting.strip_prefix("reading:") {
+        app.engine.borrow_mut().set_reading_theme(theme);
+    } else {
+        match setting {
+            "showWhenReady" => {
+                let value = app.engine.borrow().show_when_ready();
+                app.engine.borrow_mut().set_show_when_ready(!value);
+            }
+            "sharedFilesystem" => {
+                let value = app.engine.borrow().shared_filesystem();
+                app.engine.borrow_mut().set_shared_filesystem(!value);
+            }
+            "timestampsVisible" | "workspaceBarVisible" => {
+                let (key, value) = {
+                    let mut prefs = app.prefs.borrow_mut();
+                    if setting == "timestampsVisible" {
+                        prefs.timestamps = !prefs.timestamps;
+                        ("conversation/timestampsVisible", prefs.timestamps)
+                    } else {
+                        prefs.workspace_bar = !prefs.workspace_bar;
+                        ("appearance/workspaceBar", prefs.workspace_bar)
+                    }
+                };
+                app.engine.borrow_mut().settings_mut().set(key, value);
+                app.rebuild_transcripts();
+                app.refresh(&[Change::Panes, Change::Preferences]);
+            }
+            other => eprintln!("clarp-slint: unknown setting {other}"),
+        }
+    }
+    let _ = window;
 }

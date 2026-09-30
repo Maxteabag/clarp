@@ -78,6 +78,16 @@ impl App {
         self.active_index().map(|i| self.pane_state.borrow()[i].messages.clone())
     }
 
+    /// Rebuilds every transcript from scratch: a view setting (timestamps)
+    /// changes rows their source rows do not.
+    pub fn rebuild_transcripts(&self) {
+        for pane in self.pane_state.borrow_mut().iter_mut() {
+            pane.shown.clear();
+            pane.messages.set_vec(Vec::new());
+            pane.to_latest += 1;
+        }
+    }
+
     /// Each pane's chat and composer text, in layout order.
     pub fn pane_drafts(&self) -> Vec<(String, String, String)> {
         self.pane_state.borrow().iter().map(|p| (p.id.clone(), p.session.clone(), p.draft.clone())).collect()
@@ -197,7 +207,17 @@ impl App {
         let presented = self.engine.borrow_mut().presented(&pane.session);
         let always = self.engine.borrow().activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE;
         let expanded = self.expanded.borrow();
-        let rows: Vec<MessageRow> = presented.iter().map(|row| message_row(row, always, &expanded)).collect();
+        let stamps = self.prefs.borrow().timestamps;
+        let rows: Vec<MessageRow> = presented
+            .iter()
+            .map(|row| {
+                let mut shown = message_row(row, always, &expanded);
+                if !stamps {
+                    shown.stamp = SharedString::new();
+                }
+                shown
+            })
+            .collect();
         // Opened activity the Host sent without its tool calls: fetch them.
         let mut engine = self.engine.borrow_mut();
         for (row, shown) in presented.iter().zip(&rows) {
@@ -281,7 +301,7 @@ impl App {
                 .iter()
                 .map(|w| WorkspaceTab { id: text(w, "id").into(), name: text(w, "name").into(), active: text(w, "id") == active_workspace })
                 .collect();
-            window.set_workspace_bar(tabs.len() > 1);
+            window.set_workspace_bar(self.prefs.borrow().workspace_bar);
             window.set_workspaces(ModelRc::new(VecModel::from(tabs)));
             window.set_save_warning(engine.panes().workspace_save_warning().into());
         }
