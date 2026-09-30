@@ -573,7 +573,7 @@ fn panes_check(out: String) {
             if !report().transcript_focused {
                 return false;
             }
-            check(window.get_keyboard_mode() == "CONVERSATION", &format!("Escape leaves the composer for the conversation: {}", window.get_keyboard_mode()));
+            check(window.get_keyboard_mode() == "CHAT", &format!("Escape leaves the composer for the conversation: {}", window.get_keyboard_mode()));
             headless::press("e");
             true
         })),
@@ -581,7 +581,7 @@ fn panes_check(out: String) {
             if !window.get_sidebar_focused() {
                 return false;
             }
-            check(window.get_keyboard_mode() == "AGENTS" && window.get_sidebar_cursor() == "rachel", "E moves to the agents list, on the open chat");
+            check(window.get_keyboard_mode() == "EXPLORER" && window.get_sidebar_cursor() == "rachel", "E moves to the explorer, on the open chat");
             headless::press("j");
             true
         })),
@@ -1472,8 +1472,40 @@ fn sidebar_check(out: String) {
             }
             check(true, "Unread shows only the chats with news");
             window.invoke_choose_scope("all".into());
-            let helper = serde_json::json!({"session": "mike", "set": {"role": "helper", "parent_agent_id": "a1", "helper_state": "done"}});
-            check(control("/__control/agent", &helper).is_ok(), "Mike becomes Rachel's finished helper");
+            let helper = serde_json::json!({"session": "mike", "set": {"role": "helper", "parent_agent_id": "a1", "helper_state": "working"}});
+            check(control("/__control/agent", &helper).is_ok(), "Mike becomes Rachel's sub-agent");
+            true
+        })),
+        ("sub-agent folded", Box::new(|_, window, _| {
+            let Some(rachel) = window.get_chats().iter().find(|r| r.session == "rachel") else { return false };
+            if rachel.fold_count != 1 || names(window) != ["Rachel"] {
+                return false;
+            }
+            check(rachel.folded, "a sub-agent starts folded under its chat (\"1 sub-agent\")");
+            if let Some(app) = crate::app() {
+                crate::commands::run(&app, window, "focus-sidebar");
+            }
+            window.set_sidebar_cursor("rachel".into());
+            headless::press("l");
+            true
+        })),
+        ("sub-agent unfolded", Box::new(|_, window, _| {
+            if names(window).len() != 2 {
+                return false;
+            }
+            check(true, "L on the chat unfolds its sub-agent");
+            window.set_sidebar_cursor("mike".into());
+            headless::press("h");
+            true
+        })),
+        ("folded from the sub-agent", Box::new(|_, window, _| {
+            if names(window) != ["Rachel"] {
+                return false;
+            }
+            check(window.get_sidebar_cursor() == "rachel", "H on a sub-agent folds its chat and moves the cursor up to it");
+            headless::press(Key::RightArrow);
+            let done = serde_json::json!({"session": "mike", "set": {"helper_state": "done"}});
+            check(control("/__control/agent", &done).is_ok(), "Mike finishes");
             true
         })),
         ("folded", Box::new(move |_, window, _| {

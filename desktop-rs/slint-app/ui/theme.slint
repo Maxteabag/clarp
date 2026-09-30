@@ -36,7 +36,51 @@ export global Focus {
 // takes no input.
 export component FocusRing inherits Rectangle {
     in property <bool> shown;
-    border-width: root.shown ? 2px : 0px;
+    border-width: root.shown ? 1px : 0px;
     border-color: Palette.accent;
-    border-radius: 4px;
+    border-radius: 6px;
+}
+
+// A keyboard region as sqlit draws its panes: a rounded grey outline with
+// "[key] Label" set into the top-left of the border; the outline and title
+// take the accent while the region has the keyboard. Place it last in the
+// region (it fills it) and keep the content FRAME-INSET inside.
+export global Frame {
+    out property <length> top: 16px;
+    out property <length> side: 6px;
+    out property <length> bottom: 6px;
+}
+
+export component PaneFrame inherits Rectangle {
+    in property <string> key;
+    in property <string> label;
+    in property <bool> active;
+    // What shows behind the title, so it cuts the border line.
+    in property <color> surface: Palette.window;
+    property <color> tone: root.active ? Palette.accent : Palette.border;
+    Rectangle {
+        x: 0;
+        y: 7px;
+        width: root.width;
+        height: root.height - 7px;
+        border-width: 1px;
+        border-color: root.tone;
+        border-radius: 6px;
+    }
+    Rectangle {
+        x: 10px;
+        y: 0;
+        width: title.preferred-width + 8px;
+        height: 14px;
+        background: root.surface;
+        title := Text {
+            x: 4px;
+            height: parent.height;
+            text: "[" + root.key + "] " + root.label;
+            color: root.active ? Palette.accent : Palette.muted;
+            font-size: 11px;
+            font-weight: root.active ? 700 : 400;
+            vertical-alignment: center;
+        }
+    }
 }

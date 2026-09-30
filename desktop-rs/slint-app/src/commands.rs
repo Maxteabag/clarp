@@ -64,8 +64,8 @@ pub fn show_hints(app: &App, window: &AppWindow) {
         .collect();
     let mode = match state {
         "composer" => "INSERT".to_owned(),
-        "sidebar" => "AGENTS".to_owned(),
-        "pane" => "CONVERSATION".to_owned(),
+        "sidebar" => "EXPLORER".to_owned(),
+        "pane" => "CHAT".to_owned(),
         other => other.to_uppercase(),
     };
     window.set_keyboard_mode(mode.into());
@@ -189,6 +189,41 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             }
         }
         "agent-search" => window.invoke_focus_search(),
+        // Sub-agents under the cursor's chat; folding from a sub-agent
+        // moves the cursor up to its chat and folds that.
+        "fold" | "unfold" => {
+            let cursor = window.get_sidebar_cursor().to_string();
+            let parent = {
+                let engine = app.engine.borrow();
+                engine
+                    .roster()
+                    .find(&cursor)
+                    .filter(|a| a.role == "helper")
+                    .and_then(|a| engine.roster().find_by_agent_id(&a.parent_agent_id))
+                    .map(|p| p.session.clone())
+            };
+            let own = window.get_chats().iter().any(|c| c.session == cursor.as_str() && c.fold_count > 0);
+            if action == "unfold" {
+                app.fold(&cursor, Some(true));
+            } else if own && app.unfolded.borrow().contains(&cursor) {
+                app.fold(&cursor, Some(false));
+            } else if let Some(parent) = parent {
+                window.set_sidebar_cursor(parent.as_str().into());
+                app.fold(&parent, Some(false));
+            }
+        }
+        // The sidebar's views (minimal UI hides their chips and switches).
+        "list-all" | "list-unread" => {
+            window.invoke_show_pairs(false);
+            window.invoke_show_archive(false);
+            window.invoke_choose_scope(if action == "list-all" { "all" } else { "unread" }.into());
+            window.set_sidebar_visible(true);
+        }
+        "list-rooms" | "list-archive" => {
+            if action == "list-rooms" { window.invoke_show_pairs(true) } else { window.invoke_show_archive(true) }
+            window.set_sidebar_visible(true);
+            focus_sidebar(app, window);
+        }
         "sidebar" => {
             window.set_sidebar_visible(!window.get_sidebar_visible());
             app.focus_composer();
