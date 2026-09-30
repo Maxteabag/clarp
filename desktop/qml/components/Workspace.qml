@@ -77,7 +77,19 @@ Rectangle {
     color: Theme.window
 
     function focusNavigation() { navigationFocus.forceActiveFocus(); }
-    Item { id: navigationFocus; objectName: "conversationNavigationFocus" }
+    // After Escape the conversation keeps the keyboard: arrows, Page Up/Down
+    // and Home/End scroll the active pane's transcript.
+    Item {
+        id: navigationFocus
+        objectName: "conversationNavigationFocus"
+        Keys.onPressed: event => {
+            event.accepted = false;
+            for (let i = 0; i < paneViews.count; ++i) {
+                const pane = paneViews.itemAt(i) as PaneLeaf;
+                if (pane && pane.active) { pane.scrollKey(event); return; }
+            }
+        }
+    }
 
     function jumpToLatest() {
         for (let i = 0; i < paneViews.count; ++i) {

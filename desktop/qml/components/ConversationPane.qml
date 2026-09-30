@@ -28,6 +28,8 @@ Rectangle {
     }
     readonly property var pairParticipants: (root.pairRoomInfo && root.pairRoomInfo.participants) || []
     function jumpToLatest() { transcript.scrollToLatest(); }
+    // Arrow, Page and Home/End keys scroll the transcript; false when not one.
+    function scrollKey(event) { transcript.handleScrollKey(event); return event.accepted; }
     signal openConnection
     signal queueRequested(string session)
     signal profileRequested(string session)
