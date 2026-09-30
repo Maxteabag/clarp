@@ -451,6 +451,24 @@ fn composer_check(out: String) {
                 return false;
             }
             check(report().transcript_focused && !report().composer_focused, "Escape hands the keyboard to the transcript");
+            // The "clipboard" holds an image: Ctrl+V in the composer attaches it.
+            let clipboard = std::env::var_os("CLARP_TEST_CLIPBOARD").expect("check.sh sets the clipboard file");
+            let image = std::fs::read(std::env::var_os("CLARP_TEST_ATTACH_FILE").expect("check.sh sets the photo")).expect("the photo");
+            std::fs::write(clipboard, image).expect("the clipboard file");
+            app_now().focus_composer();
+            true
+        })),
+        ("paste", Box::new(|_, _window, _| {
+            if !report().composer_focused {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "v");
+            true
+        })),
+        ("pasted", Box::new(|_, _window, _| {
+            let chip = view().attachments.row_data(0);
+            let Some(chip) = chip.filter(|c| c.status == "ready") else { return false };
+            check(chip.name.ends_with(".png") && app_now().active_draft().is_empty(), &format!("Ctrl+V with an image copied attaches it without typing: {}", chip.name));
             true
         })),
     ];

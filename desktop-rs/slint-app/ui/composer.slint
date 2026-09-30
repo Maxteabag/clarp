@@ -90,6 +90,10 @@ export component Composer inherits FocusScope {
             root.jump-to-latest();
             return accept;
         }
+        if ((event.text == "v" || event.text == "V") && event.modifiers.control && !event.modifiers.shift) {
+            if (root.paste-image()) { return accept; }
+            return reject;
+        }
         if ((event.text == "o" || event.text == "O") && event.modifiers.control && event.modifiers.shift) {
             root.attach();
             return accept;
@@ -108,6 +112,8 @@ export component Composer inherits FocusScope {
     // This chat's dictation is recording.
     in property <bool> recording;
     callback silence();
+    // Ctrl+V: true when the clipboard held an image and it was attached.
+    callback paste-image() -> bool;
     in property <bool> busy;
     in property <bool> can-send: true;
     in property <bool> active: true;
