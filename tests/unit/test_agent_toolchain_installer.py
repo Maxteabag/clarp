@@ -20,7 +20,7 @@ def test_manifest_pins_supported_platforms_and_exact_cli_versions():
     assert all(len(item["sha256"]) == 64 for item in manifest["archives"].values())
     package = json.loads((ROOT / "toolchain/package.json").read_text())
     assert package["dependencies"] == {
-        "@anthropic-ai/claude-code": "2.1.283",
+        "@anthropic-ai/claude-code": "2.1.285",
         "@openai/codex": "0.159.2",
     }
     lock = json.loads((ROOT / "toolchain/package-lock.json").read_text())

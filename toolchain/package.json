@@ -5,7 +5,7 @@
   "description": "Pinned vendor CLIs managed by a Clarp installation",
   "license": "UNLICENSED",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.283",
+    "@anthropic-ai/claude-code": "2.1.285",
     "@openai/codex": "0.159.2"
   },
   "engines": {
