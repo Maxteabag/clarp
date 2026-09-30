@@ -16,6 +16,9 @@ mod platform;
 mod settings_view;
 mod switcher;
 mod view;
+// ---- updates and teams
+mod teams_view;
+mod updates_view;
 
 use view::{apply_theme, chat_row, initial, open_link};
 
@@ -214,6 +217,12 @@ impl App {
         self.voice(changes);
         if changes.iter().any(|c| matches!(c, Change::HostStatus | Change::Preferences | Change::Connection | Change::ServerInfo)) {
             settings_view::show(self, &window);
+        }
+        // ---- updates and teams
+        updates_view::refresh(self, &window, changes);
+        teams_view::refresh(self, &window, changes);
+        if changes.contains(&Change::Roster) {
+            commands::show_hints(self, &window);
         }
     }
 }
@@ -558,6 +567,28 @@ fn main() {
             pump_now(&app);
         }
     });
+    // ---- updates and teams
+    window.on_updates_refresh(|| with_window(|app, _| {
+        app.engine.borrow_mut().load_updates();
+        pump_now(app);
+    }));
+    window.on_resolve_decision(|id, choice, revision| with_window(|app, _| {
+        app.engine.borrow_mut().resolve_decision(&id, &choice, i64::from(revision));
+        pump_now(app);
+    }));
+    window.on_cancel_job(|id| with_window(|app, _| {
+        app.engine.borrow_mut().cancel_background_job(&id);
+        pump_now(app);
+    }));
+    window.on_open_report(|id| with_window(|app, window| updates_view::open_report(app, window, &id)));
+    window.on_open_chat(|session| with_window(|app, window| updates_view::open_chat(app, window, &session)));
+    window.on_show_processes(|session, x, y| with_window(|app, window| updates_view::open_processes(app, window, &session, x, y)));
+    window.on_process_helper_opened(|session| with_window(|app, window| updates_view::open_helper(app, window, &session)));
+    window.on_team_action(|action, argument| with_window(|app, window| teams_view::action(app, window, &action, &argument)));
+    window.on_team_created(|name| with_window(|app, window| teams_view::created(app, window, &name)));
+    window.on_team_saved(|name, colour, leader| with_window(|app, window| teams_view::saved(app, window, &name, &colour, leader)));
+    window.on_team_member_added(|index| with_window(|app, window| teams_view::member_added(app, window, index)));
+    window.on_team_deleted(|| with_window(|app, window| teams_view::deleted(app, window)));
     window.on_dismiss_error(|| {
         if let Some(app) = app() {
             app.engine.borrow_mut().clear_error();

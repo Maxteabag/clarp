@@ -132,6 +132,9 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
         unread: row.unread,
         muted: row.muted,
         selected: row.session == selected,
+        jobs: row.background_job_count,
+        sub_agents: row.sub_agent_count,
+        children: row.running_children,
     }
 }
 

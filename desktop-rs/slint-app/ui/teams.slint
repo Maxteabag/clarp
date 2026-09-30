@@ -1,0 +1,387 @@
+import { Button, ComboBox, LineEdit, ListView, Spinner } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+import { Modal } from "dialogs.slint";
+import { IconButton } from "updates.slint";
+
+export struct TeamView {
+    id: string,
+    name: string,
+    initial: string,
+    colour: color,
+    depth: int,
+    unread: int,
+    subtitle: string,
+    selected: bool,
+}
+
+export struct TeamMessageView {
+    source: string,
+    text: string,
+    session: string,
+}
+
+export struct TeamMemberView {
+    id: string,
+    name: string,
+}
+
+// TeamsPanel.qml: the team list, and the selected team's members and
+// messages. Team actions (edit, leader nudging, delete) are icon buttons in
+// its header; create, edit, add member and delete open dialogs.
+export component Teams inherits Rectangle {
+    in property <[TeamView]> teams;
+    in property <[TeamMessageView]> messages;
+    in property <[TeamMemberView]> members;
+    in property <string> selected;
+    in property <string> title;
+    in property <string> subtitle;
+    in property <bool> nudging;
+    in property <bool> loading;
+    in property <string> error;
+    in property <bool> grouped: true;
+    callback select(string);
+    callback refresh();
+    callback toggle-grouping();
+    callback create();
+    callback edit();
+    callback toggle-nudging();
+    callback delete();
+    callback add-member();
+    callback remove-member(string);
+    callback open-chat(string);
+    background: Palette.window;
+    // Holds the keyboard while the surface shows (keys go to the keyboard map).
+    public function take-focus() { keys.focus(); }
+    out property <bool> focused: keys.has-focus;
+    keys := FocusScope { }
+    VerticalLayout {
+        HorizontalLayout {
+            height: 54px;
+            padding-left: 16px;
+            padding-right: 12px;
+            spacing: 9px;
+            Text {
+                text: "TEAMS";
+                color: Palette.text;
+                font-size: 17px;
+                font-weight: 600;
+                letter-spacing: 1.5px;
+                vertical-alignment: center;
+            }
+            Text { text: root.teams.length + " teams"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            if root.loading: Spinner { width: 18px; height: 18px; y: 18px; indeterminate: true; }
+            Button {
+                text: root.grouped ? "Grouped" : "Flat";
+                accessible-label: "Switch team grouping";
+                y: 11px;
+                height: 32px;
+                clicked => { root.toggle-grouping(); }
+            }
+            IconButton {
+                y: 13px;
+                icon: @image-url("icons/plus.svg");
+                label: "New team";
+                clicked => { root.create(); }
+            }
+            IconButton {
+                y: 13px;
+                icon: @image-url("icons/refresh.svg");
+                label: "Refresh teams";
+                clicked => { root.refresh(); }
+            }
+        }
+        Rectangle { height: 1px; background: Palette.border; }
+        if root.error != "": Rectangle {
+            height: 34px;
+            background: Palette.danger-surface;
+            Text {
+                x: 8px;
+                width: parent.width - 16px;
+                text: root.error;
+                color: Palette.danger;
+                font-size: 12px;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            ListView {
+                width: 280px;
+                for team in root.teams: Rectangle {
+                    height: 66px;
+                    Rectangle {
+                        x: 8px;
+                        y: 4px;
+                        width: parent.width - 16px;
+                        height: 62px;
+                        border-radius: 3px;
+                        background: team.selected ? Palette.border : touch.has-hover ? Palette.control : transparent;
+                        border-width: team.selected ? 1px : 0px;
+                        border-color: Palette.muted;
+                        accessible-role: list-item;
+                        accessible-label: team.name;
+                        touch := TouchArea { clicked => { root.select(team.id); } }
+                        HorizontalLayout {
+                            padding-left: 8px + Math.min(team.depth, 5) * 14px;
+                            padding-right: 8px;
+                            spacing: 9px;
+                            Rectangle {
+                                width: 34px;
+                                height: 34px;
+                                y: 14px;
+                                border-radius: 3px;
+                                background: team.colour;
+                                Text { text: team.initial; color: Palette.text; font-size: 15px; font-weight: 600; }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Text { text: team.name; color: Palette.text; font-size: 13px; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
+                                    if team.unread > 0: Rectangle {
+                                        width: 18px;
+                                        height: 16px;
+                                        border-radius: 3px;
+                                        background: Palette.chrome-text;
+                                        Text { text: team.unread; color: Palette.window; font-size: 11px; }
+                                    }
+                                }
+                                Text { text: team.subtitle; color: Palette.muted; font-size: 11px; overflow: elide; }
+                            }
+                        }
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: Palette.rule; }
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Palette.raised;
+                VerticalLayout {
+                    Rectangle {
+                        height: 54px;
+                        background: Palette.control;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: root.title; color: Palette.text; font-size: 14px; font-weight: 600; overflow: elide; }
+                                if root.subtitle != "": Text { text: root.subtitle; color: Palette.muted; font-size: 11px; overflow: elide; }
+                            }
+                            if root.selected != "": IconButton {
+                                y: 13px;
+                                icon: @image-url("icons/edit.svg");
+                                label: "Edit team";
+                                clicked => { root.edit(); }
+                            }
+                            if root.selected != "": IconButton {
+                                y: 13px;
+                                icon: root.nudging ? @image-url("icons/nudge.svg") : @image-url("icons/nudge-off.svg");
+                                tint: root.nudging ? Palette.accent : Palette.muted;
+                                label: root.nudging ? "Disable leader nudging" : "Enable leader nudging";
+                                clicked => { root.toggle-nudging(); }
+                            }
+                            if root.selected != "": IconButton {
+                                y: 13px;
+                                icon: @image-url("icons/delete.svg");
+                                tint: Palette.danger;
+                                label: "Delete team…";
+                                clicked => { root.delete(); }
+                            }
+                        }
+                    }
+                    if root.selected != "": Rectangle {
+                        height: 42px;
+                        background: Palette.raised;
+                        border-width: 1px;
+                        border-color: Palette.border;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            alignment: start;
+                            for member in root.members: Rectangle {
+                                y: 8px;
+                                height: 25px;
+                                border-radius: 3px;
+                                background: Palette.border;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 2px;
+                                    spacing: 2px;
+                                    Text { text: member.name; color: Palette.text; font-size: 11px; vertical-alignment: center; }
+                                    IconButton {
+                                        y: 3px;
+                                        size: 19px;
+                                        icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                                        label: "Remove member " + member.name;
+                                        clicked => { root.remove-member(member.id); }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                y: 8px;
+                                height: 25px;
+                                width: add.preferred-width + 16px;
+                                border-radius: 3px;
+                                border-width: 1px;
+                                border-color: Palette.border;
+                                background: add-touch.has-hover ? Palette.hover : transparent;
+                                accessible-role: button;
+                                accessible-label: "Add team member";
+                                add := Text { text: "+ member"; color: Palette.chrome-text; font-size: 11px; }
+                                add-touch := TouchArea { clicked => { root.add-member(); } }
+                            }
+                        }
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for message in root.messages: VerticalLayout {
+                            padding-left: 14px;
+                            padding-right: 14px;
+                            padding-top: 7px;
+                            Rectangle {
+                                background: Palette.control;
+                                border-radius: 3px;
+                                VerticalLayout {
+                                    padding: 9px;
+                                    spacing: 5px;
+                                    HorizontalLayout {
+                                        Text { text: message.source; color: Palette.chrome-text; font-size: 12px; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
+                                        if message.session != "": Button { text: "Open chat"; clicked => { root.open-chat(message.session); } }
+                                    }
+                                    Text { text: message.text; color: Palette.chrome-text; font-size: 13px; wrap: word-wrap; }
+                                }
+                            }
+                        }
+                    }
+                }
+                if root.messages.length == 0 && !root.loading: Text {
+                    y: parent.height / 2;
+                    horizontal-alignment: center;
+                    text: root.selected != "" ? "No team messages yet" : "Choose a team";
+                    color: Palette.muted;
+                    font-size: 12px;
+                }
+            }
+        }
+    }
+}
+
+// Create team: a name (Enter or the check creates it).
+export component TeamCreateDialog inherits Modal {
+    callback create(string);
+    callback done();
+    public function open() { name.text = ""; name.focus(); }
+    card-width: 380px;
+    card-height: 190px;
+    dismissed => { root.done(); }
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        Text { text: "Create team"; color: Palette.text; font-size: 17px; font-weight: 600; }
+        Text { text: "Team name"; color: Palette.muted; font-size: 12px; }
+        name := LineEdit {
+            placeholder-text: "e.g. Release crew";
+            accessible-label: "Team name";
+            accepted => { root.create(self.text); }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            IconButton { icon: @image-url("../../../desktop/resources/icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
+            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Create"; clicked => { root.create(name.text); } }
+        }
+    }
+}
+
+// Edit team: name, colour and leader (one of its members, or none).
+export component TeamEditDialog inherits Modal {
+    in property <[string]> leaders;
+    in-out property <int> leader-index;
+    callback save(string, string, int);
+    callback done();
+    public function open(team-name: string, team-colour: string) {
+        name.text = team-name;
+        colour.text = team-colour;
+        name.focus();
+    }
+    card-width: 400px;
+    card-height: 330px;
+    dismissed => { root.done(); }
+    VerticalLayout {
+        padding: 20px;
+        spacing: 8px;
+        Text { text: "Edit team"; color: Palette.text; font-size: 17px; font-weight: 600; }
+        Text { text: "Name"; color: Palette.muted; font-size: 12px; }
+        name := LineEdit { accessible-label: "Name"; accepted => { root.save(name.text, colour.text, root.leader-index); } }
+        Text { text: "Color"; color: Palette.muted; font-size: 12px; }
+        colour := LineEdit { placeholder-text: "#8f96bc"; accessible-label: "Color"; accepted => { root.save(name.text, colour.text, root.leader-index); } }
+        Text { text: "Leader"; color: Palette.muted; font-size: 12px; }
+        ComboBox {
+            model: root.leaders;
+            current-index <=> root.leader-index;
+            accessible-label: "Leader";
+        }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            IconButton { icon: @image-url("../../../desktop/resources/icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
+            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Save"; clicked => { root.save(name.text, colour.text, root.leader-index); } }
+        }
+    }
+}
+
+// Add team member: one of the roster's agents.
+export component TeamMemberDialog inherits Modal {
+    in property <[string]> agents;
+    in-out property <int> agent-index;
+    callback add(int);
+    callback done();
+    card-width: 380px;
+    card-height: 190px;
+    dismissed => { root.done(); }
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        Text { text: "Add team member"; color: Palette.text; font-size: 17px; font-weight: 600; }
+        Text { text: "Agent"; color: Palette.muted; font-size: 12px; }
+        ComboBox { model: root.agents; current-index <=> root.agent-index; accessible-label: "Agent"; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            IconButton { icon: @image-url("../../../desktop/resources/icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
+            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Add"; clicked => { root.add(root.agent-index); } }
+        }
+    }
+}
+
+// Delete team?: removes the team and its history.
+export component TeamDeleteDialog inherits Modal {
+    in property <string> team;
+    callback confirm();
+    callback done();
+    card-width: 380px;
+    card-height: 160px;
+    dismissed => { root.done(); }
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        Text { text: "Delete team?"; color: Palette.text; font-size: 17px; font-weight: 600; }
+        Text { text: "This removes the team and its history."; color: Palette.chrome-text; font-size: 13px; wrap: word-wrap; }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            IconButton { icon: @image-url("../../../desktop/resources/icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
+            IconButton { icon: @image-url("icons/delete.svg"); tint: Palette.danger; label: "Delete " + root.team; clicked => { root.confirm(); } }
+        }
+    }
+}

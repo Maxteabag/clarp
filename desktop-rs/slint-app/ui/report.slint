@@ -1,0 +1,64 @@
+import { ListView } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+import { Modal } from "dialogs.slint";
+import { Block, MessageBlock } from "transcript.slint";
+import { IconButton } from "updates.slint";
+
+// ReportView.qml: a read-only reading surface for an agent's report. The
+// body is Markdown drawn as the transcript's blocks; an HTML body arrives
+// already sanitized and flattened to Markdown (Slint has no rich text).
+// Escape, the close button and a click outside close it.
+export component ReportView inherits Modal {
+    in property <string> title;
+    in property <string> summary;
+    in property <bool> html;
+    in property <[MessageBlock]> blocks;
+    callback link-clicked(string);
+    callback done();
+    card-width: 980px;
+    card-height: 2000px;
+    dismissed => { root.done(); }
+    Rectangle {
+        background: Palette.sunken;
+        border-radius: 3px;
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            HorizontalLayout {
+                spacing: 10px;
+                vertical-stretch: 0;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 2px;
+                    Text { text: root.title == "" ? "Report" : root.title; color: Palette.text; font-size: 17px; font-weight: 600; overflow: elide; }
+                    if root.summary != "": Text { text: root.summary; color: Palette.muted; font-size: 12px; overflow: elide; }
+                }
+                Text { text: root.html ? "HTML" : "MARKDOWN"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
+                IconButton {
+                    icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                    label: "Close report";
+                    clicked => { root.done(); }
+                }
+            }
+            Rectangle { height: 1px; background: Palette.border; }
+            if root.blocks.length == 0: Text {
+                text: "This artifact has no readable body.";
+                color: Palette.muted;
+                font-size: 13px;
+            }
+            ListView {
+                vertical-stretch: 1;
+                for block in root.blocks: VerticalLayout {
+                    padding-bottom: 10px;
+                    padding-right: 12px;
+                    Block {
+                        block: block;
+                        body-size: 15px;
+                        body-color: Palette.text;
+                        link-clicked(url) => { root.link-clicked(url); }
+                    }
+                }
+            }
+        }
+    }
+}

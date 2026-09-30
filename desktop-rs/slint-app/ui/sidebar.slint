@@ -1,5 +1,6 @@
 import { LineEdit } from "std-widgets.slint";
 import { Palette } from "theme.slint";
+import { ProcessIndicator } from "processes.slint";
 
 export struct ChatRow {
     session: string,
@@ -14,6 +15,10 @@ export struct ChatRow {
     unread: bool,
     muted: bool,
     selected: bool,
+    // Background work (ProcessIndicator.qml): jobs, sub-agents, helpers.
+    jobs: int,
+    sub-agents: int,
+    children: int,
 }
 
 // A small labelled toggle, like the QML scope chips.
@@ -65,6 +70,8 @@ component Row inherits Rectangle {
     // The keyboard cursor is on this row.
     in property <bool> cursor;
     callback clicked();
+    // The process indicator was clicked: its bottom right, in the window.
+    callback processes(length, length);
     height: root.chat.activity != "" ? 72px : 58px;
     border-width: root.cursor ? 1px : 0px;
     border-color: Palette.accent;
@@ -96,6 +103,13 @@ component Row inherits Rectangle {
                     font-weight: root.chat.unread ? 700 : 500;
                     overflow: elide;
                     horizontal-stretch: 1;
+                }
+                ProcessIndicator {
+                    y: 3px;
+                    jobs: root.chat.jobs;
+                    sub-agents: root.chat.sub-agents;
+                    children: root.chat.children;
+                    clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
                 Text { text: root.chat.stamp; color: Palette.faint; font-size: 11px; }
             }
@@ -159,6 +173,7 @@ export component Sidebar inherits Rectangle {
     out property <bool> list-has-focus: list.has-focus;
     public function focus-list() { list.focus(); }
     callback chosen(string);
+    callback processes(string, length, length);
     callback filter-changed();
     callback restore(string);
     callback hide();
@@ -217,6 +232,7 @@ export component Sidebar inherits Rectangle {
                     chat: row;
                     cursor: list.has-focus && row.session == root.cursor;
                     clicked => { root.chosen(row.session); }
+                    processes(x, y) => { root.processes(row.session, x, y); }
                 }
                 if root.showing-pairs && root.rooms.length == 0: Text {
                     text: "No agent-to-agent conversations yet.";

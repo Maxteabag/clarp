@@ -304,6 +304,9 @@ pub fn start_check(name: &str, out: String) {
         "desktop" => desktop_check(out),
         "instance" => instance_check(out),
         "diagnostics" => diagnostics_check(out),
+        // ---- updates and teams
+        "updates" => updates_check(out),
+        "teams" => teams_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
@@ -1246,4 +1249,340 @@ fn transcript_check(out: String) {
     let _ = out;
     run_stages(stages);
     }
+}
+
+// ---- updates and teams
+
+/// The fake Host's requests for `method` and `path`.
+fn requests(method: &str, path: &str) -> Vec<serde_json::Value> {
+    let Some(log) = std::env::var_os("CLARP_TEST_HOST_LOG") else { return Vec::new() };
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|entry| entry["method"] == method && entry["path"] == path)
+        .collect()
+}
+
+/// A left click at (x, y) in the window, as a mouse sends it.
+fn click_at(window: &crate::AppWindow, x: f32, y: f32) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let position = slint::LogicalPosition::new(x, y);
+    let window = window.window();
+    window.dispatch_event(WindowEvent::PointerMoved { position });
+    window.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+    window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+    window.dispatch_event(WindowEvent::PointerExited);
+}
+
+/// `--check updates --out DIR`: a running job shows in its chat's row and
+/// process popover (Escape / click outside close it), Ctrl+2 opens the
+/// Updates, a decision resolves, a job cancels, Ctrl+R reloads, a report
+/// opens and closes, Escape and the rail switch surfaces, and Ctrl+J opens
+/// the next chat that wants the user.
+fn updates_check(out: String) {
+    use slint::platform::Key;
+    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out);
+    let attention_gets = Rc::new(Cell::new(0usize));
+    let gets = attention_gets.clone();
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, _window, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            if !open || !report().composer_focused {
+                return false;
+            }
+            let decision = |id: &str, title: &str, question: &str, context: &str, yes: &str, no: &str, revision: i64| serde_json::json!({
+                "id": id, "decision_id": id, "session": "mike", "agent_name": "Mike", "kind": "decision", "title": title,
+                "question": question, "context": context, "yes_label": yes, "no_label": no, "revision": revision});
+            let items = serde_json::json!({"items": [
+                decision("d1", "Deploy to production?", "The release branch is green. Ship it to production now?",
+                         "All 214 tests pass; the canary has run for 30 minutes.", "Deploy", "Hold", 3),
+                decision("d2", "Rotate the API key?", "The staging key expires on Friday.", "", "Yes", "No", 1)]});
+            let now = chrono::Utc::now().timestamp_millis();
+            let job = serde_json::json!({"job_id": "j1", "agent_id": "a1", "session": "rachel", "status": "running", "kind": "watch",
+                "title": "Index the docs", "detail": "12 of 48 files", "metadata": {"completed": 12, "total": 48},
+                "started_at": now - 95_000, "heartbeat_at": now - 4_000, "updated_at": now});
+            let jobs = serde_json::json!({"jobs": [job], "event": {"type": "background-job-updated", "job": job}});
+            let sent = control("/__control/attention", &items).and_then(|()| control("/__control/jobs", &jobs));
+            check(sent.is_ok(), &format!("the fake Host takes the attention items and the job: {sent:?}"));
+            true
+        })),
+        ("job listed", Box::new(|app, window, _| {
+            let row = window.get_chats().iter().find(|r| r.session == "rachel");
+            if app.engine.borrow().background_jobs().len() != 1 || !row.as_ref().is_some_and(|r| r.jobs == 1) || window.get_attention() != 2 {
+                return false;
+            }
+            check(true, "the job shows in Rachel's row and the rail counts two decisions");
+            // The hourglass on Rachel's row.
+            click_at(window, 311.0, 150.0);
+            let jobs: Vec<crate::ProcessJob> = window.get_process_jobs().iter().collect();
+            check(window.get_overlay() == "processes", "clicking the row's indicator opens the process popover");
+            check(
+                jobs.len() == 1 && jobs[0].title == "Index the docs" && jobs[0].detail == "watch · 12 of 48 files" && jobs[0].elapsed != "",
+                &format!("it lists the job with its kind, detail and running time: {:?}", jobs.first().map(|j| (j.detail.clone(), j.elapsed.clone()))),
+            );
+            check(window.get_process_count() == "1 running", &format!("and counts it: {}", window.get_process_count()));
+            true
+        })),
+        ("popover drawn", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            shot(&out1, "updates-01-processes");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("popover closed", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(report().composer_focused, "Escape closes the popover; the composer has the keyboard back");
+            window.invoke_show_processes("rachel".into(), 330.0, 60.0);
+            click_at(window, 1100.0, 700.0);
+            check(window.get_overlay().is_empty(), "a click outside closes it too");
+            true
+        })),
+        ("chat again", Box::new(|_, _window, elapsed| {
+            if !report().composer_focused || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "2");
+            true
+        })),
+        ("open", Box::new(|app, window, elapsed| {
+            let engine = app.engine.borrow();
+            let loaded = !engine.updates_loading() && engine.update_artifacts().len() == 4 && window.get_update_attention().row_count() == 2;
+            if window.get_surface() != "updates" || !loaded || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_updates_focused() && window.get_keyboard_mode() == "UPDATES", &format!("Ctrl+2 opens the Updates with the keyboard in them ({}, {})", window.get_updates_focused(), window.get_keyboard_mode()));
+            let jobs: Vec<crate::JobView> = window.get_update_jobs().iter().collect();
+            check(jobs.len() == 1 && jobs[0].active && (jobs[0].progress - 0.25).abs() < 0.01 && jobs[0].status == "RUNNING", "the job shows running with its progress");
+            let artifacts: Vec<crate::ArtifactView> = window.get_update_artifacts().iter().collect();
+            check(
+                artifacts.iter().filter(|a| a.readable).count() == 2 && artifacts[1].title == "Findings" && artifacts[1].kind == "DOCUMENT",
+                "the artifacts list, the document and the page readable",
+            );
+            true
+        })),
+        ("drawn", Box::new(move |_, window, _| {
+            shot(&out2, "updates-02-panel");
+            window.invoke_resolve_decision("d1".into(), "yes".into(), 3);
+            check(window.get_update_attention().row_data(0).is_some_and(|d| d.pending), "a decision being resolved shows it");
+            true
+        })),
+        ("resolved", Box::new(|_, window, _| {
+            if window.get_update_attention().row_count() != 1 || window.get_attention() != 1 {
+                return false;
+            }
+            let posted = posts("/decisions/d1/resolve");
+            check(
+                posted.len() == 1 && posted[0]["body"] == serde_json::json!({"choice": "accepted", "expected_revision": 3}),
+                &format!("Deploy accepts the decision at the revision shown: {posted:?}"),
+            );
+            window.invoke_cancel_job("j1".into());
+            check(window.get_update_jobs().row_data(0).is_some_and(|j| j.pending), "the job's cancel is in flight");
+            true
+        })),
+        ("cancelled", Box::new(move |_, window, _| {
+            if requests("DELETE", "/background-jobs/j1").len() != 1 || window.get_update_jobs().row_data(0).is_some_and(|j| j.pending) {
+                return false;
+            }
+            check(true, "the cancel reaches the Host");
+            gets.set(requests("GET", "/attention").len());
+            headless::press_with(&[Key::Control], "r");
+            true
+        })),
+        ("refreshed", Box::new(move |app, window, _| {
+            if requests("GET", "/attention").len() <= attention_gets.get() || app.engine.borrow().updates_loading() {
+                return false;
+            }
+            check(true, "Ctrl+R reloads the updates");
+            window.invoke_open_report("doc1".into());
+            true
+        })),
+        ("report", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let blocks: Vec<crate::MessageBlock> = window.get_report_blocks().iter().collect();
+            check(window.get_report_title() == "Findings" && window.get_report_summary() == "What we found" && !window.get_report_html(), "Read opens the report with its title and summary");
+            check(blocks.len() == 2 && blocks[0].kind == "heading" && blocks[1].kind == "prose", &format!("its Markdown body: {:?}", blocks.iter().map(|b| b.kind.clone()).collect::<Vec<_>>()));
+            shot(&out3, "updates-03-report");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("report closed", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(window.get_surface() == "updates" && window.get_updates_focused(), "Escape closes the report, back on the Updates");
+            window.invoke_open_report("html1".into());
+            let heading = window.get_report_blocks().row_data(0);
+            check(window.get_report_html() && heading.is_some_and(|b| b.kind == "heading"), "an HTML report reads as its headings and text");
+            click_at(window, 60.0, 400.0);
+            check(window.get_overlay().is_empty(), "a click outside closes the report");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("chats", Box::new(|_, window, _| {
+            if window.get_surface() != "chats" || !report().composer_focused {
+                return false;
+            }
+            check(true, "Escape goes back to the chats, ready to type");
+            window.invoke_surface_chosen("updates".into());
+            check(window.get_surface() == "updates", "the rail's Updates button opens them again");
+            headless::press_with(&[Key::Control], "j");
+            true
+        })),
+        ("next attention", Box::new(move |app, window, elapsed| {
+            if app.engine.borrow().selected_session() != "mike" || window.get_surface() != "chats" || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(report().composer_focused, "Ctrl+J opens Mike's chat, whose decision is still pending, ready to type");
+            shot(&out4, "updates-04-next-attention");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check teams --out DIR`: Ctrl+3 opens the Teams on the first team;
+/// a team is created, selected and edited, a member added and removed,
+/// nudging switched, the delete dialog closed by Escape and a click outside
+/// and then confirmed, and Escape goes back to the chats.
+fn teams_check(out: String) {
+    use slint::platform::Key;
+    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out);
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, _window, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            if !open || !report().composer_focused {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "3");
+            true
+        })),
+        ("open", Box::new(move |_, window, elapsed| {
+            if window.get_surface() != "teams" || window.get_team_messages().row_count() != 1 || window.get_teams_loading() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_teams_focused() && window.get_keyboard_mode() == "TEAMS", "Ctrl+3 opens the Teams with the keyboard in them");
+            let members: Vec<crate::TeamMemberView> = window.get_team_members().iter().collect();
+            check(
+                window.get_team_selected() == "t1" && window.get_team_title() == "Core" && members.len() == 1 && members[0].name == "Rachel",
+                "the first team shows with its member",
+            );
+            check(window.get_team_messages().row_data(0).is_some_and(|m| m.text == "Standup at 9"), "and its messages");
+            shot(&out1, "teams-01-panel");
+            window.invoke_team_action("grouping".into(), "".into());
+            check(!window.get_teams_grouped(), "the list can go flat");
+            window.invoke_team_action("grouping".into(), "".into());
+            window.invoke_team_action("create".into(), "".into());
+            check(window.get_overlay() == "team-create", "New team opens the create dialog");
+            headless::type_text("Ops");
+            headless::press(Key::Return);
+            true
+        })),
+        ("created", Box::new(|_, window, _| {
+            if window.get_team_list().row_count() != 2 || window.get_teams_loading() {
+                return false;
+            }
+            let posted = posts("/teams");
+            check(window.get_overlay().is_empty() && posted.len() == 1 && posted[0]["body"]["name"] == "Ops", &format!("Enter creates the team: {posted:?}"));
+            window.invoke_team_action("select".into(), "t2".into());
+            true
+        })),
+        ("selected", Box::new(|_, window, _| {
+            if window.get_team_selected() != "t2" || window.get_teams_loading() {
+                return false;
+            }
+            check(window.get_team_title() == "Ops" && window.get_team_messages().row_count() == 0, "choosing it shows it, with no messages yet");
+            window.invoke_team_action("edit".into(), "".into());
+            check(window.get_overlay() == "team-edit" && window.get_team_leaders().row_count() == 1, "Edit opens the dialog; with no members only No leader");
+            headless::press(Key::End);
+            headless::type_text(" crew");
+            headless::press(Key::Tab);
+            headless::type_text("#2a7");
+            true
+        })),
+        ("edit drawn", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            shot(&out2, "teams-02-edit");
+            headless::press(Key::Return);
+            true
+        })),
+        ("edited", Box::new(|_, window, _| {
+            let posted = posts("/teams/t2");
+            if posted.is_empty() || !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(posted[0]["body"] == serde_json::json!({"name": "Ops crew", "color": "#2a7", "leader": ""}), &format!("Enter saves the name and colour: {:?}", posted[0]["body"]));
+            window.invoke_team_action("add-member".into(), "".into());
+            check(window.get_overlay() == "team-member" && window.get_team_agents().row_count() == 2, "+ member offers the roster's agents");
+            window.set_team_agent_index(1);
+            true
+        })),
+        ("member drawn", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            shot(&out3, "teams-03-member");
+            window.invoke_team_member_added(window.get_team_agent_index());
+            true
+        })),
+        ("member added", Box::new(|_, window, _| {
+            let members: Vec<crate::TeamMemberView> = window.get_team_members().iter().collect();
+            if members.len() != 1 || window.get_team_title() != "Ops crew" {
+                return false;
+            }
+            check(members[0].name == "Mike" && posts("/teams/t2/members")[0]["body"]["agent_id"] == "a2", "Mike joins the renamed team");
+            window.invoke_team_action("remove-member".into(), "a2".into());
+            true
+        })),
+        ("member removed", Box::new(|_, window, _| {
+            if window.get_team_members().row_count() != 0 || requests("DELETE", "/teams/t2/members/a2").is_empty() {
+                return false;
+            }
+            check(true, "removing him reaches the Host");
+            window.invoke_team_action("nudging".into(), "".into());
+            window.invoke_team_action("delete".into(), "".into());
+            check(window.get_overlay() == "team-delete", "Delete asks first");
+            true
+        })),
+        ("delete drawn", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let nudged = posts("/team-nudging");
+            check(nudged.len() == 1 && nudged[0]["body"] == serde_json::json!({"team_id": "t2", "nudge_enabled": true}), "nudging switches on");
+            shot(&out4, "teams-04-delete");
+            headless::press(Key::Escape);
+            check(window.get_overlay().is_empty() && window.get_teams_focused(), "Escape closes the dialog, back on the Teams");
+            window.invoke_team_action("delete".into(), "".into());
+            click_at(window, 60.0, 400.0);
+            check(window.get_overlay().is_empty(), "so does a click outside");
+            window.invoke_team_action("delete".into(), "".into());
+            window.invoke_team_deleted();
+            true
+        })),
+        ("deleted", Box::new(|_, window, _| {
+            if window.get_team_list().row_count() != 1 || window.get_teams_loading() || window.get_team_selected() != "t1" {
+                return false;
+            }
+            check(requests("DELETE", "/teams/t2").len() == 1, "the team is deleted and the first one shows again");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("back", Box::new(|_, window, _| {
+            if window.get_surface() != "chats" || !report().composer_focused {
+                return false;
+            }
+            check(true, "Escape goes back to the chats, ready to type");
+            true
+        })),
+    ];
+    run_stages(stages);
 }
