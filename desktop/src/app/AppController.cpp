@@ -25,6 +25,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QFontDatabase>
+#include <QHostAddress>
 #include <QSaveFile>
 #include <QScopedValueRollback>
 #include <QtConcurrent/QtConcurrent>
@@ -186,7 +187,7 @@ AppController::AppController(QObject* parent)
     m_lastWorkingDirectory =
         settings.value(QStringLiteral("launch/workingDirectory"), QStringLiteral("~")).toString();
     m_lastBackend = settings.value(QStringLiteral("launch/backend")).toString();
-    m_bearerToken = qEnvironmentVariable("CLARP_TOKEN", defaultToken());
+    m_bearerToken = qEnvironmentVariable("CLARP_TOKEN", defaultToken(m_baseUrl));
 
     connect(&m_api, &ApiClient::jsonReceived, this, &AppController::handleJson);
     m_toolNarrator.setApiClient(&m_api);
@@ -198,7 +199,7 @@ AppController::AppController(QObject* parent)
                     return;
                 }
                 if (m_bearerToken.isEmpty()) {
-                    m_bearerToken = token;
+                    m_bearerToken = token.isEmpty() ? defaultToken(m_baseUrl) : token;
                 }
                 const bool stored = !token.isEmpty();
                 if (m_hasStoredCredential != stored) {
@@ -4038,7 +4039,14 @@ void AppController::scheduleConversationCache(const QString& session) {
     timer->start(250);
 }
 
-QString AppController::defaultToken() const {
+// The administrator token in config.toml belongs to the Host on this
+// machine. Sending it to a remote Host would leak it and would also hide that
+// Host's own paired device credential, so only loopback URLs get it.
+QString AppController::defaultToken(const QString& baseUrl) const {
+    const QString host = QUrl(baseUrl).host();
+    if (host != QStringLiteral("localhost") && !QHostAddress(host).isLoopback()) {
+        return {};
+    }
     const QString configHome =
         qEnvironmentVariable("XDG_CONFIG_HOME", QDir::home().filePath(QStringLiteral(".config")));
     QFile file(QDir(configHome).filePath(QStringLiteral("clarp/config.toml")));

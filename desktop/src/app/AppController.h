@@ -514,7 +514,7 @@ class AppController : public QObject {
     [[nodiscard]] ConversationModel* ensureConversation(const QString& session);
     void connectConversationSignals(ConversationModel* model, const QString& session);
     void scheduleConversationCache(const QString& session);
-    [[nodiscard]] QString defaultToken() const;
+    [[nodiscard]] QString defaultToken(const QString& baseUrl) const;
     [[nodiscard]] qsizetype styledMarkdownCacheBytes() const;
 
     ApiClient m_api;

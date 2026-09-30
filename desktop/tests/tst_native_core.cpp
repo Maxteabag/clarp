@@ -38,6 +38,7 @@
 #include <QJsonDocument>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QNetworkProxy>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QMediaPlayer>
@@ -112,6 +113,8 @@ class FakeClarpServer final : public QTcpServer {
     [[nodiscard]] qsizetype requestCount(const QString& method, const QString& path) const {
         return m_requests.count(method + u' ' + path);
     }
+    [[nodiscard]] qsizetype requestCount() const { return m_requests.size(); }
+
     [[nodiscard]] QString requestLog() const { return m_requests.join(QStringLiteral(", ")); }
 
     void setBytesResponse(const QByteArray& path, const QByteArray& body, const QByteArray& contentType) {
@@ -728,6 +731,7 @@ class NativeCoreTest final : public QObject {
     void spokenMarkupLeavesNoGapsInTheText();
     void quickSwitcherPutsTheExactNameFirst();
     void unreachableHostErrorClearsWhenItIsBack();
+    void localAdminTokenIsOnlySentToLoopbackHosts();
     void attachedToolElapsedUsesAssistantBoundaryAndPreservesSender();
     void logMergeRefreshesExplanationsOncePerBatch();
     void secondLaunchIsForwardedToTheRunningInstance();
@@ -933,6 +937,49 @@ void NativeCoreTest::unreachableHostErrorClearsWhenItIsBack() {
     QVERIFY(server.listen(QHostAddress::LocalHost, port));
     QTRY_VERIFY_WITH_TIMEOUT(controller.connected(), 15000);
     QTRY_VERIFY_WITH_TIMEOUT(controller.errorMessage().isEmpty(), 1000);
+}
+
+void NativeCoreTest::localAdminTokenIsOnlySentToLoopbackHosts() {
+    // A desktop pointed at a remote Host sent the local config.toml admin
+    // token there: it leaked the credential and hid the device token paired
+    // for that Host, so every request failed with 401.
+    QTemporaryDir config;
+    QVERIFY(config.isValid());
+    QVERIFY(QDir(config.path()).mkpath(QStringLiteral("clarp")));
+    QFile toml(config.filePath(QStringLiteral("clarp/config.toml")));
+    QVERIFY(toml.open(QIODevice::WriteOnly | QIODevice::Text));
+    toml.write("auth_token = \"test-token\"\n");
+    toml.close();
+    const auto oldBase = qgetenv("CLARP_BASE_URL");
+    const auto oldToken = qgetenv("CLARP_TOKEN");
+    const auto oldConfig = qgetenv("XDG_CONFIG_HOME");
+    const auto restore = qScopeGuard([&] {
+        qputenv("CLARP_BASE_URL", oldBase);
+        qputenv("CLARP_TOKEN", oldToken);
+        qputenv("XDG_CONFIG_HOME", oldConfig);
+        QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
+    });
+    qunsetenv("CLARP_TOKEN");
+    qputenv("XDG_CONFIG_HOME", config.path().toUtf8());
+
+    FakeClarpServer local;
+    QVERIFY(local.listenLocal());
+    qputenv("CLARP_BASE_URL", local.baseUrl().toUtf8());
+    {
+        AppController controller;
+        QTRY_VERIFY_WITH_TIMEOUT(local.requestCount() > 0, 3000);
+        QVERIFY(local.sawAuthorization());
+    }
+
+    // The proxy stands in for a remote Host; Qt never proxies loopback URLs.
+    FakeClarpServer remote;
+    QVERIFY(remote.listenLocal());
+    QNetworkProxy::setApplicationProxy(
+        QNetworkProxy(QNetworkProxy::HttpProxy, QStringLiteral("127.0.0.1"), remote.serverPort()));
+    qputenv("CLARP_BASE_URL", "http://clarp-remote.test:7682");
+    AppController controller;
+    QTRY_VERIFY_WITH_TIMEOUT(remote.requestCount() > 0, 5000);
+    QVERIFY(!remote.sawAuthorization());
 }
 
 void NativeCoreTest::quickSwitcherPutsTheExactNameFirst() {
