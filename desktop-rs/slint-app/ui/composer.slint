@@ -126,6 +126,7 @@ export component Composer inherits FocusScope {
     callback cancel-transcription();
     callback escape();
     callback jump-to-latest();
+    callback queue-requested();
 
     out property <bool> editor-focused: editor.has-focus;
     property <bool> sendable: root.can-send && (root.draft != "" || root.attachments.length > 0);
@@ -180,6 +181,9 @@ export component Composer inherits FocusScope {
             color: Palette.muted;
             font-size: 12px;
             overflow: elide;
+            accessible-role: button;
+            // Opens the queue dialog (launch dialogs).
+            TouchArea { mouse-cursor: pointer; clicked => { root.queue-requested(); } }
         }
         if root.attachments.length > 0: HorizontalLayout {
             spacing: 5px;

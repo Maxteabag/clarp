@@ -12,6 +12,10 @@ use crate::{App, AppWindow, Hint, SwitcherRow, pump_now, switcher};
 /// The keyboard map's state for where the keyboard is now.
 pub fn context(app: &App, window: &AppWindow) -> &'static str {
     if app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
+        // ---- launch dialogs: the hub has its own keyboard state.
+        if !app.switcher.borrow().open && *app.overlay.borrow() == crate::launch_view::HUB {
+            return "launch";
+        }
         return "modal";
     }
     match window.get_surface().as_str() {
@@ -88,6 +92,10 @@ fn sidebar_sessions(window: &AppWindow) -> Vec<String> {
 /// Runs `action`; false for one this app does not do yet, so the key
 /// reaches the focused control instead.
 pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
+    // ---- launch dialogs
+    if let Some(ran) = crate::launch_view::run(app, window, action).or_else(|| crate::agent_dialogs_view::run(app, window, action)) {
+        return ran;
+    }
     let selected = app.engine.borrow().selected_session().to_owned();
     let mut layout_changed = false;
     match action {
@@ -289,7 +297,10 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
         state.query.clear();
         state.selected.clear();
         state.restore_composer = app.active_report().composer_focused;
+        state.contacts_only = false;
     }
+    window.set_switcher_placeholder("Agent, contact, setting or command".into());
+    window.set_switcher_empty("No matching agent or contact".into());
     window.set_switcher_open(true);
     window.invoke_show_switcher();
     refresh_switcher(app, window);
@@ -301,15 +312,19 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
         return;
     }
     let toggles = toggles(app, window);
-    let query = app.switcher.borrow().query.clone();
-    let items = switcher::results(&app.engine.borrow(), &query, toggles);
+    let (query, contacts_only) = (app.switcher.borrow().query.clone(), app.switcher.borrow().contacts_only);
+    let items = switcher::results(&app.engine.borrow(), &query, toggles, contacts_only);
     let mut state = app.switcher.borrow_mut();
     let current = switcher::keep_selection(&items, &state.selected);
     state.selected = usize::try_from(current).ok().and_then(|i| items.get(i)).map(switcher::Item::key_of).unwrap_or_default();
     let rows: Vec<SwitcherRow> = items
         .iter()
         .map(|item| SwitcherRow {
-            kind: if item.kind == switcher::Kind::Agent { "agent".into() } else { "command".into() },
+            kind: match item.kind {
+                switcher::Kind::Agent => "agent".into(),
+                switcher::Kind::Contact => "contact".into(),
+                switcher::Kind::Command => "command".into(),
+            },
             label: item.label.clone().into(),
             detail: item.detail.clone().into(),
             key: item.key.clone().into(),
@@ -360,6 +375,17 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
             app.engine.borrow_mut().select(&item.target);
             pump_now(app);
             restore = true;
+        }
+        // ---- launch dialogs: a contact row starts that contact.
+        switcher::Kind::Contact => {
+            window.set_surface("chats".into());
+            app.engine.borrow_mut().quick_start_contact(&item.target, "", "", "");
+            pump_now(app);
+            restore = true;
+        }
+        switcher::Kind::Command if item.target == "new-contact" => {
+            crate::launch_view::open_contacts(app, window, Some(restore));
+            return;
         }
         switcher::Kind::Command => {
             let leaves = ["quick-new-agent", "rename-agent", "new", "overview", "connection", "orchestrator", "updates", "teams", "settings"];

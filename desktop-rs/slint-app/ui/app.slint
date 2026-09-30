@@ -13,6 +13,10 @@ import { Updates, AttentionView, JobView, ArtifactView } from "updates.slint";
 import { ReportView } from "report.slint";
 import { Teams, TeamView, TeamMessageView, TeamMemberView, TeamCreateDialog, TeamEditDialog, TeamMemberDialog, TeamDeleteDialog } from "teams.slint";
 import { ProcessPopover, ProcessJob, ProcessHelper } from "processes.slint";
+// ---- launch dialogs
+import { NewSessionHub, StartAgentDialog, LaunchHub, StartAgent, ProviderChip, ContactCard, DirRow, PastRow, McpChoice } from "launch.slint";
+import { RenameAgentDialog, AssignAgentDialog, QueueDialog, AgentDialogs, QueuedTurn } from "agent_dialogs.slint";
+export { LaunchHub, StartAgent, ProviderChip, ContactCard, DirRow, PastRow, McpChoice, AgentDialogs, QueuedTurn }
 
 export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow }
 // ---- updates and teams
@@ -186,6 +190,9 @@ export component AppWindow inherits Window {
     in property <length> process-y;
     callback show-processes(string, length, length);
     callback process-helper-opened(string);
+    // ---- launch dialogs: the switcher's contacts-only mode
+    in property <string> switcher-placeholder: "Agent, contact, setting or command";
+    in property <string> switcher-empty: "No matching agent or contact";
     in property <[string]> keymap-actions;
     in property <string> keymap-error;
     in-out property <string> keymap-profile;
@@ -460,8 +467,36 @@ export component AppWindow inherits Window {
             helper-opened(session) => { root.process-helper-opened(session); }
             dismissed => { root.overlay-closed(); }
         }
+        // ---- launch dialogs
+        NewSessionHub {
+            visible: root.overlay == "new-session";
+            width: parent.width;
+            height: parent.height;
+        }
+        StartAgentDialog {
+            visible: root.overlay == "start-agent";
+            width: parent.width;
+            height: parent.height;
+        }
+        RenameAgentDialog {
+            visible: root.overlay == "rename-agent";
+            width: parent.width;
+            height: parent.height;
+        }
+        AssignAgentDialog {
+            visible: root.overlay == "assign-agent";
+            width: parent.width;
+            height: parent.height;
+        }
+        QueueDialog {
+            visible: root.overlay == "queue";
+            width: parent.width;
+            height: parent.height;
+        }
         switcher := Switcher {
             visible: root.switcher-open;
+            placeholder: root.switcher-placeholder;
+            empty-text: root.switcher-empty;
             width: parent.width;
             height: parent.height;
             rows: root.switcher-rows;

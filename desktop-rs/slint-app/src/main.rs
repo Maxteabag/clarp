@@ -19,6 +19,9 @@ mod view;
 // ---- updates and teams
 mod teams_view;
 mod updates_view;
+// ---- launch dialogs
+mod agent_dialogs_view;
+mod launch_view;
 
 use view::{apply_theme, chat_row, initial, open_link};
 
@@ -79,6 +82,8 @@ pub struct SwitcherState {
     pub selected: String,
     /// The composer had the keyboard when the switcher opened.
     pub restore_composer: bool,
+    // ---- launch dialogs: "Start an idle contact" lists only idle contacts.
+    pub contacts_only: bool,
 }
 
 pub fn app() -> Option<Rc<App>> {
@@ -223,6 +228,11 @@ impl App {
         teams_view::refresh(self, &window, changes);
         if changes.contains(&Change::Roster) {
             commands::show_hints(self, &window);
+        }
+        // ---- launch dialogs
+        if let Some(app) = app() {
+            launch_view::refresh(&app, &window, changes);
+            agent_dialogs_view::refresh(&app, &window, changes);
         }
     }
 }
@@ -598,6 +608,9 @@ fn main() {
             pump_now(&app);
         }
     });
+    // ---- launch dialogs
+    launch_view::wire(&window);
+    agent_dialogs_view::wire(&window);
 
     // `--theme` is the reading theme from now on, like choosing it.
     if arg("--theme").is_some() && state.engine.borrow().reading_theme() != theme {
