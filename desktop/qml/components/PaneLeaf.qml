@@ -12,6 +12,7 @@ Rectangle {
     readonly property bool active: controller.panes.activePaneId === String(node.id)
     readonly property string session: String(node.session || "")
     function jumpToLatest() { conversation.jumpToLatest(); }
+    function scrollKey(event) { return conversation.scrollKey(event); }
     focus: true
 
     color: active ? Theme.control : Theme.raised
