@@ -872,6 +872,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "clarp-engine"
+version = "0.1.0"
+dependencies = [
+ "clarp-core",
+ "clarp-net",
+ "serde_json",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "clarp-net"
 version = "0.1.0"
 dependencies = [
