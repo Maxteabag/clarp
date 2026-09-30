@@ -68,6 +68,8 @@ teams = [{"team_id": "t1", "name": "Core", "color": "#fff", "member_agent_ids": 
 team_messages = {"t1": [{"id": "tm1", "text": "Standup at 9"}]}
 turn_queue = {"rachel": [{"queue_id": "q1", "text": "later please"}, {"queue_id": "q2", "text": "and this"}]}
 create_mode = "modern"
+# /agent-model-options; /__control/catalog replaces it.
+model_options = {"backends": []}
 next_create_response = None
 pending_agents = []
 attention = [{"id": "d1", "session": "mike", "kind": "decision"}]
@@ -186,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/message-tool-details":
             return self.reply(200, {"tools": [{"name": "Bash", "input": {"command": "ls"}}], "display_cells": []})
         if url.path == "/agent-model-options":
-            return self.reply(200, {"backends": []})
+            return self.reply(200, model_options)
         if url.path == "/static/avatars/rachel.png":
             return self.reply_bytes(200, AVATAR_PNG, "image/png")
         if url.path == "/fixtures/tone.pcm":
@@ -329,6 +331,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/create":
             create_mode = body.get("mode", create_mode)
             next_create_response = body.get("respond")
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/catalog":
+            # Test control: the model catalog /agent-model-options answers.
+            global model_options
+            model_options = body
             return self.reply(200, {"ok": True})
         if url.path == "/__control/add-agent":
             # Test control: one more idle agent in the roster, announced.
