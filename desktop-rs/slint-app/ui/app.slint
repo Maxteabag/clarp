@@ -1,5 +1,5 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
-import { Palette } from "theme.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
 import { Attachment } from "composer.slint";
@@ -27,7 +27,7 @@ import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
 import { DisplayCell, CellLine, ArtifactItem } from "cells.slint";
 export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem }
 
-export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
+export { Palette, Focus, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
 
@@ -55,12 +55,23 @@ component ShortcutBar inherits Rectangle {
             font-weight: 700;
             vertical-alignment: center;
         }
-        for hint in root.hints: HorizontalLayout {
-            spacing: 5px;
-            Text { text: hint.label + ":"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
-            Text { text: hint.keys; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+        // The hints clip at the window's edge: however many the state has,
+        // they never widen the layout above them.
+        Rectangle {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            clip: true;
+            HorizontalLayout {
+                x: 0;
+                width: self.preferred-width;
+                spacing: 16px;
+                for hint in root.hints: HorizontalLayout {
+                    spacing: 5px;
+                    Text { text: hint.label + ":"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+                    Text { text: hint.keys; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                }
+            }
         }
-        Rectangle { horizontal-stretch: 1; }
         Text {
             text: root.connection;
             color: root.connection == "live" ? Palette.success : Palette.warning;
@@ -251,6 +262,8 @@ export component AppWindow inherits Window {
     changed sidebar-focused => { root.focus-moved(); }
 
     keys := FocusScope {
+        width: root.width;
+        height: root.height;
         focus-on-click: false;
         capture-key-pressed(event) => {
             if (root.shortcut(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift)) {
@@ -258,7 +271,12 @@ export component AppWindow inherits Window {
             }
             reject
         }
+        // The shortcut bar is the window's footer, under every column.
         HorizontalLayout {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height - (root.shortcuts-visible ? footer.height : 0px);
             NavRail {
                 surface: root.surface;
                 attention: root.attention;
@@ -410,13 +428,17 @@ export component AppWindow inherits Window {
                     remove-member(id) => { root.team-action("remove-member", id); }
                     open-chat(session) => { root.open-chat(session); }
                 }
-                }
-                if root.shortcuts-visible: ShortcutBar {
-                    mode: root.keyboard-mode;
-                    connection: root.connection;
-                    hints: root.hints;
+                FocusRing { shown: Focus.mode == "settings" || Focus.mode == "updates" || Focus.mode == "teams"; }
                 }
             }
+        }
+        footer := ShortcutBar {
+            visible: root.shortcuts-visible;
+            y: parent.height - self.height;
+            width: parent.width;
+            mode: root.keyboard-mode;
+            connection: root.connection;
+            hints: root.hints;
         }
         connection-page := ConnectionPage {
             visible: root.overlay == "connection";

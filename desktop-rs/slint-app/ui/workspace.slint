@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
 import { Composer, Attachment } from "composer.slint";
 import { Transcript, MessageRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
@@ -172,7 +172,7 @@ export component Pane inherits Rectangle {
     // whether the reader follows, for shortcuts and checks.
     callback reported(bool, bool, length, bool, bool);
     background: root.pane.active ? Palette.control : Palette.raised;
-    border-color: root.pane.active ? Palette.border : Palette.control;
+    border-color: Palette.control;
     border-width: 1px;
     border-radius: 3px;
     clip: true;
@@ -283,6 +283,21 @@ export component Pane inherits Rectangle {
             jump-to-latest => { transcript.scroll-to-latest(); }
             queue-requested => { AgentDialogs.queue-open(root.pane.session); }
         }
+    }
+    // The keyboard's region in the active pane (the one focus style).
+    FocusRing {
+        x: transcript.x;
+        y: transcript.y;
+        width: transcript.width;
+        height: transcript.height;
+        shown: root.pane.active && Focus.mode == "pane";
+    }
+    FocusRing {
+        x: composer.x;
+        y: composer.y;
+        width: composer.width;
+        height: composer.height;
+        shown: root.pane.active && Focus.mode == "composer";
     }
 }
 

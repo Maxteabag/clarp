@@ -4,10 +4,10 @@
 use std::rc::Rc;
 
 use clarp_engine::Change;
-use slint::{Model, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::keymap::{self, Facts};
-use crate::{App, AppWindow, Hint, SwitcherRow, pump_now, switcher};
+use crate::{App, AppWindow, Focus, Hint, SwitcherRow, pump_now, switcher};
 
 /// The keyboard map's state for where the keyboard is now.
 pub fn context(app: &App, window: &AppWindow) -> &'static str {
@@ -69,6 +69,8 @@ pub fn show_hints(app: &App, window: &AppWindow) {
         other => other.to_uppercase(),
     };
     window.set_keyboard_mode(mode.into());
+    // The one focus ring follows the same state.
+    window.global::<Focus>().set_mode(state.into());
     window.set_hints(ModelRc::new(VecModel::from(hints)));
 }
 

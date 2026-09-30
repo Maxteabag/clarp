@@ -1,5 +1,5 @@
 import { ListView } from "std-widgets.slint";
-import { Palette } from "theme.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
 
 // One line of the settings surface: a section title, a switch, a choice
 // that steps through values, an action, or read-only information.
@@ -79,9 +79,7 @@ export component Settings inherits Rectangle {
                 for row[index] in root.rows: Rectangle {
                     height: row.kind == "section" ? 40px : 36px;
                     border-radius: 3px;
-                    background: index == root.current && keys.has-focus ? Palette.control : touch.has-hover && root.actionable(index) ? Palette.hover : transparent;
-                    border-width: index == root.current && keys.has-focus ? 1px : 0px;
-                    border-color: Palette.accent;
+                    background: index == root.current && keys.has-focus ? Focus.cursor : touch.has-hover && root.actionable(index) ? Palette.hover : transparent;
                     touch := TouchArea {
                         enabled: root.actionable(index);
                         clicked => {
