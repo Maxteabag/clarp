@@ -322,3 +322,24 @@ fn the_orchestrator_loads_and_saves_clamped_settings() {
     assert_eq!(d.engine.orchestrator_last_decision(), "No decisions logged yet.");
     assert!(d.saw(&Change::Orchestrator));
 }
+
+#[test]
+fn portraits_are_fetched_once_rounded_and_cached() {
+    let host = Host::start("avatars");
+    let mut d = Driver::live(&host);
+    let cache = host.dir.join("portraits");
+    d.engine.set_portrait_directory(cache.clone());
+    assert!(d.engine.avatar_source("rachel").is_none(), "nothing until it arrives");
+    assert!(d.engine.avatar_source("rachel").is_none());
+    d.until_change("portrait", Change::Avatars);
+    let source = d.engine.avatar_source("rachel").expect("cached");
+    let path = url::Url::parse(&source).unwrap().to_file_path().unwrap();
+    assert!(path.starts_with(&cache), "{path:?}");
+    // A PNG's IHDR holds its width and height.
+    let png = std::fs::read(&path).unwrap();
+    let side = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
+    assert_eq!((side(16), side(20)), (192, 192), "rounded to the sidebar's size");
+    assert_eq!(host.requests("GET", "/static/avatars/rachel.png").len(), 1, "asked for once");
+    assert_eq!(d.engine.avatar_revision(), 1);
+    assert!(d.engine.avatar_source("nobody").is_none());
+}
