@@ -53,7 +53,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/ReadingTheme.h` (header-only) | 282 | `core/src/reading_theme.rs` + generated `reading_themes.json` | verified (`core/tests/reading_theme.rs`); fonts resolved through fontconfig (`app/src/fonts.rs`) |
 | `src/app/ReadyReplySmokeCheck.h` (header-only) | 85 | `app/tests/qml/ready_reply_probe.qml` (+ the same through a live agent-state event; screenshot of the typing state) | verified on the real Main |
 | `src/app/StartupTrace.h` (header-only) | 52 | `desktop-rs/src/app/` | todo |
-| `src/app/TranscriptScrollSmokeCheck.h` (header-only) | 440 | `desktop-rs/src/app/` | todo |
+| `src/app/TranscriptScrollSmokeCheck.h` (header-only) | 440 | `app/tests/qml/transcript_scroll_probe.qml` (real wheel turns via `KeyInjector.wheel`, QTest::wheelEvent) | wip: phase A (follow, pause, stream, final row, refresh, jump to latest, wheel back) verified on the real Main; grouped phase B and the pane-switch frame check pending |
 | `src/app/VoiceViewportSmokeCheck.h` (header-only) | 153 | `app/tests/qml/voice_viewport_probe.qml` (voice failures and a streamed reply via the fake Host's live events; anchor row within 2 px; screenshot) | verified on the real Main |
 | `src/models/TreeOrder.h` (header-only) | 79 | `core/src/tree.rs` | verified (`roster.rs::tree_order_matches_the_team_walk`) |
 
@@ -73,7 +73,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | Play announced clips, select sources by protocol precedence, and acknowledge queued/start/success/failure states. | `core/tests/audio.rs` + `app/tests/qml/controller_audio_probe.qml` (test sink) | wip: verified through the silent sink; audible output pending |
 | Treat `user-notification` as the only unread/desktop-notification decision. | `app/tests/qml/controller_probe.qml` (fake Host) (no notification for the open chat) + `roster.rs` | wip: notification for a background chat not probed |
 | Create/relaunch/fork/release agents and expose the desktop overview, voice-selection, and orchestrator settings workflows. | `app/tests/qml/controller_agent_lifecycle_probe.qml` (anonymous, relaunch with replace_sid and MCP by name, resume, fork, muted, native resume, archive, release) + `controller_launch_probe.qml` + `controller_profile_probe.qml` (voices, choose voice, orchestrator) | verified: the overview is the shared QML over these |
-| Preserve the desktop pane workspace, collapsible agent rail, keyboard-driven navigation, quick switcher, tool visibility, and scroll-to-latest behavior. | `app/tests/qml/keyboard_probe.qml` (keyboard navigation, collapsible rail, quick switcher) + `core/tests/panes.rs` + `pane_tree_model_probe.qml` (pane workspace) | wip: tool visibility and scroll-to-latest on the real Main pending |
+| Preserve the desktop pane workspace, collapsible agent rail, keyboard-driven navigation, quick switcher, tool visibility, and scroll-to-latest behavior. | `app/tests/qml/keyboard_probe.qml` (keyboard navigation, collapsible rail, quick switcher) + `core/tests/panes.rs` + `pane_tree_model_probe.qml` (pane workspace) | wip: scroll-to-latest verified (`transcript_scroll_probe.qml`); tool visibility on the real Main pending |
 
 ## C++ test cases to port
 

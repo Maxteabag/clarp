@@ -1,4 +1,4 @@
-//! KeyInjector: real key presses into one of this process's windows, for
+//! KeyInjector: real key presses and wheel turns into one of this process's windows, for
 //! probes (C++ `KeyboardSmokeCheck` and friends). Keys go through Qt's
 //! window-system path (`QTest::keyClick`), exactly as typing would; it only
 //! ever acts on the offscreen platform, so it can never type into the
@@ -32,8 +32,20 @@ pub mod qobject {
         Key_A = 0x41,
     }
 
+    #[namespace = "Qt"]
+    #[repr(i32)]
+    enum ScrollPhase {
+        NoScrollPhase = 0,
+    }
+
     unsafe extern "C++" {
         include!(<QtTest/QTest>);
+        include!("cxx-qt-lib/qpointf.h");
+        type QPointF = cxx_qt_lib::QPointF;
+        include!("cxx-qt-lib/qpoint.h");
+        type QPoint = cxx_qt_lib::QPoint;
+        #[namespace = "Qt"]
+        type ScrollPhase;
         include!(<QtGui/QWindow>);
         include!("cxx-qt-lib/qstring.h");
         type QString = cxx_qt_lib::QString;
@@ -51,6 +63,9 @@ pub mod qobject {
         #[namespace = "QTest"]
         #[cxx_name = "keyClick"]
         unsafe fn key_click(window: *mut QWindow, key: Key, modifier: KeyboardModifiers, delay: i32);
+        #[namespace = "QTest"]
+        #[cxx_name = "wheelEvent"]
+        unsafe fn wheel_event(window: *mut QWindow, position: QPointF, angle_delta: QPoint, pixel_delta: QPoint, modifiers: KeyboardModifiers, phase: ScrollPhase);
     }
 
     extern "RustQt" {
@@ -65,6 +80,10 @@ pub mod qobject {
         /// `window`. False, and nothing sent, off the offscreen platform.
         #[qinvokable]
         unsafe fn press(self: &KeyInjector, window: *mut QWindow, key: i32, modifiers: i32) -> bool;
+        /// Turns the mouse wheel over (`x`, `y`) in `window` by `notches`
+        /// (positive scrolls up, towards older rows), one notch at a time.
+        #[qinvokable]
+        unsafe fn wheel(self: &KeyInjector, window: *mut QWindow, x: f64, y: f64, notches: i32) -> bool;
         /// Types `text` one key at a time.
         #[qinvokable]
         #[cxx_name = "type"]
@@ -91,6 +110,26 @@ impl qobject::KeyInjector {
         }
         let flags = KeyboardModifiers::from_int(modifiers as u32);
         unsafe { qobject::key_click(window, qobject::Key { repr: key }, flags, -1) };
+        true
+    }
+
+    unsafe fn wheel(&self, window: *mut qobject::QWindow, x: f64, y: f64, notches: i32) -> bool {
+        if window.is_null() || !offscreen() {
+            return false;
+        }
+        let step = if notches < 0 { -120 } else { 120 };
+        for _ in 0..notches.unsigned_abs() {
+            unsafe {
+                qobject::wheel_event(
+                    window,
+                    cxx_qt_lib::QPointF::new(x, y),
+                    cxx_qt_lib::QPoint::new(0, step),
+                    cxx_qt_lib::QPoint::new(0, 0),
+                    KeyboardModifiers::from_int(0),
+                    qobject::ScrollPhase::NoScrollPhase,
+                )
+            };
+        }
         true
     }
 
