@@ -195,6 +195,10 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         "jump-latest" => app.to_latest(),
         "stop-agent" => app.engine.borrow_mut().stop(),
+        "tool-narration" => {
+            let enabled = app.engine.borrow().narrator_enabled();
+            app.engine.borrow_mut().set_narrator_enabled(!enabled);
+        }
         "talk" => {
             let agent = !selected.is_empty() && !selected.starts_with("pair:");
             let recording = crate::platform::audio::with(|audio| audio.recording()).unwrap_or(false);
@@ -216,6 +220,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             let mode = app.engine.borrow().activity_mode();
             let always = clarp_core::presentation::ALWAYS_VISIBLE;
             app.engine.borrow_mut().set_activity_mode(if mode == always { 0 } else { always });
+        }
+        _ if action.starts_with("setting:detail:") => {
+            if let Ok(level) = action.trim_start_matches("setting:detail:").parse::<i32>() {
+                app.engine.borrow_mut().set_narrator_detail_level(level);
+            }
         }
         _ if action.starts_with("setting:") => apply_setting(app, window, action),
         "settings" => crate::settings_view::open(app, window),
@@ -253,6 +262,8 @@ fn toggles(app: &App, window: &AppWindow) -> switcher::Toggles {
         workspace_bar: prefs.workspace_bar,
         shared_filesystem: engine.shared_filesystem(),
         activity_mode: engine.activity_mode(),
+        narration: engine.narrator_enabled(),
+        detail_level: engine.narrator_detail_level(),
     }
 }
 

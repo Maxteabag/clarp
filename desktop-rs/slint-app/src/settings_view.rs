@@ -68,6 +68,10 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         toggle("show-when-ready", "Show when ready", engine.show_when_ready()),
         toggle("reduced-motion", "Reduce Motion", settings.boolean("appearance/reducedMotion", false)),
         choice("activity", "Tool activity", ACTIVITY[engine.activity_mode().clamp(0, 2) as usize]),
+        section("EXPERIMENTS"),
+        toggle("narration", "Plain-English tools (Spark · extra usage)", engine.narrator_enabled()),
+        choice("tool-detail", "Tool detail", clarp_engine::Engine::narrator_detail_levels()[engine.narrator_detail_level().clamp(0, 4) as usize]),
+        info(engine.narrator_level_description(), &engine.narrator_status()),
         section("STARTUP"),
         toggle("new-agent-on-startup", "Start a new agent when opening Clarp", settings.boolean("launch/newAgentOnStartup", true)),
         section("AGENT IDENTITY"),
@@ -170,6 +174,14 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
         "activity" => {
             let mode = app.engine.borrow().activity_mode();
             app.engine.borrow_mut().set_activity_mode((mode + delta).rem_euclid(3));
+        }
+        "narration" => {
+            let enabled = app.engine.borrow().narrator_enabled();
+            app.engine.borrow_mut().set_narrator_enabled(!enabled);
+        }
+        "tool-detail" => {
+            let level = app.engine.borrow().narrator_detail_level();
+            app.engine.borrow_mut().set_narrator_detail_level((level + delta).rem_euclid(5));
         }
         "new-agent-on-startup" => flip(app, "launch/newAgentOnStartup", true),
         "anonymous-agents" => flip(app, "launch/anonymousAgents", true),
