@@ -18,7 +18,8 @@ env CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-t
     XDG_CONFIG_HOME="$scratch/c" XDG_CACHE_HOME="$scratch/k" XDG_DATA_HOME="$scratch/d" XDG_STATE_HOME="$scratch/s" \
     CLARP_AUDIO_OUTPUT=null CLARP_AUDIO_INPUT="file:$scratch/voice.wav" CLARP_KEYRING=off \
     CLARP_TEST_OPEN_URL="$scratch/urls" CLARP_TEST_HOST_LOG="$scratch/host.log" \
-    CLARP_TEST_ATTACH_FILE="$scratch/photo.png" \
+    CLARP_TEST_ATTACH_FILE="$scratch/photo.png" CLARP_TEST_NOTIFY_LOG="$scratch/notifications" \
+    CLARP_TEST_FOREGROUND=1 \
     timeout 120 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
     target/debug/clarp-slint --check "$name" --out "$out" 2>&1 | tee "$scratch/run.log" | grep -E "^(ok|FAIL|E2E)"
 grep -q "^E2E_PASS" "$scratch/run.log"

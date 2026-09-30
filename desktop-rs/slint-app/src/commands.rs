@@ -70,6 +70,8 @@ pub fn show_hints(app: &App, window: &AppWindow) {
 
 /// A key the window saw before any control: true when a binding ran.
 pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool) -> bool {
+    // Every key is someone at this window (headless too, where winit is not).
+    crate::platform::desktop::note_input();
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return false };
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
     let state = context(&app, &window);
