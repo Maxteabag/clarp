@@ -79,7 +79,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/TypingIndicator.qml` | 42 | ui/transcript.slint | todo |
 | `qml/components/UpdatesPanel.qml` | 331 | ui/panels/updatespanel.slint | todo |
 | `qml/components/VoiceDialog.qml` | 123 | ui/panels/voicedialog.slint | todo |
-| `qml/components/Workspace.qml` | 171 | `slint-app/ui/workspace.slint` `Workspace` (panes from `PaneTree::view_layout`, split handles with drag/double-click balance, workspace tabs, save-conflict warning) + `engine/src/workspace.rs` (persistence off the UI thread, joined on close) + `slint-app/src/panes.rs` | verified: `slint-app/tests/check.sh panes` (`docs/checks/panes-01-split.png`), `engine/tests/host_flow.rs::panes_follow_the_selection_and_their_layout_is_restored`; split dragging and the workspace tabs are not driven by a check yet |
+| `qml/components/Workspace.qml` | 171 | `slint-app/ui/workspace.slint` `Workspace` (panes from `PaneTree::view_layout`, split handles with drag/double-click balance, workspace tabs, save-conflict warning) + `engine/src/workspace.rs` (persistence off the UI thread, joined on close) + `slint-app/src/panes.rs` | verified: `slint-app/tests/check.sh panes` (`docs/checks/panes-01-split.png`), `engine/tests/host_flow.rs::panes_follow_the_selection_and_their_layout_is_restored` (also split down, resize, new workspace, Ctrl+Alt+W) |
 
 ## REWRITE_PLAN behaviours (against the Slint app)
 

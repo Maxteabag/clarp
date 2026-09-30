@@ -571,6 +571,44 @@ fn panes_check(out: String) {
                 return false;
             }
             check(true, "Ctrl+Shift+K hides the shortcut bar");
+            headless::press_with(&[Key::Control, Key::Alt], "s");
+            true
+        })),
+        ("split down", Box::new(|app, window, _| {
+            if app.engine.borrow().panes().pane_count() != 2 || window.get_splits().row_count() != 1 {
+                return false;
+            }
+            let split = window.get_splits().row_data(0).expect("split");
+            check(!split.vertical && (split.ratio - 0.5).abs() < 0.01, "Ctrl+Alt+S splits down, half and half");
+            window.invoke_resize_split(split.id, 0.3);
+            true
+        })),
+        ("resized", Box::new(|_, window, _| {
+            let ratio = window.get_splits().row_data(0).map(|s| s.ratio).unwrap_or(0.0);
+            if (ratio - 0.3).abs() > 0.01 {
+                return false;
+            }
+            check((view().height - 0.7).abs() < 0.01 || (view().height - 0.3).abs() < 0.01, "dragging the split resizes the panes");
+            check(!window.get_workspace_bar(), "one workspace needs no tabs");
+            window.invoke_create_workspace();
+            true
+        })),
+        ("second workspace", Box::new(|app, window, _| {
+            if window.get_workspaces().row_count() != 2 {
+                return false;
+            }
+            let active = window.get_workspaces().iter().find(|w| w.active).map(|w| w.name.to_string()).unwrap_or_default();
+            check(window.get_workspace_bar() && active == "Workspace 2", &format!("a new workspace shows the tabs and opens: {active}"));
+            check(app.engine.borrow().panes().pane_count() == 1, "with a single pane");
+            headless::press_with(&[Key::Control, Key::Alt], "w");
+            true
+        })),
+        ("back", Box::new(|app, window, _| {
+            let active = window.get_workspaces().iter().find(|w| w.active).map(|w| w.name.to_string()).unwrap_or_default();
+            if active != "Main" {
+                return false;
+            }
+            check(app.engine.borrow().panes().pane_count() == 2, "Ctrl+Alt+W returns to the first workspace and its two panes");
             true
         })),
     ];
