@@ -1,0 +1,61 @@
+import { Palette } from "theme.slint";
+
+export struct MessageRow {
+    id: string,
+    // user, assistant, activity
+    author: string,
+    text: string,
+    meta: string,
+    pending: bool,
+    failed: bool,
+}
+
+// The transcript (TranscriptView/MessageDelegate in QML). Rows are plain
+// wrapped text for now; Markdown and tool cards follow.
+export component Transcript inherits Rectangle {
+    in property <[MessageRow]> rows;
+    in property <bool> follow: true;
+    background: Palette.window;
+    flick := Flickable {
+        width: parent.width;
+        height: parent.height;
+        content-width: self.width;
+        column := VerticalLayout {
+            width: flick.width;
+            padding: 16px;
+            spacing: 14px;
+            for row in root.rows: HorizontalLayout {
+                alignment: row.author == "user" ? end : start;
+                Rectangle {
+                    background: row.author == "user" ? Palette.bubble : transparent;
+                    border-radius: 2px;
+                    max-width: flick.width * 0.8;
+                    VerticalLayout {
+                        padding: row.author == "user" ? 10px : 2px;
+                        spacing: 4px;
+                        Text {
+                            text: row.text;
+                            wrap: word-wrap;
+                            color: row.author == "activity" ? Palette.muted : Palette.text;
+                            font-size: row.author == "activity" ? 13px : Palette.body-size;
+                            font-italic: row.author == "activity";
+                        }
+                        if row.pending || row.failed || row.meta != "": Text {
+                            text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.meta;
+                            color: row.failed ? Palette.danger : Palette.faint;
+                            font-size: 11px;
+                        }
+                    }
+                }
+            }
+        }
+        content-height: column.preferred-height;
+    }
+    // Following keeps the end in view as rows arrive.
+    changed rows => {
+        if (root.follow) { flick.content-y = Math.min(0px, flick.height - column.preferred-height); }
+    }
+    public function scroll-to-latest() {
+        flick.content-y = Math.min(0px, flick.height - column.preferred-height);
+    }
+}

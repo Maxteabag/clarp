@@ -1,0 +1,133 @@
+import { TextEdit, Button } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+import { Sidebar, ChatRow } from "sidebar.slint";
+import { Transcript, MessageRow } from "transcript.slint";
+
+export { Palette, ChatRow, MessageRow }
+
+export component AppWindow inherits Window {
+    title: root.selected-name == "" ? "Clarp" : root.selected-name + " — Clarp";
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Palette.window;
+    default-font-family: Palette.body-family;
+    default-font-size: Palette.body-size;
+
+    in property <[ChatRow]> chats;
+    in property <[MessageRow]> messages;
+    in property <string> selected-name;
+    in property <string> selected-detail;
+    in property <string> connection;
+    in property <string> error;
+    in property <bool> sending;
+    in property <bool> busy;
+    in-out property <string> draft;
+    callback chat-chosen(string);
+    callback send(string);
+    callback stop();
+    callback dismiss-error();
+
+    forward-focus: composer;
+
+    HorizontalLayout {
+        sidebar := Sidebar {
+            width: 300px;
+            rows: root.chats;
+            chosen(session) => { root.chat-chosen(session); }
+        }
+        Rectangle { width: 1px; background: Palette.rule; }
+        VerticalLayout {
+            // Header: the open chat and the connection.
+            Rectangle {
+                height: 48px;
+                background: Palette.window;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 12px;
+                    Text {
+                        text: root.selected-name;
+                        color: Palette.chrome-text;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.selected-detail;
+                        color: Palette.muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: root.connection;
+                        color: root.connection == "live" ? Palette.success : Palette.warning;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            Rectangle { height: 1px; background: Palette.rule; }
+            if root.error != "": Rectangle {
+                height: 36px;
+                background: Palette.danger-surface;
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    Text {
+                        text: root.error;
+                        color: Palette.danger;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    TouchArea {
+                        width: 80px;
+                        clicked => { root.dismiss-error(); }
+                        Text { text: "Dismiss"; color: Palette.chrome-text; }
+                    }
+                }
+            }
+            transcript := Transcript {
+                vertical-stretch: 1;
+                rows: root.messages;
+            }
+            Rectangle { height: 1px; background: Palette.rule; }
+            // Composer: Enter sends, Shift+Enter is a new line.
+            Rectangle {
+                height: 96px;
+                background: Palette.sunken;
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 10px;
+                    keys := FocusScope {
+                        horizontal-stretch: 1;
+                        capture-key-pressed(event) => {
+                            if (event.text == Key.Return && !event.modifiers.shift) {
+                                if (composer.text != "") {
+                                    root.send(composer.text);
+                                    composer.text = "";
+                                }
+                                return accept;
+                            }
+                            reject
+                        }
+                        composer := TextEdit {
+                            text <=> root.draft;
+                            wrap: word-wrap;
+                            font-size: Palette.body-size;
+                        }
+                    }
+                    Button {
+                        text: root.busy ? "Stop" : "Send";
+                        enabled: root.busy || composer.text != "";
+                        clicked => {
+                            if (root.busy) { root.stop(); }
+                            else if (composer.text != "") { root.send(composer.text); composer.text = ""; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

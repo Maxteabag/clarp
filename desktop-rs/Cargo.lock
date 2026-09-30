@@ -896,6 +896,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "clarp-slint"
+version = "0.1.0"
+dependencies = [
+ "clarp-core",
+ "clarp-engine",
+ "image",
+ "slint",
+ "slint-build",
+]
+
+[[package]]
 name = "clarp-switcher-slint"
 version = "0.1.0"
 dependencies = [
