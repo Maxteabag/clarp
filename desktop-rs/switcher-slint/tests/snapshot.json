@@ -1,0 +1,136 @@
+{
+ "agents": [
+  {
+   "agent_id": "rachel-id",
+   "session": "rachel",
+   "persona": "Rachel",
+   "backend": "claude",
+   "latest_state": "idle",
+   "busy": false,
+   "unread": true,
+   "cwd": "/home/fake/clarp",
+   "last_activity": 1000,
+   "alive": true
+  },
+  {
+   "agent_id": "adam-id",
+   "session": "adam",
+   "persona": "Adam",
+   "backend": "codex",
+   "latest_state": "thinking",
+   "busy": true,
+   "unread": false,
+   "cwd": "/home/fake/billing",
+   "last_activity": 999,
+   "alive": true
+  },
+  {
+   "agent_id": "ada-id",
+   "session": "ada",
+   "persona": "Ada",
+   "backend": "claude",
+   "latest_state": "idle",
+   "busy": false,
+   "unread": false,
+   "cwd": "/home/fake/ada-notes",
+   "last_activity": 998,
+   "alive": true
+  },
+  {
+   "agent_id": "kada-id",
+   "session": "kada",
+   "persona": "Kada",
+   "backend": "grok",
+   "latest_state": "idle",
+   "busy": false,
+   "unread": false,
+   "cwd": "/home/fake/kada",
+   "last_activity": 997,
+   "alive": true
+  },
+  {
+   "agent_id": "team-ada-id",
+   "session": "team-ada",
+   "persona": "Team Ada",
+   "backend": "claude",
+   "latest_state": "waiting",
+   "busy": false,
+   "unread": true,
+   "cwd": "/home/fake/team",
+   "last_activity": 996,
+   "alive": true
+  },
+  {
+   "agent_id": "mike-id",
+   "session": "mike",
+   "persona": "Mike",
+   "backend": "codex",
+   "latest_state": "tool",
+   "busy": true,
+   "unread": false,
+   "cwd": "/home/fake/infra",
+   "last_activity": 995,
+   "alive": true
+  },
+  {
+   "agent_id": "nova-id",
+   "session": "nova",
+   "persona": "Nova",
+   "backend": "opencode",
+   "latest_state": "idle",
+   "busy": false,
+   "unread": false,
+   "cwd": "/home/fake/site",
+   "last_activity": 994,
+   "alive": true
+  },
+  {
+   "agent_id": "fern-id",
+   "session": "fern",
+   "persona": "Fern",
+   "backend": "claude",
+   "latest_state": "idle",
+   "busy": false,
+   "unread": false,
+   "cwd": "/home/fake/garden",
+   "last_activity": 993,
+   "alive": true
+  },
+  {
+   "agent_id": "remy-id",
+   "session": "remy",
+   "persona": "Remy",
+   "backend": "agy",
+   "latest_state": "idle",
+   "busy": false,
+   "unread": false,
+   "cwd": "/home/fake/recipes",
+   "last_activity": 992,
+   "alive": true
+  },
+  {
+   "agent_id": "cedar-id",
+   "session": "cedar",
+   "persona": "Cedar",
+   "backend": "deepseek",
+   "latest_state": "idle",
+   "busy": false,
+   "unread": false,
+   "cwd": "/home/fake/forest",
+   "last_activity": 991,
+   "alive": true
+  },
+  {
+   "agent_id": "ada-helper-id",
+   "session": "ada-helper",
+   "persona": "Adaline",
+   "backend": "claude",
+   "latest_state": "idle",
+   "busy": false,
+   "unread": false,
+   "cwd": "/home/fake/ada-notes",
+   "last_activity": 990,
+   "alive": true
+  }
+ ]
+}

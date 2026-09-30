@@ -1,0 +1,125 @@
+// The Clarp quick switcher (Ctrl+K) in Slint: type to filter the agents,
+// Up/Down to move, Enter to open, Escape to close. Colours come from the
+// reading theme, set from Rust.
+import { LineEdit } from "std-widgets.slint";
+
+export struct AgentRow {
+    name: string,
+    detail: string,
+    busy: bool,
+    unread: bool,
+}
+
+export global Palette {
+    in property <color> window: #1a1b26;
+    in property <color> raised: #20212e;
+    in property <color> control: #292b3a;
+    in property <color> border: #41445a;
+    in property <color> text: #e7e1dc;
+    in property <color> muted: #8f96bc;
+    in property <color> accent: #bb9af7;
+    in property <color> accent-text: #1a1b26;
+    in property <color> success: #9ece6a;
+}
+
+export component Switcher inherits Window {
+    title: "Clarp quick switcher (Slint)";
+    preferred-width: 640px;
+    preferred-height: 440px;
+    background: Palette.window;
+    default-font-family: "JetBrains Mono";
+    default-font-size: 15px;
+
+    in property <[AgentRow]> rows;
+    in property <string> status;
+    in-out property <int> current: 0;
+    out property <string> query: search.text;
+    callback query-changed(string);
+    callback chosen(int);
+    callback dismissed();
+
+    forward-focus: search;
+    keys := FocusScope {
+        // Seen before the search box, so the list keeps Up/Down/Enter/Escape.
+        capture-key-pressed(event) => {
+            if (event.text == Key.DownArrow) {
+                root.current = Math.min(root.current + 1, root.rows.length - 1);
+                list.content-y = Math.min(list.content-y, -(root.current * 52px) + list.height - 52px);
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.current = Math.max(root.current - 1, 0);
+                list.content-y = Math.max(list.content-y, -(root.current * 52px));
+                return accept;
+            }
+            if (event.text == Key.Return) {
+                if (root.rows.length > 0) { root.chosen(root.current); }
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                root.dismissed();
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 16px;
+            spacing: 12px;
+            search := LineEdit {
+                placeholder-text: "Search agents";
+                font-size: 16px;
+                edited(text) => {
+                    root.current = 0;
+                    root.query-changed(text);
+                }
+            }
+            list := Flickable {
+                content-height: root.rows.length * 52px;
+                for row[index] in root.rows: Rectangle {
+                    y: index * 52px;
+                    height: 48px;
+                    width: parent.width;
+                    background: index == root.current ? Palette.accent : touch.has-hover ? Palette.control : Palette.raised;
+                    border-radius: 2px;
+                    touch := TouchArea {
+                        clicked => { root.current = index; root.chosen(index); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        spacing: 12px;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: row.busy ? Palette.success : row.unread ? Palette.accent : transparent;
+                            border-width: row.busy || row.unread ? 0px : 1px;
+                            border-color: Palette.border;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            Text {
+                                text: row.name;
+                                color: index == root.current ? Palette.accent-text : Palette.text;
+                                font-weight: 600;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: row.detail;
+                                font-size: 12px;
+                                color: index == root.current ? Palette.accent-text : Palette.muted;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+            Text {
+                text: root.status;
+                font-size: 12px;
+                color: Palette.muted;
+            }
+        }
+    }
+}
