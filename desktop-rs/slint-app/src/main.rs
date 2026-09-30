@@ -13,6 +13,7 @@ mod headless;
 #[allow(dead_code)]
 mod keymap;
 mod panes;
+mod settings_view;
 mod switcher;
 mod view;
 
@@ -191,6 +192,9 @@ impl App {
         if changes.iter().any(|c| matches!(c, Change::Roster | Change::Preferences)) {
             commands::refresh_switcher(self, &window);
         }
+        if changes.iter().any(|c| matches!(c, Change::HostStatus | Change::Preferences | Change::Connection | Change::ServerInfo)) {
+            settings_view::show(self, &window);
+        }
     }
 }
 
@@ -227,6 +231,8 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| settings.string("appearance/readingTheme", clarp_core::reading_theme::default_theme_id()));
     apply_theme(&window, &theme);
+    view::load_fonts(theme.clone());
+    window.set_minimal_ui(settings.boolean("appearance/minimalUi", false));
     let prefs = Prefs::load(&settings);
     let engine = match Engine::new(Config::from_env(settings), || {
         if let Err(error) = slint::invoke_from_event_loop(pump) {
@@ -326,6 +332,25 @@ fn main() {
         }
     });
     window.on_shortcut(|text, control, alt, shift| commands::shortcut(&text, control, alt, shift));
+    window.on_setting_changed(|id, delta| {
+        if let (Some(app), Some(window)) = (app(), crate::window()) {
+            settings_view::change(&app, &window, &id, delta);
+        }
+    });
+    window.on_surface_chosen(|surface| {
+        if let (Some(app), Some(window)) = (app(), crate::window())
+            && !commands::run(&app, &window, &surface)
+        {
+            eprintln!("clarp-slint: the {surface} surface is not available yet");
+        }
+    });
+    window.on_run_command(|action| {
+        if let (Some(app), Some(window)) = (app(), crate::window())
+            && !commands::run(&app, &window, &action)
+        {
+            eprintln!("clarp-slint: {action} is not available yet");
+        }
+    });
     window.on_open_switcher(|| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             commands::open_switcher(&app, &window);
@@ -424,6 +449,11 @@ fn main() {
         }
     });
 
+    // `--theme` is the reading theme from now on, like choosing it.
+    if arg("--theme").is_some() && state.engine.borrow().reading_theme() != theme {
+        state.engine.borrow_mut().set_reading_theme(&theme);
+        state.engine.borrow_mut().pump();
+    }
     state.engine.borrow_mut().start();
     drop(state);
     if let Some(out) = e2e_out {

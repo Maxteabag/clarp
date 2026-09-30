@@ -92,6 +92,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "shortcut-bar" => window.set_shortcuts_visible(!window.get_shortcuts_visible()),
         "switcher" => open_switcher(app, window),
         "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
+        // Escape on another surface goes back to the chats.
+        "escape" if window.get_surface() != "chats" => {
+            window.set_surface("chats".into());
+            app.focus_composer();
+        }
         "escape" => {
             let state = app.engine.borrow().roster().find(&selected).map(|a| a.latest_state.clone()).unwrap_or_default();
             let context = context(app, window);
@@ -187,11 +192,10 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             app.engine.borrow_mut().set_activity_mode(if mode == always { 0 } else { always });
         }
         _ if action.starts_with("setting:") => apply_setting(app, window, action),
-        "chats" | "updates" | "teams" | "settings" => {
-            window.set_surface(action.into());
-            if action == "chats" {
-                app.focus_composer();
-            }
+        "settings" => crate::settings_view::open(app, window),
+        "chats" => {
+            window.set_surface("chats".into());
+            app.focus_composer();
         }
         _ => return false,
     }

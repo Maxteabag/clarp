@@ -100,7 +100,7 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         rows.push(Item {
             detail: text("detail"),
             ..command(
-                &format!("Reading theme: {} · {}{current}", text("label"), text("fontFamily")),
+                &format!("Reading theme: {} · {}{current}", text("label"), crate::view::theme_font(theme)),
                 &format!("setting:reading:{}", text("id")),
                 "",
                 "settings",

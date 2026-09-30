@@ -84,6 +84,7 @@ component Block inherits VerticalLayout {
         text: root.block.styled;
         default-color: root.body-color;
         default-font-size: root.body-size;
+        default-font-family: Palette.body-family;
         link-color: Palette.link;
         link-clicked(url) => { root.link-clicked(url); }
     }
@@ -91,6 +92,7 @@ component Block inherits VerticalLayout {
         text: root.block.styled;
         default-color: Palette.chrome-text;
         default-font-size: root.body-size * (root.block.level <= 1 ? 1.4 : root.block.level == 2 ? 1.25 : 1.1);
+        default-font-family: Palette.body-family;
         link-color: Palette.link;
         link-clicked(url) => { root.link-clicked(url); }
     }
@@ -115,6 +117,7 @@ component Block inherits VerticalLayout {
             text: root.block.styled;
             default-color: Palette.muted;
             default-font-size: root.body-size;
+            default-font-family: Palette.body-family;
             link-color: Palette.link;
             link-clicked(url) => { root.link-clicked(url); }
         }
@@ -140,6 +143,7 @@ component Block inherits VerticalLayout {
                             text: cell;
                             default-color: table-row.header ? Palette.chrome-text : root.body-color;
                             default-font-size: root.body-size * 0.95;
+                            default-font-family: Palette.body-family;
                             link-color: Palette.link;
                         }
                     }

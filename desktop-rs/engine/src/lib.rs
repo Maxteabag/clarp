@@ -10,6 +10,7 @@
 
 pub mod blocks;
 mod composer;
+mod host_status;
 pub mod workspace;
 
 use std::collections::{HashMap, HashSet};
@@ -50,6 +51,8 @@ pub enum Change {
     Preferences,
     /// The pane layout, the active pane or the save warning changed.
     Panes,
+    /// Diagnostics, speech to text or the voice providers changed.
+    HostStatus,
     /// A chat's composer attachments changed.
     Composer(String),
     /// A reply in a chat that is not open: the desktop may notify.
@@ -140,6 +143,7 @@ pub struct Engine {
     panes: workspace::Panes,
     /// The restored layout's active chat, opened once the roster has it.
     restored_session: String,
+    host_status: host_status::HostStatus,
 }
 
 impl Engine {
@@ -217,6 +221,7 @@ impl Engine {
             draft_flush_token: 0,
             pending_uploads: HashMap::new(),
             restored_session: String::new(),
+            host_status: host_status::HostStatus::default(),
             panes: workspace::Panes::new(workspace_store),
             deliveries: HashMap::new(),
             delivery_counter: 0,
@@ -277,6 +282,9 @@ impl Engine {
     }
     pub fn error(&self) -> &str {
         &self.error
+    }
+    pub fn server_version(&self) -> &str {
+        &self.server_version
     }
     pub fn server_name(&self) -> &str {
         &self.server_name
@@ -900,6 +908,9 @@ impl Engine {
             self.finish_upload(tag, Some(object));
             return;
         }
+        if self.host_status_json(tag, object) {
+            return;
+        }
         if tag.starts_with("tool-details:") {
             if let Some((session, message_id)) = self.tool_detail_requests.remove(tag) {
                 self.ensure_conversation(&session);
@@ -936,6 +947,10 @@ impl Engine {
     }
 
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
+        let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        if self.host_status_failed(tag, &detail) {
+            return;
+        }
         if tag.starts_with("composer-upload:") {
             self.finish_upload(tag, None);
             self.set_error(&if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() });

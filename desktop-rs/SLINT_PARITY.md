@@ -56,12 +56,12 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/QuickSwitcher.qml` | 440 | `slint-app/ui/switcher.slint` + `slint-app/src/switcher.rs` (commands, settings toggles incl. reading themes and tool activity, agents ranked by `switcher_rank`, selection kept by identity) + `commands.rs` | verified: `switcher::tests` (2), `slint-app/tests/check.sh switcher` (Ctrl+K, ranking, Up/Down/Enter, a command, a setting, Escape, click outside; `docs/checks/switcher-01-search.png`); contacts arrive with the start-agent flow, tool-detail levels with the narrator |
 | `qml/components/RenameAgentDialog.qml` | 99 | ui/panels/renameagentdialog.slint | todo |
 | `qml/components/ReportView.qml` | 154 | ui/panels/reportview.slint | todo |
-| `qml/components/SettingsPanel.qml` | 625 | ui/panels/settingspanel.slint | todo |
+| `qml/components/SettingsPanel.qml` | 625 | `slint-app/ui/settings.slint` + `slint-app/src/settings_view.rs` (all sections; Host status and voice routing via `engine/src/host_status.rs`; voice routing as provider/fallback choices instead of a dialog) | verified: `slint-app/tests/check.sh settings` (`docs/checks/settings-01.png`); tool-detail slider waits for the narrator port |
 | `qml/components/ShortcutBar.qml` | 50 | `slint-app/ui/app.slint` `ShortcutBar` (mode, hints from `keymap::hints`, connection state) | verified: `check.sh panes` (INSERT/CONVERSATION/AGENTS, hide) |
 | `qml/components/StartAgentDialog.qml` | 368 | ui/panels/startagentdialog.slint | todo |
 | `qml/components/StatusPill.qml` | 49 | ui/sidebar.slint | todo |
 | `qml/components/TeamsPanel.qml` | 564 | ui/panels/teamspanel.slint | todo |
-| `qml/components/Theme.qml` | 47 | `slint-app/ui/theme.slint` `Palette` set from `clarp_core::reading_theme`; std widgets follow light/dark | verified: `engine/tests/host_flow.rs::preferences_are_remembered` + terminal and paper renders |
+| `qml/components/Theme.qml` | 47 | `slint-app/ui/theme.slint` `Palette` set from `clarp_core::reading_theme`; std widgets follow light/dark | verified: `engine/tests/host_flow.rs::preferences_are_remembered` + terminal and paper renders; reading font resolved from the theme's families (`fc-list`, off the UI thread) for the transcript and composer only, as in Qt |
 | `qml/components/ThemedComboBox.qml` | 31 | ui/widgets.slint (shared controls, theme global) | todo |
 | `qml/components/ToolCard.qml` | 150 | `slint-app/ui/transcript.slint` `ToolCard` (status, name, summary, Details for command/input/result); groups via `clarp_core::presentation`, missing calls from `/message-tool-details` (`Engine::load_tool_details`) | verified: `check.sh transcript` (fold, open, fetch, card contents, fold again; `docs/checks/transcript-01-tools.png`); display cells pending |
 | `qml/components/TranscriptList.qml` | 478 | ui/transcript.slint | todo |
