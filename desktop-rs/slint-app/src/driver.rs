@@ -315,6 +315,7 @@ pub fn start_check(name: &str, out: String) {
         "instance" => instance_check(out),
         "diagnostics" => diagnostics_check(out),
         "preview" => preview_check(out),
+        "connection" => connection_check(out),
         // ---- updates and teams
         "updates" => updates_check(out),
         "teams" => teams_check(out),
@@ -1171,6 +1172,85 @@ fn preview_check(out: String) {
                 return false;
             }
             check(true, "Escape closes the panel");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check connection --out DIR`: the Host button opens the connection
+/// page, a wrong token is refused, the right one connects, a one-time code
+/// pairs (the keyring stays off), and Ctrl+B hides and shows the sidebar.
+fn connection_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    fn base() -> String {
+        std::env::var("CLARP_BASE_URL").unwrap_or_default()
+    }
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(|app, window, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            window.invoke_run_command("connection".into());
+            true
+        })),
+        ("open", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "connection" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(window.get_base_url() == clarp_core::settings::normalized_base_url(&base()), "the page shows this Host");
+            shot(&out2, "connection-01");
+            window.invoke_connect_host(base().into(), "wrong-token".into());
+            true
+        })),
+        ("refused", Box::new(|app, _window, _| {
+            if app.engine.borrow().connection_state() != "unauthorized" {
+                return false;
+            }
+            check(true, "a wrong token is refused");
+            crate::window().expect("window").invoke_connect_host(base().into(), "probe-token".into());
+            true
+        })),
+        ("connected", Box::new(|app, _window, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(true, "the right token connects");
+            crate::window().expect("window").invoke_pair_host(base().into(), "123456".into());
+            true
+        })),
+        ("paired", Box::new(|app, window, elapsed| {
+            let authorized = requests("GET", "/server-info").iter().any(|r| r["authorization"] == "Bearer cld_probe_paired_device");
+            if !authorized || app.engine.borrow().connection_state() != "live" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(true, "a one-time code pairs this desktop and connects with its device token");
+            check(!window.get_stored_credential(), "with the keyring off, nothing is stored");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("closed", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(window.get_sidebar_visible(), "the sidebar shows");
+            headless::press_with(&[Key::Control], "b");
+            true
+        })),
+        ("hidden", Box::new(|_, window, _| {
+            if window.get_sidebar_visible() {
+                return false;
+            }
+            check(true, "Ctrl+B hides the sidebar");
+            headless::press_with(&[Key::Control], "b");
+            true
+        })),
+        ("shown", Box::new(|_, window, _| {
+            if !window.get_sidebar_visible() {
+                return false;
+            }
+            check(true, "and shows it again");
             true
         })),
     ];
