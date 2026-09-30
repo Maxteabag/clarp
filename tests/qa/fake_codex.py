@@ -119,8 +119,11 @@ def app_server():
             emit({"method": "turn/completed", "params": {
                 **base, "turn": {"id": turn_id, "status": "interrupted"}}})
             return
+        # CLARP_QA_STREAM_DELAY paces the partial replies (seconds), so a client
+        # can observe a reply while it streams; 0.15 by default.
+        step_delay = float(os.environ.get("CLARP_QA_STREAM_DELAY", "0.15"))
         for part in (text[:8], text[:16], text):
-            if stop.wait(0.15):
+            if stop.wait(step_delay):
                 emit({"method": "turn/completed", "params": {
                     **base, "turn": {"id": turn_id, "status": "interrupted"}}})
                 return

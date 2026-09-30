@@ -63,6 +63,10 @@ pub mod qobject {
         #[namespace = "QTest"]
         #[cxx_name = "keyClick"]
         unsafe fn key_click(window: *mut QWindow, key: Key, modifier: KeyboardModifiers, delay: i32);
+        /// The character overload: its text is the character itself.
+        #[namespace = "QTest"]
+        #[cxx_name = "keyClick"]
+        unsafe fn key_click_char(window: *mut QWindow, key: c_char, modifier: KeyboardModifiers, delay: i32);
         #[namespace = "QTest"]
         #[cxx_name = "wheelEvent"]
         unsafe fn wheel_event(window: *mut QWindow, position: QPointF, angle_delta: QPoint, pixel_delta: QPoint, modifiers: KeyboardModifiers, phase: ScrollPhase);
@@ -84,7 +88,7 @@ pub mod qobject {
         /// (positive scrolls up, towards older rows) in one event.
         #[qinvokable]
         unsafe fn wheel(self: &KeyInjector, window: *mut QWindow, x: f64, y: f64, notches: i32) -> bool;
-        /// Types `text` one key at a time.
+        /// Types `text` (printable ASCII) one key at a time.
         #[qinvokable]
         #[cxx_name = "type"]
         unsafe fn type_text(self: &KeyInjector, window: *mut QWindow, text: &QString) -> bool;
@@ -137,9 +141,11 @@ impl qobject::KeyInjector {
             return false;
         }
         for character in text.to_string().chars() {
-            let upper = character.to_ascii_uppercase();
-            let shift = if character.is_ascii_uppercase() { 0x0200_0000 } else { 0 };
-            unsafe { qobject::key_click(window, qobject::Key { repr: upper as i32 }, KeyboardModifiers::from_int(shift), -1) };
+            if !character.is_ascii() || character.is_ascii_control() {
+                eprintln!("KeyInjector: cannot type {character:?}; only printable ASCII");
+                return false;
+            }
+            unsafe { qobject::key_click_char(window, character as u8 as std::ffi::c_char, KeyboardModifiers::from_int(0), -1) };
         }
         true
     }
