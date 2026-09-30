@@ -48,10 +48,10 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/KeyboardSmokeCheck.h` (header-only) | 330 | `app/tests/qml/keyboard_probe.qml` + `app/src/bridge/key_injector.rs` (QTest::keyClick into the offscreen window, refused on any other platform) | verified: composer typing, shortcut hints, Escape/E/J/Enter, sidebar toggle, search, quick switcher, next attention on the real Main |
 | `src/app/LocalReport.h` (header-only) | 40 | `core/src/links.rs::local_report_path` | verified (`core/tests/links.rs::only_readable_non_executable_reports_open`); content is checked by magic bytes/UTF-8 instead of the freedesktop MIME database |
 | `src/app/MemoryDiagnostics.h` (header-only) | 71 | `core/src/diagnostics.rs` + `app/src/bridge/diagnostics.rs` | verified: minute `memory {...}` line (RSS split, window items/text items, controller `memoryCounters`, CPU, stalls); `app/tests/run-desktop-services.sh` checks it on the real window |
-| `src/app/PairSidebarSmokeCheck.h` (header-only) | 62 | `desktop-rs/src/app/` | todo |
+| `src/app/PairSidebarSmokeCheck.h` (header-only) | 62 | `app/tests/qml/pair_sidebar_probe.qml` | verified on the real Main |
 | `src/app/PreviewRelaunch.h` (header-only) | 15 | `core/src/preview.rs` | verified (`core/tests/preview.rs::relaunch_preserves_host_and_session`) |
 | `src/app/ReadingTheme.h` (header-only) | 282 | `core/src/reading_theme.rs` + generated `reading_themes.json` | verified (`core/tests/reading_theme.rs`); fonts resolved through fontconfig (`app/src/fonts.rs`) |
-| `src/app/ReadyReplySmokeCheck.h` (header-only) | 85 | `desktop-rs/src/app/` | todo |
+| `src/app/ReadyReplySmokeCheck.h` (header-only) | 85 | `app/tests/qml/ready_reply_probe.qml` (+ the same through a live agent-state event; screenshot of the typing state) | verified on the real Main |
 | `src/app/StartupTrace.h` (header-only) | 52 | `desktop-rs/src/app/` | todo |
 | `src/app/TranscriptScrollSmokeCheck.h` (header-only) | 440 | `desktop-rs/src/app/` | todo |
 | `src/app/VoiceViewportSmokeCheck.h` (header-only) | 153 | `desktop-rs/src/app/` | todo |
