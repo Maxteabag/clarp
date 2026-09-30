@@ -10,6 +10,10 @@ cp slint-app/docs/screens/markdown-paper.png "$scratch/photo.png"
 # The "microphone": a second of tone, never the user's device.
 /usr/bin/python3 -c "import math,struct,wave,sys; w=wave.open(sys.argv[1],'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(i/8))) for i in range(16000))); w.close()" "$scratch/voice.wav"
 mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
+# The native CLI and terminal launcher an agent terminal needs; never run,
+# since CLARP_TEST_TERMINAL_LOG records the launch instead.
+mkdir -p "$scratch/bin"
+for program in claude xdg-terminal-exec; do printf '#!/bin/sh\nexit 1\n' > "$scratch/bin/$program"; chmod +x "$scratch/bin/$program"; done
 /usr/bin/python3 app/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
 host=$!
 for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
@@ -20,6 +24,7 @@ env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0
     CLARP_TEST_OPEN_URL="$scratch/urls" CLARP_TEST_HOST_LOG="$scratch/host.log" \
     CLARP_TEST_ATTACH_FILE="$scratch/photo.png" CLARP_TEST_NOTIFY_LOG="$scratch/notifications" \
     CLARP_TEST_FOREGROUND=1 CLARP_TEST_CLIPBOARD="$scratch/clipboard" \
+    CLARP_TEST_TERMINAL_LOG="$scratch/terminal.jsonl" PATH="$scratch/bin:$PATH" \
     timeout 120 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
     target/debug/clarp-slint --check "$name" --out "$out" 2>&1 | tee "$scratch/run.log" | grep -E "^(ok|FAIL|E2E)|panicked"
 grep -q "^E2E_PASS" "$scratch/run.log"
