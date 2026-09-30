@@ -1,4 +1,5 @@
-import { Button, ComboBox, LineEdit, TextEdit } from "std-widgets.slint";
+import { Button, ComboBox } from "std-widgets.slint";
+import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing } from "theme.slint";
 
 // A dialog over the window: a dimmed backdrop that closes it when clicked,
@@ -52,7 +53,7 @@ export component KeymapEditor inherits Modal {
                 horizontal-stretch: 1;
                 accessible-label: "Command";
             }
-            sequence := LineEdit {
+            sequence := Field {
                 placeholder-text: "Ctrl+Alt+K";
                 width: 180px;
                 accessible-label: "Shortcut";
@@ -61,7 +62,7 @@ export component KeymapEditor inherits Modal {
         }
         if root.error != "": Text { text: root.error; color: Palette.danger; wrap: word-wrap; }
         Text { text: "Profile JSON"; color: Palette.muted; }
-        json := TextEdit {
+        json := Editor {
             vertical-stretch: 1;
             text <=> root.profile;
             font-family: "JetBrains Mono";
@@ -110,8 +111,8 @@ export component ConnectionPage inherits Modal {
             font-size: 12px;
             wrap: word-wrap;
         }
-        server := LineEdit { placeholder-text: "http://127.0.0.1:7682"; accessible-label: "Server"; }
-        token := LineEdit {
+        server := Field { placeholder-text: "http://127.0.0.1:7682"; accessible-label: "Server"; }
+        token := Field {
             placeholder-text: "Device or administrator token";
             input-type: password;
             accessible-label: "Token";
@@ -121,7 +122,7 @@ export component ConnectionPage inherits Modal {
         Text { text: "Or pair with a one-time code from clarp-admin pair create"; color: Palette.muted; font-size: 11px; }
         HorizontalLayout {
             spacing: 8px;
-            code := LineEdit {
+            code := Field {
                 placeholder-text: "clp_…";
                 input-type: password;
                 accessible-label: "Pairing code";
