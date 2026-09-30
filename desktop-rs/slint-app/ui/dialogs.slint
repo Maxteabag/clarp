@@ -1,0 +1,78 @@
+import { Button, ComboBox, LineEdit, TextEdit } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+
+// A dialog over the window: a dimmed backdrop that closes it when clicked,
+// and a card in the middle. Escape closes it through the keyboard map.
+export component Modal inherits Rectangle {
+    in property <length> card-width: 560px;
+    in property <length> card-height: 420px;
+    callback dismissed();
+    background: #00000080;
+    TouchArea { clicked => { root.dismissed(); } }
+    card := Rectangle {
+        width: Math.min(root.card-width, root.width - 40px);
+        height: Math.min(root.card-height, root.height - 40px);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        border-radius: 3px;
+        background: Palette.control;
+        border-width: 1px;
+        border-color: Palette.faint;
+        // Clicks on the card stay on it.
+        TouchArea { }
+        @children
+    }
+}
+
+// KeymapEditor.qml: rebind the editable actions to one Ctrl chord each, or
+// edit the whole profile as JSON.
+export component KeymapEditor inherits Modal {
+    in property <[string]> actions;
+    in property <string> error;
+    in-out property <string> profile;
+    callback apply(string, string);
+    callback import-profile(string);
+    callback export-profile();
+    callback reset();
+    callback done();
+    public function open() { sequence.text = ""; json.focus(); }
+    card-width: 720px;
+    card-height: 600px;
+    dismissed => { root.done(); }
+    VerticalLayout {
+        padding: 22px;
+        spacing: 12px;
+        Text { text: "Key bindings"; color: Palette.text; font-size: 20px; }
+        Text { text: "Choose a command. Empty shortcut restores its default."; color: Palette.muted; }
+        HorizontalLayout {
+            spacing: 8px;
+            command := ComboBox {
+                model: root.actions;
+                horizontal-stretch: 1;
+                accessible-label: "Command";
+            }
+            sequence := LineEdit {
+                placeholder-text: "Ctrl+Alt+K";
+                width: 180px;
+                accessible-label: "Shortcut";
+            }
+            Button { text: "Apply"; clicked => { root.apply(command.current-value, sequence.text); } }
+        }
+        if root.error != "": Text { text: root.error; color: Palette.danger; wrap: word-wrap; }
+        Text { text: "Profile JSON"; color: Palette.muted; }
+        json := TextEdit {
+            vertical-stretch: 1;
+            text <=> root.profile;
+            font-family: "JetBrains Mono";
+            accessible-label: "Keymap JSON";
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Button { text: "Import"; clicked => { root.import-profile(root.profile); } }
+            Button { text: "Export"; clicked => { root.export-profile(); } }
+            Button { text: "Reset defaults"; clicked => { root.reset(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Button { text: "Done"; primary: true; clicked => { root.done(); } }
+        }
+    }
+}

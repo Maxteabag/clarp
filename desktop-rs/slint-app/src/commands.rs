@@ -11,7 +11,7 @@ use crate::{App, AppWindow, Hint, SwitcherRow, pump_now, switcher};
 
 /// The keyboard map's state for where the keyboard is now.
 pub fn context(app: &App, window: &AppWindow) -> &'static str {
-    if app.switcher.borrow().open {
+    if app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
         return "modal";
     }
     match window.get_surface().as_str() {
@@ -92,6 +92,14 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "shortcut-bar" => window.set_shortcuts_visible(!window.get_shortcuts_visible()),
         "switcher" => open_switcher(app, window),
         "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
+        "escape" if !app.overlay.borrow().is_empty() => close_overlay(app, window),
+        "edit-keymap" => {
+            window.set_keymap_actions(ModelRc::new(VecModel::from(keymap::EDITABLE.iter().map(|a| slint::SharedString::from(*a)).collect::<Vec<_>>())));
+            window.set_keymap_error("".into());
+            window.set_keymap_profile(keymap::export(&overrides(app)).into());
+            open_overlay(app, window, "keymap");
+            window.invoke_open_keymap();
+        }
         // Escape on another surface goes back to the chats.
         "escape" if window.get_surface() != "chats" => {
             window.set_surface("chats".into());
@@ -362,4 +370,51 @@ fn apply_setting(app: &App, window: &AppWindow, action: &str) {
         }
     }
     let _ = window;
+}
+
+// ---- dialogs -----------------------------------------------------------------
+
+pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
+    *app.overlay.borrow_mut() = name.to_owned();
+    window.set_overlay(name.into());
+    show_hints(app, window);
+}
+
+/// Closes the dialog; the active pane's composer gets the keyboard back.
+pub fn close_overlay(app: &App, window: &AppWindow) {
+    app.overlay.borrow_mut().clear();
+    window.set_overlay("".into());
+    app.focus_composer();
+    show_hints(app, window);
+}
+
+fn save_overrides(app: &App, overrides: &keymap::Overrides) {
+    let value = serde_json::to_value(overrides).unwrap_or_default();
+    app.engine.borrow_mut().settings_mut().set("keymap/bindings", value);
+}
+
+pub fn keymap_apply(app: &App, window: &AppWindow, action: &str, key: &str) {
+    match keymap::set_binding(&overrides(app), action, key) {
+        Ok(next) => {
+            save_overrides(app, &next);
+            window.set_keymap_error("".into());
+            window.set_keymap_profile(keymap::export(&next).into());
+        }
+        Err(error) => window.set_keymap_error(error.into()),
+    }
+}
+
+pub fn keymap_import(app: &App, window: &AppWindow, text: &str) {
+    match keymap::import(text) {
+        Ok(next) => {
+            save_overrides(app, &next);
+            window.set_keymap_error("".into());
+            window.set_keymap_profile(keymap::export(&next).into());
+        }
+        Err(error) => window.set_keymap_error(error.into()),
+    }
+}
+
+pub fn keymap_export(app: &App, window: &AppWindow) {
+    window.set_keymap_profile(keymap::export(&overrides(app)).into());
 }

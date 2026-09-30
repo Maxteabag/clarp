@@ -9,8 +9,6 @@
 mod commands;
 mod driver;
 mod headless;
-// Import, export and rebinding serve the keymap editor.
-#[allow(dead_code)]
 mod keymap;
 mod panes;
 mod settings_view;
@@ -46,6 +44,8 @@ pub struct App {
     expanded: RefCell<std::collections::HashSet<String>>,
     pub prefs: RefCell<Prefs>,
     pub switcher: RefCell<SwitcherState>,
+    /// The dialog over the window ("" for none).
+    pub overlay: RefCell<String>,
 }
 
 /// View preferences the window keeps (the Qt controller's names).
@@ -265,6 +265,7 @@ fn main() {
         workspaces: RefCell::new(clarp_core::workspace::WorkspaceContext::default()),
         prefs: RefCell::new(prefs),
         switcher: RefCell::new(SwitcherState::default()),
+        overlay: RefCell::new(String::new()),
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
@@ -351,6 +352,11 @@ fn main() {
             eprintln!("clarp-slint: {action} is not available yet");
         }
     });
+    window.on_keymap_apply(|action, key| with_window(|app, window| commands::keymap_apply(app, window, &action, &key)));
+    window.on_keymap_import(|text| with_window(|app, window| commands::keymap_import(app, window, &text)));
+    window.on_keymap_export(|| with_window(|app, window| commands::keymap_export(app, window)));
+    window.on_keymap_reset(|| with_window(|app, window| commands::keymap_import(app, window, &keymap::export(&keymap::Overrides::new()))));
+    window.on_overlay_closed(|| with_window(|app, window| commands::close_overlay(app, window)));
     window.on_open_switcher(|| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             commands::open_switcher(&app, &window);
@@ -468,6 +474,13 @@ fn main() {
         std::process::exit(1);
     }
     std::process::exit(driver::exit_code());
+}
+
+/// Runs `act` with the app and its window, when both are there.
+fn with_window(act: impl FnOnce(&Rc<App>, &AppWindow)) {
+    if let (Some(app), Some(window)) = (app(), window()) {
+        act(&app, &window);
+    }
 }
 
 /// Commands change state synchronously (an optimistic row, a selection):
