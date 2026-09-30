@@ -28,11 +28,11 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/AgentRail.qml` | 52 | ui/sidebar.slint | todo |
 | `qml/components/ArtifactSummaryCard.qml` | 70 | ui/transcript.slint | todo |
 | `qml/components/AssignAgentDialog.qml` | 146 | ui/panels/assignagentdialog.slint | todo |
-| `qml/components/AttachFileDialog.qml` | 12 | ui/composer.slint | todo |
+| `qml/components/AttachFileDialog.qml` | 12 | `slint-app/src/main.rs` `choose_attachment` (desktop portal file chooser via `rfd`, off the UI thread) | wip: the chooser itself is not opened in checks (`CLARP_TEST_ATTACH_FILE` stands in); drag-and-drop pending (Slint has no file drop; winit 0.30 has none on Wayland) |
 | `qml/components/AvatarActivity.qml` | 38 | ui/sidebar.slint | todo |
 | `qml/components/ChatList.qml` | 456 | `slint-app/ui/sidebar.slint` (search, All/Unread, pair rooms and archive rows, nesting via `clarp_core::sidebar`) | wip: in the e2e; keyboard navigation, hide/collapse, restore from archive and a search/scope check pending |
 | `qml/components/ChatRow.qml` | 301 | `slint-app/ui/sidebar.slint` `Row` (name, stamp, preview, activity line, queue, muted, unread, busy ring, helper depth) | wip: portraits, process glyph, done-helpers lines pending |
-| `qml/components/Composer.qml` | 461 | ui/composer.slint | todo |
+| `qml/components/Composer.qml` | 461 | `slint-app/ui/composer.slint` + `engine/src/composer.rs` (per-chat drafts flushed after 1 s idle and on close, attachments with upload/shared-filesystem, chips with thumbnails, queue and quota notices, Enter/Shift+Enter/Ctrl+Enter/Ctrl+End/Escape/Ctrl+Shift+O, send/stop) | verified: `engine/tests/host_flow.rs::drafts_and_attachments_belong_to_the_chat_and_survive_a_restart`, `slint-app/tests/check.sh composer` (`docs/checks/composer-01-notices.png`); clipboard image paste, transcription line and Silence button arrive with the platform/audio step; starting-contact line with the start-agent dialog |
 | `qml/components/ConnectionPage.qml` | 151 | ui/panels/connectionpage.slint | todo |
 | `qml/components/ConversationPane.qml` | 575 | ui/workspace.slint | todo |
 | `qml/components/DeferredPanel.qml` | 74 | ui/workspace.slint | todo |
@@ -91,7 +91,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | Replace a conversation when its `conversation_id` changes or the server returns `replace_required`. |  | todo |
 | Merge growing messages by id and revision without duplicating turns. |  | todo |
 | Open one SSE stream, resume with `Last-Event-ID`, reconnect on silence or failure, and ignore unknown additive fields/events. |  | todo |
-| Send idempotent messages with an optimistic `u-<client_msg_id>` row and keep delivery pending until that id appears in `/log`. |  | todo |
+| Send idempotent messages with an optimistic `u-<client_msg_id>` row and keep delivery pending until that id appears in `/log`. | `engine/tests/host_flow.rs::a_send_shows_at_once_and_is_confirmed_by_the_log`; the e2e sends through the Slint composer against tests/qa/host.py; `check.sh composer` checks the `/send` body (text + attachment path, `queue_if_busy`) | verified |
 | Stop a running turn and represent queued, waiting, interrupted, and active states accurately. |  | todo |
 | Record microphone PCM, upload it to `/transcribe`, and carry the returned trace/transcription ids into `/send`. |  | todo |
 | Play announced clips, select sources by protocol precedence, and acknowledge queued/start/success/failure states. |  | todo |

@@ -17,8 +17,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 slint = { version = "1.18", default-features = false, features = [
     "std", "compat-1-2", "accessibility",
     "backend-winit", "backend-winit-wayland", "backend-winit-x11",
-    "renderer-software", "software-renderer-systemfonts",
+    "renderer-software", "software-renderer-systemfonts", "image-default-formats",
 ] }
+# The attach dialog, through the desktop's file-chooser portal.
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
 [build-dependencies]
 slint-build = "1.18"

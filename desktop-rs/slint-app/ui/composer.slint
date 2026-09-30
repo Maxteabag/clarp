@@ -1,0 +1,210 @@
+import { TextEdit } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+
+export struct Attachment {
+    id: string,
+    name: string,
+    status: string,
+    thumbnail: image,
+}
+
+component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <color> tint: Palette.muted;
+    callback clicked();
+    width: 32px;
+    height: 32px;
+    border-radius: 3px;
+    background: touch.has-hover && root.enabled ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    Image {
+        source: root.icon;
+        width: 18px;
+        height: 18px;
+        colorize: root.enabled ? root.tint : Palette.faint;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <Attachment> item;
+    callback remove();
+    height: 24px;
+    border-radius: 3px;
+    background: Palette.control;
+    border-width: 1px;
+    border-color: Palette.border;
+    HorizontalLayout {
+        padding-left: 7px;
+        spacing: 4px;
+        if root.item.thumbnail.width > 0: Image {
+            source: root.item.thumbnail;
+            width: 18px;
+            height: 18px;
+            y: 3px;
+            image-fit: cover;
+        }
+        Text {
+            text: root.item.name + (root.item.status == "ready" ? "" : " · " + root.item.status);
+            color: root.item.status == "failed" ? Palette.danger : Palette.text;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            max-width: 180px;
+        }
+        IconButton {
+            width: 22px;
+            height: 22px;
+            y: 1px;
+            icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+            label: "Remove " + root.item.name;
+            clicked => { root.remove(); }
+        }
+    }
+}
+
+// The composer (Composer.qml): notices above the editor, attachment chips,
+// then the editor. Enter sends, Shift+Enter is a new line, Ctrl+Enter
+// queues behind a running turn, Ctrl+End jumps to the latest, Escape hands
+// the keyboard to the transcript, Ctrl+Shift+O attaches a file.
+export component Composer inherits FocusScope {
+    forward-focus: editor;
+    capture-key-pressed(event) => {
+        if (!editor.has-focus) { return reject; }
+        if (event.text == Key.Escape) {
+            root.escape();
+            return accept;
+        }
+        if (event.text == Key.Return && !event.modifiers.shift) {
+            root.submit(event.modifiers.control);
+            return accept;
+        }
+        if (event.text == Key.End && event.modifiers.control) {
+            root.jump-to-latest();
+            return accept;
+        }
+        if ((event.text == "o" || event.text == "O") && event.modifiers.control && event.modifiers.shift) {
+            root.attach();
+            return accept;
+        }
+        reject
+    }
+
+    in-out property <string> draft;
+    in property <[Attachment]> attachments;
+    in property <int> queued;
+    in property <string> quota-notice;
+    in property <string> starting;
+    in property <int> transcribing;
+    in property <bool> busy;
+    in property <bool> can-send: true;
+    in property <bool> active: true;
+    in property <string> agent-name;
+    callback send(string, bool);
+    callback stop();
+    callback edited(string);
+    callback attach();
+    callback remove-attachment(string);
+    callback cancel-transcription();
+    callback escape();
+    callback jump-to-latest();
+
+    out property <bool> editor-focused: editor.has-focus;
+    property <bool> sendable: root.can-send && (root.draft != "" || root.attachments.length > 0);
+    function submit(queue: bool) {
+        if (root.sendable) {
+            root.send(root.draft, queue);
+        }
+    }
+    Rectangle { background: Palette.window; }
+    Rectangle { y: 0; height: 1px; background: Palette.rule; }
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 6px;
+        if root.starting != "": Text {
+            text: "Starting " + root.starting + "…";
+            color: Palette.muted;
+            font-size: 12px;
+        }
+        if root.transcribing > 0: HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.transcribing == 1 ? "Transcribing voice in background…" : root.transcribing + " voice notes transcribing…";
+                color: Palette.muted;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: "Cancel";
+                color: Palette.link;
+                font-size: 12px;
+                TouchArea { clicked => { root.cancel-transcription(); } }
+            }
+        }
+        if root.quota-notice != "": Text {
+            text: "! " + root.quota-notice;
+            color: Palette.warning;
+            font-size: 12px;
+            overflow: elide;
+            accessible-label: root.quota-notice;
+        }
+        if root.queued > 0: Text {
+            text: root.queued + (root.queued == 1 ? " message queued" : " messages queued") + "  ·  Ctrl+Enter queues next";
+            color: Palette.muted;
+            font-size: 12px;
+            overflow: elide;
+        }
+        if root.attachments.length > 0: HorizontalLayout {
+            spacing: 5px;
+            alignment: start;
+            for item in root.attachments: Chip {
+                item: item;
+                remove => { root.remove-attachment(item.id); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            editor := TextEdit {
+                horizontal-stretch: 1;
+                text <=> root.draft;
+                enabled: root.active;
+                wrap: word-wrap;
+                font-size: Palette.body-size;
+                min-height: 44px;
+                preferred-height: 60px;
+                accessible-label: "Message to " + root.agent-name;
+                edited(text) => { root.edited(text); }
+            }
+            VerticalLayout {
+                alignment: end;
+                spacing: 2px;
+                IconButton {
+                    icon: @image-url("icons/attach.svg");
+                    label: "Attach a file (Ctrl+Shift+O)";
+                    enabled: root.active;
+                    clicked => { root.attach(); }
+                }
+                IconButton {
+                    icon: root.busy && !root.sendable ? @image-url("icons/stop.svg") : @image-url("icons/send.svg");
+                    label: root.busy && !root.sendable ? "Stop the turn" : "Send";
+                    tint: root.busy && !root.sendable ? Palette.danger : Palette.accent;
+                    enabled: root.busy || root.sendable;
+                    clicked => {
+                        if (root.busy && !root.sendable) { root.stop(); } else { root.submit(false); }
+                    }
+                }
+            }
+        }
+    }
+}
