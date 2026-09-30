@@ -250,7 +250,8 @@ export component Pane inherits Rectangle {
             copy-message(id) => { root.copy-message(id); }
             reached-top => { root.load-older(); }
           }
-          PaneFrame { key: "c"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
+          // In the composer letters type: Escape is the way back to the chat.
+          PaneFrame { key: root.pane.active && Focus.mode == "composer" ? "esc" : "c"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
         }
         // The transcript's footer (ConversationPane.qml).
         if root.pane.working: Rectangle {

@@ -81,6 +81,9 @@ component Row inherits Rectangle {
     in property <ChatRow> chat;
     // The keyboard cursor is on this row.
     in property <bool> cursor;
+    // The cursor landed here: its place in the list, to scroll it into view.
+    callback reveal(length, length);
+    changed cursor => { if (self.cursor) { root.reveal(self.y, self.height); } }
     callback clicked();
     // The process indicator was clicked: its bottom right, in the window.
     callback processes(length, length);
@@ -306,7 +309,7 @@ export component Sidebar inherits Rectangle {
         // Holds the keyboard for J/K/Enter navigation (the keyboard map).
         list := FocusScope {
           vertical-stretch: 1;
-          Flickable {
+          flick := Flickable {
             x: 8px + Frame.side;
             y: Frame.top;
             width: parent.width - 16px - 2 * Frame.side;
@@ -315,6 +318,14 @@ export component Sidebar inherits Rectangle {
                 for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
                     chat: row;
                     cursor: list.has-focus && row.session == root.cursor;
+                    // J/K keep the cursor's row in view.
+                    reveal(y, h) => {
+                        if (y + flick.content-y < 0px) {
+                            flick.content-y = -y;
+                        } else if (y + h + flick.content-y > flick.height) {
+                            flick.content-y = flick.height - y - h;
+                        }
+                    }
                     clicked => { if (!row.archived) { root.chosen(row.session); } }
                     done-toggled(parent) => { root.done-toggled(parent); }
                     fold-toggled => { root.fold-toggled(row.session); }
