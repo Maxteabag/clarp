@@ -54,6 +54,8 @@ pub mod ffi {
         unsafe fn set_property(self: Pin<&mut QObject>, name: *const c_char, value: &QVariant) -> bool;
         #[cxx_name = "deleteLater"]
         fn delete_later(self: Pin<&mut QObject>);
+        #[cxx_name = "setParent"]
+        unsafe fn set_object_parent(self: Pin<&mut QObject>, parent: *mut QObject);
         #[cxx_name = "indexOfProperty"]
         unsafe fn index_of_property(self: &QMetaObject, name: *const c_char) -> i32;
         #[Self = "QObject"]
@@ -145,6 +147,20 @@ pub unsafe fn as_item(object: *mut QObject) -> *mut QQuickItem {
     }
     // QQuickItem's first base is QObject, so the pointers coincide.
     object.cast()
+}
+
+/// Keeps QML from taking an object C++ owns: QML collects a parentless
+/// object that an invokable or property hands it (JavaScript ownership),
+/// but never one with a parent. The C++ client sets `CppOwnership`, whose
+/// nested enum cxx cannot name.
+///
+/// # Safety
+/// `object` and `owner` must be null or live QObjects; `owner` must outlive
+/// the object or delete it first.
+pub unsafe fn keep_cpp_owned(object: *mut QObject, owner: *mut QObject) {
+    if let Some(object) = unsafe { object.as_mut() } {
+        unsafe { Pin::new_unchecked(object).set_object_parent(owner) };
+    }
 }
 
 pub fn item_object(item: *mut QQuickItem) -> *mut QObject {

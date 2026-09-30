@@ -931,6 +931,8 @@ impl qobject::TranscriptLayout {
         let left = self.geometry.left_margin;
         if let Some(mut created) = quick::pin(created) {
             unsafe { created.as_mut().set_parent_item(this) };
+            // SAFETY: the layout deletes its delegates, or they go with it.
+            unsafe { quick::keep_cpp_owned(object, self.self_object().cast_mut()) };
             delegate.as_mut().complete_create();
             created.as_mut().set_x(left);
             created.as_mut().set_width(width);
@@ -960,6 +962,7 @@ impl qobject::TranscriptLayout {
                 let width = self.width();
                 if let Some(mut heading) = quick::pin(section_item) {
                     unsafe { heading.as_mut().set_parent_item(this) };
+                    unsafe { quick::keep_cpp_owned(section_object, self.self_object().cast_mut()) };
                     section_delegate.as_mut().complete_create();
                     heading.as_mut().set_x(0.0);
                     heading.as_mut().set_width(width);

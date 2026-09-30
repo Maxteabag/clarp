@@ -1078,6 +1078,8 @@ impl cxx_qt::Initialize for AppController {
             rust.panes = Owned(new_pane_tree_model());
             rust.voices = Owned(new_voice_list_model());
             rust.empty_conversation = Owned(new_conversation_model());
+            // SAFETY: the controller owns and deletes it first.
+            unsafe { super::quick::keep_cpp_owned(pointer(&rust.empty_conversation).cast(), address as *mut _) };
             rust.narrator = Owned(new_tool_narrator());
             rust.avatar_motion = Owned(new_avatar_motion_clock());
             rust.audio = Owned(new_audio_controller());
@@ -1595,6 +1597,9 @@ impl AppController {
                 ConnectionType::QueuedConnection,
             )
         });
+        // conversationForSession hands it to QML, which must not collect it.
+        let owner = unsafe { self.as_mut().get_unchecked_mut() } as *mut AppController;
+        unsafe { super::quick::keep_cpp_owned(pointer(&model).cast(), owner.cast()) };
         let mut rust = self.as_mut().rust_mut();
         rust.guards.extend(replacement.into_iter().chain(confirmed).chain(cache_save));
         rust.conversations.insert(session.to_owned(), model);
