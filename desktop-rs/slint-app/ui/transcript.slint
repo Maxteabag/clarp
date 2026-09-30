@@ -21,6 +21,9 @@ export struct ToolRow {
     summary: string,
     status: string,
     detail: string,
+    // Plain-English tools on: the Host's explanation ("" while it comes).
+    narrated: bool,
+    explanation: string,
 }
 
 export struct MessageRow {
@@ -62,8 +65,18 @@ component ToolCard inherits Rectangle {
                 border-radius: 3px;
                 background: root.tool.status == "error" ? Palette.danger : root.tool.status == "running" ? Palette.warning : Palette.success;
             }
-            Text { text: root.tool.name; color: Palette.chrome-text; font-size: 12px; font-weight: 600; }
-            Text { text: root.tool.summary; color: Palette.muted; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+            if !root.tool.narrated: Text { text: root.tool.name; color: Palette.chrome-text; font-size: 12px; font-weight: 600; }
+            if !root.tool.narrated: Text { text: root.tool.summary; color: Palette.muted; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+            // ActivityExplanation.qml: the explanation in place of the call,
+            // dots until it arrives; a failed one falls back to the call.
+            if root.tool.narrated: Text {
+                text: root.tool.explanation != "" ? root.tool.explanation : "…";
+                color: Palette.text;
+                font-size: 12px;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+                accessible-label: root.tool.explanation != "" ? root.tool.explanation : "Explaining " + root.tool.name;
+            }
             if root.tool.detail != "": TouchArea {
                 width: 60px;
                 clicked => { root.open = !root.open; }
@@ -170,6 +183,7 @@ export component Transcript inherits FocusScope {
     out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
     callback link-clicked(string);
     callback toggle-activity(string, string);
+    callback copy-message(string);
     // The reader reached the oldest loaded row: time for the page before.
     callback reached-top();
     // While an older page lands above, the reader's place is held by its
@@ -198,6 +212,8 @@ export component Transcript inherits FocusScope {
                 background: row.author == "user" ? Palette.bubble : transparent;
                 border-radius: 2px;
                 max-width: row.author == "user" ? list.visible-width * 0.75 : list.visible-width;
+                // Hovering a message offers its copy button.
+                hover := TouchArea { }
                 VerticalLayout {
                     padding: row.author == "user" ? 10px : 2px;
                     spacing: 8px;
@@ -224,11 +240,26 @@ export component Transcript inherits FocusScope {
                         for tool in row.tools: ToolCard { tool: tool; }
                     }
                     for artifact in row.artifacts: ArtifactCard { artifact: artifact; }
-                    if row.pending || row.failed || row.stamp != "": Text {
-                        text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
-                        color: row.failed ? Palette.danger : Palette.faint;
-                        font-size: 11px;
-                        horizontal-alignment: row.author == "user" ? right : left;
+                    // Slint's rich text cannot be selected: the message's text
+                    // is copied whole instead.
+                    if row.pending || row.failed || row.stamp != "" || row.author != "activity": HorizontalLayout {
+                        spacing: 8px;
+                        alignment: row.author == "user" ? end : start;
+                        height: 18px;
+                        if row.pending || row.failed || row.stamp != "": Text {
+                            text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
+                            color: row.failed ? Palette.danger : Palette.faint;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                        if row.author != "activity": Rectangle {
+                            width: 18px;
+                            opacity: hover.has-hover || copy.has-hover ? 1 : 0;
+                            accessible-role: button;
+                            accessible-label: "Copy message";
+                            Image { source: @image-url("icons/copy.svg"); width: 14px; height: 14px; colorize: Palette.faint; }
+                            copy := TouchArea { clicked => { root.copy-message(row.id); } }
+                        }
                     }
                 }
             }

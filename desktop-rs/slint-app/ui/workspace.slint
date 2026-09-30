@@ -135,6 +135,7 @@ export component Pane inherits Rectangle {
     callback link-clicked(string);
     callback load-older();
     callback toggle-activity(string, string);
+    callback copy-message(string);
     callback silence();
     callback cancel-transcription();
     callback paste-image() -> bool;
@@ -212,6 +213,7 @@ export component Pane inherits Rectangle {
             rows: root.pane.messages;
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
+            copy-message(id) => { root.copy-message(id); }
             reached-top => { root.load-older(); }
         }
         // The transcript's footer (ConversationPane.qml).
@@ -308,6 +310,7 @@ export component Workspace inherits Rectangle {
     callback link-clicked(string);
     callback load-older(string);
     callback toggle-activity(string, string, string);
+    callback copy-message(string, string);
     callback silence();
     callback cancel-transcription(string);
     callback paste-image(string) -> bool;
@@ -394,6 +397,7 @@ export component Workspace inherits Rectangle {
         link-clicked(url) => { root.link-clicked(url); }
         load-older => { root.load-older(pane.id); }
         toggle-activity(id, group) => { root.toggle-activity(pane.id, id, group); }
+        copy-message(id) => { root.copy-message(pane.id, id); }
         silence => { root.silence(); }
         cancel-transcription => { root.cancel-transcription(pane.id); }
         paste-image => { return root.paste-image(pane.id); }

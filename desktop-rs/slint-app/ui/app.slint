@@ -128,6 +128,7 @@ export component AppWindow inherits Window {
     callback remove-attachment(string, string);
     callback load-older(string);
     callback toggle-activity(string, string, string);
+    callback copy-message(string, string);
     callback silence();
     callback cancel-transcription(string);
     callback paste-image(string) -> bool;
@@ -339,6 +340,7 @@ export component AppWindow inherits Window {
                     link-clicked(url) => { root.link-clicked(url); }
                     load-older(id) => { root.load-older(id); }
                     toggle-activity(id, message, group) => { root.toggle-activity(id, message, group); }
+                    copy-message(id, message) => { root.copy-message(id, message); }
                     silence => { root.silence(); }
                     cancel-transcription(id) => { root.cancel-transcription(id); }
                     paste-image(id) => { return root.paste-image(id); }

@@ -317,6 +317,7 @@ pub fn start_check(name: &str, out: String) {
         "preview" => preview_check(out),
         "connection" => connection_check(out),
         "lifecycle" => lifecycle_check(out),
+        "narration" => narration_check(out),
         // ---- updates and teams
         "updates" => updates_check(out),
         "teams" => teams_check(out),
@@ -1331,6 +1332,49 @@ fn lifecycle_check(out: String) {
             let bodies = created();
             let Some(body) = bodies.iter().find(|b| b.get("fork_session_id").is_some()) else { return false };
             check(body["fork_session_id"] == "old-1" && body["replace_sid"].as_str().is_some_and(|s| s.starts_with("mike")), &format!("fork starts from the chosen past conversation: {body}"));
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check narration --out DIR`: with plain-English tools on, an open tool
+/// call shows the Host's explanation in place of the raw call.
+fn narration_check(out: String) {
+    let out2 = out.clone();
+    let turns = serde_json::json!({"session": "rachel", "turns": [
+        {"id": "n1", "role": "user", "text": "List the files"},
+        {"id": "n2", "role": "assistant", "text": "Here they are.",
+         "tools": [{"id": "call-1", "name": "Bash", "summary": "ls the project", "command": "ls", "status": "completed"}]},
+    ]});
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(move |app, window, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/turns", &turns).is_ok(), "the Host has a reply with a tool call");
+            check(crate::commands::run(&app_now(), window, "tool-narration"), "plain-English tools switch on");
+            check(crate::commands::run(&app_now(), window, "setting:detail:3"), "at Plain English");
+            true
+        })),
+        ("folded", Box::new(|_, window, _| {
+            let Some(row) = rows(window).into_iter().find(|r| r.id == "n2") else { return false };
+            window.invoke_toggle_activity(app_now().active_id(), row.id, row.group_id);
+            true
+        })),
+        ("explained", Box::new(move |app, window, _| {
+            let Some(row) = rows(window).into_iter().find(|r| r.id == "n2" && r.expanded) else { return false };
+            let Some(tool) = row.tools.row_data(0) else { return false };
+            if tool.explanation.is_empty() {
+                return false;
+            }
+            check(tool.narrated && tool.explanation == "Explained: ls the project", &format!("the call is explained in plain English: {:?}", tool.explanation));
+            check(app.engine.borrow().settings().integer("experiments/toolDetailLevel", 0) == 3, "the level is kept");
+            shot(&out2, "narration-01");
+            // A message's copy button puts its text on the clipboard.
+            window.invoke_copy_message(app_now().active_id(), "n2".into());
+            let copied = std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+            check(copied == "Here they are.", &format!("the copy button copies the message: {copied:?}"));
             true
         })),
     ];

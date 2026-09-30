@@ -436,6 +436,17 @@ fn main() {
             }
         }
     });
+    window.on_copy_message(|pane, id| with_window(|app, _| {
+        let session = app.session_of(&pane);
+        let text = app.engine.borrow().conversation(&session).and_then(|c| {
+            c.rows().iter().find(|m| m.id == id.as_str()).map(|m| if m.display_text.is_empty() { m.text.clone() } else { m.display_text.clone() })
+        });
+        match text.map(|text| platform::clipboard::copy(&text)) {
+            Some(Ok(())) => {}
+            Some(Err(error)) => app.engine.borrow_mut().report_error(&format!("Could not copy: {error}")),
+            None => eprintln!("clarp-slint: no message {id} to copy"),
+        }
+    }));
     window.on_paste_image(|pane| {
         let Some(app) = app() else { return false };
         let session = app.session_of(&pane);
