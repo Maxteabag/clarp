@@ -487,6 +487,12 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("name") == "Nobody":
                 return self.reply(409, {"error": "contact is busy"})
             return self.reply(200, {"ok": True, "session": body.get("session")})
+        if url.path.startswith("/decisions/") and url.path.endswith("/resolve"):
+            # A resolved decision leaves the attention list.
+            decision = url.path.split("/")[2]
+            with state_lock:
+                attention[:] = [a for a in attention if a.get("id") != decision]
+            return self.reply(200, {"ok": True, "decision_id": decision, "status": body.get("choice")})
         if url.path in ("/select", "/stop", "/compact", "/agent-schedules/toggle", "/team-nudging") or url.path.startswith("/agent-"):
             return self.reply(200, {"ok": True})
         if url.path == "/agents":
