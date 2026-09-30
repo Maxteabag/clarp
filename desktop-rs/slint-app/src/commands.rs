@@ -60,8 +60,12 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     let hints: Vec<Hint> = keymap::hints(state, &overrides(app), facts(app, window))
         .into_iter()
         .map(|b| Hint {
-            label: b.label.into(),
             keys: b.keys.first().map(|k| k.replace("Return", "Enter").replace("Escape", "Esc")).unwrap_or_default().into(),
+            label: if b.action == "toggle-preview" {
+                if app.engine.borrow().settings().boolean("explorer/livePreview", false) { "Preview: on".into() } else { "Preview: off".into() }
+            } else {
+                b.label.into()
+            },
         })
         .collect();
     let mode = match state {
@@ -180,7 +184,20 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             };
             if let Some(next) = next {
                 window.set_sidebar_cursor(next.as_str().into());
+                // Live preview: the chat under the cursor opens in the active
+                // pane while the keyboard stays in the explorer.
+                let preview = app.engine.borrow().settings().boolean("explorer/livePreview", false);
+                if preview && !next.starts_with("pair:") && app.engine.borrow().selected_session() != next.as_str() {
+                    app.engine.borrow_mut().select(next);
+                    pump_now(app);
+                    focus_sidebar(app, window);
+                    window.set_sidebar_cursor(next.as_str().into());
+                }
             }
+        }
+        "toggle-preview" => {
+            let on = app.engine.borrow().settings().boolean("explorer/livePreview", false);
+            app.engine.borrow_mut().settings_mut().set("explorer/livePreview", !on);
         }
         "agent-open" => {
             let cursor = window.get_sidebar_cursor().to_string();
