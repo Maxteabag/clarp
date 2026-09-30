@@ -80,7 +80,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | C++ test | Rust test | Status |
 |---|---|---|
 | `tst_native_core::spawnedLifecycleNeverBecomesTranscriptTool` | `core/tests/conversation.rs::spawned_lifecycle_never_becomes_transcript_tool` | verified |
-| `tst_native_core::voiceErrorsStayInTheirSession` | | todo |
+| `tst_native_core::voiceErrorsStayInTheirSession` | `app/tests/qml/controller_voice_errors_probe.qml` (fake Host) | verified |
 | `tst_native_core::sidebarPreviewIsPlainText` | `core/tests/protocol.rs::sidebar_preview_is_plain_text` | verified |
 | `tst_native_core::clipboardImageBecomesAttachmentWithoutSending` | | todo |
 | `tst_native_core::relaunchPreservesHostSessionAndDraft` | `core/tests/preview.rs::relaunch_preserves_host_and_session` + `app/tests/qml/controller_restore_probe.qml` | verified: relaunch environment and arguments, restored chat before and after the roster; drafts are durable per Host and chat (`controller_lifecycle_probe.qml`) |
@@ -90,7 +90,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::leadingDayTracksVisibleHistory` | `core/tests/presentation.rs::leading_day_tracks_visible_history` | verified (core) |
 | `tst_native_core::oldActivityGroupsAreLazyAndVisitScoped` | `core/tests/presentation.rs::old_activity_groups_are_lazy_and_visit_scoped` | verified (core) |
 | `tst_native_core::consecutiveExplanationsCollapseWithoutChangingTranscript` | `core/tests/presentation.rs::consecutive_explanations_collapse_without_changing_transcript` | verified (core) |
-| `tst_native_core::streamedTokenAnnouncesOnlyItsRows` | | todo |
+| `tst_native_core::streamedTokenAnnouncesOnlyItsRows` | `core/tests/presentation.rs::streamed_token_announces_only_its_rows` | verified |
 | `tst_native_core::spokenMarkupLeavesNoGapsInTheText` | `core/tests/protocol.rs::spoken_markup_leaves_no_gaps_in_the_text` | verified |
 | `tst_native_core::quickSwitcherPutsTheExactNameFirst` | `core/tests/roster.rs::quick_switcher_puts_the_exact_name_first` (`roster::switcher_rank`, used by `matchingAgents`) | verified |
 | `tst_native_core::unreachableHostErrorClearsWhenItIsBack` | `app/tests/qml/controller_lifecycle_probe.qml` (fake Host outage switch) | verified |
@@ -155,7 +155,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::sharedPlaybackDoesNotDuplicateDownloads` | `app/tests/qml/controller_shared_playback_probe.qml` | wip: one download and cross-window mute verified; the microphone-held part is covered by `core/tests/audio.rs::recording_holds_the_queue_and_mute_or_silence_drains_it` rather than a second process holding the lease |
 | `tst_native_core::markdownParagraphsBecomeVisibleDisplayBlocks` | `core/tests/protocol.rs::markdown_paragraphs_become_visible_display_blocks` | verified |
 | `tst_native_core::hugeMarkdownBlocksAreNotRetainedInTheStyleCache` | `app/tests/qml/markdown_style_cache_probe.qml` (counts the UTF-8 held, so the 4 MB bound takes more rows than the C++ UTF-16 count) | verified |
-| `tst_native_core::agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent` | | todo |
+| `tst_native_core::agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent` | `core/tests/conversation.rs::agent_reply_keeps_its_author_and_names_the_answered_agent` | verified |
 | `tst_native_core::pairConversationRoomsAreReadOnlyProjections` | `app/tests/qml/controller_pair_rooms_probe.qml` | verified: listed and unread, identical lists change nothing (mutation caught), read-only selection (no /select, no clips), member updates refresh, older Host without the route shows no rooms and no error |
 | `tst_native_core::onlyWebAndMailLinksAreOpenable` | `core/tests/protocol.rs::only_web_and_mail_links_are_openable` | verified |
 | `tst_native_core::toolOutputLinksAreAnchoredWithoutChangingTheText` | `core/tests/protocol.rs::tool_output_links_are_anchored_without_changing_the_text` | wip: QTextDocument round trip pending (app crate) |

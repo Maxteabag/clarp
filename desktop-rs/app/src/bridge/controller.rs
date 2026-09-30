@@ -5221,8 +5221,28 @@ impl AppController {
         let session = json::string(event, "session");
         match kind.as_str() {
             "audio" => {
+                // A clip for the chat means its voice works again.
+                if !session.is_empty() {
+                    self.as_mut().ensure_conversation(&session);
+                    if let Some(model) = self.as_mut().conversation_mut(&session) {
+                        model.set_voice_error_value(QString::default());
+                    }
+                }
                 if let Some(audio) = self.as_mut().audio_mut() {
                     audio.enqueue_clip(event.clone());
+                }
+            }
+            // A voice failure belongs to its chat; an unscoped one to the
+            // window. A launch screen has no speech request to report.
+            "tts-error" if !self.launch_mode => {
+                let message = event.get("message").and_then(Value::as_str).map_or_else(|| json::string(event, "error"), str::to_owned);
+                if session.is_empty() {
+                    self.as_mut().set_error(&message);
+                } else {
+                    self.as_mut().ensure_conversation(&session);
+                    if let Some(model) = self.as_mut().conversation_mut(&session) {
+                        model.set_voice_error_value(QString::from(&message));
+                    }
                 }
             }
             "agent-roster" => self.request_snapshot(),
