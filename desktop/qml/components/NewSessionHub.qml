@@ -306,6 +306,7 @@ Rectangle {
                     }
                     ThemedComboBox {
                         id: effortField
+                        visible: root.effortChoices.length > 1
                         Layout.preferredWidth: 200
                         model: [{id: "", label: "Server default"}].concat(root.effortChoices)
                         textRole: "label"; valueRole: "id"

@@ -200,6 +200,7 @@ Rectangle {
                         }
                     }
                     ColumnLayout {
+                        visible: effortField.count > 1
                         Layout.fillWidth: true
                         TuiLabel {
                             text: "Effort"
