@@ -81,7 +81,7 @@ pub mod qobject {
         #[qinvokable]
         unsafe fn press(self: &KeyInjector, window: *mut QWindow, key: i32, modifiers: i32) -> bool;
         /// Turns the mouse wheel over (`x`, `y`) in `window` by `notches`
-        /// (positive scrolls up, towards older rows), one notch at a time.
+        /// (positive scrolls up, towards older rows) in one event.
         #[qinvokable]
         unsafe fn wheel(self: &KeyInjector, window: *mut QWindow, x: f64, y: f64, notches: i32) -> bool;
         /// Types `text` one key at a time.
@@ -117,19 +117,18 @@ impl qobject::KeyInjector {
         if window.is_null() || !offscreen() {
             return false;
         }
-        let step = if notches < 0 { -120 } else { 120 };
-        for _ in 0..notches.unsigned_abs() {
-            unsafe {
-                qobject::wheel_event(
-                    window,
-                    cxx_qt_lib::QPointF::new(x, y),
-                    cxx_qt_lib::QPoint::new(0, step),
-                    cxx_qt_lib::QPoint::new(0, 0),
-                    KeyboardModifiers::from_int(0),
-                    qobject::ScrollPhase::NoScrollPhase,
-                )
-            };
-        }
+        // One event carrying every notch, as a fast wheel turn delivers (and
+        // as the C++ smoke checks send).
+        unsafe {
+            qobject::wheel_event(
+                window,
+                cxx_qt_lib::QPointF::new(x, y),
+                cxx_qt_lib::QPoint::new(0, 120 * notches),
+                cxx_qt_lib::QPoint::new(0, 0),
+                KeyboardModifiers::from_int(0),
+                qobject::ScrollPhase::NoScrollPhase,
+            )
+        };
         true
     }
 

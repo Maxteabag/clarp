@@ -281,10 +281,17 @@ impl Roster {
     pub fn apply_snapshot(&mut self, snapshot: &Object) {
         self.transport_available = true;
         let mut next: Vec<Agent> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
         for value in json::array(snapshot, "agents") {
             let Some(object) = value.as_object() else { continue };
             let mut agent = Agent::from_json(object);
             if agent.session.is_empty() || agent.archived != self.archived_only {
+                continue;
+            }
+            // A session is one row: a snapshot listing it twice keeps the
+            // first (reordering assumes unique sessions).
+            if !seen.insert(agent.session.clone()) {
+                eprintln!("Roster: the snapshot lists {} more than once; keeping the first", agent.session);
                 continue;
             }
             if self.outgoing_ranks.get(&agent.session).is_some_and(|(_, at)| agent.last_activity > *at) {
