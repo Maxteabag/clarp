@@ -639,7 +639,7 @@ impl Engine {
     }
 
     /// The agent's working directory on this desktop, when it exists here.
-    fn local_agent_directory(&self, session: &str) -> Option<std::path::PathBuf> {
+    pub fn local_agent_directory(&self, session: &str) -> Option<std::path::PathBuf> {
         let path = self.roster.find(session).map(|a| a.working_directory.clone()).unwrap_or_default();
         let canonical = std::fs::canonicalize(&path).ok().filter(|_| !path.is_empty())?;
         canonical.is_dir().then_some(canonical)

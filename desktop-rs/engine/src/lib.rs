@@ -14,6 +14,10 @@ mod connection;
 mod host_status;
 pub mod lifecycle;
 mod queue;
+mod panels;
+pub mod profile;
+mod teams;
+mod updates;
 pub mod workspace;
 
 use std::collections::{HashMap, HashSet};
@@ -75,6 +79,19 @@ pub enum Change {
     AssignmentRequested { session: String, automatic: bool },
     /// A contact was assigned to this chat.
     AssignmentSucceeded(String),
+    /// Attention items, background jobs, artifacts, their loading, error or
+    /// pending actions changed.
+    Updates,
+    /// The background job tracker changed (`agent_processes`).
+    Processes,
+    /// The team list, the selected team, its messages, loading or error.
+    Teams,
+    /// The profile's plan, heartbeat, prompts, loading or error.
+    Profile,
+    Voices,
+    /// A chat's media list or a cached image changed.
+    Media,
+    Orchestrator,
 }
 
 enum Message {
@@ -90,6 +107,7 @@ enum Message {
     CredentialRemoved { base: String, result: Result<(), String> },
     /// Look again for a created session the roster did not show yet.
     CreatedAgentDue(String),
+    UpdatesDue,
 }
 
 pub struct Config {
@@ -175,6 +193,11 @@ pub struct Engine {
     // lifecycle
     launch: lifecycle::Launch,
     queue: queue::TurnQueue,
+
+    // panels
+    updates: updates::Updates,
+    teams: teams::Teams,
+    profile: profile::Profile,
 }
 
 impl Engine {
@@ -266,6 +289,10 @@ impl Engine {
             // lifecycle
             launch,
             queue: queue::TurnQueue::default(),
+            // panels
+            updates: Default::default(),
+            teams: Default::default(),
+            profile: Default::default(),
         })
     }
 
@@ -301,6 +328,7 @@ impl Engine {
                 Message::CredentialStored { base, result } => self.credential_stored(&base, result),
                 Message::CredentialRemoved { base, result } => self.credential_removed(&base, result),
                 Message::CreatedAgentDue(session) => self.created_agent_due(&session),
+                Message::UpdatesDue => self.updates_due(),
             }
         }
         let mut changes = std::mem::take(&mut self.changes);
@@ -935,12 +963,15 @@ impl Engine {
         match reply {
             ApiReply::Json { tag, object } => self.handle_json(&tag, &object),
             ApiReply::Failed { tag, message, status } => self.handle_failure(&tag, &message, status),
-            ApiReply::Bytes { .. } => {}
+            ApiReply::Bytes { tag, bytes, content_type } => self.panels_bytes(&tag, &bytes, &content_type),
         }
     }
 
     fn handle_json(&mut self, tag: &str, object: &Object) {
         if self.lifecycle_json(tag, object) {
+            return;
+        }
+        if self.panels_json(tag, object) {
             return;
         }
         if tag == "agent-conversations" {
@@ -1006,6 +1037,9 @@ impl Engine {
         if self.lifecycle_failure(tag, message, status) {
             return;
         }
+        if self.panels_failure(tag, message, status) {
+            return;
+        }
         if tag.starts_with("composer-upload:") {
             self.finish_upload(tag, None);
             self.set_error(&if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() });
@@ -1061,6 +1095,7 @@ impl Engine {
     }
 
     fn handle_sse(&mut self, signal: SseSignal) {
+        self.panels_sse(&signal);
         match signal {
             SseSignal::Connected(connected) => {
                 if self.connected != connected {
