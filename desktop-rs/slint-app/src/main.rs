@@ -30,10 +30,16 @@ pub struct App {
     archived: Rc<VecModel<ChatRow>>,
     messages: Rc<VecModel<MessageRow>>,
     sidebar: RefCell<clarp_core::sidebar::Sidebar>,
+    /// Messages whose tool calls the reader opened (not groups).
+    expanded: RefCell<std::collections::HashSet<String>>,
 }
 
 pub fn app() -> Option<Rc<App>> {
     APP.with(|a| a.borrow().clone())
+}
+
+pub fn window() -> Option<AppWindow> {
+    app()?.window.upgrade()
 }
 
 /// The Slint app's own settings, apart from the Qt apps'.
@@ -191,6 +197,81 @@ fn open_link(url: &str) {
     }
 }
 
+fn tool_row(tool: &serde_json::Value) -> ToolRow {
+    let text = |key: &str| tool.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+    let first = |keys: &[&str], fallback: &str| {
+        keys.iter().map(|k| text(k)).find(|v| !v.is_empty()).unwrap_or_else(|| fallback.to_owned())
+    };
+    let mut detail = Vec::new();
+    if !text("command").is_empty() {
+        detail.push(text("command"));
+    } else if let Some(input) = tool.get("input") {
+        detail.push(input.as_str().map_or_else(|| serde_json::to_string_pretty(input).unwrap_or_default(), str::to_owned));
+    }
+    if !text("result").is_empty() {
+        detail.push(text("result"));
+    }
+    ToolRow {
+        name: first(&["name", "action"], "Tool").into(),
+        summary: first(&["summary", "description", "file_path"], "").into(),
+        status: first(&["status"], "recorded").into(),
+        detail: detail.join("\n\n").into(),
+    }
+}
+
+/// "HH:MM" in local time for an RFC 3339 stamp.
+fn message_stamp(timestamp: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|t| t.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .unwrap_or_default()
+}
+
+fn message_row(
+    row: &clarp_core::presentation::PresentedRow,
+    always_show_tools: bool,
+    expanded: &std::collections::HashSet<String>,
+) -> MessageRow {
+    let m = &row.message;
+    let author = if row.activity { "activity" } else if m.role == "user" { "user" } else { "assistant" };
+    let text = if row.body.is_empty() && !row.activity { m.text.clone() } else { row.body.clone() };
+    // The user's own words stay literal; replies are Markdown.
+    let blocks = if author == "user" {
+        vec![clarp_engine::blocks::Block::Prose(text.clone())]
+    } else {
+        clarp_engine::blocks::blocks(&text)
+    };
+    let from_agent = author == "user" && m.origin == "agent" && !m.sender_name.is_empty();
+    let count = (row.activity_count as usize).max(row.tools.len());
+    let has_activity = !row.activity && count > 0;
+    let inline = always_show_tools || row.activity_inline;
+    let label = if !has_activity || inline {
+        String::new()
+    } else if !row.group_label.is_empty() {
+        row.group_label.clone()
+    } else if !row.activity_label.is_empty() {
+        row.activity_label.clone()
+    } else {
+        format!("{count} tool call{}", if count == 1 { "" } else { "s" })
+    };
+    // A group is keyed by its first member (presentation `toggle_group`).
+    let group_id = if row.group_label.is_empty() { String::new() } else { m.id.clone() };
+    let open = has_activity && (inline || if group_id.is_empty() { expanded.contains(&m.id) } else { row.group_expanded });
+    MessageRow {
+        id: m.id.clone().into(),
+        author: author.into(),
+        blocks: ModelRc::new(VecModel::from(blocks.iter().map(|b| message_block(b, author == "user")).collect::<Vec<_>>())),
+        sender: if from_agent { m.sender_name.clone() } else { String::new() }.into(),
+        stamp: message_stamp(&m.timestamp).into(),
+        meta: SharedString::new(),
+        pending: m.pending,
+        failed: m.delivery_failed,
+        activity_label: label.into(),
+        group_id: group_id.into(),
+        expanded: open,
+        tools: ModelRc::new(VecModel::from(row.tools.iter().map(tool_row).collect::<Vec<_>>())),
+    }
+}
+
 impl App {
     /// The chat list, through the same search/scope/nesting rules as the
     /// Qt sidebar (`clarp_core::sidebar`).
@@ -265,33 +346,34 @@ impl App {
             self.archived.set_vec(archived);
             window.set_unread_rooms(engine.unread_rooms() as i32);
         }
-        if changes.iter().any(|c| matches!(c, Change::Selection) || matches!(c, Change::Conversation(s) if *s == selected)) {
-            let rows: Vec<MessageRow> = engine
-                .conversation(&selected)
-                .map(|conversation| {
-                    conversation
-                        .rows()
-                        .iter()
-                        .map(|m| {
-                            let author = if m.activity { "activity" } else if m.role == "user" { "user" } else { "assistant" };
-                            let text = if m.display_text.is_empty() { m.text.clone() } else { m.display_text.clone() };
-                            let meta = if m.tools.is_empty() { String::new() } else { format!("{} tool call{}", m.tools.len(), if m.tools.len() == 1 { "" } else { "s" }) };
-                            // The user's own words stay literal; replies are Markdown.
-                            let blocks = if author == "user" { vec![clarp_engine::blocks::Block::Prose(text.clone())] } else { clarp_engine::blocks::blocks(&text) };
-                            MessageRow {
-                                id: m.id.clone().into(),
-                                author: author.into(),
-                                blocks: ModelRc::new(VecModel::from(blocks.iter().map(|b| message_block(b, author == "user")).collect::<Vec<_>>())),
-                                meta: meta.into(),
-                                pending: m.pending,
-                                failed: m.delivery_failed,
-                            }
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+        let conversation_changed =
+            changes.iter().any(|c| matches!(c, Change::Selection | Change::Preferences) || matches!(c, Change::Conversation(s) if *s == selected));
+        drop(engine);
+        if conversation_changed {
+            let presented = self.engine.borrow_mut().presented(&selected);
+            let always = self.engine.borrow().activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE;
+            let expanded = self.expanded.borrow();
+            let rows: Vec<MessageRow> = presented.iter().map(|row| message_row(row, always, &expanded)).collect();
+            // Opened activity the Host sent without its tool calls: fetch them.
+            let mut engine = self.engine.borrow_mut();
+            for (row, shown) in presented.iter().zip(&rows) {
+                if !shown.expanded {
+                    continue;
+                }
+                if row.group_label.is_empty() {
+                    if row.message.tool_details_available {
+                        engine.load_tool_details(&selected, &row.message.id);
+                    }
+                } else {
+                    for id in &row.group_ids {
+                        engine.load_tool_details(&selected, id);
+                    }
+                }
+            }
+            drop(engine);
             self.messages.set_vec(rows);
         }
+        let engine = self.engine.borrow();
         let agent = engine.selected_agent();
         window.set_selected_name(if selected.is_empty() { String::new() } else { engine.chat_name(&selected) }.into());
         window.set_selected_detail(agent.map(|a| format!("{} · {}", a.backend, a.working_directory)).unwrap_or_default().into());
@@ -325,7 +407,8 @@ fn main() {
     let e2e_out = args.iter().position(|a| a == "--e2e-out").and_then(|i| args.get(i + 1)).cloned();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
-    let headless = e2e_out.is_some() || shot.is_some() || args.iter().any(|a| a == "--headless");
+    let check = arg("--check");
+    let headless = e2e_out.is_some() || shot.is_some() || check.is_some() || args.iter().any(|a| a == "--headless");
     if headless && let Err(error) = headless::install(1280, 800, 1.0) {
         eprintln!("clarp-slint: {error}");
         std::process::exit(1);
@@ -370,6 +453,7 @@ fn main() {
         archived,
         messages,
         sidebar: RefCell::new(clarp_core::sidebar::Sidebar::default()),
+        expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
 
@@ -403,6 +487,24 @@ fn main() {
         }
     });
     window.on_link_clicked(|url| open_link(&url));
+    window.on_toggle_activity(|id, group| {
+        if let Some(app) = app() {
+            if group.is_empty() {
+                let id = id.to_string();
+                let mut expanded = app.expanded.borrow_mut();
+                if !expanded.remove(&id) {
+                    expanded.insert(id);
+                }
+            } else {
+                app.engine.borrow_mut().toggle_group(&group);
+            }
+            let changes = app.engine.borrow_mut().pump();
+            let mut all = changes;
+            let selected = app.engine.borrow().selected_session().to_owned();
+            all.push(Change::Conversation(selected));
+            app.refresh(&all);
+        }
+    });
     window.on_dismiss_error(|| {
         if let Some(app) = app() {
             app.engine.borrow_mut().clear_error();
@@ -414,6 +516,8 @@ fn main() {
     drop(state);
     if let Some(out) = e2e_out {
         driver::start(out);
+    } else if let Some(name) = check {
+        driver::start_check(&name, arg("--out").unwrap_or_else(|| ".".into()));
     } else if let Some(path) = shot {
         driver::start_shot(path, arg("--select").unwrap_or_default());
     }

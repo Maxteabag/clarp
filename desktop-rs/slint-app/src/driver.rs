@@ -3,9 +3,10 @@
 //! waits (up to a limit) for what it expects, then acts.
 
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 
 use crate::headless;
 
@@ -213,4 +214,190 @@ pub fn start_shot(path: String, session: String) {
 fn shot_to(path: &str) {
     let saved = headless::save_frame(path);
     check(saved.is_ok(), &format!("captured {path} {}", saved.err().unwrap_or_default()));
+}
+
+/// Posts a test control to the fake Host (`/__control/...`), which takes
+/// no token. The check never runs against a real Host.
+fn control(path: &str, body: &serde_json::Value) -> Result<(), String> {
+    use std::io::{Read, Write};
+    let base = std::env::var("CLARP_BASE_URL").map_err(|e| e.to_string())?;
+    let url = url_host(&base).ok_or_else(|| format!("not a loopback Host: {base}"))?;
+    let body = body.to_string();
+    let mut stream = std::net::TcpStream::connect(&url).map_err(|e| e.to_string())?;
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {url}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).map_err(|e| e.to_string())?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).map_err(|e| e.to_string())?;
+    if reply.starts_with("HTTP/1.1 200") { Ok(()) } else { Err(reply.lines().next().unwrap_or_default().to_owned()) }
+}
+
+/// "127.0.0.1:PORT" from a loopback base URL, else None.
+fn url_host(base: &str) -> Option<String> {
+    let rest = base.strip_prefix("http://127.0.0.1:")?;
+    let port: u16 = rest.trim_end_matches('/').parse().ok()?;
+    Some(format!("127.0.0.1:{port}"))
+}
+
+type Stage = (&'static str, Box<dyn FnMut(&crate::App, &crate::AppWindow, Duration) -> bool>);
+
+/// Runs `stages` in order: each is polled every 100 ms until it returns
+/// true, and fails the run if it takes over 15 s.
+fn run_stages(mut stages: Vec<Stage>) {
+    let timer = slint::Timer::default();
+    let since = Cell::new(Instant::now());
+    let index = Cell::new(0usize);
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
+        let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
+        let app = &*app;
+        let Some((name, stage)) = stages.get_mut(index.get()) else {
+            TIMER.with(|t| t.borrow_mut().take());
+            finish();
+            return;
+        };
+        let elapsed = since.get().elapsed();
+        if elapsed > Duration::from_secs(15) {
+            check(false, &format!("timed out: {name}"));
+            TIMER.with(|t| t.borrow_mut().take());
+            finish();
+            return;
+        }
+        if stage(app, &window, elapsed) {
+            index.set(index.get() + 1);
+            since.set(Instant::now());
+        }
+        window.window().request_redraw();
+    });
+    TIMER.with(|t| *t.borrow_mut() = Some(timer));
+}
+
+fn rows(window: &crate::AppWindow) -> Vec<crate::MessageRow> {
+    window.get_messages().iter().collect()
+}
+
+/// `--check transcript --out DIR`: tool activity folds and opens (fetching
+/// details the Host left out), a reader scrolling up stops following while
+/// rows arrive, and End resumes it. Needs the fake Host.
+pub fn start_check(name: &str, out: String) {
+    if name != "transcript" {
+        check(false, &format!("no check named {name}"));
+        finish();
+        return;
+    }
+    let tools = serde_json::json!({"session": "rachel", "turns": [
+        {"id": "t1", "role": "user", "text": "Run the build"},
+        {"id": "t2", "role": "assistant", "text": "", "activity_count": 2, "tool_details_available": true},
+        {"id": "t3", "role": "assistant", "text": "", "activity_count": 1, "tool_details_available": true},
+        {"id": "t4", "role": "assistant", "text": "I read **main.rs**.",
+         "tools": [{"name": "Read", "file_path": "src/main.rs", "status": "completed", "result": "fn main() {}"}]},
+        {"id": "t5", "role": "assistant", "text": "Done."},
+    ]});
+    let fill = |count: usize| serde_json::json!({"session": "mike", "count": count, "prefix": "Line"});
+    let out2 = out.clone();
+    let out3 = out.clone();
+    let offset = Rc::new(Cell::new(0.0f32));
+    let offset2 = offset.clone();
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(move |app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/turns", &tools).is_ok(), "the Host takes a transcript with tool calls");
+            app.engine.borrow_mut().select("rachel");
+            crate::pump();
+            true
+        })),
+        ("tool rows fold", Box::new(|_, window, _| {
+            let rows = rows(window);
+            let Some(group) = rows.iter().find(|r| !r.group_id.is_empty()) else { return false };
+            check(group.activity_label.starts_with("3 tool calls"), &format!("old activity folds into one row: {:?}", group.activity_label));
+            check(!group.expanded && group.tools.row_count() == 0, "a folded group shows no tool cards");
+            let read = rows.iter().find(|r| r.id == "t4");
+            check(read.is_some_and(|r| r.activity_label == "1 tool call" && !r.expanded), "a reply's own tool call is folded behind its toggle");
+            window.invoke_toggle_activity(group.id.clone(), group.group_id.clone());
+            window.invoke_toggle_activity("t4".into(), "".into());
+            true
+        })),
+        ("tools open with details", Box::new(move |_, window, _| {
+            let rows = rows(window);
+            let Some(group) = rows.iter().find(|r| !r.group_id.is_empty()) else { return false };
+            if !group.expanded || group.tools.row_count() < 2 {
+                return false;
+            }
+            let names: Vec<String> = group.tools.iter().map(|t| t.name.to_string()).collect();
+            check(names.iter().all(|n| n == "Bash"), &format!("opening a group fetches the tool calls the Host left out: {names:?}"));
+            let read = rows.iter().find(|r| r.id == "t4").expect("t4");
+            let tool = read.tools.row_data(0);
+            check(
+                read.expanded && tool.as_ref().is_some_and(|t| t.name == "Read" && t.summary == "src/main.rs" && t.detail.contains("fn main")),
+                "a reply's tool card shows name, file and result",
+            );
+            shot(&out2, "transcript-01-tools");
+            true
+        })),
+        ("folds again", Box::new(move |app, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let rows_now = rows(window);
+            let group = rows_now.iter().find(|r| !r.group_id.is_empty()).expect("group");
+            window.invoke_toggle_activity(group.id.clone(), group.group_id.clone());
+            let folded = rows(window).iter().find(|r| !r.group_id.is_empty()).is_some_and(|r| !r.expanded);
+            check(folded, "a second toggle folds the group");
+            check(control("/__control/fill", &fill(80)).is_ok(), "the Host takes a long chat");
+            app.engine.borrow_mut().select("mike");
+            crate::pump();
+            true
+        })),
+        ("long chat follows", Box::new(|_, window, elapsed| {
+            if rows(window).len() < 80 || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(window.get_transcript_follows() && window.get_transcript_at_end(), &format!("a chat opens at its latest message (follows {}, at end {}, offset {})", window.get_transcript_follows(), window.get_transcript_at_end(), window.get_transcript_offset()));
+            window.invoke_focus_transcript();
+            headless::press(slint::platform::Key::PageUp);
+            headless::press(slint::platform::Key::PageUp);
+            true
+        })),
+        ("paused", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_transcript_focused(), "Escape-style focus gives the transcript the keyboard");
+            check(!window.get_transcript_follows() && !window.get_transcript_at_end(), "Page Up scrolls back and stops following");
+            offset.set(window.get_transcript_offset());
+            check(control("/__control/fill", &fill(90)).is_ok(), "the Host adds rows");
+            true
+        })),
+        ("stays put", Box::new(move |_, window, elapsed| {
+            if rows(window).len() < 90 || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(!window.get_transcript_follows(), "new rows do not pull a reader who scrolled up");
+            let moved = (window.get_transcript_offset() - offset2.get()).abs();
+            check(moved < 1.0, &format!("the reader's place holds ({moved}px)"));
+            headless::press(slint::platform::Key::End);
+            true
+        })),
+        ("resumes", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_transcript_follows() && window.get_transcript_at_end(), "End returns to the latest and follows again");
+            check(control("/__control/fill", &fill(100)).is_ok(), "the Host adds more rows");
+            true
+        })),
+        ("follows new rows", Box::new(move |_, window, elapsed| {
+            if rows(window).len() < 100 || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(window.get_transcript_at_end(), "following keeps the latest in view as rows arrive");
+            shot(&out3, "transcript-02-following");
+            true
+        })),
+    ];
+    let _ = out;
+    run_stages(stages);
 }

@@ -2,9 +2,9 @@ import { TextEdit, Button, Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
-import { Transcript, MessageRow, MessageBlock, TableRow } from "transcript.slint";
+import { Transcript, MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
 
-export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, WidgetPalette }
+export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette }
 
 export component AppWindow inherits Window {
     title: root.selected-name == "" ? "Clarp" : root.selected-name + " — Clarp";
@@ -39,6 +39,13 @@ export component AppWindow inherits Window {
     callback toggle-muted();
     callback open-switcher();
     callback link-clicked(string);
+    callback toggle-activity(string, string);
+    out property <bool> transcript-follows: transcript.follow;
+    out property <bool> transcript-at-end: transcript.at-end;
+    out property <length> transcript-offset: transcript.offset;
+    out property <bool> transcript-focused: transcript.has-focus;
+    public function focus-transcript() { transcript.focus(); }
+    public function focus-composer() { composer.focus(); }
     callback send(string);
     callback stop();
     callback dismiss-error();
@@ -133,6 +140,7 @@ export component AppWindow inherits Window {
                 vertical-stretch: 1;
                 rows: root.messages;
                 link-clicked(url) => { root.link-clicked(url); }
+                toggle-activity(id, group) => { root.toggle-activity(id, group); }
             }
             Rectangle { height: 1px; background: Palette.rule; }
             // Composer: Enter sends, Shift+Enter is a new line.
@@ -145,6 +153,10 @@ export component AppWindow inherits Window {
                     keys := FocusScope {
                         horizontal-stretch: 1;
                         capture-key-pressed(event) => {
+                            if (event.text == Key.Escape) {
+                                transcript.focus();
+                                return accept;
+                            }
                             if (event.text == Key.Return && !event.modifiers.shift) {
                                 if (composer.text != "") {
                                     root.send(composer.text);
