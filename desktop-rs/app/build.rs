@@ -47,13 +47,23 @@ fn main() {
     let (qml, resources) = module_files();
     let qmldirs = subdirectory_qmldirs(&qml);
     let files = qml.iter().map(|path| QmlFile::from(path.as_str()).singleton(path.ends_with("/Theme.qml")));
-    CxxQtBuilder::new_qml_module(QmlModule::new("Clarp.Desktop").qml_files(files))
+    let builder = CxxQtBuilder::new_qml_module(QmlModule::new("Clarp.Desktop").qml_files(files))
         .qt_module("Network")
+        .qt_module("Test")
         .qrc_resources(
             QResources::new()
                 .resource(QResource::new().files(resources.iter().map(String::as_str)))
                 .resource(QResource::new().files(qmldirs)),
         )
-        .files(["src/bridge/agent_filter_model.rs", "src/bridge/avatar_motion.rs", "src/bridge/agent_list_model.rs", "src/bridge/audio_controller.rs", "src/bridge/controller.rs", "src/bridge/desktop.rs", "src/bridge/desktop_services.rs", "src/bridge/diagnostics.rs", "src/bridge/conversation_model.rs", "src/bridge/directory_models.rs", "src/bridge/instance_server.rs", "src/bridge/pane_tree_model.rs", "src/bridge/presentation_model.rs", "src/bridge/preview_versions.rs", "src/bridge/tool_narrator.rs", "src/bridge/transcript_layout.rs", "src/bridge/transcript_rows.rs", "src/bridge/window_capture.rs", "src/bridge/quick.rs"])
-        .build();
+        .files(["src/bridge/agent_filter_model.rs", "src/bridge/avatar_motion.rs", "src/bridge/agent_list_model.rs", "src/bridge/audio_controller.rs", "src/bridge/controller.rs", "src/bridge/desktop.rs", "src/bridge/desktop_services.rs", "src/bridge/diagnostics.rs", "src/bridge/conversation_model.rs", "src/bridge/directory_models.rs", "src/bridge/instance_server.rs", "src/bridge/key_injector.rs", "src/bridge/pane_tree_model.rs", "src/bridge/presentation_model.rs", "src/bridge/preview_versions.rs", "src/bridge/tool_narrator.rs", "src/bridge/transcript_layout.rs", "src/bridge/transcript_rows.rs", "src/bridge/window_capture.rs", "src/bridge/quick.rs"])
+        ;
+    // QtTest declares its window key functions (KeyInjector) only for GUI
+    // builds, as CMake's Qt6::Gui target defines.
+    // SAFETY: only adds a preprocessor define to the cc build.
+    let builder = unsafe {
+        builder.cc_builder(|cc| {
+            cc.define("QT_GUI_LIB", None);
+        })
+    };
+    builder.build();
 }

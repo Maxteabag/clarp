@@ -20,6 +20,7 @@ pub mod directory_models;
 // windowRequested carries the whole launch (seven arguments).
 #[allow(clippy::too_many_arguments)]
 pub mod instance_server;
+pub mod key_injector;
 pub mod pane_tree_model;
 pub mod presentation_model;
 #[allow(dead_code)]
