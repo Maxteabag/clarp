@@ -453,11 +453,21 @@ fn composer_check(out: String) {
             headless::press(Key::Escape);
             true
         })),
+        ("left", Box::new(|_, _window, elapsed| {
+            if !report().transcript_focused || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(posts("/stop").is_empty(), "Escape in the composer only leaves it, even while the agent works");
+            headless::press(Key::Escape);
+            true
+        })),
         ("stopped", Box::new(|_, _window, _| {
             if posts("/stop").is_empty() {
                 return false;
             }
-            check(report().composer_focused, "Escape stops a working agent and keeps the keyboard in the composer");
+            check(report().transcript_focused, "a second Escape, in the conversation, stops the working agent");
+            // Back to the composer for the idle Escape below.
+            headless::press("i");
             let now = chrono::Utc::now().timestamp_millis();
             let idle = serde_json::json!({"type": "agent-state", "session": "rachel", "kind": "idle", "ts": now});
             check(control("/__control/event", &idle).is_ok(), "the agent goes idle");

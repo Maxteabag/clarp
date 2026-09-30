@@ -1,4 +1,5 @@
-import { Button, ComboBox, LineEdit, ListView, TextEdit } from "std-widgets.slint";
+import { Button, ComboBox, ListView } from "std-widgets.slint";
+import { Field, Editor } from "fields.slint";
 import { Palette } from "theme.slint";
 import { Modal } from "dialogs.slint";
 import { IconButton } from "launch.slint";
@@ -58,7 +59,7 @@ export component RenameAgentDialog inherits Modal {
         padding: 20px;
         spacing: 14px;
         Text { text: "Rename contact"; color: Palette.text; font-size: 17px; }
-        field := LineEdit {
+        field := Field {
             placeholder-text: "Name";
             text <=> AgentDialogs.rename-name;
             enabled: !AgentDialogs.submitting;
@@ -190,7 +191,7 @@ export component AssignAgentDialog inherits Modal {
                 enabled: !AgentDialogs.submitting;
                 clicked => { AgentDialogs.assign-mode-chosen("create"); }
             }
-            if AgentDialogs.assign-mode == "create": LineEdit {
+            if AgentDialogs.assign-mode == "create": Field {
                 placeholder-text: "Name";
                 text <=> AgentDialogs.assign-name;
                 enabled: !AgentDialogs.submitting;
@@ -236,7 +237,7 @@ component QueueRow inherits Rectangle {
     body := VerticalLayout {
         padding: 9px;
         spacing: 7px;
-        editor := TextEdit {
+        editor := Editor {
             text: root.item.text;
             wrap: word-wrap;
             font-size: 12px;

@@ -1,4 +1,4 @@
-import { LineEdit } from "std-widgets.slint";
+import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing } from "theme.slint";
 import { ProcessIndicator } from "processes.slint";
 
@@ -247,7 +247,7 @@ export component Sidebar inherits Rectangle {
             Rectangle {
                 height: 34px;
                 horizontal-stretch: 1;
-                search := LineEdit {
+                search := Field {
                     width: parent.width;
                     height: parent.height;
                     placeholder-text: "Search agents · /";

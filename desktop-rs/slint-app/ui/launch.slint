@@ -1,4 +1,5 @@
-import { Button, CheckBox, ComboBox, LineEdit, ListView } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, ListView } from "std-widgets.slint";
+import { Field, Editor } from "fields.slint";
 import { Palette } from "theme.slint";
 import { Modal } from "dialogs.slint";
 
@@ -254,7 +255,7 @@ component Card inherits Rectangle {
 // move, Tab completes the highlighted folder, Enter chooses.
 component DirectoryPicker inherits VerticalLayout {
     spacing: 12px;
-    search := LineEdit {
+    search := Field {
         placeholder-text: "~";
         text <=> LaunchHub.directory-text;
         accessible-label: "Launch directory";
@@ -439,7 +440,7 @@ export component NewSessionHub inherits Modal {
                         clicked => { LaunchHub.toggle-new-contact(); }
                     }
                 }
-                if LaunchHub.new-contact: LineEdit {
+                if LaunchHub.new-contact: Field {
                     placeholder-text: "Name for the new contact";
                     text <=> LaunchHub.name;
                     accessible-label: "Name for the new contact";
@@ -449,7 +450,7 @@ export component NewSessionHub inherits Modal {
                     changed request => { if (LaunchHub.focus-target == "name") { self.focus(); } }
                 }
                 if LaunchHub.new-contact: Rectangle { vertical-stretch: 1; }
-                if !LaunchHub.new-contact: LineEdit {
+                if !LaunchHub.new-contact: Field {
                     placeholder-text: "Search contacts";
                     text <=> LaunchHub.query;
                     accessible-label: "Search contacts";
@@ -571,7 +572,7 @@ export component StartAgentDialog inherits Modal {
                 font-weight: 600;
             }
             Label { text: "Name"; }
-            name := LineEdit {
+            name := Field {
                 placeholder-text: "Rachel";
                 text <=> StartAgent.name;
                 accessible-label: "Name";
@@ -579,7 +580,7 @@ export component StartAgentDialog inherits Modal {
                 changed request => { self.focus(); }
             }
             Label { text: "Workspace"; }
-            workspace := LineEdit {
+            workspace := Field {
                 placeholder-text: "~/Projects/example";
                 text <=> StartAgent.workspace;
                 accessible-label: "Workspace";

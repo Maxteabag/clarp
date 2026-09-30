@@ -145,7 +145,9 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "escape" => {
             let state = app.engine.borrow().roster().find(&selected).map(|a| a.latest_state.clone()).unwrap_or_default();
             let context = context(app, window);
-            if matches!(state.as_str(), "thinking" | "tool" | "compacting") {
+            // One thing per press: in the composer Escape only leaves it; a
+            // working agent stops from the conversation (or Ctrl+.).
+            if context != "composer" && matches!(state.as_str(), "thinking" | "tool" | "compacting") {
                 app.engine.borrow_mut().stop();
             } else if context == "search" {
                 focus_sidebar(app, window);

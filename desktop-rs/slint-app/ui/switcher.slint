@@ -1,4 +1,5 @@
-import { LineEdit, ListView } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
+import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing } from "theme.slint";
 
 export struct SwitcherRow {
@@ -57,7 +58,7 @@ export component Switcher inherits Rectangle {
             VerticalLayout {
                 padding: 5px;
                 spacing: 4px;
-                search := LineEdit {
+                search := Field {
                     height: 43px;
                     font-size: 14px;
                     placeholder-text: root.placeholder;

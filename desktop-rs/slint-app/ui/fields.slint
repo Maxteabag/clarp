@@ -1,0 +1,60 @@
+// The std text inputs without Fluent's accent underline: the FocusRing is
+// the one focus style. Each wraps the std widget in a rounded clip and makes
+// it 2px taller, so the underline (its bottom 2px) falls outside.
+import { LineEdit, TextEdit } from "std-widgets.slint";
+
+export component Field inherits Rectangle {
+    in-out property <string> text <=> inner.text;
+    in property <string> placeholder-text <=> inner.placeholder-text;
+    in property <InputType> input-type <=> inner.input-type;
+    in property <bool> enabled <=> inner.enabled;
+    in property <bool> read-only <=> inner.read-only;
+    in property <length> font-size <=> inner.font-size;
+    out property <bool> has-focus: inner.has-focus;
+    callback accepted <=> inner.accepted;
+    callback edited <=> inner.edited;
+    public function select-all() { inner.select-all(); }
+    forward-focus: inner;
+    accessible-role: none;
+    border-radius: 4px;
+    clip: true;
+    min-height: inner.min-height - 2px;
+    preferred-height: inner.preferred-height - 2px;
+    min-width: inner.min-width;
+    preferred-width: inner.preferred-width;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    inner := LineEdit {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height + 2px;
+        accessible-label: root.accessible-label;
+    }
+}
+
+export component Editor inherits Rectangle {
+    in-out property <string> text <=> inner.text;
+    in property <TextWrap> wrap <=> inner.wrap;
+    in property <bool> enabled <=> inner.enabled;
+    in property <bool> read-only <=> inner.read-only;
+    in property <length> font-size <=> inner.font-size;
+    in property <string> font-family <=> inner.font-family;
+    out property <bool> has-focus: inner.has-focus;
+    callback edited <=> inner.edited;
+    forward-focus: inner;
+    accessible-role: none;
+    border-radius: 4px;
+    clip: true;
+    min-height: inner.min-height - 2px;
+    preferred-height: inner.preferred-height - 2px;
+    min-width: inner.min-width;
+    preferred-width: inner.preferred-width;
+    inner := TextEdit {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height + 2px;
+        accessible-label: root.accessible-label;
+    }
+}

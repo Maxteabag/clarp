@@ -1,5 +1,6 @@
 import { Palette } from "theme.slint";
-import { ComboBox, LineEdit, Slider, SpinBox, Switch } from "std-widgets.slint";
+import { ComboBox, Slider, SpinBox, Switch } from "std-widgets.slint";
+import { Field, Editor } from "fields.slint";
 import { Modal } from "dialogs.slint";
 import { IconButton, Busy } from "agent_controls.slint";
 
@@ -92,7 +93,7 @@ export component OrchestratorDialog inherits Modal {
             }
         }
         Text { text: "Model override"; color: Palette.chrome-text; font-size: 12px; }
-        LineEdit { text <=> OrchestratorBridge.model; placeholder-text: "Provider default"; accessible-label: "Model override"; }
+        Field { text <=> OrchestratorBridge.model; placeholder-text: "Provider default"; accessible-label: "Model override"; }
         Text { text: "Timeout (milliseconds)"; color: Palette.chrome-text; font-size: 12px; }
         HorizontalLayout {
             alignment: start;

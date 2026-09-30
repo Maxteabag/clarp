@@ -1,4 +1,4 @@
-import { TextEdit } from "std-widgets.slint";
+import { Field, Editor } from "fields.slint";
 import { Palette } from "theme.slint";
 
 export struct Attachment {
@@ -195,7 +195,7 @@ export component Composer inherits FocusScope {
         }
         HorizontalLayout {
             spacing: 6px;
-            editor := TextEdit {
+            editor := Editor {
                 horizontal-stretch: 1;
                 text <=> root.draft;
                 enabled: root.active;
