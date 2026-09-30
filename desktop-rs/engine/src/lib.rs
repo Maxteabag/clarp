@@ -10,6 +10,7 @@
 
 pub mod blocks;
 mod composer;
+pub mod workspace;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -47,6 +48,8 @@ pub enum Change {
     Error,
     /// A preference (mute, theme, …) changed.
     Preferences,
+    /// The pane layout, the active pane or the save warning changed.
+    Panes,
     /// A chat's composer attachments changed.
     Composer(String),
     /// A reply in a chat that is not open: the desktop may notify.
@@ -61,6 +64,7 @@ enum Message {
     RoomsDue(u64),
     DeliveryDue { client_id: String, token: u64 },
     DraftsDue(u64),
+    PanesWritten(clarp_core::panes::WriteResult),
 }
 
 pub struct Config {
@@ -69,6 +73,8 @@ pub struct Config {
     /// to the local admin token for a loopback Host.
     pub token: String,
     pub settings: Settings,
+    /// Where the pane layout is saved; None keeps it in memory.
+    pub workspace_store: Option<std::path::PathBuf>,
 }
 
 impl Config {
@@ -78,7 +84,7 @@ impl Config {
         let saved = settings.string("connection/baseUrl", "http://127.0.0.1:7682");
         let base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
         let token = std::env::var("CLARP_TOKEN").unwrap_or_default();
-        Self { base_url, token, settings }
+        Self { base_url, token, settings, workspace_store: workspace::default_store_path() }
     }
 }
 
@@ -131,6 +137,9 @@ pub struct Engine {
     draft_flush_token: u64,
     /// In-flight `/upload`s: tag → the pending attachment.
     pending_uploads: HashMap<String, Object>,
+    panes: workspace::Panes,
+    /// The restored layout's active chat, opened once the roster has it.
+    restored_session: String,
 }
 
 impl Engine {
@@ -160,6 +169,7 @@ impl Engine {
             sse_post(Message::Sse(signal))
         });
         let muted = config.settings.boolean("audio/muted", false);
+        let workspace_store = config.workspace_store.clone();
         let tools_visible = config.settings.boolean("conversation/toolsVisible", false);
         let presentation = clarp_core::presentation::Settings {
             show_when_ready: config.settings.boolean("conversation/showWhenReady", false),
@@ -206,6 +216,8 @@ impl Engine {
             pending_drafts: HashMap::new(),
             draft_flush_token: 0,
             pending_uploads: HashMap::new(),
+            restored_session: String::new(),
+            panes: workspace::Panes::new(workspace_store),
             deliveries: HashMap::new(),
             delivery_counter: 0,
             sending: false,
@@ -240,6 +252,7 @@ impl Engine {
                 }
                 Message::DeliveryDue { client_id, token } => self.delivery_timed_out(&client_id, token),
                 Message::DraftsDue(token) => self.drafts_due(token),
+                Message::PanesWritten(result) => self.panes_written(result),
             }
         }
         let mut changes = std::mem::take(&mut self.changes);
@@ -400,6 +413,7 @@ impl Engine {
     /// Connects to the configured Host, looking the credential up first
     /// when there is no token.
     pub fn start(&mut self) {
+        self.restored_session = self.panes.tree.active_session();
         if !self.token.is_empty() {
             self.reconnect();
             return;
@@ -532,9 +546,14 @@ impl Engine {
             self.changes.push(Change::Archive);
         }
         self.schedule_agent_conversations();
+        self.open_shown_panes();
         let selected_known = self.roster.find(&self.selected).is_some() || self.selected.starts_with("pair:");
         if self.selected.is_empty() || !selected_known {
-            let first = self.roster.first_session().map(str::to_owned);
+            // A restored layout reopens its active chat when it still exists.
+            let restored = std::mem::take(&mut self.restored_session);
+            let first = Some(restored)
+                .filter(|s| self.roster.find(s).is_some() || s.starts_with("pair:"))
+                .or_else(|| self.roster.first_session().map(str::to_owned));
             match first {
                 Some(first) if !self.waiting_for_session_choice => self.select(&first),
                 _ if !self.selected.is_empty() => {
@@ -674,6 +693,9 @@ impl Engine {
         if changed {
             self.ensure_conversation(session);
             self.changes.push(Change::Selection);
+            if self.panes.tree.active_session() != session {
+                self.with_panes(|panes| panes.set_active_session(session));
+            }
         }
         if session.starts_with("pair:") {
             // A pair room is a projection, not an agent: no Host focus.
@@ -1072,6 +1094,7 @@ impl Drop for Engine {
     fn drop(&mut self) {
         self.sse.stop();
         self.flush_drafts();
+        self.flush_panes();
     }
 }
 

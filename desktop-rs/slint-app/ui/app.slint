@@ -1,11 +1,51 @@
-import { TextEdit, Button, Palette as WidgetPalette } from "std-widgets.slint";
+import { Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
-import { Composer, Attachment } from "composer.slint";
-import { Transcript, MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
+import { Attachment } from "composer.slint";
+import { MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
+import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 
-export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment }
+export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab }
+
+export struct Hint {
+    label: string,
+    keys: string,
+}
+
+// ShortcutBar.qml: where the keyboard is, and what it can do there.
+component ShortcutBar inherits Rectangle {
+    in property <string> mode;
+    in property <[Hint]> hints;
+    in property <string> connection;
+    height: 30px;
+    background: Palette.sunken;
+    Rectangle { y: 0; height: 1px; background: Palette.border; }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 16px;
+        Text {
+            text: root.mode;
+            color: Palette.accent;
+            font-size: 10px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+        for hint in root.hints: HorizontalLayout {
+            spacing: 5px;
+            Text { text: hint.label + ":"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+            Text { text: hint.keys; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+        }
+        Rectangle { horizontal-stretch: 1; }
+        Text {
+            text: root.connection;
+            color: root.connection == "live" ? Palette.success : Palette.warning;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+}
 
 export component AppWindow inherits Window {
     title: root.selected-name == "" ? "Clarp" : root.selected-name + " — Clarp";
@@ -23,158 +63,144 @@ export component AppWindow inherits Window {
     in property <bool> muted;
     in property <string> server-initial;
     in-out property <string> surface: "chats";
-    in property <string> selected-model;
-    in property <string> selected-effort;
     out property <string> query: sidebar.query;
     out property <string> scope: sidebar.scope;
-    in property <[MessageRow]> messages;
     in property <string> selected-name;
-    in property <string> selected-detail;
     in property <string> connection;
     in property <string> error;
-    in property <bool> sending;
-    in property <bool> busy;
-    in-out property <string> draft;
-    in property <[Attachment]> attachments;
-    in property <int> queued;
-    in property <string> quota-notice;
-    in property <int> transcribing;
-    in property <bool> can-send: true;
-    out property <bool> composer-focused: composer.editor-focused;
+    in property <[PaneView]> panes;
+    in property <[SplitView]> splits;
+    in property <[WorkspaceTab]> workspaces;
+    in property <string> save-warning;
+    in property <bool> workspace-bar;
+    in-out property <bool> sidebar-visible: true;
+    in-out property <bool> shortcuts-visible: true;
+    in property <string> keyboard-mode;
+    in property <[Hint]> hints;
+    // The chat the sidebar's keyboard cursor is on.
+    in property <string> sidebar-cursor;
+    out property <bool> search-focused: sidebar.search-has-focus;
+    out property <bool> sidebar-focused: sidebar.list-has-focus;
+    public function focus-search() { sidebar.focus-search(); }
+    public function focus-sidebar() { sidebar.focus-list(); }
+
     callback chat-chosen(string);
     callback filter-changed();
     callback toggle-muted();
     callback open-switcher();
     callback link-clicked(string);
-    callback load-older();
-    callback toggle-activity(string, string);
-    out property <bool> transcript-follows: transcript.follow;
-    out property <bool> transcript-at-end: transcript.at-end;
-    out property <length> transcript-offset: transcript.offset;
-    out property <bool> transcript-focused: transcript.has-focus;
-    public function focus-transcript() { transcript.focus(); }
-    // A newly opened chat starts at its latest message.
-    public function transcript-to-latest() { transcript.scroll-to-latest(); }
-    public function focus-composer() { composer.focus(); }
-    // Ctrl+Enter queues behind a running turn.
-    callback send(string, bool);
-    callback draft-edited(string);
-    callback attach();
-    callback remove-attachment(string);
-    callback stop();
     callback dismiss-error();
+    // Every key reaches the keyboard map first; true when it ran a command.
+    callback shortcut(string, bool, bool, bool) -> bool;
+    // Tells the map where the keyboard went.
+    callback focus-moved();
+    // Pane events carry the pane's id.
+    callback pane-activated(string);
+    callback send(string, string, bool);
+    callback stop(string);
+    callback draft-edited(string, string);
+    callback attach(string);
+    callback remove-attachment(string, string);
+    callback load-older(string);
+    callback toggle-activity(string, string, string);
+    callback pane-reported(string, bool, bool, length, bool, bool);
+    callback switch-workspace(string);
+    callback create-workspace();
+    callback save-layout-instead();
+    callback resize-split(string, float);
+    callback balance();
 
-    forward-focus: composer;
+    changed search-focused => { root.focus-moved(); }
+    changed sidebar-focused => { root.focus-moved(); }
 
-    HorizontalLayout {
-        NavRail {
-            surface: root.surface;
-            attention: root.attention;
-            muted: root.muted;
-            server-initial: root.server-initial;
-            select-surface(surface) => { root.surface = surface; }
-            toggle-muted => { root.toggle-muted(); }
-            open-switcher => { root.open-switcher(); }
+    keys := FocusScope {
+        focus-on-click: false;
+        capture-key-pressed(event) => {
+            if (root.shortcut(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift)) {
+                return accept;
+            }
+            reject
         }
-        sidebar := Sidebar {
-            width: 320px;
-            rows: root.chats;
-            rooms: root.rooms;
-            archived: root.archived;
-            unread-rooms: root.unread-rooms;
-            chosen(session) => { root.chat-chosen(session); }
-            filter-changed => { root.filter-changed(); }
-        }
-        Rectangle { width: 1px; background: Palette.rule; }
-        VerticalLayout {
-            // Header: the open chat and the connection.
-            Rectangle {
-                height: 48px;
-                background: Palette.window;
-                HorizontalLayout {
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    spacing: 12px;
-                    Text {
-                        text: root.selected-name;
-                        color: Palette.chrome-text;
-                        font-weight: 700;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.selected-detail;
-                        color: Palette.muted;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        horizontal-stretch: 1;
-                    }
-                    if root.selected-model != "": Text {
-                        text: "model " + root.selected-model;
-                        color: Palette.muted;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-                    if root.selected-effort != "": Text {
-                        text: "effort " + root.selected-effort;
-                        color: Palette.muted;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: root.connection;
-                        color: root.connection == "live" ? Palette.success : Palette.warning;
-                        font-size: 12px;
-                        vertical-alignment: center;
+        HorizontalLayout {
+            NavRail {
+                surface: root.surface;
+                attention: root.attention;
+                muted: root.muted;
+                server-initial: root.server-initial;
+                select-surface(surface) => { root.surface = surface; }
+                toggle-muted => { root.toggle-muted(); }
+                open-switcher => { root.open-switcher(); }
+            }
+            sidebar := Sidebar {
+                visible: root.sidebar-visible;
+                width: root.sidebar-visible ? 320px : 0px;
+                rows: root.chats;
+                rooms: root.rooms;
+                archived: root.archived;
+                unread-rooms: root.unread-rooms;
+                cursor: root.sidebar-cursor;
+                chosen(session) => { root.chat-chosen(session); }
+                filter-changed => { root.filter-changed(); }
+            }
+            if root.sidebar-visible: Rectangle { width: 1px; background: Palette.rule; }
+            VerticalLayout {
+                if root.error != "": Rectangle {
+                    height: 36px;
+                    background: Palette.danger-surface;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        Text {
+                            text: root.error;
+                            color: Palette.danger;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                        Rectangle {
+                            width: 28px;
+                            accessible-role: button;
+                            accessible-label: "Dismiss";
+                            Image {
+                                source: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                                width: 16px;
+                                height: 16px;
+                                colorize: Palette.danger;
+                            }
+                            TouchArea { clicked => { root.dismiss-error(); } }
+                        }
                     }
                 }
-            }
-            Rectangle { height: 1px; background: Palette.rule; }
-            if root.error != "": Rectangle {
-                height: 36px;
-                background: Palette.danger-surface;
-                HorizontalLayout {
-                    padding-left: 16px;
-                    padding-right: 16px;
-                    Text {
-                        text: root.error;
-                        color: Palette.danger;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        horizontal-stretch: 1;
+                Workspace {
+                    vertical-stretch: 1;
+                    panes: root.panes;
+                    splits: root.splits;
+                    workspaces: root.workspaces;
+                    save-warning: root.save-warning;
+                    bar-visible: root.workspace-bar;
+                    activate(id) => { root.pane-activated(id); }
+                    send(id, text, queue) => { root.send(id, text, queue); }
+                    stop(id) => { root.stop(id); }
+                    draft-edited(id, text) => { root.draft-edited(id, text); }
+                    attach(id) => { root.attach(id); }
+                    remove-attachment(id, attachment) => { root.remove-attachment(id, attachment); }
+                    link-clicked(url) => { root.link-clicked(url); }
+                    load-older(id) => { root.load-older(id); }
+                    toggle-activity(id, message, group) => { root.toggle-activity(id, message, group); }
+                    reported(id, follows, at-end, offset, transcript, composer) => {
+                        root.pane-reported(id, follows, at-end, offset, transcript, composer);
                     }
-                    TouchArea {
-                        width: 80px;
-                        clicked => { root.dismiss-error(); }
-                        Text { text: "Dismiss"; color: Palette.chrome-text; }
-                    }
+                    switch-workspace(id) => { root.switch-workspace(id); }
+                    create-workspace => { root.create-workspace(); }
+                    save-layout-instead => { root.save-layout-instead(); }
+                    resize-split(id, ratio) => { root.resize-split(id, ratio); }
+                    balance => { root.balance(); }
                 }
-            }
-            transcript := Transcript {
-                vertical-stretch: 1;
-                rows: root.messages;
-                link-clicked(url) => { root.link-clicked(url); }
-                toggle-activity(id, group) => { root.toggle-activity(id, group); }
-                reached-top => { root.load-older(); }
-            }
-            Rectangle { height: 1px; background: Palette.rule; }
-            composer := Composer {
-                draft <=> root.draft;
-                attachments: root.attachments;
-                queued: root.queued;
-                quota-notice: root.quota-notice;
-                transcribing: root.transcribing;
-                busy: root.busy;
-                can-send: root.can-send;
-                active: root.selected-name != "";
-                agent-name: root.selected-name;
-                send(text, queue) => { root.send(text, queue); }
-                stop => { root.stop(); }
-                edited(text) => { root.draft-edited(text); }
-                attach => { root.attach(); }
-                remove-attachment(id) => { root.remove-attachment(id); }
-                escape => { transcript.focus(); }
-                jump-to-latest => { transcript.scroll-to-latest(); }
+                if root.shortcuts-visible: ShortcutBar {
+                    mode: root.keyboard-mode;
+                    connection: root.connection;
+                    hints: root.hints;
+                }
             }
         }
     }

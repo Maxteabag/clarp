@@ -62,8 +62,12 @@ component ListSwitch inherits Rectangle {
 
 component Row inherits Rectangle {
     in property <ChatRow> chat;
+    // The keyboard cursor is on this row.
+    in property <bool> cursor;
     callback clicked();
     height: root.chat.activity != "" ? 72px : 58px;
+    border-width: root.cursor ? 1px : 0px;
+    border-color: Palette.accent;
     background: root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
     accessible-role: list-item;
     accessible-label: root.chat.name;
@@ -136,6 +140,9 @@ export component Sidebar inherits Rectangle {
     in-out property <string> scope: "all";
     out property <string> query: search.text;
     out property <bool> search-has-focus: search.has-focus;
+    in property <string> cursor;
+    out property <bool> list-has-focus: list.has-focus;
+    public function focus-list() { list.focus(); }
     callback chosen(string);
     callback filter-changed();
     callback restore(string);
@@ -170,11 +177,14 @@ export component Sidebar inherits Rectangle {
             unread: root.unread-rooms;
             clicked => { root.showing-pairs = !root.showing-pairs; }
         }
-        Flickable {
-            vertical-stretch: 1;
+        // Holds the keyboard for J/K/Enter navigation (the keyboard map).
+        list := FocusScope {
+          vertical-stretch: 1;
+          Flickable {
             viewport := VerticalLayout {
                 for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
                     chat: row;
+                    cursor: list.has-focus && row.session == root.cursor;
                     clicked => { root.chosen(row.session); }
                 }
                 if root.showing-pairs && root.rooms.length == 0: Text {
@@ -184,6 +194,7 @@ export component Sidebar inherits Rectangle {
                     horizontal-alignment: center;
                 }
             }
+        }
         }
         if !root.showing-pairs: ListSwitch {
             glyph: root.showing-archive ? "‹" : "≡";
