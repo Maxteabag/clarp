@@ -65,7 +65,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/ThemedComboBox.qml` | 31 | ui/widgets.slint (shared controls, theme global) | todo |
 | `qml/components/ToolCard.qml` | 150 | `slint-app/ui/transcript.slint` `ToolCard` (status, name, summary, Details for command/input/result); groups via `clarp_core::presentation`, missing calls from `/message-tool-details` (`Engine::load_tool_details`) | verified: `check.sh transcript` (fold, open, fetch, card contents, fold again; `docs/checks/transcript-01-tools.png`); display cells pending |
 | `qml/components/TranscriptList.qml` | 478 | ui/transcript.slint | todo |
-| `qml/components/TranscriptView.qml` | 177 | `slint-app/ui/transcript.slint` `Transcript` (virtualised `ListView`, follow/pause, Up/Down/Page/Home/End after Escape) | verified: `check.sh transcript` (opens at latest, Page Up pauses, new rows keep the reader's place, End resumes, following tracks new rows); older-page loading on scroll-to-top pending |
+| `qml/components/TranscriptView.qml` | 177 | `slint-app/ui/transcript.slint` `Transcript` (virtualised `ListView`, follow/pause, Up/Down/Page/Home/End after Escape) | verified: `check.sh transcript` (opens at latest, Page Up pauses, new rows keep the reader's place, End resumes, following tracks new rows); reaching the top loads the page before with the reader's place held (bottom-anchored), rows updated in place by id (`sync_rows`) so streaming never rebuilds the list |
 | `qml/components/TuiBusyIndicator.qml` | 25 | ui/widgets.slint (shared controls, theme global) | todo |
 | `qml/components/TuiButton.qml` | 14 | ui/widgets.slint (shared controls, theme global) | todo |
 | `qml/components/TuiCheckBox.qml` | 20 | ui/widgets.slint (shared controls, theme global) | todo |
@@ -87,7 +87,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 |---|---|---|
 | Discover and render the live agent roster from `/agents/snapshot`. |  | todo |
 | Select and follow an agent, including server-wide focus updates. |  | todo |
-| Load tail history, paginate older messages, and apply revision deltas. |  | todo |
+| Load tail history, paginate older messages, and apply revision deltas. | `engine/tests/host_flow.rs` (tail, delta on send); `slint-app/tests/check.sh transcript` (100-row tail, Home loads 100 older twice, nothing older after the first message, deltas while paused and following) | verified |
 | Replace a conversation when its `conversation_id` changes or the server returns `replace_required`. |  | todo |
 | Merge growing messages by id and revision without duplicating turns. |  | todo |
 | Open one SSE stream, resume with `Last-Event-ID`, reconnect on silence or failure, and ignore unknown additive fields/events. |  | todo |

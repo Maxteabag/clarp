@@ -9,6 +9,7 @@
 mod driver;
 mod headless;
 
+use clarp_core::presentation::PresentedRow;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -30,6 +31,8 @@ pub struct App {
     archived: Rc<VecModel<ChatRow>>,
     messages: Rc<VecModel<MessageRow>>,
     sidebar: RefCell<clarp_core::sidebar::Sidebar>,
+    /// What each transcript row was built from, to update only changed rows.
+    shown: RefCell<Vec<(PresentedRow, bool)>>,
     /// Messages whose tool calls the reader opened (not groups).
     expanded: RefCell<std::collections::HashSet<String>>,
 }
@@ -195,6 +198,33 @@ fn open_link(url: &str) {
     if let Err(error) = std::process::Command::new("xdg-open").arg(url).spawn() {
         eprintln!("clarp-slint: could not open {url}: {error}");
     }
+}
+
+/// Brings the transcript model to `rows` touching only what changed: the
+/// rows kept at the start and end are updated in place (and only when their
+/// source differs), so streaming does not rebuild the list and an older page
+/// is inserted above rather than replacing everything.
+fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<(PresentedRow, bool)>, fresh: Vec<(PresentedRow, bool)>, rows: Vec<MessageRow>) {
+    use slint::Model;
+    let id = |row: &(PresentedRow, bool)| row.0.message.id.clone();
+    let prefix = shown.iter().zip(&fresh).take_while(|(a, b)| id(a) == id(b)).count();
+    let most = shown.len().min(fresh.len()) - prefix;
+    let suffix = shown.iter().rev().zip(fresh.iter().rev()).take(most).take_while(|(a, b)| id(a) == id(b)).count();
+    let mut rows: Vec<Option<MessageRow>> = rows.into_iter().map(Some).collect();
+    for index in (0..prefix).chain(fresh.len() - suffix..fresh.len()) {
+        let old = if index < prefix { index } else { index + shown.len() - fresh.len() };
+        if shown[old] != fresh[index] {
+            model.set_row_data(old, rows[index].take().expect("each row is used once"));
+        }
+    }
+    let (old_middle, new_middle) = (shown.len() - prefix - suffix, fresh.len() - prefix - suffix);
+    for _ in 0..old_middle {
+        model.remove(prefix);
+    }
+    for (offset, row) in rows[prefix..prefix + new_middle].iter_mut().enumerate() {
+        model.insert(prefix + offset, row.take().expect("each row is used once"));
+    }
+    *shown = fresh;
 }
 
 fn tool_row(tool: &serde_json::Value) -> ToolRow {
@@ -371,7 +401,11 @@ impl App {
                 }
             }
             drop(engine);
-            self.messages.set_vec(rows);
+            let fresh: Vec<(PresentedRow, bool)> = presented.into_iter().zip(rows.iter().map(|r| r.expanded)).collect();
+            sync_rows(&self.messages, &mut self.shown.borrow_mut(), fresh, rows);
+            if changes.iter().any(|c| matches!(c, Change::Selection)) {
+                window.invoke_transcript_to_latest();
+            }
         }
         let engine = self.engine.borrow();
         let agent = engine.selected_agent();
@@ -453,6 +487,7 @@ fn main() {
         archived,
         messages,
         sidebar: RefCell::new(clarp_core::sidebar::Sidebar::default()),
+        shown: RefCell::new(Vec::new()),
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
@@ -467,6 +502,10 @@ fn main() {
         if let Some(app) = app() {
             app.engine.borrow_mut().send(&text);
             pump_now(&app);
+            // Your own message always brings the latest into view.
+            if let Some(window) = app.window.upgrade() {
+                window.invoke_transcript_to_latest();
+            }
         }
     });
     window.on_stop(|| {
@@ -487,6 +526,13 @@ fn main() {
         }
     });
     window.on_link_clicked(|url| open_link(&url));
+    window.on_load_older(|| {
+        if let Some(app) = app() {
+            let selected = app.engine.borrow().selected_session().to_owned();
+            app.engine.borrow_mut().load_older(&selected);
+            pump_now(&app);
+        }
+    });
     window.on_toggle_activity(|id, group| {
         if let Some(app) = app() {
             if group.is_empty() {
@@ -498,11 +544,7 @@ fn main() {
             } else {
                 app.engine.borrow_mut().toggle_group(&group);
             }
-            let changes = app.engine.borrow_mut().pump();
-            let mut all = changes;
-            let selected = app.engine.borrow().selected_session().to_owned();
-            all.push(Change::Conversation(selected));
-            app.refresh(&all);
+            pump_now(&app);
         }
     });
     window.on_dismiss_error(|| {
@@ -530,9 +572,10 @@ fn main() {
 
 /// Commands change state synchronously (an optimistic row, a selection):
 /// show it without waiting for the next wake.
+/// Shows what a command just changed, without waiting for the wake.
 fn pump_now(app: &Rc<App>) {
-    let changes = app.engine.borrow_mut().pump();
-    let mut all = changes;
-    all.push(Change::Selection);
-    app.refresh(&all);
+    let mut changes = app.engine.borrow_mut().pump();
+    let selected = app.engine.borrow().selected_session().to_owned();
+    changes.push(Change::Conversation(selected));
+    app.refresh(&changes);
 }

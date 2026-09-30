@@ -39,12 +39,15 @@ export component AppWindow inherits Window {
     callback toggle-muted();
     callback open-switcher();
     callback link-clicked(string);
+    callback load-older();
     callback toggle-activity(string, string);
     out property <bool> transcript-follows: transcript.follow;
     out property <bool> transcript-at-end: transcript.at-end;
     out property <length> transcript-offset: transcript.offset;
     out property <bool> transcript-focused: transcript.has-focus;
     public function focus-transcript() { transcript.focus(); }
+    // A newly opened chat starts at its latest message.
+    public function transcript-to-latest() { transcript.scroll-to-latest(); }
     public function focus-composer() { composer.focus(); }
     callback send(string);
     callback stop();
@@ -141,6 +144,7 @@ export component AppWindow inherits Window {
                 rows: root.messages;
                 link-clicked(url) => { root.link-clicked(url); }
                 toggle-activity(id, group) => { root.toggle-activity(id, group); }
+                reached-top => { root.load-older(); }
             }
             Rectangle { height: 1px; background: Palette.rule; }
             // Composer: Enter sends, Shift+Enter is a new line.

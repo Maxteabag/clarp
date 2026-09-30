@@ -161,13 +161,21 @@ export component Transcript inherits FocusScope {
     out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
     callback link-clicked(string);
     callback toggle-activity(string, string);
+    // The reader reached the oldest loaded row: time for the page before.
+    callback reached-top();
+    // While an older page lands above, the reader's place is held by its
+    // distance from the bottom, which prepended rows do not change.
+    property <bool> holding;
+    property <length> from-bottom;
     Rectangle { background: Palette.window; }
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
     list := ListView {
         // A reader who scrolls away from the end stops following.
         scrolled => {
+            root.holding = false;
             root.follow = root.at-end;
+            root.check-top();
         }
         width: parent.width;
         height: parent.height;
@@ -220,7 +228,18 @@ export component Transcript inherits FocusScope {
     }
     // Following also tracks rows that grow while streaming.
     changed list-height => {
-        if (root.follow) { root.scroll-to-latest(); }
+        if (root.follow) {
+            root.scroll-to-latest();
+        } else if (root.holding) {
+            list.content-y = Math.min(0px, root.from-bottom - list.content-height);
+        }
+    }
+    function check-top() {
+        if (!root.follow && list.content-y >= -40px) {
+            root.holding = true;
+            root.from-bottom = list.content-height + list.content-y;
+            root.reached-top();
+        }
     }
     // The list estimates the height of rows it has not drawn yet and
     // corrects it as they appear; while following, keep pinning the end
@@ -236,7 +255,9 @@ export component Transcript inherits FocusScope {
     }
     public function scroll-by(delta: length) {
         list.content-y = Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta));
+        root.holding = false;
         root.follow = root.at-end;
+        root.check-top();
     }
     // After Escape the transcript has the keyboard: Up/Down, Page Up/Down,
     // Home and End scroll it.
@@ -245,7 +266,7 @@ export component Transcript inherits FocusScope {
         if (event.text == Key.DownArrow) { root.scroll-by(40px); return accept; }
         if (event.text == Key.PageUp) { root.scroll-by(-list.visible-height * 0.9); return accept; }
         if (event.text == Key.PageDown) { root.scroll-by(list.visible-height * 0.9); return accept; }
-        if (event.text == Key.Home) { list.content-y = 0px; root.follow = root.at-end; return accept; }
+        if (event.text == Key.Home) { root.scroll-by(-list.content-height); return accept; }
         if (event.text == Key.End) { root.scroll-to-latest(); return accept; }
         reject
     }

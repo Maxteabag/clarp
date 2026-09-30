@@ -395,6 +395,50 @@ pub fn start_check(name: &str, out: String) {
             }
             check(window.get_transcript_at_end(), "following keeps the latest in view as rows arrive");
             shot(&out3, "transcript-02-following");
+            let long = serde_json::json!({"session": "long", "count": 250, "prefix": "Line"});
+            check(
+                control("/__control/add-agent", &serde_json::json!({"session": "long"})).is_ok() && control("/__control/fill", &long).is_ok(),
+                "the Host holds a chat longer than one page",
+            );
+            true
+        })),
+        ("open the long chat", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find("long").is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select("long");
+            crate::pump();
+            true
+        })),
+        ("one page", Box::new(|_, window, elapsed| {
+            let rows = rows(window);
+            if rows.len() != 100 || rows.last().is_none_or(|r| r.id != "long-249") || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(rows[0].id == "long-150", &format!("the chat loads its latest page: first {}", rows[0].id));
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("older page", Box::new(|_, window, elapsed| {
+            let rows = rows(window);
+            if rows.len() < 200 || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(rows[0].id == "long-50" && rows.len() == 200, &format!("reaching the top loads the page before: first {}", rows[0].id));
+            check(
+                !window.get_transcript_follows() && window.get_transcript_offset() < -1000.0,
+                &format!("the reader stays on the row they were reading ({}px)", window.get_transcript_offset()),
+            );
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("oldest page", Box::new(|app, window, elapsed| {
+            let rows = rows(window);
+            if rows.len() < 250 || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(rows[0].id == "long-0", "the next page reaches the first message");
+            check(app.engine.borrow().conversation("long").is_some_and(|c| !c.has_more()), "and there is nothing older to load");
             true
         })),
     ];
