@@ -212,8 +212,20 @@ export component Transcript inherits FocusScope {
                 background: row.author == "user" ? Palette.bubble : transparent;
                 border-radius: 2px;
                 max-width: row.author == "user" ? list.visible-width * 0.75 : list.visible-width;
-                // Hovering a message offers its copy button.
+                // Hovering a message offers its copy button (Slint's rich text
+                // cannot be selected: the message's text is copied whole).
                 hover := TouchArea { }
+                if row.author != "activity": Rectangle {
+                    x: parent.width - 20px;
+                    y: 2px;
+                    width: 18px;
+                    height: 18px;
+                    opacity: hover.has-hover || copy.has-hover ? 1 : 0;
+                    accessible-role: button;
+                    accessible-label: "Copy message";
+                    Image { source: @image-url("icons/copy.svg"); width: 14px; height: 14px; colorize: Palette.faint; }
+                    copy := TouchArea { clicked => { root.copy-message(row.id); } }
+                }
                 VerticalLayout {
                     padding: row.author == "user" ? 10px : 2px;
                     spacing: 8px;
@@ -240,26 +252,11 @@ export component Transcript inherits FocusScope {
                         for tool in row.tools: ToolCard { tool: tool; }
                     }
                     for artifact in row.artifacts: ArtifactCard { artifact: artifact; }
-                    // Slint's rich text cannot be selected: the message's text
-                    // is copied whole instead.
-                    if row.pending || row.failed || row.stamp != "" || row.author != "activity": HorizontalLayout {
-                        spacing: 8px;
-                        alignment: row.author == "user" ? end : start;
-                        height: 18px;
-                        if row.pending || row.failed || row.stamp != "": Text {
-                            text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
-                            color: row.failed ? Palette.danger : Palette.faint;
-                            font-size: 11px;
-                            vertical-alignment: center;
-                        }
-                        if row.author != "activity": Rectangle {
-                            width: 18px;
-                            opacity: hover.has-hover || copy.has-hover ? 1 : 0;
-                            accessible-role: button;
-                            accessible-label: "Copy message";
-                            Image { source: @image-url("icons/copy.svg"); width: 14px; height: 14px; colorize: Palette.faint; }
-                            copy := TouchArea { clicked => { root.copy-message(row.id); } }
-                        }
+                    if row.pending || row.failed || row.stamp != "": Text {
+                        text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
+                        color: row.failed ? Palette.danger : Palette.faint;
+                        font-size: 11px;
+                        horizontal-alignment: row.author == "user" ? right : left;
                     }
                 }
             }

@@ -19,6 +19,15 @@ export struct ChatRow {
     jobs: int,
     sub-agents: int,
     children: int,
+    // The agent's portrait (empty until cached); a pair room's two.
+    portrait: image,
+    portrait2: image,
+    // Finished helpers folded under this row ("N helpers done").
+    done-parent: string,
+    done-count: int,
+    done-expanded: bool,
+    // An archived agent: Restore instead of opening.
+    archived: bool,
 }
 
 // A small labelled toggle, like the QML scope chips.
@@ -72,7 +81,10 @@ component Row inherits Rectangle {
     callback clicked();
     // The process indicator was clicked: its bottom right, in the window.
     callback processes(length, length);
-    height: root.chat.activity != "" ? 72px : 58px;
+    callback done-toggled(string);
+    callback restore();
+    height: (root.chat.activity != "" ? 72px : 58px) + (root.chat.done-count > 0 ? 22px : 0px);
+    opacity: root.chat.archived ? 0.65 : 1;
     border-width: root.cursor ? 1px : 0px;
     border-color: Palette.accent;
     background: root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
@@ -90,7 +102,22 @@ component Row inherits Rectangle {
             border-radius: 18px;
             border-width: root.chat.busy ? 2px : 1px;
             border-color: root.chat.busy ? Palette.success : Palette.border;
+            clip: true;
             Text { text: root.chat.initial; color: Palette.chrome-text; font-size: 15px; }
+            if root.chat.portrait.width > 0: Image {
+                source: root.chat.portrait;
+                width: root.chat.portrait2.width > 0 ? parent.width / 2 : parent.width;
+                x: 0;
+                height: parent.height;
+                image-fit: cover;
+            }
+            if root.chat.portrait2.width > 0: Image {
+                source: root.chat.portrait2;
+                width: parent.width / 2;
+                x: parent.width / 2;
+                height: parent.height;
+                image-fit: cover;
+            }
         }
         VerticalLayout {
             padding-top: 8px;
@@ -138,6 +165,29 @@ component Row inherits Rectangle {
                 font-size: 11px;
                 overflow: elide;
             }
+            if root.chat.done-count > 0: Rectangle {
+                height: 20px;
+                accessible-role: button;
+                accessible-label: root.chat.done-count + " helpers done";
+                Text {
+                    x: 0;
+                    text: (root.chat.done-expanded ? "▾ " : "▸ ") + root.chat.done-count + (root.chat.done-count == 1 ? " helper done" : " helpers done");
+                    color: done-touch.has-hover ? Palette.muted : Palette.faint;
+                    font-size: 11px;
+                }
+                done-touch := TouchArea { clicked => { root.done-toggled(root.chat.done-parent); } }
+            }
+        }
+        if root.chat.archived: Rectangle {
+            width: 30px;
+            height: 30px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: restore-touch.has-hover ? Palette.hover : transparent;
+            accessible-role: button;
+            accessible-label: "Restore " + root.chat.name;
+            Image { source: @image-url("icons/restore.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
+            restore-touch := TouchArea { clicked => { root.restore(); } }
         }
     }
 }
@@ -172,10 +222,15 @@ export component Sidebar inherits Rectangle {
     in property <string> cursor;
     out property <bool> list-has-focus: list.has-focus;
     public function focus-list() { list.focus(); }
+    // The All/Unread chips, as a click does.
+    public function choose-scope(scope: string) { root.scope = scope; root.filter-changed(); }
+    // The archive list, as its row's click does.
+    public function show-archive(on: bool) { root.showing-archive = on; }
     callback chosen(string);
     callback processes(string, length, length);
     callback filter-changed();
     callback restore(string);
+    callback done-toggled(string);
     callback hide();
     callback new-agent();
     // Minimal UI hides the hide button (Ctrl+B still works).
@@ -231,7 +286,9 @@ export component Sidebar inherits Rectangle {
                 for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
                     chat: row;
                     cursor: list.has-focus && row.session == root.cursor;
-                    clicked => { root.chosen(row.session); }
+                    clicked => { if (!row.archived) { root.chosen(row.session); } }
+                    done-toggled(parent) => { root.done-toggled(parent); }
+                    restore => { root.restore(row.session); }
                     processes(x, y) => { root.processes(row.session, x, y); }
                 }
                 if root.showing-pairs && root.rooms.length == 0: Text {

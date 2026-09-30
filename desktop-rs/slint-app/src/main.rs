@@ -149,8 +149,37 @@ impl App {
             .visible(&trees, &filters)
             .into_iter()
             .filter_map(|session| rows.iter().find(|r| r.session == session))
-            .map(|row| chat_row(row, sidebar.depth(&row.session), selected))
+            .map(|row| {
+                let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
+                if let Some(line) = sidebar.footers(&row.session).first() {
+                    chat.done_parent = line.parent_agent_id.clone().into();
+                    chat.done_count = line.count as i32;
+                    chat.done_expanded = line.expanded;
+                }
+                chat
+            })
             .collect()
+    }
+
+    /// Portraits for the chat list: an agent's own, a pair room's two
+    /// agents' (from `pair:<agent>:<agent>`).
+    fn with_portraits(&self, mut rows: Vec<ChatRow>) -> Vec<ChatRow> {
+        for row in &mut rows {
+            let session = row.session.to_string();
+            if let Some(pair) = session.strip_prefix("pair:") {
+                let sessions: Vec<String> = {
+                    let engine = self.engine.borrow();
+                    pair.split(':').filter_map(|id| engine.roster().find_by_agent_id(id).map(|a| a.session.clone())).collect()
+                };
+                if let [first, second] = sessions.as_slice() {
+                    row.portrait = profile_view::portrait(self, first);
+                    row.portrait2 = profile_view::portrait(self, second);
+                }
+            } else {
+                row.portrait = profile_view::portrait(self, &session);
+            }
+        }
+        rows
     }
 
     fn refresh(&self, changes: &[Change]) {
@@ -160,9 +189,13 @@ impl App {
             apply_theme(&window, &engine.reading_theme());
         }
         let selected = engine.selected_session().to_owned();
-        let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive));
+        let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Avatars));
+        drop(engine);
         if list_changed {
-            self.chats.set_vec(self.chat_rows(&engine, &window));
+            let chats = self.chat_rows(&self.engine.borrow(), &window);
+            let chats = self.with_portraits(chats);
+            self.chats.set_vec(chats);
+            let engine = self.engine.borrow();
             let rooms: Vec<ChatRow> = engine
                 .rooms()
                 .iter()
@@ -182,12 +215,19 @@ impl App {
                     }
                 })
                 .collect();
-            self.rooms.set_vec(rooms);
-            let archived: Vec<ChatRow> = engine.archived().rows().iter().map(|row| chat_row(row, 0, &selected)).collect();
-            self.archived.set_vec(archived);
+            let archived: Vec<ChatRow> = engine
+                .archived()
+                .rows()
+                .iter()
+                .map(|row| ChatRow { archived: true, ..chat_row(row, 0, &selected) })
+                .collect();
             window.set_unread_rooms(engine.unread_rooms() as i32);
+            drop(engine);
+            let rooms = self.with_portraits(rooms);
+            self.rooms.set_vec(rooms);
+            let archived = self.with_portraits(archived);
+            self.archived.set_vec(archived);
         }
-        drop(engine);
         self.refresh_panes(&window, changes);
         // A chat opens ready to type into, unless the reader is scrolling.
         if changes.contains(&Change::Selection) && !self.active_report().transcript_focused {
@@ -386,6 +426,15 @@ fn main() {
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
 
+    window.on_done_helpers_toggled(|parent| with_window(|app, _| {
+        if app.sidebar.borrow_mut().toggle_done_helpers(&parent) {
+            app.refresh(&[Change::Roster]);
+        }
+    }));
+    window.on_restore_agent(|session| with_window(|app, _| {
+        app.engine.borrow_mut().set_agent_archived(&session, false);
+        pump_now(app);
+    }));
     window.on_chat_chosen(|session| {
         if let Some(app) = app() {
             app.engine.borrow_mut().select(&session);

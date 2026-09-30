@@ -135,6 +135,7 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
         jobs: row.background_job_count,
         sub_agents: row.sub_agent_count,
         children: row.running_children,
+        ..ChatRow::default()
     }
 }
 

@@ -318,6 +318,7 @@ pub fn start_check(name: &str, out: String) {
         "connection" => connection_check(out),
         "lifecycle" => lifecycle_check(out),
         "narration" => narration_check(out),
+        "sidebar" => sidebar_check(out),
         // ---- updates and teams
         "updates" => updates_check(out),
         "teams" => teams_check(out),
@@ -1375,6 +1376,116 @@ fn narration_check(out: String) {
             window.invoke_copy_message(app_now().active_id(), "n2".into());
             let copied = std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
             check(copied == "Here they are.", &format!("the copy button copies the message: {copied:?}"));
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check sidebar --out DIR`: search and the Unread scope filter the
+/// chats, finished helpers fold under their parent, an archived agent is
+/// restored, and the pane header says what the agent runs.
+fn sidebar_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    fn names(window: &crate::AppWindow) -> Vec<String> {
+        window.get_chats().iter().map(|r| r.name.to_string()).collect()
+    }
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(|app, window, _| {
+            if app.engine.borrow().conversation("rachel").is_none_or(|c| c.rows().is_empty()) || names(window).len() != 2 {
+                return false;
+            }
+            window.invoke_focus_search();
+            true
+        })),
+        ("search", Box::new(|_, window, _| {
+            if !window.get_search_focused() {
+                return false;
+            }
+            headless::type_text("mik");
+            true
+        })),
+        ("filtered", Box::new(|_, window, _| {
+            if names(window) != ["Mike"] {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "SEARCH", "typing in the search filters the chats to Mike");
+            for _ in 0..3 {
+                headless::press(Key::Backspace);
+            }
+            true
+        })),
+        ("cleared", Box::new(|_, window, _| {
+            if names(window).len() != 2 {
+                return false;
+            }
+            let event = serde_json::json!({"type": "user-notification", "session": "mike", "persona": "Mike", "preview": "news"});
+            check(control("/__control/event", &event).is_ok(), "Mike has news");
+            true
+        })),
+        ("unread", Box::new(|_, window, _| {
+            if !window.get_chats().iter().any(|r| r.session == "mike" && r.unread) {
+                return false;
+            }
+            window.invoke_choose_scope("unread".into());
+            true
+        })),
+        ("unread only", Box::new(|_, window, _| {
+            if names(window) != ["Mike"] {
+                return false;
+            }
+            check(true, "Unread shows only the chats with news");
+            window.invoke_choose_scope("all".into());
+            let helper = serde_json::json!({"session": "mike", "set": {"role": "helper", "parent_agent_id": "a1", "helper_state": "done"}});
+            check(control("/__control/agent", &helper).is_ok(), "Mike becomes Rachel's finished helper");
+            true
+        })),
+        ("folded", Box::new(move |_, window, _| {
+            let Some(rachel) = window.get_chats().iter().find(|r| r.session == "rachel") else { return false };
+            if rachel.done_count != 1 || names(window) != ["Rachel"] {
+                return false;
+            }
+            check(!rachel.done_expanded, "a finished helper folds under its parent as \"1 helper done\"");
+            shot(&out2, "sidebar-01-helpers");
+            window.invoke_done_helpers_toggled(rachel.done_parent);
+            true
+        })),
+        ("unfolded", Box::new(|_, window, _| {
+            if names(window).len() != 2 {
+                return false;
+            }
+            check(true, "the line unfolds the helper");
+            let back = serde_json::json!({"session": "mike", "set": {"role": "agent", "parent_agent_id": "", "helper_state": "", "archived_at": 1790000000}});
+            check(control("/__control/agent", &back).is_ok(), "Mike is archived");
+            true
+        })),
+        ("archived", Box::new(|_, window, _| {
+            if window.get_archived().row_count() != 1 || names(window) != ["Rachel"] {
+                return false;
+            }
+            window.invoke_show_archive(true);
+            let row = window.get_archived().row_data(0).expect("archived row");
+            check(row.archived && row.name == "Mike", "an archived agent leaves the chats for the archive");
+            window.invoke_restore_agent(row.session);
+            true
+        })),
+        ("restored", Box::new(|_, window, _| {
+            if window.get_archived().row_count() != 0 || names(window).len() != 2 {
+                return false;
+            }
+            check(posts("/agent-archive").last().is_some_and(|r| r["body"]["archived"] == false), "Restore brings it back");
+            window.invoke_show_archive(false);
+            let runtime = serde_json::json!({"session": "rachel", "set": {"model": "", "effort": "", "status_text": "Reading the docs"}});
+            check(control("/__control/agent", &runtime).is_ok(), "Rachel reports a status and no model");
+            true
+        })),
+        ("header", Box::new(|_, _window, _| {
+            let pane = view();
+            if pane.status != "Reading the docs" {
+                return false;
+            }
+            check(pane.model.is_empty() && pane.effort.is_empty(), "the header then says the model is not reported and the effort is the default");
             true
         })),
     ];
