@@ -8,6 +8,7 @@
 //! [`Engine::pump`] on its own thread, which applies them and returns what
 //! changed. No toolkit type crosses into the engine.
 
+mod avatars;
 pub mod blocks;
 mod composer;
 mod connection;
@@ -103,6 +104,8 @@ pub enum Change {
     /// A chat's media list or a cached image changed.
     Media,
     Orchestrator,
+    /// An agent portrait arrived (`avatar_source`).
+    Avatars,
 }
 
 enum Message {
@@ -215,6 +218,7 @@ pub struct Engine {
     updates: updates::Updates,
     teams: teams::Teams,
     profile: profile::Profile,
+    avatars: avatars::Avatars,
 }
 
 impl Engine {
@@ -314,6 +318,7 @@ impl Engine {
             updates: Default::default(),
             teams: Default::default(),
             profile: Default::default(),
+            avatars: Default::default(),
         })
     }
 
