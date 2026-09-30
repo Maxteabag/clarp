@@ -4,6 +4,7 @@ mod audio_output;
 mod bridge;
 mod fonts;
 mod list_replay;
+mod mpris;
 mod qjson;
 mod runtime;
 mod stall_monitor;

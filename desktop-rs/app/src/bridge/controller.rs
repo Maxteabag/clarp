@@ -2512,6 +2512,10 @@ impl AppController {
         })
     }
 
+    pub fn audio_pub(&self) -> *mut AudioController {
+        self.audio_value()
+    }
+
     pub fn muted_pub(&self) -> bool {
         self.muted
     }
