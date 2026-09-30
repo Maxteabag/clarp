@@ -1,4 +1,4 @@
-import { Palette, Focus, FocusRing } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
 import { Composer, Attachment } from "composer.slint";
 import { Transcript, MessageRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
@@ -172,8 +172,7 @@ export component Pane inherits Rectangle {
     // whether the reader follows, for shortcuts and checks.
     callback reported(bool, bool, length, bool, bool);
     background: root.pane.active ? Palette.control : Palette.raised;
-    border-color: Palette.control;
-    border-width: 1px;
+    border-width: 0px;
     border-radius: 3px;
     clip: true;
     opacity: root.pane.active ? 1 : 0.76;
@@ -236,14 +235,22 @@ export component Pane inherits Rectangle {
     VerticalLayout {
         padding: 2px;
         Header { pane: root.pane; }
-        Rectangle { height: 1px; background: Palette.rule; }
-        transcript := Transcript {
-            vertical-stretch: 1;
+        // [c] Chat and [i] Insert: the pane's two keyboard regions, framed
+        // as sqlit frames its panes.
+        Rectangle {
+          vertical-stretch: 1;
+          transcript := Transcript {
+            x: Frame.side;
+            y: Frame.top;
+            width: parent.width - 2 * Frame.side;
+            height: parent.height - Frame.top - Frame.bottom;
             rows: root.pane.messages;
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }
             reached-top => { root.load-older(); }
+          }
+          PaneFrame { key: "c"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
         }
         // The transcript's footer (ConversationPane.qml).
         if root.pane.working: Rectangle {
@@ -257,9 +264,14 @@ export component Pane inherits Rectangle {
             }
         }
         // Pair rooms are the Host's read-only projection: no composer.
-        composer := Composer {
-            visible: !root.pane.pair;
-            height: root.pane.pair ? 0px : self.preferred-height;
+        Rectangle {
+          visible: !root.pane.pair;
+          height: root.pane.pair ? 0px : composer.preferred-height + Frame.top + Frame.bottom;
+          composer := Composer {
+            x: Frame.side;
+            y: Frame.top;
+            width: parent.width - 2 * Frame.side;
+            height: parent.height - Frame.top - Frame.bottom;
             init => { self.draft = root.pane.draft; root.draft-set-seen = root.pane.draft-set; }
             attachments: root.pane.attachments;
             queued: root.pane.queued;
@@ -282,22 +294,9 @@ export component Pane inherits Rectangle {
             escape => { transcript.focus(); }
             jump-to-latest => { transcript.scroll-to-latest(); }
             queue-requested => { AgentDialogs.queue-open(root.pane.session); }
+          }
+          PaneFrame { key: "i"; label: "Insert"; active: root.pane.active && Focus.mode == "composer"; surface: root.background; }
         }
-    }
-    // The keyboard's region in the active pane (the one focus style).
-    FocusRing {
-        x: transcript.x;
-        y: transcript.y;
-        width: transcript.width;
-        height: transcript.height;
-        shown: root.pane.active && Focus.mode == "pane";
-    }
-    FocusRing {
-        x: composer.x;
-        y: composer.y;
-        width: composer.width;
-        height: composer.height;
-        shown: root.pane.active && Focus.mode == "composer";
     }
 }
 

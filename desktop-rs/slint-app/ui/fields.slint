@@ -1,7 +1,7 @@
 // The std text inputs without Fluent's accent underline: the FocusRing is
 // the one focus style. Each wraps the std widget in a rounded clip and makes
 // it 2px taller, so the underline (its bottom 2px) falls outside.
-import { LineEdit, TextEdit } from "std-widgets.slint";
+import { LineEdit, TextEdit, Palette as WidgetPalette } from "std-widgets.slint";
 
 export component Field inherits Rectangle {
     in-out property <string> text <=> inner.text;
@@ -31,6 +31,14 @@ export component Field inherits Rectangle {
         height: parent.height + 2px;
         accessible-label: root.accessible-label;
     }
+    // The bottom edge the clip took with the underline.
+    Rectangle {
+        x: 4px;
+        y: parent.height - 1px;
+        width: parent.width - 8px;
+        height: 1px;
+        background: WidgetPalette.border;
+    }
 }
 
 export component Editor inherits Rectangle {
@@ -56,5 +64,13 @@ export component Editor inherits Rectangle {
         width: parent.width;
         height: parent.height + 2px;
         accessible-label: root.accessible-label;
+    }
+    // The bottom edge the clip took with the underline.
+    Rectangle {
+        x: 4px;
+        y: parent.height - 1px;
+        width: parent.width - 8px;
+        height: 1px;
+        background: WidgetPalette.border;
     }
 }

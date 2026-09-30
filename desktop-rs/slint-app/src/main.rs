@@ -57,6 +57,8 @@ pub struct App {
     workspaces: RefCell<clarp_core::workspace::WorkspaceContext>,
     /// Messages whose tool calls the reader opened (not groups).
     expanded: RefCell<std::collections::HashSet<String>>,
+    /// Chats whose sub-agents show in the explorer; the rest fold them.
+    pub unfolded: RefCell<std::collections::HashSet<String>>,
     pub prefs: RefCell<Prefs>,
     pub switcher: RefCell<SwitcherState>,
     /// The dialog over the window ("" for none).
@@ -145,13 +147,50 @@ impl App {
         sidebar.unread_only = window.get_scope() == "unread";
         sidebar.rebuild(&trees);
         let selected = engine.selected_session();
-        sidebar
-            .visible(&trees, &filters)
+        let tree_active = sidebar.tree_active();
+        let visible: Vec<&clarp_core::roster::AgentRow> =
+            sidebar.visible(&trees, &filters).into_iter().filter_map(|session| rows.iter().find(|r| r.session == session)).collect();
+        // Sub-agents fold under their chat unless it is unfolded; the open
+        // chat's own ancestors stay open so it is always in the list.
+        let parent_of = |row: &clarp_core::roster::AgentRow| -> Option<&clarp_core::roster::AgentRow> {
+            if row.agent_role != "helper" || row.parent_agent_id.is_empty() {
+                return None;
+            }
+            rows.iter().find(|r| r.agent_id == row.parent_agent_id && r.session != row.session)
+        };
+        let ancestors = |row: &clarp_core::roster::AgentRow| -> Vec<String> {
+            let (mut chain, mut current) = (Vec::new(), parent_of(row));
+            while let Some(parent) = current {
+                if chain.contains(&parent.session) {
+                    break;
+                }
+                chain.push(parent.session.clone());
+                current = parent_of(parent);
+            }
+            chain
+        };
+        let mut unfolded = self.unfolded.borrow().clone();
+        if let Some(open) = rows.iter().find(|r| r.session == selected) {
+            unfolded.extend(ancestors(open));
+        }
+        let mut folded_under: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+        let mut shown = Vec::new();
+        for row in &visible {
+            let chain = if tree_active { ancestors(row) } else { Vec::new() };
+            if let Some(first) = chain.first() {
+                *folded_under.entry(first.clone()).or_default() += 1;
+            }
+            if chain.iter().all(|a| unfolded.contains(a)) {
+                shown.push(*row);
+            }
+        }
+        shown
             .into_iter()
-            .filter_map(|session| rows.iter().find(|r| r.session == session))
             .map(|row| {
                 let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
-                if let Some(line) = sidebar.footers(&row.session).first() {
+                chat.fold_count = folded_under.get(&row.session).copied().unwrap_or(0);
+                chat.folded = !unfolded.contains(&row.session);
+                if let Some(line) = sidebar.footers(&row.session).first().filter(|_| !chat.folded) {
                     chat.done_parent = line.parent_agent_id.clone().into();
                     chat.done_count = line.count as i32;
                     chat.done_expanded = line.expanded;
@@ -159,6 +198,18 @@ impl App {
                 chat
             })
             .collect()
+    }
+
+    /// Folds (`Some(false)`), unfolds (`Some(true)`) or toggles (`None`) the
+    /// sub-agents under `session`.
+    pub fn fold(&self, session: &str, open: Option<bool>) {
+        let mut unfolded = self.unfolded.borrow_mut();
+        let open = open.unwrap_or(!unfolded.contains(session));
+        let changed = if open { unfolded.insert(session.to_owned()) } else { unfolded.remove(session) };
+        drop(unfolded);
+        if changed {
+            self.refresh(&[Change::Roster]);
+        }
     }
 
     /// Portraits for the chat list: an agent's own, a pair room's two
@@ -417,6 +468,7 @@ fn main() {
         panes: pane_views,
         pane_state: RefCell::new(Vec::new()),
         sidebar: RefCell::new(clarp_core::sidebar::Sidebar::default()),
+        unfolded: RefCell::new(std::collections::HashSet::new()),
         workspaces: RefCell::new(clarp_core::workspace::WorkspaceContext::default()),
         prefs: RefCell::new(prefs),
         switcher: RefCell::new(SwitcherState::default()),
@@ -426,6 +478,7 @@ fn main() {
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
 
+    window.on_fold_toggled(|session| with_window(|app, _| app.fold(&session, None)));
     window.on_done_helpers_toggled(|parent| with_window(|app, _| {
         if app.sidebar.borrow_mut().toggle_done_helpers(&parent) {
             app.refresh(&[Change::Roster]);

@@ -1,5 +1,5 @@
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
 import { ProcessIndicator } from "processes.slint";
 
 export struct ChatRow {
@@ -26,6 +26,9 @@ export struct ChatRow {
     done-parent: string,
     done-count: int,
     done-expanded: bool,
+    // Sub-agents under this row, and whether they are folded away.
+    fold-count: int,
+    folded: bool,
     // An archived agent: Restore instead of opening.
     archived: bool,
 }
@@ -82,8 +85,9 @@ component Row inherits Rectangle {
     // The process indicator was clicked: its bottom right, in the window.
     callback processes(length, length);
     callback done-toggled(string);
+    callback fold-toggled();
     callback restore();
-    height: (root.chat.activity != "" ? 72px : 58px) + (root.chat.done-count > 0 ? 22px : 0px);
+    height: (root.chat.activity != "" ? 72px : 58px) + (root.chat.done-count > 0 ? 22px : 0px) + (root.chat.fold-count > 0 ? 22px : 0px);
     opacity: root.chat.archived ? 0.65 : 1;
     background: root.cursor ? Focus.cursor : root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
     accessible-role: list-item;
@@ -163,6 +167,18 @@ component Row inherits Rectangle {
                 font-size: 11px;
                 overflow: elide;
             }
+            if root.chat.fold-count > 0: Rectangle {
+                height: 20px;
+                accessible-role: button;
+                accessible-label: root.chat.fold-count + " sub-agents";
+                Text {
+                    x: 0;
+                    text: (root.chat.folded ? "▸ " : "▾ ") + root.chat.fold-count + (root.chat.fold-count == 1 ? " sub-agent" : " sub-agents");
+                    color: fold-touch.has-hover ? Palette.muted : Palette.faint;
+                    font-size: 11px;
+                }
+                fold-touch := TouchArea { clicked => { root.fold-toggled(); } }
+            }
             if root.chat.done-count > 0: Rectangle {
                 height: 20px;
                 accessible-role: button;
@@ -223,12 +239,15 @@ export component Sidebar inherits Rectangle {
     // The All/Unread chips, as a click does.
     public function choose-scope(scope: string) { root.scope = scope; root.filter-changed(); }
     // The archive list, as its row's click does.
-    public function show-archive(on: bool) { root.showing-archive = on; }
+    public function show-archive(on: bool) { root.showing-archive = on; root.showing-pairs = false; }
+    // The agent-to-agent rooms, as their switch's click does.
+    public function show-pairs(on: bool) { root.showing-pairs = on; root.showing-archive = false; }
     callback chosen(string);
     callback processes(string, length, length);
     callback filter-changed();
     callback restore(string);
     callback done-toggled(string);
+    callback fold-toggled(string);
     callback hide();
     callback new-agent();
     // Minimal UI hides the hide button (Ctrl+B still works).
@@ -267,7 +286,9 @@ export component Sidebar inherits Rectangle {
                 clicked => { root.new-agent(); }
             }
         }
-        HorizontalLayout {
+        // Minimal UI keeps the list alone: scope, rooms and the archive stay
+        // in Ctrl+K.
+        if !root.minimal: HorizontalLayout {
             padding-left: 10px;
             spacing: 6px;
             alignment: start;
@@ -275,7 +296,7 @@ export component Sidebar inherits Rectangle {
             Chip { label: "All"; on: root.scope == "all"; clicked => { root.scope = "all"; root.filter-changed(); } }
             Chip { label: "Unread"; on: root.scope == "unread"; clicked => { root.scope = "unread"; root.filter-changed(); } }
         }
-        if !root.showing-archive: ListSwitch {
+        if !root.showing-archive && (!root.minimal || root.showing-pairs): ListSwitch {
             glyph: root.showing-pairs ? "‹" : "↔";
             label: root.showing-pairs ? "Back to chats" : "Agent conversations";
             count: root.rooms.length;
@@ -286,12 +307,17 @@ export component Sidebar inherits Rectangle {
         list := FocusScope {
           vertical-stretch: 1;
           Flickable {
+            x: 8px + Frame.side;
+            y: Frame.top;
+            width: parent.width - 16px - 2 * Frame.side;
+            height: parent.height - Frame.top - Frame.bottom - 8px;
             viewport := VerticalLayout {
                 for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
                     chat: row;
                     cursor: list.has-focus && row.session == root.cursor;
                     clicked => { if (!row.archived) { root.chosen(row.session); } }
                     done-toggled(parent) => { root.done-toggled(parent); }
+                    fold-toggled => { root.fold-toggled(row.session); }
                     restore => { root.restore(row.session); }
                     processes(x, y) => { root.processes(row.session, x, y); }
                 }
@@ -303,9 +329,9 @@ export component Sidebar inherits Rectangle {
                 }
             }
         }
-          FocusRing { shown: Focus.mode == "sidebar"; }
+          PaneFrame { x: 8px; width: parent.width - 16px; height: parent.height - 8px; y: 0; key: "e"; label: "Explorer"; active: Focus.mode == "sidebar"; surface: Palette.raised; }
         }
-        if !root.showing-pairs: ListSwitch {
+        if !root.showing-pairs && (!root.minimal || root.showing-archive): ListSwitch {
             glyph: root.showing-archive ? "‹" : "≡";
             label: root.showing-archive ? "Back to chats" : "Archived";
             count: root.archived.length;

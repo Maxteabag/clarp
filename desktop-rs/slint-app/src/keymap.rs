@@ -104,12 +104,12 @@ fn state(name: &str) -> Vec<Binding> {
         ],
         "navigation" => vec![
             b("next-attention", &["N", "Ctrl+J"], "Next attention", true, Attention, false),
-            b("focus-sidebar", &["E"], "Agents", true, Always, false),
-            b("focus-pane", &["C"], "Conversation", true, Always, false),
-            b("focus-composer", &["I"], "Type", true, Agent, false),
+            b("focus-sidebar", &["E"], "Explorer", true, Always, false),
+            b("focus-pane", &["C"], "Chat", true, Always, false),
+            b("focus-composer", &["I"], "Insert", true, Agent, false),
             b("toggle-focus", &["Tab", "Shift+Tab"], "Switch focus", true, Always, false),
             b("switcher", &["Space", "Ctrl+K"], "Commands", true, Always, false),
-            b("escape", &["Escape"], "Conversation", false, Always, false),
+            b("escape", &["Escape"], "Chat", false, Always, false),
         ],
         "pane" => vec![
             b("move-left", &["Alt+Left", "Ctrl+Alt+Left"], "Left pane", false, Always, false),
@@ -127,6 +127,11 @@ fn state(name: &str) -> Vec<Binding> {
             b("agent-previous", &["K", "Up"], "Previous", true, Rows, false),
             b("agent-open", &["Return", "Enter"], "Open", true, Rows, false),
             b("agent-search", &["/"], "Search", true, Always, false),
+            b("fold", &["H", "Left"], "Fold", true, Rows, false),
+            b("unfold", &["L", "Right"], "Unfold", true, Rows, false),
+            // The explorer's header buttons, shown while it has the keyboard.
+            b("new", &["Ctrl+N"], "New agent", true, Always, false),
+            b("sidebar", &["Ctrl+B"], "Hide sidebar", true, Always, false),
         ],
         "composer" => vec![
             b("jump-latest", &["Ctrl+End"], "Latest", true, Agent, true),
@@ -136,7 +141,7 @@ fn state(name: &str) -> Vec<Binding> {
         ],
         "search" => vec![
             b("search-next", &["Down"], "Results", true, Rows, true),
-            b("escape", &["Escape"], "Agents", true, Always, false),
+            b("escape", &["Escape"], "Explorer", true, Always, false),
         ],
         "settings" => vec![
             b("settings-move", &["Up", "Down"], "Move", true, Always, true),
@@ -335,12 +340,14 @@ mod tests {
     #[test]
     fn child_states_inherit_and_override_by_action() {
         let none = Overrides::new();
-        // Escape in a pane is navigation's "Conversation", not workspace's "Navigate".
+        // Escape in a pane is navigation's "Chat", not workspace's "Navigate".
         let pane = resolve("pane", &none, Some(all()));
-        assert_eq!(pane.iter().find(|b| b.action == "escape").unwrap().label, "Conversation");
+        assert_eq!(pane.iter().find(|b| b.action == "escape").unwrap().label, "Chat");
         assert_eq!(pane.iter().find(|b| b.action == "split-right").unwrap().keys, ["Alt+V", "Ctrl+Alt+V", "Ctrl+Shift+V"]);
         assert!(pane.iter().any(|b| b.action == "settings"), "main's bindings reach a pane");
         assert_eq!(action_for("pane", "E", &none, all()), Some("focus-sidebar"));
+        assert_eq!(action_for("sidebar", "H", &none, all()), Some("fold"));
+        assert_eq!(action_for("sidebar", "Right", &none, all()), Some("unfold"));
         assert_eq!(action_for("composer", "E", &none, all()), None, "letters type in the composer");
         assert_eq!(action_for("composer", "Return", &none, all()), None, "the composer sends by itself");
         assert_eq!(action_for("composer", "Ctrl+Alt+V", &none, all()), Some("split-right"));
