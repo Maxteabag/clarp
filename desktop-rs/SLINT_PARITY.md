@@ -42,7 +42,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/KeymapEditor.qml` | 32 | ui/workspace.slint | todo |
 | `qml/components/LaunchDirectoryPicker.qml` | 113 | ui/panels/launchdirectorypicker.slint | todo |
 | `qml/components/MediaGallery.qml` | 163 | ui/panels/mediagallery.slint | todo |
-| `qml/components/MessageDelegate.qml` | 538 | ui/transcript.slint | todo |
+| `qml/components/MessageDelegate.qml` | 538 | `slint-app/ui/transcript.slint` `Block` + `engine/src/blocks.rs` (headings, prose/lists via StyledText, code, quotes, tables, rules; `blocks::tests`) | wip: rendered in both themes (`slint-app/docs/screens/`); text selection (Slint's StyledText has none), timestamps, sender labels, media pending |
 | `qml/components/NavRail.qml` | 145 | `slint-app/ui/navrail.slint` (same SVG icons, attention badge, mute, settings, Host initial) | wip: surfaces other than chats pending |
 | `qml/components/NewSessionHub.qml` | 458 | ui/panels/newsessionhub.slint | todo |
 | `qml/components/OrchestratorDialog.qml` | 193 | ui/panels/orchestratordialog.slint | todo |
@@ -61,11 +61,11 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/StartAgentDialog.qml` | 368 | ui/panels/startagentdialog.slint | todo |
 | `qml/components/StatusPill.qml` | 49 | ui/sidebar.slint | todo |
 | `qml/components/TeamsPanel.qml` | 564 | ui/panels/teamspanel.slint | todo |
-| `qml/components/Theme.qml` | 47 | ui/widgets.slint (shared controls, theme global) | todo |
+| `qml/components/Theme.qml` | 47 | `slint-app/ui/theme.slint` `Palette` set from `clarp_core::reading_theme`; std widgets follow light/dark | verified: `engine/tests/host_flow.rs::preferences_are_remembered` + terminal and paper renders |
 | `qml/components/ThemedComboBox.qml` | 31 | ui/widgets.slint (shared controls, theme global) | todo |
 | `qml/components/ToolCard.qml` | 150 | ui/transcript.slint | todo |
 | `qml/components/TranscriptList.qml` | 478 | ui/transcript.slint | todo |
-| `qml/components/TranscriptView.qml` | 177 | ui/transcript.slint | todo |
+| `qml/components/TranscriptView.qml` | 177 | `slint-app/ui/transcript.slint` | wip: follow-latest on new rows; paused reading, wheel/keys, virtualisation and scroll anchoring pending |
 | `qml/components/TuiBusyIndicator.qml` | 25 | ui/widgets.slint (shared controls, theme global) | todo |
 | `qml/components/TuiButton.qml` | 14 | ui/widgets.slint (shared controls, theme global) | todo |
 | `qml/components/TuiCheckBox.qml` | 20 | ui/widgets.slint (shared controls, theme global) | todo |

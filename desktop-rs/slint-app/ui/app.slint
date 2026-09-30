@@ -1,10 +1,10 @@
-import { TextEdit, Button } from "std-widgets.slint";
+import { TextEdit, Button, Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
-import { Transcript, MessageRow } from "transcript.slint";
+import { Transcript, MessageRow, MessageBlock, TableRow } from "transcript.slint";
 
-export { Palette, ChatRow, MessageRow }
+export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, WidgetPalette }
 
 export component AppWindow inherits Window {
     title: root.selected-name == "" ? "Clarp" : root.selected-name + " — Clarp";
@@ -38,6 +38,7 @@ export component AppWindow inherits Window {
     callback filter-changed();
     callback toggle-muted();
     callback open-switcher();
+    callback link-clicked(string);
     callback send(string);
     callback stop();
     callback dismiss-error();
@@ -131,6 +132,7 @@ export component AppWindow inherits Window {
             transcript := Transcript {
                 vertical-stretch: 1;
                 rows: root.messages;
+                link-clicked(url) => { root.link-clicked(url); }
             }
             Rectangle { height: 1px; background: Palette.rule; }
             // Composer: Enter sends, Shift+Enter is a new line.
