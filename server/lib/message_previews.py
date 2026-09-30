@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from .db import conn
+from .db import change_stamp, conn
 from . import origins, team_leader
 from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display
@@ -239,6 +239,11 @@ def last_message_preview(*, agent_id: str, max_len: int = 80) -> str:
 # agents whose rows changed run their three indexed queries again.
 _PREVIEW_CACHE: RevisionedCache[str, dict[str, Any]] = RevisionedCache(
     "message_previews.dashboard", max_entries=1024)
+# The revision map below walks every message's index entry and row (~65 ms on
+# a 180k-message store) on each dashboard poll. It only moves on a committed
+# write, so polls between writes reuse the last map.
+_REVISION_CACHE: RevisionedCache[str, tuple[dict, dict, list]] = RevisionedCache(
+    "message_previews.dashboard_revisions", max_entries=1)
 
 
 def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...]) -> dict[str, Any]:
@@ -279,15 +284,7 @@ def _agent_preview(agent_id: str, max_len: int, routine: tuple[str, ...]) -> dic
     return entry
 
 
-def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
-    """The dashboard projection for every live agent.
-
-    Revisions come first (one indexed GROUP BY); they key a per-agent cache so
-    an unchanged agent costs nothing and a changed one costs three index walks
-    that stop after at most 50 rows. The previous window-function query ranked
-    every message of every live agent on each call (100–230 ms each, twice).
-    """
-    routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
+def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]], list[str]]:
     revisions: dict[str, dict[str, int]] = {}
     # updated_at rides along: a transcript import that rewrites a row in place
     # (same revision, new text) must refresh the cached preview as well.
@@ -304,6 +301,20 @@ def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
         revisions.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['revision'] or 0)
         stamps.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['updated_at'] or 0)
     live = [row['agent_id'] for row in conn().execute("SELECT agent_id FROM agents WHERE deleted_at IS NULL")]
+    return revisions, stamps, live
+
+
+def dashboard_messages(max_len: int = 80) -> dict[str, dict[str, Any]]:
+    """The dashboard projection for every live agent.
+
+    Revisions come first (one indexed GROUP BY); they key a per-agent cache so
+    an unchanged agent costs nothing and a changed one costs three index walks
+    that stop after at most 50 rows. The previous window-function query ranked
+    every message of every live agent on each call (100–230 ms each, twice).
+    """
+    routine = tuple(sorted(origins.ROUTINE_AUTOMATION_ORIGINS))
+    revisions, stamps, live = _REVISION_CACHE.get_or_compute(
+        "all", change_stamp(), _dashboard_revisions)
     result: dict[str, dict[str, Any]] = {}
     for agent_id in live:
         key = tuple(sorted((str(session or ''), rev, stamps.get(agent_id, {}).get(session, 0))

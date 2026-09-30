@@ -120,6 +120,36 @@ def test_keepalive_reuses_one_connection(open_server):
     conn.close()
 
 
+def test_idle_close_does_not_log_a_phantom_request(open_server, monkeypatch):
+    """Closing an idle keep-alive connection must not re-log its last request.
+
+    The final handle_one_request() on a closing connection parses nothing; it
+    used to emit a second httpRequest row for the previous request, timed
+    across the idle wait.
+    """
+    logged = []
+    real_emit = server_module.eventlog.emit
+
+    def capture(source, event, **fields):
+        if event == "httpRequest" and fields.get("path") == "/server-info?idle-close":
+            logged.append(fields)
+        return real_emit(source, event, **fields)
+
+    monkeypatch.setattr(server_module.eventlog, "emit", capture)
+    conn = http.client.HTTPConnection("127.0.0.1", open_server, timeout=3)
+    conn.request("GET", "/server-info?idle-close")
+    resp = conn.getresponse()
+    resp.read()
+    assert resp.status == 200
+    time.sleep(0.3)
+    conn.close()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and len(logged) < 2:
+        time.sleep(0.05)
+    assert len(logged) == 1
+    assert logged[0]["duration_ms"] < 250
+
+
 def test_unauthorized_post_with_body_does_not_poison_connection(authed_server):
     """A 401 rejected before the handler reads the body must drain it —
     otherwise the body bytes are parsed as the next request line and the

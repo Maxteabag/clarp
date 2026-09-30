@@ -131,3 +131,24 @@ def test_last_seen_is_throttled_without_caching_authentication(monkeypatch):
     assert device_pairing.revoke(paired["device_id"])
     assert device_pairing.authenticate(paired["token"]) is None
     assert device_pairing.authenticate("cld_" + "invalid" * 8) is None
+
+
+def test_busy_last_seen_is_silent_and_keeps_the_lock_report_window(monkeypatch, capsys):
+    import sqlite3
+
+    paired = device_pairing.exchange(device_pairing.issue()["code"])
+    db.conn().execute("UPDATE paired_devices SET last_seen_at = 0")
+    monkeypatch.setattr(db, "_LAST_LOCK_REPORT_AT", float("-inf"))
+    capsys.readouterr()
+    writer = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        assert device_pairing.authenticate(paired["token"])["last_seen_at"] == 0
+        assert "sqlite_lock_wait" not in capsys.readouterr().err
+        # A real wait right after is still reported, not throttled away.
+        with db.busy_timeout(20), pytest.raises(sqlite3.OperationalError):
+            db.conn().execute("UPDATE paired_devices SET last_seen_at = 1")
+        assert "sqlite_lock_wait" in capsys.readouterr().err
+    finally:
+        writer.rollback()
+        writer.close()

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-import sqlite3
 import uuid
 
 from . import db
@@ -114,23 +113,12 @@ def authenticate(token: str) -> dict | None:
     # timestamp, so a phone polling /clog queued behind every long import
     # (2026-09-20). Once a minute is all "last seen" needs.
     if now - last_seen >= LAST_SEEN_WRITE_INTERVAL_MS:
-        connection = db.conn()
-        previous_timeout = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
-        try:
-            connection.execute("PRAGMA busy_timeout = 20")
-            connection.execute(
+        # Authentication already checked the token and revocation above.
+        # Optional presence bookkeeping must not break or stall a valid request.
+        if db.best_effort_write(
                 "UPDATE paired_devices SET last_seen_at = ? WHERE device_id = ?",
-                (now, row["device_id"]),
-            )
+                (now, row["device_id"])):
             last_seen = now
-        except sqlite3.OperationalError as exc:
-            # Authentication already checked the token and revocation above.
-            # Optional presence bookkeeping must not break a valid request.
-            code = getattr(exc, "sqlite_errorcode", 0) & 0xff
-            if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
-                raise
-        finally:
-            connection.execute(f"PRAGMA busy_timeout = {previous_timeout}")
     return dict(row) | {"last_seen_at": last_seen}
 
 
