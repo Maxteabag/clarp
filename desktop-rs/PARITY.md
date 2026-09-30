@@ -243,3 +243,17 @@ toward behavior parity. Unknown expectation keys fail the runner.
 - `report_no_fetch.py` — todo
 - `test_preview_adoption.py` — todo
 - `` — todo
+
+## End-to-end against a real Host
+
+`app/tests/run-e2e.sh` runs the Rust desktop against `tests/qa/host.py` (the
+production server with the deterministic Codex provider). Both run in a
+private network namespace with only loopback (offline), with their own HOME
+and a system-only PATH, so no real credentials or agent CLIs are reachable;
+the desktop is offscreen on a private session bus. The driver
+(`app/tests/e2e/e2e_main.qml`) uses the real Main and KeyInjector: roster
+from the Host, the chat's composer, a typed message sent with Enter, the
+reply seen streaming (a `live-` row updated in place) and then final with no
+error, and the quick switcher opening the second chat. Screenshots from the
+recorded run: `docs/e2e/01-roster.png` … `06-second-chat.png`
+(`04-streaming.png` is the reply mid-stream).
