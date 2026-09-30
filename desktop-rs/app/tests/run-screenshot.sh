@@ -4,12 +4,15 @@
 # on a non-zero exit, a missing PNG, or any Clarp QML warning.
 #   app/tests/run-screenshot.sh [out.png] [session]
 set -uo pipefail
+# The system Python (dbus, gi and the fake Host need nothing else); a
+# version manager on PATH must not decide which interpreter runs the checks.
+python3=${CLARP_TEST_PYTHON:-/usr/bin/python3}
 cd "$(dirname "$0")/../.."
 out=${1:-/var/tmp/clarp-rust-screenshot.png}
 session=${2:-rachel}
 scratch=$(mktemp -d /var/tmp/clarp-screenshot.XXXXXX)
 trap 'rm -rf "$scratch"' EXIT
-python3 app/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
+"$python3" app/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
 host=$!
 for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
 rm -f "$out"
