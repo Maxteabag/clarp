@@ -3697,8 +3697,47 @@ impl AppController {
         true
     }
 
-    fn paste_clipboard_image(self: Pin<&mut Self>, _pane_id: &QString, _session: &QString) -> bool {
-        false
+    /// A copied image becomes an attachment of the open chat, without
+    /// sending or touching the draft (C++ `pasteClipboardImage`). False lets
+    /// the native text paste proceed.
+    fn paste_clipboard_image(mut self: Pin<&mut Self>, pane_id: &QString, session: &QString) -> bool {
+        const MAX_IMAGE_BYTES: usize = 256 * 1024 * 1024;
+        let Some(png) = super::desktop::clipboard_image_png() else { return false };
+        let (active_pane, active_session) = self
+            .panes
+            .as_ref()
+            .map(|p| (p.core().active_pane_id().to_owned(), p.core().active_session().to_owned()))
+            .unwrap_or_default();
+        if pane_id.to_string() != active_pane || session.to_string() != active_session || session.is_empty() {
+            self.set_error("Select a conversation before pasting an image");
+            return true;
+        }
+        if png.is_empty() || png.len() > MAX_IMAGE_BYTES {
+            self.set_error("Clipboard image is empty or too large");
+            return true;
+        }
+        if png.len() as u64 > clarp_core::attachments::MAX_UPLOAD_BYTES {
+            self.set_error("Could not store the pasted image (maximum 50 MB)");
+            return true;
+        }
+        let Some(folder) = clarp_core::media::cache_dir().map(|dir| dir.join("clipboard-images")) else {
+            self.set_error("Could not store the pasted image");
+            return true;
+        };
+        let path = folder.join(format!("{}.png", uuid::Uuid::new_v4()));
+        let stored = std::fs::create_dir_all(&folder).and_then(|_| {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?.write_all(&png)
+        });
+        if let Err(error) = stored {
+            eprintln!("AppController: could not store a pasted image at {}: {error}", path.display());
+            self.set_error("Could not store the pasted image");
+            return true;
+        }
+        let url = cxx_qt_lib::QUrl::from(&format!("file://{}", path.display()));
+        self.as_mut().attach_local_file(pane_id, session, &url);
+        true
     }
 
     fn finish_upload(mut self: Pin<&mut Self>, tag: &str, object: Option<&Object>) {

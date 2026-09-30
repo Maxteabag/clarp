@@ -47,6 +47,10 @@ for probe in "${probes[@]}"; do
     sed -n 's#^// fixture-exec: ##p' "$probe" | while read -r fixture text; do
         printf '%b' "$text" > "$scratch/$name/$fixture" && chmod +x "$scratch/$name/$fixture"
     done
+    # "// fixture-copy: NAME SOURCE" copies app/tests/fixtures/SOURCE (binary).
+    sed -n 's#^// fixture-copy: ##p' "$probe" | while read -r fixture source; do
+        cp "app/tests/fixtures/$source" "$scratch/$name/$fixture"
+    done
     sed -n 's#^// fixture-dir: ##p' "$probe" | while IFS= read -r fixture; do
         mkdir -p "$scratch/$name/$fixture"
     done
