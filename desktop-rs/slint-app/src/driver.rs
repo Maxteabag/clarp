@@ -311,6 +311,7 @@ pub fn start_check(name: &str, out: String) {
         "desktop" => desktop_check(out),
         "instance" => instance_check(out),
         "diagnostics" => diagnostics_check(out),
+        "preview" => preview_check(out),
         // ---- updates and teams
         "updates" => updates_check(out),
         "teams" => teams_check(out),
@@ -1110,6 +1111,59 @@ fn diagnostics_check(_out: String) {
             }
             check(log.contains("== stall at") && log.contains("diagnostics_check"), "a blocked UI thread is logged with the stack that blocked it");
             crate::platform::diagnostics::log_memory();
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check preview` (with `CLARP_TEST_PREVIEW_FIXTURE=1`): a newer preview
+/// build shows a banner, Ctrl+Alt+U asks to reopen on it, and the versions
+/// panel lists the builds and pins one with Enter.
+fn preview_check(out: String) {
+    use slint::platform::Key;
+    let out2 = out.clone();
+    let stages: Vec<Stage> = vec![
+        ("banner", Box::new(move |_, window, elapsed| {
+            if !window.get_preview_enabled() || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(window.get_preview_update_label() == "v1.1.3 · abcd1234", &format!("a newer installed build is offered: {:?}", window.get_preview_update_label()));
+            shot(&out2, "preview-01-banner");
+            headless::press_with(&[Key::Control, Key::Alt], "u");
+            true
+        })),
+        ("update asked", Box::new(|_, window, _| {
+            if window.get_preview_notice().is_empty() {
+                return false;
+            }
+            check(window.get_preview_notice() == "Fixture captured restart request", "Ctrl+Alt+U asks to reopen on the newer build");
+            window.invoke_run_command("preview-versions".into());
+            true
+        })),
+        ("panel", Box::new(|_, window, elapsed| {
+            if window.get_overlay() != "preview" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let labels: Vec<String> = window.get_preview_versions().iter().map(|v| v.label.to_string()).collect();
+            check(labels.len() == 2 && labels[0].contains("installed") && labels[1].contains("running"), &format!("the panel lists the builds: {labels:?}"));
+            headless::press(Key::DownArrow);
+            headless::press(Key::Return);
+            true
+        })),
+        ("pinned", Box::new(|_, window, _| {
+            if window.get_preview_current() != 1 {
+                return false;
+            }
+            check(true, "Down and Enter choose a build");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("closed", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(true, "Escape closes the panel");
             true
         })),
     ];

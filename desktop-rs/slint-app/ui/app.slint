@@ -8,6 +8,7 @@ import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
 import { KeymapEditor, ConnectionPage } from "dialogs.slint";
+import { PreviewPanel, PreviewBanner, PreviewWindow, PreviewVersion } from "preview.slint";
 // ---- updates and teams
 import { Updates, AttentionView, JobView, ArtifactView } from "updates.slint";
 import { ReportView } from "report.slint";
@@ -18,7 +19,7 @@ import { NewSessionHub, StartAgentDialog, LaunchHub, StartAgent, ProviderChip, C
 import { RenameAgentDialog, AssignAgentDialog, QueueDialog, AgentDialogs, QueuedTurn } from "agent_dialogs.slint";
 export { LaunchHub, StartAgent, ProviderChip, ContactCard, DirRow, PastRow, McpChoice, AgentDialogs, QueuedTurn }
 
-export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow }
+export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
 
@@ -210,6 +211,19 @@ export component AppWindow inherits Window {
     callback pair-host(string, string);
     callback forget-host();
     public function open-connection-page() { connection-page.open(); }
+    // ---- preview versions
+    in property <bool> preview-enabled;
+    in property <[PreviewVersion]> preview-versions;
+    in property <bool> preview-busy;
+    in property <bool> preview-pinned;
+    in property <string> preview-error;
+    in property <string> preview-notice;
+    in property <string> preview-update-label;
+    in property <bool> preview-can-restart: true;
+    in-out property <int> preview-current;
+    callback preview-choose(string);
+    callback preview-update();
+    public function open-preview() { preview-panel.open(); }
     in property <bool> switcher-open;
     in property <[SwitcherRow]> switcher-rows;
     in property <int> switcher-current;
@@ -260,6 +274,14 @@ export component AppWindow inherits Window {
             }
             if root.sidebar-visible: Rectangle { width: 1px; background: Palette.rule; }
             VerticalLayout {
+                if root.preview-enabled && (root.preview-update-label != "" || root.preview-pinned || root.preview-error != ""): PreviewBanner {
+                    update-label: root.preview-update-label;
+                    pinned: root.preview-pinned;
+                    error: root.preview-error;
+                    can-update: root.preview-can-restart && !root.preview-busy;
+                    update => { root.preview-update(); }
+                    versions => { root.run-command("preview-versions"); }
+                }
                 if root.error != "": Rectangle {
                     height: 36px;
                     background: Palette.danger-surface;
@@ -492,6 +514,21 @@ export component AppWindow inherits Window {
             visible: root.overlay == "queue";
             width: parent.width;
             height: parent.height;
+        }
+        // ---- preview versions
+        preview-panel := PreviewPanel {
+            visible: root.overlay == "preview";
+            width: parent.width;
+            height: parent.height;
+            versions: root.preview-versions;
+            can-restart: root.preview-can-restart;
+            busy: root.preview-busy;
+            pinned: root.preview-pinned;
+            error: root.preview-error;
+            notice: root.preview-notice;
+            current <=> root.preview-current;
+            choose(hash) => { root.preview-choose(hash); }
+            done => { root.overlay-closed(); }
         }
         switcher := Switcher {
             visible: root.switcher-open;

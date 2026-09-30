@@ -19,7 +19,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | QML file | Lines | Slint target | Status |
 |---|---|---|---|
 | `qml/Main.qml` | 874 | `slint-app/ui/app.slint` + `slint-app/src/main.rs` | wip: window, header with connection state, error banner, sidebar/transcript/composer layout on `clarp-engine`; e2e `slint-app/tests/run-e2e.sh` (roster, send, streaming, second chat) passes |
-| `qml/PreviewVersionWindow.qml` | 42 | preview versions window | todo |
+| `qml/PreviewVersionWindow.qml` | 42 | `slint-app/ui/preview.slint` `PreviewWindow` (`clarp-slint --preview-versions`) | wip: builds and shares the panel; the manager mode is not driven by a check (it needs the preview helper) |
 | `qml/components/ActivityExplanation.qml` | 134 | ui/transcript.slint | todo |
 | `qml/components/ActivitySweep.qml` | 15 | ui/sidebar.slint | todo |
 | `qml/components/AgentAvatar.qml` | 81 | ui/sidebar.slint | todo |
@@ -48,7 +48,7 @@ over `engine/`, so its behaviour tests run against the engine without a UI.
 | `qml/components/OrchestratorDialog.qml` | 193 | ui/panels/orchestratordialog.slint | todo |
 | `qml/components/PairRow.qml` | 117 | `slint-app/ui/sidebar.slint` room rows + `engine` rooms (unread from seen revisions; `engine/tests/host_flow.rs::pair_rooms_load_unread_and_are_read_once_opened`) | wip: participants' portraits pending |
 | `qml/components/PaneLeaf.qml` | 69 | `slint-app/ui/workspace.slint` `Pane` (active highlight, click to activate) | verified: `slint-app/tests/check.sh panes` (`docs/checks/panes-01-split.png`), `engine/tests/host_flow.rs::panes_follow_the_selection_and_their_layout_is_restored` |
-| `qml/components/PreviewVersionPanel.qml` | 114 | ui/panels/previewversionpanel.slint | todo |
+| `qml/components/PreviewVersionPanel.qml` | 114 | `slint-app/ui/preview.slint` `PreviewPanel` + `PreviewBanner` on `Modal` + `slint-app/src/preview_view.rs` over `clarp_core::preview` (helper off the UI thread, 15 s refresh, relaunch on the same Host and chat) | verified: `CLARP_TEST_PREVIEW_FIXTURE=1 check.sh preview` (banner, Ctrl+Alt+U, panel from the switcher, Down/Enter, Escape; `docs/checks/preview-01-banner.png`); only enabled in the worktree-preview install, as in Qt |
 | `qml/components/ProcessGlyph.qml` | 118 | `slint-app/ui/processes.slint` `ProcessGlyph` (hourglass / agent as SVGs under `ui/icons/`, coloured by the theme's link colour) | verified: `check.sh updates` (`docs/checks/updates-01-processes.png`); the running sub-agent's hop animation waits for the motion clock (reduced motion) port |
 | `qml/components/ProcessIndicator.qml` | 85 | `slint-app/ui/processes.slint` `ProcessIndicator` (glyph kind, count badge, summary as accessible label) in the sidebar row; counts from the roster rows (`Change::Roster` after `Change::Processes`) | verified: `check.sh updates` (the job's hourglass shows on Rachel's row; clicking it opens the popover); the pane header's indicator arrives with the header work; no hover tooltip (Slint has none) |
 | `qml/components/ProcessPopover.qml` | 236 | `slint-app/ui/processes.slint` `ProcessPopover` + `slint-app/src/updates_view.rs` (from `engine.agent_processes(session)`, refreshed on `Change::Processes`/`Roster` and every second while open; right-aligned under the indicator; helper rows open their chat) | verified: `check.sh updates` (job row with kind, detail, elapsed, heartbeat; count; Escape and click outside close it; `docs/checks/updates-01-processes.png`) |

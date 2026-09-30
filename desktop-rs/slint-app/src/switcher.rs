@@ -47,6 +47,7 @@ pub struct Toggles {
     pub shared_filesystem: bool,
     pub activity_mode: i32,
     pub narration: bool,
+    pub preview_versions: bool,
     pub detail_level: i32,
 }
 
@@ -55,12 +56,13 @@ fn toggle(on: bool, label: &str, action: &str, key: &str, keywords: &'static str
 }
 
 pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
-    let mut rows = vec![
+    let mut rows: Vec<Item> = vec![
         command("Customize key bindings", "edit-keymap", "Ctrl+Alt+,", "view", ""),
         command("Next workspace", "next-workspace", "Ctrl+Alt+W", "view", ""),
         command("New contact & chat", "quick-new-agent", "Ctrl+Shift+N", "agent", "new session hub create"),
         command("Rename contact", "rename-agent", "F2", "agent", "rename name title relabel persona"),
         command("New session", "new", "Ctrl+N", "agent", "new agent start chat provider contact hub"),
+        command("Preview versions · update or roll back", "preview-versions", "", "settings", "previous installs rollback downgrade"),
         command("Start an idle contact", "new-contact", "Ctrl+Alt+N", "agent", "new session hub"),
         command("Open agent in terminal", "agent-terminal", "Ctrl+Alt+T", "agent", ""),
         command(
@@ -106,6 +108,7 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         let current = if toggles.activity_mode == mode as i32 { " (current)" } else { "" };
         rows.push(command(&format!("Tool activity: {label}{current}"), &format!("setting:activity:{mode}"), if mode == 1 { "Ctrl+Shift+T" } else { "" }, "settings", "tool calls collapse expand grouping"));
     }
+    rows.retain(|c| c.target != "preview-versions" || toggles.preview_versions);
     for (level, name) in clarp_engine::Engine::narrator_detail_levels().iter().enumerate() {
         let level = level as i32;
         let note = if toggles.detail_level == level { " (current)" } else if level > 0 { " (uses AI)" } else { " (no AI)" };
