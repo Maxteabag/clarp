@@ -12,7 +12,6 @@ mod headless;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use clarp_core::protocol::display_name;
 use clarp_core::settings::Settings;
 use clarp_engine::{Change, Config, Engine};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -27,7 +26,10 @@ pub struct App {
     pub engine: RefCell<Engine>,
     pub window: slint::Weak<AppWindow>,
     chats: Rc<VecModel<ChatRow>>,
+    rooms: Rc<VecModel<ChatRow>>,
+    archived: Rc<VecModel<ChatRow>>,
     messages: Rc<VecModel<MessageRow>>,
+    sidebar: RefCell<clarp_core::sidebar::Sidebar>,
 }
 
 pub fn app() -> Option<Rc<App>> {
@@ -94,33 +96,106 @@ pub fn apply_theme(window: &AppWindow, id: &str) {
     }
 }
 
+fn stamp(epoch_millis: i64) -> String {
+    if epoch_millis <= 0 {
+        return String::new();
+    }
+    clarp_core::time_format::chat_stamp(epoch_millis, &chrono::Local::now())
+}
+
+fn initial(name: &str) -> SharedString {
+    name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into()
+}
+
+fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str) -> ChatRow {
+    let preview = if !row.last_message.is_empty() { row.last_message.clone() } else { row.working_directory.clone() };
+    let activity = if row.busy && !row.status_text.is_empty() { row.status_text.clone() } else { String::new() };
+    ChatRow {
+        session: row.session.clone().into(),
+        initial: initial(&row.name),
+        name: row.name.clone().into(),
+        stamp: stamp(row.last_activity).into(),
+        preview: preview.into(),
+        activity: activity.into(),
+        depth: depth as i32,
+        queued: row.queue_count,
+        busy: row.busy,
+        unread: row.unread,
+        muted: row.muted,
+        selected: row.session == selected,
+    }
+}
+
 impl App {
+    /// The chat list, through the same search/scope/nesting rules as the
+    /// Qt sidebar (`clarp_core::sidebar`).
+    fn chat_rows(&self, engine: &Engine, window: &AppWindow) -> Vec<ChatRow> {
+        use clarp_core::sidebar::{FilterInput, TreeInput};
+        let rows = engine.roster().rows();
+        let trees: Vec<TreeInput> = rows
+            .iter()
+            .map(|r| TreeInput {
+                session: r.session.clone(),
+                agent_id: r.agent_id.clone(),
+                agent_role: r.agent_role.clone(),
+                parent_agent_id: r.parent_agent_id.clone(),
+                helper_state: r.helper_state.clone(),
+            })
+            .collect();
+        let filters: Vec<FilterInput> = rows
+            .iter()
+            .map(|r| FilterInput {
+                session: r.session.clone(),
+                unread: r.unread,
+                name: r.name.clone(),
+                backend: r.backend.clone(),
+                last_message: r.last_message.clone(),
+                working_directory: r.working_directory.clone(),
+            })
+            .collect();
+        let mut sidebar = self.sidebar.borrow_mut();
+        sidebar.query = window.get_query().to_string();
+        sidebar.unread_only = window.get_scope() == "unread";
+        sidebar.rebuild(&trees);
+        let selected = engine.selected_session();
+        sidebar
+            .visible(&trees, &filters)
+            .into_iter()
+            .filter_map(|session| rows.iter().find(|r| r.session == session))
+            .map(|row| chat_row(row, sidebar.depth(&row.session), selected))
+            .collect()
+    }
+
     fn refresh(&self, changes: &[Change]) {
         let Some(window) = self.window.upgrade() else { return };
         let engine = self.engine.borrow();
         let selected = engine.selected_session().to_owned();
-        let roster_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection));
-        if roster_changed {
-            let rows: Vec<ChatRow> = engine
-                .roster()
-                .agents()
+        let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive));
+        if list_changed {
+            self.chats.set_vec(self.chat_rows(&engine, &window));
+            let rooms: Vec<ChatRow> = engine
+                .rooms()
                 .iter()
-                .filter(|a| !a.janitor)
-                .map(|agent| {
-                    let name = display_name(agent).to_owned();
-                    let state = engine.roster().display_state(&agent.session).unwrap_or_default();
+                .filter_map(|room| room.as_object())
+                .map(|room| {
+                    let session = clarp_core::json::string(room, "conversation_id");
+                    let title = engine.chat_name(&session);
                     ChatRow {
-                        session: agent.session.clone().into(),
-                        initial: name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
-                        name: name.into(),
-                        detail: if agent.busy { format!("{} · working…", agent.backend) } else { format!("{} · {state}", agent.backend) }.into(),
-                        busy: agent.busy,
-                        unread: agent.unread,
-                        selected: agent.session == selected,
+                        initial: "↔".into(),
+                        name: title.into(),
+                        stamp: String::new().into(),
+                        preview: clarp_core::json::string(room, "preview").into(),
+                        unread: room.get("unread").and_then(|v| v.as_bool()).unwrap_or(false),
+                        selected: session == selected,
+                        session: session.into(),
+                        ..ChatRow::default()
                     }
                 })
                 .collect();
-            self.chats.set_vec(rows);
+            self.rooms.set_vec(rooms);
+            let archived: Vec<ChatRow> = engine.archived().rows().iter().map(|row| chat_row(row, 0, &selected)).collect();
+            self.archived.set_vec(archived);
+            window.set_unread_rooms(engine.unread_rooms() as i32);
         }
         if changes.iter().any(|c| matches!(c, Change::Selection) || matches!(c, Change::Conversation(s) if *s == selected)) {
             let rows: Vec<MessageRow> = engine
@@ -141,12 +216,15 @@ impl App {
             self.messages.set_vec(rows);
         }
         let agent = engine.selected_agent();
-        window.set_selected_name(agent.map(|a| display_name(a).to_owned()).unwrap_or_default().into());
-        window.set_selected_detail(
-            agent.map(|a| format!("{} · {}", a.backend, a.working_directory)).unwrap_or_default().into(),
-        );
+        window.set_selected_name(if selected.is_empty() { String::new() } else { engine.chat_name(&selected) }.into());
+        window.set_selected_detail(agent.map(|a| format!("{} · {}", a.backend, a.working_directory)).unwrap_or_default().into());
+        window.set_selected_model(agent.map(|a| a.model.clone()).unwrap_or_default().into());
+        window.set_selected_effort(agent.map(|a| a.effort.clone()).unwrap_or_default().into());
         window.set_busy(agent.is_some_and(|a| a.busy));
         window.set_connection(engine.connection_state().into());
+        window.set_muted(engine.muted());
+        let name = engine.server_name();
+        window.set_server_initial(initial(if name.is_empty() { "C" } else { name }));
         let conversation_error = engine.conversation(&selected).map(|c| {
             if c.error().is_empty() { c.voice_error().to_owned() } else { c.error().to_owned() }
         });
@@ -194,10 +272,22 @@ fn main() {
         }
     };
     let chats = Rc::new(VecModel::<ChatRow>::default());
+    let rooms = Rc::new(VecModel::<ChatRow>::default());
+    let archived = Rc::new(VecModel::<ChatRow>::default());
     let messages = Rc::new(VecModel::<MessageRow>::default());
     window.set_chats(ModelRc::from(chats.clone()));
+    window.set_rooms(ModelRc::from(rooms.clone()));
+    window.set_archived(ModelRc::from(archived.clone()));
     window.set_messages(ModelRc::from(messages.clone()));
-    let state = Rc::new(App { engine: RefCell::new(engine), window: window.as_weak(), chats, messages });
+    let state = Rc::new(App {
+        engine: RefCell::new(engine),
+        window: window.as_weak(),
+        chats,
+        rooms,
+        archived,
+        messages,
+        sidebar: RefCell::new(clarp_core::sidebar::Sidebar::default()),
+    });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
 
     window.on_chat_chosen(|session| {
@@ -215,6 +305,18 @@ fn main() {
     window.on_stop(|| {
         if let Some(app) = app() {
             app.engine.borrow_mut().stop();
+        }
+    });
+    window.on_filter_changed(|| {
+        if let Some(app) = app() {
+            app.refresh(&[Change::Roster]);
+        }
+    });
+    window.on_toggle_muted(|| {
+        if let Some(app) = app() {
+            let muted = app.engine.borrow().muted();
+            app.engine.borrow_mut().set_muted(!muted);
+            pump_now(&app);
         }
     });
     window.on_dismiss_error(|| {

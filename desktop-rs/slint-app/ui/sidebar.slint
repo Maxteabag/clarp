@@ -1,87 +1,195 @@
+import { LineEdit } from "std-widgets.slint";
 import { Palette } from "theme.slint";
 
 export struct ChatRow {
     session: string,
     name: string,
-    detail: string,
     initial: string,
+    stamp: string,
+    preview: string,
+    activity: string,
+    depth: int,
+    queued: int,
     busy: bool,
     unread: bool,
+    muted: bool,
     selected: bool,
 }
 
-// The chat list (ChatList/ChatRow in QML): one row per agent.
-export component Sidebar inherits Rectangle {
-    in property <[ChatRow]> rows;
-    callback chosen(string);
-    background: Palette.raised;
-    VerticalLayout {
-        padding: 8px;
-        spacing: 4px;
-        Text {
-            text: "Chats";
-            color: Palette.muted;
-            font-size: 12px;
-            vertical-stretch: 0;
+// A small labelled toggle, like the QML scope chips.
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> on;
+    callback clicked();
+    height: 26px;
+    width: text.preferred-width + 20px;
+    border-radius: 13px;
+    background: root.on ? Palette.accent : touch.has-hover ? Palette.hover : Palette.control;
+    text := Text {
+        text: root.label;
+        color: root.on ? Palette.accent-text : Palette.chrome-text;
+        font-size: 12px;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// One entry row ("Agent conversations", "Archived") that swaps the list.
+component ListSwitch inherits Rectangle {
+    in property <string> glyph;
+    in property <string> label;
+    in property <string> count;
+    in property <int> unread;
+    callback clicked();
+    height: 36px;
+    background: touch.has-hover ? Palette.hover : transparent;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        Text { text: root.glyph; color: Palette.muted; vertical-alignment: center; }
+        Text { text: root.label; color: Palette.chrome-text; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        if root.unread > 0: Rectangle {
+            width: 20px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            background: Palette.accent;
+            Text { text: root.unread; color: Palette.accent-text; font-size: 11px; }
         }
-        list := Flickable {
-            vertical-stretch: 1;
-            content-height: root.rows.length * 60px;
-            for row[index] in root.rows: Rectangle {
-                y: index * 60px;
-                height: 56px;
-                width: parent.width;
-                background: row.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
-                accessible-role: list-item;
-                accessible-label: row.name;
-                touch := TouchArea {
-                    clicked => { root.chosen(row.session); }
+        Text { text: root.count; color: Palette.faint; font-size: 12px; vertical-alignment: center; }
+    }
+}
+
+component Row inherits Rectangle {
+    in property <ChatRow> chat;
+    callback clicked();
+    height: root.chat.activity != "" ? 72px : 58px;
+    background: root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
+    accessible-role: list-item;
+    accessible-label: root.chat.name;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 10px + root.chat.depth * 18px;
+        padding-right: 10px;
+        spacing: 10px;
+        Rectangle {
+            width: 36px;
+            height: 36px;
+            y: 10px;
+            border-radius: 18px;
+            border-width: root.chat.busy ? 2px : 1px;
+            border-color: root.chat.busy ? Palette.success : Palette.border;
+            Text { text: root.chat.initial; color: Palette.chrome-text; font-size: 15px; }
+        }
+        VerticalLayout {
+            padding-top: 8px;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.chat.name;
+                    color: Palette.chrome-text;
+                    font-weight: root.chat.unread ? 700 : 500;
+                    overflow: elide;
+                    horizontal-stretch: 1;
                 }
-                HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    spacing: 10px;
-                    Rectangle {
-                        width: 36px;
-                        height: 36px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: 18px;
-                        border-width: 1px;
-                        border-color: row.busy ? Palette.success : Palette.border;
-                        Text {
-                            text: row.initial;
-                            color: Palette.chrome-text;
-                            font-size: 15px;
-                        }
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Text {
-                                text: row.name;
-                                color: Palette.chrome-text;
-                                font-weight: row.unread ? 700 : 500;
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                            }
-                            if row.unread: Rectangle {
-                                width: 8px;
-                                height: 8px;
-                                border-radius: 4px;
-                                background: Palette.accent;
-                                y: (parent.height - self.height) / 2;
-                            }
-                        }
-                        Text {
-                            text: row.detail;
-                            color: row.busy ? Palette.warning : Palette.muted;
-                            font-size: 12px;
-                            overflow: elide;
-                        }
-                    }
+                Text { text: root.chat.stamp; color: Palette.faint; font-size: 11px; }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.chat.preview;
+                    color: Palette.muted;
+                    font-size: 12px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if root.chat.muted: Text { text: "⊘"; color: Palette.faint; font-size: 12px; }
+                if root.chat.queued > 0: Text { text: root.chat.queued + " queued"; color: Palette.warning; font-size: 11px; }
+                if root.chat.unread: Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 4px;
+                    background: Palette.accent;
                 }
             }
+            if root.chat.activity != "": Text {
+                text: root.chat.activity;
+                color: Palette.warning;
+                font-size: 11px;
+                overflow: elide;
+            }
+        }
+    }
+}
+
+// The chat list (ChatList/ChatRow in QML): search, the All/Unread scope,
+// agent-to-agent rooms and the archive behind one row each.
+export component Sidebar inherits Rectangle {
+    in property <[ChatRow]> rows;
+    in property <[ChatRow]> rooms;
+    in property <[ChatRow]> archived;
+    in property <int> unread-rooms;
+    in-out property <bool> showing-pairs;
+    in-out property <bool> showing-archive;
+    in-out property <string> scope: "all";
+    out property <string> query: search.text;
+    out property <bool> search-has-focus: search.has-focus;
+    callback chosen(string);
+    callback filter-changed();
+    callback restore(string);
+    public function focus-search() { search.focus(); }
+    public function clear-search() { search.text = ""; root.filter-changed(); }
+    background: Palette.raised;
+    VerticalLayout {
+        padding-top: 10px;
+        spacing: 8px;
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            vertical-stretch: 0;
+            search := LineEdit {
+                height: 34px;
+                placeholder-text: "Search agents · /";
+                edited => { root.filter-changed(); }
+            }
+        }
+        HorizontalLayout {
+            padding-left: 10px;
+            spacing: 6px;
+            alignment: start;
+            vertical-stretch: 0;
+            Chip { label: "All"; on: root.scope == "all"; clicked => { root.scope = "all"; root.filter-changed(); } }
+            Chip { label: "Unread"; on: root.scope == "unread"; clicked => { root.scope = "unread"; root.filter-changed(); } }
+        }
+        if !root.showing-archive: ListSwitch {
+            glyph: root.showing-pairs ? "‹" : "↔";
+            label: root.showing-pairs ? "Back to chats" : "Agent conversations";
+            count: root.rooms.length;
+            unread: root.unread-rooms;
+            clicked => { root.showing-pairs = !root.showing-pairs; }
+        }
+        Flickable {
+            vertical-stretch: 1;
+            viewport := VerticalLayout {
+                for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
+                    chat: row;
+                    clicked => { root.chosen(row.session); }
+                }
+                if root.showing-pairs && root.rooms.length == 0: Text {
+                    text: "No agent-to-agent conversations yet.";
+                    color: Palette.muted;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+        if !root.showing-pairs: ListSwitch {
+            glyph: root.showing-archive ? "‹" : "≡";
+            label: root.showing-archive ? "Back to chats" : "Archived";
+            count: root.archived.length;
+            clicked => { root.showing-archive = !root.showing-archive; }
         }
     }
 }

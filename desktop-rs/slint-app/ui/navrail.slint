@@ -1,0 +1,77 @@
+import { Palette } from "theme.slint";
+
+component RailButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> selected;
+    in property <int> badge;
+    in property <string> tip;
+    callback clicked();
+    width: 48px;
+    height: 44px;
+    border-radius: 6px;
+    background: root.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.tip;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    Image {
+        source: root.icon;
+        width: 20px;
+        height: 20px;
+        colorize: root.selected ? Palette.text : Palette.muted;
+    }
+    if root.badge > 0: Rectangle {
+        x: parent.width - 18px;
+        y: 4px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: Palette.accent;
+        Text { text: root.badge; color: Palette.accent-text; font-size: 10px; }
+    }
+}
+
+// The left rail (NavRail.qml): surfaces, voice, settings and the Host.
+export component NavRail inherits Rectangle {
+    in property <string> surface: "chats";
+    in property <int> attention;
+    in property <bool> muted;
+    in property <string> server-initial;
+    callback select-surface(string);
+    callback open-switcher();
+    callback toggle-muted();
+    width: 56px;
+    background: Palette.sunken;
+    VerticalLayout {
+        padding: 4px;
+        spacing: 4px;
+        alignment: start;
+        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-chats.svg"); tip: "Chats"; selected: root.surface == "chats"; clicked => { root.select-surface("chats"); } }
+        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-overview.svg"); tip: "All agents"; selected: root.surface == "overview"; clicked => { root.select-surface("overview"); } }
+        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-search.svg"); tip: "Go to agent (Ctrl+K)"; clicked => { root.open-switcher(); } }
+        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-updates.svg"); tip: "Updates"; badge: root.attention; selected: root.surface == "updates"; clicked => { root.select-surface("updates"); } }
+        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-teams.svg"); tip: "Teams"; selected: root.surface == "teams"; clicked => { root.select-surface("teams"); } }
+    }
+    VerticalLayout {
+        y: parent.height - self.preferred-height;
+        padding: 4px;
+        spacing: 4px;
+        RailButton {
+            icon: root.muted ? @image-url("../../../desktop/resources/icons/rail-muted.svg") : @image-url("../../../desktop/resources/icons/rail-sound.svg");
+            tip: root.muted ? "Voice replies muted (Ctrl+M)" : "Voice replies on (Ctrl+M)";
+            clicked => { root.toggle-muted(); }
+        }
+        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-settings.svg"); tip: "Settings (Ctrl+,)"; selected: root.surface == "settings"; clicked => { root.select-surface("settings"); } }
+        Rectangle {
+            width: 48px;
+            height: 44px;
+            Rectangle {
+                width: 30px;
+                height: 30px;
+                border-radius: 15px;
+                border-width: 1px;
+                border-color: Palette.success;
+                Text { text: root.server-initial; color: Palette.chrome-text; font-size: 13px; }
+            }
+        }
+    }
+}

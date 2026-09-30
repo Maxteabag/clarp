@@ -33,11 +33,17 @@ pub enum Change {
     Connection,
     ServerInfo,
     Roster,
+    /// Archived agents changed.
+    Archive,
+    /// Agent-to-agent rooms changed (list or unread).
+    Rooms,
     Selection,
     /// A conversation's rows or state changed.
     Conversation(String),
     Sending,
     Error,
+    /// A preference (mute, theme, …) changed.
+    Preferences,
     /// A reply in a chat that is not open: the desktop may notify.
     Notification { title: String, body: String },
 }
@@ -47,6 +53,7 @@ enum Message {
     Sse(SseSignal),
     Credential { base: String, token: String },
     SnapshotDue,
+    RoomsDue(u64),
     DeliveryDue { client_id: String, token: u64 },
 }
 
@@ -90,6 +97,11 @@ pub struct Engine {
     server_version: String,
 
     roster: Roster,
+    archived: Roster,
+    rooms: Vec<Value>,
+    rooms_in_flight: bool,
+    rooms_dirty: bool,
+    rooms_refresh: u64,
     selected: String,
     waiting_for_session_choice: bool,
     conversations: HashMap<String, Conversation>,
@@ -153,6 +165,11 @@ impl Engine {
             server_name: String::new(),
             server_version: String::new(),
             roster: Roster::default(),
+            archived: Roster::archived(),
+            rooms: Vec::new(),
+            rooms_in_flight: false,
+            rooms_dirty: false,
+            rooms_refresh: 0,
             selected: String::new(),
             waiting_for_session_choice: false,
             conversations: HashMap::new(),
@@ -187,6 +204,11 @@ impl Engine {
                 Message::Reply(reply) => self.handle_reply(reply),
                 Message::Sse(signal) => self.handle_sse(signal),
                 Message::Credential { base, token } => self.credential_looked_up(&base, token),
+                Message::RoomsDue(generation) => {
+                    if generation == self.rooms_refresh {
+                        self.load_agent_conversations();
+                    }
+                }
                 Message::SnapshotDue => {
                     self.snapshot_scheduled = false;
                     self.request_snapshot();
@@ -223,6 +245,30 @@ impl Engine {
     pub fn roster(&self) -> &Roster {
         &self.roster
     }
+    pub fn archived(&self) -> &Roster {
+        &self.archived
+    }
+    /// Agent-to-agent rooms (`pair:` conversations), each with `unread`.
+    pub fn rooms(&self) -> &[Value] {
+        &self.rooms
+    }
+    pub fn unread_rooms(&self) -> usize {
+        self.rooms.iter().filter(|room| room.get("unread").and_then(Value::as_bool) == Some(true)).count()
+    }
+    pub fn room(&self, conversation_id: &str) -> Option<&Object> {
+        self.rooms
+            .iter()
+            .filter_map(Value::as_object)
+            .find(|room| room.get("conversation_id").and_then(Value::as_str) == Some(conversation_id))
+    }
+    /// The name a chat shows: an agent's, or a room's title.
+    pub fn chat_name(&self, session: &str) -> String {
+        if session.starts_with("pair:") {
+            let title = self.room(session).map(|r| json::string(r, "title")).unwrap_or_default();
+            return if title.is_empty() { "Agent conversation".into() } else { title };
+        }
+        self.roster.find(session).map_or_else(|| session.to_owned(), |a| display_name(a).to_owned())
+    }
     pub fn selected_session(&self) -> &str {
         &self.selected
     }
@@ -237,6 +283,14 @@ impl Engine {
     }
     pub fn muted(&self) -> bool {
         self.muted
+    }
+    /// Voice replies on or off, remembered (C++ `setMuted`).
+    pub fn set_muted(&mut self, muted: bool) {
+        if self.muted != muted {
+            self.muted = muted;
+            self.settings.set("audio/muted", muted);
+            self.changes.push(Change::Preferences);
+        }
     }
     pub fn settings(&self) -> &Settings {
         &self.settings
@@ -380,6 +434,11 @@ impl Engine {
     fn apply_snapshot(&mut self, object: &Object) {
         self.mutate_roster(|r| r.apply_snapshot(object));
         self.changes.push(Change::Roster);
+        self.archived.apply_snapshot(object);
+        if !self.archived.take_ops().is_empty() {
+            self.changes.push(Change::Archive);
+        }
+        self.schedule_agent_conversations();
         let selected_known = self.roster.find(&self.selected).is_some() || self.selected.starts_with("pair:");
         if self.selected.is_empty() || !selected_known {
             let first = self.roster.first_session().map(str::to_owned);
@@ -419,6 +478,96 @@ impl Engine {
         }
     }
 
+    // ---- agent-to-agent rooms --------------------------------------------
+
+    fn load_agent_conversations(&mut self) {
+        if self.rooms_in_flight {
+            self.rooms_dirty = true;
+            return;
+        }
+        if self.token.is_empty() {
+            return;
+        }
+        self.rooms_in_flight = true;
+        self.api.get("agent-conversations", "/agent-conversations", &[]);
+    }
+
+    fn schedule_agent_conversations(&mut self) {
+        self.rooms_refresh += 1;
+        self.after(Duration::from_millis(400), Message::RoomsDue(self.rooms_refresh));
+    }
+
+    fn seen_key(&self, conversation_id: &str) -> String {
+        clarp_core::settings::agent_conversation_seen_key(&self.base_url, conversation_id)
+    }
+
+    fn seen_revision(&self, conversation_id: &str) -> i64 {
+        self.settings.integer(&self.seen_key(conversation_id), 0)
+    }
+
+    fn mark_agent_conversation_seen(&mut self, conversation_id: &str, revision: i64) {
+        if conversation_id.is_empty() || revision <= 0 {
+            return;
+        }
+        if revision > self.seen_revision(conversation_id) {
+            let key = self.seen_key(conversation_id);
+            self.settings.set(&key, revision);
+        }
+        let mut changed = false;
+        for room in &mut self.rooms {
+            if room.get("conversation_id").and_then(Value::as_str) == Some(conversation_id)
+                && room.get("unread").and_then(Value::as_bool) == Some(true)
+            {
+                room["unread"] = json!(false);
+                changed = true;
+            }
+        }
+        if changed {
+            self.changes.push(Change::Rooms);
+        }
+    }
+
+    fn apply_agent_conversations(&mut self, conversations: &[Value]) {
+        let mut rooms = Vec::new();
+        let mut behind = Vec::new();
+        for room in conversations.iter().filter_map(Value::as_object) {
+            let id = json::string(room, "conversation_id");
+            if !id.starts_with("pair:") {
+                continue;
+            }
+            let latest = room.get("latest_revision").and_then(Value::as_i64).unwrap_or(0);
+            if id == self.selected {
+                self.mark_agent_conversation_seen(&id, latest);
+            }
+            let mut room = room.clone();
+            room.insert("unread".into(), json!(latest > self.seen_revision(&id)));
+            room.insert("session".into(), json!(id));
+            rooms.push(Value::Object(room));
+            if self.conversations.get(&id).is_some_and(|c| c.latest_revision() < latest) {
+                behind.push(id);
+            }
+        }
+        for id in behind {
+            self.request_delta(&id);
+        }
+        if self.rooms != rooms {
+            self.rooms = rooms;
+            self.changes.push(Change::Rooms);
+        }
+    }
+
+    fn refresh_pair_conversations_for(&mut self, session: &str) {
+        let agent_id = self.roster.find(session).map(|a| a.agent_id.clone()).unwrap_or_default();
+        if !agent_id.is_empty() {
+            let related: Vec<String> =
+                self.conversations.keys().filter(|id| id.starts_with("pair:") && id.contains(&agent_id)).cloned().collect();
+            for id in related {
+                self.request_delta(&id);
+            }
+        }
+        self.schedule_agent_conversations();
+    }
+
     // ---- selection and conversations ------------------------------------
 
     pub fn select(&mut self, session: &str) {
@@ -433,8 +582,15 @@ impl Engine {
             self.ensure_conversation(session);
             self.changes.push(Change::Selection);
         }
+        if session.starts_with("pair:") {
+            // A pair room is a projection, not an agent: no Host focus.
+            let latest = self.room(session).and_then(|r| r.get("latest_revision")).and_then(Value::as_i64).unwrap_or(0);
+            self.mark_agent_conversation_seen(session, latest);
+            self.request_tail(session, false);
+            return;
+        }
         let janitor = self.roster.find(session).is_some_and(|a| a.janitor);
-        if !janitor && !session.starts_with("pair:") {
+        if !janitor {
             self.api.post_json(&format!("select:{session}"), "/select", json!({"session": session}), None);
         }
         self.request_tail(session, false);
@@ -617,6 +773,14 @@ impl Engine {
     }
 
     fn handle_json(&mut self, tag: &str, object: &Object) {
+        if tag == "agent-conversations" {
+            self.rooms_in_flight = false;
+            if std::mem::take(&mut self.rooms_dirty) {
+                self.schedule_agent_conversations();
+            }
+            self.apply_agent_conversations(&json::array(object, "conversations"));
+            return;
+        }
         if tag == "server-info" {
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.server_version = json::string(object, "clarp_version");
@@ -651,6 +815,19 @@ impl Engine {
                 return;
             }
             self.complete_snapshot_request();
+        }
+        if tag == "agent-conversations" {
+            self.rooms_in_flight = false;
+            if std::mem::take(&mut self.rooms_dirty) {
+                self.schedule_agent_conversations();
+            }
+            // A Host without this route simply has no pair rooms to show.
+            eprintln!("clarp-engine: agent conversations failed: {message} (HTTP {status})");
+            if !self.rooms.is_empty() {
+                self.rooms.clear();
+                self.changes.push(Change::Rooms);
+            }
+            return;
         }
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         self.set_error(&detail);
@@ -727,6 +904,7 @@ impl Engine {
                 if self.conversations.contains_key(&session) {
                     self.request_delta(&session);
                 }
+                self.refresh_pair_conversations_for(&session);
             }
             "agent-state" => {
                 self.mutate_roster(|r| r.apply_state_event(event));
