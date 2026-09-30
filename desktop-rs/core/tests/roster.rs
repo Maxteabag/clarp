@@ -360,3 +360,14 @@ fn quick_switcher_puts_the_exact_name_first() {
     assert_eq!(names.last(), Some(&"Kada"));
     assert_eq!(names, ["Ada", "Adam", "Adaline", "Team Ada", "Kada"]);
 }
+
+/// A snapshot that lists a session twice (a Host bug, or a race while it
+/// adds an agent) keeps one row per session instead of aborting the app.
+#[test]
+fn a_duplicated_session_in_a_snapshot_is_one_row() {
+    let mut roster = clarp_core::roster::Roster::default();
+    let row = |session: &str, activity: i64| serde_json::json!({"session": session, "persona": session, "last_activity": activity});
+    roster.apply_snapshot(serde_json::json!({"agents": [row("a", 3), row("b", 2)]}).as_object().unwrap());
+    roster.apply_snapshot(serde_json::json!({"agents": [row("a", 3), row("b", 2), row("c", 1), row("c", 1), row("c", 1)]}).as_object().unwrap());
+    assert_eq!(roster.sessions(), vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]);
+}

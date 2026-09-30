@@ -318,6 +318,17 @@ class Handler(BaseHTTPRequestHandler):
             create_mode = body.get("mode", create_mode)
             next_create_response = body.get("respond")
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/add-agent":
+            # Test control: one more idle agent in the roster, announced.
+            session = body["session"]
+            row = {"agent_id": session + "-id", "session": session, "persona": body.get("persona", session),
+                   "backend": "claude", "latest_state": "idle", "alive": True, "last_activity": 500,
+                   "conversation_id": "c-" + session, "head_revision": 0}
+            with state_lock:
+                turns.setdefault(session, [])
+                agents.append(row)
+            broadcast({"type": "agent-roster", "session": session, "kind": "created"})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/publish-pending":
             with state_lock:
                 agents.extend(pending_agents)

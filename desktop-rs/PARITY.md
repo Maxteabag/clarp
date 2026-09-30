@@ -53,7 +53,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/ReadingTheme.h` (header-only) | 282 | `core/src/reading_theme.rs` + generated `reading_themes.json` | verified (`core/tests/reading_theme.rs`); fonts resolved through fontconfig (`app/src/fonts.rs`) |
 | `src/app/ReadyReplySmokeCheck.h` (header-only) | 85 | `app/tests/qml/ready_reply_probe.qml` (+ the same through a live agent-state event; screenshot of the typing state) | verified on the real Main |
 | `src/app/StartupTrace.h` (header-only) | 52 | `desktop-rs/src/app/` | todo |
-| `src/app/TranscriptScrollSmokeCheck.h` (header-only) | 440 | `app/tests/qml/transcript_scroll_probe.qml` (real wheel turns via `KeyInjector.wheel`, QTest::wheelEvent) | wip: phases A and B (grouped activity, show when ready, narration; transient thinking through a live Host event) verified on the real Main; the pane-switch frame check (`startTranscriptSwitchSmokeCheck`) pending |
+| `src/app/TranscriptScrollSmokeCheck.h` (header-only) | 440 | `app/tests/qml/transcript_scroll_probe.qml` (real wheel turns via `KeyInjector.wheel`, QTest::wheelEvent) | verified on the real Main: phases A and B (grouped activity, show when ready, narration; transient thinking through a live Host event) and the pane-switch frame check (`transcript_switch_probe.qml`: every painted frame during switches, a split and focus changes) |
 | `src/app/VoiceViewportSmokeCheck.h` (header-only) | 153 | `app/tests/qml/voice_viewport_probe.qml` (voice failures and a streamed reply via the fake Host's live events; anchor row within 2 px; screenshot) | verified on the real Main |
 | `src/models/TreeOrder.h` (header-only) | 79 | `core/src/tree.rs` | verified (`roster.rs::tree_order_matches_the_team_walk`) |
 
