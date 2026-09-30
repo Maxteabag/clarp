@@ -73,6 +73,17 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     clipboard.set_text(text).map_err(|e| e.to_string())
 }
 
+/// The clipboard's image as PNG, if it holds one. With `CLARP_TEST_CLIPBOARD`
+/// the test file is the clipboard: PNG bytes are an image, anything else text.
+pub fn clipboard_image_png() -> Option<Vec<u8>> {
+    if let Some(path) = std::env::var_os("CLARP_TEST_CLIPBOARD") {
+        return std::fs::read(&path).ok().filter(|bytes| clarp_core::media::is_png(bytes));
+    }
+    let mut guard = clipboard().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let image = guard.as_mut()?.get_image().ok()?;
+    clarp_core::media::png_from_rgba(image.width as u32, image.height as u32, image.bytes.into_owned())
+}
+
 pub fn platform_name() -> String {
     ffi::QGuiApplication::platform_name().to_string()
 }

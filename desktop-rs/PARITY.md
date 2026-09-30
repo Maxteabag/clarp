@@ -82,7 +82,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::spawnedLifecycleNeverBecomesTranscriptTool` | `core/tests/conversation.rs::spawned_lifecycle_never_becomes_transcript_tool` | verified |
 | `tst_native_core::voiceErrorsStayInTheirSession` | `app/tests/qml/controller_voice_errors_probe.qml` (fake Host) | verified |
 | `tst_native_core::sidebarPreviewIsPlainText` | `core/tests/protocol.rs::sidebar_preview_is_plain_text` | verified |
-| `tst_native_core::clipboardImageBecomesAttachmentWithoutSending` | | todo |
+| `tst_native_core::clipboardImageBecomesAttachmentWithoutSending` | `app/tests/qml/controller_paste_image_probe.qml` (test clipboard file) | verified |
 | `tst_native_core::relaunchPreservesHostSessionAndDraft` | `core/tests/preview.rs::relaunch_preserves_host_and_session` + `app/tests/qml/controller_restore_probe.qml` | verified: relaunch environment and arguments, restored chat before and after the roster; drafts are durable per Host and chat (`controller_lifecycle_probe.qml`) |
 | `tst_native_core::previewRestartCapturesContextAndRejectsBusy` | `core/tests/preview.rs::preview_restart_captures_context_and_rejects_busy` | verified |
 | `tst_native_core::restoredSessionDoesNotFallBackToAnotherAgent` | `app/tests/qml/controller_restore_missing_probe.qml` (+ `controller_restore_probe.qml`) | verified |
@@ -103,7 +103,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::hostDefaultDirectoryReplacesHomePlaceholder` | `app/tests/qml/controller_launch_probe.qml` | verified |
 | `tst_native_core::contactCreateShowsHostMessageWithoutHttpSuffix` | `app/tests/qml/controller_launch_probe.qml` | verified |
 | `tst_native_core::newAgentWaitsForOwnRosterAndRejectsLateSnapshots` | `app/tests/qml/controller_launch_probe.qml` (session-only path, retry without a second create) | wip: a held late snapshot released after creation is not simulated |
-| `tst_native_core::fastLaunchOpensWithoutWaitingForFleet` | | todo |
+| `tst_native_core::fastLaunchOpensWithoutWaitingForFleet` | `app/tests/qml/controller_launch_mode_probe.qml` (no fleet, suppressed speech error, chosen directory, pane follows, refresh burst coalesced) | verified |
 | `tst_native_core::resumeLaunchOpensExactSessionWithoutFleet` | `app/tests/qml/controller_paths_probe.qml` + `app/tests/qml/controller_launch_mode_probe.qml` | verified: resume request shape; launch mode loads no fleet, suppresses other agents' speech errors, shows only the launched agent, resumes the fleet about 500 ms after creation |
 | `tst_native_core::launchPoolCarriesBackendModelAndHandlesEmpty` | `app/tests/qml/controller_launch_probe.qml` | wip: pool request shape and empty-pool signal verified; model/effort on a pool start not asserted |
 | `tst_native_core::redesignedRosterFiltersWithoutMutatingSource` | `core/tests/sidebar.rs::redesigned_roster_filters_without_mutating_source` + `agent_filter_model_probe.qml` | verified |

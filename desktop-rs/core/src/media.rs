@@ -84,6 +84,18 @@ fn format_of(bytes: &[u8]) -> Option<image::ImageFormat> {
 
 /// The centred square of the image, scaled to 192 px and cut to a circle,
 /// as PNG. None when the bytes are not a readable image up to 4096 px.
+/// RGBA pixels as PNG (a pasted clipboard image).
+pub fn png_from_rgba(width: u32, height: u32, rgba: Vec<u8>) -> Option<Vec<u8>> {
+    let image = image::RgbaImage::from_raw(width, height, rgba)?;
+    let mut png = Vec::new();
+    image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some(png)
+}
+
+pub fn is_png(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+}
+
 pub fn rounded_portrait(bytes: &[u8]) -> Option<Vec<u8>> {
     let format = format_of(bytes)?;
     let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
