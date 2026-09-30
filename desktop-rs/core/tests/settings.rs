@@ -52,3 +52,17 @@ fn two_windows_writing_settings_keep_each_others_changes() {
     assert_eq!(reopened.string("drafts/b", "gone"), "gone", "a removal from another window applies too");
     std::fs::remove_file(&path).ok();
 }
+
+/// The local administrator token only ever goes to a Host on this machine
+/// (main 9a3c1208, C++ `defaultToken(baseUrl)`).
+#[test]
+fn the_admin_token_only_goes_to_loopback_hosts() {
+    use clarp_core::settings::is_loopback_url;
+    for local in ["http://127.0.0.1:7682", "http://localhost:7682", "http://LOCALHOST", "http://127.8.9.10:1", "http://[::1]:7682"] {
+        assert!(is_loopback_url(local), "{local}");
+    }
+    for remote in ["http://192.168.1.5:7682", "https://clarp.example.com", "http://100.64.0.1:7682", "http://localhost.example.com", "not a url", ""] {
+        assert!(!is_loopback_url(remote), "{remote}");
+    }
+    assert_eq!(clarp_core::settings::default_token("https://clarp.example.com"), "");
+}
