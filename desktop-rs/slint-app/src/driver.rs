@@ -1333,6 +1333,31 @@ fn lifecycle_check(out: String) {
             let bodies = created();
             let Some(body) = bodies.iter().find(|b| b.get("fork_session_id").is_some()) else { return false };
             check(body["fork_session_id"] == "old-1" && body["replace_sid"].as_str().is_some_and(|s| s.starts_with("mike")), &format!("fork starts from the chosen past conversation: {body}"));
+            crate::commands::run(&app_now(), &crate::window().expect("window"), "relaunch-agent");
+            true
+        })),
+        ("resume mode", Box::new(|_, window, elapsed| {
+            let start = window.global::<StartAgent>();
+            if window.get_overlay() != "start-agent" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            start.set_workspace("/tmp".into());
+            start.invoke_workspace_edited("/tmp".into());
+            start.invoke_mode_chosen("resume".into());
+            true
+        })),
+        ("resume past", Box::new(|_, window, _| {
+            let start = window.global::<StartAgent>();
+            if start.get_past_sessions().row_count() == 0 {
+                return false;
+            }
+            start.invoke_past_chosen(0);
+            start.invoke_start();
+            true
+        })),
+        ("resumed", Box::new(|_, _window, _| {
+            let Some(body) = created().into_iter().find(|b| b.get("resume_session_id").is_some()) else { return false };
+            check(body["resume_session_id"] == "old-1", &format!("resume reopens the chosen past conversation: {body}"));
             true
         })),
     ];
