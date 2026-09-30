@@ -564,6 +564,10 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "resourceUrl"]
         fn resource_url(self: &AppController, path: &QString) -> QUrl;
+        /// What the controller holds, for the memory log and checks.
+        #[qinvokable]
+        #[cxx_name = "memoryCounters"]
+        fn memory_counters_object(self: &AppController) -> QJsonObject;
         #[qinvokable]
         #[cxx_name = "styledMarkdownHtml"]
         fn styled_markdown_html(self: &AppController, markdown: &QString, options: &QJsonObject) -> QString;
@@ -2516,6 +2520,10 @@ impl AppController {
         self.audio_value()
     }
 
+    fn memory_counters_object(&self) -> cxx_qt_lib::QJsonObject {
+        crate::qjson::to_qjson(&self.memory_counters()).to_object()
+    }
+
     pub fn muted_pub(&self) -> bool {
         self.muted
     }
@@ -2710,6 +2718,11 @@ impl AppController {
             .map(|agent| json!({"session": agent.session, "name": display_name(agent), "backend": agent.backend,
                                 "state": agent.latest_state, "busy": agent.busy, "unread": agent.unread}))
             .collect();
+        let mut rows = rows;
+        if !needle.is_empty() {
+            let text = |row: &Value, key: &str| row[key].as_str().unwrap_or_default().to_owned();
+            rows.sort_by_key(|row| clarp_core::roster::switcher_rank(&text(row, "name"), &text(row, "session"), &needle));
+        }
         crate::qjson::to_qjson_array(&rows)
     }
 

@@ -92,7 +92,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::consecutiveExplanationsCollapseWithoutChangingTranscript` | `core/tests/presentation.rs::consecutive_explanations_collapse_without_changing_transcript` | verified (core) |
 | `tst_native_core::streamedTokenAnnouncesOnlyItsRows` | | todo |
 | `tst_native_core::spokenMarkupLeavesNoGapsInTheText` | `core/tests/protocol.rs::spoken_markup_leaves_no_gaps_in_the_text` | verified |
-| `tst_native_core::quickSwitcherPutsTheExactNameFirst` | | todo |
+| `tst_native_core::quickSwitcherPutsTheExactNameFirst` | `core/tests/roster.rs::quick_switcher_puts_the_exact_name_first` (`roster::switcher_rank`, used by `matchingAgents`) | verified |
 | `tst_native_core::unreachableHostErrorClearsWhenItIsBack` | `app/tests/qml/controller_lifecycle_probe.qml` (fake Host outage switch) | verified |
 | `tst_native_core::attachedToolElapsedUsesAssistantBoundaryAndPreservesSender` | `core/tests/presentation.rs::attached_tool_elapsed_uses_assistant_boundary_and_preserves_sender` | verified (core) |
 | `tst_native_core::logMergeRefreshesExplanationsOncePerBatch` | `core/tests/presentation.rs::log_merge_costs_one_lookup_per_tool` | wip: lookup bound verified; the Rust adapter diffs rows instead of one whole-transcript dataChanged, so that assertion is replaced by "no reset, per-row updates" |
@@ -154,14 +154,14 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_native_core::narrationClipWithoutMediaBackendStaysBounded` | | todo |
 | `tst_native_core::sharedPlaybackDoesNotDuplicateDownloads` | `app/tests/qml/controller_shared_playback_probe.qml` | wip: one download and cross-window mute verified; the microphone-held part is covered by `core/tests/audio.rs::recording_holds_the_queue_and_mute_or_silence_drains_it` rather than a second process holding the lease |
 | `tst_native_core::markdownParagraphsBecomeVisibleDisplayBlocks` | `core/tests/protocol.rs::markdown_paragraphs_become_visible_display_blocks` | verified |
-| `tst_native_core::hugeMarkdownBlocksAreNotRetainedInTheStyleCache` | | todo |
+| `tst_native_core::hugeMarkdownBlocksAreNotRetainedInTheStyleCache` | `app/tests/qml/markdown_style_cache_probe.qml` (counts the UTF-8 held, so the 4 MB bound takes more rows than the C++ UTF-16 count) | verified |
 | `tst_native_core::agentReplyKeepsItsAuthorAndNamesTheAnsweredAgent` | | todo |
 | `tst_native_core::pairConversationRoomsAreReadOnlyProjections` | `app/tests/qml/controller_pair_rooms_probe.qml` | verified: listed and unread, identical lists change nothing (mutation caught), read-only selection (no /select, no clips), member updates refresh, older Host without the route shows no rooms and no error |
 | `tst_native_core::onlyWebAndMailLinksAreOpenable` | `core/tests/protocol.rs::only_web_and_mail_links_are_openable` | verified |
 | `tst_native_core::toolOutputLinksAreAnchoredWithoutChangingTheText` | `core/tests/protocol.rs::tool_output_links_are_anchored_without_changing_the_text` | wip: QTextDocument round trip pending (app crate) |
 | `tst_native_core::reportHtmlCannotFetchRemoteResources` | `core/tests/protocol.rs::report_html_cannot_fetch_remote_resources` | verified |
 | `tst_native_core::reportHtmlKeepsStructureButNeverFetchesRemoteResources` | `core/tests/protocol.rs::report_html_keeps_structure_but_never_fetches_remote_resources` | wip: QTextDocument plain-text check pending (app crate) |
-| `tst_native_core::reportForArtifactExposesSanitizedBody` | | todo |
+| `tst_native_core::reportForArtifactExposesSanitizedBody` | `app/tests/qml/controller_reports_probe.qml` (sanitised HTML, Markdown untouched, non-viewable and missing ids) | verified |
 | `tst_native_core::portedUrlsBecomeLinksWithoutChangingVisibleText` | `core/tests/protocol.rs::ported_urls_become_links_without_changing_visible_text` | wip: QTextDocument setMarkdown check pending (app crate) |
 | `tst_tool_narrator::viewportOwnersShareAndReleaseQueuedActivity` | `core/tests/narrator.rs::viewport_owners_share_and_release_queued_activity` | verified |
 | `tst_tool_narrator::sharedHostPollsWithoutStartingLocalCodex` | `core/tests/narrator.rs::shared_host_polls_until_ready_and_caches + narrator_probe.qml` | verified |
