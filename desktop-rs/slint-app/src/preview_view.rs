@@ -31,14 +31,23 @@ fn launch(manager: bool) -> Launch {
     let home = std::env::var("HOME").unwrap_or_default();
     let helper = clarp_core::preview::helper_path(&home);
     let fixture = std::env::var_os("CLARP_TEST_PREVIEW_FIXTURE").is_some();
+    let instance_name = std::env::var("CLARP_INSTANCE_NAME").unwrap_or_default();
+    // Hashing reads the whole executable (tens of MB): only where the
+    // versions can show at all.
+    let preview = manager || instance_name == "com.maxteabag.Clarp.WorktreePreview";
+    let executable_hash = if preview {
+        clarp_core::preview::file_sha256(std::path::Path::new("/proc/self/exe")).unwrap_or_default()
+    } else {
+        String::new()
+    };
     Launch {
         helper_exists: std::path::Path::new(&helper).exists(),
         home,
-        instance_name: std::env::var("CLARP_INSTANCE_NAME").unwrap_or_default(),
+        instance_name,
         manager,
         screenshot: fixture,
         screenshot_scenario: if fixture { "preview-versions".into() } else { String::new() },
-        executable_hash: clarp_core::preview::file_sha256(std::path::Path::new("/proc/self/exe")).unwrap_or_default(),
+        executable_hash,
     }
 }
 

@@ -107,6 +107,32 @@ Slint's software renderer. The driver (`slint-app/src/driver.rs`) types and
 sends through the real composer, sees the reply stream and complete, and opens
 a second chat. Screenshots: `slint-app/docs/e2e/`.
 
+### Build and performance
+
+`cargo build --release -p clarp-slint` builds `target/release/clarp-slint`:
+`ldd` lists 13 libraries (ALSA, fontconfig, freetype, libpng, zlib, the C
+runtime), none from Qt; `cargo tree -p clarp-slint` has no Qt crate, and no
+`.qml` is read (the QML file names in the sources are comments naming what
+each part ports). Stripped it is 55 MB, toolkit included.
+
+`slint-app/tests/perf.sh 5` starts each app five times offscreen against a
+fresh fake Host (private bus, scratch HOME, `env -i`) and measures from launch
+to the first chat's `/log` request (started, connected, roster loaded, chat
+opened), then memory five seconds in. Medians, 2026-09-30, this machine:
+
+| | Slint app (release) | Qt/QML Rust app (PR 201, installed build) |
+|---|---|---|
+| Launch to first chat request | 65 ms (53–66) | 178 ms (174–210) |
+| Resident memory at 5 s | 48 MB | 103 MB |
+| Peak resident memory | 48 MB | 103 MB |
+| Shared libraries (`ldd`, without the vDSO) | 13, no Qt | 78 |
+
+The first run showed the Slint app peaking at 107 MB: the preview-versions
+check hashed the whole executable at startup. It now hashes only in the
+worktree-preview install, where the versions can show (the Qt app still reads
+its binary this way). Offscreen numbers leave out the window system; a real
+window on Wayland was not measured here.
+
 
 ## Platform (no QML counterpart)
 
