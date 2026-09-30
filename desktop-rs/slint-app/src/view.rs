@@ -310,6 +310,7 @@ pub(crate) fn tool_row(tool: &serde_json::Value) -> ToolRow {
         summary: first(&["summary", "description", "file_path"], "").into(),
         status: first(&["status"], "recorded").into(),
         detail: detail.join("\n\n").into(),
+        ..ToolRow::default()
     }
 }
 

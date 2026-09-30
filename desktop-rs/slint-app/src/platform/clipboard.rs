@@ -21,7 +21,6 @@ fn clipboard() -> &'static Mutex<Option<arboard::Clipboard>> {
 }
 
 #[allow(dead_code)] // for the transcript's copy action
-#[allow(dead_code)] // for the transcript's copy action
 pub fn copy(text: &str) -> Result<(), String> {
     if let Some(path) = std::env::var_os("CLARP_TEST_CLIPBOARD") {
         return std::fs::write(&path, text).map_err(|e| format!("{}: {e}", std::path::Path::new(&path).display()));

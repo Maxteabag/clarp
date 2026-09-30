@@ -20,6 +20,9 @@ pub struct Report {
     pub composer_focused: bool,
 }
 
+/// How many of a chat's latest rows get their tool calls explained.
+const NARRATED_ROWS: usize = 40;
+
 pub struct PaneState {
     pub id: String,
     pub session: String,
@@ -271,12 +274,40 @@ impl App {
                 }
             }
         }
+        // Plain-English tools: the latest open rows' calls, explained.
+        let narrating = engine.narrator_enabled() && !engine.narrator_unavailable();
+        let mut rows = rows;
+        let recent = rows.len().saturating_sub(NARRATED_ROWS);
+        for (index, (row, shown)) in presented.iter().zip(rows.iter_mut()).enumerate() {
+            if !narrating || index < recent || !shown.expanded {
+                continue;
+            }
+            let calls: Vec<crate::ToolRow> = row
+                .tools
+                .iter()
+                .zip(shown.tools.iter())
+                .map(|(tool, mut card)| {
+                    let Some(activity) = tool.as_object() else { return card };
+                    let failed = engine.explanation_failed(&pane.session, activity);
+                    card.narrated = !failed;
+                    card.explanation = engine.explanation_for(&pane.session, activity).into();
+                    if !failed && card.explanation.is_empty() {
+                        engine.request_explanation(&pane.session, activity);
+                    }
+                    card
+                })
+                .collect();
+            shown.tools = ModelRc::new(VecModel::from(calls));
+        }
         drop(engine);
-        let signature = |artifacts: &Vec<serde_json::Value>| {
-            artifacts.iter().map(|a| format!("{}@{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default())).collect::<Vec<_>>().join(",")
+        let signature = |artifacts: &Vec<serde_json::Value>, row: &MessageRow| {
+            let explained: Vec<String> = row.tools.iter().map(|t| format!("{}:{}", t.narrated, t.explanation)).collect();
+            let cards = artifacts.iter().map(|a| format!("{}@{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default())).collect::<Vec<_>>().join(",");
+            format!("{cards}|{}", explained.join(","))
         };
+        let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let fresh: Vec<Shown> =
-            presented.into_iter().zip(rows.iter().map(|r| r.expanded)).zip(&artifacts).map(|((row, open), a)| (row, open, signature(a))).collect();
+            presented.into_iter().zip(rows.iter().map(|r| r.expanded)).zip(signatures).map(|((row, open), s)| (row, open, s)).collect();
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
     }
 
