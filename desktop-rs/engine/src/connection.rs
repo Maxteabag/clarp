@@ -21,6 +21,7 @@ impl Engine {
             return;
         }
         self.reset_transient_state();
+        self.reset_narrator();
         self.sse.stop();
         self.base_url = normalized.clone();
         self.server_name.clear();

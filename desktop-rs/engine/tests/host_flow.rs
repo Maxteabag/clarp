@@ -286,3 +286,21 @@ fn connecting_pairing_and_forgetting_a_host() {
     d.changes.extend(d.engine.pump());
     assert_eq!(d.engine.connection_state(), "offline");
 }
+
+#[test]
+fn tool_activity_is_explained_in_plain_english_once_asked() {
+    let host = Host::start("narrator");
+    let mut d = Driver::new(&host.base);
+    d.engine.start();
+    d.until("live", |e| e.connection_state() == "live");
+    let activity = serde_json::json!({"id": "act-1", "name": "Bash", "summary": "list the files"}).as_object().cloned().unwrap();
+    assert!(d.engine.explanation_for("rachel", &activity).is_empty(), "nothing is asked while the experiment is off");
+    d.engine.set_narrator_enabled(true);
+    d.engine.set_narrator_detail_level(3);
+    assert_eq!(d.engine.settings().integer("experiments/toolDetailLevel", 0), 3, "the level is kept");
+    d.engine.request_explanation("rachel", &activity);
+    d.until("explained", |e| e.explanation_for("rachel", &activity) == "Explained: list the files");
+    let asked = host.requests("POST", "/tool-explanations");
+    assert!(asked.len() >= 2, "a pending answer is polled: {asked:?}");
+    assert!(d.changes.contains(&Change::Narrator));
+}

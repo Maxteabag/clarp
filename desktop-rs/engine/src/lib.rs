@@ -12,6 +12,7 @@ pub mod blocks;
 mod composer;
 mod connection;
 mod voice;
+mod narrator;
 mod host_status;
 pub mod lifecycle;
 mod queue;
@@ -59,6 +60,9 @@ pub enum Change {
     Preferences,
     /// The pane layout, the active pane or the save warning changed.
     Panes,
+    /// Tool explanations, the narrator's status, level or switch changed:
+    /// transcripts present again.
+    Narrator,
     /// Voice clips to play (announced, or recovered for the open chat).
     Clips(Vec<Object>),
     /// Speech should stop (a message was sent).
@@ -110,6 +114,7 @@ enum Message {
     DeliveryDue { client_id: String, token: u64 },
     DraftsDue(u64),
     PanesWritten(clarp_core::panes::WriteResult),
+    Narrator(narrator::NarratorTimer),
     CredentialStored { base: String, result: Result<(), String> },
     CredentialRemoved { base: String, result: Result<(), String> },
     /// Look again for a created session the roster did not show yet.
@@ -198,6 +203,7 @@ pub struct Engine {
     has_stored_credential: bool,
     /// Optional requests whose failure was already logged once.
     quiet_failures: HashSet<String>,
+    narrator: std::cell::RefCell<clarp_core::narrator::Narrator>,
 
     // lifecycle
     launch: lifecycle::Launch,
@@ -238,6 +244,7 @@ impl Engine {
         let muted = config.settings.boolean("audio/muted", false);
         let workspace_store = config.workspace_store.clone();
         let keyring = config.keyring;
+        let narrator = narrator::new(&config.settings);
         let tools_visible = config.settings.boolean("conversation/toolsVisible", false);
         let presentation = clarp_core::presentation::Settings {
             show_when_ready: config.settings.boolean("conversation/showWhenReady", false),
@@ -291,6 +298,7 @@ impl Engine {
             keyring,
             has_stored_credential: false,
             quiet_failures: HashSet::new(),
+            narrator,
             panes: workspace::Panes::new(workspace_store),
             deliveries: HashMap::new(),
             delivery_counter: 0,
@@ -335,6 +343,7 @@ impl Engine {
                 Message::DeliveryDue { client_id, token } => self.delivery_timed_out(&client_id, token),
                 Message::DraftsDue(token) => self.drafts_due(token),
                 Message::PanesWritten(result) => self.panes_written(result),
+                Message::Narrator(timer) => self.narrator_due(timer),
                 Message::CredentialStored { base, result } => self.credential_stored(&base, result),
                 Message::CredentialRemoved { base, result } => self.credential_removed(&base, result),
                 Message::CreatedAgentDue(session) => self.created_agent_due(&session),
@@ -415,8 +424,7 @@ impl Engine {
     /// A conversation as the transcript shows it: tool activity grouped
     /// and collapsed per the activity mode (`clarp_core::presentation`).
     pub fn presented(&mut self, session: &str) -> Vec<clarp_core::presentation::PresentedRow> {
-        let Some(conversation) = self.conversations.get(session) else { return Vec::new() };
-        clarp_core::presentation::present(conversation.rows(), &mut self.presentation, None).rows
+        self.present_with_explanations(session)
     }
     /// Fetches the tool calls of a message the Host sent without them
     /// (`tool_details_available`), once per message at a time.
@@ -1012,7 +1020,7 @@ impl Engine {
             self.finish_upload(tag, Some(object));
             return;
         }
-        if self.voice_json(tag, object) {
+        if self.voice_json(tag, object) || self.narrator_json(tag, object) {
             return;
         }
         if self.host_status_json(tag, object) {
@@ -1060,7 +1068,7 @@ impl Engine {
 
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
-        if self.host_status_failed(tag, &detail) {
+        if self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" {

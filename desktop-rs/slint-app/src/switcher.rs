@@ -44,6 +44,8 @@ pub struct Toggles {
     pub workspace_bar: bool,
     pub shared_filesystem: bool,
     pub activity_mode: i32,
+    pub narration: bool,
+    pub detail_level: i32,
 }
 
 fn toggle(on: bool, label: &str, action: &str, key: &str, keywords: &'static str) -> Item {
@@ -58,6 +60,13 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         command("Rename contact", "rename-agent", "F2", "agent", "rename name title relabel persona"),
         command("New session", "new", "Ctrl+N", "agent", "new agent start chat provider contact hub"),
         command("Open agent in terminal", "agent-terminal", "Ctrl+Alt+T", "agent", ""),
+        command(
+            if toggles.narration { "Disable plain-English tools" } else { "Enable plain-English tools (Spark · extra usage)" },
+            "tool-narration",
+            "",
+            "experiment",
+            "",
+        ),
         command("Split right", "split-right", "Ctrl+Alt+V", "layout", ""),
         command("Split down", "split-down", "Ctrl+Alt+S", "layout", ""),
         command("Close pane", "close-pane", "Ctrl+Alt+X", "layout", ""),
@@ -93,6 +102,11 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
     for (mode, label) in ["Grouped", "Always visible", "Group old"].iter().enumerate() {
         let current = if toggles.activity_mode == mode as i32 { " (current)" } else { "" };
         rows.push(command(&format!("Tool activity: {label}{current}"), &format!("setting:activity:{mode}"), if mode == 1 { "Ctrl+Shift+T" } else { "" }, "settings", "tool calls collapse expand grouping"));
+    }
+    for (level, name) in clarp_engine::Engine::narrator_detail_levels().iter().enumerate() {
+        let level = level as i32;
+        let note = if toggles.detail_level == level { " (current)" } else if level > 0 { " (uses AI)" } else { " (no AI)" };
+        rows.push(command(&format!("Tool detail: {name}{note}"), &format!("setting:detail:{level}"), "", "settings", "explanation explanations narration audience"));
     }
     for theme in clarp_core::reading_theme::themes() {
         let text = |key: &str| theme.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_owned();

@@ -340,7 +340,7 @@ impl App {
             let session = pane.session.clone();
             let fresh = rebound.contains(&pane.id);
             let conversation = fresh
-                || changes.iter().any(|c| matches!(c, Change::Preferences) || matches!(c, Change::Conversation(s) if *s == session));
+                || changes.iter().any(|c| matches!(c, Change::Preferences | Change::Narrator) || matches!(c, Change::Conversation(s) if *s == session));
             if conversation {
                 self.messages(pane);
             }
