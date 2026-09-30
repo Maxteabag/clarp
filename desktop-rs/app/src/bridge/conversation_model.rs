@@ -339,7 +339,7 @@ impl qobject::ConversationModel {
     fn voice_error_value(&self) -> QString {
         qs(self.core.voice_error())
     }
-    fn count_value(&self) -> i32 {
+    pub fn count_value(&self) -> i32 {
         self.rows.len() as i32
     }
     fn index_of_message(&self, id: &QString) -> i32 {

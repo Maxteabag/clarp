@@ -14,7 +14,7 @@ host=$!
 for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
 rm -f "$out"
 env CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS=off \
-    XDG_CONFIG_HOME="$scratch/config" XDG_CACHE_HOME="$scratch/cache" XDG_DATA_HOME="$scratch/data" CLARP_TEST_OPEN_URL="$scratch/opened-urls" CLARP_TEST_CLIPBOARD="$scratch/clipboard" CLARP_AUDIO_OUTPUT=null \
+    XDG_CONFIG_HOME="$scratch/config" XDG_CACHE_HOME="$scratch/cache" XDG_DATA_HOME="$scratch/data" XDG_STATE_HOME="$scratch/state" CLARP_TEST_OPEN_URL="$scratch/opened-urls" CLARP_TEST_CLIPBOARD="$scratch/clipboard" CLARP_AUDIO_OUTPUT=null \
     QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen CLARP_SCREENSHOT_PATH="$out" \
     CLARP_SCREENSHOT_SELECT_SESSION="$session" CLARP_SCREENSHOT_SIZE=1280x800 \
     timeout 60 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \

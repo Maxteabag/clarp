@@ -6,6 +6,7 @@ mod fonts;
 mod list_replay;
 mod qjson;
 mod runtime;
+mod stall_monitor;
 
 use cxx_qt_lib::{QByteArray, QGuiApplication, QMap, QMapPair_QString_QVariant, QQmlApplicationEngine, QString, QUrl, QVariant};
 
@@ -41,6 +42,22 @@ Main {
             Qt.callLater(() => root.openLaunchAgent(launchBackend, launchModel, launchEffort, launchAnonymous, launchDirectory))
     }
     DesktopServices { window: root }
+    Diagnostics {
+        // Live Qt Quick items and text items: a steadily rising count across
+        // identical views is the signature of leaked delegates.
+        onMemorySampleRequested: {
+            let items = 0, textItems = 0
+            const visit = item => {
+                items += 1
+                if (/^QQuickText(Edit|Input)?(_|\(|$)/.test(String(item)))
+                    textItems += 1
+                for (const child of item.children)
+                    visit(child)
+            }
+            visit(root.contentItem)
+            logMemory(items, textItems)
+        }
+    }
     // A second launch opens its window here. A closed extra window is
     // destroyed with its controller, so it stops costing memory; the first
     // window keeps the process state, tray and presence.

@@ -14,7 +14,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/InstanceServer` | 199 | `core/src/instance.rs` + `app/src/bridge/instance_server.rs` | verified: same socket key (build path+mtime, instance, Host, token, config, display, renderer) and wire format; runs alone for help/version/versions, screenshots, restore, probes, `CLARP_SEPARATE_PROCESS`; 0700 socket, removed on quit; a second launch opens its window in the running process (`app/tests/run-desktop-services.sh`) |
 | `src/app/MarkdownStyle` | 250 | `core/src/markdown_style.rs` (pulldown-cmark) + `styledMarkdownHtml` in the controller | verified (`core/tests/markdown_style.rs`, `app/tests/qml/markdown_style_probe.qml`, screenshot of a styled reply). Deviation: rendered directly to Qt rich-text HTML instead of restyling a QTextDocument; raw HTML in a message stays text; `styleMarkdown(textDocument)` is not ported (no QML caller) |
 | `src/app/PreviewVersions` | 147 | `core/src/preview.rs` + `app/src/bridge/preview_versions.rs` | verified (core: `core/tests/preview.rs`); the bridge runs the helper off-thread and quits through `QCoreApplication::quit` bound with cxx `#[Self]` |
-| `src/app/StallMonitor` | 247 | `desktop-rs/src/app/` | todo |
+| `src/app/StallMonitor` | 247 | `core/src/diagnostics.rs` + `app/src/stall_monitor.rs` + `app/src/bridge/diagnostics.rs` | verified: heartbeat plus dispatcher `awake()` wake time, signal-captured GUI stack (named from debug info, C++ demangled), memory-mark captures every 512 MB, same env knobs and log path; `app/tests/qml/diagnostics_probe.qml` (A/B: fails without wake times) |
 | `src/app/TimeFormat` | 138 | `core/src/time_format.rs` | verified (`conversation.rs::stamps_*`, `compact_*`); en_US formats fixed, QLocale-driven locale pending |
 | `src/app/ToolNarrator` | 802 | `core/src/narrator.rs` + `app/src/bridge/tool_narrator.rs` | verified for the shared-Host path (`core/tests/narrator.rs`, `app/tests/qml/narrator_probe.qml`); the local `codex exec` fallback and script-context evidence are not ported (the app always uses the Host) |
 | `src/app/TranscriptCache` | 123 | `core/src/transcript_cache.rs` + controller restore/250 ms save | verified (`core/tests/transcript_cache.rs`; `app/tests/qml/controller_transcript_cache_probe.qml` opens a chat from the cache with the Host unreachable, restore mutation caught) |
@@ -47,7 +47,7 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `src/app/DesktopPalette.h` (header-only) | 40 | `desktop-rs/src/app/` | todo |
 | `src/app/KeyboardSmokeCheck.h` (header-only) | 330 | `desktop-rs/src/app/` | todo |
 | `src/app/LocalReport.h` (header-only) | 40 | `core/src/links.rs::local_report_path` | verified (`core/tests/links.rs::only_readable_non_executable_reports_open`); content is checked by magic bytes/UTF-8 instead of the freedesktop MIME database |
-| `src/app/MemoryDiagnostics.h` (header-only) | 71 | `desktop-rs/src/app/` | todo |
+| `src/app/MemoryDiagnostics.h` (header-only) | 71 | `core/src/diagnostics.rs` + `app/src/bridge/diagnostics.rs` | verified: minute `memory {...}` line (RSS split, window items/text items, controller `memoryCounters`, CPU, stalls); `app/tests/run-desktop-services.sh` checks it on the real window |
 | `src/app/PairSidebarSmokeCheck.h` (header-only) | 62 | `desktop-rs/src/app/` | todo |
 | `src/app/PreviewRelaunch.h` (header-only) | 15 | `core/src/preview.rs` | verified (`core/tests/preview.rs::relaunch_preserves_host_and_session`) |
 | `src/app/ReadingTheme.h` (header-only) | 282 | `core/src/reading_theme.rs` + generated `reading_themes.json` | verified (`core/tests/reading_theme.rs`); fonts resolved through fontconfig (`app/src/fonts.rs`) |
@@ -194,11 +194,11 @@ The C++ `desktop/` tree stays the reference until every row is `verified`.
 | `tst_reading_theme::noPurePolarityExtremes` | `core/tests/reading_theme.rs::no_pure_polarity_extremes` | verified |
 | `tst_reading_theme::optionsMirrorThemes` | `core/tests/reading_theme.rs::options_mirror_themes` | verified |
 | `tst_reading_theme::secondaryTextMeetsAa` | `core/tests/reading_theme.rs::secondary_text_meets_aa` | verified |
-| `tst_stall_monitor::blockedGuiThreadIsLoggedWithItsStack` | | todo |
-| `tst_stall_monitor::disabledMonitorDoesNothing` | | todo |
-| `tst_stall_monitor::memoryThresholdCapturesTheGuiStack` | | todo |
-| `tst_stall_monitor::postedBlockDurationsUseWakeTime` | | todo |
-| `tst_stall_monitor::shortPausesAreNotStalls` | | todo |
+| `tst_stall_monitor::blockedGuiThreadIsLoggedWithItsStack` | `app/tests/qml/diagnostics_probe.qml` | verified |
+| `tst_stall_monitor::disabledMonitorDoesNothing` | `app/src/bridge/diagnostics.rs` (threshold 0 starts no watchdog; screenshot runs default to 0) | checked by review |
+| `tst_stall_monitor::memoryThresholdCapturesTheGuiStack` | `core/src/diagnostics.rs::memory_captures_at_the_mark_and_every_512_mb_more` + `diagnostics_probe.qml` | verified |
+| `tst_stall_monitor::postedBlockDurationsUseWakeTime` | `core/src/diagnostics.rs::posted_block_durations_use_wake_time` + `diagnostics_probe.qml` short blocks | verified |
+| `tst_stall_monitor::shortPausesAreNotStalls` | `core/src/diagnostics.rs::short_pauses_are_not_stalls` + `diagnostics_probe.qml` | verified |
 | `tst_transcript_layout::anchorSurvivesChangesAboveViewport` | `core/tests/transcript_layout.rs::anchor_survives_changes_above_viewport` | verified (core) |
 | `tst_transcript_layout::createdRowsMatchDelegateHeightsAndAreContiguous` | `core/tests/transcript_layout.rs::created_rows_match_delegate_heights_and_are_contiguous` | verified (core) |
 | `tst_transcript_layout::followingTracksEndAfterModelAndHeightChanges` | `core/tests/transcript_layout.rs::following_tracks_end_after_model_and_height_changes` | verified (core) |
