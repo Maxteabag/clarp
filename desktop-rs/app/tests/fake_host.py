@@ -68,6 +68,8 @@ teams = [{"team_id": "t1", "name": "Core", "color": "#fff", "member_agent_ids": 
 team_messages = {"t1": [{"id": "tm1", "text": "Standup at 9"}]}
 turn_queue = {"rachel": [{"queue_id": "q1", "text": "later please"}, {"queue_id": "q2", "text": "and this"}]}
 create_mode = "modern"
+# The snapshot's personas (idle contacts); /__control/personas replaces them.
+personas = [{"id": "p", "name": "Paula"}]
 # /agent-model-options; /__control/catalog replaces it.
 model_options = {"backends": []}
 next_create_response = None
@@ -139,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp"})
         if url.path == "/agents/snapshot":
             with state_lock:
-                return self.reply(200, {"agents": agents, "personas": [{"id": "p", "name": "Paula"}],
+                return self.reply(200, {"agents": agents, "personas": personas,
                                         "available_mcp_servers": [{"name": "github", "description": "GitHub"}]})
         if url.path == "/teams":
             with state_lock:
@@ -336,6 +338,13 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: the model catalog /agent-model-options answers.
             global model_options
             model_options = body
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/personas":
+            # Test control: the personas the snapshot lists, then a roster event.
+            global personas
+            with state_lock:
+                personas = body.get("personas", [])
+            broadcast({"type": "agent-roster", "session": "", "kind": "updated"})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/add-agent":
             # Test control: one more idle agent in the roster, announced.
