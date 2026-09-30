@@ -108,6 +108,7 @@ pub struct Engine {
     waiting_for_session_choice: bool,
     conversations: HashMap<String, Conversation>,
     muted: bool,
+    presentation: clarp_core::presentation::Settings,
 
     snapshot_generation: u64,
     snapshot_in_flight: bool,
@@ -119,6 +120,8 @@ pub struct Engine {
     deliveries: HashMap<String, (String, u64)>,
     delivery_counter: u64,
     sending: bool,
+    /// In-flight `/message-tool-details` requests: tag → (session, message).
+    tool_detail_requests: HashMap<String, (String, String)>,
 }
 
 impl Engine {
@@ -148,6 +151,12 @@ impl Engine {
             sse_post(Message::Sse(signal))
         });
         let muted = config.settings.boolean("audio/muted", false);
+        let tools_visible = config.settings.boolean("conversation/toolsVisible", false);
+        let presentation = clarp_core::presentation::Settings {
+            show_when_ready: config.settings.boolean("conversation/showWhenReady", false),
+            activity_mode: config.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32,
+            ..clarp_core::presentation::Settings::default()
+        };
         Ok(Self {
             base_url: normalized_base_url(&config.base_url),
             token: config.token,
@@ -176,6 +185,7 @@ impl Engine {
             waiting_for_session_choice: false,
             conversations: HashMap::new(),
             muted,
+            presentation,
             snapshot_generation: 0,
             snapshot_in_flight: false,
             snapshot_dirty: false,
@@ -183,6 +193,7 @@ impl Engine {
             snapshot_last: None,
             log_in_flight: HashSet::new(),
             pending_log_mode: HashMap::new(),
+            tool_detail_requests: HashMap::new(),
             deliveries: HashMap::new(),
             delivery_counter: 0,
             sending: false,
@@ -286,6 +297,59 @@ impl Engine {
     pub fn muted(&self) -> bool {
         self.muted
     }
+    /// A conversation as the transcript shows it: tool activity grouped
+    /// and collapsed per the activity mode (`clarp_core::presentation`).
+    pub fn presented(&mut self, session: &str) -> Vec<clarp_core::presentation::PresentedRow> {
+        let Some(conversation) = self.conversations.get(session) else { return Vec::new() };
+        clarp_core::presentation::present(conversation.rows(), &mut self.presentation, None).rows
+    }
+    /// Fetches the tool calls of a message the Host sent without them
+    /// (`tool_details_available`), once per message at a time.
+    pub fn load_tool_details(&mut self, session: &str, message_id: &str) {
+        if session.is_empty()
+            || message_id.is_empty()
+            || self.tool_detail_requests.values().any(|(s, m)| s == session && m == message_id)
+        {
+            return;
+        }
+        let tag = format!("tool-details:{}", uuid::Uuid::new_v4());
+        self.tool_detail_requests.insert(tag.clone(), (session.to_owned(), message_id.to_owned()));
+        self.api.get(&tag, "/message-tool-details", &[("session", session), ("message_id", message_id)]);
+    }
+    /// Opens or closes a group of old activity.
+    pub fn toggle_group(&mut self, group_id: &str) {
+        self.presentation.toggle_group(group_id);
+        let selected = self.selected.clone();
+        self.changes.push(Change::Conversation(selected));
+    }
+    /// 0 grouped, 1 always visible, 2 group old (C++ `activityDisplayMode`).
+    pub fn activity_mode(&self) -> i32 {
+        self.presentation.activity_mode
+    }
+    pub fn set_activity_mode(&mut self, mode: i32) {
+        let mode = mode.clamp(0, 2);
+        if self.presentation.activity_mode != mode {
+            self.presentation.activity_mode = mode;
+            self.settings.set("conversation/activityDisplayMode", i64::from(mode));
+            self.settings.set("conversation/toolsVisible", mode == clarp_core::presentation::ALWAYS_VISIBLE);
+            self.changes.push(Change::Preferences);
+            let selected = self.selected.clone();
+            self.changes.push(Change::Conversation(selected));
+        }
+    }
+    pub fn show_when_ready(&self) -> bool {
+        self.presentation.show_when_ready
+    }
+    pub fn set_show_when_ready(&mut self, value: bool) {
+        if self.presentation.show_when_ready != value {
+            self.presentation.show_when_ready = value;
+            self.settings.set("conversation/showWhenReady", value);
+            self.changes.push(Change::Preferences);
+            let selected = self.selected.clone();
+            self.changes.push(Change::Conversation(selected));
+        }
+    }
+
     /// The reading theme's id, remembered (C++ `setReadingTheme`).
     pub fn reading_theme(&self) -> String {
         clarp_core::reading_theme::normalized_theme_id(
@@ -797,6 +861,13 @@ impl Engine {
             self.apply_agent_conversations(&json::array(object, "conversations"));
             return;
         }
+        if tag.starts_with("tool-details:") {
+            if let Some((session, message_id)) = self.tool_detail_requests.remove(tag) {
+                self.ensure_conversation(&session);
+                self.with_conversation(&session, |c| c.apply_tool_details(&message_id, object));
+            }
+            return;
+        }
         if tag == "server-info" {
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.server_version = json::string(object, "clarp_version");
@@ -826,6 +897,11 @@ impl Engine {
     }
 
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
+        if let Some((session, message_id)) = self.tool_detail_requests.remove(tag) {
+            // Left available, so opening the row again retries.
+            eprintln!("Engine: tool details for {session}/{message_id} failed ({status}): {message}");
+            return;
+        }
         if let Some(generation) = tag.strip_prefix("snapshot:") {
             if generation.parse::<u64>().ok() != Some(self.snapshot_generation) {
                 return;

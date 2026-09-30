@@ -361,6 +361,21 @@ class Handler(BaseHTTPRequestHandler):
                             agent["conversation_id"] = body["conversation_id"]
             broadcast({"type": "transcript-updated", "session": session})
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/turns":
+            # Test control: replace a chat's history with `turns` as given
+            # (tool calls, activity rows), and announce it.
+            session = body["session"]
+            with state_lock:
+                rows = []
+                for turn in body["turns"]:
+                    revision += 1
+                    rows.append({"revision": revision, "timestamp": "2026-09-29T10:00:00Z", **turn})
+                turns[session] = rows
+                for agent in agents:
+                    if agent["session"] == session:
+                        agent["head_revision"] = revision
+            broadcast({"type": "transcript-updated", "session": session})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/publish-pending":
             with state_lock:
                 agents.extend(pending_agents)

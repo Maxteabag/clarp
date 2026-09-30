@@ -1,4 +1,5 @@
 import { Palette } from "theme.slint";
+import { ListView } from "std-widgets.slint";
 
 export struct TableRow {
     cells: [styled-text],
@@ -14,14 +15,64 @@ export struct MessageBlock {
     rows: [TableRow],
 }
 
+export struct ToolRow {
+    name: string,
+    summary: string,
+    status: string,
+    detail: string,
+}
+
 export struct MessageRow {
     id: string,
     // user, assistant, activity
     author: string,
     blocks: [MessageBlock],
+    sender: string,
+    stamp: string,
     meta: string,
     pending: bool,
     failed: bool,
+    // Tool activity: the toggle's label, whether the cards show, the cards.
+    activity-label: string,
+    group-id: string,
+    expanded: bool,
+    tools: [ToolRow],
+}
+
+// One tool call (ToolCard.qml): name, summary, status; details on request.
+component ToolCard inherits Rectangle {
+    in property <ToolRow> tool;
+    property <bool> open;
+    background: Palette.raised;
+    border-radius: 2px;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 3px;
+                background: root.tool.status == "error" ? Palette.danger : root.tool.status == "running" ? Palette.warning : Palette.success;
+            }
+            Text { text: root.tool.name; color: Palette.chrome-text; font-size: 12px; font-weight: 600; }
+            Text { text: root.tool.summary; color: Palette.muted; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+            if root.tool.detail != "": TouchArea {
+                width: 60px;
+                clicked => { root.open = !root.open; }
+                Text { text: root.open ? "Hide" : "Details"; color: Palette.link; font-size: 12px; }
+            }
+        }
+        if root.open: Text {
+            text: root.tool.detail;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+            color: Palette.text;
+            wrap: word-wrap;
+        }
+    }
 }
 
 component Block inherits VerticalLayout {
@@ -99,52 +150,103 @@ component Block inherits VerticalLayout {
     if root.block.kind == "rule": Rectangle { height: 1px; background: Palette.rule; }
 }
 
-// The transcript (TranscriptView/MessageDelegate in QML): Markdown messages
-// as blocks, the user's in bubbles, activity lines muted.
-export component Transcript inherits Rectangle {
+// The transcript (TranscriptView/MessageDelegate in QML): a virtualised
+// list of Markdown messages, the user's in bubbles, tool activity folded
+// behind a toggle. It follows the latest while the reader is at the end;
+// scrolling up pauses it, and returning to the end (or End) resumes it.
+export component Transcript inherits FocusScope {
     in property <[MessageRow]> rows;
     in-out property <bool> follow: true;
+    out property <length> offset: list.content-y;
+    out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
     callback link-clicked(string);
-    background: Palette.window;
-    flick := Flickable {
+    callback toggle-activity(string, string);
+    Rectangle { background: Palette.window; }
+    // Mirrors the list's height so a streaming row that grows is followed.
+    property <length> list-height: list.content-height;
+    list := ListView {
+        // A reader who scrolls away from the end stops following.
+        scrolled => {
+            root.follow = root.at-end;
+        }
         width: parent.width;
         height: parent.height;
-        content-width: self.width;
-        column := VerticalLayout {
-            width: flick.width;
-            padding: 16px;
-            spacing: 14px;
-            for row in root.rows: HorizontalLayout {
-                alignment: row.author == "user" ? end : stretch;
-                Rectangle {
-                    background: row.author == "user" ? Palette.bubble : transparent;
-                    border-radius: 2px;
-                    max-width: row.author == "user" ? flick.width * 0.75 : flick.width;
-                    VerticalLayout {
-                        padding: row.author == "user" ? 10px : 2px;
-                        spacing: 8px;
-                        for block in row.blocks: Block {
-                            block: block;
-                            body-size: row.author == "activity" ? 13px : Palette.body-size;
-                            body-color: row.author == "activity" ? Palette.muted : Palette.text;
-                            link-clicked(url) => { root.link-clicked(url); }
+        for row in root.rows: HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 7px;
+            padding-bottom: 7px;
+            alignment: row.author == "user" ? end : stretch;
+            Rectangle {
+                background: row.author == "user" ? Palette.bubble : transparent;
+                border-radius: 2px;
+                max-width: row.author == "user" ? list.visible-width * 0.75 : list.visible-width;
+                VerticalLayout {
+                    padding: row.author == "user" ? 10px : 2px;
+                    spacing: 8px;
+                    if row.sender != "": Text { text: row.sender; color: Palette.accent; font-size: 12px; font-weight: 600; }
+                    for block in row.blocks: Block {
+                        block: block;
+                        body-size: row.author == "activity" ? 13px : Palette.body-size;
+                        body-color: row.author == "activity" ? Palette.muted : Palette.text;
+                        link-clicked(url) => { root.link-clicked(url); }
+                    }
+                    if row.activity-label != "": TouchArea {
+                        height: 20px;
+                        clicked => { root.toggle-activity(row.id, row.group-id); }
+                        Text {
+                            text: (row.expanded ? "Hide · " : "Show · ") + row.activity-label;
+                            color: Palette.faint;
+                            font-size: 12px;
+                            x: 0;
                         }
-                        if row.pending || row.failed || row.meta != "": Text {
-                            text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.meta;
-                            color: row.failed ? Palette.danger : Palette.faint;
-                            font-size: 11px;
-                        }
+                    }
+                    if row.expanded: VerticalLayout {
+                        spacing: 1px;
+                        for tool in row.tools: ToolCard { tool: tool; }
+                    }
+                    if row.pending || row.failed || row.stamp != "": Text {
+                        text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
+                        color: row.failed ? Palette.danger : Palette.faint;
+                        font-size: 11px;
+                        horizontal-alignment: row.author == "user" ? right : left;
                     }
                 }
             }
         }
-        content-height: column.preferred-height;
     }
-    // Following keeps the end in view as rows arrive.
     changed rows => {
         if (root.follow) { root.scroll-to-latest(); }
     }
+    // Following also tracks rows that grow while streaming.
+    changed list-height => {
+        if (root.follow) { root.scroll-to-latest(); }
+    }
+    // The list estimates the height of rows it has not drawn yet and
+    // corrects it as they appear; while following, keep pinning the end
+    // until the estimate settles.
+    Timer {
+        interval: 16ms;
+        running: root.follow && !root.at-end;
+        triggered => { root.scroll-to-latest(); }
+    }
     public function scroll-to-latest() {
-        flick.content-y = Math.min(0px, flick.height - column.preferred-height);
+        root.follow = true;
+        list.content-y = Math.min(0px, list.visible-height - list.content-height);
+    }
+    public function scroll-by(delta: length) {
+        list.content-y = Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta));
+        root.follow = root.at-end;
+    }
+    // After Escape the transcript has the keyboard: Up/Down, Page Up/Down,
+    // Home and End scroll it.
+    key-pressed(event) => {
+        if (event.text == Key.UpArrow) { root.scroll-by(-40px); return accept; }
+        if (event.text == Key.DownArrow) { root.scroll-by(40px); return accept; }
+        if (event.text == Key.PageUp) { root.scroll-by(-list.visible-height * 0.9); return accept; }
+        if (event.text == Key.PageDown) { root.scroll-by(list.visible-height * 0.9); return accept; }
+        if (event.text == Key.Home) { list.content-y = 0px; root.follow = root.at-end; return accept; }
+        if (event.text == Key.End) { root.scroll-to-latest(); return accept; }
+        reject
     }
 }
