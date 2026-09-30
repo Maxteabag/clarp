@@ -22,3 +22,21 @@ export global Palette {
     in property <length> body-size: 15px;
     in property <string> body-family: "JetBrains Mono";
 }
+
+// Where the keyboard is: the keyboard map's state (commands::context), set
+// from Rust with the shortcut bar. Every region that owns a state draws the
+// one FocusRing when it is the one; lists mark their cursor with Cursor.
+export global Focus {
+    in property <string> mode: "pane";
+    out property <color> cursor: Palette.accent.with-alpha(0.16);
+}
+
+// The focus style: a ring over the region the keyboard is in. Place it last
+// in the region so it draws on top (it fills its parent unless placed); it
+// takes no input.
+export component FocusRing inherits Rectangle {
+    in property <bool> shown;
+    border-width: root.shown ? 2px : 0px;
+    border-color: Palette.accent;
+    border-radius: 4px;
+}

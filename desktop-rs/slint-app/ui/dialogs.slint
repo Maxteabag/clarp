@@ -1,5 +1,5 @@
 import { Button, ComboBox, LineEdit, TextEdit } from "std-widgets.slint";
-import { Palette } from "theme.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
 
 // A dialog over the window: a dimmed backdrop that closes it when clicked,
 // and a card in the middle. Escape closes it through the keyboard map.
@@ -21,6 +21,7 @@ export component Modal inherits Rectangle {
         // Clicks on the card stay on it.
         TouchArea { }
         @children
+        FocusRing { shown: Focus.mode == "modal" || Focus.mode == "launch"; }
     }
 }
 

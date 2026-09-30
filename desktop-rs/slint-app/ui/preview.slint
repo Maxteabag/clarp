@@ -1,5 +1,5 @@
 import { Button } from "std-widgets.slint";
-import { Palette } from "theme.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
 import { Modal } from "dialogs.slint";
 
 export struct PreviewVersion {
@@ -55,9 +55,7 @@ export component PreviewPanel inherits Modal {
                 for version[index] in root.versions: Rectangle {
                     height: 34px;
                     border-radius: 3px;
-                    background: Palette.border;
-                    border-width: index == root.current && keys.has-focus ? 1px : 0px;
-                    border-color: Palette.accent;
+                    background: index == root.current && keys.has-focus ? Focus.cursor : Palette.border;
                     opacity: root.busy || !root.can-restart ? 0.5 : 1;
                     Text { x: 10px; text: version.label; color: Palette.text; vertical-alignment: center; }
                     TouchArea {

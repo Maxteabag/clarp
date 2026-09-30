@@ -1,5 +1,5 @@
 import { LineEdit, ListView } from "std-widgets.slint";
-import { Palette } from "theme.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
 
 export struct SwitcherRow {
     kind: string,
@@ -103,6 +103,7 @@ export component Switcher inherits Rectangle {
                 }
             }
         }
+        FocusRing { shown: Focus.mode == "modal"; }
     }
     // Keep the chosen row in view as Up/Down move it.
     changed current => {
