@@ -8,6 +8,8 @@
 //! [`Engine::pump`] on its own thread, which applies them and returns what
 //! changed. No toolkit type crosses into the engine.
 
+pub mod blocks;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -284,6 +286,20 @@ impl Engine {
     pub fn muted(&self) -> bool {
         self.muted
     }
+    /// The reading theme's id, remembered (C++ `setReadingTheme`).
+    pub fn reading_theme(&self) -> String {
+        clarp_core::reading_theme::normalized_theme_id(
+            &self.settings.string("appearance/readingTheme", clarp_core::reading_theme::default_theme_id()),
+        )
+    }
+    pub fn set_reading_theme(&mut self, id: &str) {
+        let id = clarp_core::reading_theme::normalized_theme_id(id);
+        if id != self.reading_theme() {
+            self.settings.set("appearance/readingTheme", id);
+            self.changes.push(Change::Preferences);
+        }
+    }
+
     /// Voice replies on or off, remembered (C++ `setMuted`).
     pub fn set_muted(&mut self, muted: bool) {
         if self.muted != muted {

@@ -147,3 +147,17 @@ fn pair_rooms_load_unread_and_are_read_once_opened() {
     d.until("room opened and read", |e| e.unread_rooms() == 0 && e.conversation("pair:a1:a2").is_some_and(|c| !c.rows().is_empty()));
     assert!(host.requests("POST", "/select").iter().all(|r| r["body"]["session"] != "pair:a1:a2"), "a room takes no Host focus");
 }
+
+#[test]
+fn preferences_are_remembered() {
+    let mut d = Driver::new("http://127.0.0.1:9");
+    assert_eq!(d.engine.reading_theme(), "terminal");
+    d.engine.set_reading_theme("paper");
+    d.engine.set_muted(true);
+    let changes = d.engine.pump();
+    assert!(changes.contains(&Change::Preferences));
+    assert_eq!((d.engine.reading_theme().as_str(), d.engine.muted()), ("paper", true));
+    assert_eq!(d.engine.settings().string("appearance/readingTheme", ""), "paper");
+    d.engine.set_reading_theme("no-such-theme");
+    assert_eq!(d.engine.reading_theme(), "terminal", "an unknown theme falls back to the default");
+}

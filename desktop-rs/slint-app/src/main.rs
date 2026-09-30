@@ -91,6 +91,9 @@ pub fn apply_theme(window: &AppWindow, id: &str) {
             None => {}
         }
     }
+    // The standard widgets follow the theme's light or dark scheme.
+    let light = theme.get("light").and_then(|v| v.as_bool()).unwrap_or(false);
+    window.global::<WidgetPalette>().set_color_scheme(if light { slint::language::ColorScheme::Light } else { slint::language::ColorScheme::Dark });
     if let Some(size) = theme.get("fontPixelSize").and_then(|v| v.as_f64()) {
         palette.set_body_size(size as f32);
     }
@@ -123,6 +126,68 @@ fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str) ->
         unread: row.unread,
         muted: row.muted,
         selected: row.session == selected,
+    }
+}
+
+/// Inline Markdown as Slint styled text; plain text if Slint cannot parse it.
+fn styled(markdown: &str, literal: bool) -> slint::StyledText {
+    if literal {
+        return slint::StyledText::from_plain_text(markdown);
+    }
+    slint::StyledText::from_markdown(markdown).unwrap_or_else(|_| slint::StyledText::from_plain_text(markdown))
+}
+
+fn message_block(block: &clarp_engine::blocks::Block, literal: bool) -> MessageBlock {
+    use clarp_engine::blocks::Block;
+    let empty = || ModelRc::new(VecModel::<TableRow>::default());
+    match block {
+        Block::Prose(markdown) => MessageBlock { kind: "prose".into(), styled: styled(markdown, literal), text: SharedString::new(), level: 0, rows: empty() },
+        Block::Heading { level, markdown } => MessageBlock {
+            kind: "heading".into(),
+            styled: styled(&format!("**{markdown}**"), false),
+            text: SharedString::new(),
+            level: i32::from(*level),
+            rows: empty(),
+        },
+        Block::Code { text, .. } => MessageBlock { kind: "code".into(), styled: slint::StyledText::default(), text: text.clone().into(), level: 0, rows: empty() },
+        Block::Quote(markdown) => MessageBlock { kind: "quote".into(), styled: styled(markdown, false), text: SharedString::new(), level: 0, rows: empty() },
+        Block::Table(rows) => MessageBlock {
+            kind: "table".into(),
+            styled: slint::StyledText::default(),
+            text: SharedString::new(),
+            level: 0,
+            rows: ModelRc::new(VecModel::from(
+                rows.iter()
+                    .enumerate()
+                    .map(|(index, cells)| TableRow {
+                        cells: ModelRc::new(VecModel::from(cells.iter().map(|c| styled(c, false)).collect::<Vec<_>>())),
+                        header: index == 0,
+                    })
+                    .collect::<Vec<_>>(),
+            )),
+        },
+        Block::Rule => MessageBlock { kind: "rule".into(), styled: slint::StyledText::default(), text: SharedString::new(), level: 0, rows: empty() },
+    }
+}
+
+/// Only web and mail links open, in the desktop's browser; tests record
+/// them to `CLARP_TEST_OPEN_URL` instead.
+fn open_link(url: &str) {
+    let openable = url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:");
+    if !openable {
+        eprintln!("clarp-slint: not opening {url}: only web and mail links open");
+        return;
+    }
+    if let Some(path) = std::env::var_os("CLARP_TEST_OPEN_URL") {
+        use std::io::Write;
+        let written = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| writeln!(f, "{url}"));
+        if let Err(error) = written {
+            eprintln!("clarp-slint: could not record {url}: {error}");
+        }
+        return;
+    }
+    if let Err(error) = std::process::Command::new("xdg-open").arg(url).spawn() {
+        eprintln!("clarp-slint: could not open {url}: {error}");
     }
 }
 
@@ -169,6 +234,9 @@ impl App {
     fn refresh(&self, changes: &[Change]) {
         let Some(window) = self.window.upgrade() else { return };
         let engine = self.engine.borrow();
+        if changes.contains(&Change::Preferences) {
+            apply_theme(&window, &engine.reading_theme());
+        }
         let selected = engine.selected_session().to_owned();
         let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive));
         if list_changed {
@@ -208,7 +276,16 @@ impl App {
                             let author = if m.activity { "activity" } else if m.role == "user" { "user" } else { "assistant" };
                             let text = if m.display_text.is_empty() { m.text.clone() } else { m.display_text.clone() };
                             let meta = if m.tools.is_empty() { String::new() } else { format!("{} tool call{}", m.tools.len(), if m.tools.len() == 1 { "" } else { "s" }) };
-                            MessageRow { id: m.id.clone().into(), author: author.into(), text: text.into(), meta: meta.into(), pending: m.pending, failed: m.delivery_failed }
+                            // The user's own words stay literal; replies are Markdown.
+                            let blocks = if author == "user" { vec![clarp_engine::blocks::Block::Prose(text.clone())] } else { clarp_engine::blocks::blocks(&text) };
+                            MessageRow {
+                                id: m.id.clone().into(),
+                                author: author.into(),
+                                blocks: ModelRc::new(VecModel::from(blocks.iter().map(|b| message_block(b, author == "user")).collect::<Vec<_>>())),
+                                meta: meta.into(),
+                                pending: m.pending,
+                                failed: m.delivery_failed,
+                            }
                         })
                         .collect()
                 })
@@ -246,7 +323,9 @@ pub fn pump() {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let e2e_out = args.iter().position(|a| a == "--e2e-out").and_then(|i| args.get(i + 1)).cloned();
-    let headless = e2e_out.is_some() || args.iter().any(|a| a == "--headless");
+    let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+    let shot = arg("--shot");
+    let headless = e2e_out.is_some() || shot.is_some() || args.iter().any(|a| a == "--headless");
     if headless && let Err(error) = headless::install(1280, 800, 1.0) {
         eprintln!("clarp-slint: {error}");
         std::process::exit(1);
@@ -259,7 +338,11 @@ fn main() {
         }
     };
     let settings = settings();
-    apply_theme(&window, &settings.string("appearance/readingTheme", clarp_core::reading_theme::default_theme_id()));
+    let theme = std::env::args()
+        .skip_while(|a| a != "--theme")
+        .nth(1)
+        .unwrap_or_else(|| settings.string("appearance/readingTheme", clarp_core::reading_theme::default_theme_id()));
+    apply_theme(&window, &theme);
     let engine = match Engine::new(Config::from_env(settings), || {
         if let Err(error) = slint::invoke_from_event_loop(pump) {
             eprintln!("clarp-slint: dropped an engine wake: {error}");
@@ -319,6 +402,7 @@ fn main() {
             pump_now(&app);
         }
     });
+    window.on_link_clicked(|url| open_link(&url));
     window.on_dismiss_error(|| {
         if let Some(app) = app() {
             app.engine.borrow_mut().clear_error();
@@ -330,6 +414,8 @@ fn main() {
     drop(state);
     if let Some(out) = e2e_out {
         driver::start(out);
+    } else if let Some(path) = shot {
+        driver::start_shot(path, arg("--select").unwrap_or_default());
     }
     if let Err(error) = window.run() {
         eprintln!("clarp-slint: {error}");

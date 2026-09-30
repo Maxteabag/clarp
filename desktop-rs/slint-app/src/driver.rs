@@ -169,3 +169,48 @@ fn step(out: &str) {
     }
     let _ = app.window.upgrade().map(|w| w.window().request_redraw());
 }
+
+/// `--shot PATH --select SESSION [--theme ID]`: once live, open SESSION,
+/// let it load and settle, save the window as PNG and quit.
+pub fn start_shot(path: String, session: String) {
+    let timer = slint::Timer::default();
+    let started = Instant::now();
+    let chosen = Cell::new(false);
+    let settled: Cell<Option<Instant>> = Cell::new(None);
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
+        let Some(app) = crate::app() else { return };
+        if started.elapsed() > Duration::from_secs(20) {
+            check(false, "timed out waiting to capture");
+            finish();
+            return;
+        }
+        let live = app.engine.borrow().connection_state() == "live";
+        if !live {
+            return;
+        }
+        if !chosen.get() {
+            chosen.set(true);
+            app.engine.borrow_mut().select(&session);
+            crate::pump();
+            return;
+        }
+        let loaded = app.engine.borrow().conversation(&session).is_some_and(|c| !c.loading() && !c.rows().is_empty());
+        if !loaded {
+            return;
+        }
+        let since = *settled.get().get_or_insert_with(Instant::now);
+        settled.set(Some(since));
+        if since.elapsed() < Duration::from_millis(600) {
+            return;
+        }
+        shot_to(&path);
+        TIMER.with(|t| t.borrow_mut().take());
+        finish();
+    });
+    TIMER.with(|t| *t.borrow_mut() = Some(timer));
+}
+
+fn shot_to(path: &str) {
+    let saved = headless::save_frame(path);
+    check(saved.is_ok(), &format!("captured {path} {}", saved.err().unwrap_or_default()));
+}

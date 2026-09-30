@@ -1,20 +1,110 @@
 import { Palette } from "theme.slint";
 
+export struct TableRow {
+    cells: [styled-text],
+    header: bool,
+}
+
+export struct MessageBlock {
+    // prose, heading, code, quote, table, rule
+    kind: string,
+    styled: styled-text,
+    text: string,
+    level: int,
+    rows: [TableRow],
+}
+
 export struct MessageRow {
     id: string,
     // user, assistant, activity
     author: string,
-    text: string,
+    blocks: [MessageBlock],
     meta: string,
     pending: bool,
     failed: bool,
 }
 
-// The transcript (TranscriptView/MessageDelegate in QML). Rows are plain
-// wrapped text for now; Markdown and tool cards follow.
+component Block inherits VerticalLayout {
+    in property <MessageBlock> block;
+    in property <length> body-size;
+    in property <brush> body-color;
+    callback link-clicked(string);
+    if root.block.kind == "prose": StyledText {
+        text: root.block.styled;
+        default-color: root.body-color;
+        default-font-size: root.body-size;
+        link-color: Palette.link;
+        link-clicked(url) => { root.link-clicked(url); }
+    }
+    if root.block.kind == "heading": StyledText {
+        text: root.block.styled;
+        default-color: Palette.chrome-text;
+        default-font-size: root.body-size * (root.block.level <= 1 ? 1.4 : root.block.level == 2 ? 1.25 : 1.1);
+        link-color: Palette.link;
+        link-clicked(url) => { root.link-clicked(url); }
+    }
+    if root.block.kind == "code": Rectangle {
+        background: Palette.sunken;
+        border-radius: 2px;
+        VerticalLayout {
+            padding: 10px;
+            Text {
+                text: root.block.text;
+                font-family: "JetBrains Mono";
+                font-size: root.body-size * 0.9;
+                color: Palette.text;
+                wrap: word-wrap;
+            }
+        }
+    }
+    if root.block.kind == "quote": HorizontalLayout {
+        spacing: 10px;
+        Rectangle { width: 3px; background: Palette.accent; }
+        StyledText {
+            text: root.block.styled;
+            default-color: Palette.muted;
+            default-font-size: root.body-size;
+            link-color: Palette.link;
+            link-clicked(url) => { root.link-clicked(url); }
+        }
+    }
+    if root.block.kind == "table": Rectangle {
+        border-width: 1px;
+        border-color: Palette.border;
+        VerticalLayout {
+            for table-row in root.block.rows: HorizontalLayout {
+                spacing: 0px;
+                for cell in table-row.cells: Rectangle {
+                    // Equal columns, so every row lines up: content never
+                    // decides a column's width.
+                    horizontal-stretch: 1;
+                    preferred-width: 0px;
+                    min-width: 0px;
+                    border-width: 1px;
+                    border-color: Palette.rule;
+                    background: table-row.header ? Palette.raised : transparent;
+                    VerticalLayout {
+                        padding: 6px;
+                        StyledText {
+                            text: cell;
+                            default-color: table-row.header ? Palette.chrome-text : root.body-color;
+                            default-font-size: root.body-size * 0.95;
+                            link-color: Palette.link;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if root.block.kind == "rule": Rectangle { height: 1px; background: Palette.rule; }
+}
+
+// The transcript (TranscriptView/MessageDelegate in QML): Markdown messages
+// as blocks, the user's in bubbles, activity lines muted.
 export component Transcript inherits Rectangle {
     in property <[MessageRow]> rows;
-    in property <bool> follow: true;
+    in-out property <bool> follow: true;
+    callback link-clicked(string);
     background: Palette.window;
     flick := Flickable {
         width: parent.width;
@@ -25,20 +115,19 @@ export component Transcript inherits Rectangle {
             padding: 16px;
             spacing: 14px;
             for row in root.rows: HorizontalLayout {
-                alignment: row.author == "user" ? end : start;
+                alignment: row.author == "user" ? end : stretch;
                 Rectangle {
                     background: row.author == "user" ? Palette.bubble : transparent;
                     border-radius: 2px;
-                    max-width: flick.width * 0.8;
+                    max-width: row.author == "user" ? flick.width * 0.75 : flick.width;
                     VerticalLayout {
                         padding: row.author == "user" ? 10px : 2px;
-                        spacing: 4px;
-                        Text {
-                            text: row.text;
-                            wrap: word-wrap;
-                            color: row.author == "activity" ? Palette.muted : Palette.text;
-                            font-size: row.author == "activity" ? 13px : Palette.body-size;
-                            font-italic: row.author == "activity";
+                        spacing: 8px;
+                        for block in row.blocks: Block {
+                            block: block;
+                            body-size: row.author == "activity" ? 13px : Palette.body-size;
+                            body-color: row.author == "activity" ? Palette.muted : Palette.text;
+                            link-clicked(url) => { root.link-clicked(url); }
                         }
                         if row.pending || row.failed || row.meta != "": Text {
                             text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.meta;
@@ -53,7 +142,7 @@ export component Transcript inherits Rectangle {
     }
     // Following keeps the end in view as rows arrive.
     changed rows => {
-        if (root.follow) { flick.content-y = Math.min(0px, flick.height - column.preferred-height); }
+        if (root.follow) { root.scroll-to-latest(); }
     }
     public function scroll-to-latest() {
         flick.content-y = Math.min(0px, flick.height - column.preferred-height);
