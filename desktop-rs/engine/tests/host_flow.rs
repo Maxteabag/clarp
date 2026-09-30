@@ -63,7 +63,7 @@ impl Driver {
     fn new(base: &str) -> Self {
         let woken = Arc::new((Mutex::new(false), Condvar::new()));
         let signal = woken.clone();
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: None };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: None, keyring: false };
         let engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
             *flag.lock().unwrap() = true;
@@ -169,7 +169,7 @@ fn drafts_and_attachments_belong_to_the_chat_and_survive_a_restart() {
     let driver = |base: &str| {
         let mut d = Driver::new(base);
         let settings = Settings::at(file.clone());
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None, keyring: false };
         let signal = d.woken.clone();
         d.engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
@@ -228,7 +228,7 @@ fn panes_follow_the_selection_and_their_layout_is_restored() {
     let store = host.dir.join("workspaces.json");
     let driver = |base: &str| {
         let mut d = Driver::new(base);
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: Some(store.clone()) };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: Some(store.clone()), keyring: false };
         let signal = d.woken.clone();
         d.engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
@@ -260,4 +260,29 @@ fn panes_follow_the_selection_and_their_layout_is_restored() {
     d.engine.start();
     d.until("both panes load", |e| e.conversation("mike").is_some_and(|c| !c.rows().is_empty()) && e.selected_session() == "mike");
     assert!(d.engine.panes().pane_layout().iter().all(|p| p["session"] == "mike"), "{:?}", d.engine.panes().pane_layout());
+}
+
+#[test]
+fn connecting_pairing_and_forgetting_a_host() {
+    let host = Host::start("connection");
+    let mut d = Driver::new("http://127.0.0.1:9");
+    d.engine.connect_to_server(&host.base, "wrong-token");
+    d.until("refused", |e| e.connection_state() == "unauthorized");
+    d.engine.connect_to_server(&host.base, "probe-token");
+    d.until("live", |e| e.connection_state() == "live" && e.roster().agents().len() == 2);
+    assert_eq!(d.engine.settings().string("connection/baseUrl", ""), clarp_core::settings::normalized_base_url(&host.base));
+
+    d.engine.pair_device(&host.base, "999999");
+    d.until("pairing refused", |e| e.connection_state() == "offline" && e.error().contains("pairing code expired"));
+    d.engine.pair_device(&host.base, "123456");
+    d.until("paired and live", |e| e.connection_state() == "live");
+    let exchange = host.requests("POST", "/pairing/exchange").pop().unwrap();
+    assert_eq!(exchange["body"]["device_name"], "Clarp desktop");
+    let info = host.requests("GET", "/server-info");
+    assert!(info.last().is_some_and(|r| r["authorization"] == "Bearer cld_probe_paired_device"), "the paired token is used: {info:?}");
+    assert!(!d.engine.has_stored_credential(), "with the keyring off nothing is stored");
+
+    d.engine.forget_credential();
+    d.changes.extend(d.engine.pump());
+    assert_eq!(d.engine.connection_state(), "offline");
 }

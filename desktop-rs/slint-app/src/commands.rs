@@ -93,6 +93,10 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "switcher" => open_switcher(app, window),
         "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
         "escape" if !app.overlay.borrow().is_empty() => close_overlay(app, window),
+        "connection" => {
+            open_overlay(app, window, "connection");
+            window.invoke_open_connection_page();
+        }
         "edit-keymap" => {
             window.set_keymap_actions(ModelRc::new(VecModel::from(keymap::EDITABLE.iter().map(|a| slint::SharedString::from(*a)).collect::<Vec<_>>())));
             window.set_keymap_error("".into());

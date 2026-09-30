@@ -7,7 +7,7 @@ import { MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
-import { KeymapEditor } from "dialogs.slint";
+import { KeymapEditor, ConnectionPage } from "dialogs.slint";
 
 export { Palette, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow }
 
@@ -134,6 +134,14 @@ export component AppWindow inherits Window {
     callback keymap-reset();
     callback overlay-closed();
     public function open-keymap() { keymap.open(); }
+    in property <string> base-url;
+    in property <bool> connecting;
+    in property <bool> stored-credential;
+    in property <bool> has-agents;
+    callback connect-host(string, string);
+    callback pair-host(string, string);
+    callback forget-host();
+    public function open-connection-page() { connection-page.open(); }
     in property <bool> switcher-open;
     in property <[SwitcherRow]> switcher-rows;
     in property <int> switcher-current;
@@ -164,6 +172,8 @@ export component AppWindow inherits Window {
                 select-surface(surface) => { root.surface-chosen(surface); }
                 toggle-muted => { root.toggle-muted(); }
                 open-switcher => { root.open-switcher(); }
+                open-connection => { root.run-command("connection"); }
+                live: root.connection == "live";
             }
             sidebar := Sidebar {
                 visible: root.sidebar-visible;
@@ -256,6 +266,21 @@ export component AppWindow inherits Window {
                     hints: root.hints;
                 }
             }
+        }
+        connection-page := ConnectionPage {
+            visible: root.overlay == "connection";
+            width: parent.width;
+            height: parent.height;
+            base-url: root.base-url;
+            state: root.connection;
+            error: root.error;
+            connecting: root.connecting;
+            can-cancel: root.has-agents;
+            stored: root.stored-credential;
+            connect(url, token) => { root.connect-host(url, token); }
+            pair(url, code) => { root.pair-host(url, code); }
+            forget => { root.forget-host(); }
+            cancel => { root.overlay-closed(); }
         }
         keymap := KeymapEditor {
             visible: root.overlay == "keymap";

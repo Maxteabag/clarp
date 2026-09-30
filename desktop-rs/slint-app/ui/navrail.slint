@@ -39,6 +39,8 @@ export component NavRail inherits Rectangle {
     callback select-surface(string);
     callback open-switcher();
     callback toggle-muted();
+    callback open-connection();
+    in property <bool> live: true;
     width: 56px;
     background: Palette.sunken;
     VerticalLayout {
@@ -69,9 +71,12 @@ export component NavRail inherits Rectangle {
                 height: 30px;
                 border-radius: 15px;
                 border-width: 1px;
-                border-color: Palette.success;
+                border-color: root.live ? Palette.success : Palette.warning;
                 Text { text: root.server-initial; color: Palette.chrome-text; font-size: 13px; }
             }
+            accessible-role: button;
+            accessible-label: "Host connection";
+            TouchArea { clicked => { root.open-connection(); } }
         }
     }
 }

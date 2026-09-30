@@ -76,3 +76,87 @@ export component KeymapEditor inherits Modal {
         }
     }
 }
+
+// ConnectionPage.qml: the Host's address and a token, or a one-time pairing
+// code; the device token then stays in the keyring.
+export component ConnectionPage inherits Modal {
+    in property <string> base-url;
+    in property <string> state;
+    in property <string> error;
+    in property <bool> connecting;
+    in property <bool> can-cancel;
+    in property <bool> stored;
+    callback connect(string, string);
+    callback pair(string, string);
+    callback forget();
+    callback cancel();
+    public function open() {
+        server.text = root.base-url;
+        token.text = "";
+        code.text = "";
+        server.focus();
+    }
+    card-width: 520px;
+    card-height: 470px;
+    dismissed => { if (root.can-cancel) { root.cancel(); } }
+    VerticalLayout {
+        padding: 28px;
+        spacing: 14px;
+        Text { text: "Connect to Clarp"; color: Palette.text; font-size: 17px; font-weight: 600; }
+        Text {
+            text: "The native client connects directly to the Clarp server. Credentials remain outside the UI after this session.";
+            color: Palette.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+        server := LineEdit { placeholder-text: "http://127.0.0.1:7682"; accessible-label: "Server"; }
+        token := LineEdit {
+            placeholder-text: "Device or administrator token";
+            input-type: password;
+            accessible-label: "Token";
+            accepted => { root.connect(server.text, token.text); }
+        }
+        Rectangle { height: 1px; background: Palette.border; }
+        Text { text: "Or pair with a one-time code from clarp-admin pair create"; color: Palette.muted; font-size: 11px; }
+        HorizontalLayout {
+            spacing: 8px;
+            code := LineEdit {
+                placeholder-text: "clp_…";
+                input-type: password;
+                accessible-label: "Pairing code";
+                accepted => { root.pair(server.text, code.text); }
+            }
+            Button {
+                text: "Pair";
+                enabled: code.text != "" && !root.connecting;
+                clicked => { root.pair(server.text, code.text); }
+            }
+        }
+        if root.error != "": Text { text: root.error; color: Palette.danger; font-size: 11px; wrap: word-wrap; }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                width: pill.preferred-width + 16px;
+                height: 24px;
+                y: 4px;
+                border-radius: 12px;
+                background: root.state == "live" ? Palette.success.with-alpha(0.2) : Palette.warning.with-alpha(0.2);
+                pill := Text { text: root.state; color: root.state == "live" ? Palette.success : Palette.warning; font-size: 11px; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if root.can-cancel: Button { text: "Cancel"; clicked => { root.cancel(); } }
+            if root.stored: Button {
+                text: "Forget device token";
+                enabled: !root.connecting;
+                clicked => { token.text = ""; code.text = ""; root.forget(); }
+            }
+            Button {
+                text: root.connecting ? "Connecting…" : "Connect";
+                primary: true;
+                enabled: !root.connecting;
+                clicked => { root.connect(server.text, token.text); }
+            }
+        }
+    }
+}
