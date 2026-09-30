@@ -140,3 +140,21 @@ def test_unknown_or_deleted_participants_are_missing(tmp_path):
     agents_db.soft_delete(cpp)
     assert agent_conversations.list_conversations() == []
     assert agent_conversations.load_timeline(agent_conversations.conversation_id(hugo, cpp))["missing"] is True
+
+
+def test_newest_row_per_room_seeks_instead_of_scanning_every_pair(tmp_path):
+    hugo, cpp = _pair(tmp_path)
+    _send(cpp, hugo, "Status: survey done", client_id="c1")
+    captured: list[str] = []
+    connection = agents_db.conn()
+    connection.set_trace_callback(captured.append)
+    try:
+        agent_conversations._list_conversations_uncached(10)
+    finally:
+        connection.set_trace_callback(None)
+    listing = next(sql for sql in captured if "WITH pair_rows AS" in sql)
+    plan = [row[3] for row in connection.execute("EXPLAIN QUERY PLAN " + listing)]
+    newest = plan[next(i for i, step in enumerate(plan) if "CORRELATED SCALAR SUBQUERY" in step):]
+    # One full index scan per room made the sidebar list O(rooms x pair rows).
+    assert not any(step.startswith("SCAN m ") for step in newest), plan
+    assert sum("SEARCH m USING INDEX idx_messages_pair_summary" in step for step in newest) == 2

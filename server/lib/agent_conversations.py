@@ -139,9 +139,9 @@ def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
     Aggregates, the newest row per pair and all participants resolve in three
     statements. A per-room query loop cost ~1.8 s on a real transcript store,
     which the sidebar waited on before it could show the section at all.
-    The scan still costs ~0.4 s over ~100k pair rows, so the result is kept per
-    limit until the next committed write; every client poll between writes
-    answers from memory.
+    The whole projection is ~30 ms over ~22k pair rows; the result is still
+    kept per limit until the next committed write so polls between writes
+    answer from memory.
     """
     limit = max(1, min(int(limit), 1000))
     result = _LIST_CACHE.get_or_compute(
@@ -152,10 +152,13 @@ def list_conversations(limit: int = 200) -> list[dict[str, Any]]:
 def _list_conversations_uncached(limit: int) -> list[dict[str, Any]]:
     # The aggregate reads only idx_messages_pair_summary (agent, sender, role,
     # revision, timestamp, seq): no table rows, no text. The newest row per
-    # pair is then one indexed lookup per room rather than a window function
-    # over every pair message. INDEXED BY is deliberate: left to itself the
-    # planner walks the dashboard index and reads every row's text, which is
-    # 16 s on a cold page cache against 0.9 s here (65 ms warm).
+    # pair is then two indexed seeks per room (one per direction) rather than
+    # a window function over every pair message. Keep them as a UNION ALL: an
+    # `(a AND b) OR (b AND a)` predicate cannot seek, so each room scanned the
+    # whole index (164 rooms x 22k rows: 0.4-0.9 s against 28 ms).
+    # INDEXED BY is deliberate: left to itself the planner walks the dashboard
+    # index and reads every row's text, which is 16 s on a cold page cache
+    # against 0.9 s here (65 ms warm).
     rows = conn().execute(f"""
         WITH pair_rows AS (
             SELECT m.role, m.revision, {_ACTIVITY} AS activity,
@@ -176,11 +179,18 @@ def _list_conversations_uncached(limit: int) -> list[dict[str, Any]]:
                r.message_id, r.agent_id, r.role, r.timestamp, r.text, r.revision, r.sender_agent_id
           FROM aggregated g
           JOIN messages r ON r.rowid = (
-               SELECT m.rowid FROM messages m INDEXED BY idx_messages_pair_summary
-                WHERE ((m.agent_id = g.low AND m.sender_agent_id = g.high)
-                    OR (m.agent_id = g.high AND m.sender_agent_id = g.low))
-                  AND {_PAIR_WHERE} AND m.role IN ('user', 'assistant')
-                ORDER BY COALESCE(m.timestamp, '') DESC, m.seq DESC LIMIT 1)
+               SELECT newest.rowid FROM (
+                   SELECT m.rowid AS rowid, m.timestamp, m.seq
+                     FROM messages m INDEXED BY idx_messages_pair_summary
+                    WHERE m.agent_id = g.low AND m.sender_agent_id = g.high
+                      AND {_PAIR_WHERE} AND m.role IN ('user', 'assistant')
+                   UNION ALL
+                   SELECT m.rowid AS rowid, m.timestamp, m.seq
+                     FROM messages m INDEXED BY idx_messages_pair_summary
+                    WHERE m.agent_id = g.high AND m.sender_agent_id = g.low
+                      AND {_PAIR_WHERE} AND m.role IN ('user', 'assistant')
+               ) AS newest
+               ORDER BY COALESCE(newest.timestamp, '') DESC, newest.seq DESC LIMIT 1)
          WHERE g.delivered = 1
          ORDER BY g.latest_activity DESC
          LIMIT ?""", (limit,)).fetchall()

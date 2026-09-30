@@ -637,7 +637,15 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def handle_one_request(self):
-        started = time.time()
+        # One Handler serves every request on a keep-alive connection, so
+        # `command`, `_status_code` and the request clock still hold the
+        # previous request here. When the idle connection finally closes,
+        # super() reads an empty line and never parses a request; logging off
+        # those leftovers emitted a phantom copy of the previous request timed
+        # across the idle wait (the "90 s maximum" on every path). Only a
+        # request that reached parse_request() this iteration is logged.
+        self._request_started_wall = None
+        self._status_code = 0
         self._request_started_monotonic = time.perf_counter()
         self._response_phases = {}
         from lib import diagnostics_settings
@@ -653,8 +661,9 @@ class Handler(BaseHTTPRequestHandler):
             # or runs out of FDs before that, neither attribute exists yet,
             # so use getattr to keep the finally-block from raising.
             code = getattr(self, "_status_code", 0) or 0
-            if getattr(self, "command", None):
-                self._log_http(code, getattr(self, "_request_started_wall", started))
+            started = getattr(self, "_request_started_wall", None)
+            if started is not None and getattr(self, "command", None):
+                self._log_http(code, started)
 
     def send_response(self, code, message=None):
         self._status_code = code

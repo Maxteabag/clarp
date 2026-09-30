@@ -2,7 +2,7 @@
 import json
 import pytest
 
-from lib import agents, db, message_store
+from lib import agents, db, message_previews, message_store
 from lib.snapshot import build_agent_snapshot
 
 
@@ -44,6 +44,8 @@ def test_idle_snapshot_query_count_does_not_grow_with_roster():
         for i in range(len(agents.list_agents()), count):
             agents.create_agent(persona=f'Person{i}', voice_id='', cwd='/tmp', session=f'p{i}')
         build_agent_snapshot(None)  # materialize initial persona/config state
+        # Budget the uncached revision walk; whether warm-up wrote must not decide it.
+        message_previews._REVISION_CACHE.reset()
         statements = []
         db.conn().set_trace_callback(statements.append)
         try:
@@ -285,3 +287,22 @@ def test_active_background_jobs_show_the_agent_as_background():
     background_jobs.finish('worker-a', generation=worker['generation'])
     row = next(r for r in build_agent_snapshot(None)['agents'] if r['agent_id'] == aid)
     assert row['status_text'] == 'Build'
+
+def test_dashboard_revision_map_is_reused_until_a_write():
+    aid = agents.create_agent(persona='Poller', voice_id='', cwd='/tmp', session='poller')
+    message_store.record_user_message(agent_id=aid, backend_session_id='b',
+                                      client_msg_id='first', text='first')
+    captured: list[str] = []
+    db.conn().set_trace_callback(captured.append)
+    try:
+        before = message_store.dashboard_messages()[aid]['revisions']['b']
+        message_store.dashboard_messages()
+        walks = sum('MAX(revision) AS revision' in sql for sql in captured)
+        message_store.record_user_message(agent_id=aid, backend_session_id='b',
+                                          client_msg_id='second', text='second')
+        after = message_store.dashboard_messages()[aid]['revisions']['b']
+    finally:
+        db.conn().set_trace_callback(None)
+    assert walks == 1
+    assert after > before
+    assert after == message_store.latest_revision(agent_id=aid, backend_session_id='b')

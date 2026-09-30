@@ -155,6 +155,10 @@ def _clear_transaction_owner(connection: sqlite3.Connection) -> None:
 def _report_database_locked(waiting_sql: object) -> None:
     """Log transaction owners to stderr without touching SQLite recursively."""
     global _LAST_LOCK_REPORT_AT
+    if getattr(_LOCAL, "busy_expected", False):
+        # A best_effort_write() gave up on purpose. Reporting it would also
+        # spend the shared throttle window and hide a real wait behind it.
+        return
     now = time.monotonic()
     waiting = _sql_template(waiting_sql)
     with _TRANSACTION_LOCK:
@@ -399,6 +403,30 @@ def busy_timeout(timeout_ms: int) -> Iterator[sqlite3.Connection]:
         yield connection
     finally:
         connection.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+
+
+def best_effort_write(sql: str, parameters=(), *, timeout_ms: int = 20) -> bool:
+    """Run one optional write, giving up after *timeout_ms* if the file is busy.
+
+    For bookkeeping a request must never queue behind a long writer for
+    (e.g. a device's last-seen stamp). Returns False when SQLite was busy;
+    that expected give-up is not reported as a lock wait.
+    """
+    connection = conn()
+    previous = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+    _LOCAL.busy_expected = True
+    try:
+        connection.execute(f"PRAGMA busy_timeout = {int(timeout_ms)}")
+        connection.execute(sql, parameters)
+        return True
+    except sqlite3.OperationalError as exc:
+        code = getattr(exc, "sqlite_errorcode", 0) & 0xff
+        if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise
+        return False
+    finally:
+        _LOCAL.busy_expected = False
+        connection.execute(f"PRAGMA busy_timeout = {previous}")
 
 
 _T = TypeVar("_T")
