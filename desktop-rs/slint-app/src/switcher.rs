@@ -135,6 +135,32 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
     rows
 }
 
+/// Every row of the settings page that does something, as commands, so
+/// Ctrl+K reaches all settings (`(kind, id, label, detail, on)` per row).
+/// Rows the list above already covers by hand are skipped.
+pub fn settings(rows: &[(String, String, String, String, bool)]) -> Vec<Item> {
+    const COVERED: &[&str] =
+        &["timestamps", "show-when-ready", "workspace-bar", "shared-filesystem", "activity", "tool-detail", "reading-theme", "spoken-replies", "narration", "connection", "orchestrator"];
+    let keywords = "setting settings preference option";
+    let mut items = Vec::new();
+    for (kind, id, label, detail, on) in rows {
+        if id.is_empty() || COVERED.contains(&id.as_str()) {
+            continue;
+        }
+        let target = |delta: i32| format!("settingrow:{id}:{delta}");
+        match kind.as_str() {
+            "toggle" => items.push(Item { keywords, ..toggle(*on, label, &target(1), "", "") }),
+            "choice" => {
+                items.push(Item { detail: detail.clone(), keywords, ..command(&format!("{label}: next (now {detail})"), &target(1), "", "settings", "") });
+                items.push(Item { detail: detail.clone(), keywords, ..command(&format!("{label}: previous"), &target(-1), "", "settings", "") });
+            }
+            "action" => items.push(Item { detail: detail.clone(), keywords, ..command(label, &target(1), "", "settings", "") }),
+            _ => {}
+        }
+    }
+    items
+}
+
 /// Agents matching `query`, best first (C++ `matchingAgents`).
 pub fn agents(engine: &Engine, query: &str) -> Vec<Item> {
     let needle = query.trim().to_lowercase();
@@ -187,14 +213,16 @@ pub fn contacts(engine: &Engine, query: &str) -> Vec<Item> {
         .collect()
 }
 
-/// The switcher's rows for `query`; `contacts_only` lists idle contacts only.
-pub fn results(engine: &Engine, query: &str, toggles: Toggles, contacts_only: bool) -> Vec<Item> {
+/// The switcher's rows for `query`; `contacts_only` lists idle contacts only;
+/// `settings` are the settings page's rows as commands.
+pub fn results(engine: &Engine, query: &str, toggles: Toggles, contacts_only: bool, settings: Vec<Item>) -> Vec<Item> {
     if contacts_only {
         return contacts(engine, query);
     }
     let terms: Vec<String> = query.trim().to_lowercase().split_whitespace().map(str::to_owned).collect();
     let commands: Vec<Item> = commands(toggles, &engine.reading_theme())
         .into_iter()
+        .chain(settings)
         .filter(|c| {
             let searchable = format!("{} {} {} {}", c.label, c.group, c.key, c.keywords).to_lowercase();
             terms.iter().all(|term| searchable.contains(term))
@@ -236,6 +264,21 @@ mod tests {
         let split: Vec<_> = rows.iter().filter(|c| keep(c, &["split", "right"])).collect();
         assert_eq!(split.len(), 1);
         assert_eq!(split[0].target, "split-right");
+    }
+
+    #[test]
+    fn every_settings_row_becomes_a_command() {
+        let row = |kind: &str, id: &str, label: &str, on: bool| (kind.to_owned(), id.to_owned(), label.to_owned(), "Kokoro".to_owned(), on);
+        let items = settings(&[
+            row("section", "", "APPEARANCE", false),
+            row("toggle", "minimal-ui", "Minimal UI", false),
+            row("toggle", "timestamps", "Timestamps", true),
+            row("choice", "voice-provider", "Voice provider", false),
+            row("info", "", "Host version", false),
+        ]);
+        let targets: Vec<&str> = items.iter().map(|i| i.target.as_str()).collect();
+        assert_eq!(targets, ["settingrow:minimal-ui:1", "settingrow:voice-provider:1", "settingrow:voice-provider:-1"], "sections, info and hand-covered rows are left out");
+        assert_eq!(items[0].label, "Off → On · Minimal UI");
     }
 
     #[test]

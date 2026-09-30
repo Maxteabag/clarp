@@ -301,6 +301,12 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
                 app.engine.borrow_mut().set_narrator_detail_level(level);
             }
         }
+        _ if action.starts_with("settingrow:") => {
+            let rest = action.trim_start_matches("settingrow:");
+            if let Some((id, delta)) = rest.rsplit_once(':') {
+                crate::settings_view::change(app, window, id, delta.parse().unwrap_or(1));
+            }
+        }
         _ if action.starts_with("setting:") => apply_setting(app, window, action),
         "settings" => crate::settings_view::open(app, window),
         "ui-larger" | "ui-smaller" | "ui-reset" => {
@@ -377,7 +383,11 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     }
     let toggles = toggles(app, window);
     let (query, contacts_only) = (app.switcher.borrow().query.clone(), app.switcher.borrow().contacts_only);
-    let items = switcher::results(&app.engine.borrow(), &query, toggles, contacts_only);
+    let settings: Vec<(String, String, String, String, bool)> = crate::settings_view::rows(app)
+        .into_iter()
+        .map(|r| (r.kind.to_string(), r.id.to_string(), r.label.to_string(), r.detail.to_string(), r.on))
+        .collect();
+    let items = switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings));
     let mut state = app.switcher.borrow_mut();
     let current = switcher::keep_selection(&items, &state.selected);
     state.selected = usize::try_from(current).ok().and_then(|i| items.get(i)).map(switcher::Item::key_of).unwrap_or_default();
