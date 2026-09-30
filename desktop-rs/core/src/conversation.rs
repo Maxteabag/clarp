@@ -250,7 +250,11 @@ impl Conversation {
             self.latest_revision = revision;
             self.emit(Signal::LatestRevisionChanged);
         }
-        let more = json::boolean(response, "has_more");
+        // `has_more` says whether older history exists only on a full or
+        // older page. On a delta the Host uses it for a backlog of newer rows
+        // beyond the limit, so a delta never changes it (the C++ client let a
+        // delta that arrived just after opening a long chat hide "load older").
+        let more = if kind == LoadKind::Delta { self.has_more } else { json::boolean(response, "has_more") };
         if self.has_more != more {
             self.has_more = more;
             self.emit(Signal::HasMoreChanged);
