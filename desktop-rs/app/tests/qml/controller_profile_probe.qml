@@ -13,6 +13,15 @@ Window {
     function check(ok, what) {
         if (!ok) { failures++; console.log("FAIL " + what) } else console.log("ok   " + what)
     }
+    function hostPosts(path) {
+        let log = ""
+        for (const arg of Qt.application.arguments)
+            if (arg.startsWith("--probe-host-log=")) log = arg.substring(17)
+        const xhr = new XMLHttpRequest()
+        xhr.open("GET", "file://" + log, false)
+        xhr.send()
+        return xhr.responseText.split("\n").filter(l => l).map(l => JSON.parse(l)).filter(r => r.path === path && r.method === "POST").map(r => r.body)
+    }
     function finish() {
         console.log(failures === 0 ? "PROBE_PASS" : "PROBE_FAIL " + failures)
         Qt.exit(failures === 0 ? 0 : 1)
@@ -57,6 +66,7 @@ Window {
             stage = 5
         } else if (stage === 5 && !app.voicesLoading && app.voices.count === 2) {
             check(app.voiceBio === "Warm and clear", "voice bio")
+            app.chooseVoice("rachel", "v2")
             app.loadOrchestrator()
             stage = 6
         } else if (stage === 6 && !app.orchestratorLoading && app.orchestratorLastDecision !== "") {
@@ -66,6 +76,8 @@ Window {
         } else if (stage === 7 && !app.orchestratorLoading && app.orchestratorSettings.enabled === true) {
             check(app.orchestratorSettings.provider === "openai" && app.orchestratorSettings.timeout_ms === 250, "defaults and clamps")
             check(app.orchestratorLastDecision === "No decisions logged yet.", "empty decision log")
+            const chosen = hostPosts("/agent-voice")
+            check(chosen.length === 1 && chosen[0].session === "rachel" && chosen[0].voice_id === "v2", "choosing a voice reaches the Host: " + JSON.stringify(chosen))
             ticker.stop()
             finish()
         }

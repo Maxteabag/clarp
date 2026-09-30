@@ -92,6 +92,9 @@ pub mod qobject {
         #[qproperty(u64, agent_revision, cxx_name = "agentRevision", READ = agent_revision_value, NOTIFY = agent_revision_changed)]
         #[qproperty(u64, process_revision, cxx_name = "processRevision", READ = process_revision_value, NOTIFY = process_revision_changed)]
         #[qproperty(QJsonArray, attention_items, cxx_name = "attentionItems", READ = attention_items_value, NOTIFY = updates_changed)]
+        /// MCP servers the Host offers new agents (the Start Agent dialog and
+        /// profile panel pick from these).
+        #[qproperty(QJsonArray, available_mcp_servers, cxx_name = "availableMcpServers", READ = available_mcp_servers_value, NOTIFY = agent_revision_changed)]
         #[qproperty(QJsonArray, background_jobs, cxx_name = "backgroundJobs", READ = background_jobs_value, NOTIFY = updates_changed)]
         #[qproperty(QJsonArray, update_artifacts, cxx_name = "updateArtifacts", READ = update_artifacts_value, NOTIFY = updates_changed)]
         #[qproperty(bool, updates_loading, cxx_name = "updatesLoading", READ = updates_loading_value, NOTIFY = updates_changed)]
@@ -197,6 +200,7 @@ pub mod qobject {
         fn agent_revision_value(self: &AppController) -> u64;
         fn process_revision_value(self: &AppController) -> u64;
         fn attention_items_value(self: &AppController) -> QJsonArray;
+        fn available_mcp_servers_value(self: &AppController) -> QJsonArray;
         fn background_jobs_value(self: &AppController) -> QJsonArray;
         fn update_artifacts_value(self: &AppController) -> QJsonArray;
         fn updates_loading_value(self: &AppController) -> bool;
@@ -945,6 +949,7 @@ pub struct AppControllerRust {
     updates_error: String,
     pending_update_actions: HashSet<String>,
     model_catalog: Object,
+    available_mcp_servers: Vec<Value>,
     starting_contact: String,
     starting_backend: String,
     last_working_directory: String,
@@ -1343,6 +1348,9 @@ impl AppController {
     fn process_revision_value(&self) -> u64 {
         self.process_revision
     }
+    fn available_mcp_servers_value(&self) -> cxx_qt_lib::QJsonArray {
+        crate::qjson::to_qjson_array(&self.available_mcp_servers)
+    }
     fn attention_items_value(&self) -> cxx_qt_lib::QJsonArray {
         crate::qjson::to_qjson_array(&self.attention_items)
     }
@@ -1660,6 +1668,7 @@ impl AppController {
         self.as_mut().rust_mut().base_url = normalized.clone();
         self.as_mut().rust_mut().server_name.clear();
         self.as_mut().rust_mut().server_version.clear();
+        self.as_mut().rust_mut().available_mcp_servers.clear();
         let empty = serde_json::Map::from_iter([("agents".to_owned(), Value::Array(Vec::new()))]);
         if let Some(agents) = self.as_mut().agents_mut() {
             agents.mutate(|core| core.apply_snapshot(&empty));
@@ -2037,6 +2046,8 @@ impl AppController {
     }
 
     fn apply_snapshot(mut self: Pin<&mut Self>, object: &Object) {
+        self.as_mut().rust_mut().available_mcp_servers =
+            object.get("available_mcp_servers").and_then(Value::as_array).cloned().unwrap_or_default();
         if let Some(agents) = self.as_mut().agents_mut() {
             agents.mutate(|core| core.apply_snapshot(object));
         }
@@ -4520,7 +4531,8 @@ impl AppController {
         self.as_mut().rust_mut().starting_backend = backend.to_owned();
         self.as_mut().contact_launch_changed();
         body["cwd"] = json!(self.launch_directory_or_home());
-        body["synthesize_audio"] = json!(false);
+        // A resumed native session only reopens; a new agent speaks unless muted.
+        body["synthesize_audio"] = json!(starting != "resume" && !self.muted_pub());
         if let Some(api) = self.api.as_ref() {
             api.post_json("contact-create", "/agents", body, None);
         }
@@ -4595,7 +4607,7 @@ impl AppController {
             return;
         }
         let mut body = Self::with_llm(
-            json!({"name": name, "session": name.to_lowercase(), "cwd": directory, "backend": backend, "synthesize_audio": false}),
+            json!({"name": name, "session": name.to_lowercase(), "cwd": directory, "backend": backend, "synthesize_audio": !self.muted_pub()}),
             &model.to_string(), &effort.to_string(),
         );
         // MCP servers are chosen by name.

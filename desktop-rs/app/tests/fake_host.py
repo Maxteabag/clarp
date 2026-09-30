@@ -136,7 +136,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp"})
         if url.path == "/agents/snapshot":
             with state_lock:
-                return self.reply(200, {"agents": agents, "personas": [{"id": "p", "name": "Paula"}]})
+                return self.reply(200, {"agents": agents, "personas": [{"id": "p", "name": "Paula"}],
+                                        "available_mcp_servers": [{"name": "github", "description": "GitHub"}]})
         if url.path == "/teams":
             with state_lock:
                 return self.reply(200, {"teams": teams})
