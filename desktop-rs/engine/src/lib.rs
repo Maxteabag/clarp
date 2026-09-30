@@ -10,6 +10,7 @@
 
 pub mod blocks;
 mod composer;
+mod connection;
 mod host_status;
 pub mod workspace;
 
@@ -68,6 +69,8 @@ enum Message {
     DeliveryDue { client_id: String, token: u64 },
     DraftsDue(u64),
     PanesWritten(clarp_core::panes::WriteResult),
+    CredentialStored { base: String, result: Result<(), String> },
+    CredentialRemoved { base: String, result: Result<(), String> },
 }
 
 pub struct Config {
@@ -78,6 +81,8 @@ pub struct Config {
     pub settings: Settings,
     /// Where the pane layout is saved; None keeps it in memory.
     pub workspace_store: Option<std::path::PathBuf>,
+    /// Device tokens may be read from and kept in the Secret Service.
+    pub keyring: bool,
 }
 
 impl Config {
@@ -87,7 +92,8 @@ impl Config {
         let saved = settings.string("connection/baseUrl", "http://127.0.0.1:7682");
         let base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
         let token = std::env::var("CLARP_TOKEN").unwrap_or_default();
-        Self { base_url, token, settings, workspace_store: workspace::default_store_path() }
+        let keyring = std::env::var("CLARP_KEYRING").map_or(true, |v| v != "off");
+        Self { base_url, token, settings, workspace_store: workspace::default_store_path(), keyring }
     }
 }
 
@@ -144,6 +150,8 @@ pub struct Engine {
     /// The restored layout's active chat, opened once the roster has it.
     restored_session: String,
     host_status: host_status::HostStatus,
+    keyring: bool,
+    has_stored_credential: bool,
 }
 
 impl Engine {
@@ -174,6 +182,7 @@ impl Engine {
         });
         let muted = config.settings.boolean("audio/muted", false);
         let workspace_store = config.workspace_store.clone();
+        let keyring = config.keyring;
         let tools_visible = config.settings.boolean("conversation/toolsVisible", false);
         let presentation = clarp_core::presentation::Settings {
             show_when_ready: config.settings.boolean("conversation/showWhenReady", false),
@@ -222,6 +231,8 @@ impl Engine {
             pending_uploads: HashMap::new(),
             restored_session: String::new(),
             host_status: host_status::HostStatus::default(),
+            keyring,
+            has_stored_credential: false,
             panes: workspace::Panes::new(workspace_store),
             deliveries: HashMap::new(),
             delivery_counter: 0,
@@ -258,6 +269,8 @@ impl Engine {
                 Message::DeliveryDue { client_id, token } => self.delivery_timed_out(&client_id, token),
                 Message::DraftsDue(token) => self.drafts_due(token),
                 Message::PanesWritten(result) => self.panes_written(result),
+                Message::CredentialStored { base, result } => self.credential_stored(&base, result),
+                Message::CredentialRemoved { base, result } => self.credential_removed(&base, result),
             }
         }
         let mut changes = std::mem::take(&mut self.changes);
@@ -426,22 +439,20 @@ impl Engine {
             self.reconnect();
             return;
         }
-        let base = self.base_url.clone();
-        let (sender, wake) = (self.sender.clone(), self.wake.clone());
-        self.runtime.spawn(async move {
-            let token = clarp_net::credentials::lookup(&base).await;
-            if sender.send(Message::Credential { base, token }).is_ok() {
-                wake();
-            }
-        });
+        self.look_up_credential();
     }
 
     fn credential_looked_up(&mut self, server: &str, token: String) {
         if normalized_base_url(server) != self.base_url {
             return;
         }
+        let stored = !token.is_empty();
         if self.token.is_empty() {
             self.token = if token.is_empty() { default_token(&self.base_url) } else { token };
+        }
+        if stored != self.has_stored_credential {
+            self.has_stored_credential = stored;
+            self.changes.push(Change::Connection);
         }
         self.reconnect();
     }
@@ -918,7 +929,12 @@ impl Engine {
             }
             return;
         }
+        if tag == "pairing" {
+            self.handle_pairing(object);
+            return;
+        }
         if tag == "server-info" {
+            self.keep_working_token();
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.server_version = json::string(object, "clarp_version");
             self.changes.push(Change::ServerInfo);
@@ -984,7 +1000,7 @@ impl Engine {
         self.set_error(&detail);
         // No HTTP status: the Host was unreachable. Reconnecting answers it.
         self.error_is_transport = status == 0;
-        if tag == "server-info" {
+        if tag == "server-info" || tag == "pairing" {
             self.set_connecting(false);
             self.set_connection_state(if status == 401 { "unauthorized" } else { "offline" });
         } else if tag.starts_with("log-") {

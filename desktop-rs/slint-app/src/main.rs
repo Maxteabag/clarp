@@ -177,6 +177,21 @@ impl App {
         let engine = self.engine.borrow();
         window.set_selected_name(if selected.is_empty() { String::new() } else { engine.chat_name(&selected) }.into());
         window.set_connection(engine.connection_state().into());
+        window.set_base_url(engine.base_url().into());
+        window.set_connecting(matches!(engine.connection_state(), "connecting" | "pairing"));
+        window.set_stored_credential(engine.has_stored_credential());
+        window.set_has_agents(!engine.roster().agents().is_empty());
+        // No Host and no agents: the connection page asks for one (as the
+        // Qt app does), and goes once the Host answers.
+        let state = engine.connection_state().to_owned();
+        let empty = engine.roster().agents().is_empty();
+        let overlay = self.overlay.borrow().clone();
+        if overlay.is_empty() && empty && matches!(state.as_str(), "offline" | "unauthorized") && changes.contains(&Change::Connection) {
+            commands::open_overlay(self, &window, "connection");
+            window.invoke_open_connection_page();
+        } else if overlay == "connection" && state == "live" && !empty && changes.contains(&Change::Roster) {
+            commands::close_overlay(self, &window);
+        }
         window.set_muted(engine.muted());
         let name = engine.server_name();
         window.set_server_initial(initial(if name.is_empty() { "C" } else { name }));
@@ -356,6 +371,18 @@ fn main() {
     window.on_keymap_import(|text| with_window(|app, window| commands::keymap_import(app, window, &text)));
     window.on_keymap_export(|| with_window(|app, window| commands::keymap_export(app, window)));
     window.on_keymap_reset(|| with_window(|app, window| commands::keymap_import(app, window, &keymap::export(&keymap::Overrides::new()))));
+    window.on_connect_host(|url, token| with_window(|app, _| {
+        app.engine.borrow_mut().connect_to_server(&url, &token);
+        pump_now(app);
+    }));
+    window.on_pair_host(|url, code| with_window(|app, _| {
+        app.engine.borrow_mut().pair_device(&url, &code);
+        pump_now(app);
+    }));
+    window.on_forget_host(|| with_window(|app, _| {
+        app.engine.borrow_mut().forget_credential();
+        pump_now(app);
+    }));
     window.on_overlay_closed(|| with_window(|app, window| commands::close_overlay(app, window)));
     window.on_open_switcher(|| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
