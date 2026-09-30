@@ -273,6 +273,19 @@ pub fn run_manager() -> ! {
         }
     });
     show();
+    // Checks: `--headless` with `CLARP_TEST_SHOT=<png>` saves the window
+    // once it has drawn the catalog, then quits.
+    if let Some(path) = std::env::var_os("CLARP_TEST_SHOT") {
+        let weak = window.as_weak();
+        slint::Timer::single_shot(Duration::from_millis(500), move || {
+            let versions = weak.upgrade().map_or(0, |w| slint::Model::row_count(&w.get_versions()));
+            let saved = crate::headless::save_frame(&path.to_string_lossy());
+            println!("{} the manager lists {versions} versions {}", if versions == 2 && saved.is_ok() { "ok  " } else { "FAIL" }, saved.err().unwrap_or_default());
+            if let Err(error) = slint::quit_event_loop() {
+                eprintln!("clarp-slint: {error}");
+            }
+        });
+    }
     if let Err(error) = window.run() {
         eprintln!("clarp-slint: {error}");
         std::process::exit(1);
