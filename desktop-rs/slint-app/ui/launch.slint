@@ -366,7 +366,7 @@ export component NewSessionHub inherits Modal {
                 Rectangle { horizontal-stretch: 1; }
                 Text { text: "enter start · esc cancel"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
                 IconButton {
-                    icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                    icon: @image-url("icons/rail-close.svg");
                     label: "Cancel · Esc";
                     clicked => { LaunchHub.cancel(); }
                 }
@@ -718,7 +718,7 @@ export component StartAgentDialog inherits Modal {
                 spacing: 8px;
                 alignment: end;
                 IconButton {
-                    icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                    icon: @image-url("icons/rail-close.svg");
                     label: "Cancel";
                     clicked => { StartAgent.cancel(); }
                 }

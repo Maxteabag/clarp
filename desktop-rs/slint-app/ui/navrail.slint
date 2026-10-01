@@ -47,22 +47,22 @@ export component NavRail inherits Rectangle {
         padding: 4px;
         spacing: 4px;
         alignment: start;
-        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-chats.svg"); tip: "Chats"; selected: root.surface == "chats"; clicked => { root.select-surface("chats"); } }
-        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-overview.svg"); tip: "All agents"; selected: root.surface == "overview"; clicked => { root.select-surface("overview"); } }
-        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-search.svg"); tip: "Go to agent (Ctrl+K)"; clicked => { root.open-switcher(); } }
-        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-updates.svg"); tip: "Updates"; badge: root.attention; selected: root.surface == "updates"; clicked => { root.select-surface("updates"); } }
-        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-teams.svg"); tip: "Teams"; selected: root.surface == "teams"; clicked => { root.select-surface("teams"); } }
+        RailButton { icon: @image-url("icons/rail-chats.svg"); tip: "Chats"; selected: root.surface == "chats"; clicked => { root.select-surface("chats"); } }
+        RailButton { icon: @image-url("icons/rail-overview.svg"); tip: "All agents"; selected: root.surface == "overview"; clicked => { root.select-surface("overview"); } }
+        RailButton { icon: @image-url("icons/rail-search.svg"); tip: "Go to agent (Ctrl+K)"; clicked => { root.open-switcher(); } }
+        RailButton { icon: @image-url("icons/rail-updates.svg"); tip: "Updates"; badge: root.attention; selected: root.surface == "updates"; clicked => { root.select-surface("updates"); } }
+        RailButton { icon: @image-url("icons/rail-teams.svg"); tip: "Teams"; selected: root.surface == "teams"; clicked => { root.select-surface("teams"); } }
     }
     VerticalLayout {
         y: parent.height - self.preferred-height;
         padding: 4px;
         spacing: 4px;
         RailButton {
-            icon: root.muted ? @image-url("../../../desktop/resources/icons/rail-muted.svg") : @image-url("../../../desktop/resources/icons/rail-sound.svg");
+            icon: root.muted ? @image-url("icons/rail-muted.svg") : @image-url("icons/rail-sound.svg");
             tip: root.muted ? "Voice replies muted (Ctrl+M)" : "Voice replies on (Ctrl+M)";
             clicked => { root.toggle-muted(); }
         }
-        RailButton { icon: @image-url("../../../desktop/resources/icons/rail-settings.svg"); tip: "Settings (Ctrl+,)"; selected: root.surface == "settings"; clicked => { root.select-surface("settings"); } }
+        RailButton { icon: @image-url("icons/rail-settings.svg"); tip: "Settings (Ctrl+,)"; selected: root.surface == "settings"; clicked => { root.select-surface("settings"); } }
         Rectangle {
             width: 48px;
             height: 44px;
