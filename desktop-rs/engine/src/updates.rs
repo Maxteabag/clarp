@@ -30,6 +30,10 @@ pub(crate) struct Updates {
     jobs: JobTracker,
     /// Bumped whenever the job tracker changes (Qt `processRevision`).
     process_revision: u64,
+    /// artifact id -> how its latest answer (a form's, a decision's) went.
+    artifact_status: std::collections::HashMap<String, String>,
+    /// "purpose:artifact" -> the bytes fetched for it, or why not.
+    artifact_bytes: std::collections::HashMap<String, Result<Vec<u8>, String>>,
 }
 
 impl Engine {
@@ -116,7 +120,62 @@ impl Engine {
         clarp_core::roster::describe_agent_processes(&self.roster, &self.updates.jobs, session, now)
     }
 
+    /// How the card's latest answer went: "Sending…", "Answers accepted"
+    /// or "Not sent: …" ("" before any, and once a decision's is in).
+    pub fn artifact_status(&self, artifact_id: &str) -> &str {
+        self.updates.artifact_status.get(artifact_id).map_or("", String::as_str)
+    }
+
+    /// A card the window could not open or send says why.
+    pub fn set_artifact_status(&mut self, artifact_id: &str, status: &str) {
+        self.updates.artifact_status.insert(artifact_id.to_owned(), status.to_owned());
+        self.changes.push(Change::Updates);
+    }
+
+    /// Fetches an artifact's bytes from the Host (a poster, a file to
+    /// open); `take_artifact_bytes` hands them over once they arrive.
+    pub fn fetch_artifact_bytes(&mut self, artifact_id: &str, purpose: &str, path: &str) {
+        let tag = format!("artifact-bytes:{purpose}:{artifact_id}:{}", uuid::Uuid::new_v4().simple());
+        self.api.get_bytes(&tag, path);
+    }
+
+    pub fn take_artifact_bytes(&mut self, artifact_id: &str, purpose: &str) -> Option<Result<Vec<u8>, String>> {
+        self.updates.artifact_bytes.remove(&format!("{purpose}:{artifact_id}"))
+    }
+
     // ---- commands --------------------------------------------------------
+
+    /// Answers an artifact's decision (iOS `submitDecision`): `action` is
+    /// `resolve` with `{"choice"}` or `{"answer"}`, or `dismiss`; always
+    /// against the revision the user saw. The artifacts reload after.
+    pub fn send_decision(&mut self, artifact_id: &str, decision_id: &str, action: &str, mut body: Value, revision: i64) {
+        let key = format!("decision:{decision_id}");
+        if decision_id.is_empty() || !matches!(action, "resolve" | "dismiss") || self.updates.pending_actions.contains(&key) {
+            return;
+        }
+        if let Some(object) = body.as_object_mut() {
+            object.insert("expected_revision".into(), json!(revision));
+        }
+        self.updates.pending_actions.insert(key);
+        self.updates.artifact_status.insert(artifact_id.to_owned(), "Sending…".into());
+        self.changes.push(Change::Updates);
+        let path = format!("/decisions/{}/{action}", clarp_core::endpoint::percent_encode_segment(decision_id));
+        self.api.post_json(&format!("decision-answer:{artifact_id}|{decision_id}"), &path, body, None);
+    }
+
+    /// Sends an HTML form's answers (iOS `HTMLFormView`): a fresh submission
+    /// id with the form's version; the Host's receipt must echo both.
+    pub fn submit_html_form(&mut self, artifact_id: &str, version: Value, answers: Value) {
+        if artifact_id.is_empty() || !answers.is_object() {
+            return;
+        }
+        let submission = uuid::Uuid::new_v4().to_string();
+        self.updates.artifact_status.insert(artifact_id.to_owned(), "Sending…".into());
+        self.changes.push(Change::Updates);
+        let path = format!("/artifacts/{}/submit", clarp_core::endpoint::percent_encode_segment(artifact_id));
+        let body = json!({"submission_id": submission, "version": version.clone(), "answers": answers});
+        self.api.post_json(&format!("form-submit:{artifact_id}|{submission}|{version}"), &path, body, None);
+    }
 
     pub fn load_updates(&mut self) {
         self.updates.generation += 1;
@@ -207,13 +266,42 @@ impl Engine {
             self.updates.pending_actions.remove(action);
             self.changes.push(Change::Updates);
             self.load_updates();
+        } else if let Some(rest) = tag.strip_prefix("decision-answer:") {
+            let (artifact, decision) = rest.split_once('|').unwrap_or((rest, ""));
+            self.updates.pending_actions.remove(&format!("decision:{decision}"));
+            self.updates.artifact_status.remove(artifact);
+            self.changes.push(Change::Updates);
+            self.load_updates();
+        } else if let Some(rest) = tag.strip_prefix("form-submit:") {
+            let mut parts = rest.splitn(3, '|');
+            let (artifact, submission, version) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default(), parts.next().unwrap_or_default());
+            let echoed = object.get("accepted").and_then(Value::as_bool) == Some(true)
+                && json::string(object, "submission_id") == submission
+                && json::string(object, "artifact_id") == artifact
+                && object.get("version").map(Value::to_string).as_deref() == Some(version);
+            let status = if echoed { "Answers accepted".to_owned() } else { "Not sent: the Host's receipt did not match these answers".to_owned() };
+            self.updates.artifact_status.insert(artifact.to_owned(), status);
+            self.changes.push(Change::Updates);
         } else {
             return false;
         }
         true
     }
 
+    /// An artifact's bytes arrived.
+    pub(crate) fn updates_bytes(&mut self, tag: &str, bytes: &[u8]) -> bool {
+        let Some(key) = artifact_bytes_key(tag) else { return false };
+        self.updates.artifact_bytes.insert(key, Ok(bytes.to_vec()));
+        self.changes.push(Change::Updates);
+        true
+    }
+
     pub(crate) fn updates_failure(&mut self, tag: &str, detail: &str) -> bool {
+        if let Some(key) = artifact_bytes_key(tag) {
+            self.updates.artifact_bytes.insert(key, Err(detail.to_owned()));
+            self.changes.push(Change::Updates);
+            return true;
+        }
         if let Some(rest) = tag.strip_prefix("updates:") {
             let generation = rest.split(':').next().and_then(|g| g.parse::<u64>().ok());
             if generation == Some(self.updates.generation) {
@@ -223,6 +311,15 @@ impl Engine {
         } else if let Some(action) = tag.strip_prefix("update-action:") {
             self.updates.pending_actions.remove(action);
             self.updates.error = detail.to_owned();
+            self.changes.push(Change::Updates);
+        } else if let Some(rest) = tag.strip_prefix("decision-answer:") {
+            let (artifact, decision) = rest.split_once('|').unwrap_or((rest, ""));
+            self.updates.pending_actions.remove(&format!("decision:{decision}"));
+            self.updates.artifact_status.insert(artifact.to_owned(), format!("Not sent: {detail}"));
+            self.changes.push(Change::Updates);
+        } else if let Some(rest) = tag.strip_prefix("form-submit:") {
+            let artifact = rest.split('|').next().unwrap_or_default();
+            self.updates.artifact_status.insert(artifact.to_owned(), format!("Not sent: {detail}"));
             self.changes.push(Change::Updates);
         } else {
             return false;
@@ -256,4 +353,11 @@ impl Engine {
             self.load_updates();
         }
     }
+}
+
+/// "purpose:artifact" from an `artifact-bytes:purpose:artifact:nonce` tag.
+fn artifact_bytes_key(tag: &str) -> Option<String> {
+    let rest = tag.strip_prefix("artifact-bytes:")?;
+    let (key, _nonce) = rest.rsplit_once(':')?;
+    Some(key.to_owned())
 }

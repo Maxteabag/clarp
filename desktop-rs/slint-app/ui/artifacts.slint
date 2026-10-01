@@ -1,0 +1,744 @@
+import { Palette } from "theme.slint";
+
+// One answer a decision or question offers.
+export struct ArtifactOption {
+    id: string,
+    label: string,
+    detail: string,
+    recommended: bool,
+}
+
+// One artifact card in the chat (iOS ArtifactCard): what every type shows
+// inline, and the state its controls are in.
+export struct ArtifactItem {
+    id: string,
+    // The Host's type (countdown, document, ...), and as shown.
+    kind: string,
+    label: string,
+    outcome: string,
+    failed: bool,
+    // The status worth a badge: draft, failed, cancelled, expired ("" for none).
+    badge: string,
+    title: string,
+    summary: string,
+    progress: string,
+    form: bool,
+    // countdown: the target in seconds on ArtifactBridge.now's clock, when
+    // it parses; the target's date and zone; why there is no clock.
+    countdown-at: int,
+    countdown-set: bool,
+    countdown-line: string,
+    countdown-note: string,
+    // The artifact's Markdown body where the card shows it, and drawn.
+    note: string,
+    note-styled: styled-text,
+    // What Enter or a click does ("" for nothing), and how it went.
+    action: string,
+    status-text: string,
+    // The keyboard's card in the chat (J/K).
+    selected: bool,
+    // decision / question: what is asked, why, how urgent; while pending
+    // its answers (an approval's are Yes and No) and the one the keyboard
+    // chose (-1 for none); once answered, how, with what, delivered yet.
+    question: string,
+    context: string,
+    meta: string,
+    pending: bool,
+    approval: bool,
+    options: [ArtifactOption],
+    chosen: int,
+    resolved: string,
+    resolved-ok: bool,
+    answer: string,
+    delivery: string,
+    // A question that takes an answer of one's own: its text, and whether
+    // the keyboard is writing it (its option is the last number).
+    allow-custom: bool,
+    draft: string,
+    editing: bool,
+    // plan / workflow_run: how far along (0-1, -1 for unknown, -2 for
+    // under way without a count), "done/total", and the step under way.
+    progress-value: float,
+    progress-count: string,
+    current: string,
+    // The step shown is blocked, not under way.
+    current-blocked: bool,
+    // document / research: the body's first lines as plain text.
+    preview: string,
+    // research: how many sources it cites that can be opened.
+    sources: string,
+    // data: the header and the first row (iOS shows one), the row count,
+    // or why there is no table.
+    head: [string],
+    first-row: [string],
+    rows-count: string,
+    data-note: string,
+    // audio / video: idle, preparing, playing, paused or failed; what to
+    // say; the length; for the position, seconds played before and the
+    // bridge clock's second playback (re)started (-1 when not playing).
+    media-state: string,
+    media-text: string,
+    media-length: string,
+    media-played: int,
+    media-started: int,
+    media-seconds: int,
+    // video: its poster once fetched (has-poster), else a placeholder.
+    poster: image,
+    has-poster: bool,
+    // file: its kind and size ("PDF · 1.2 MB").
+    file-info: string,
+    // release: the version (or commit), and how it went (ready, failed,
+    // active or other).
+    revision: string,
+    release-state: string,
+    // code_change: where (repository and branch) and how much.
+    repo: string,
+    files: string,
+    additions: string,
+    deletions: string,
+    // Keeps the why/delivery line: the card is or was pending in this
+    // window, or has something to say there.
+    keep-line: bool,
+}
+
+// What the cards share: the clock countdowns read, and their actions.
+export global ArtifactBridge {
+    // Seconds since the window started, ticking once a second.
+    in property <int> now;
+    // "Remaining", "Target reached" or "Since target", and the clock.
+    pure callback countdown-phase(int, int) -> string;
+    pure callback countdown-clock(int, int) -> string;
+    // A playing card's position, "m:ss", from its played and started.
+    pure callback media-position(int, int, int) -> string;
+    // A click (or Enter on the selected card) on the card's action.
+    callback open(string);
+    callback link-clicked(string);
+    // A decision's or question's answer: choose one (keyboard 1-9), send
+    // the chosen one (Enter, or an approval's button), or discard it.
+    callback choose(string, int);
+    callback send(string);
+    callback discard(string);
+    // The answer of one's own as typed, and whether a card's field has the
+    // keyboard (letters then type, they are not shortcuts).
+    callback draft-edited(string, string);
+    in-out property <bool> editing;
+    callback editing-changed(string, bool);
+    // Where a card is (its top and height) and the chat's visible band.
+    callback card-shown(string, length, length, length, length);
+}
+
+// The type's tint (iOS ArtifactCard's palette, from the reading theme).
+export global ArtifactLook {
+    public pure function tint(kind: string, failed: bool) -> color {
+        if (failed) { return Palette.danger; }
+        if (kind == "countdown" || kind == "plan" || kind == "release") { return Palette.success; }
+        if (kind == "decision" || kind == "question" || kind == "html_form") { return Palette.warning; }
+        if (kind == "workflow_run" || kind == "code_change") { return Palette.accent; }
+        return Palette.link;
+    }
+    public pure function glyph(kind: string) -> string {
+        if (kind == "countdown") { return "◷"; }
+        if (kind == "plan") { return "☰"; }
+        if (kind == "decision" || kind == "question") { return "?"; }
+        if (kind == "html_form") { return "▤"; }
+        if (kind == "code_change") { return "±"; }
+        if (kind == "data") { return "▦"; }
+        if (kind == "audio") { return "♪"; }
+        if (kind == "video") { return "▶"; }
+        if (kind == "release") { return "⬢"; }
+        if (kind == "directory") { return "▭"; }
+        if (kind == "file") { return "▣"; }
+        if (kind == "workflow_run") { return "⟳"; }
+        return "¶";
+    }
+}
+
+// A countdown's body (iOS CountdownArtifactView): the phase, the clock in
+// large figures, the target's date and zone; it ticks on the bridge's
+// clock, so its height never changes.
+component CountdownBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    spacing: 3px;
+    if !root.artifact.countdown-set: Text {
+        text: root.artifact.countdown-note;
+        color: root.artifact.countdown-note == "Cancelled" ? Palette.muted : Palette.warning;
+        font-size: 13px;
+    }
+    if root.artifact.countdown-set: Text {
+        text: ArtifactBridge.countdown-phase(root.artifact.countdown-at, ArtifactBridge.now);
+        color: Palette.muted;
+        font-size: 11px;
+    }
+    if root.artifact.countdown-set: Text {
+        height: 30px;
+        text: ArtifactBridge.countdown-clock(root.artifact.countdown-at, ArtifactBridge.now);
+        color: Palette.text;
+        font-family: "JetBrains Mono";
+        font-size: 24px;
+        font-weight: 600;
+        vertical-alignment: center;
+        accessible-role: text;
+    }
+    if root.artifact.countdown-set: Text {
+        text: root.artifact.countdown-line;
+        color: Palette.muted;
+        font-size: 12px;
+        overflow: elide;
+    }
+}
+
+// A decision's answer button (iOS's approval buttons): its key, its label.
+component AnswerButton inherits Rectangle {
+    in property <string> key;
+    in property <string> label;
+    in property <bool> primary;
+    in property <bool> chosen;
+    callback clicked();
+    height: 28px;
+    min-width: content.preferred-width + 20px;
+    border-radius: 6px;
+    border-width: root.chosen ? 2px : 1px;
+    border-color: root.chosen ? Palette.accent : root.primary ? Palette.warning : Palette.border;
+    background: area.has-hover ? Palette.hover : root.primary ? Palette.warning.with-alpha(0.18) : Palette.control;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    content := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+        if root.key != "": Text { text: root.key; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+        Text { text: root.label; color: Palette.text; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+    }
+    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// One of a question's answers (iOS's radio rows): a fixed height, so
+// choosing never moves the chat.
+component OptionRow inherits Rectangle {
+    in property <int> number;
+    in property <string> label;
+    in property <string> detail;
+    in property <bool> recommended;
+    in property <bool> chosen;
+    in property <bool> enabled;
+    in property <bool> show-number;
+    callback clicked();
+    height: root.detail != "" ? 38px : 26px;
+    border-radius: 6px;
+    background: root.chosen ? Palette.accent.with-alpha(0.14) : area.has-hover && root.enabled ? Palette.hover : transparent;
+    accessible-role: radio-button;
+    accessible-checked: root.chosen;
+    accessible-label: root.label;
+    area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 8px;
+        Text {
+            width: 14px;
+            text: root.chosen ? (root.enabled ? "●" : "✓") : "○";
+            color: root.chosen ? Palette.accent : Palette.faint;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                alignment: start;
+                spacing: 8px;
+                if root.show-number: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+                Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: 12px; font-weight: root.chosen ? 600 : 400; overflow: elide; }
+                if root.recommended: Text { text: "Recommended"; color: Palette.success; font-size: 10px; vertical-alignment: center; }
+            }
+            if root.detail != "": Text { text: root.detail; color: Palette.muted; font-size: 11px; overflow: elide; }
+        }
+    }
+}
+
+// "Write my own answer": the last numbered answer, its field typing like
+// the composer (Enter sends, Escape goes back to the chat).
+component OwnAnswer inherits HorizontalLayout {
+    in property <ArtifactItem> artifact;
+    in property <int> number;
+    property <bool> chosen: root.artifact.chosen == root.artifact.options.length;
+    height: 30px;
+    padding-left: 6px;
+    spacing: 8px;
+    Text {
+        width: 14px;
+        text: root.chosen ? (root.artifact.pending ? "●" : "✓") : "○";
+        color: root.chosen ? Palette.accent : Palette.faint;
+        font-size: 12px;
+        vertical-alignment: center;
+    }
+    if root.artifact.pending: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+    // Asked once, after the row is in the window (focus during its
+    // creation is ignored); Escape gives the keyboard back for good.
+    property <bool> asked;
+    if root.artifact.pending: HorizontalLayout {
+        horizontal-stretch: 1;
+        Rectangle {
+            horizontal-stretch: 1;
+            height: 26px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: field.has-focus ? Palette.accent : Palette.border;
+            background: Palette.sunken;
+            if field.text == "": Text {
+                x: 8px;
+                height: parent.height;
+                text: "Write my own answer";
+                color: Palette.faint;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+            field := TextInput {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                text: root.artifact.draft;
+                color: Palette.text;
+                font-size: 12px;
+                single-line: true;
+                vertical-alignment: center;
+                accessible-label: "Write my own answer";
+                edited => {
+                    ArtifactBridge.draft-edited(root.artifact.id, self.text);
+                    if (!root.chosen) {
+                        ArtifactBridge.choose(root.artifact.id, root.artifact.options.length);
+                    }
+                }
+                // The keyboard leaves the field before sending: the answered
+                // card has no field, and a focused one must not be destroyed.
+                accepted => {
+                    self.clear-focus();
+                    ArtifactBridge.send(root.artifact.id);
+                }
+                changed has-focus => {
+                    ArtifactBridge.editing = self.has-focus;
+                    ArtifactBridge.editing-changed(root.artifact.id, self.has-focus);
+                }
+            }
+        }
+        Timer {
+            interval: 30ms;
+            running: root.artifact.editing && !root.asked;
+            triggered => {
+                root.asked = true;
+                field.focus();
+            }
+        }
+    }
+    if !root.artifact.pending: Text {
+        text: root.chosen ? root.artifact.draft : "Write my own answer";
+        color: root.chosen ? Palette.text : Palette.faint;
+        font-size: 12px;
+        overflow: elide;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+    }
+}
+
+// A decision's or question's body (iOS DecisionResponseView). Its height
+// is the same pending and answered, so a decision answered above a reader
+// who scrolled up does not move what they read: one line for why and how
+// urgent (then whether it was delivered), one row for the buttons (then
+// how it was answered), with the send's status beside them.
+component DecisionBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    property <bool> question: !root.artifact.approval;
+    spacing: 5px;
+    if root.artifact.question != "": Text { text: root.artifact.question; color: Palette.text; font-size: 13px; font-weight: 600; wrap: word-wrap; }
+    if root.artifact.context != "": Text { text: root.artifact.context; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
+    // Settled with nothing to say, a decision has no line to keep.
+    if root.artifact.keep-line: Text {
+        height: 15px;
+        text: root.artifact.pending ? root.artifact.meta : root.artifact.delivery;
+        color: root.artifact.pending ? Palette.warning : Palette.muted;
+        font-size: 11px;
+        overflow: elide;
+    }
+    // A question's options, pending and answered alike (the answer marked).
+    if root.question: VerticalLayout {
+        spacing: 2px;
+        for option[index] in root.artifact.options: OptionRow {
+            number: index + 1;
+            label: option.label;
+            detail: option.detail;
+            recommended: option.recommended;
+            chosen: root.artifact.chosen == index;
+            enabled: root.artifact.pending;
+            show-number: root.artifact.pending;
+            clicked => { ArtifactBridge.choose(root.artifact.id, index); }
+        }
+        if root.artifact.allow-custom: OwnAnswer {
+            artifact: root.artifact;
+            number: root.artifact.options.length + 1;
+        }
+    }
+    if root.artifact.question != "" || root.artifact.resolved != "": HorizontalLayout {
+        height: 28px;
+        alignment: start;
+        spacing: 8px;
+        if root.artifact.pending && root.artifact.approval: HorizontalLayout {
+            spacing: 8px;
+            for option[index] in root.artifact.options: AnswerButton {
+                key: index + 1;
+                label: option.label;
+                primary: index == 0;
+                chosen: root.artifact.chosen == index;
+                clicked => {
+                    ArtifactBridge.choose(root.artifact.id, index);
+                    ArtifactBridge.send(root.artifact.id);
+                }
+            }
+        }
+        if root.artifact.pending && root.question && root.artifact.options.length + (root.artifact.allow-custom ? 1 : 0) > 0: AnswerButton {
+            key: root.artifact.selected ? "Enter" : "";
+            label: "Send answer";
+            primary: true;
+            clicked => { ArtifactBridge.send(root.artifact.id); }
+        }
+        if root.artifact.pending: AnswerButton {
+            key: root.artifact.selected ? "Del" : "";
+            label: "Discard";
+            clicked => { ArtifactBridge.discard(root.artifact.id); }
+        }
+        if !root.artifact.pending && root.artifact.resolved != "": HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: root.artifact.resolved-ok ? "✓" : "–";
+                color: root.artifact.resolved-ok ? Palette.success : Palette.muted;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+            Text { text: root.artifact.resolved; color: root.artifact.resolved-ok ? Palette.success : Palette.muted; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+            if root.artifact.answer != "": Text { text: "· " + root.artifact.answer; color: Palette.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
+        }
+        if root.artifact.status-text != "": Text {
+            text: root.artifact.status-text;
+            color: root.artifact.status-text.starts-with("Not ") || root.artifact.status-text.starts-with("Choose") ? Palette.danger : Palette.muted;
+            font-size: 12px;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// A video's poster (iOS plays it inline; the desktop opens it in the
+// system's player): 180 px tall before and after the poster lands.
+component VideoBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    in property <color> tint;
+    spacing: 4px;
+    Rectangle {
+        height: 180px;
+        border-radius: 6px;
+        clip: true;
+        background: Palette.sunken;
+        if root.artifact.has-poster: Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.artifact.poster;
+            image-fit: contain;
+        }
+        if root.artifact.action != "": Rectangle {
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
+            background: Palette.window.with-alpha(0.7);
+            Text { width: parent.width; height: parent.height; text: "▶"; color: root.tint; font-size: 18px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        if root.artifact.media-length != "": Text {
+            x: parent.width - self.width - 8px;
+            y: parent.height - self.height - 6px;
+            text: root.artifact.media-length;
+            color: Palette.text;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+        }
+    }
+    if root.artifact.media-text != "": Text { text: root.artifact.media-text; color: Palette.warning; font-size: 11px; }
+}
+
+// An audio card's player (iOS: play/pause, progress, m:ss / m:ss and a
+// status line), one row and one line, whatever its state.
+component MediaBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    in property <color> tint;
+    property <int> played: root.artifact.media-played + (root.artifact.media-started >= 0 ? Math.max(0, ArtifactBridge.now - root.artifact.media-started) : 0);
+    property <string> position: ArtifactBridge.media-position(root.artifact.media-played, root.artifact.media-started, ArtifactBridge.now);
+    spacing: 4px;
+    if root.artifact.action != "": HorizontalLayout {
+        spacing: 10px;
+        height: 32px;
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            background: play.has-hover ? root.tint.with-alpha(0.3) : root.tint.with-alpha(0.18);
+            accessible-role: button;
+            accessible-label: root.artifact.action;
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.artifact.media-state == "playing" ? "❚❚" : "▶";
+                color: root.tint;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            play := TouchArea { mouse-cursor: pointer; clicked => { ArtifactBridge.open(root.artifact.id); } }
+        }
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 4px;
+            horizontal-stretch: 1;
+            border-radius: 2px;
+            background: Palette.control;
+            Rectangle {
+                x: 0;
+                height: parent.height;
+                border-radius: 2px;
+                background: root.tint;
+                width: root.artifact.media-seconds <= 0 ? 0 : parent.width * Math.min(1, root.played / root.artifact.media-seconds);
+            }
+        }
+        Text {
+            text: root.position + (root.artifact.media-length != "" ? " / " + root.artifact.media-length : "");
+            color: Palette.muted;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+    Text {
+        height: 15px;
+        text: root.artifact.media-text;
+        color: root.artifact.media-state == "failed" || root.artifact.action == "" ? Palette.warning : Palette.muted;
+        font-size: 11px;
+        overflow: elide;
+    }
+}
+
+// A plan's or run's progress (iOS's ProgressView and caption) and the
+// step under way, in two lines whatever its length.
+component ProgressBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    in property <color> tint;
+    spacing: 4px;
+    if root.artifact.progress-value >= 0 || root.artifact.progress-value < -1.5: HorizontalLayout {
+        spacing: 8px;
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 6px;
+            horizontal-stretch: 1;
+            border-radius: 3px;
+            background: Palette.control;
+            Rectangle {
+                x: 0;
+                height: parent.height;
+                // Under way without a count: a third, at rest.
+                width: parent.width * (root.artifact.progress-value < 0 ? 0.33 : Math.min(1, root.artifact.progress-value));
+                border-radius: 3px;
+                background: root.tint;
+            }
+        }
+        if root.artifact.progress-count != "": Text { text: root.artifact.progress-count; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+    }
+    // One line, there whenever the plan is known: a step finishing, the
+    // next beginning or the plan completing never changes the height.
+    if root.artifact.current != "" || root.artifact.progress-value >= 0: HorizontalLayout {
+        spacing: 6px;
+        if root.artifact.current != "" && root.artifact.progress-value >= 0: Text {
+            text: root.artifact.current-blocked ? "■" : "▶";
+            color: root.artifact.current-blocked ? Palette.danger : root.tint;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.artifact.current != "" ? root.artifact.current
+                : root.artifact.progress-value >= 0.999 ? "All steps done" : "Nothing under way";
+            color: root.artifact.current == "" ? Palette.muted : root.artifact.progress-value >= 0 ? Palette.text : Palette.warning;
+            font-size: 12px;
+            overflow: elide;
+            height: 16px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+export component ArtifactCard inherits Rectangle {
+    in property <ArtifactItem> artifact;
+    // The chat's visible band, in window coordinates: the keyboard only
+    // reaches cards in it. The card reports where it is a few times a
+    // second (read fresh: its absolute position is not tracked through the
+    // list); nothing in its size or layout reads these.
+    in property <length> view-top;
+    in property <length> view-bottom;
+    Timer {
+        interval: 150ms;
+        running: true;
+        triggered => { ArtifactBridge.card-shown(root.artifact.id, root.absolute-position.y, root.height, root.view-top, root.view-bottom); }
+    }
+    property <color> tint: ArtifactLook.tint(root.artifact.kind, root.artifact.failed);
+    background: touch.has-hover && root.artifact.action != "" ? root.tint.with-alpha(0.1) : root.tint.with-alpha(0.065);
+    border-width: root.artifact.selected ? 2px : 1px;
+    border-color: root.artifact.selected ? Palette.accent : root.tint.with-alpha(0.3);
+    border-radius: 8px;
+    accessible-role: groupbox;
+    accessible-label: root.artifact.label + " " + root.artifact.title;
+    accessible-description: root.artifact.action;
+    touch := TouchArea {
+        enabled: root.artifact.action != "";
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { ArtifactBridge.open(root.artifact.id); }
+    }
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 6px;
+                background: root.tint.with-alpha(0.14);
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: ArtifactLook.glyph(root.artifact.kind);
+                    color: root.tint;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                Text { text: root.artifact.label; color: Palette.faint; font-size: 9px; font-weight: 600; letter-spacing: 0.8px; }
+                Text { text: root.artifact.title; color: Palette.text; font-size: 14px; font-weight: 600; wrap: word-wrap; }
+            }
+            if root.artifact.badge != "": Rectangle {
+                y: 2px;
+                height: 18px;
+                width: badge-text.preferred-width + 12px;
+                border-radius: 9px;
+                background: (root.artifact.badge == "Failed" ? Palette.danger : Palette.muted).with-alpha(0.16);
+                badge-text := Text {
+                    text: root.artifact.badge;
+                    color: root.artifact.badge == "Failed" ? Palette.danger : Palette.muted;
+                    font-size: 11px;
+                }
+            }
+        }
+        if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
+        if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; }
+        // The body's first lines (iOS shows four), always four lines tall.
+        // The body's first lines (iOS: four for a document, five for
+        // research), as tall as they are up to that.
+        if root.artifact.preview != "": Text {
+            text: root.artifact.preview;
+            color: Palette.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+            overflow: elide;
+            max-height: (root.artifact.kind == "research" ? 5 : 4) * 16px;
+            vertical-alignment: top;
+        }
+        // A table's header and first row, equal columns, one line each.
+        if root.artifact.head.length > 0: VerticalLayout {
+            spacing: 1px;
+            HorizontalLayout {
+                spacing: 6px;
+                for cell in root.artifact.head: Text { text: cell; color: Palette.chrome-text; font-size: 11px; font-weight: 600; overflow: elide; horizontal-stretch: 1; min-width: 0; preferred-width: 0; }
+            }
+            if root.artifact.first-row.length > 0: HorizontalLayout {
+                spacing: 6px;
+                for cell in root.artifact.first-row: Text { text: cell; color: Palette.text; font-family: "JetBrains Mono"; font-size: 11px; overflow: elide; horizontal-stretch: 1; min-width: 0; preferred-width: 0; }
+            }
+            Text { text: root.artifact.rows-count; color: Palette.faint; font-size: 11px; }
+        }
+        if root.artifact.data-note != "": Text { text: root.artifact.data-note; color: Palette.warning; font-size: 12px; }
+        // A change's where and how much, one line each (iOS's monospaced row).
+        if root.artifact.kind == "code_change" || root.artifact.kind == "directory" || root.artifact.kind == "workflow_run": Text { text: root.artifact.repo; color: Palette.text; font-family: "JetBrains Mono"; font-size: 12px; overflow: elide; }
+        if root.artifact.files != "" || root.artifact.additions != "" || root.artifact.deletions != "": HorizontalLayout {
+            alignment: start;
+            spacing: 10px;
+            if root.artifact.files != "": Text { text: root.artifact.files; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 12px; }
+            if root.artifact.additions != "": Text { text: root.artifact.additions; color: Palette.success; font-family: "JetBrains Mono"; font-size: 12px; }
+            if root.artifact.deletions != "": Text { text: root.artifact.deletions; color: Palette.danger; font-family: "JetBrains Mono"; font-size: 12px; }
+        }
+        // iOS's release row: the revision large, its state marked.
+        if root.artifact.kind == "release": HorizontalLayout {
+            spacing: 8px;
+            Text { text: root.artifact.revision; color: Palette.text; font-family: "JetBrains Mono"; font-size: 15px; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
+            Text {
+                text: root.artifact.release-state == "ready" ? "✓ Released" : root.artifact.release-state == "failed" ? "✕ Failed" : root.artifact.release-state == "active" ? "● Rolling out" : "○ Release";
+                color: root.artifact.release-state == "ready" ? Palette.success : root.artifact.release-state == "failed" ? Palette.danger : root.artifact.release-state == "active" ? Palette.warning : Palette.muted;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+        }
+        if root.artifact.file-info != "": Text {
+            text: root.artifact.file-info;
+            color: root.artifact.action == "" ? Palette.warning : Palette.muted;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+            overflow: elide;
+        }
+        if root.artifact.sources != "": Text { text: root.artifact.sources; color: Palette.faint; font-size: 11px; }
+        if root.artifact.kind == "audio": MediaBody { artifact: root.artifact; tint: root.tint; }
+        if root.artifact.kind == "video": VideoBody { artifact: root.artifact; tint: root.tint; }
+        if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
+        // Two lines, whatever the summary's length: a summary that grows
+        // does not change the card's height.
+        // A body's preview stands in for the summary (iOS shows one).
+        if root.artifact.summary != "" && root.artifact.preview == "": Text {
+            text: root.artifact.summary;
+            color: Palette.text;
+            font-size: 12px;
+            wrap: word-wrap;
+            overflow: elide;
+            height: 32px;
+            vertical-alignment: top;
+        }
+        if root.artifact.note != "": StyledText {
+            text: root.artifact.note-styled;
+            default-color: Palette.text;
+            default-font-size: 13px;
+            default-font-family: Palette.body-family;
+            link-color: Palette.link;
+            link-clicked(url) => { ArtifactBridge.link-clicked(url); }
+        }
+        // The bar's count says it already.
+        if root.artifact.progress != "" && root.artifact.progress-count == "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
+        if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
+        // A decision shows its send's status in its own row.
+        // Audio plays from its own button.
+        if root.artifact.kind != "audio" && (root.artifact.action != "" || (root.artifact.status-text != "" && root.artifact.kind != "decision" && root.artifact.kind != "question")): HorizontalLayout {
+            spacing: 10px;
+            if root.artifact.action != "": Text {
+                text: root.artifact.action + " ↗";
+                color: Palette.link;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            if root.artifact.selected && root.artifact.action != "": Text { text: "Enter"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
+            if root.artifact.status-text != "": Text {
+                text: root.artifact.status-text;
+                color: root.artifact.status-text.starts-with("Not ") ? Palette.danger : root.artifact.status-text == "Answers accepted" ? Palette.success : Palette.muted;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+}

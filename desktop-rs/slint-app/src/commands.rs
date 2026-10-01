@@ -26,7 +26,8 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     }
     if window.get_search_focused() {
         "search"
-    } else if app.active_report().composer_focused {
+    } else if app.active_report().composer_focused || window.global::<crate::ArtifactBridge>().get_editing() {
+        // A card's answer field types like the composer.
         "composer"
     } else if window.get_sidebar_focused() {
         "sidebar"
@@ -47,6 +48,8 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         playing: crate::platform::audio::with(|audio| audio.playing()).unwrap_or(false),
         behind: !app.active_report().at_end,
         folds: window.get_chats().iter().any(|c| c.fold_count > 0),
+        artifacts: crate::artifacts_view::has_cards(app),
+        artifact: crate::artifacts_view::selected(app).is_some(),
     }
 }
 
@@ -94,6 +97,14 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool) -> bool {
     // file (Composer.qml's own shortcut), elsewhere it opens the overview.
     if action == "overview" && state == "composer" {
         return false;
+    }
+    // The digit is the answer: 1 is the card's first.
+    if action == "artifact-choose" {
+        let Some(id) = crate::artifacts_view::selected(&app) else { return false };
+        let index = chord.parse::<i32>().map_or(-1, |n| n - 1);
+        crate::artifacts_view::choose(&app, &id, index);
+        show_hints(&app, &window);
+        return true;
     }
     let ran = run(&app, &window, action);
     show_hints(&app, &window);
@@ -175,6 +186,16 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             }
         }
         "focus-sidebar" => focus_sidebar(app, window),
+        "artifact-next" => crate::artifacts_view::step(app, 1),
+        "artifact-previous" => crate::artifacts_view::step(app, -1),
+        "artifact-discard" => match crate::artifacts_view::selected(app) {
+            Some(id) => crate::artifacts_view::discard(app, &id),
+            None => return false,
+        },
+        "artifact-open" => match crate::artifacts_view::selected(app) {
+            Some(id) => crate::artifacts_view::open(app, window, &id),
+            None => return false,
+        },
         "focus-pane" => app.focus_transcript(),
         "focus-composer" => app.focus_composer(),
         "toggle-focus" => {

@@ -403,7 +403,7 @@ pub(super) fn extras_check(out: String) {
             check(reply.activity_label == "2 tool calls" && !reply.expanded, &format!("display cells fold behind the reply's toggle: {:?}", reply.activity_label));
             let card = reply.artifacts.row_data(0).expect("artifact");
             check(
-                reply.artifacts.row_count() == 1 && card.title == "Ship plan" && card.kind == "PLAN" && card.progress == "1 / 3 completed" && card.outcome == "active",
+                reply.artifacts.row_count() == 1 && card.title == "Ship plan" && card.label == "PLAN" && card.progress == "1 / 3 completed" && card.outcome == "active",
                 "the artifact made during the reply shows as a card under it (the undated one does not)",
             );
             window.invoke_toggle_activity(app_now().active_id(), "x2".into(), "".into());

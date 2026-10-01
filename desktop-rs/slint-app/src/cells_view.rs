@@ -1,12 +1,12 @@
-//! The transcript extras: display cells, artifact cards under the reply
-//! they belong to, and whether a pane shows the typing indicator.
+//! The transcript extras: display cells, which reply each artifact card
+//! goes under, and whether a pane shows the typing indicator.
 
 use clarp_core::presentation::PresentedRow;
 use clarp_engine::Engine;
 use serde_json::Value;
 use slint::{ModelRc, VecModel};
 
-use crate::{ArtifactItem, CellLine, DisplayCell};
+use crate::{CellLine, DisplayCell};
 
 fn text(value: &Value, key: &str) -> String {
     match value.get(key) {
@@ -72,46 +72,6 @@ pub fn cells(row: &PresentedRow) -> Vec<DisplayCell> {
 /// cells stand in for the tools except edits (MessageDelegate.qml).
 pub fn shows_tool(row: &PresentedRow, tool: &Value) -> bool {
     !repeated(tool) && (!row.group_label.is_empty() || row.display_cells.is_empty() || matches!(text(tool, "name").as_str(), "Edit" | "MultiEdit" | "Write"))
-}
-
-/// ArtifactSummaryCard.qml's fields.
-pub fn artifact_item(artifact: &Value) -> ArtifactItem {
-    let kind = if text(artifact, "type").is_empty() { "item".to_owned() } else { text(artifact, "type") };
-    let outcome = [text(artifact, "conclusion"), text(artifact, "status")].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| "unknown".into());
-    let failed = matches!(outcome.as_str(), "failed" | "failure" | "timed_out" | "action_required");
-    let plan = artifact.get("plan").cloned().unwrap_or(Value::Null);
-    let (total, completed) = if kind == "plan" {
-        (number(&plan, "total_count"), number(&plan, "completed_count"))
-    } else {
-        (number(artifact, "total_steps"), number(artifact, "completed_steps"))
-    };
-    let progress = if !matches!(kind.as_str(), "plan" | "workflow_run") {
-        String::new()
-    } else if total > 0 {
-        format!("{} / {} completed", completed.max(0), total)
-    } else if outcome == "active" {
-        "In progress".into()
-    } else {
-        String::new()
-    };
-    let countdown = if kind == "countdown" {
-        let zone = text(artifact, "time_zone");
-        format!("{}{}", text(artifact, "target_at"), if zone.is_empty() { String::new() } else { format!(" · {zone}") })
-    } else {
-        String::new()
-    };
-    let title = [text(artifact, "file_name"), text(artifact, "title")].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| "Artifact".into());
-    ArtifactItem {
-        id: text(artifact, "artifact_id").into(),
-        kind: kind.replace('_', " ").to_uppercase().into(),
-        outcome: outcome.into(),
-        failed,
-        title: title.into(),
-        summary: text(artifact, "summary").into(),
-        progress: progress.into(),
-        countdown: countdown.trim().to_owned().into(),
-        form: kind == "html_form",
-    }
 }
 
 /// For each presented row, the session's artifacts made while it was being

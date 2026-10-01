@@ -3,7 +3,7 @@ import { Palette, Focus, FocusRing } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
 import { Attachment } from "composer.slint";
-import { MessageRow, MessageBlock, TableRow, ToolRow } from "transcript.slint";
+import { MessageRow, MessageBlock, MessageImage, TableRow, ToolRow } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
@@ -24,10 +24,11 @@ import { MediaItem } from "media.slint";
 import { AgentOverview, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact } from "overview.slint";
 import { VoiceDialog, VoiceBridge, VoiceItem } from "voice.slint";
 import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
-import { DisplayCell, CellLine, ArtifactItem } from "cells.slint";
-export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem }
+import { DisplayCell, CellLine } from "cells.slint";
+import { ArtifactItem, ArtifactBridge } from "artifacts.slint";
+export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge }
 
-export { Palette, Focus, ChatRow, MessageRow, MessageBlock, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
+export { Palette, Focus, ChatRow, MessageRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
 
@@ -184,6 +185,8 @@ export component AppWindow inherits Window {
     in property <string> report-title;
     in property <string> report-summary;
     in property <bool> report-html;
+    // What the report is, when it is not a document's body (PLAN...).
+    in property <string> report-kind;
     in property <[MessageBlock]> report-blocks;
     in property <[TeamView]> team-list;
     in property <[TeamMessageView]> team-messages;
@@ -480,6 +483,7 @@ export component AppWindow inherits Window {
             title: root.report-title;
             summary: root.report-summary;
             html: root.report-html;
+            kind: root.report-kind;
             blocks: root.report-blocks;
             link-clicked(url) => { root.link-clicked(url); }
             done => { root.overlay-closed(); }

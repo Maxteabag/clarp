@@ -35,6 +35,9 @@ pub struct PaneState {
     focus_transcript: i32,
     to_latest: i32,
     view: PaneView,
+    /// Each reply's artifact cards, updated in place: a card is never
+    /// rebuilt under a click or a field that has the keyboard.
+    cards: std::collections::HashMap<String, Rc<VecModel<crate::ArtifactItem>>>,
 }
 
 impl PaneState {
@@ -52,6 +55,7 @@ impl PaneState {
             focus_composer: 0,
             focus_transcript: 0,
             to_latest: 0,
+            cards: std::collections::HashMap::new(),
         }
     }
 }
@@ -89,6 +93,7 @@ impl App {
     pub fn rebuild_transcripts(&self) {
         for pane in self.pane_state.borrow_mut().iter_mut() {
             pane.shown.clear();
+            pane.cards.clear();
             pane.messages.set_vec(Vec::new());
             pane.to_latest += 1;
         }
@@ -242,11 +247,26 @@ impl App {
     }
 
     fn messages(&self, pane: &mut PaneState) {
+        crate::artifacts_view::settle_downloads(self, &pane.session);
         let presented = self.engine.borrow_mut().presented(&pane.session);
         let always = self.engine.borrow().activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE;
         let expanded = self.expanded.borrow();
         let stamps = self.prefs.borrow().timestamps;
         let artifacts = crate::cells_view::artifacts_by_row(&presented, &self.engine.borrow().artifacts_for_session(&pane.session));
+        let cursor = self.artifact_cursor.borrow().clone();
+        let choices = self.artifact_choices.borrow().clone();
+        let drafts = self.artifact_drafts.borrow().clone();
+        let editing = self.artifact_editing.borrow().clone();
+        // Decisions shown pending with a why line keep it once answered.
+        for artifact in self.engine.borrow().artifacts_for_session(&pane.session) {
+            let shown = crate::artifacts_view::artifact_item(&artifact);
+            if shown.pending && !shown.meta.is_empty() {
+                self.artifact_seen_pending.borrow_mut().insert(shown.id.to_string());
+            }
+        }
+        let seen_pending = self.artifact_seen_pending.borrow().clone();
+        let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
+        let mut kept = std::collections::HashMap::new();
         let rows: Vec<MessageRow> = presented
             .iter()
             .zip(&artifacts)
@@ -255,11 +275,16 @@ impl App {
                 if !stamps {
                     shown.stamp = SharedString::new();
                 }
-                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(crate::cells_view::artifact_item).collect();
-                shown.artifacts = ModelRc::new(VecModel::from(cards));
+                let engine = self.engine.borrow();
+                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(|a| crate::artifacts_view::card(a, &engine, &state)).collect();
+                let model = pane.cards.remove(&row.message.id).unwrap_or_default();
+                crate::artifacts_view::update_cards(&model, cards);
+                shown.artifacts = ModelRc::from(model.clone());
+                kept.insert(row.message.id.clone(), model);
                 shown
             })
             .collect();
+        pane.cards = kept;
         // Opened activity the Host sent without its tool calls: fetch them.
         let mut engine = self.engine.borrow_mut();
         for (row, shown) in presented.iter().zip(&rows) {
@@ -304,8 +329,14 @@ impl App {
         drop(engine);
         let signature = |artifacts: &Vec<serde_json::Value>, row: &MessageRow| {
             let explained: Vec<String> = row.tools.iter().map(|t| format!("{}:{}", t.narrated, t.explanation)).collect();
-            let cards = artifacts.iter().map(|a| format!("{}@{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default())).collect::<Vec<_>>().join(",");
-            format!("{cards}|{}", explained.join(","))
+            let cards = artifacts
+                .iter()
+                .map(|a| format!("{}@{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default()))
+                .collect::<Vec<_>>()
+                .join(",");
+            // A row with images is drawn again when one lands.
+            let pictures = if row.blocks.iter().any(|b| b.kind == "images") { crate::artifacts_view::pictures_landed() } else { 0 };
+            format!("{cards}|{}|{pictures}", explained.join(","))
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let fresh: Vec<Shown> =
@@ -335,6 +366,7 @@ impl App {
                     // Another chat: its rows, its draft, from its latest message.
                     pane.session = session.clone();
                     pane.shown.clear();
+                    pane.cards.clear();
                     pane.messages.set_vec(Vec::new());
                     pane.draft = self.engine.borrow().draft(&session);
                     pane.draft_set += 1;
