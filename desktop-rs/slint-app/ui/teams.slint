@@ -220,7 +220,7 @@ export component Teams inherits Rectangle {
                                     IconButton {
                                         y: 3px;
                                         size: 19px;
-                                        icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
+                                        icon: @image-url("icons/rail-close.svg");
                                         label: "Remove member " + member.name;
                                         clicked => { root.remove-member(member.id); }
                                     }
@@ -296,7 +296,7 @@ export component TeamCreateDialog inherits Modal {
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("../../../desktop/resources/icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
             IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Create"; clicked => { root.create(name.text); } }
         }
     }
@@ -334,7 +334,7 @@ export component TeamEditDialog inherits Modal {
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("../../../desktop/resources/icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
             IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Save"; clicked => { root.save(name.text, colour.text, root.leader-index); } }
         }
     }
@@ -358,7 +358,7 @@ export component TeamMemberDialog inherits Modal {
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("../../../desktop/resources/icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
             IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Add"; clicked => { root.add(root.agent-index); } }
         }
     }
@@ -381,7 +381,7 @@ export component TeamDeleteDialog inherits Modal {
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("../../../desktop/resources/icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
             IconButton { icon: @image-url("icons/delete.svg"); tint: Palette.danger; label: "Delete " + root.team; clicked => { root.confirm(); } }
         }
     }
