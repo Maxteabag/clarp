@@ -101,7 +101,10 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         ..ArtifactItem::default()
     };
     match kind.as_str() {
-        "countdown" => countdown_fields(&mut item, artifact, &status),
+        "countdown" => {
+            countdown_fields(&mut item, artifact, &status);
+            set_note(&mut item, &text(artifact, "content"));
+        }
         "html_form" => {
             let report = is_report(artifact);
             item.label = if report { "REPORT" } else { "FORM" }.into();
@@ -111,6 +114,13 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         _ => {}
     }
     item
+}
+
+/// The Markdown body the card shows under its summary.
+fn set_note(item: &mut ArtifactItem, markdown: &str) {
+    let markdown = markdown.trim();
+    item.note = markdown.into();
+    item.note_styled = crate::view::styled(markdown, false);
 }
 
 /// A card as the chat shows it: its fields, whether the keyboard is on it,
@@ -216,6 +226,7 @@ pub fn bind(window: &AppWindow) {
     bridge.on_countdown_phase(|target, now| countdown(i64::from(target), i64::from(now)).0.into());
     bridge.on_countdown_clock(|target, now| countdown(i64::from(target), i64::from(now)).1.into());
     bridge.set_now(clock_now());
+    bridge.on_link_clicked(|url| crate::open_link(&url));
     bridge.on_open(|id| {
         if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
             open(&app, &window, &id);
