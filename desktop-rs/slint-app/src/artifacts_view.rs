@@ -386,7 +386,15 @@ fn open_directory(app: &App, artifact: &Value) {
         _ => app.engine.borrow().roster().find(&session).map(|a| std::path::PathBuf::from(&a.working_directory)).filter(|p| !p.as_os_str().is_empty()),
     };
     let shared = app.engine.borrow().shared_filesystem();
-    let local = base.as_ref().map(|b| b.join(&relative)).filter(|_| shared).and_then(|p| std::fs::canonicalize(p).ok()).filter(|p| p.is_dir());
+    // Resolved, it must still be under its root: a link inside the folder
+    // does not lead out of it.
+    let root = base.as_ref().and_then(|b| std::fs::canonicalize(b).ok());
+    let local = base
+        .as_ref()
+        .map(|b| b.join(&relative))
+        .filter(|_| shared)
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .filter(|p| p.is_dir() && root.as_ref().is_some_and(|r| p.starts_with(r)));
     let Some(folder) = local else {
         let root = if text(artifact, "root") == "home" { "~" } else { "the agent's folder" };
         app.engine.borrow_mut().set_artifact_status(&id, &format!("On the Host: {root}/{relative}"));
@@ -973,7 +981,7 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
                 .collect();
             let mut parts = Vec::new();
             if !facts.is_empty() {
-                parts.push(markdown_table(&["Release".to_owned(), String::new()], &facts));
+                parts.push(markdown_table(&["Release".to_owned(), card.title.to_string()], &facts));
             }
             let notes = text(&artifact, "content");
             if !notes.trim().is_empty() {
