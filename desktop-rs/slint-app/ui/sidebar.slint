@@ -26,6 +26,8 @@ export struct ChatRow {
     done-parent: string,
     done-count: int,
     done-expanded: bool,
+    // Its place in the Ctrl+J queue (1 is next), or 0.
+    queue: int,
     // Sub-agents under this row, and whether they are folded away.
     fold-count: int,
     folded: bool,
@@ -133,6 +135,22 @@ component Row inherits Rectangle {
             spacing: 2px;
             HorizontalLayout {
                 spacing: 6px;
+                // The attention queue: 1 is where Ctrl+J goes next.
+                if root.chat.queue > 0: Rectangle {
+                    width: Math.max(16px, number.preferred-width + 8px);
+                    height: 16px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 8px;
+                    background: root.chat.queue == 1 ? Palette.accent : Palette.accent.with-alpha(0.25);
+                    accessible-role: text;
+                    accessible-label: "Next attention, number " + root.chat.queue;
+                    number := Text {
+                        text: root.chat.queue;
+                        color: root.chat.queue == 1 ? Palette.accent-text : Palette.accent;
+                        font-size: 10px;
+                        font-weight: 700;
+                    }
+                }
                 Text {
                     text: root.chat.name;
                     color: Palette.chrome-text;
@@ -209,23 +227,6 @@ component Row inherits Rectangle {
             restore-touch := TouchArea { clicked => { root.restore(); } }
         }
     }
-}
-
-// The chat list (ChatList/ChatRow in QML): search, the All/Unread scope,
-// agent-to-agent rooms and the archive behind one row each.
-component SideButton inherits Rectangle {
-    in property <image> icon;
-    in property <string> label;
-    in property <bool> round;
-    callback clicked();
-    width: 34px;
-    height: 34px;
-    border-radius: root.round ? 17px : 3px;
-    background: touch.has-hover ? Palette.hover : root.round ? Palette.control : transparent;
-    accessible-role: button;
-    accessible-label: root.label;
-    Image { source: root.icon; width: 18px; height: 18px; colorize: Palette.muted; }
-    touch := TouchArea { clicked => { root.clicked(); } }
 }
 
 export component Sidebar inherits Rectangle {

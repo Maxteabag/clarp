@@ -519,16 +519,27 @@ impl Roster {
     }
 
     pub fn next_attention_session(&self, current: &str, pending: &[String]) -> Option<String> {
+        self.attention_queue(current, pending).into_iter().next()
+    }
+
+    /// Every agent that wants the reader, in the order Ctrl+J (next
+    /// attention) visits them from `current`: the roster order, starting
+    /// after it and wrapping around.
+    pub fn attention_queue(&self, current: &str, pending: &[String]) -> Vec<String> {
         let count = self.agents.len();
         if count == 0 {
-            return None;
+            return Vec::new();
         }
         // An unknown current starts the scan at the first row.
         let start = self.index_of_session(current).unwrap_or(count - 1);
-        (1..=count).map(|offset| &self.agents[(start + offset) % count]).find_map(|agent| {
-            let wants = agent.unread || agent.latest_state == "waiting" || pending.contains(&agent.session);
-            (agent.session != current && !agent.archived && wants).then(|| agent.session.clone())
-        })
+        (1..=count)
+            .map(|offset| &self.agents[(start + offset) % count])
+            .filter(|agent| {
+                let wants = agent.unread || agent.latest_state == "waiting" || pending.contains(&agent.session);
+                agent.session != current && !agent.archived && wants
+            })
+            .map(|agent| agent.session.clone())
+            .collect()
     }
 
     pub fn display_state(&self, session: &str) -> Option<String> {

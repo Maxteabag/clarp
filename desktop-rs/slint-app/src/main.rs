@@ -177,6 +177,7 @@ impl App {
         if let Some(open) = rows.iter().find(|r| r.session == selected) {
             unfolded.extend(ancestors(open));
         }
+        let queue = engine.attention_queue();
         let mut folded_under: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
         let mut shown = Vec::new();
         for row in &visible {
@@ -193,6 +194,7 @@ impl App {
             .map(|row| {
                 let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
                 chat.fold_count = folded_under.get(&row.session).copied().unwrap_or(0);
+                chat.queue = queue.iter().position(|s| *s == row.session).map_or(0, |i| i as i32 + 1);
                 chat.folded = !unfolded.contains(&row.session);
                 if let Some(line) = sidebar.footers(&row.session).first().filter(|_| !chat.folded) {
                     chat.done_parent = line.parent_agent_id.clone().into();
@@ -249,7 +251,7 @@ impl App {
             recent.retain(|s| *s != selected);
             recent.insert(0, selected.clone());
         }
-        let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Avatars));
+        let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Avatars | Change::Updates));
         drop(engine);
         if list_changed {
             let chats = self.chat_rows(&self.engine.borrow(), &window);
