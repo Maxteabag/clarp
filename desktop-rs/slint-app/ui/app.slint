@@ -163,6 +163,7 @@ export component AppWindow inherits Window {
     // The rail of destinations (Chats, Updates, Teams, Settings); Ctrl+1..4
     // and Ctrl+K reach them without it.
     in property <bool> nav-rail-visible: true;
+    in property <bool> explorer-compact;
     out property <bool> settings-focused: settings.list-focused;
     public function focus-settings() { settings.focus-list(); }
     callback setting-changed(string, int);
@@ -304,6 +305,7 @@ export component AppWindow inherits Window {
                 unread-rooms: root.unread-rooms;
                 cursor: root.sidebar-cursor;
                 minimal: root.minimal-ui;
+                compact: root.explorer-compact;
                 hide => { root.run-command("sidebar"); }
                 new-agent => { root.run-command("new"); }
                 chosen(session) => { root.chat-chosen(session); }

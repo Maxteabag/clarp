@@ -437,6 +437,7 @@ fn main() {
     view::load_fonts(theme.clone());
     window.set_minimal_ui(settings.boolean("appearance/minimalUi", false));
     window.set_nav_rail_visible(settings.boolean("appearance/navRail", true));
+    window.set_explorer_compact(settings.boolean("explorer/compact", false));
     window.set_shortcuts_visible(settings.boolean("appearance/shortcutsVisible", true));
     // The reader's interface scale (1.15 as in the Qt app); checks draw at 1.0.
     let ui_scale = if headless { 1.0 } else { settings.get("appearance/uiScale").and_then(serde_json::Value::as_f64).unwrap_or(1.15) as f32 };
