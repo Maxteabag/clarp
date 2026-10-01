@@ -246,6 +246,21 @@ def artifact_fixtures(kind, session, now_ms):
              "summary": "Only a summary so far; the body comes later."},
             {"artifact_id": "doc-huge", "type": "document", "status": "ready", "session": s, "title": "A very long report", "content": huge},
         ]
+    if kind == "research":
+        return [
+            {"artifact_id": "res-market", "type": "research", "status": "ready", "session": s,
+             "title": "Desktop agent clients in 2026: who ships what, on which toolkit, and why Slint",
+             "summary": "Four vendors compared.",
+             "content": "## Findings\n\nMost clients ship **Electron**; two ship native toolkits.\n\n## Method\n\nWe read the release notes.",
+             "sources": [{"title": "Gartner forecast", "url": "https://gartner.example/r"},
+                         {"title": "Vendor blog", "url": "https://vendor.example/b"},
+                         {"title": "Old mirror", "url": "http://insecure.example/old"},
+                         {"title": "Unlinked note"}]},
+            {"artifact_id": "res-html", "type": "research", "status": "ready", "session": s, "title": "Market page",
+             "content": "<!doctype html><html><body><h1>Market</h1><p>Growth is <b>12%</b> a year.</p><script>steal()</script></body></html>"},
+            {"artifact_id": "res-plain", "type": "research", "status": "ready", "session": s, "title": "Notes without sources",
+             "content": "Short notes."},
+        ]
     raise KeyError(kind)
 
 

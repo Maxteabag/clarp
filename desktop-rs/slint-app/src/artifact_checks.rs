@@ -859,10 +859,76 @@ fn document_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- research
+
+fn research_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let ids = ["res-market", "res-html", "res-plain"];
+    let mut stages = load_chat("art-research", &["research"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("research cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let market = card(window, "res-market").expect("market");
+            check(market.label == "RESEARCH" && market.action == "Open research" && market.preview.starts_with("Findings Most clients ship Electron"), &format!("research shows its first lines and opens: {:?} {:?}", market.action, market.preview));
+            // iOS lists only https sources; the count says how many open.
+            check(market.sources == "2 sources", &format!("and how many sources it cites: {:?}", market.sources));
+            let html = card(window, "res-html").expect("html");
+            check(html.preview.starts_with("Market Growth is 12% a year") && !html.preview.contains("steal"), &format!("an HTML body reads as its text, scripts dropped: {:?}", html.preview));
+            check(card(window, "res-plain").is_some_and(|c| c.sources.is_empty()), "no sources, no sources line");
+            let detail = crate::artifacts_view::detail(app, "res-market").map(|d| clarp_core::json::string(&d, "body")).unwrap_or_default();
+            check(
+                detail.contains("Most clients ship") && detail.contains("[Gartner forecast](https://gartner.example/r)") && detail.contains("[Vendor blog](https://vendor.example/b)") && !detail.contains("insecure.example"),
+                &format!("opened, its body and its https sources as links: {detail:?}"),
+            );
+            app.focus_transcript();
+            true
+        })),
+        ("research keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("research first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("res-market") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            shot(&out, "artifacts-07-research");
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("research opens", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the research: overlay {:?}", window.get_overlay())); true };
+            }
+            check(window.get_report_title().starts_with("Desktop agent clients in 2026") && window.get_report_kind() == "RESEARCH", &format!("in the report viewer, as research: {:?}", window.get_report_kind()));
+            shot(&out2, "artifacts-07b-research-open");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("research closed", Box::new(|_, window, elapsed| {
+            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_overlay().is_empty(), "Escape closes it");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1100,6 +1166,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(question_stages(&out));
     stages.extend(plan_stages(&out));
     stages.extend(document_stages(&out));
+    stages.extend(research_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
