@@ -153,6 +153,15 @@ pub fn click(x: f32, y: f32) {
     window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
 }
 
+/// A mouse wheel turn over a logical position: a positive `delta_y`
+/// scrolls up (towards older content), as a wheel sends it.
+pub fn wheel(x: f32, y: f32, delta_y: f32) {
+    let Some(window) = window() else { return };
+    let position = slint::LogicalPosition::new(x, y);
+    window.dispatch_event(WindowEvent::PointerMoved { position });
+    window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y });
+}
+
 pub fn type_text(text: &str) {
     for character in text.chars() {
         press(SharedString::from(character.to_string()));
