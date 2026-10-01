@@ -776,10 +776,69 @@ fn plan_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- document
+
+fn document_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let ids = ["doc-spec", "doc-summary", "doc-huge"];
+    let mut stages = load_chat("art-document", &["document"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("document cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let spec = card(window, "doc-spec").expect("spec");
+            check(spec.label == "DOCUMENT" && spec.action == "Open document", &format!("a document offers to open: {:?} {:?}", spec.label, spec.action));
+            check(
+                spec.preview.starts_with("Slint client: design notes") && spec.preview.contains("The transcript keeps its offset") && !spec.preview.contains('#') && !spec.preview.contains("**"),
+                &format!("its first lines as plain text: {:?}", spec.preview),
+            );
+            let summary = card(window, "doc-summary").expect("summary");
+            check(summary.badge == "Draft" && summary.preview.is_empty() && summary.summary.starts_with("Only a summary") && summary.action.is_empty(), &format!("without a body, its summary and nothing to open: {:?} {:?}", summary.preview, summary.action));
+            app.focus_transcript();
+            true
+        })),
+        ("document keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::End);
+            true
+        })),
+        ("huge document", Box::new(move |app, _, elapsed| {
+            if !crate::artifacts_view::on_screen(app).contains(&"doc-huge".to_owned()) && elapsed < Duration::from_secs(3) {
+                return false;
+            }
+            shot(&out, "artifacts-06-document");
+            headless::press("k");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("document opens", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the document: overlay {:?}", window.get_overlay())); true };
+            }
+            let blocks = window.get_report_blocks().row_count();
+            check(window.get_report_title() == "A very long report" && blocks >= 200, &format!("the whole document in the report viewer: {:?}, {blocks} blocks", window.get_report_title()));
+            shot(&out2, "artifacts-06b-document-open");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("document closed", Box::new(|_, window, elapsed| {
+            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_overlay().is_empty(), "Escape closes it");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1014,6 +1073,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(decision_stages(&out));
     stages.extend(question_stages(&out));
     stages.extend(plan_stages(&out));
+    stages.extend(document_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
