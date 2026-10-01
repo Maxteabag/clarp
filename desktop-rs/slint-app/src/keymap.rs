@@ -98,7 +98,6 @@ fn state(name: &str) -> Vec<Binding> {
             b("focus-pane", &["Ctrl+H"], "Chat", false, Always, false),
             b("retry-message", &["Ctrl+Alt+R"], "Retry failed message", false, Agent, false),
             b("jump-latest", &["Ctrl+End"], "Latest", true, Behind, false),
-            b("assign-agent", &["Ctrl+A"], "Assign contact", false, Agent, false),
             b("auto-assign-agent", &["Ctrl+Shift+A"], "Auto assign", false, Agent, false),
             b("escape", &["Escape"], "Navigate", false, Always, false),
             b("move-left", &["Ctrl+Alt+Left"], "Left pane", false, Always, false),

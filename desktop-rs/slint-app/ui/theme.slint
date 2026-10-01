@@ -88,36 +88,45 @@ export component PaneFrame inherits Rectangle {
             vertical-alignment: center;
         }
     }
+    // Sized from its two texts' own widths (not from a layout sized by
+    // this box, which could settle on a stale width and leave the title
+    // mid-border with the line missing after it).
+    property <length> info-gap: root.info-name != "" && root.info != "" ? 6px : 0px;
+    property <length> info-room: Math.max(0px, root.width - 40px - 2 * 10px - 60px);
+    property <length> info-want: (root.info-name != "" ? name-text.preferred-width : 0px) + root.info-gap + (root.info != "" ? info-text.preferred-width : 0px);
     if root.info-name != "" || root.info != "": Rectangle {
-        property <length> room: root.width - 40px - 2 * 10px - 60px;
-        width: min(right.preferred-width + 8px, self.room);
+        width: Math.min(root.info-want, root.info-room) + 8px;
         height: 14px;
         x: root.width - self.width - 10px;
         y: 0;
         background: root.surface;
-        clip: true;
-        right := HorizontalLayout {
-            x: 4px;
-            width: parent.width - 8px;
-            spacing: 6px;
-            if root.info-name != "": Text {
-                text: root.info-name;
-                color: name-touch.has-hover ? Palette.accent : Palette.chrome-text;
-                font-size: 11px;
-                font-weight: 700;
-                vertical-alignment: center;
-                accessible-role: button;
-                accessible-label: "Agent profile";
-                name-touch := TouchArea { mouse-cursor: pointer; clicked => { root.info-clicked(); } }
-            }
-            Text {
-                text: root.info;
-                color: Palette.muted;
-                font-size: 11px;
-                vertical-alignment: center;
-                overflow: elide;
-                horizontal-stretch: 1;
-            }
-        }
+    }
+    name-text := Text {
+        visible: root.info-name != "";
+        x: root.width - 10px - 4px - Math.min(root.info-want, root.info-room);
+        y: 0;
+        height: 14px;
+        width: Math.min(self.preferred-width, root.info-room);
+        text: root.info-name;
+        color: name-touch.has-hover ? Palette.accent : Palette.chrome-text;
+        font-size: 11px;
+        font-weight: 700;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: button;
+        accessible-label: "Agent profile";
+        name-touch := TouchArea { mouse-cursor: pointer; clicked => { root.info-clicked(); } }
+    }
+    info-text := Text {
+        visible: root.info != "";
+        x: name-text.x + (root.info-name != "" ? name-text.width : 0px) + root.info-gap;
+        y: 0;
+        height: 14px;
+        width: Math.max(0px, root.width - 10px - 4px - self.x);
+        text: root.info;
+        color: Palette.muted;
+        font-size: 11px;
+        vertical-alignment: center;
+        overflow: elide;
     }
 }
