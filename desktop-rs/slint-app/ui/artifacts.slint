@@ -635,13 +635,15 @@ export component ArtifactCard inherits Rectangle {
         if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
         if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; }
         // The body's first lines (iOS shows four), always four lines tall.
+        // The body's first lines (iOS: four for a document, five for
+        // research), as tall as they are up to that.
         if root.artifact.preview != "": Text {
             text: root.artifact.preview;
             color: Palette.muted;
             font-size: 12px;
             wrap: word-wrap;
             overflow: elide;
-            height: 64px;
+            max-height: (root.artifact.kind == "research" ? 5 : 4) * 16px;
             vertical-alignment: top;
         }
         // A table's header and first row, equal columns, one line each.
@@ -673,7 +675,8 @@ export component ArtifactCard inherits Rectangle {
         if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
         // Two lines, whatever the summary's length: a summary that grows
         // does not change the card's height.
-        if root.artifact.summary != "": Text {
+        // A body's preview stands in for the summary (iOS shows one).
+        if root.artifact.summary != "" && root.artifact.preview == "": Text {
             text: root.artifact.summary;
             color: Palette.text;
             font-size: 12px;
