@@ -155,44 +155,64 @@ component AnswerButton inherits Rectangle {
     area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
-// A decision's or question's body (iOS DecisionResponseView).
+// A decision's or question's body (iOS DecisionResponseView). Its height
+// is the same pending and answered, so a decision answered above a reader
+// who scrolled up does not move what they read: one line for why and how
+// urgent (then whether it was delivered), one row for the buttons (then
+// how it was answered), with the send's status beside them.
 component DecisionBody inherits VerticalLayout {
     in property <ArtifactItem> artifact;
     spacing: 5px;
     if root.artifact.question != "": Text { text: root.artifact.question; color: Palette.text; font-size: 13px; font-weight: 600; wrap: word-wrap; }
     if root.artifact.context != "": Text { text: root.artifact.context; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
-    if root.artifact.pending && root.artifact.meta != "": Text { text: root.artifact.meta; color: Palette.warning; font-size: 11px; wrap: word-wrap; }
-    if root.artifact.pending && root.artifact.approval: HorizontalLayout {
+    if root.artifact.question != "" || root.artifact.resolved != "": Text {
+        height: 15px;
+        text: root.artifact.pending ? root.artifact.meta : root.artifact.delivery;
+        color: root.artifact.pending ? Palette.warning : Palette.muted;
+        font-size: 11px;
+        overflow: elide;
+    }
+    if root.artifact.question != "" || root.artifact.resolved != "": HorizontalLayout {
+        height: 28px;
         alignment: start;
         spacing: 8px;
-        for option[index] in root.artifact.options: AnswerButton {
-            key: index + 1;
-            label: option.label;
-            primary: index == 0;
-            chosen: root.artifact.chosen == index;
-            clicked => {
-                ArtifactBridge.choose(root.artifact.id, index);
-                ArtifactBridge.send(root.artifact.id);
+        if root.artifact.pending && root.artifact.approval: HorizontalLayout {
+            spacing: 8px;
+            for option[index] in root.artifact.options: AnswerButton {
+                key: index + 1;
+                label: option.label;
+                primary: index == 0;
+                chosen: root.artifact.chosen == index;
+                clicked => {
+                    ArtifactBridge.choose(root.artifact.id, index);
+                    ArtifactBridge.send(root.artifact.id);
+                }
+            }
+            AnswerButton {
+                key: root.artifact.selected ? "Del" : "";
+                label: "Discard";
+                clicked => { ArtifactBridge.discard(root.artifact.id); }
             }
         }
-        AnswerButton {
-            key: root.artifact.selected ? "Del" : "";
-            label: "Discard";
-            clicked => { ArtifactBridge.discard(root.artifact.id); }
+        if !root.artifact.pending && root.artifact.resolved != "": HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: root.artifact.resolved-ok ? "✓" : "–";
+                color: root.artifact.resolved-ok ? Palette.success : Palette.muted;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+            Text { text: root.artifact.resolved; color: root.artifact.resolved-ok ? Palette.success : Palette.muted; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+            if root.artifact.answer != "": Text { text: "· " + root.artifact.answer; color: Palette.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
+        }
+        if root.artifact.status-text != "": Text {
+            text: root.artifact.status-text;
+            color: root.artifact.status-text.starts-with("Not ") || root.artifact.status-text.starts-with("Choose") ? Palette.danger : Palette.muted;
+            font-size: 12px;
+            overflow: elide;
+            vertical-alignment: center;
         }
     }
-    if !root.artifact.pending && root.artifact.resolved != "": HorizontalLayout {
-        alignment: start;
-        spacing: 6px;
-        Text {
-            text: root.artifact.resolved-ok ? "✓" : "–";
-            color: root.artifact.resolved-ok ? Palette.success : Palette.muted;
-            font-size: 13px;
-        }
-        Text { text: root.artifact.resolved; color: root.artifact.resolved-ok ? Palette.success : Palette.muted; font-size: 12px; font-weight: 600; }
-        if root.artifact.answer != "": Text { text: "· " + root.artifact.answer; color: Palette.text; font-size: 12px; overflow: elide; }
-    }
-    if root.artifact.delivery != "": Text { text: root.artifact.delivery; color: Palette.muted; font-size: 11px; wrap: word-wrap; }
 }
 
 export component ArtifactCard inherits Rectangle {
@@ -250,13 +270,16 @@ export component ArtifactCard inherits Rectangle {
         }
         if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
         if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; }
+        // Two lines, whatever the summary's length: a summary that grows
+        // does not change the card's height.
         if root.artifact.summary != "": Text {
             text: root.artifact.summary;
             color: Palette.text;
             font-size: 12px;
             wrap: word-wrap;
             overflow: elide;
-            max-height: 2 * 18px;
+            height: 32px;
+            vertical-alignment: top;
         }
         if root.artifact.note != "": StyledText {
             text: root.artifact.note-styled;
@@ -268,7 +291,8 @@ export component ArtifactCard inherits Rectangle {
         }
         if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
         if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
-        if root.artifact.action != "" || root.artifact.status-text != "": HorizontalLayout {
+        // A decision shows its send's status in its own row.
+        if root.artifact.action != "" || (root.artifact.status-text != "" && root.artifact.kind != "decision" && root.artifact.kind != "question"): HorizontalLayout {
             spacing: 10px;
             if root.artifact.action != "": Text {
                 text: root.artifact.action + " ↗";
