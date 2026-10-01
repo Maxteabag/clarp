@@ -288,6 +288,26 @@ PERSONA_PERSONALITIES.update({
     "Nova": "Personality: an atomic-energy android; intense, systematic, and careful with power and risk.",
 })
 
+# Grok cartoon roster: punk, gothic and rogue portraits; Gemini cartoon
+# roster: genies rising from golden lamps.
+PERSONA_PERSONALITIES.update({
+    "Margrok": "Personality: a green-haired street punk with a grin; irreverent and quick, you poke holes in the plan, then fix it yourself.",
+    "Blaze": "Personality: a grease-smudged mechanic with a wrench and a wink; hands-on, cheeky and fearless, you take things apart to see why they broke.",
+    "Dagger": "Personality: a scarred operative with a cybernetic eye; cool, terse and exact, you say only what matters and never miss the detail.",
+    "Fang": "Personality: a rugged wolfish drifter; gravel-voiced, loyal and blunt, you get through rough terrain with instinct and grit.",
+    "Jax": "Personality: a sunny Aussie rogue in shades and leather; laid-back, confident and upbeat, you make hard things sound easy and then actually make them easy.",
+    "Raven": "Personality: a gothic night owl; calm, low-key and perceptive, you notice what others overlook and say it softly and plainly.",
+    "Riot": "Personality: a paint-splattered British rebel in a gas mask; witty, chirpy and restless, you shake up stale ideas and keep things moving.",
+    "Roxy": "Personality: a pink-mohawked Aussie punk; bright, bold and helpful, you are friendly but straight-talking and always get it done.",
+    "Spike": "Personality: a spiky-haired British punk mate; casual, warm and cheeky, you keep it real and explain things like a mate at the pub.",
+    "Vance": "Personality: an elegant old-world vampire; unhurried, velvety and composed, you savor a hard problem and calm everyone down.",
+    "Pip": "Personality: a tiny excitable genie; bubbly, eager and kind, every request is a wish you are thrilled to grant.",
+    "Bloop": "Personality: a big jolly water genie; warm, bubbly and generous, you make people feel looked after and laugh easily.",
+    "Mochi": "Personality: a soft little peach genie; gentle, soothing and patient, you make stressful things feel calm and manageable.",
+    "Noodle": "Personality: a flamboyant purple genie with a twirled moustache; theatrical, friendly and clever, you add a little showmanship to every answer.",
+    "Ziggy": "Personality: a fiery golden genie; high-energy, cheerful and quick, you leap at the task and spark ideas as you go.",
+})
+
 # DeepSeek tier: deep-sea explorers. Bioluminescent-blue underwater portraits;
 # the artwork says "deep", the prompt says how each one works.
 PERSONA_PERSONALITIES.update({
@@ -376,6 +396,9 @@ class Config:
     gemini_api_key: str = ""             # [gemini_tts] api_key or env GEMINI_API_KEY
     gemini_model: str = "gemini-3.8-flash-tts"
     gemini_voice: str = "Kore"
+    # Persona -> Gemini voice ([gemini_tts.voices]). Voice Design ids live in
+    # the user's Google project, so there are no built-in defaults.
+    gemini_voices: dict[str, str] = field(default_factory=dict)
     cartesia_api_key: str = ""           # [cartesia] api_key or env CARTESIA_API_KEY
     deepgram_api_key: str = ""            # [deepgram] api_key or env DEEPGRAM_API_KEY
     deepgram_model: str = "flux-haley-en"
@@ -560,6 +583,18 @@ class Config:
             return str(configured)
         migrated = config_file.parent / configured.name
         return str(migrated) if migrated.is_file() else str(configured)
+
+    def gemini_voice_for(self, persona: str) -> str | None:
+        """Gemini voice for a persona (case-insensitive), or None if unmapped.
+
+        Anonymous ``<Archetype>-<hex>`` agents use the archetype's voice.
+        """
+        if not persona:
+            return None
+        voices = {k.casefold(): v for k, v in self.gemini_voices.items()}
+        return (voices.get(persona.casefold())
+                or voices.get(_ANONYMOUS_SUFFIX.sub("", persona).casefold())
+                or None)
 
     def cartesia_voice_for(self, persona: str) -> str | None:
         """Cartesia voice id for a persona, or None if unmapped.
@@ -764,6 +799,9 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         gemini_api_key  = str(gemini.get("api_key", "")),
         gemini_model    = str(gemini.get("model", "gemini-3.8-flash-tts")).strip() or "gemini-3.8-flash-tts",
         gemini_voice    = str(gemini.get("voice", "Kore")).strip() or "Kore",
+        gemini_voices   = {str(k): str(v).strip()
+                           for k, v in (gemini.get("voices") or {}).items()
+                           if str(v).strip()},
         cartesia_api_key = str(cartesia.get("api_key", "")),
         deepgram_api_key = str(deepgram.get("api_key", "")),
         deepgram_model  = str(deepgram.get("model", "flux-haley-en")),

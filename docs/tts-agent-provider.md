@@ -19,8 +19,29 @@ voice = "Kore"                    # default when an agent names no gemini_voice
 
 Keys: `provider`, and `<provider>_voice` (for example `cartesia_voice` or
 `gemini_voice`) for that provider's voice. Without a `<provider>_voice` the
-agent's stored voice map is used, then the provider default. Config changes
-apply to the next clip without a restart.
+agent's stored voice map is used, then the contact's voice for that provider,
+then the provider default. Config changes apply to the next clip without a
+restart.
+
+## A voice per contact and provider
+
+A contact's voice is a map with one entry per provider, for example
+`{"elevenlabs": "...", "cartesia": "...", "gemini": "voice_..."}`. Switching
+`[tts] provider` picks that provider's entry; the other entries are kept, so
+switching back restores the old voice.
+
+Gemini voices for contacts come from `[gemini_tts.voices]` (contact name to a
+prebuilt name or Voice Design id). Voice Design ids belong to the Google
+project that created them, so there are no built-in defaults:
+
+```toml
+[gemini_tts.voices]
+Arnold = "voice_..."   # designed to keep his Australian Cartesia accent
+Ingrid = "voice_..."
+```
+
+Built-in contacts get the `gemini` entry in their stored voice map on the next
+server start; clips use the table immediately.
 
 An agent always speaks with one voice. `[tts] fallback` still applies when the
 agent's provider fails; leave it `none` to keep one voice per agent.

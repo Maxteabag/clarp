@@ -31,10 +31,13 @@ def ensure_builtins() -> None:
 def _sync_builtins() -> None:
     cfg = config.load()
     for name in cfg.roster.keys():
-        voice = json.dumps({
+        voices = {
             "elevenlabs": cfg.roster.get(name, ""),
             "cartesia": cfg.cartesia_voice_for(name),
-        }, separators=(",", ":"))
+        }
+        if cfg.gemini_voice_for(name):
+            voices["gemini"] = cfg.gemini_voice_for(name)
+        voice = json.dumps(voices, separators=(",", ":"))
         db.conn().execute(
             """INSERT OR IGNORE INTO personas
                  (persona_id,name,voice_id,personality,builtin,created_at)

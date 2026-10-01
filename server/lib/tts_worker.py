@@ -254,7 +254,9 @@ def _synthesize(*, cfg, row: dict, agent: dict,
         if selected == GEMINI:
             from .gemini_tts import synthesize as gemini_synthesize
             return gemini_synthesize(
-                text=text, voice=voice_for(GEMINI) or cfg.gemini_voice,
+                text=text,
+                voice=(voice_for(GEMINI) or cfg.gemini_voice_for(persona)
+                       or cfg.gemini_voice),
                 out_path=out_path, api_key=cfg.gemini_key(),
                 model=cfg.gemini_model, on_chunk=on_chunk,
                 trace_id=trace_id)
