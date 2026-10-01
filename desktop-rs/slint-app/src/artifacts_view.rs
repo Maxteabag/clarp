@@ -107,6 +107,15 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
         "plan" => plan_fields(&mut item, artifact),
+        "document" | "research" => {
+            let content = text(artifact, "content");
+            if !content.trim().is_empty() {
+                // HTML reads as its text, Markdown without its marks.
+                let markdown = if clarp_core::text::looks_like_html_report(&content) { crate::updates_view::html_markdown(&content) } else { content };
+                item.preview = clarp_core::text::plain_preview_text(&markdown).chars().take(600).collect::<String>().into();
+                item.action = if kind == "document" { "Open document" } else { "Open research" }.into();
+            }
+        }
         "html_form" => {
             let report = is_report(artifact);
             item.label = if report { "REPORT" } else { "FORM" }.into();
