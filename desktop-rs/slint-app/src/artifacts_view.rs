@@ -10,7 +10,7 @@ use slint::ComponentHandle;
 use clarp_engine::{Change, Engine};
 use slint::Model;
 
-use crate::{App, AppWindow, ArtifactBridge, ArtifactItem};
+use crate::{App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption};
 
 fn text(value: &Value, key: &str) -> String {
     match value.get(key) {
@@ -105,6 +105,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             countdown_fields(&mut item, artifact, &status);
             set_note(&mut item, &text(artifact, "content"));
         }
+        "decision" | "question" => decision_fields(&mut item, artifact),
         "html_form" => {
             let report = is_report(artifact);
             item.label = if report { "REPORT" } else { "FORM" }.into();
@@ -123,19 +124,173 @@ fn set_note(item: &mut ArtifactItem, markdown: &str) {
     item.note_styled = crate::view::styled(markdown, false);
 }
 
+/// What the window holds for the cards beyond the artifacts: the card the
+/// keyboard is on and the answers chosen on cards.
+pub struct CardState<'a> {
+    pub cursor: &'a str,
+    pub choices: &'a std::collections::HashMap<String, i32>,
+}
+
 /// A card as the chat shows it: its fields, whether the keyboard is on it,
-/// and how its latest action went.
-pub fn card(artifact: &Value, engine: &Engine, cursor: &str) -> ArtifactItem {
+/// what it chose and how its latest action went.
+pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactItem {
     let mut item = artifact_item(artifact);
-    item.selected = !cursor.is_empty() && item.id == cursor;
-    item.status_text = engine.form_status(&item.id).into();
+    item.selected = !state.cursor.is_empty() && item.id == state.cursor;
+    item.status_text = engine.artifact_status(&item.id).into();
+    if item.pending {
+        item.chosen = state.choices.get(item.id.as_str()).copied().filter(|c| (*c as usize) < item.options.row_count()).unwrap_or(-1);
+    }
     item
 }
 
 /// What a card's row depends on beyond the artifact itself.
-pub fn card_signature(artifact: &Value, engine: &Engine, cursor: &str) -> String {
+pub fn card_signature(artifact: &Value, engine: &Engine, state: &CardState) -> String {
     let id = text(artifact, "artifact_id");
-    format!("{}{}", if id == cursor { "*" } else { "" }, engine.form_status(&id))
+    let chosen = state.choices.get(&id).copied().unwrap_or(-1);
+    format!("{}{chosen}{}", if id == state.cursor { "*" } else { "" }, engine.artifact_status(&id))
+}
+
+/// iOS `DecisionResponseView`: while pending the question, why and how
+/// urgent, and its answers; once answered, how and with what.
+fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
+    let Some(decision) = artifact.get("decision").filter(|d| d.is_object()) else { return };
+    let status = text(decision, "status");
+    item.question = text(decision, "question").into();
+    item.context = text(decision, "context").into();
+    let response = text(decision, "response_type");
+    item.approval = response.is_empty() || response == "approval";
+    let options: Vec<ArtifactOption> = if item.approval {
+        let label = |key: &str, fallback: &str| Some(text(decision, key)).filter(|l| !l.is_empty()).unwrap_or_else(|| fallback.to_owned());
+        vec![
+            ArtifactOption { id: "yes".into(), label: label("yes_label", "Yes").into(), ..ArtifactOption::default() },
+            ArtifactOption { id: "no".into(), label: label("no_label", "No").into(), ..ArtifactOption::default() },
+        ]
+    } else {
+        let recommended = text(decision, "recommended_option_id");
+        decision
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|options| {
+                options
+                    .iter()
+                    .map(|o| {
+                        let (id, label) = (text(o, "id"), text(o, "label"));
+                        let recommended = !recommended.is_empty() && id == recommended && !label.to_lowercase().contains("recommended");
+                        ArtifactOption { id: id.into(), label: label.into(), detail: text(o, "description").into(), recommended }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    item.pending = status == "pending";
+    item.chosen = -1;
+    if item.pending {
+        let mut meta = Vec::new();
+        if !text(decision, "priority_reason").is_empty() {
+            meta.push(text(decision, "priority_reason"));
+        }
+        match text(decision, "response_effort").as_str() {
+            "quick" | "" => {}
+            "short" => meta.push("About a minute".into()),
+            _ => meta.push("Needs a closer look".into()),
+        }
+        let deadline = chrono::DateTime::parse_from_rfc3339(&text(decision, "deadline_at"));
+        if let Ok(deadline) = deadline {
+            meta.insert(0, format!("Due {}", deadline.with_timezone(&chrono::Local).format("%b %-d at %H:%M")));
+        } else if text(decision, "urgency") == "time_sensitive" {
+            meta.push("Time sensitive".into());
+        }
+        if !item.approval && response != "single_choice" {
+            meta.push("Update Clarp to answer this kind of question".into());
+        }
+        item.meta = meta.join(" · ").into();
+        if item.approval || response == "single_choice" {
+            item.options = slint::ModelRc::new(slint::VecModel::from(options));
+        }
+        return;
+    }
+    let (resolved, ok) = match status.as_str() {
+        "answered" => ("Answer saved", true),
+        "accepted" => ("Approved", true),
+        "rejected" => ("Declined", false),
+        "cancelled" => ("Discarded", false),
+        "expired" => ("Expired", false),
+        _ => ("", false),
+    };
+    item.resolved = resolved.into();
+    item.resolved_ok = ok;
+    let answer = decision.get("answer").cloned().unwrap_or(Value::Null);
+    let chosen = text(&answer, "option_id");
+    item.answer = [text(&answer, "text"), text(&answer, "label")]
+        .into_iter()
+        .find(|t| !t.is_empty())
+        .or_else(|| options.iter().find(|o| !chosen.is_empty() && o.id == chosen.as_str()).map(|o| o.label.to_string()))
+        .unwrap_or_default()
+        .into();
+    if decision.get("delivery_pending").and_then(Value::as_bool) == Some(true) {
+        item.delivery = "Saved. Waiting to deliver to the agent.".into();
+    }
+}
+
+/// 1-9 on a card: the answer the keyboard chose.
+pub fn choose(app: &App, id: &str, index: i32) {
+    let options = card_item(app, id).map(|c| c.options.row_count()).unwrap_or(0);
+    if index < 0 || index as usize >= options {
+        return;
+    }
+    app.artifact_choices.borrow_mut().insert(id.to_owned(), index);
+    *app.artifact_cursor.borrow_mut() = id.to_owned();
+    app.refresh(&[Change::Updates]);
+}
+
+/// The card as the open chat shows it.
+fn card_item(app: &App, id: &str) -> Option<ArtifactItem> {
+    app.active_messages()?.iter().flat_map(|row| row.artifacts.iter().collect::<Vec<_>>()).find(|a| a.id == id)
+}
+
+/// Sends a decision's chosen answer.
+pub fn send(app: &App, id: &str) {
+    let Some(artifact) = artifact(app, id) else { return };
+    let Some(card) = card_item(app, id).filter(|c| c.pending) else { return };
+    let decision = artifact.get("decision").cloned().unwrap_or(Value::Null);
+    let Some(option) = usize::try_from(card.chosen).ok().and_then(|i| card.options.row_data(i)) else {
+        app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first (1-9)");
+        app.refresh(&[Change::Updates]);
+        return;
+    };
+    let body = if card.approval {
+        serde_json::json!({"choice": if option.id == "yes" { "accepted" } else { "rejected" }})
+    } else {
+        serde_json::json!({"answer": {"option_id": option.id.as_str()}})
+    };
+    app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "resolve", body, number(&decision, "revision"));
+    pump();
+}
+
+/// Discards a pending decision (iOS "Discard").
+pub fn discard(app: &App, id: &str) {
+    let Some(artifact) = artifact(app, id) else { return };
+    if !card_item(app, id).is_some_and(|c| c.pending) {
+        return;
+    }
+    let decision = artifact.get("decision").cloned().unwrap_or(Value::Null);
+    app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "dismiss", serde_json::json!({}), number(&decision, "revision"));
+    pump();
+}
+
+/// Shows the engine's change at once.
+fn pump() {
+    if let Some(app) = crate::app() {
+        crate::pump_now(&app);
+    }
+}
+
+fn artifact(app: &App, id: &str) -> Option<Value> {
+    let found = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned();
+    if found.is_none() {
+        eprintln!("clarp-slint: no artifact {id}");
+    }
+    found
 }
 
 /// iOS `isHTMLReport`: read-only, or an answer schema that asks nothing.
@@ -181,11 +336,7 @@ pub fn step(app: &App, direction: i32) {
 
 /// A card's action (Enter on the selected card, or a click).
 pub fn open(app: &App, window: &AppWindow, id: &str) {
-    let artifact = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned();
-    let Some(artifact) = artifact else {
-        eprintln!("clarp-slint: no artifact {id} to open");
-        return;
-    };
+    let Some(artifact) = artifact(app, id) else { return };
     *app.artifact_cursor.borrow_mut() = id.to_owned();
     match text(&artifact, "type").as_str() {
         "html_form" if !is_report(&artifact) => {
@@ -194,11 +345,14 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                 Ok(url) => crate::open_link(&url),
                 Err(error) => {
                     eprintln!("clarp-slint: {error}");
-                    app.engine.borrow_mut().set_form_status(id, &format!("Not opened: {error}"));
+                    app.engine.borrow_mut().set_artifact_status(id, &format!("Not opened: {error}"));
                 }
             }
         }
-        _ => crate::updates_view::open_report(app, window, id),
+        "decision" | "question" => return send(app, id),
+        _ if app.engine.borrow().report_for_artifact(id).is_some() => crate::updates_view::open_report(app, window, id),
+        // Nothing to open: Enter only selects.
+        _ => {}
     }
     app.refresh(&[Change::Updates]);
 }
@@ -227,6 +381,21 @@ pub fn bind(window: &AppWindow) {
     bridge.on_countdown_clock(|target, now| countdown(i64::from(target), i64::from(now)).1.into());
     bridge.set_now(clock_now());
     bridge.on_link_clicked(|url| crate::open_link(&url));
+    bridge.on_choose(|id, index| {
+        if let Some(app) = crate::app() {
+            choose(&app, &id, index);
+        }
+    });
+    bridge.on_send(|id| {
+        if let Some(app) = crate::app() {
+            send(&app, &id);
+        }
+    });
+    bridge.on_discard(|id| {
+        if let Some(app) = crate::app() {
+            discard(&app, &id);
+        }
+    });
     bridge.on_open(|id| {
         if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
             open(&app, &window, &id);

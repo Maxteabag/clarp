@@ -248,6 +248,8 @@ impl App {
         let stamps = self.prefs.borrow().timestamps;
         let artifacts = crate::cells_view::artifacts_by_row(&presented, &self.engine.borrow().artifacts_for_session(&pane.session));
         let cursor = self.artifact_cursor.borrow().clone();
+        let choices = self.artifact_choices.borrow().clone();
+        let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices };
         let rows: Vec<MessageRow> = presented
             .iter()
             .zip(&artifacts)
@@ -257,7 +259,7 @@ impl App {
                     shown.stamp = SharedString::new();
                 }
                 let engine = self.engine.borrow();
-                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(|a| crate::artifacts_view::card(a, &engine, &cursor)).collect();
+                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(|a| crate::artifacts_view::card(a, &engine, &state)).collect();
                 shown.artifacts = ModelRc::new(VecModel::from(cards));
                 shown
             })
@@ -309,7 +311,7 @@ impl App {
             let engine = self.engine.borrow();
             let cards = artifacts
                 .iter()
-                .map(|a| format!("{}@{}{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default(), crate::artifacts_view::card_signature(a, &engine, &cursor)))
+                .map(|a| format!("{}@{}{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default(), crate::artifacts_view::card_signature(a, &engine, &state)))
                 .collect::<Vec<_>>()
                 .join(",");
             format!("{cards}|{}", explained.join(","))
