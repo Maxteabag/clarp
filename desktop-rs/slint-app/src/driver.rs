@@ -22,6 +22,9 @@ mod scroll_checks;
 // ---- artifacts in the chat
 #[path = "artifact_checks.rs"]
 mod artifact_checks;
+// ---- startup with a real Host's roster
+#[path = "startup_checks.rs"]
+mod startup_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -312,6 +315,7 @@ pub fn start_check(name: &str, out: String) {
     match name {
         "transcript" => transcript_check(out),
         "scroll" => scroll_checks::scroll_check(out),
+        "startup" => startup_checks::startup_check(out),
         "composer" => composer_check(out),
         "panes" => panes_check(out),
         "switcher" => switcher_check(out),

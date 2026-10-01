@@ -5,7 +5,12 @@ Serves /server-info, /agents/snapshot, /log, /select, /send, /stop,
 /agent-model-options and an /events SSE stream. A /send files the user row
 under u-<client_msg_id>, appends an assistant reply, bumps the revision and
 pushes transcript-updated. Every request is appended to --log as JSON lines.
-Usage: fake_host.py --port-file PATH --log PATH
+Usage: fake_host.py --port-file PATH --log PATH [--roster N]
+
+--roster N fills the roster to N agents like a real Host's: a quarter are
+helpers under a parent, some work, some wait, a few have attention items or
+background jobs, and each has its own 512 px portrait (the Host's bundled
+ones, as served from /static/avatars).
 """
 import argparse
 import json
@@ -125,6 +130,37 @@ def rich_turn(i):
         return {"role": "assistant", "text": f"### Mixed {i}\n\n" + LOREM * size
                 + "\n\n> Keep the main checkout untouched.\n\n```sh\ncargo build\ncargo test\n```"}
     return {"role": "user", "text": f"Follow-up {i}: " + LOREM[: 30 + size * 20]}
+
+
+AVATAR_DIR = pathlib.Path(__file__).resolve().parents[3] / "static" / "avatars"
+
+
+def fill_roster(count):
+    """Grows `agents` to `count` (see --roster), with attention and jobs."""
+    portraits = sorted(p.name for p in AVATAR_DIR.glob("*.png")) or ["rachel.png"]
+    parents = [a["agent_id"] for a in agents]
+    for i in range(len(agents), count):
+        name = pathlib.Path(portraits[i % len(portraits)]).stem.capitalize()
+        agent = {"agent_id": f"g{i}", "session": f"agent-{i}", "persona": f"{name} {i}",
+                 "backend": ("claude", "codex", "grok")[i % 3], "cwd": f"/home/fake/src/project-{i % 7}",
+                 "latest_state": "idle", "alive": True, "last_activity": 900 - i, "conversation_id": f"c-{i}",
+                 "head_revision": 1, "avatar_url": f"/static/avatars/{portraits[i % len(portraits)]}",
+                 "last_message": f"Finished step {i}: " + LOREM[: 40 + i % 60]}
+        if i % 4 == 0:
+            agent.update(role="helper", parent_agent_id=parents[i % len(parents)],
+                         helper_state="done" if i % 8 == 0 else "running")
+        else:
+            parents.append(agent["agent_id"])
+        if i % 7 == 0:
+            agent.update(latest_state="working", status_text=f"Running the tests for part {i}")
+        elif i % 11 == 0:
+            agent["latest_state"] = "waiting"
+        agents.append(agent)
+        if i % 9 == 0:
+            attention.append({"id": f"d{i}", "session": agent["session"], "kind": "decision"})
+        if i % 6 == 0:
+            jobs.append({"job_id": f"job-{i}", "agent_id": agent["agent_id"], "status": "running",
+                         "title": f"Watch build {i}", "kind": "sub-agent" if i % 12 == 0 else "watcher"})
 
 
 def record(entry):
@@ -511,6 +547,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, model_options)
         if url.path == "/static/avatars/rachel.png":
             return self.reply_bytes(200, AVATAR_PNG, "image/png")
+        if url.path.startswith("/static/avatars/") and (AVATAR_DIR / url.path.rsplit("/", 1)[1]).is_file():
+            return self.reply_bytes(200, (AVATAR_DIR / url.path.rsplit("/", 1)[1]).read_bytes(), "image/png")
         if url.path == "/fixtures/tone.pcm":
             import math
             import struct
@@ -1150,8 +1188,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port-file", required=True)
     parser.add_argument("--log", required=True)
+    parser.add_argument("--roster", type=int, default=0)
     args = parser.parse_args()
     log_path = args.log
+    fill_roster(args.roster)
     server = Server(("127.0.0.1", 0), Handler)
     with open(args.port_file, "w") as handle:
         handle.write(str(server.server_address[1]))

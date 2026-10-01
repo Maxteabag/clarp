@@ -92,7 +92,9 @@ impl Platform for Headless {
                     if frame.0 != width || frame.1 != height {
                         *frame = (width, height, vec![PremultipliedRgbaColor::default(); stride * (height + MARGIN)], frame.3);
                     }
+                    let started = std::time::Instant::now();
                     renderer.render(&mut frame.2, stride);
+                    crate::perf::drawn(started);
                     frame.3 += 1;
                 });
             });
