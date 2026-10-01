@@ -334,10 +334,101 @@ fn html_form_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- decision
+
+fn decision_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let ids = ["dec-deploy", "dec-refused", "dec-discard", "dec-approved", "dec-declined", "dec-expired", "dec-waiting", "dec-missing"];
+    let mut stages = load_chat("art-decision", &["decision"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("decision cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let deploy = card(window, "dec-deploy").expect("deploy");
+            check(deploy.label == "DECISION" && deploy.pending && deploy.approval, &format!("a pending approval: {:?} pending {} approval {}", deploy.label, deploy.pending, deploy.approval));
+            check(deploy.question == "Deploy the billing migration tonight?" && deploy.context.starts_with("All checks are green"), &format!("it asks its question with its context: {:?}", deploy.question));
+            check(deploy.meta.contains("Blocks the release train") && deploy.meta.contains("Needs a closer look") && deploy.meta.contains("Time sensitive"), &format!("why, how much effort, how urgent: {:?}", deploy.meta));
+            let labels: Vec<String> = deploy.options.iter().map(|o| o.label.to_string()).collect();
+            check(labels == ["Ship it", "Hold"] && deploy.chosen == -1, &format!("its own Yes and No labels, none chosen: {labels:?} {}", deploy.chosen));
+            let discard = card(window, "dec-discard").expect("discard");
+            let plain: Vec<String> = discard.options.iter().map(|o| o.label.to_string()).collect();
+            check(plain == ["Yes", "No"] && discard.meta.starts_with("Due "), &format!("the default labels and a due date: {plain:?} {:?}", discard.meta));
+            for (id, resolved, ok) in [("dec-approved", "Approved", true), ("dec-declined", "Declined", false), ("dec-expired", "Expired", false)] {
+                let shown = card(window, id).expect(id);
+                check(!shown.pending && shown.resolved == resolved && shown.resolved_ok == ok && shown.options.row_count() == 0, &format!("{id} shows {resolved:?}: {:?}", shown.resolved));
+            }
+            let waiting = card(window, "dec-waiting").expect("waiting");
+            check(waiting.delivery == "Saved. Waiting to deliver to the agent.", &format!("a saved answer not yet delivered says so: {:?}", waiting.delivery));
+            let missing = card(window, "dec-missing").expect("missing");
+            check(!missing.pending && missing.question.is_empty() && missing.resolved.is_empty(), "a decision without its question shows only its title");
+            app.focus_transcript();
+            true
+        })),
+        ("decision keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            for _ in 0..8 {
+                headless::press("k");
+            }
+            true
+        })),
+        ("decision chosen", Box::new(|_, window, elapsed| {
+            if selected(window) != "dec-deploy" {
+                if elapsed > Duration::from_secs(2) {
+                    check(false, &format!("K reaches the first decision: {:?}", selected(window)));
+                    return true;
+                }
+                return false;
+            }
+            headless::press("2");
+            let hold = card(window, "dec-deploy").map(|c| c.chosen).unwrap_or(-2);
+            headless::press("1");
+            let ship = card(window, "dec-deploy").map(|c| c.chosen).unwrap_or(-2);
+            check(hold == 1 && ship == 0, &format!("2 chooses Hold, 1 Ship it: {hold} {ship}"));
+            check(posts("/decisions/d-deploy/resolve").is_empty(), "choosing sends nothing yet");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("decision sent", Box::new(|_, window, elapsed| {
+            let sent = posts("/decisions/d-deploy/resolve");
+            let shown = card(window, "dec-deploy").is_some_and(|c| !c.pending && c.resolved == "Approved");
+            if (sent.is_empty() || !shown) && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            let body = sent.last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
+            check(body == json!({"choice": "accepted", "expected_revision": 4}), &format!("Enter approves against the revision seen: {body}"));
+            check(shown, &format!("the card shows it approved: {:?}", card(window, "dec-deploy").map(|c| c.resolved)));
+            // The other ways in: a refused answer, and discarding.
+            let bridge = window.global::<ArtifactBridge>();
+            bridge.invoke_choose("dec-refused".into(), 1);
+            bridge.invoke_send("dec-refused".into());
+            bridge.invoke_discard("dec-discard".into());
+            true
+        })),
+        ("decision refused and discarded", Box::new(move |_, window, elapsed| {
+            let refused = card(window, "dec-refused").map(|c| c.status_text.to_string()).unwrap_or_default();
+            let discarded = card(window, "dec-discard").is_some_and(|c| c.resolved == "Discarded");
+            if (!refused.starts_with("Not sent") || !discarded) && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            let declined = posts("/decisions/d-refused/resolve").last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
+            check(declined == json!({"choice": "rejected", "expected_revision": 2}), &format!("the second answer declines: {declined}"));
+            check(refused.contains("the decision changed since you saw it") && card(window, "dec-refused").is_some_and(|c| c.pending), &format!("a refused answer says why and stays open: {refused:?}"));
+            let dismissed = posts("/decisions/d-discard/dismiss").last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
+            check(dismissed == json!({"expected_revision": 4}) && discarded, &format!("discarding dismisses it: {dismissed}"));
+            shot(&out, "artifacts-03-decision");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "html_form"];
 
 /// The chat full of artifacts opens at its latest message and stays there
 /// while the cards settle; a reader scrolled up stays put while artifacts
@@ -431,6 +522,7 @@ pub(super) fn artifacts_check(out: String) {
     let mut stages: Vec<Stage> = Vec::new();
     stages.extend(countdown_stages(&out));
     stages.extend(html_form_stages(&out));
+    stages.extend(decision_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
