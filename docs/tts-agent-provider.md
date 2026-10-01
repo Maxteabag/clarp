@@ -40,6 +40,11 @@ Arnold = "voice_..."   # designed to keep his Australian Cartesia accent
 Ingrid = "voice_..."
 ```
 
+An agent without its own Gemini voice uses the Gemini voice of the contact
+whose Cartesia voice it has. With none, it stays silent, as it would under
+Cartesia; `[gemini_tts] voice` is only the default for agents moved to Gemini
+with `[tts.agents.<name>] provider = "gemini"`.
+
 Built-in contacts get the `gemini` entry in their stored voice map on the next
 server start; clips use the table immediately.
 
