@@ -341,6 +341,8 @@ def artifact_fixtures(kind, session, now_ms):
              "relative_path": "Downloads"},
             {"artifact_id": "dir-escape", "type": "directory", "status": "ready", "session": s, "title": "Somewhere it should not go",
              "root": "workspace", "relative_path": "../../etc"},
+            {"artifact_id": "dir-link", "type": "directory", "status": "ready", "session": s, "title": "A link out of the folder",
+             "root": "workspace", "relative_path": "build/outside"},
         ]
     if kind == "workflow_run":
         run = lambda n: f"https://github.com/example/clarp/actions/runs/{n}"
