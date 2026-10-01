@@ -101,12 +101,18 @@ component CountdownBody inherits VerticalLayout {
 export component ArtifactCard inherits Rectangle {
     in property <ArtifactItem> artifact;
     property <color> tint: ArtifactLook.tint(root.artifact.kind, root.artifact.failed);
-    background: root.tint.with-alpha(0.065);
-    border-width: 1px;
-    border-color: root.tint.with-alpha(0.3);
+    background: touch.has-hover && root.artifact.action != "" ? root.tint.with-alpha(0.1) : root.tint.with-alpha(0.065);
+    border-width: root.artifact.selected ? 2px : 1px;
+    border-color: root.artifact.selected ? Palette.accent : root.tint.with-alpha(0.3);
     border-radius: 8px;
     accessible-role: groupbox;
     accessible-label: root.artifact.label + " " + root.artifact.title;
+    accessible-description: root.artifact.action;
+    touch := TouchArea {
+        enabled: root.artifact.action != "";
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { ArtifactBridge.open(root.artifact.id); }
+    }
     VerticalLayout {
         padding: 10px;
         spacing: 6px;
@@ -156,5 +162,22 @@ export component ArtifactCard inherits Rectangle {
         }
         if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
         if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
+        if root.artifact.action != "" || root.artifact.status-text != "": HorizontalLayout {
+            spacing: 10px;
+            if root.artifact.action != "": Text {
+                text: root.artifact.action + " ↗";
+                color: Palette.link;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            if root.artifact.selected && root.artifact.action != "": Text { text: "Enter"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
+            if root.artifact.status-text != "": Text {
+                text: root.artifact.status-text;
+                color: root.artifact.status-text.starts-with("Not ") ? Palette.danger : root.artifact.status-text == "Answers accepted" ? Palette.success : Palette.muted;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+        }
     }
 }

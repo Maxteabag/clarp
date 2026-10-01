@@ -7,7 +7,10 @@ use std::time::Duration;
 use serde_json::Value;
 use slint::ComponentHandle;
 
-use crate::{AppWindow, ArtifactBridge, ArtifactItem};
+use clarp_engine::{Change, Engine};
+use slint::Model;
+
+use crate::{App, AppWindow, ArtifactBridge, ArtifactItem};
 
 fn text(value: &Value, key: &str) -> String {
     match value.get(key) {
@@ -97,10 +100,97 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         form: kind == "html_form",
         ..ArtifactItem::default()
     };
-    if kind == "countdown" {
-        countdown_fields(&mut item, artifact, &status);
+    match kind.as_str() {
+        "countdown" => countdown_fields(&mut item, artifact, &status),
+        "html_form" => {
+            let report = is_report(artifact);
+            item.label = if report { "REPORT" } else { "FORM" }.into();
+            item.action = if report { "Open report" } else { "Open form" }.into();
+            item.form = false;
+        }
+        _ => {}
     }
     item
+}
+
+/// A card as the chat shows it: its fields, whether the keyboard is on it,
+/// and how its latest action went.
+pub fn card(artifact: &Value, engine: &Engine, cursor: &str) -> ArtifactItem {
+    let mut item = artifact_item(artifact);
+    item.selected = !cursor.is_empty() && item.id == cursor;
+    item.status_text = engine.form_status(&item.id).into();
+    item
+}
+
+/// What a card's row depends on beyond the artifact itself.
+pub fn card_signature(artifact: &Value, engine: &Engine, cursor: &str) -> String {
+    let id = text(artifact, "artifact_id");
+    format!("{}{}", if id == cursor { "*" } else { "" }, engine.form_status(&id))
+}
+
+/// iOS `isHTMLReport`: read-only, or an answer schema that asks nothing.
+fn is_report(artifact: &Value) -> bool {
+    let flagged = |v: &Value| v.get("read_only").and_then(Value::as_bool) == Some(true);
+    if flagged(artifact) || artifact.get("payload").is_some_and(flagged) {
+        return true;
+    }
+    let schema = artifact.get("answer_schema").cloned().unwrap_or(Value::Null);
+    let fields = schema.get("properties").and_then(Value::as_object).map(|p| p.len());
+    fields == Some(0) || (fields.is_none() && schema.get("additionalProperties") == Some(&Value::Bool(false)))
+}
+
+/// The open chat's card ids, top to bottom.
+fn card_ids(app: &App) -> Vec<String> {
+    app.active_messages()
+        .map(|rows| rows.iter().flat_map(|row| row.artifacts.iter().map(|a| a.id.to_string()).collect::<Vec<_>>()).collect())
+        .unwrap_or_default()
+}
+
+pub fn has_cards(app: &App) -> bool {
+    !card_ids(app).is_empty()
+}
+
+/// The card the keyboard is on, while it is in the open chat.
+pub fn selected(app: &App) -> Option<String> {
+    let cursor = app.artifact_cursor.borrow().clone();
+    (!cursor.is_empty() && card_ids(app).contains(&cursor)).then_some(cursor)
+}
+
+/// J/K: the next or previous card; from none, the latest.
+pub fn step(app: &App, direction: i32) {
+    let ids = card_ids(app);
+    let Some(last) = ids.len().checked_sub(1) else { return };
+    let at = selected(app).and_then(|id| ids.iter().position(|i| *i == id));
+    let next = match at {
+        None => last,
+        Some(index) => (index as i64 + i64::from(direction)).clamp(0, last as i64) as usize,
+    };
+    *app.artifact_cursor.borrow_mut() = ids[next].clone();
+    app.refresh(&[Change::Updates]);
+}
+
+/// A card's action (Enter on the selected card, or a click).
+pub fn open(app: &App, window: &AppWindow, id: &str) {
+    let artifact = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned();
+    let Some(artifact) = artifact else {
+        eprintln!("clarp-slint: no artifact {id} to open");
+        return;
+    };
+    *app.artifact_cursor.borrow_mut() = id.to_owned();
+    match text(&artifact, "type").as_str() {
+        "html_form" if !is_report(&artifact) => {
+            let version = artifact.get("version").cloned().unwrap_or(Value::Null);
+            match crate::form_server::serve(id, version, &text(&artifact, "content")) {
+                Ok(url) => crate::open_link(&url),
+                Err(error) => {
+                    eprintln!("clarp-slint: {error}");
+                    app.engine.borrow_mut().set_form_status(id, &format!("Not opened: {error}"));
+                }
+            }
+        }
+        _ => crate::updates_view::open_report(app, window, id),
+    }
+    app.refresh(&[Change::Updates]);
 }
 
 /// A countdown's target on the cards' clock, and its date in the target's
@@ -126,6 +216,11 @@ pub fn bind(window: &AppWindow) {
     bridge.on_countdown_phase(|target, now| countdown(i64::from(target), i64::from(now)).0.into());
     bridge.on_countdown_clock(|target, now| countdown(i64::from(target), i64::from(now)).1.into());
     bridge.set_now(clock_now());
+    bridge.on_open(|id| {
+        if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+            open(&app, &window, &id);
+        }
+    });
     let weak = window.as_weak();
     let timer = slint::Timer::default();
     // A quarter-second check keeps the tick within 250 ms of the second.

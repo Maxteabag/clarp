@@ -47,6 +47,8 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         playing: crate::platform::audio::with(|audio| audio.playing()).unwrap_or(false),
         behind: !app.active_report().at_end,
         folds: window.get_chats().iter().any(|c| c.fold_count > 0),
+        artifacts: crate::artifacts_view::has_cards(app),
+        artifact: crate::artifacts_view::selected(app).is_some(),
     }
 }
 
@@ -175,6 +177,12 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             }
         }
         "focus-sidebar" => focus_sidebar(app, window),
+        "artifact-next" => crate::artifacts_view::step(app, 1),
+        "artifact-previous" => crate::artifacts_view::step(app, -1),
+        "artifact-open" => match crate::artifacts_view::selected(app) {
+            Some(id) => crate::artifacts_view::open(app, window, &id),
+            None => return false,
+        },
         "focus-pane" => app.focus_transcript(),
         "focus-composer" => app.focus_composer(),
         "toggle-focus" => {

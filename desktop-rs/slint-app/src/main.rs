@@ -25,6 +25,7 @@ mod agent_dialogs_view;
 mod launch_view;
 // ---- profile and overview
 mod artifacts_view;
+mod form_server;
 mod cells_view;
 mod orchestrator_view;
 mod overview_view;
@@ -70,6 +71,8 @@ pub struct App {
     pub overlay: RefCell<String>,
     /// An agent the launch asked for, until the window starts it.
     pub launch: RefCell<Option<launch::Request>>,
+    /// The artifact card the keyboard is on (J/K in the chat), "" for none.
+    pub artifact_cursor: RefCell<String>,
 }
 
 /// View preferences the window keeps (the Qt controller's names).
@@ -510,6 +513,7 @@ fn main() {
         switcher: RefCell::new(SwitcherState::default()),
         overlay: RefCell::new(String::new()),
         launch: RefCell::new(None),
+        artifact_cursor: RefCell::new(String::new()),
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));

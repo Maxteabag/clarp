@@ -11,7 +11,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use slint::{ComponentHandle, Model};
 
-use super::{Stage, check, control, headless, posts, report, rows, run_stages, shot};
+use super::{Stage, app_now, check, control, headless, posts, report, rows, run_stages, shot};
 use crate::{ArtifactBridge, ArtifactItem};
 
 /// Every card in the open chat, in transcript order, with its row's id.
@@ -28,18 +28,27 @@ fn fixture(app: &crate::App, id: &str) -> Value {
     app.engine.borrow().update_artifacts().iter().find(|a| a["artifact_id"] == id).cloned().unwrap_or(Value::Null)
 }
 
-/// A stage that gives Rachel a chat of `types`' fixtures and opens it.
-fn load_chat(types: &'static [&'static str]) -> Stage {
-    ("load", Box::new(move |app, _, _| {
-        if app.engine.borrow().connection_state() != "live" {
-            return false;
-        }
-        let loaded = control("/__control/artifact-chat", &json!({"session": "rachel", "types": types}));
-        check(loaded.is_ok(), &format!("the Host takes a chat of {types:?} artifacts {}", loaded.err().unwrap_or_default()));
-        app.engine.borrow_mut().select("rachel");
-        crate::pump();
-        true
-    }))
+/// A stage that gives a new agent, `session`, a chat of `types`' fixtures,
+/// and a stage that opens it once the roster lists it.
+fn load_chat(session: &'static str, types: &'static [&'static str]) -> Vec<Stage> {
+    vec![
+        ("load", Box::new(move |app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            let loaded = control("/__control/artifact-chat", &json!({"session": session, "types": types}));
+            check(loaded.is_ok(), &format!("the Host takes a chat of {types:?} artifacts {}", loaded.err().unwrap_or_default()));
+            true
+        })),
+        ("open", Box::new(move |app, _, _| {
+            if app.engine.borrow().roster().find(session).is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select(session);
+            crate::pump();
+            true
+        })),
+    ]
 }
 
 /// Waits until every id shows as a card and the chat has settled.
@@ -54,8 +63,8 @@ fn countdown_stages(out: &str) -> Vec<Stage> {
     let first: Rc<RefCell<(i32, String)>> = Rc::default();
     let first2 = first.clone();
     let ticks = Rc::new(Cell::new(0));
-    vec![
-        load_chat(&["countdown"]),
+    let mut stages = load_chat("art-countdown", &["countdown"]);
+    stages.extend::<Vec<Stage>>(vec![
         ("countdown cards", Box::new(move |app, window, elapsed| {
             if !placed(window, &["cd-launch", "cd-reached", "cd-past", "cd-cancelled", "cd-broken"], elapsed) {
                 return false;
@@ -104,7 +113,8 @@ fn countdown_stages(out: &str) -> Vec<Stage> {
             shot(&out, "artifacts-01-countdown");
             true
         })),
-    ]
+    ]);
+    stages
 }
 
 /// Lines the app recorded instead of opening them (`CLARP_TEST_OPEN_URL`).
@@ -151,8 +161,8 @@ fn html_form_stages(out: &str) -> Vec<Stage> {
     let out = out.to_owned();
     let form_url: Rc<RefCell<String>> = Rc::default();
     let (form_url2, form_url3) = (form_url.clone(), form_url.clone());
-    vec![
-        load_chat(&["html_form"]),
+    let mut stages = load_chat("art-form", &["html_form"]);
+    stages.extend::<Vec<Stage>>(vec![
         ("form cards", Box::new(|app, window, elapsed| {
             if !placed(window, &["form-trip", "form-report", "form-stale"], elapsed) {
                 return false;
@@ -271,9 +281,31 @@ fn html_form_stages(out: &str) -> Vec<Stage> {
             check(status.starts_with("Not sent") && status.contains("form version changed"), &format!("a refused answer says why: {status:?}"));
             let _ = &form_url3;
             shot(&out, "artifacts-02-html-form");
+            app_now().focus_transcript();
             true
         })),
-    ]
+        ("a click opens a card", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            // A real pointer click, down the left of the chat from the
+            // bottom: the latest row is a card, the rows above are prose.
+            let before = opened().len();
+            let mut clicked = None;
+            for y in (300..=700).rev().step_by(12) {
+                super::click_at(window, 560.0, y as f32);
+                if opened().len() > before {
+                    clicked = Some(y);
+                    break;
+                }
+            }
+            let url = opened().last().cloned().unwrap_or_default();
+            check(clicked.is_some() && url.contains("/form/"), &format!("clicking the latest card opens its form (at y {clicked:?}): {url}"));
+            check(selected(window) == "form-stale", &format!("and puts the keyboard on it: {:?}", selected(window)));
+            true
+        })),
+    ]);
+    stages
 }
 
 pub(super) fn artifacts_check(out: String) {
