@@ -6,6 +6,19 @@ ideas, a task backlog, or an approval queue.
 
 ## Current decisions
 
+Fading history and background compositing are specified in [0020](0020-history-and-background-heat.md).
+
+Absolute heat coordinates are specified in [0019](0019-world-space-heat.md).
+
+Layered zoom and pixelated heat are specified in [0017](0017-layered-zoom-and-pixel-heat.md).
+The activity feed is specified in [0018](0018-activity-feed.md).
+
+The optional activity heatmap is specified in [0015](0015-activity-heatmap.md).
+Its density algorithm is refined by [0016](0016-gaussian-density-field.md).
+
+The morning recap is specified in [0014](0014-morning-recap.md).
+Optional camera following is specified in [0013](0013-follow-activity-camera.md).
+
 | Record | Status | Decision |
 | --- | --- | --- |
 | [0001](0001-procedural-visual-software.md) | Accepted | Agents develop executable visual software, not just icons. |
