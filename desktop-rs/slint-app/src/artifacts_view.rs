@@ -106,6 +106,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             set_note(&mut item, &text(artifact, "content"));
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
+        "plan" => plan_fields(&mut item, artifact),
         "html_form" => {
             let report = is_report(artifact);
             item.label = if report { "REPORT" } else { "FORM" }.into();
@@ -149,7 +150,7 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
         item.editing = item.allow_custom && state.editing == item.id.as_str();
     }
     // Answered in this window, it keeps the line it had, so its height.
-    item.keep_line = item.pending || !item.delivery.is_empty() || state.seen_pending.contains(item.id.as_str());
+    item.keep_line = (item.pending && !item.meta.is_empty()) || !item.delivery.is_empty() || state.seen_pending.contains(item.id.as_str());
     item
 }
 
@@ -342,6 +343,77 @@ fn artifact(app: &App, id: &str) -> Option<Value> {
     found
 }
 
+/// A plan's items and subtasks, depth first.
+fn plan_items(plan: &Value) -> Vec<(usize, Value)> {
+    fn walk(items: &Value, depth: usize, out: &mut Vec<(usize, Value)>) {
+        for item in items.as_array().into_iter().flatten() {
+            out.push((depth, item.clone()));
+            walk(item.get("subtasks").unwrap_or(&Value::Null), depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(plan.get("items").unwrap_or(&Value::Null), 0, &mut out);
+    out
+}
+
+/// iOS's plan card: items and subtasks completed against the plan's
+/// total, and the first one under way.
+fn plan_fields(item: &mut ArtifactItem, artifact: &Value) {
+    let Some(plan) = artifact.get("plan").filter(|p| p.is_object()) else {
+        item.progress_value = -1.0;
+        item.current = "Plan details unavailable".into();
+        return;
+    };
+    let items = plan_items(plan);
+    let done = items.iter().filter(|(_, i)| text(i, "status") == "completed").count() as i64;
+    let total = match number(plan, "total_count") {
+        0 => items.len() as i64,
+        total => total,
+    };
+    item.progress_value = done as f32 / total.max(1) as f32;
+    item.progress_count = format!("{done}/{total}").into();
+    item.current = items.iter().find(|(_, i)| text(i, "status") == "in_progress").map(|(_, i)| text(i, "title")).unwrap_or_default().into();
+    item.action = "Open plan".into();
+}
+
+/// The report viewer's model for an artifact without a report body:
+/// what its card stands for, in full.
+pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
+    let artifact = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned()?;
+    let card = artifact_item(&artifact);
+    let (summary, body) = match text(&artifact, "type").as_str() {
+        "plan" => {
+            let plan = artifact.get("plan").filter(|p| p.is_object())?;
+            let summary = [text(plan, "title"), text(plan, "goal"), format!("{} done", card.progress_count)]
+                .into_iter()
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            // A table: one row per item and subtask, the state beside it.
+            let cell = |t: String| t.replace('|', "\\|");
+            let mut rows = vec!["| Step | State |".to_owned(), "|---|---|".to_owned()];
+            for (depth, i) in plan_items(plan) {
+                let (mark, state) = match text(&i, "status").as_str() {
+                    "completed" => ("✓", "done"),
+                    "in_progress" => ("▶", "under way"),
+                    "blocked" | "failed" => ("✕", "blocked"),
+                    _ => ("○", "to do"),
+                };
+                let detail = text(&i, "detail");
+                let indent = "↳ ".repeat(depth);
+                let state = if detail.is_empty() { state.to_owned() } else { format!("{state} · *{}*", cell(detail)) };
+                rows.push(format!("| {indent}{mark} {} | {state} |", cell(text(&i, "title"))));
+            }
+            let lines = rows;
+            (summary, lines.join("\n"))
+        }
+        _ => return None,
+    };
+    serde_json::json!({"artifact_id": id, "title": card.title.as_str(), "summary": summary, "type": card.kind.as_str(), "isHtml": false, "body": body})
+        .as_object()
+        .cloned()
+}
+
 /// iOS `isHTMLReport`: read-only, or an answer schema that asks nothing.
 fn is_report(artifact: &Value) -> bool {
     let flagged = |v: &Value| v.get("read_only").and_then(Value::as_bool) == Some(true);
@@ -444,6 +516,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
             }
         }
         "decision" | "question" => return send(app, id),
+        "plan" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
         _ if app.engine.borrow().report_for_artifact(id).is_some() => crate::updates_view::open_report(app, window, id),
         // Nothing to open: Enter only selects.
         _ => {}

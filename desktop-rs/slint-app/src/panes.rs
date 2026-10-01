@@ -256,10 +256,11 @@ impl App {
         let choices = self.artifact_choices.borrow().clone();
         let drafts = self.artifact_drafts.borrow().clone();
         let editing = self.artifact_editing.borrow().clone();
-        // Decisions shown pending keep their height once answered.
+        // Decisions shown pending with a why line keep it once answered.
         for artifact in self.engine.borrow().artifacts_for_session(&pane.session) {
-            if artifact.get("decision").and_then(|d| d.get("status")).and_then(serde_json::Value::as_str) == Some("pending") {
-                self.artifact_seen_pending.borrow_mut().insert(text_of(&artifact, "artifact_id"));
+            let shown = crate::artifacts_view::artifact_item(&artifact);
+            if shown.pending && !shown.meta.is_empty() {
+                self.artifact_seen_pending.borrow_mut().insert(shown.id.to_string());
             }
         }
         let seen_pending = self.artifact_seen_pending.borrow().clone();
