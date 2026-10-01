@@ -61,3 +61,22 @@ def test_direct_deepgram_remains_a_first_class_provider(monkeypatch):
 def test_eleven_previews_use_quality_model_at_natural_speed():
     assert voice_catalog.ELEVEN_PREVIEW_MODEL == "eleven_multilingual_v2"
     assert voice_catalog.ELEVEN_PREVIEW_SPEED == 1.0
+
+
+def test_gemini_selected_with_key_reports_voice_available(monkeypatch):
+    # Regression: Gemini was missing from the provider catalog, so a Host on
+    # [tts] provider = "gemini" reported voice_available=false and the phone
+    # refused to unmute ("Voice unavailable on this server").
+    monkeypatch.setattr(config, "_CACHED", config.Config(
+        tts_provider="gemini", gemini_api_key="k",
+        gemini_voices={"Arnold": "voice_arnold_au", "Cipher": "Charon"}))
+    monkeypatch.setattr("lib.cartesia_voices.english_voices", lambda: [])
+    result = voice_catalog.catalog(
+        {"arnold": {"name": "Arnold", "voice_id": '{"cartesia":"c-au"}'}}, "arnold")
+    gemini = {row["id"]: row for row in result["providers"]}["gemini"]
+
+    assert result["voice_available"] is True
+    assert gemini["available"] is True and gemini["selected"] is True
+    voices = {row["id"]: row for row in gemini["voices"]}
+    assert voices["voice_arnold_au"]["current"] is True
+    assert voices["Charon"]["name"] == "Charon"

@@ -99,6 +99,35 @@ AURA2_VOICES = (
 )
 
 
+# Gemini TTS prebuilt voices with Google's one-word descriptions.
+GEMINI_VOICES = (
+    ("Zephyr", "Bright"), ("Puck", "Upbeat"), ("Charon", "Informative"),
+    ("Kore", "Firm"), ("Fenrir", "Excitable"), ("Leda", "Youthful"),
+    ("Orus", "Firm"), ("Aoede", "Breezy"), ("Callirrhoe", "Easy-going"),
+    ("Autonoe", "Bright"), ("Enceladus", "Breathy"), ("Iapetus", "Clear"),
+    ("Umbriel", "Easy-going"), ("Algieba", "Smooth"), ("Despina", "Smooth"),
+    ("Erinome", "Clear"), ("Algenib", "Gravelly"), ("Rasalgethi", "Informative"),
+    ("Laomedeia", "Upbeat"), ("Achernar", "Soft"), ("Alnilam", "Firm"),
+    ("Schedar", "Even"), ("Gacrux", "Mature"), ("Pulcherrima", "Forward"),
+    ("Achird", "Friendly"), ("Zubenelgenubi", "Casual"),
+    ("Vindemiatrix", "Gentle"), ("Sadachbia", "Lively"),
+    ("Sadaltager", "Knowledgeable"), ("Sulafat", "Warm"),
+)
+
+
+def gemini_voices(cfg) -> list[tuple[str, str, str]]:
+    """Prebuilt voices plus the contacts' designed voices from config."""
+    rows = [(name, name, description) for name, description in GEMINI_VOICES]
+    prebuilt = {name for name, _ in GEMINI_VOICES}
+    designed = {}
+    for persona, voice_id in sorted(cfg.gemini_voices.items()):
+        if voice_id not in prebuilt:
+            designed.setdefault(voice_id, persona)
+    rows += [(voice_id, f"{persona} (designed)", "Voice Design")
+             for voice_id, persona in designed.items()]
+    return rows
+
+
 def _owners(agents: dict, provider: str, current_session: str) -> dict[str, str]:
     result = {}
     for session, info in agents.items():
@@ -144,6 +173,14 @@ def catalog(agents: dict, current_session: str = "") -> dict:
         "deepgram": _rows(
             "deepgram", deepgram_live, agents, current_session),
     }
+    cfg = config.load()
+    voices["gemini"] = _rows("gemini", gemini_voices(cfg), agents, current_session)
+    current_info = agents.get(current_session) or {}
+    current_gemini = voice_map(str(current_info.get("voice_id") or "")).get(
+        "gemini") or cfg.gemini_voice_for(str(
+            current_info.get("name") or current_info.get("persona") or ""))
+    for row in voices["gemini"]:
+        row["current"] = row["id"] == current_gemini
     try:
         from .cartesia_voices import english_voices
         cartesia = english_voices()
