@@ -151,16 +151,17 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
     use clarp_engine::blocks::Block;
     let empty = || ModelRc::new(VecModel::<TableRow>::default());
     match block {
-        Block::Prose(markdown) => MessageBlock { kind: "prose".into(), styled: styled(markdown, literal), text: SharedString::new(), level: 0, rows: empty() },
+        Block::Prose(markdown) => MessageBlock { kind: "prose".into(), styled: styled(markdown, literal), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
         Block::Heading { level, markdown } => MessageBlock {
             kind: "heading".into(),
             styled: styled(&format!("**{markdown}**"), false),
             text: SharedString::new(),
             level: i32::from(*level),
             rows: empty(),
+            ..MessageBlock::default()
         },
-        Block::Code { text, .. } => MessageBlock { kind: "code".into(), styled: slint::StyledText::default(), text: text.clone().into(), level: 0, rows: empty() },
-        Block::Quote(markdown) => MessageBlock { kind: "quote".into(), styled: styled(markdown, false), text: SharedString::new(), level: 0, rows: empty() },
+        Block::Code { text, .. } => MessageBlock { kind: "code".into(), styled: slint::StyledText::default(), text: text.clone().into(), level: 0, rows: empty(), ..MessageBlock::default() },
+        Block::Quote(markdown) => MessageBlock { kind: "quote".into(), styled: styled(markdown, false), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
         Block::Table(rows) => MessageBlock {
             kind: "table".into(),
             styled: slint::StyledText::default(),
@@ -175,8 +176,9 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
                     })
                     .collect::<Vec<_>>(),
             )),
+            ..MessageBlock::default()
         },
-        Block::Rule => MessageBlock { kind: "rule".into(), styled: slint::StyledText::default(), text: SharedString::new(), level: 0, rows: empty() },
+        Block::Rule => MessageBlock { kind: "rule".into(), styled: slint::StyledText::default(), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
     }
 }
 
