@@ -516,6 +516,7 @@ export component ArtifactCard inherits Rectangle {
             height: 64px;
             vertical-alignment: top;
         }
+        if root.artifact.sources != "": Text { text: root.artifact.sources; color: Palette.faint; font-size: 11px; }
         if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
         // Two lines, whatever the summary's length: a summary that grows
         // does not change the card's height.
