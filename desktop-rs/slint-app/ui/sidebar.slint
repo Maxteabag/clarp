@@ -29,6 +29,8 @@ export struct ChatRow {
     done-expanded: bool,
     // Its place in the Ctrl+J queue (1 is next), or 0.
     queue: int,
+    // A working agent's name, letter by letter, for the shimmer.
+    letters: [string],
     // Sub-agents under this row, and whether they are folded away.
     fold-count: int,
     folded: bool,
@@ -153,27 +155,33 @@ component Row inherits Rectangle {
                         font-weight: 700;
                     }
                 }
-                // A working agent's name is green, with a light band sweeping
-                // across it (still, with Reduce Motion).
-                Rectangle {
+                // A working agent's name is green, and a glow travels through
+                // its letters (still green, with Reduce Motion).
+                if !root.chat.busy || root.reduced-motion || root.chat.letters.length == 0: Text {
+                    text: root.chat.name;
+                    color: root.chat.busy ? Palette.success : Palette.chrome-text;
+                    font-weight: root.chat.unread || root.chat.busy ? 700 : 500;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if root.chat.busy && !root.reduced-motion && root.chat.letters.length > 0: shimmer := Rectangle {
                     horizontal-stretch: 1;
                     min-width: 0px;
-                    preferred-height: name.preferred-height;
                     clip: true;
-                    name := Text {
-                        width: parent.width;
-                        height: parent.height;
-                        text: root.chat.name;
-                        color: root.chat.busy ? Palette.success : Palette.chrome-text;
-                        font-weight: root.chat.unread || root.chat.busy ? 700 : 500;
-                        overflow: elide;
-                    }
-                    if root.chat.busy && !root.reduced-motion: Rectangle {
-                        property <float> phase: Math.mod(animation-tick() / 1600ms, 1.0);
-                        width: 36px;
-                        x: -self.width + (Math.min(name.preferred-width, parent.width) + self.width) * self.phase;
-                        height: parent.height;
-                        background: @linear-gradient(90deg, #ffffff00 0%, #ffffff55 50%, #ffffff00 100%);
+                    // The glow's centre runs a little past both ends.
+                    property <float> phase: Math.mod(animation-tick() / 1800ms, 1.0) * 1.6 - 0.3;
+                    property <int> count: root.chat.letters.length;
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: 0px;
+                        for letter[i] in root.chat.letters: Text {
+                            property <float> at: (i + 0.5) / shimmer.count;
+                            property <float> glow: Math.max(0, 1 - Math.abs(self.at - shimmer.phase) * 4);
+                            text: letter;
+                            color: Palette.success.mix(#ffffff, 1 - self.glow * 0.75);
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
                     }
                 }
                 // Background jobs and sub-agents, each its own icon; Right
