@@ -1466,6 +1466,7 @@ fn narration_check(out: String) {
 fn sidebar_check(out: String) {
     use slint::platform::Key;
     let out2 = out.clone();
+    let out3 = out.clone();
     fn names(window: &crate::AppWindow) -> Vec<String> {
         window.get_chats().iter().map(|r| r.name.to_string()).collect()
     }
@@ -1590,12 +1591,24 @@ fn sidebar_check(out: String) {
             check(control("/__control/agent", &runtime).is_ok(), "Rachel reports a status and no model");
             true
         })),
-        ("header", Box::new(|_, _window, _| {
+        ("header", Box::new(|_, window, _| {
             let pane = view();
             if pane.status != "Reading the docs" {
                 return false;
             }
             check(pane.model.is_empty() && pane.effort.is_empty(), "the header then says the model is not reported and the effort is the default");
+            if let Some(app) = crate::app() {
+                crate::commands::run(&app, window, "toggle-compact");
+            }
+            true
+        })),
+        ("compact", Box::new(move |_, window, elapsed| {
+            if !window.get_explorer_compact() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let width = window.get_explorer_compact_width();
+            check(width < 320.0 && width >= 120.0, &format!("the compact explorer narrows to an average row: {width}px"));
+            shot(&out3, "sidebar-02-compact");
             true
         })),
     ];
