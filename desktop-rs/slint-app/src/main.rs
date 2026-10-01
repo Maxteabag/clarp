@@ -119,6 +119,19 @@ fn settings() -> Settings {
     }
 }
 
+/// The compact explorer's width: an average row (avatar and name), so most
+/// names fit and the longest are elided. The chrome is a monospace face,
+/// about 0.6 em per character.
+fn compact_width(window: &AppWindow, chats: &[ChatRow]) -> f32 {
+    let names: Vec<usize> = chats.iter().map(|c| c.name.chars().count()).filter(|n| *n > 0).collect();
+    let average = if names.is_empty() { 8.0 } else { names.iter().sum::<usize>() as f32 / names.len() as f32 };
+    let char_width = window.global::<Palette>().get_body_size() * 0.6;
+    let queue_badge = if chats.iter().any(|c| c.queue > 0) { 22.0 } else { 0.0 };
+    // Sidebar and frame padding, row padding, the avatar and its gap.
+    let chrome = 16.0 + 12.0 + 20.0 + 28.0 + 10.0 + 12.0;
+    (chrome + queue_badge + average.ceil() * char_width).clamp(120.0, 320.0)
+}
+
 impl App {
     /// The chat list, through the same search/scope/nesting rules as the
     /// Qt sidebar (`clarp_core::sidebar`).
@@ -256,6 +269,7 @@ impl App {
         if list_changed {
             let chats = self.chat_rows(&self.engine.borrow(), &window);
             let chats = self.with_portraits(chats);
+            window.set_explorer_compact_width(compact_width(&window, &chats));
             self.chats.set_vec(chats);
             let engine = self.engine.borrow();
             let rooms: Vec<ChatRow> = engine

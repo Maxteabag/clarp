@@ -164,6 +164,8 @@ export component AppWindow inherits Window {
     // and Ctrl+K reach them without it.
     in property <bool> nav-rail-visible: true;
     in property <bool> explorer-compact;
+    // Set from the names (Rust): the compact explorer fits an average row.
+    in property <length> explorer-compact-width: 200px;
     out property <bool> settings-focused: settings.list-focused;
     public function focus-settings() { settings.focus-list(); }
     callback setting-changed(string, int);
@@ -298,7 +300,7 @@ export component AppWindow inherits Window {
             }
             sidebar := Sidebar {
                 visible: root.sidebar-visible;
-                width: root.sidebar-visible ? 320px : 0px;
+                width: !root.sidebar-visible ? 0px : root.explorer-compact ? root.explorer-compact-width : 320px;
                 rows: root.chats;
                 rooms: root.rooms;
                 archived: root.archived;
