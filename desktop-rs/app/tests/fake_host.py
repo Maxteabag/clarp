@@ -290,6 +290,16 @@ def artifact_fixtures(kind, session, now_ms):
              "columns": ["Name", "Value"], "rows": []},
             {"artifact_id": "data-broken", "type": "data", "status": "failed", "session": s, "title": "Export that failed"},
         ]
+    if kind == "audio":
+        return [
+            {"artifact_id": "aud-brief", "type": "audio", "status": "ready", "session": s,
+             "title": "This morning's stand-up, summarised for the people who could not make it to the call",
+             "url": "/media/aud1", "mime_type": "audio/mpeg", "file_name": "standup-summary.mp3", "duration_ms": 72000},
+            {"artifact_id": "aud-gone", "type": "audio", "status": "ready", "session": s, "title": "An expired recording",
+             "url": "/media/gone", "mime_type": "audio/mpeg", "file_name": "old.mp3", "duration_ms": 5000},
+            {"artifact_id": "aud-elsewhere", "type": "audio", "status": "ready", "session": s, "title": "A clip on another site",
+             "url": "http://evil.example/x.mp3", "mime_type": "audio/mpeg", "file_name": "x.mp3"},
+        ]
     raise KeyError(kind)
 
 
@@ -421,6 +431,11 @@ class Handler(BaseHTTPRequestHandler):
             events = [{"type": "audio", "clip_id": 50, "session": query.get("session"), "url": "/clips/50/complete.mp3",
                        "complete_url": "/clips/50/complete.mp3", "trace_id": "recovered"}] if query.get("session") == "mike" else []
             return self.reply(200, {"events": events})
+        if url.path == "/media/aud1":
+            data = (pathlib.Path(__file__).parent / "fixtures" / "clip.mp3").read_bytes()
+            return self.reply_bytes(200, data, "audio/mpeg")
+        if url.path == "/media/gone":
+            return self.reply(404, {"error": "media expired"})
         if url.path == "/media/files/m1":
             return self.reply_bytes(200, MEDIA_PNG, "image/png")
         if url.path == "/media":
