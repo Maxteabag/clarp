@@ -1,6 +1,7 @@
 import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
 import { ProcessIndicator } from "processes.slint";
+import { ProfileBridge } from "profile.slint";
 
 export struct ChatRow {
     session: string,
@@ -85,6 +86,7 @@ component Row inherits Rectangle {
     in property <bool> cursor;
     // Compact explorer: the avatar and the name only.
     in property <bool> compact;
+    in property <bool> reduced-motion;
     // The cursor landed here: its place in the list, to scroll it into view.
     callback reveal(length, length);
     changed cursor => { if (self.cursor) { root.reveal(self.y, self.height); } }
@@ -111,8 +113,8 @@ component Row inherits Rectangle {
             height: self.width;
             y: root.compact ? 6px : 10px;
             border-radius: self.width / 2;
-            border-width: root.chat.busy ? 2px : 1px;
-            border-color: root.chat.busy ? Palette.success : Palette.border;
+            border-width: 1px;
+            border-color: Palette.border;
             clip: true;
             Text { text: root.chat.initial; color: Palette.chrome-text; font-size: 15px; }
             if root.chat.portrait.width > 0: Image {
@@ -151,12 +153,28 @@ component Row inherits Rectangle {
                         font-weight: 700;
                     }
                 }
-                Text {
-                    text: root.chat.name;
-                    color: Palette.chrome-text;
-                    font-weight: root.chat.unread ? 700 : 500;
-                    overflow: elide;
+                // A working agent's name is green, with a light band sweeping
+                // across it (still, with Reduce Motion).
+                Rectangle {
                     horizontal-stretch: 1;
+                    min-width: 0px;
+                    preferred-height: name.preferred-height;
+                    clip: true;
+                    name := Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: root.chat.name;
+                        color: root.chat.busy ? Palette.success : Palette.chrome-text;
+                        font-weight: root.chat.unread || root.chat.busy ? 700 : 500;
+                        overflow: elide;
+                    }
+                    if root.chat.busy && !root.reduced-motion: Rectangle {
+                        property <float> phase: Math.mod(animation-tick() / 1600ms, 1.0);
+                        width: 36px;
+                        x: -self.width + (Math.min(name.preferred-width, parent.width) + self.width) * self.phase;
+                        height: parent.height;
+                        background: @linear-gradient(90deg, #ffffff00 0%, #ffffff55 50%, #ffffff00 100%);
+                    }
                 }
                 // Background jobs and sub-agents, each its own icon; Right
                 // unfolds the sub-agents' chats into the list.
@@ -287,10 +305,11 @@ export component Sidebar inherits Rectangle {
                 height: 34px;
                 horizontal-stretch: 1;
                 opacity: root.explorer-active ? 1 : 0.45;
+                min-width: 0px;
                 search := Field {
                     width: parent.width;
                     height: parent.height;
-                    placeholder-text: "Search agents · /";
+                    placeholder-text: root.compact ? "Search" : "Search agents · /";
                     edited => { root.filter-changed(); }
                 }
                 FocusRing { shown: Focus.mode == "search"; }
@@ -324,6 +343,7 @@ export component Sidebar inherits Rectangle {
                     chat: row;
                     cursor: list.has-focus && row.session == root.cursor;
                     compact: root.compact;
+                    reduced-motion: ProfileBridge.reduced-motion;
                     // J/K keep the cursor's row in view.
                     reveal(y, h) => {
                         if (y + flick.content-y < 0px) {
