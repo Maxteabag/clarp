@@ -501,6 +501,16 @@ export component ArtifactCard inherits Rectangle {
         }
         if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
         if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; }
+        // The body's first lines (iOS shows four), always four lines tall.
+        if root.artifact.preview != "": Text {
+            text: root.artifact.preview;
+            color: Palette.muted;
+            font-size: 12px;
+            wrap: word-wrap;
+            overflow: elide;
+            height: 64px;
+            vertical-alignment: top;
+        }
         if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
         // Two lines, whatever the summary's length: a summary that grows
         // does not change the card's height.
