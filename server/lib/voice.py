@@ -18,6 +18,7 @@ import json
 ELEVENLABS = "elevenlabs"
 CARTESIA = "cartesia"
 DEEPGRAM = "deepgram"
+GEMINI = "gemini"
 
 
 def voice_map(raw: str | None) -> dict[str, str]:
