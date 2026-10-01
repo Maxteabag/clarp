@@ -1,5 +1,13 @@
 import { Palette } from "theme.slint";
 
+// One answer a decision or question offers.
+export struct ArtifactOption {
+    id: string,
+    label: string,
+    detail: string,
+    recommended: bool,
+}
+
 // One artifact card in the chat (iOS ArtifactCard): what every type shows
 // inline, and the state its controls are in.
 export struct ArtifactItem {
@@ -29,6 +37,20 @@ export struct ArtifactItem {
     status-text: string,
     // The keyboard's card in the chat (J/K).
     selected: bool,
+    // decision / question: what is asked, why, how urgent; while pending
+    // its answers (an approval's are Yes and No) and the one the keyboard
+    // chose (-1 for none); once answered, how, with what, delivered yet.
+    question: string,
+    context: string,
+    meta: string,
+    pending: bool,
+    approval: bool,
+    options: [ArtifactOption],
+    chosen: int,
+    resolved: string,
+    resolved-ok: bool,
+    answer: string,
+    delivery: string,
 }
 
 // What the cards share: the clock countdowns read, and their actions.
@@ -41,6 +63,11 @@ export global ArtifactBridge {
     // A click (or Enter on the selected card) on the card's action.
     callback open(string);
     callback link-clicked(string);
+    // A decision's or question's answer: choose one (keyboard 1-9), send
+    // the chosen one (Enter, or an approval's button), or discard it.
+    callback choose(string, int);
+    callback send(string);
+    callback discard(string);
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).

@@ -149,6 +149,32 @@ def artifact_fixtures(kind, session, now_ms):
              "title": "Lunch order", "summary": "", "content": "<form><input name=\"dish\"></form>",
              "answer_schema": {"type": "object", "properties": {"dish": {"type": "string"}}}},
         ]
+    if kind == "decision":
+        def decision(did, status, revision=4, **more):
+            return {"decision_id": did, "question": "", "context": "", "status": status, "revision": revision,
+                    "response_type": "approval", "response_effort": "quick", "urgency": "normal", **more}
+        return [
+            {"artifact_id": "dec-deploy", "type": "decision", "status": "active", "session": s,
+             "title": "Deploy the billing migration to production tonight, during the low-traffic window after 22:00",
+             "decision": decision("d-deploy", "pending", question="Deploy the billing migration tonight?",
+                                  context="All checks are green on staging. Rolling back takes about ten minutes.",
+                                  yes_label="Ship it", no_label="Hold", urgency="time_sensitive", response_effort="review",
+                                  priority_reason="Blocks the release train")},
+            {"artifact_id": "dec-refused", "type": "decision", "status": "active", "session": s, "title": "Rotate the API keys",
+             "decision": decision("d-refused", "pending", revision=2, question="Rotate the keys now?")},
+            {"artifact_id": "dec-discard", "type": "decision", "status": "active", "session": s, "title": "Archive old branches",
+             "decision": decision("d-discard", "pending", question="Archive the 40 merged branches?",
+                                  deadline_at=iso_at(now_ms + 2 * day))},
+            {"artifact_id": "dec-approved", "type": "decision", "status": "completed", "session": s, "title": "Upgrade Postgres",
+             "decision": decision("d-approved", "accepted", question="Upgrade to Postgres 17?", resolved_choice="accepted")},
+            {"artifact_id": "dec-declined", "type": "decision", "status": "completed", "session": s, "title": "Delete the staging data",
+             "decision": decision("d-declined", "rejected", question="Delete staging data?", resolved_choice="rejected")},
+            {"artifact_id": "dec-expired", "type": "decision", "status": "expired", "session": s, "title": "Book the venue",
+             "decision": decision("d-expired", "expired", question="Book it before Friday?")},
+            {"artifact_id": "dec-waiting", "type": "decision", "status": "completed", "session": s, "title": "Merge the docs PR",
+             "decision": decision("d-waiting", "accepted", question="Merge it?", delivery_pending=True)},
+            {"artifact_id": "dec-missing", "type": "decision", "status": "active", "session": s, "title": "A decision without its question"},
+        ]
     raise KeyError(kind)
 
 
@@ -617,11 +643,36 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("name") == "Nobody":
                 return self.reply(409, {"error": "contact is busy"})
             return self.reply(200, {"ok": True, "session": body.get("session")})
-        if url.path.startswith("/decisions/") and url.path.endswith("/resolve"):
-            # A resolved decision leaves the attention list.
+        if url.path.startswith("/decisions/") and (url.path.endswith("/resolve") or url.path.endswith("/dismiss")):
+            # A resolved decision leaves the attention list; an artifact's
+            # decision takes the answer, unless the user saw an older one.
             decision = url.path.split("/")[2]
+            owner = None
             with state_lock:
                 attention[:] = [a for a in attention if a.get("id") != decision]
+                for artifact in artifacts:
+                    held = artifact.get("decision") or {}
+                    if held.get("decision_id") == decision:
+                        owner = artifact
+                if owner is not None:
+                    held = owner["decision"]
+                    if body.get("expected_revision") != held.get("revision"):
+                        return self.reply(409, {"error": "the decision changed since you saw it"})
+                    if url.path.endswith("/dismiss"):
+                        held["status"] = "cancelled"
+                    elif "answer" in body:
+                        answer = body["answer"]
+                        label = next((o["label"] for o in held.get("options", []) if o["id"] == answer.get("option_id")), "")
+                        held["status"] = "answered"
+                        held["answer"] = {**answer, "label": label}
+                    else:
+                        held["status"] = body.get("choice")
+                        held["resolved_choice"] = body.get("choice")
+                    held["revision"] += 1
+                    owner["status"] = "completed"
+                    owner["updated_at"] = int(time.time() * 1000)
+            if owner is not None:
+                broadcast({"type": "artifact-updated", "session": owner.get("session", "")})
             return self.reply(200, {"ok": True, "decision_id": decision, "status": body.get("choice")})
         if url.path.startswith("/artifacts/") and url.path.endswith("/submit"):
             # A form's answers: a receipt echoing the submission, or 409
