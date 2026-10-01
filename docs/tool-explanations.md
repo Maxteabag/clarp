@@ -16,12 +16,10 @@ Two panes on desktop share a local reference count; phones use separate UUIDs.
 Late requests for released tokens are fenced by bounded two-minute tombstones.
 Legacy clients without demand IDs retain work for up to 24 hours after their last poll.
 
-Desktop checks mapped card coordinates against the transcript ListView every
-80ms while narration is enabled, including minimized-window suppression. iOS uses
-one shared 100ms visibility sampler for mounted labels, intersects every clipping
-ancestor, and suppresses requests outside the active scene. It cancels the label
-task on exit and sends a separate best-effort release; Host expiry covers loss
-of connectivity. Visibility changes do not rewrite transcripts or move scroll.
+iOS uses one shared 100ms visibility sampler for mounted labels, intersects
+every clipping ancestor, and suppresses requests outside the active scene. It
+cancels the label task on exit and sends a separate best-effort release; Host
+expiry covers loss of connectivity. Visibility changes do not rewrite transcripts or move scroll.
 
 Tests cover offscreen/dwell/re-entry geometry, shared view ownership, queued
 expiry, released-token races, and completion of already running batches.
@@ -272,5 +270,4 @@ uv run --group dev pytest tests/unit/test_tool_explanation_cache.py tests/unit/t
 uv run --group dev pytest tests/unit/test_tool_explanation_learning.py tests/unit/test_tool_explanation_hybrid.py
 uv run --group dev pytest tests/unit/test_tool_explanation_jev_similar.py tests/unit/test_tool_explanation_jev_picks.py
 uv run --group dev pytest tests/unit/test_tool_explanation_full_commands.py
-ctest --test-dir desktop/build/release -R 'tool-narrator|activity-layout' --output-on-failure
 ```

@@ -30,8 +30,8 @@ first-class Clarp agent that reports to it?
 - **Reporting back already works.** `clarp-admin prompt --from` makes an
   agent-origin message, and `agent_conversations.py` builds the parent–helper
   pair chat from it.
-- **Grouping already exists for teams.** iOS (`AgentTeam.overviewRows`) and
-  desktop (`TeamsPanel.qml`) walk `parent_team_id` depth-first. The same walk
+- **Grouping already exists for teams.** iOS (`AgentTeam.overviewRows`) walks
+  `parent_team_id` depth-first. The same walk
   works for agents keyed on a parent id.
 - **An earlier design stops halfway.** claude-pwa PR #11 (open, design only,
   2026-08-26) defines a `ChildRun` entity for delegated runs. It deliberately

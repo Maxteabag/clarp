@@ -33,10 +33,10 @@ messages notify normally once the user is away. A push already sent to APNs
 cannot be recalled by this mechanism. Calls and other notification transports
 are outside this message-alert policy.
 
-The Linux monitor uses asynchronous login1 GetSession/GetUser Display discovery,
-Active/LockedHint updates and PrepareForSleep. Query generations fence stale
-responses. Unknown or unsupported session/lock monitoring fails open (phone
-alerts continue); this implementation does not claim macOS/Windows monitoring.
+On Linux a desktop client watches login1 (GetSession/GetUser Display discovery,
+Active/LockedHint updates and PrepareForSleep) and fences stale responses with
+query generations. Unknown or unsupported session/lock monitoring must fail open
+(phone alerts continue).
 Screenshots never enable real desktop presence. Presence failures on older Hosts
 are non-disruptive and expire naturally; matching Host and desktop deployments
 are required for suppression.
@@ -46,14 +46,8 @@ Verification (from repo root):
 ```sh
 uv run pytest tests/unit/test_desktop_presence.py tests/unit/test_apns.py \
   tests/integration/test_desktop_presence_endpoint.py -q -n 2
-QT_FORCE_STDERR_LOGGING=1 ctest --test-dir desktop/build/release --output-on-failure
-cmake --build desktop/build/release --target all_qmllint
-QT_QPA_PLATFORM=offscreen QT_FORCE_STDERR_LOGGING=1 \
-  desktop/build/release/tests/clarp-desktop-presence-tests --probe-session
 ```
 
-The probe only reads session state and never publishes presence or changes the
-visible desktop. The CTest lane injects state into an isolated offscreen window;
 APNs tests use a fake HTTP transport. Do not send real phone pushes merely to
 exercise this policy. Verify a deployed Host endpoint with a fresh instance and
 an inactive report, so verification itself cannot silence the user's phone.

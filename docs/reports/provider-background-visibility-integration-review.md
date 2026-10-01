@@ -1,5 +1,8 @@
 # Provider visibility integration review (local only)
 
+> Historical record. The Qt desktop client and the compiled reducer probe it
+> describes have since been removed from this repository.
+
 ## SSE deduplication
 
 Confirmed with live localhost `/events` SSE delivered to the **unchanged production Qt `BackgroundJobTracker.cpp`**, compiled as a standalone QCoreApplication with Qt 6.11.2. No window, desktop control, snapshot refetch, or iOS/Mac change was used.
