@@ -107,6 +107,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
         "plan" => plan_fields(&mut item, artifact),
+        "data" => data_fields(&mut item, artifact),
         "code_change" => {
             // iOS: the repository (or "Repository"), the branch, the files
             // and lines changed.
@@ -404,6 +405,63 @@ fn preview_text(markdown: &str) -> String {
     blocks.iter().map(|b| clarp_core::text::plain_preview_text(b)).filter(|b| !b.is_empty()).collect::<Vec<_>>().join(" · ")
 }
 
+/// iOS `ArtifactScalar`: true reads Yes, false No, null —.
+fn scalar(value: &Value) -> String {
+    match value {
+        Value::Null => "—".into(),
+        Value::Bool(true) => "Yes".into(),
+        Value::Bool(false) => "No".into(),
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// A data artifact's columns and rows (as text), when it has columns.
+fn table(artifact: &Value) -> Option<(Vec<String>, Vec<Vec<String>>)> {
+    let columns: Vec<String> = artifact.get("columns")?.as_array()?.iter().map(scalar).collect();
+    if columns.is_empty() {
+        return None;
+    }
+    let rows = artifact
+        .get("rows")
+        .and_then(Value::as_array)
+        .map(|rows| rows.iter().map(|r| r.as_array().map(|cells| cells.iter().map(scalar).collect()).unwrap_or_default()).collect())
+        .unwrap_or_default();
+    Some((columns, rows))
+}
+
+/// At most seven cells: six and what is left.
+fn clipped(cells: &[String], rest: impl Fn(usize) -> String) -> Vec<slint::SharedString> {
+    if cells.len() <= 7 {
+        return cells.iter().map(|c| c.as_str().into()).collect();
+    }
+    cells[..6].iter().map(|c| c.as_str().into()).chain(std::iter::once(rest(cells.len() - 6).into())).collect()
+}
+
+/// iOS's data card: the header and the first row, and how many rows.
+fn data_fields(item: &mut ArtifactItem, artifact: &Value) {
+    let Some((columns, rows)) = table(artifact) else {
+        item.data_note = "Structured data unavailable".into();
+        return;
+    };
+    let model = |cells: Vec<slint::SharedString>| slint::ModelRc::new(slint::VecModel::from(cells));
+    item.head = model(clipped(&columns, |more| format!("+{more}")));
+    if let Some(first) = rows.first() {
+        item.first_row = model(clipped(first, |_| "…".into()));
+    }
+    item.rows_count = format!("{} row{}", rows.len(), if rows.len() == 1 { "" } else { "s" }).into();
+    item.action = "Open table".into();
+}
+
+/// A Markdown table of `rows` under `head`.
+fn markdown_table(head: &[String], rows: &[Vec<String>]) -> String {
+    let cell = |t: &str| t.replace('|', "\\|").replace('\n', " ");
+    let line = |cells: &[String]| format!("| {} |", cells.iter().map(|c| cell(c)).collect::<Vec<_>>().join(" | "));
+    let mut lines = vec![line(head), format!("|{}|", vec!["---"; head.len()].join("|"))];
+    lines.extend(rows.iter().map(|r| line(r)));
+    lines.join("\n")
+}
+
 /// A plan's items and subtasks, depth first.
 fn plan_items(plan: &Value) -> Vec<(usize, Value)> {
     fn walk(items: &Value, depth: usize, out: &mut Vec<(usize, Value)>) {
@@ -524,6 +582,26 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
             }
             (summary, parts.join("\n\n"))
         }
+        "data" => {
+            let (columns, rows) = table(&artifact)?;
+            let mut parts = Vec::new();
+            // The chart as bars: the first 30 categories, scaled to the largest.
+            let chart = artifact.get("chart").cloned().unwrap_or(Value::Null);
+            let at = |key: &str, fallback: usize| columns.iter().position(|c| *c == text(&chart, key)).unwrap_or(fallback);
+            if matches!(text(&chart, "kind").as_str(), "bar" | "line") {
+                let (category, value) = (at("category_column", 0), at("value_column", 1));
+                let points: Vec<(String, f64)> = rows.iter().take(30).filter_map(|r| Some((r.get(category)?.clone(), r.get(value)?.parse::<f64>().ok()?))).collect();
+                let top = points.iter().map(|(_, v)| v.abs()).fold(0.0, f64::max).max(f64::MIN_POSITIVE);
+                let bars: Vec<Vec<String>> =
+                    points.iter().map(|(c, v)| vec![c.clone(), format!("{} {v}", "━".repeat(((v.abs() / top) * 24.0).round() as usize))]).collect();
+                if !bars.is_empty() {
+                    parts.push(markdown_table(&[columns[category].clone(), columns.get(value).cloned().unwrap_or_default()], &bars));
+                }
+            }
+            // The grid, as iOS caps it: 500 rows.
+            parts.push(markdown_table(&columns, &rows[..rows.len().min(500)]));
+            (format!("{} · {} columns", card.rows_count, columns.len()), parts.join("\n\n"))
+        }
         _ => return None,
     };
     serde_json::json!({"artifact_id": id, "title": card.title.as_str(), "summary": summary, "type": card.kind.as_str(), "isHtml": from_html, "converted": true, "kind": card.label.as_str(), "body": body})
@@ -633,7 +711,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
             }
         }
         "decision" | "question" => return send(app, id),
-        "plan" | "code_change" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
+        "plan" | "code_change" | "data" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
         _ if app.engine.borrow().report_for_artifact(id).is_some() => crate::updates_view::open_report(app, window, id),
         // Nothing to open: Enter only selects.
         _ => {}
