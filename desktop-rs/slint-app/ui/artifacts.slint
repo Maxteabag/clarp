@@ -73,6 +73,14 @@ export struct ArtifactItem {
     first-row: [string],
     rows-count: string,
     data-note: string,
+    // audio / video: idle, preparing, playing, paused or failed; what to
+    // say; the length; for the position, seconds played before and the
+    // bridge clock's second playback (re)started (-1 when not playing).
+    media-state: string,
+    media-text: string,
+    media-length: string,
+    media-played: int,
+    media-started: int,
     // code_change: where (repository and branch) and how much.
     repo: string,
     files: string,
@@ -90,6 +98,8 @@ export global ArtifactBridge {
     // "Remaining", "Target reached" or "Since target", and the clock.
     pure callback countdown-phase(int, int) -> string;
     pure callback countdown-clock(int, int) -> string;
+    // A playing card's position, "m:ss", from its played and started.
+    pure callback media-position(int, int, int) -> string;
     // A click (or Enter on the selected card) on the card's action.
     callback open(string);
     callback link-clicked(string);

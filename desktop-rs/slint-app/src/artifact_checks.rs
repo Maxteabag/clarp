@@ -1062,10 +1062,102 @@ fn data_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- audio
+
+fn audio_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let ids = ["aud-brief", "aud-gone", "aud-elsewhere"];
+    let mut stages = load_chat("art-audio", &["audio"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("audio cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let brief = card(window, "aud-brief").expect("brief");
+            // iOS titles only a file card with its file's name.
+            check(brief.label == "AUDIO" && brief.title.starts_with("This morning's stand-up") && brief.action == "Play", &format!("an audio card keeps its title and offers to play: {:?} {:?}", brief.title, brief.action));
+            check(brief.media_state == "idle" && brief.media_length == "1:12", &format!("idle, with its length: {:?} {:?}", brief.media_state, brief.media_length));
+            let elsewhere = card(window, "aud-elsewhere").expect("elsewhere");
+            check(elsewhere.media_text == "Audio unavailable" && elsewhere.action.is_empty(), &format!("audio not on the Host cannot play: {:?}", elsewhere.media_text));
+            app.focus_transcript();
+            true
+        })),
+        ("audio keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("audio first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("aud-brief") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("audio plays", Box::new(move |_, window, elapsed| {
+            let brief = card(window, "aud-brief").expect("brief");
+            if brief.media_state != "playing" || elapsed < Duration::from_millis(1600) {
+                return elapsed > Duration::from_secs(4) && { check(false, &format!("Enter plays it: {:?} {:?}", brief.media_state, brief.media_text)); true };
+            }
+            let fetched = super::requests("GET", "/media/aud1");
+            check(fetched.last().is_some_and(|r| r["authorization"] == "Bearer probe-token"), "the clip comes from the Host with the app's token");
+            check(brief.media_text == "Playing" && brief.action == "Pause", &format!("it says it plays and offers to pause: {:?} {:?}", brief.media_text, brief.action));
+            let bridge = window.global::<ArtifactBridge>();
+            let position = bridge.invoke_media_position(brief.media_played, brief.media_started, bridge.get_now());
+            check(position.as_str() != "0:00" && position.starts_with("0:0"), &format!("its position moves: {position}"));
+            shot(&out, "artifacts-10-audio");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("audio paused", Box::new(|_, window, elapsed| {
+            let brief = card(window, "aud-brief").expect("brief");
+            if brief.media_state != "paused" {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter again pauses it: {:?}", brief.media_state)); true };
+            }
+            check(brief.media_text == "Paused" && brief.action == "Play" && brief.media_played >= 1, &format!("paused where it was: {:?} {}s", brief.media_text, brief.media_played));
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("audio resumes", Box::new(|_, window, elapsed| {
+            let brief = card(window, "aud-brief").expect("brief");
+            if brief.media_state != "playing" {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("and again resumes it: {:?}", brief.media_state)); true };
+            }
+            check(true, "and again resumes it");
+            true
+        })),
+        ("audio ends", Box::new(|_, window, elapsed| {
+            let brief = card(window, "aud-brief").expect("brief");
+            if brief.media_state != "idle" {
+                return elapsed > Duration::from_secs(8) && { check(false, &format!("the clip ends: {:?}", brief.media_state)); true };
+            }
+            check(brief.action == "Play", "at its end it can play again");
+            window.global::<ArtifactBridge>().invoke_open("aud-gone".into());
+            true
+        })),
+        ("audio gone", Box::new(|_, window, elapsed| {
+            let gone = card(window, "aud-gone").expect("gone");
+            if gone.media_state != "failed" {
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("an expired clip fails: {:?}", gone.media_state)); true };
+            }
+            check(gone.media_text == "Couldn't prepare audio" && gone.action == "Play", &format!("an expired clip says it could not be prepared, and can be tried again: {:?}", gone.media_text));
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1306,6 +1398,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(research_stages(&out));
     stages.extend(code_change_stages(&out));
     stages.extend(data_stages(&out));
+    stages.extend(audio_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
