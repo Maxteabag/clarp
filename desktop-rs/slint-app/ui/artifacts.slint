@@ -61,6 +61,8 @@ export struct ArtifactItem {
     progress-value: float,
     progress-count: string,
     current: string,
+    // The step shown is blocked, not under way.
+    current-blocked: bool,
     // document / research: the body's first lines as plain text.
     preview: string,
     // research: how many sources it cites that can be opened.
@@ -431,7 +433,12 @@ component ProgressBody inherits VerticalLayout {
     // next beginning or the plan completing never changes the height.
     if root.artifact.current != "" || root.artifact.progress-value >= 0: HorizontalLayout {
         spacing: 6px;
-        if root.artifact.current != "" && root.artifact.progress-value >= 0: Text { text: "▶"; color: root.tint; font-size: 10px; vertical-alignment: center; }
+        if root.artifact.current != "" && root.artifact.progress-value >= 0: Text {
+            text: root.artifact.current-blocked ? "■" : "▶";
+            color: root.artifact.current-blocked ? Palette.danger : root.tint;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
         Text {
             text: root.artifact.current != "" ? root.artifact.current
                 : root.artifact.progress-value >= 0.999 ? "All steps done" : "Nothing under way";
