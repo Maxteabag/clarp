@@ -1017,6 +1017,7 @@ dependencies = [
  "clarp-net",
  "futures-util",
  "i-slint-backend-testing",
+ "i-slint-core",
  "image",
  "ksni",
  "libc",
