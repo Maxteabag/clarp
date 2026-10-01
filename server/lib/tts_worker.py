@@ -104,7 +104,7 @@ def synth_one(*,
                 # WebSocket/local synthesis writes through one delivery
                 # contract; provider selection stays inside _synthesize.
                 active_delivery = delivery or ChunkedFileDelivery(broker=broker)
-                clip_route = tts_mode.route(voice_config, agent, row["session"])
+                clip_route = tts_mode.route(voice_config, agent)
                 # Raw PCM is Cartesia's live stream; any other provider's
                 # clip is an MP3 that every client plays from its URL.
                 if (clip_route.provider != CARTESIA
@@ -112,9 +112,7 @@ def synth_one(*,
                     active_delivery = ChunkedFileDelivery(broker=broker)
                 _emit("tts_worker", "route",
                       context=_event_context(row, agent),
-                      detail={"mode": clip_route.mode,
-                              "provider": clip_route.provider,
-                              "chat_open": clip_route.chat_open,
+                      detail={"provider": clip_route.provider,
                               "delivery": getattr(active_delivery, "name", "")})
                 result = _synth_pwa_via_delivery(
                     row, agent, audio_dir,
@@ -205,7 +203,8 @@ def _synthesize(*, cfg, row: dict, agent: dict,
     text = row["text"]
 
     if clip_route is None:
-        clip_route = tts_mode.live_route(cfg, cfg.tts_provider)
+        clip_route = tts_mode.Route(
+            cfg.tts_provider, None, tts_mode.fallback_for(cfg, cfg.tts_provider))
     provider = clip_route.provider
 
     def voice_for(selected: str) -> str | None:
