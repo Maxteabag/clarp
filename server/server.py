@@ -1244,6 +1244,10 @@ class Handler(BaseHTTPRequestHandler):
                     from lib.deepgram_tts import synthesize
                     synthesize(text=prompt, voice_id=voice_id,
                                out_path=temporary, api_key=cfg.deepgram_key())
+                elif provider == "gemini":
+                    from lib.gemini_tts import synthesize
+                    synthesize(text=prompt, voice=voice_id, out_path=temporary,
+                               api_key=cfg.gemini_key(), model=cfg.gemini_model)
 
                 else:
                     from lib.custom_tts_adapters import preview as custom_preview

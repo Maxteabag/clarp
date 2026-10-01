@@ -11,7 +11,7 @@ def test_provider_catalog_reports_remote_client_and_disabled(monkeypatch):
         cartesia_api_key="key"))
     value = tts_providers.status()
     rows = {row["id"]: row for row in value["providers"]}
-    assert set(rows) == {"cartesia", "elevenlabs", "deepgram", "none"}
+    assert set(rows) == {"cartesia", "elevenlabs", "gemini", "deepgram", "none"}
     assert rows["cartesia"]["selected"] is True
     assert rows["cartesia"]["available"] is True
 

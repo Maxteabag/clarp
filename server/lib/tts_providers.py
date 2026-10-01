@@ -11,6 +11,9 @@ CATALOG = (
     {"id": "elevenlabs", "name": "ElevenLabs", "kind": "cloud",
      "streaming": True, "credential": "ELEVEN_API_KEY", "can_fallback": True,
      "supports_preview": True, "allows_custom_voice": False, "custom": False},
+    {"id": "gemini", "name": "Gemini TTS", "kind": "cloud",
+     "streaming": True, "credential": "GEMINI_API_KEY", "can_fallback": True,
+     "supports_preview": True, "allows_custom_voice": False, "custom": False},
     {"id": "deepgram", "name": "Deepgram", "kind": "cloud",
      "streaming": True, "credential": "DEEPGRAM_API_KEY", "can_fallback": True,
      "supports_preview": True, "allows_custom_voice": False, "custom": False},
@@ -55,6 +58,7 @@ def status() -> dict:
             bool(cfg.cartesia_key()) if provider == "cartesia" else
             bool(cfg.eleven_key()) if provider == "elevenlabs" else
             bool(cfg.deepgram_key()) if provider == "deepgram" else
+            bool(cfg.gemini_key()) if provider == "gemini" else
             bool(definition.get("installed", True))
         )
         rows.append(dict(
