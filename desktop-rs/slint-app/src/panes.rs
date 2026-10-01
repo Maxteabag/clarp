@@ -35,6 +35,9 @@ pub struct PaneState {
     focus_transcript: i32,
     to_latest: i32,
     view: PaneView,
+    /// Each reply's artifact cards, updated in place: a card is never
+    /// rebuilt under a click or a field that has the keyboard.
+    cards: std::collections::HashMap<String, Rc<VecModel<crate::ArtifactItem>>>,
 }
 
 impl PaneState {
@@ -52,6 +55,7 @@ impl PaneState {
             focus_composer: 0,
             focus_transcript: 0,
             to_latest: 0,
+            cards: std::collections::HashMap::new(),
         }
     }
 }
@@ -89,6 +93,7 @@ impl App {
     pub fn rebuild_transcripts(&self) {
         for pane in self.pane_state.borrow_mut().iter_mut() {
             pane.shown.clear();
+            pane.cards.clear();
             pane.messages.set_vec(Vec::new());
             pane.to_latest += 1;
         }
@@ -259,6 +264,7 @@ impl App {
         }
         let seen_pending = self.artifact_seen_pending.borrow().clone();
         let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
+        let mut kept = std::collections::HashMap::new();
         let rows: Vec<MessageRow> = presented
             .iter()
             .zip(&artifacts)
@@ -269,10 +275,14 @@ impl App {
                 }
                 let engine = self.engine.borrow();
                 let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(|a| crate::artifacts_view::card(a, &engine, &state)).collect();
-                shown.artifacts = ModelRc::new(VecModel::from(cards));
+                let model = pane.cards.remove(&row.message.id).unwrap_or_default();
+                crate::artifacts_view::update_cards(&model, cards);
+                shown.artifacts = ModelRc::from(model.clone());
+                kept.insert(row.message.id.clone(), model);
                 shown
             })
             .collect();
+        pane.cards = kept;
         // Opened activity the Host sent without its tool calls: fetch them.
         let mut engine = self.engine.borrow_mut();
         for (row, shown) in presented.iter().zip(&rows) {
@@ -317,10 +327,9 @@ impl App {
         drop(engine);
         let signature = |artifacts: &Vec<serde_json::Value>, row: &MessageRow| {
             let explained: Vec<String> = row.tools.iter().map(|t| format!("{}:{}", t.narrated, t.explanation)).collect();
-            let engine = self.engine.borrow();
             let cards = artifacts
                 .iter()
-                .map(|a| format!("{}@{}{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default(), crate::artifacts_view::card_signature(a, &engine, &state)))
+                .map(|a| format!("{}@{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default()))
                 .collect::<Vec<_>>()
                 .join(",");
             format!("{cards}|{}", explained.join(","))
@@ -353,6 +362,7 @@ impl App {
                     // Another chat: its rows, its draft, from its latest message.
                     pane.session = session.clone();
                     pane.shown.clear();
+                    pane.cards.clear();
                     pane.messages.set_vec(Vec::new());
                     pane.draft = self.engine.borrow().draft(&session);
                     pane.draft_set += 1;

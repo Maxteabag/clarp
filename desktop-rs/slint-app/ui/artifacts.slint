@@ -82,6 +82,8 @@ export global ArtifactBridge {
     callback draft-edited(string, string);
     in-out property <bool> editing;
     callback editing-changed(string, bool);
+    // Where a card is (its top and height) and the chat's visible band.
+    callback card-shown(string, length, length, length, length);
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
@@ -242,13 +244,19 @@ component OwnAnswer inherits HorizontalLayout {
             horizontal-stretch: 1;
             text: root.artifact.draft;
             placeholder-text: "Write my own answer";
+            font-size: 12px;
             edited(text) => {
                 ArtifactBridge.draft-edited(root.artifact.id, text);
                 if (!root.chosen) {
                     ArtifactBridge.choose(root.artifact.id, root.artifact.options.length);
                 }
             }
-            accepted => { ArtifactBridge.send(root.artifact.id); }
+            // The keyboard leaves the field before sending: the answered
+            // card has no field, and a focused one must not be destroyed.
+            accepted => {
+                self.clear-focus();
+                ArtifactBridge.send(root.artifact.id);
+            }
             changed has-focus => {
                 ArtifactBridge.editing = self.has-focus;
                 ArtifactBridge.editing-changed(root.artifact.id, self.has-focus);
@@ -361,6 +369,17 @@ component DecisionBody inherits VerticalLayout {
 
 export component ArtifactCard inherits Rectangle {
     in property <ArtifactItem> artifact;
+    // The chat's visible band, in window coordinates: the keyboard only
+    // reaches cards in it. The card reports where it is a few times a
+    // second (read fresh: its absolute position is not tracked through the
+    // list); nothing in its size or layout reads these.
+    in property <length> view-top;
+    in property <length> view-bottom;
+    Timer {
+        interval: 150ms;
+        running: true;
+        triggered => { ArtifactBridge.card-shown(root.artifact.id, root.absolute-position.y, root.height, root.view-top, root.view-bottom); }
+    }
     property <color> tint: ArtifactLook.tint(root.artifact.kind, root.artifact.failed);
     background: touch.has-hover && root.artifact.action != "" ? root.tint.with-alpha(0.1) : root.tint.with-alpha(0.065);
     border-width: root.artifact.selected ? 2px : 1px;

@@ -254,7 +254,13 @@ export component Transcript inherits FocusScope {
                     }
                     for artifact in row.artifacts: HorizontalLayout {
                         alignment: start;
-                        ArtifactCard { artifact: artifact; preferred-width: 640px; max-width: 640px; }
+                        ArtifactCard {
+                            artifact: artifact;
+                            preferred-width: 640px;
+                            max-width: 640px;
+                            view-top: root.absolute-position.y;
+                            view-bottom: root.absolute-position.y + root.height;
+                        }
                     }
                     if row.pending || row.failed || row.stamp != "": Text {
                         text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
