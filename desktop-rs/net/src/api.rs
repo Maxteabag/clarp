@@ -1,4 +1,4 @@
-//! Port of `desktop/src/network/ApiClient`.
+//! Port of the C++ client's `ApiClient`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};

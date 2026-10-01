@@ -1,4 +1,4 @@
-//! The fake Host (`app/tests/fake_host.py`) and an engine driver, shared by
+//! The fake Host (`tests/fake_host.py`) and an engine driver, shared by
 //! the integration tests that are not `host_flow.rs`.
 #![allow(dead_code)]
 
@@ -22,7 +22,7 @@ impl Host {
         let dir = std::env::temp_dir().join(format!("clarp-engine-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (port, log) = (dir.join("port"), dir.join("host.log"));
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../app/tests/fake_host.py");
+        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fake_host.py");
         let child = Command::new("/usr/bin/python3")
             .args([script, "--port-file", port.to_str().unwrap(), "--log", log.to_str().unwrap()])
             .spawn()

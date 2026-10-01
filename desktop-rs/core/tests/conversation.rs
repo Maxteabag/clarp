@@ -1,4 +1,4 @@
-//! Ports of the ConversationModel cases in desktop/tests/tst_native_core.cpp.
+//! Ports of the ConversationModel cases in the C++ client's `tst_native_core.cpp`.
 //! Every scenario also replays the recorded ops onto a mirror and checks it
 //! equals the model, which is the contract the Qt adapter relies on.
 

@@ -1,5 +1,5 @@
 //! Reading themes for the transcript, message text, composer and chrome.
-//! Port of `desktop/src/app/ReadingTheme.h`; the palette is
+//! Port of the C++ client's `ReadingTheme.h`; the palette is
 //! `reading_themes.json`, generated from that header so no value is retyped.
 //! Choices follow docs/reading-themes.md (AAA body text, AA secondary text,
 //! no pure polarity, a 60-110 character measure).

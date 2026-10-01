@@ -1,8 +1,8 @@
 //! What the window offers the desktop, apart from drawing: voice replies
 //! and dictation, the media-player controls (MPRIS), the tray and
 //! notifications, presence, one process per desktop, and diagnostics.
-//! `audio_output`, `audio_input`, `audio_coordinator` and `mpris` are the
-//! Qt Rust app's (desktop-rs/app/src), unchanged but for the runtime.
+//! `audio_output`, `audio_input`, `audio_coordinator` and `mpris` were
+//! ported from the retired Qt Rust app, unchanged but for the runtime.
 
 pub mod audio;
 pub mod audio_coordinator;

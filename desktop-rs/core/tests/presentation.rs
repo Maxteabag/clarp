@@ -1,5 +1,5 @@
 //! Ports of the ConversationPresentationModel cases in
-//! desktop/tests/tst_native_core.cpp. Rows the C++ tests built with
+//! the C++ client's `tst_native_core.cpp`. Rows the C++ tests built with
 //! QStandardItemModel are built here as Messages directly.
 
 use std::cell::Cell;

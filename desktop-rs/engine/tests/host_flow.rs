@@ -1,4 +1,4 @@
-//! The engine against the fake Host (`app/tests/fake_host.py`), with no UI:
+//! The engine against the fake Host (`tests/fake_host.py`), with no UI:
 //! connect, roster, selection, transcript, send and its confirmation, stop.
 
 use std::process::{Child, Command};
@@ -20,7 +20,7 @@ impl Host {
         let dir = std::env::temp_dir().join(format!("clarp-engine-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (port, log) = (dir.join("port"), dir.join("host.log"));
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../app/tests/fake_host.py");
+        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fake_host.py");
         let child = Command::new("/usr/bin/python3")
             .args([script, "--port-file", port.to_str().unwrap(), "--log", log.to_str().unwrap()])
             .spawn()

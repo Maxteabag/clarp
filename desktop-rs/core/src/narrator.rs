@@ -1,5 +1,5 @@
 //! Tool-activity explanations through the Host's shared `/tool-explanations`
-//! service. Port of the shared-Host half of `desktop/src/app/ToolNarrator`
+//! service. Port of the shared-Host half of the C++ client's `ToolNarrator`
 //! (the controller always gives the C++ narrator an API client, so its local
 //! `codex exec` fallback only ever ran in tests and is not ported).
 //!

@@ -1,6 +1,6 @@
 //! The pane workspace: a binary split tree per workspace, focus, zoom,
 //! spatial navigation and conflict-safe persistence. Port of
-//! `desktop/src/models/PaneTreeModel`.
+//! the C++ client's `PaneTreeModel`.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::LazyLock;

@@ -1,4 +1,4 @@
-//! Port of desktop/tests/tst_reading_theme.cpp.
+//! Port of the C++ client's `tst_reading_theme.cpp`.
 
 use std::collections::HashSet;
 

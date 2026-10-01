@@ -6,12 +6,12 @@ the Slint code and a check (headless test or probe) named here.
 
 ## Architecture decision
 
-The QML app's logic lives in the cxx-qt bridge (`app/src/bridge/controller.rs`
+The QML app's logic lived in the cxx-qt bridge (`app/src/bridge/controller.rs`
 and models), which is Qt-bound. The Slint app gets a new UI-neutral crate,
 `engine/`, ported from that bridge: plain Rust state, commands and change
 notifications on top of `clarp-core`/`clarp-net`, with no toolkit types. The
-Qt bridge stays as it is (PR #201 must not break); moving it onto `engine/`
-later removes the duplication. The Slint app (`slint-app/`) is a thin view
+Qt app and its bridge have since been retired with the C++ client, so
+`engine/` is the only copy of that logic. The Slint app (`slint-app/`) is a thin view
 over `engine/`, so its behaviour tests run against the engine without a UI.
 
 ## QML components (62 files, 11688 lines)
@@ -115,10 +115,12 @@ runtime), none from Qt; `cargo tree -p clarp-slint` has no Qt crate, and no
 `.qml` is read (the QML file names in the sources are comments naming what
 each part ports). Stripped it is 55 MB, toolkit included.
 
-`slint-app/tests/perf.sh 5` starts each app five times offscreen against a
+`slint-app/tests/perf.sh 5` starts the app five times offscreen against a
 fresh fake Host (private bus, scratch HOME, `env -i`) and measures from launch
 to the first chat's `/log` request (started, connected, roster loaded, chat
-opened), then memory five seconds in. Medians, 2026-09-30, this machine:
+opened), then memory five seconds in. Medians, 2026-09-30, this machine,
+against the Qt/QML app before it was retired (the script now measures only
+the Slint app):
 
 | | Slint app (release) | Qt/QML Rust app (PR 201, installed build) |
 |---|---|---|
@@ -136,7 +138,7 @@ window on Wayland was not measured here.
 
 ## Platform (no QML counterpart)
 
-| Qt app piece | Slint app | Status |
+| Retired Qt app piece (`app/src`, removed) | Slint app | Status |
 |---|---|---|
 | `app/src/bridge/audio_controller.rs` + `audio_output.rs`, `audio_input.rs`, `audio_coordinator.rs` | `slint-app/src/platform/audio.rs` (same logic, notices instead of Qt signals) + the three modules copied unchanged | verified: `check.sh voice`; checks run with `CLARP_AUDIO_OUTPUT=null` and a fixture microphone, never the user's devices |
 | `app/src/mpris.rs` | `slint-app/src/platform/mpris.rs` (copied) + `platform::serve_mpris` / `publish_playback` | verified: `check.sh voice` queries Identity and PlaybackStatus on the check's private bus |

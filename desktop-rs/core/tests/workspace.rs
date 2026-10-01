@@ -1,4 +1,4 @@
-//! Port of desktop/tests/tst_workspace_context.cpp (uses a real Git repo).
+//! Port of the C++ client's `tst_workspace_context.cpp` (uses a real Git repo).
 
 use std::process::Command;
 

@@ -1,5 +1,5 @@
 //! Ports of the AgentListModel, BackgroundJobTracker and TreeOrder cases in
-//! desktop/tests/tst_native_core.cpp. Each step also replays the recorded ops
+//! the C++ client's `tst_native_core.cpp`. Each step also replays the recorded ops
 //! onto a mirror and checks it equals the presented rows.
 
 use std::collections::HashMap;

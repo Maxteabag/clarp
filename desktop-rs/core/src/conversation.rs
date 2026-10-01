@@ -1,4 +1,4 @@
-//! Transcript state for one agent. Port of `desktop/src/models/ConversationModel`.
+//! Transcript state for one agent. Port of the C++ client's `ConversationModel`.
 //!
 //! Every mutation is recorded as an ordered [`Op`]. The Qt list model keeps a
 //! mirror of the rows and replays each op between the matching
