@@ -48,13 +48,6 @@ component ShortcutBar inherits Rectangle {
         padding-left: 8px;
         padding-right: 8px;
         spacing: 16px;
-        Text {
-            text: root.mode;
-            color: Palette.accent;
-            font-size: 10px;
-            font-weight: 700;
-            vertical-alignment: center;
-        }
         // The hints clip at the window's edge: however many the state has,
         // they never widen the layout above them.
         Rectangle {
@@ -317,7 +310,6 @@ export component AppWindow inherits Window {
                 fold-toggled(session) => { root.fold-toggled(session); }
                 restore(session) => { root.restore-agent(session); }
             }
-            if root.sidebar-visible: Rectangle { width: 1px; background: Palette.rule; }
             VerticalLayout {
                 if root.preview-enabled && (root.preview-update-label != "" || root.preview-pinned || root.preview-error != ""): PreviewBanner {
                     update-label: root.preview-update-label;
