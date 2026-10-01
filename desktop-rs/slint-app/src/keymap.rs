@@ -118,7 +118,7 @@ fn state(name: &str) -> Vec<Binding> {
         "navigation" => vec![
             b("next-attention", &["N", "Ctrl+J"], "Next attention", true, Attention, false),
             b("focus-sidebar", &["E", "Ctrl+E"], "Explorer", false, Always, false),
-            b("focus-pane", &["C", "Ctrl+H"], "Chat", false, Always, false),
+            b("focus-pane", &["H", "Ctrl+H"], "Chat", false, Always, false),
             b("focus-composer", &["I"], "Insert", false, Agent, false),
             b("toggle-focus", &["Tab", "Shift+Tab"], "Switch focus", false, Always, false),
             b("switcher", &["Space", "Ctrl+K"], "Commands", true, Always, false),
@@ -142,7 +142,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("agent-search", &["/"], "Search", true, Always, false),
             b("toggle-preview", &["P"], "Preview", true, Always, false),
             b("toggle-compact", &["V"], "Compact view", true, Always, false),
-            b("fold", &["H", "Left"], "Fold", true, Folds, false),
+            b("fold", &["Left"], "Fold", true, Folds, false),
             b("unfold", &["L", "Right"], "Unfold", true, Folds, false),
             // The explorer's header buttons, shown while it has the keyboard.
             b("new", &["Ctrl+N"], "New agent", true, Always, false),
@@ -387,7 +387,8 @@ mod tests {
         assert_eq!(pane.iter().find(|b| b.action == "split-right").unwrap().keys, ["Alt+V", "Ctrl+Alt+V", "Ctrl+Shift+V"]);
         assert!(pane.iter().any(|b| b.action == "settings"), "main's bindings reach a pane");
         assert_eq!(action_for("pane", "E", &none, all()), Some("focus-sidebar"));
-        assert_eq!(action_for("sidebar", "H", &none, all()), Some("fold"));
+        assert_eq!(action_for("sidebar", "Left", &none, all()), Some("fold"));
+        assert_eq!(action_for("sidebar", "H", &none, all()), Some("focus-pane"), "H is the chat everywhere");
         assert_eq!(action_for("sidebar", "P", &none, all()), Some("toggle-preview"));
         assert_eq!(action_for("composer", "Ctrl+E", &none, all()), Some("focus-sidebar"));
         assert_eq!(action_for("composer", "Ctrl+H", &none, all()), Some("focus-pane"));
