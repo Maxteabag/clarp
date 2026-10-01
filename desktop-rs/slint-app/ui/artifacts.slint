@@ -14,7 +14,6 @@ export struct ArtifactItem {
     title: string,
     summary: string,
     progress: string,
-    countdown: string,
     form: bool,
     // countdown: the target in seconds on ArtifactBridge.now's clock, when
     // it parses; the target's date and zone; why there is no clock.
@@ -33,22 +32,113 @@ export global ArtifactBridge {
     pure callback countdown-clock(int, int) -> string;
 }
 
+// The type's tint (iOS ArtifactCard's palette, from the reading theme).
+export global ArtifactLook {
+    public pure function tint(kind: string, failed: bool) -> color {
+        if (failed) { return Palette.danger; }
+        if (kind == "countdown" || kind == "plan" || kind == "release") { return Palette.success; }
+        if (kind == "decision" || kind == "question" || kind == "html_form") { return Palette.warning; }
+        if (kind == "workflow_run" || kind == "code_change") { return Palette.accent; }
+        return Palette.link;
+    }
+    public pure function glyph(kind: string) -> string {
+        if (kind == "countdown") { return "◷"; }
+        if (kind == "plan") { return "☰"; }
+        if (kind == "decision" || kind == "question") { return "?"; }
+        if (kind == "html_form") { return "▤"; }
+        if (kind == "code_change") { return "±"; }
+        if (kind == "data") { return "▦"; }
+        if (kind == "audio") { return "♪"; }
+        if (kind == "video") { return "▶"; }
+        if (kind == "release") { return "⬢"; }
+        if (kind == "directory") { return "▭"; }
+        if (kind == "workflow_run") { return "⟳"; }
+        return "¶";
+    }
+}
+
+// A countdown's body (iOS CountdownArtifactView): the phase, the clock in
+// large figures, the target's date and zone; it ticks on the bridge's
+// clock, so its height never changes.
+component CountdownBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    spacing: 3px;
+    if !root.artifact.countdown-set: Text {
+        text: root.artifact.countdown-note;
+        color: Palette.muted;
+        font-size: 13px;
+    }
+    if root.artifact.countdown-set: Text {
+        text: ArtifactBridge.countdown-phase(root.artifact.countdown-at, ArtifactBridge.now);
+        color: Palette.muted;
+        font-size: 11px;
+    }
+    if root.artifact.countdown-set: Text {
+        height: 30px;
+        text: ArtifactBridge.countdown-clock(root.artifact.countdown-at, ArtifactBridge.now);
+        color: Palette.text;
+        font-family: "JetBrains Mono";
+        font-size: 24px;
+        font-weight: 600;
+        vertical-alignment: center;
+        accessible-role: text;
+    }
+    if root.artifact.countdown-set: Text {
+        text: root.artifact.countdown-line;
+        color: Palette.muted;
+        font-size: 12px;
+        overflow: elide;
+    }
+}
+
 export component ArtifactCard inherits Rectangle {
     in property <ArtifactItem> artifact;
-    background: Palette.window;
+    property <color> tint: ArtifactLook.tint(root.artifact.kind, root.artifact.failed);
+    background: root.tint.with-alpha(0.065);
     border-width: 1px;
-    border-color: root.artifact.failed ? Palette.danger : Palette.border;
-    border-radius: 6px;
+    border-color: root.tint.with-alpha(0.3);
+    border-radius: 8px;
     accessible-role: groupbox;
-    accessible-label: root.artifact.title;
+    accessible-label: root.artifact.label + " " + root.artifact.title;
     VerticalLayout {
-        padding: 12px;
+        padding: 10px;
         spacing: 6px;
         HorizontalLayout {
-            Text { text: root.artifact.kind; color: Palette.chrome-text; font-size: 11px; horizontal-stretch: 1; }
-            Text { text: root.artifact.outcome; color: root.artifact.failed ? Palette.danger : Palette.text; font-size: 12px; }
+            spacing: 8px;
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 6px;
+                background: root.tint.with-alpha(0.14);
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: ArtifactLook.glyph(root.artifact.kind);
+                    color: root.tint;
+                    font-size: 14px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                Text { text: root.artifact.label; color: Palette.faint; font-size: 9px; font-weight: 600; letter-spacing: 0.8px; }
+                Text { text: root.artifact.title; color: Palette.text; font-size: 14px; font-weight: 600; wrap: word-wrap; }
+            }
+            if root.artifact.badge != "": Rectangle {
+                y: 2px;
+                height: 18px;
+                width: badge-text.preferred-width + 12px;
+                border-radius: 9px;
+                background: (root.artifact.badge == "Failed" ? Palette.danger : Palette.muted).with-alpha(0.16);
+                badge-text := Text {
+                    text: root.artifact.badge;
+                    color: root.artifact.badge == "Failed" ? Palette.danger : Palette.muted;
+                    font-size: 11px;
+                }
+            }
         }
-        Text { text: root.artifact.title; color: Palette.text; font-size: 15px; wrap: word-wrap; }
+        if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
         if root.artifact.summary != "": Text {
             text: root.artifact.summary;
             color: Palette.text;
@@ -58,8 +148,6 @@ export component ArtifactCard inherits Rectangle {
             max-height: 2 * 18px;
         }
         if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
-        if root.artifact.countdown != "": Text { text: root.artifact.countdown; color: Palette.text; font-size: 12px; wrap: word-wrap; }
         if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
     }
 }
-

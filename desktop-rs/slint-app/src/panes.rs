@@ -255,7 +255,7 @@ impl App {
                 if !stamps {
                     shown.stamp = SharedString::new();
                 }
-                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(crate::cells_view::artifact_item).collect();
+                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(crate::artifacts_view::artifact_item).collect();
                 shown.artifacts = ModelRc::new(VecModel::from(cards));
                 shown
             })

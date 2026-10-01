@@ -252,7 +252,10 @@ export component Transcript inherits FocusScope {
                         for cell in row.cells: DisplayCellCard { cell: cell; }
                         for tool in row.tools: ToolCard { tool: tool; }
                     }
-                    for artifact in row.artifacts: ArtifactCard { artifact: artifact; }
+                    for artifact in row.artifacts: HorizontalLayout {
+                        alignment: start;
+                        ArtifactCard { artifact: artifact; preferred-width: 640px; max-width: 640px; }
+                    }
                     if row.pending || row.failed || row.stamp != "": Text {
                         text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
                         color: row.failed ? Palette.danger : Palette.faint;
