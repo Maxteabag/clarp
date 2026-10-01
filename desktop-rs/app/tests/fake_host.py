@@ -229,6 +229,10 @@ def artifact_fixtures(kind, session, now_ms):
              "plan": {"plan_id": "p3", "title": "Migrate", "status": "blocked",
                       "items": [item("Back up", "completed"), item("Wait for the DBA", "blocked")], "completed_count": 1, "total_count": 2}},
             {"artifact_id": "plan-missing", "type": "plan", "status": "active", "session": s, "title": "A plan whose details went missing"},
+            {"artifact_id": "plan-last", "type": "plan", "status": "active", "session": s, "title": "Rotate the certificates",
+             "plan": {"plan_id": "p4", "title": "Certificates", "status": "active",
+                      "items": [item("Renew", "completed"), item("Deploy the new certificates to the edge", "in_progress")],
+                      "completed_count": 1, "total_count": 2}},
         ]
     if kind == "document":
         spec = ("# Slint client: design notes\n\nThe **transcript** keeps its offset while a reader is up; cards keep their height.\n\n"
@@ -640,6 +644,29 @@ class Handler(BaseHTTPRequestHandler):
                     if artifact.get("summary"):
                         artifact["summary"] += " " + body.get("more", "")
                         artifact["updated_at"] = now_ms
+                    plan = artifact.get("plan") or {}
+                    if plan.get("status") == "active" and plan.get("items"):
+                        # The step under way finishes (with its subtasks), the next begins.
+                        flat = []
+                        def walk(items):
+                            for it in items:
+                                flat.append(it)
+                                walk(it.get("subtasks", []))
+                        walk(plan["items"])
+                        top = plan["items"]
+                        current = next((it for it in top if it.get("status") == "in_progress"), None)
+                        if current is not None:
+                            current["status"] = "completed"
+                            for sub in current.get("subtasks", []):
+                                sub["status"] = "completed"
+                            following = next((it for it in top if it.get("status") == "pending"), None)
+                            if following is not None:
+                                following["status"] = "in_progress"
+                            else:
+                                plan["status"] = "completed"
+                                artifact["status"] = "completed"
+                            plan["completed_count"] = sum(1 for it in flat if it.get("status") == "completed")
+                            artifact["updated_at"] = now_ms
                     held = artifact.get("decision") or {}
                     if held.get("status") == "pending":
                         held.update({"status": "accepted", "resolved_choice": "accepted", "revision": held["revision"] + 1})

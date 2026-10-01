@@ -711,7 +711,9 @@ fn question_stages(out: &str) -> Vec<Stage> {
 
 fn plan_stages(out: &str) -> Vec<Stage> {
     let (out, out2) = (out.to_owned(), out.to_owned());
-    let ids = ["plan-ship", "plan-done", "plan-blocked", "plan-missing"];
+    let ids = ["plan-ship", "plan-done", "plan-blocked", "plan-missing", "plan-last"];
+    let before: Rc<RefCell<Vec<(String, f32)>>> = Rc::default();
+    let before2 = before.clone();
     let mut stages = load_chat("art-plan", &["plan"]);
     stages.extend::<Vec<Stage>>(vec![
         ("plan cards", Box::new(move |app, window, elapsed| {
@@ -770,6 +772,28 @@ fn plan_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             check(window.get_overlay().is_empty() && report().transcript_focused, "Escape closes it, back on the chat");
+            headless::press(slint::platform::Key::End);
+            true
+        })),
+        ("plans move on", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if !shown.contains(&"plan-last".to_owned()) && elapsed < Duration::from_secs(3) {
+                return false;
+            }
+            *before.borrow_mut() = crate::artifacts_view::card_heights(app);
+            let more = "";
+            check(control("/__control/artifact-settle", &json!({"session": "art-plan", "more": more})).is_ok(), "the Host moves the plans on");
+            true
+        })),
+        ("plans moved on", Box::new(move |app, window, elapsed| {
+            let moved = card(window, "plan-ship").is_some_and(|c| c.current == "Write the release notes" && c.progress_count == "4/5")
+                && card(window, "plan-last").is_some_and(|c| c.progress_count == "2/2" && c.current.is_empty());
+            if !moved || elapsed < Duration::from_millis(800) {
+                return elapsed > Duration::from_secs(5) && { check(false, "the plans move on: the next step under way, the last plan done"); true };
+            }
+            let changed = changed_heights(&before2.borrow(), &crate::artifacts_view::card_heights(app));
+            let measured: Vec<String> = before2.borrow().iter().map(|(id, _)| id.clone()).collect();
+            check(measured.contains(&"plan-last".to_owned()) && changed.is_empty(), &format!("a plan moving on or finishing keeps its height: {changed:?} of {measured:?}"));
             true
         })),
     ]);
@@ -1010,12 +1034,14 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
         })),
         ("reader stays put", Box::new(move |app, window, elapsed| {
             let settled = card(window, "dec-deploy-all").is_some_and(|c| c.resolved == "Approved")
+                && card(window, "plan-ship-all").is_some_and(|c| c.current == "Write the release notes")
+                && card(window, "plan-last-all").is_some_and(|c| c.progress_count == "2/2" && c.current.is_empty())
                 && card(window, "cd-launch-all").is_some_and(|c| c.summary.contains("Updated by the agent"))
                 && card(window, "form-trip-all").is_some_and(|c| c.status_text == "Answers accepted")
                 && card(window, "cd-new").is_some();
             if !settled || elapsed < Duration::from_millis(1000) {
                 if elapsed > Duration::from_secs(6) {
-                    check(false, "the cards change: decisions answered, summaries grown, the form accepted, the new card shown");
+                    check(false, "the cards change: decisions answered, plans moved on, summaries grown, the form accepted, the new card shown");
                     return true;
                 }
                 return false;
