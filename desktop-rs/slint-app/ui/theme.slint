@@ -57,6 +57,11 @@ export component PaneFrame inherits Rectangle {
     in property <bool> active;
     // What shows behind the title, so it cuts the border line.
     in property <color> surface: Palette.window;
+    // An optional title on the right of the border: a name (clickable) and
+    // muted details, as the chat frame shows its agent.
+    in property <string> info-name;
+    in property <string> info;
+    callback info-clicked();
     property <color> tone: root.active ? Palette.accent : Palette.border;
     Rectangle {
         x: 0;
@@ -81,6 +86,38 @@ export component PaneFrame inherits Rectangle {
             font-size: 11px;
             font-weight: root.active ? 700 : 400;
             vertical-alignment: center;
+        }
+    }
+    if root.info-name != "" || root.info != "": Rectangle {
+        property <length> room: root.width - 40px - 2 * 10px - 60px;
+        width: min(right.preferred-width + 8px, self.room);
+        height: 14px;
+        x: root.width - self.width - 10px;
+        y: 0;
+        background: root.surface;
+        clip: true;
+        right := HorizontalLayout {
+            x: 4px;
+            width: parent.width - 8px;
+            spacing: 6px;
+            if root.info-name != "": Text {
+                text: root.info-name;
+                color: name-touch.has-hover ? Palette.accent : Palette.chrome-text;
+                font-size: 11px;
+                font-weight: 700;
+                vertical-alignment: center;
+                accessible-role: button;
+                accessible-label: "Agent profile";
+                name-touch := TouchArea { mouse-cursor: pointer; clicked => { root.info-clicked(); } }
+            }
+            Text {
+                text: root.info;
+                color: Palette.muted;
+                font-size: 11px;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
         }
     }
 }

@@ -34,9 +34,12 @@ export component ProcessIndicator inherits Rectangle {
     in property <int> sub-agents;
     in property <int> children;
     in property <length> glyph-size: 14px;
+    // "jobs" or "agents" shows only that kind (the explorer gives each its
+    // own icon); empty shows both as one glyph.
+    in property <string> only;
     callback clicked();
-    property <int> plain: Math.max(0, root.jobs - root.sub-agents);
-    property <int> agents: Math.max(root.sub-agents, root.children, 0);
+    property <int> plain: root.only == "agents" ? 0 : Math.max(0, root.jobs - root.sub-agents);
+    property <int> agents: root.only == "jobs" ? 0 : Math.max(root.sub-agents, root.children, 0);
     out property <int> total: root.plain + root.agents;
     out property <string> summary: (root.plain > 0 ? root.plain + (root.plain == 1 ? " background job" : " background jobs") : "")
         + (root.plain > 0 && root.agents > 0 ? ", " : "")
@@ -59,7 +62,7 @@ export component ProcessIndicator inherits Rectangle {
         width: Math.max(11px, badge.preferred-width + 5px);
         height: 11px;
         border-radius: 5.5px;
-        background: Palette.link;
+        background: root.agents > 0 ? Palette.link : Palette.muted;
         border-width: 1px;
         border-color: Palette.window;
         badge := Text {
