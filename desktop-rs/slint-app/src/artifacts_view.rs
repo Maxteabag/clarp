@@ -107,6 +107,27 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
         "plan" => plan_fields(&mut item, artifact),
+        "code_change" => {
+            // iOS: the repository (or "Repository"), the branch, the files
+            // and lines changed.
+            let repository = text(artifact, "repository");
+            let branch = text(artifact, "branch");
+            let repo = if repository.is_empty() { "Repository".to_owned() } else { repository };
+            item.repo = if branch.is_empty() { repo } else { format!("{repo} · {branch}") }.into();
+            if artifact.get("files_changed").is_some() {
+                let files = number(artifact, "files_changed");
+                item.files = format!("{files} file{}", if files == 1 { "" } else { "s" }).into();
+            }
+            if artifact.get("additions").is_some() {
+                item.additions = format!("+{}", number(artifact, "additions")).into();
+            }
+            if artifact.get("deletions").is_some() {
+                item.deletions = format!("−{}", number(artifact, "deletions")).into();
+            }
+            if !text(artifact, "diff").is_empty() || text(artifact, "source_url").starts_with("https://") {
+                item.action = "Open change".into();
+            }
+        }
         "document" | "research" => {
             let content = text(artifact, "content");
             if !content.trim().is_empty() {
@@ -451,6 +472,24 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
             }
             (text(&artifact, "summary"), markdown)
         }
+        "code_change" => {
+            let commit = text(&artifact, "commit");
+            let summary = if commit.is_empty() { card.repo.to_string() } else { format!("{} · {commit}", card.repo) };
+            let mut parts = Vec::new();
+            let stats = [card.files.to_string(), card.additions.to_string(), card.deletions.to_string()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>();
+            if !stats.is_empty() {
+                parts.push(stats.join(" · "));
+            }
+            let diff = text(&artifact, "diff");
+            if !diff.is_empty() {
+                parts.push(format!("```diff\n{}\n```", diff.trim_end()));
+            }
+            let source = text(&artifact, "source_url");
+            if source.starts_with("https://") {
+                parts.push(format!("[Open source]({source})"));
+            }
+            (summary, parts.join("\n\n"))
+        }
         _ => return None,
     };
     serde_json::json!({"artifact_id": id, "title": card.title.as_str(), "summary": summary, "type": card.kind.as_str(), "isHtml": from_html, "converted": true, "kind": card.label.as_str(), "body": body})
@@ -560,7 +599,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
             }
         }
         "decision" | "question" => return send(app, id),
-        "plan" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
+        "plan" | "code_change" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
         _ if app.engine.borrow().report_for_artifact(id).is_some() => crate::updates_view::open_report(app, window, id),
         // Nothing to open: Enter only selects.
         _ => {}

@@ -521,6 +521,15 @@ export component ArtifactCard inherits Rectangle {
             height: 64px;
             vertical-alignment: top;
         }
+        // A change's where and how much, one line each (iOS's monospaced row).
+        if root.artifact.kind == "code_change": Text { text: root.artifact.repo; color: Palette.text; font-family: "JetBrains Mono"; font-size: 12px; overflow: elide; }
+        if root.artifact.files != "" || root.artifact.additions != "" || root.artifact.deletions != "": HorizontalLayout {
+            alignment: start;
+            spacing: 10px;
+            if root.artifact.files != "": Text { text: root.artifact.files; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 12px; }
+            if root.artifact.additions != "": Text { text: root.artifact.additions; color: Palette.success; font-family: "JetBrains Mono"; font-size: 12px; }
+            if root.artifact.deletions != "": Text { text: root.artifact.deletions; color: Palette.danger; font-family: "JetBrains Mono"; font-size: 12px; }
+        }
         if root.artifact.sources != "": Text { text: root.artifact.sources; color: Palette.faint; font-size: 11px; }
         if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
         // Two lines, whatever the summary's length: a summary that grows
