@@ -173,7 +173,7 @@ export component Pane inherits Rectangle {
                     : root.pane.default-effort != "" ? "effort " + root.pane.default-effort + " (default)" : "effort default")
                 + (root.pane.busy ? "  ·  working" : "");
             info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
-            key: root.pane.active && Focus.mode == "composer" ? "ctrl+h" : "c"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
+            key: root.pane.active && Focus.mode == "composer" ? "ctrl+h" : "h"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
         }
         // The transcript's footer (ConversationPane.qml).
         if root.pane.working: Rectangle {

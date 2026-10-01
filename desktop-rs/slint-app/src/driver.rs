@@ -1539,14 +1539,14 @@ fn sidebar_check(out: String) {
             }
             check(true, "L on the chat unfolds its sub-agent");
             window.set_sidebar_cursor("mike".into());
-            headless::press("h");
+            headless::press(Key::LeftArrow);
             true
         })),
         ("folded from the sub-agent", Box::new(|_, window, _| {
             if names(window) != ["Rachel"] {
                 return false;
             }
-            check(window.get_sidebar_cursor() == "rachel", "H on a sub-agent folds its chat and moves the cursor up to it");
+            check(window.get_sidebar_cursor() == "rachel", "Left on a sub-agent folds its chat and moves the cursor up to it");
             headless::press(Key::RightArrow);
             let done = serde_json::json!({"session": "mike", "set": {"helper_state": "done"}});
             check(control("/__control/agent", &done).is_ok(), "Mike finishes");
