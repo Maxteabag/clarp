@@ -24,9 +24,11 @@ use crate::perf::{self, Event, ms};
 /// The explorer lists every agent this soon after launch: the fake Host
 /// answers at once, so this is the app's own work (113-239 ms).
 const EXPLORER: Duration = Duration::from_millis(500);
-/// The first chat's rows are drawn this soon after launch (65 ms with two
-/// agents; the roster's size must not hold up the open chat).
-const FIRST_CHAT: Duration = Duration::from_millis(1000);
+/// The first chat's rows are drawn this soon after launch: the roster's
+/// size must not hold up the open chat (110-160 ms in release; 0.35-1.3 s
+/// in debug, where a frame of the software renderer takes up to 0.5 s;
+/// was 7.7-13.9 s with an empty portrait cache).
+const FIRST_CHAT: Duration = Duration::from_millis(2000);
 /// A usual chat-list rebuild of 100 rows (the median): a 60 Hz frame has
 /// 16 ms and the list is one of many things in it (2-4 ms; was 8-14).
 const REBUILD: Duration = Duration::from_millis(6);
@@ -36,10 +38,15 @@ const LONGEST_REBUILD: Duration = Duration::from_millis(25);
 /// dropped frames, never a visible freeze (opening the first chat, 36-88
 /// ms; was 0.3-12 s).
 const WAKE: Duration = Duration::from_millis(200);
-/// Rebuilds in the first five seconds: the roster, the selection, rooms,
-/// archive and updates each change the list, and portraits arrive at most
-/// ten times a second, not one rebuild each (7-13).
-const STARTUP_REBUILDS: usize = 15;
+/// Rebuilds in the first five seconds for anything but portraits: the
+/// roster, the selection, rooms, archive and updates each change the list
+/// (6-8).
+const STARTUP_REBUILDS: usize = 10;
+/// Arriving portraits rebuild the list at most this often, not once each.
+const PORTRAIT_PACE: Duration = Duration::from_millis(90);
+/// All rebuilds in the first five seconds together (21-58 ms; was
+/// 650-730 ms).
+const STARTUP_REBUILD_TIME: Duration = Duration::from_millis(150);
 /// Rebuilds for a burst of 40 Host events delivered together: the list is
 /// rebuilt once per wake, not once per event.
 const BURST_REBUILDS: usize = 10;
@@ -100,9 +107,20 @@ pub(super) fn startup_check(out: String) {
                 wake.is_none_or(|e| e.took <= WAKE),
                 &format!("no engine wake holds the UI thread over {WAKE:?} (longest {:.2} ms: {})", wake.map_or(0.0, |e| ms(e.took)), wake.map_or("", |e| &e.what)),
             );
+            let (portraits, others): (Vec<&Event>, Vec<&Event>) = stats.rebuilds.iter().partition(|e| e.what.ends_with("; Avatars"));
             check(
-                stats.rebuilds.len() <= STARTUP_REBUILDS,
-                &format!("{} chat-list rebuilds in the first five seconds (budget {STARTUP_REBUILDS})", stats.rebuilds.len()),
+                others.len() <= STARTUP_REBUILDS,
+                &format!("{} chat-list rebuilds in the first five seconds, besides portraits (budget {STARTUP_REBUILDS})", others.len()),
+            );
+            let closest = portraits.windows(2).map(|w| w[1].at.saturating_sub(w[0].at)).min();
+            check(
+                closest.is_none_or(|gap| gap >= PORTRAIT_PACE),
+                &format!("{} rebuilds for arriving portraits, at least {PORTRAIT_PACE:?} apart (closest {closest:?})", portraits.len()),
+            );
+            let total: Duration = stats.rebuilds.iter().map(|e| e.took).sum();
+            check(
+                total <= STARTUP_REBUILD_TIME,
+                &format!("the rebuilds take {:.1} ms in all (budget {STARTUP_REBUILD_TIME:?})", ms(total)),
             );
             burst_from.set(stats.rebuilds.len());
             // 40 events at once: agents start and stop, some have news.
