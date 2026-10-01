@@ -194,11 +194,17 @@ export component Transcript inherits FocusScope {
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
     list := ListView {
-        // A reader who scrolls away from the end stops following.
+        // A reader who scrolls stops following at once. A wheel notch
+        // animates: this runs as it starts, before the list has moved, so
+        // whether they ended at the end (follow again) or the top (load the
+        // page before) is decided once the scroll has settled.
         scrolled => {
             root.holding = false;
-            root.follow = root.at-end;
-            root.check-top();
+            root.follow = false;
+            if (!root.settling) { root.start-y = list.content-y; }
+            root.settled-y = list.content-y;
+            root.still-ticks = 0;
+            root.settling = true;
         }
         width: parent.width;
         height: parent.height;
@@ -209,6 +215,9 @@ export component Transcript inherits FocusScope {
             padding-bottom: 7px;
             alignment: row.author == "user" ? end : stretch;
             Rectangle {
+                // One message of the list; the id finds it in the checks.
+                accessible-role: list-item;
+                accessible-id: "row:" + row.id;
                 background: row.author == "user" ? Palette.bubble : transparent;
                 border-radius: 2px;
                 max-width: row.author == "user" ? list.visible-width * 0.75 : list.visible-width;
@@ -278,6 +287,33 @@ export component Transcript inherits FocusScope {
             root.holding = true;
             root.from-bottom = list.content-height + list.content-y;
             root.reached-top();
+        }
+    }
+    // Watches a scroll until the list holds still (within half a pixel for
+    // ten frames: the list keeps correcting its estimates for a while).
+    // Once it has moved and shows the end, the reader follows again.
+    property <bool> settling;
+    property <length> start-y;
+    property <length> settled-y;
+    property <int> still-ticks;
+    Timer {
+        interval: 16ms;
+        running: root.settling;
+        triggered => {
+            if (list.content-y != root.start-y) {
+                root.follow = root.at-end;
+            }
+            if (Math.abs((list.content-y - root.settled-y) / 1px) > 0.5) {
+                root.settled-y = list.content-y;
+                root.still-ticks = 0;
+                return;
+            }
+            root.still-ticks += 1;
+            if (root.still-ticks >= 10) {
+                root.settling = false;
+                root.follow = root.at-end;
+                root.check-top();
+            }
         }
     }
     // The list estimates the height of rows it has not drawn yet and

@@ -87,7 +87,44 @@ subscribers = []
 event_id = 0
 log_path = None
 outage_until = 0.0
+# Seconds an older page (/log?before=) takes; /__control/older-delay sets it.
+older_delay = 0.0
 CLOSE = object()
+
+
+LOREM = ("The build runs the unit tests first, then the integration suite against a scratch "
+         "database, and only then packages the desktop app. ")
+
+
+def rich_turn(i):
+    """Row `i` of a realistic chat: its kind cycles, its size varies."""
+    size = 1 + (i * 7) % 5
+    kind = i % 10
+    if kind == 0:
+        return {"role": "user", "text": f"Question {i}: can you check the build?"}
+    if kind == 1:
+        return {"role": "assistant", "text": f"Answer {i}. " + LOREM * (2 + size * 2)}
+    if kind == 2:
+        code = "\n".join(f"    let value_{n} = compute({n}, \"step\");" for n in range(3 + size * 3))
+        return {"role": "assistant", "text": f"Code {i}:\n\n```rust\nfn main() {{\n{code}\n}}\n```"}
+    if kind == 3:
+        return {"role": "user", "text": f"Long request {i}. " + LOREM * (1 + size)}
+    if kind == 4:
+        table = "\n".join(f"| step {n} | {'done' if n % 2 else 'running'} | {n * 3}s |" for n in range(2 + size))
+        return {"role": "assistant", "text": f"Table {i}:\n\n| step | state | time |\n|---|---|---|\n{table}"}
+    if kind == 5:
+        items = "\n".join(f"- item {n}: " + LOREM[: 40 + n * 9] for n in range(3 + size))
+        return {"role": "assistant", "text": f"## List {i}\n\n{items}"}
+    if kind == 6:
+        tools = [{"name": "Bash", "command": f"cargo test -p part{n}", "status": "completed",
+                  "result": "\n".join(f"test case_{m} ... ok" for m in range(4 + n))} for n in range(1 + size % 3)]
+        return {"role": "assistant", "text": f"Ran the tests for {i}.", "tools": tools}
+    if kind == 7:
+        return {"role": "assistant", "text": f"Done {i}."}
+    if kind == 8:
+        return {"role": "assistant", "text": f"### Mixed {i}\n\n" + LOREM * size
+                + "\n\n> Keep the main checkout untouched.\n\n```sh\ncargo build\ncargo test\n```"}
+    return {"role": "user", "text": f"Follow-up {i}: " + LOREM[: 30 + size * 20]}
 
 
 def record(entry):
@@ -247,6 +284,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"paths": ["/home/fake/src", "/home/fake/notes"][: int(query.get("limit", "5"))]})
         if url.path == "/log":
             session = query.get("session", "")
+            if query.get("before") and older_delay:
+                time.sleep(older_delay)
             with state_lock:
                 rows = turns.get(session, [])
                 after = int(query.get("after_revision", "-1"))
@@ -390,6 +429,47 @@ class Handler(BaseHTTPRequestHandler):
                     revision += 1
                     rows.append({"revision": revision, "timestamp": "2026-09-29T10:00:00Z", **turn})
                 turns[session] = rows
+                for agent in agents:
+                    if agent["session"] == session:
+                        agent["head_revision"] = revision
+            broadcast({"type": "transcript-updated", "session": session})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/rich":
+            # Test control: replace a chat's history with `count` rows of
+            # varied height (wrapped prose, code, tables, lists, tool calls,
+            # user bubbles), deterministic by index, and announce it.
+            session, count = body["session"], int(body["count"])
+            with state_lock:
+                rows = []
+                for i in range(count):
+                    revision += 1
+                    rows.append({"id": f"{session}-{i}", "revision": revision,
+                                 "timestamp": "2026-09-15T08:00:00Z", **rich_turn(i)})
+                turns[session] = rows
+                for agent in agents:
+                    if agent["session"] == session:
+                        agent["head_revision"] = revision
+            broadcast({"type": "transcript-updated", "session": session})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/older-delay":
+            # Test control: older pages arrive after `seconds`.
+            global older_delay
+            older_delay = float(body.get("seconds", 0))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/upsert":
+            # Test control: update turns by id (a streaming reply growing) or
+            # append them, each with a new revision, and announce it.
+            session = body["session"]
+            with state_lock:
+                rows = turns.setdefault(session, [])
+                for turn in body["turns"]:
+                    revision += 1
+                    turn = {"timestamp": "2026-09-29T10:00:00Z", **turn, "revision": revision}
+                    existing = next((t for t in rows if t["id"] == turn["id"]), None)
+                    if existing is None:
+                        rows.append(turn)
+                    else:
+                        existing.update(turn)
                 for agent in agents:
                     if agent["session"] == session:
                         agent["head_revision"] = revision
