@@ -60,6 +60,7 @@ fn placed(window: &crate::AppWindow, ids: &[&str], elapsed: Duration) -> bool {
 
 fn countdown_stages(out: &str) -> Vec<Stage> {
     let out = out.to_owned();
+    let out2 = out.clone();
     let first: Rc<RefCell<(i32, String)>> = Rc::default();
     let first2 = first.clone();
     let ticks = Rc::new(Cell::new(0));
@@ -76,6 +77,7 @@ fn countdown_stages(out: &str) -> Vec<Stage> {
             check(placed_under == "made-cd-launch", &format!("a countdown sits under the reply it was made in: {placed_under}"));
             check(launch.kind == "countdown" && launch.label == "COUNTDOWN" && launch.badge.is_empty(), &format!("it is labelled a countdown, no badge while active: {:?} {:?}", launch.label, launch.badge));
             check(launch.summary == "Freeze starts an hour before.", "it shows its summary");
+            check(launch.note == "Remember to **page** the on-call.", &format!("and its Markdown content under it: {:?}", launch.note));
             // The target's own date and time (it carries its offset), and its zone.
             let target = fixture(app, "cd-launch")["target_at"].as_str().unwrap_or_default().to_owned();
             let expected = chrono::DateTime::parse_from_rfc3339(&target).map(|t| format!("{} · Europe/Oslo", t.format("%b %-d, %Y at %H:%M"))).unwrap_or_default();
@@ -111,6 +113,22 @@ fn countdown_stages(out: &str) -> Vec<Stage> {
             let later = bridge.invoke_countdown_clock(launch.countdown_at, now);
             check(now > then && later.as_str() != clock, &format!("the clock ticks: {clock} then {later} (now {then} then {now})"));
             shot(&out, "artifacts-01-countdown");
+            app_now().focus_transcript();
+            true
+        })),
+        ("countdown from the top", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("long countdown in view", Box::new(move |_, _, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            // The long title wrapped, the summary and the content.
+            shot(&out2, "artifacts-01b-countdown-top");
             true
         })),
     ]);
