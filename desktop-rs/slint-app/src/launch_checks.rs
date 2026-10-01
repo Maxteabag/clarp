@@ -384,7 +384,7 @@ pub(super) fn launch_check(out: String) {
 }
 
 /// `--check agent-dialogs --out DIR`: F2 renames the chat's contact,
-/// Ctrl+A assigns one (choosing, a refused name, automatic with
+/// Assign (Ctrl+K) assigns one (choosing, a refused name, automatic with
 /// Ctrl+Shift+A), the queue dialog edits, sends and deletes queued turns,
 /// Ctrl+Alt+R retries a failed message, Ctrl+Alt+T opens the agent's CLI
 /// (recorded by `CLARP_TEST_TERMINAL_LOG`) and Ctrl+Shift+R releases an agent.
@@ -458,7 +458,10 @@ pub(super) fn agent_dialogs_check(out: String) {
             if !typing_ready() {
                 return false;
             }
-            headless::press_with(&[Key::Control], "a");
+            // Assign has no key of its own (Ctrl+A selects text): its command.
+            if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+                crate::commands::run(&app, &window, "assign-agent");
+            }
             true
         })),
         ("assign open", Box::new(|_, window, elapsed| {
@@ -466,7 +469,7 @@ pub(super) fn agent_dialogs_check(out: String) {
             if window.get_overlay() != "assign-agent" || dialogs.get_assign_contacts().row_count() != 1 || !waited(elapsed, 300) {
                 return false;
             }
-            check(dialogs.get_assign_mode() == "auto", "Ctrl+A opens the assignment on Automatic");
+            check(dialogs.get_assign_mode() == "auto", "Assign opens the assignment on Automatic");
             headless::press(Key::DownArrow);
             true
         })),
@@ -486,7 +489,10 @@ pub(super) fn agent_dialogs_check(out: String) {
                 return false;
             }
             check(true, "Enter assigns the chosen contact and the dialog closes");
-            headless::press_with(&[Key::Control], "a");
+            // Assign has no key of its own (Ctrl+A selects text): its command.
+            if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+                crate::commands::run(&app, &window, "assign-agent");
+            }
             true
         })),
         ("assign again", Box::new(|_, window, elapsed| {
