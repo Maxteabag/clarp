@@ -476,21 +476,63 @@ fn decision_stages(out: &str) -> Vec<Stage> {
 /// Every type so far, the one ending on a clickable card last.
 const ALL_TYPES: &[&str] = &["countdown", "decision", "html_form"];
 
+/// How far the chat's content moved down between two saved frames (rows
+/// of the chat's left half, the best match of their mean brightness).
+fn vertical_shift(before: &str, after: &str) -> Result<i32, String> {
+    let rows = |path: &str| -> Result<Vec<f32>, String> {
+        let image = image::open(path).map_err(|e| format!("{path}: {e}"))?.to_luma8();
+        Ok((0..image.height()).map(|y| (400..1040.min(image.width())).map(|x| f32::from(image.get_pixel(x, y)[0])).sum::<f32>() / 640.0).collect())
+    };
+    let (a, b) = (rows(before)?, rows(after)?);
+    let (top, bottom) = (70i32, 700i32.min(a.len() as i32).min(b.len() as i32));
+    let mut best = (f32::MAX, 0);
+    // Within a card's height: the chat repeats itself every few cards.
+    for shift in -150i32..=150 {
+        let pairs: Vec<(f32, f32)> = (top..bottom).filter(|y| (top..bottom).contains(&(y + shift))).map(|y| (a[y as usize], b[(y + shift) as usize])).collect();
+        if pairs.len() < 250 {
+            continue;
+        }
+        let difference = pairs.iter().map(|(x, y)| (x - y).abs()).sum::<f32>() / pairs.len() as f32;
+        if difference < best.0 {
+            best = (difference, shift);
+        }
+    }
+    Ok(best.1)
+}
+
 /// The chat full of artifacts opens at its latest message and stays there
-/// while the cards settle; a reader scrolled up stays put while artifacts
-/// update and arrive.
+/// while the cards settle; a reader scrolled up stays put while the cards
+/// around them change state and size (summaries grow, decisions are
+/// answered, a form's status comes and goes) and new ones arrive.
 fn scroll_stages(out: &str) -> Vec<Stage> {
     let out = out.to_owned();
-    let out2 = out.clone();
+    let (out2, out3) = (out.clone(), out.clone());
     let offset = Rc::new(Cell::new(0.0f32));
     let offset2 = offset.clone();
     let held = Rc::new(Cell::new(0.0f32));
     let held2 = held.clone();
-    let mut stages = load_chat("art-all", ALL_TYPES);
+    let mut stages = vec![
+        ("load", Box::new(move |app: &crate::App, _: &crate::AppWindow, _: Duration| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            let loaded = control("/__control/artifact-chat", &json!({"session": "art-all", "types": ALL_TYPES, "suffix": "-all"}));
+            check(loaded.is_ok(), &format!("the Host takes a chat of every type {}", loaded.err().unwrap_or_default()));
+            true
+        }) as Box<dyn FnMut(&crate::App, &crate::AppWindow, Duration) -> bool>),
+        ("open", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find("art-all").is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select("art-all");
+            crate::pump();
+            true
+        })),
+    ];
     stages.extend::<Vec<Stage>>(vec![
         ("full chat opens", Box::new(move |_, window, elapsed| {
             let last = cards(window).last().map(|(_, a)| a.id.to_string()).unwrap_or_default();
-            if last != "form-stale" || elapsed < Duration::from_millis(800) {
+            if last != "form-stale-all" || elapsed < Duration::from_millis(800) {
                 return false;
             }
             check(report().follows && report().at_end, &format!("a chat full of artifacts opens at its latest message (follows {}, at end {}, offset {})", report().follows, report().at_end, report().offset));
@@ -524,31 +566,45 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
             headless::press(slint::platform::Key::PageUp);
             true
         })),
-        ("reader is up", Box::new(move |_, _, elapsed| {
-            if elapsed < Duration::from_millis(500) {
+        ("reader is up", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(600) {
                 return false;
             }
             check(!report().follows && !report().at_end, "Page Up takes the reader into the history");
             held.set(report().offset);
-            // A card above the reader changes, and a new one arrives below.
-            let changed = json!({"session": "art-all", "id": "cd-launch", "set": {"summary": "Freeze moved: it now starts two hours before the window, so plan around it."}});
+            shot(&out2, "artifacts-91a-before-update");
+            // Around the reader: every summary grows a line, the pending
+            // decisions are answered, a form's answers go out (Sending…,
+            // then accepted), and a new card arrives below.
+            let more = "Updated by the agent a moment ago with a longer explanation of what changed and why it matters now.";
+            check(control("/__control/artifact-settle", &json!({"session": "art-all", "more": more})).is_ok(), "the Host moves the cards on");
             let added = json!({"session": "art-all", "add": [{"artifact_id": "cd-new", "type": "countdown", "status": "active", "session": "art-all",
                 "title": "A countdown made while the reader was away", "target_at": "2026-12-24T18:00:00+01:00", "time_zone": "Europe/Oslo"}]});
-            check(control("/__control/artifact-update", &changed).is_ok() && control("/__control/artifact-update", &added).is_ok(), "the Host updates a card and adds one");
+            check(control("/__control/artifact-update", &added).is_ok(), "and adds one");
+            window.global::<ArtifactBridge>().invoke_open("form-trip-all".into());
+            let url = opened().last().cloned().unwrap_or_default();
+            let sent = fetch("POST", &format!("{url}/submit"), r#"{"destination":"Oslo"}"#, None);
+            check(sent.is_ok_and(|(status, _)| status == 202), "a form's answers go out while the reader is up");
             true
         })),
         ("reader stays put", Box::new(move |_, window, elapsed| {
-            let updated = card(window, "cd-launch").is_some_and(|c| c.summary.starts_with("Freeze moved")) && card(window, "cd-new").is_some();
-            if !updated || elapsed < Duration::from_millis(800) {
-                if elapsed > Duration::from_secs(5) {
-                    check(false, "the updated and new cards show");
+            let settled = card(window, "dec-deploy-all").is_some_and(|c| c.resolved == "Approved")
+                && card(window, "cd-launch-all").is_some_and(|c| c.summary.contains("Updated by the agent"))
+                && card(window, "form-trip-all").is_some_and(|c| c.status_text == "Answers accepted")
+                && card(window, "cd-new").is_some();
+            if !settled || elapsed < Duration::from_millis(1000) {
+                if elapsed > Duration::from_secs(6) {
+                    check(false, "the cards change: decisions answered, summaries grown, the form accepted, the new card shown");
                     return true;
                 }
                 return false;
             }
             let moved = (report().offset - held2.get()).abs();
-            check(!report().follows && moved < 1.0, &format!("a reader scrolled up is not moved when artifacts update or arrive ({moved}px)"));
-            shot(&out2, "artifacts-91-reader-held");
+            let after = format!("{out3}/artifacts-91-reader-held.png");
+            shot(&out3, "artifacts-91-reader-held");
+            let shift = vertical_shift(&format!("{out3}/artifacts-91a-before-update.png"), &after);
+            check(!report().follows && moved < 1.0, &format!("a reader scrolled up keeps the offset while cards around change ({moved}px)"));
+            check(shift.as_ref().is_ok_and(|s| s.abs() <= 1), &format!("and what they read does not move on screen: {shift:?} px"));
             headless::press(slint::platform::Key::End);
             true
         })),

@@ -540,6 +540,11 @@ class Handler(BaseHTTPRequestHandler):
             # artifacts replace that chat's, the other chats' stay.
             session = body.get("session", "rachel")
             rows, made = artifact_chat(session, body.get("types", []), int(time.time() * 1000))
+            # `suffix` keeps one chat's artifact (and decision) ids its own.
+            for artifact in made:
+                artifact["artifact_id"] += body.get("suffix", "")
+                if isinstance(artifact.get("decision"), dict):
+                    artifact["decision"]["decision_id"] += body.get("suffix", "")
             created = False
             with state_lock:
                 for row in rows:
@@ -560,6 +565,24 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "transcript-updated", "session": session})
             broadcast({"type": "artifact-updated", "session": session})
             return self.reply(200, {"ok": True, "artifacts": made})
+        if url.path == "/__control/artifact-settle":
+            # Test control: cards change height as the Host moves on: each
+            # summary grows by `more`, each pending decision is approved.
+            now_ms = int(time.time() * 1000)
+            with state_lock:
+                for artifact in artifacts:
+                    if artifact.get("session") != body.get("session"):
+                        continue
+                    if artifact.get("summary"):
+                        artifact["summary"] += " " + body.get("more", "")
+                        artifact["updated_at"] = now_ms
+                    held = artifact.get("decision") or {}
+                    if held.get("status") == "pending":
+                        held.update({"status": "accepted", "resolved_choice": "accepted", "revision": held["revision"] + 1})
+                        artifact["status"] = "completed"
+                        artifact["updated_at"] = now_ms
+            broadcast({"type": "artifact-updated", "session": body.get("session", "")})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/artifact-update":
             # Test control: change one artifact's fields in place (a later
             # updated_at) and/or add `add` artifacts, then announce it.
