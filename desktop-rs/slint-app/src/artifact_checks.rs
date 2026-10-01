@@ -1247,10 +1247,74 @@ fn video_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- file
+
+fn file_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let ids = ["file-pdf", "file-csv", "file-gone", "file-elsewhere"];
+    let mut stages = load_chat("art-file", &["file"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("file cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            // iOS titles a file card with its file's name.
+            let pdf = card(window, "file-pdf").expect("pdf");
+            check(pdf.label == "FILE" && pdf.title == "contract-2026-signed.pdf" && pdf.file_info == "PDF · 1.2 MB" && pdf.action == "Open file", &format!("a file, named, its kind and size: {:?} {:?} {:?}", pdf.title, pdf.file_info, pdf.action));
+            check(card(window, "file-csv").is_some_and(|c| c.file_info == "CSV · 2.0 KB"), "a small one in KB");
+            let elsewhere = card(window, "file-elsewhere").expect("elsewhere");
+            check(elsewhere.action.is_empty() && elsewhere.file_info.starts_with("File unavailable"), &format!("a file not on the Host cannot open: {:?}", elsewhere.file_info));
+            app.focus_transcript();
+            true
+        })),
+        ("file keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("file first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("file-pdf") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("file opens", Box::new(move |_, window, elapsed| {
+            let found = opened().into_iter().find(|u| u.starts_with("file://") && u.ends_with("contract-2026-signed.pdf"));
+            let Some(url) = found else {
+                return elapsed > Duration::from_secs(4) && { check(false, &format!("Enter opens the file with the desktop's app: {:?}", opened())); true };
+            };
+            let fetched = super::requests("GET", "/media/pdf1");
+            check(fetched.last().is_some_and(|r| r["authorization"] == "Bearer probe-token"), "the file comes from the Host with the app's token");
+            check(std::fs::read(url.trim_start_matches("file://")).is_ok_and(|b| b.starts_with(b"%PDF")), "saved whole under its own name");
+            check(card(window, "file-pdf").is_some_and(|c| c.status_text == "Opened"), "the card says it opened");
+            shot(&out, "artifacts-12-file");
+            window.global::<ArtifactBridge>().invoke_open("file-gone".into());
+            true
+        })),
+        ("file gone", Box::new(|_, window, elapsed| {
+            let gone = card(window, "file-gone").map(|c| c.status_text.to_string()).unwrap_or_default();
+            if !gone.starts_with("Couldn't download") {
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("an expired file says so: {gone:?}")); true };
+            }
+            check(gone.contains("404"), &format!("an expired file says why, and Enter tries again: {gone:?}"));
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "file", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1493,6 +1557,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(data_stages(&out));
     stages.extend(audio_stages(&out));
     stages.extend(video_stages(&out));
+    stages.extend(file_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }

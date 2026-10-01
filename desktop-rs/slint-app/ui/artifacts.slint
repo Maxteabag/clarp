@@ -85,6 +85,8 @@ export struct ArtifactItem {
     // video: its poster once fetched (has-poster), else a placeholder.
     poster: image,
     has-poster: bool,
+    // file: its kind and size ("PDF · 1.2 MB").
+    file-info: string,
     // code_change: where (repository and branch) and how much.
     repo: string,
     files: string,
