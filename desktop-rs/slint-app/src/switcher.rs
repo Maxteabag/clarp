@@ -200,7 +200,7 @@ pub fn agents(engine: &Engine, query: &str) -> Vec<Item> {
 pub fn recent(engine: &Engine, opened: &[String], query: &str) -> Vec<Item> {
     let selected = engine.selected_session();
     let mut all = agents(engine, query);
-    let activity = |session: &str| engine.roster().rows().iter().find(|r| r.session == session).map_or(0, |r| r.last_activity);
+    let activity = |session: &str| engine.roster().find(session).map_or(0, |a| a.last_activity);
     let rank = |item: &Item| opened.iter().position(|s| *s == item.target);
     all.retain(|item| item.target != selected);
     all.sort_by(|a, b| match (rank(a), rank(b)) {
