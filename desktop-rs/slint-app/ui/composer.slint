@@ -194,15 +194,14 @@ export component Composer inherits FocusScope {
             }
         }
         editor := PlainEditor {
-            vertical-stretch: 1;
             text <=> root.draft;
             enabled: root.active;
             wrap: word-wrap;
             font-size: Palette.body-size;
             font-family: Palette.body-family;
-            min-height: 44px;
-            preferred-height: 60px;
-            placeholder-text: root.active ? "Message " + root.agent-name : "";
+            // One line to start; grows with the text up to 240px, then
+            // scrolls.
+            height: clamp(self.text-height, Palette.body-size * 1.6, 240px);
             accessible-label: "Message to " + root.agent-name;
             edited(text) => { root.edited(text); }
         }

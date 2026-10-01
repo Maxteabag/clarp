@@ -87,6 +87,8 @@ export component PlainEditor inherits Rectangle {
     in property <string> font-family <=> input.font-family;
     in property <TextWrap> wrap <=> input.wrap;
     out property <bool> has-focus: input.has-focus;
+    // The text's own height: the composer grows with it.
+    out property <length> text-height: input.preferred-height;
     callback edited(string);
     forward-focus: input;
     accessible-role: text-input;

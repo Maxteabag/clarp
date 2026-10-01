@@ -73,6 +73,15 @@ export component Caption inherits Text {
     vertical-alignment: center;
 }
 
+// The key that drives a section, beside its caption (the hub is keyboard
+// first: every control has one).
+component KeyTag inherits Text {
+    color: Palette.accent;
+    font-size: 10px;
+    font-weight: 700;
+    vertical-alignment: center;
+}
+
 // A text action that toggles or opens something inline.
 export component LinkButton inherits Rectangle {
     in property <string> text;
@@ -329,6 +338,23 @@ export component NewSessionHub inherits Modal {
                 LaunchHub.step-provider(event.text == Key.RightArrow ? 1 : -1);
                 return accept;
             }
+            // Every other control has a Ctrl key (letters type in the fields).
+            if (event.modifiers.control && !event.modifiers.alt && LaunchHub.connected && !LaunchHub.choosing-directory) {
+                let step = event.modifiers.shift ? -1 : 1;
+                if ((event.text == "m" || event.text == "M") && LaunchHub.model-labels.length > 0) {
+                    LaunchHub.model-index = Math.mod(LaunchHub.model-index + step + LaunchHub.model-labels.length, LaunchHub.model-labels.length);
+                    LaunchHub.model-chosen(LaunchHub.model-index);
+                    return accept;
+                }
+                if ((event.text == "e" || event.text == "E") && LaunchHub.effort-labels.length > 0) {
+                    LaunchHub.effort-index = Math.mod(LaunchHub.effort-index + step + LaunchHub.effort-labels.length, LaunchHub.effort-labels.length);
+                    LaunchHub.effort-chosen(LaunchHub.effort-index);
+                    return accept;
+                }
+                if (event.text == "d" || event.text == "D") { LaunchHub.change-directory(); return accept; }
+                if (event.text == "n" || event.text == "N") { LaunchHub.toggle-new-contact(); return accept; }
+                if (event.text == "t" || event.text == "T") { LaunchHub.toggle-show-all(); return accept; }
+            }
             reject
         }
         VerticalLayout {
@@ -338,6 +364,7 @@ export component NewSessionHub inherits Modal {
                 spacing: 10px;
                 Text { text: "New Session"; color: Palette.text; font-size: 18px; font-weight: 600; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
+                Text { text: "enter start · esc cancel"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
                 IconButton {
                     icon: @image-url("../../../desktop/resources/icons/rail-close.svg");
                     label: "Cancel · Esc";
@@ -363,7 +390,12 @@ export component NewSessionHub inherits Modal {
             }
             if LaunchHub.connected: VerticalLayout {
                 spacing: 6px;
-                Caption { text: "PROVIDER"; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Caption { text: "PROVIDER"; }
+                    KeyTag { text: "ctrl+← →"; }
+                }
                 HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
@@ -379,6 +411,7 @@ export component NewSessionHub inherits Modal {
                 HorizontalLayout {
                     spacing: 10px;
                     Caption { text: "MODEL"; }
+                    KeyTag { text: "ctrl+m"; }
                     Text {
                         text: LaunchHub.model-summary;
                         color: Palette.text;
@@ -386,6 +419,7 @@ export component NewSessionHub inherits Modal {
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
+                    KeyTag { text: "effort ctrl+e"; }
                     LinkButton {
                         text: LaunchHub.editing-model ? "Done" : "Edit";
                         clicked => { LaunchHub.toggle-edit-model(); }
@@ -412,6 +446,7 @@ export component NewSessionHub inherits Modal {
             if LaunchHub.connected && !LaunchHub.choosing-directory: HorizontalLayout {
                 spacing: 10px;
                 Caption { text: "DIRECTORY"; }
+                KeyTag { text: "ctrl+d"; }
                 Text {
                     text: LaunchHub.directory;
                     color: Palette.muted;
@@ -428,12 +463,15 @@ export component NewSessionHub inherits Modal {
                 HorizontalLayout {
                     spacing: 10px;
                     Caption { text: "CONTACT"; }
+                    KeyTag { text: "↑↓"; }
                     Rectangle { horizontal-stretch: 1; }
+                    KeyTag { text: "ctrl+t"; }
                     CheckBox {
                         text: "Show all";
                         checked: LaunchHub.show-all;
                         toggled => { LaunchHub.toggle-show-all(); }
                     }
+                    KeyTag { text: "ctrl+n"; }
                     LinkButton {
                         y: 3px;
                         text: LaunchHub.new-contact ? "Choose a contact" : "New contact";

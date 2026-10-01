@@ -234,7 +234,6 @@ export component Pane inherits Rectangle {
     }
     VerticalLayout {
         padding: 2px;
-        Header { pane: root.pane; }
         // [c] Chat and [i] Insert: the pane's two keyboard regions, framed
         // as sqlit frames its panes.
         Rectangle {
@@ -251,7 +250,19 @@ export component Pane inherits Rectangle {
             reached-top => { root.load-older(); }
           }
           // In the composer letters type: Ctrl+H is the way back to the chat.
-          PaneFrame { key: root.pane.active && Focus.mode == "composer" ? "ctrl+h" : "c"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
+          // The agent's name, folder and runtime sit on the right of the
+          // frame's border (there is no separate header).
+          PaneFrame {
+            info-name: root.pane.session == "" ? "No agent selected" : root.pane.name;
+            info: root.pane.session == "" || root.pane.pair ? root.pane.workspace-label
+                : (root.pane.workspace-label != "" ? root.pane.workspace-label + "  ·  " : "")
+                + (root.pane.status != "" ? root.pane.status + "  ·  " : "")
+                + (root.pane.model != "" ? root.pane.model : "model not reported")
+                + "  ·  " + (root.pane.effort != "" ? "effort " + root.pane.effort
+                    : root.pane.default-effort != "" ? "effort " + root.pane.default-effort + " (default)" : "effort default")
+                + (root.pane.busy ? "  ·  working" : "");
+            info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
+            key: root.pane.active && Focus.mode == "composer" ? "ctrl+h" : "c"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
         }
         // The transcript's footer (ConversationPane.qml).
         if root.pane.working: Rectangle {
