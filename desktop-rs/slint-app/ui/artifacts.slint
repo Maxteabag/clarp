@@ -51,6 +51,11 @@ export struct ArtifactItem {
     resolved-ok: bool,
     answer: string,
     delivery: string,
+    // A question that takes an answer of one's own: its text, and whether
+    // the keyboard is writing it (its option is the last number).
+    allow-custom: bool,
+    draft: string,
+    editing: bool,
 }
 
 // What the cards share: the clock countdowns read, and their actions.
@@ -68,6 +73,10 @@ export global ArtifactBridge {
     callback choose(string, int);
     callback send(string);
     callback discard(string);
+    // The answer of one's own as typed, and whether a card's field has the
+    // keyboard (letters then type, they are not shortcuts).
+    callback draft-edited(string, string);
+    in-out property <bool> editing;
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
