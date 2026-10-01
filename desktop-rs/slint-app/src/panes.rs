@@ -334,7 +334,9 @@ impl App {
                 .map(|a| format!("{}@{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default()))
                 .collect::<Vec<_>>()
                 .join(",");
-            format!("{cards}|{}", explained.join(","))
+            // A row with images is drawn again when one lands.
+            let pictures = if row.blocks.iter().any(|b| b.kind == "images") { crate::artifacts_view::pictures_landed() } else { 0 };
+            format!("{cards}|{}|{pictures}", explained.join(","))
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let fresh: Vec<Shown> =

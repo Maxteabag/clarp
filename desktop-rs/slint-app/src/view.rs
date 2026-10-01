@@ -357,7 +357,9 @@ pub(crate) fn message_row(
     MessageRow {
         id: m.id.clone().into(),
         author: author.into(),
-        blocks: ModelRc::new(VecModel::from(blocks.iter().map(|b| message_block(b, author == "user")).collect::<Vec<_>>())),
+        blocks: ModelRc::new(VecModel::from(
+            blocks.iter().flat_map(|b| crate::artifacts_view::with_images(b, author == "user")).collect::<Vec<_>>(),
+        )),
         sender: if from_agent { m.sender_name.clone() } else { String::new() }.into(),
         stamp: message_stamp(&m.timestamp).into(),
         meta: SharedString::new(),
