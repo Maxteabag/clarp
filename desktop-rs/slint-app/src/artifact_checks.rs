@@ -729,6 +729,7 @@ fn plan_stages(out: &str) -> Vec<Stage> {
             check(done.progress_count == "1/1" && done.progress_value >= 0.99 && done.current.is_empty(), &format!("a finished plan: {:?} {:?}", done.progress_count, done.current));
             let blocked = card(window, "plan-blocked").expect("blocked");
             check(blocked.badge == "Failed" && blocked.failed, &format!("a blocked plan shows as failed: {:?}", blocked.badge));
+            check(blocked.current == "Wait for the DBA" && blocked.current_blocked, &format!("and names its blocked step: {:?}", blocked.current));
             let missing = card(window, "plan-missing").expect("missing");
             check(missing.progress_value < 0.0 && missing.current == "Plan details unavailable" && missing.action.is_empty(), &format!("a plan without its details says so: {:?}", missing.current));
             app.focus_transcript();
@@ -814,7 +815,7 @@ fn document_stages(out: &str) -> Vec<Stage> {
             let spec = card(window, "doc-spec").expect("spec");
             check(spec.label == "DOCUMENT" && spec.action == "Open document", &format!("a document offers to open: {:?} {:?}", spec.label, spec.action));
             check(
-                spec.preview.starts_with("Slint client: design notes") && spec.preview.contains("The transcript keeps its offset") && !spec.preview.contains('#') && !spec.preview.contains("**"),
+                spec.preview.starts_with("Slint client: design notes · The transcript keeps its offset") && !spec.preview.contains('#') && !spec.preview.contains("**") && !spec.preview.contains("fn main"),
                 &format!("its first lines as plain text: {:?}", spec.preview),
             );
             let summary = card(window, "doc-summary").expect("summary");
@@ -871,11 +872,11 @@ fn research_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             let market = card(window, "res-market").expect("market");
-            check(market.label == "RESEARCH" && market.action == "Open research" && market.preview.starts_with("Findings Most clients ship Electron"), &format!("research shows its first lines and opens: {:?} {:?}", market.action, market.preview));
+            check(market.label == "RESEARCH" && market.action == "Open research" && market.preview.starts_with("Findings · Most clients ship Electron"), &format!("research shows its first lines and opens: {:?} {:?}", market.action, market.preview));
             // iOS lists only https sources; the count says how many open.
             check(market.sources == "2 sources", &format!("and how many sources it cites: {:?}", market.sources));
             let html = card(window, "res-html").expect("html");
-            check(html.preview.starts_with("Market Growth is 12% a year") && !html.preview.contains("steal"), &format!("an HTML body reads as its text, scripts dropped: {:?}", html.preview));
+            check(html.preview.starts_with("Market · Growth is 12% a year") && !html.preview.contains("steal"), &format!("an HTML body reads as its text, scripts dropped: {:?}", html.preview));
             check(card(window, "res-plain").is_some_and(|c| c.sources.is_empty()), "no sources, no sources line");
             let detail = crate::artifacts_view::detail(app, "res-market").map(|d| clarp_core::json::string(&d, "body")).unwrap_or_default();
             check(

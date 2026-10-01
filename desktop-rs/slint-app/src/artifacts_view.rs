@@ -133,7 +133,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             if !content.trim().is_empty() {
                 // HTML reads as its text, Markdown without its marks.
                 let markdown = if clarp_core::text::looks_like_html_report(&content) { crate::updates_view::html_markdown(&content) } else { content };
-                item.preview = clarp_core::text::plain_preview_text(&markdown).chars().take(600).collect::<String>().into();
+                item.preview = preview_text(&markdown).chars().take(600).collect::<String>().into();
                 item.action = if kind == "document" { "Open document" } else { "Open research" }.into();
             }
             let sources = https_sources(artifact).len();
@@ -377,6 +377,33 @@ fn artifact(app: &App, id: &str) -> Option<Value> {
     found
 }
 
+/// A body's first lines as plain text: its blocks (paragraphs, headings,
+/// lists) kept apart by " · ", code left out.
+fn preview_text(markdown: &str) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+    let (mut current, mut fenced) = (Vec::new(), false);
+    for line in markdown.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        // A heading or a list item starts a block of its own.
+        let starts = line.trim_start().starts_with('#') || line.trim_start().starts_with("- ") || line.trim_start().starts_with("* ");
+        if line.trim().is_empty() || starts {
+            blocks.push(current.join("\n"));
+            current.clear();
+        }
+        if !line.trim().is_empty() {
+            current.push(line);
+        }
+    }
+    blocks.push(current.join("\n"));
+    blocks.iter().map(|b| clarp_core::text::plain_preview_text(b)).filter(|b| !b.is_empty()).collect::<Vec<_>>().join(" · ")
+}
+
 /// A plan's items and subtasks, depth first.
 fn plan_items(plan: &Value) -> Vec<(usize, Value)> {
     fn walk(items: &Value, depth: usize, out: &mut Vec<(usize, Value)>) {
@@ -407,6 +434,13 @@ fn plan_fields(item: &mut ArtifactItem, artifact: &Value) {
     item.progress_value = done as f32 / total.max(1) as f32;
     item.progress_count = format!("{done}/{total}").into();
     item.current = items.iter().find(|(_, i)| text(i, "status") == "in_progress").map(|(_, i)| text(i, "title")).unwrap_or_default().into();
+    // Nothing under way but a step blocked: that step, marked.
+    if item.current.is_empty() {
+        if let Some((_, blocked)) = items.iter().find(|(_, i)| matches!(text(i, "status").as_str(), "blocked" | "failed")) {
+            item.current = text(blocked, "title").into();
+            item.current_blocked = true;
+        }
+    }
     item.action = "Open plan".into();
 }
 
