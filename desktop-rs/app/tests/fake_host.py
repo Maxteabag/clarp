@@ -531,6 +531,18 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "transcript-updated", "session": session})
             broadcast({"type": "artifact-updated", "session": session})
             return self.reply(200, {"ok": True, "artifacts": made})
+        if url.path == "/__control/artifact-update":
+            # Test control: change one artifact's fields in place (a later
+            # updated_at) and/or add `add` artifacts, then announce it.
+            with state_lock:
+                for artifact in artifacts:
+                    if artifact.get("artifact_id") == body.get("id"):
+                        artifact.update(body.get("set", {}))
+                        artifact["updated_at"] = int(time.time() * 1000)
+                for extra in body.get("add", []):
+                    artifacts.append({"created_at": int(time.time() * 1000), "updated_at": int(time.time() * 1000), **extra})
+            broadcast({"type": "artifact-updated", "session": body.get("session", "")})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/jobs":
             # Test control: replace the job list, then push an optional event.
             global jobs
