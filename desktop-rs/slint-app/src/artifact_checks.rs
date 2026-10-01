@@ -707,10 +707,78 @@ fn question_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- plan
+
+fn plan_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let ids = ["plan-ship", "plan-done", "plan-blocked", "plan-missing"];
+    let mut stages = load_chat("art-plan", &["plan"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("plan cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let ship = card(window, "plan-ship").expect("ship");
+            // iOS counts items and subtasks completed against the plan's total.
+            check(ship.label == "PLAN" && ship.progress_count == "2/5" && (ship.progress_value - 0.4).abs() < 0.01, &format!("a plan's progress: {:?} {}", ship.progress_count, ship.progress_value));
+            check(ship.current == "Port the transcript to Slint without changing how it scrolls for a reader who is up", &format!("and the step under way: {:?}", ship.current));
+            check(ship.action == "Open plan", &format!("it opens: {:?}", ship.action));
+            let done = card(window, "plan-done").expect("done");
+            check(done.progress_count == "1/1" && done.progress_value >= 0.99 && done.current.is_empty(), &format!("a finished plan: {:?} {:?}", done.progress_count, done.current));
+            let blocked = card(window, "plan-blocked").expect("blocked");
+            check(blocked.badge == "Failed" && blocked.failed, &format!("a blocked plan shows as failed: {:?}", blocked.badge));
+            let missing = card(window, "plan-missing").expect("missing");
+            check(missing.progress_value < 0.0 && missing.current == "Plan details unavailable" && missing.action.is_empty(), &format!("a plan without its details says so: {:?}", missing.current));
+            app.focus_transcript();
+            true
+        })),
+        ("plan keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("plan first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("plan-ship") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            shot(&out, "artifacts-05-plan");
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("plan opens", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the plan: overlay {:?}", window.get_overlay())); true };
+            }
+            check(window.get_report_title() == "Ship the Slint desktop client to the beta group before the end of the quarter", "the plan opens in the report viewer, under its title");
+            check(window.get_report_summary() == "Ship 2.0 · Beta testers on the Slint app · 2/5 done", &format!("with its plan, goal and progress: {:?}", window.get_report_summary()));
+            // Three items and two subtasks, one line each.
+            check(window.get_report_blocks().row_count() >= 5, &format!("and every item and subtask: {} blocks", window.get_report_blocks().row_count()));
+            shot(&out2, "artifacts-05b-plan-open");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("plan closed", Box::new(|_, window, elapsed| {
+            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_overlay().is_empty() && report().transcript_focused, "Escape closes it, back on the chat");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -944,6 +1012,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(html_form_stages(&out));
     stages.extend(decision_stages(&out));
     stages.extend(question_stages(&out));
+    stages.extend(plan_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
