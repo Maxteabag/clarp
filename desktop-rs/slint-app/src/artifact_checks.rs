@@ -1376,10 +1376,98 @@ fn release_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- directory
+
+fn directory_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let ids = ["dir-out", "dir-home", "dir-escape"];
+    // The agent works in the check's scratch folder, which has build/out.
+    let folder = std::env::var("CLARP_TEST_HOST_LOG").ok().and_then(|l| std::path::Path::new(&l).parent().map(|p| p.to_path_buf())).unwrap_or_default();
+    let made = std::fs::create_dir_all(folder.join("build/out"));
+    let workspace = folder.to_string_lossy().into_owned();
+    let workspace2 = workspace.clone();
+    let mut stages: Vec<Stage> = vec![
+        ("load", Box::new(move |app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(made.is_ok(), "the agent's folder has build/out");
+            let loaded = control("/__control/artifact-chat", &json!({"session": "art-directory", "types": ["directory"], "cwd": workspace}));
+            check(loaded.is_ok(), "the Host takes a chat of directories");
+            // Its folders open only when this desktop shares the Host's files.
+            if !app.engine.borrow().shared_filesystem() {
+                app.engine.borrow_mut().set_shared_filesystem(true);
+            }
+            true
+        })),
+        ("open", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find("art-directory").is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select("art-directory");
+            crate::pump();
+            true
+        })),
+    ];
+    stages.extend::<Vec<Stage>>(vec![
+        ("directory cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let dir = card(window, "dir-out").expect("out");
+            check(dir.label == "DIRECTORY" && dir.repo == "build/out" && dir.action == "Open folder", &format!("a folder, its path, and it opens: {:?} {:?}", dir.repo, dir.action));
+            let escape = card(window, "dir-escape").expect("escape");
+            check(escape.action.is_empty() && escape.status_text.is_empty() && escape.file_info == "Folder unavailable", &format!("a path out of its root never opens: {:?} {:?}", escape.action, escape.file_info));
+            app.focus_transcript();
+            true
+        })),
+        ("directory keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("directory first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("dir-out") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            shot(&out, "artifacts-14-directory");
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("directory opens", Box::new(move |app, window, elapsed| {
+            let expected = std::fs::canonicalize(std::path::Path::new(&workspace2).join("build/out")).map(|p| format!("file://{}", p.display())).unwrap_or_default();
+            if !opened().contains(&expected) {
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("Enter opens the folder in the file manager: want {expected}, got {:?}", opened())); true };
+            }
+            check(true, "Enter opens the folder in the file manager");
+            // Not shared: the folder is on the Host, and the card says so.
+            app.engine.borrow_mut().set_shared_filesystem(false);
+            window.global::<ArtifactBridge>().invoke_open("dir-out".into());
+            true
+        })),
+        ("directory remote", Box::new(|_, window, elapsed| {
+            let said = card(window, "dir-out").map(|c| c.status_text.to_string()).unwrap_or_default();
+            if !said.starts_with("On the Host") {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("a Host that does not share its files: the card says where the folder is: {said:?}")); true };
+            }
+            check(said.contains("build/out"), &format!("a Host that does not share its files: the card says where the folder is: {said:?}"));
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "file", "release", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "file", "release", "directory", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1624,6 +1712,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(video_stages(&out));
     stages.extend(file_stages(&out));
     stages.extend(release_stages(&out));
+    stages.extend(directory_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }

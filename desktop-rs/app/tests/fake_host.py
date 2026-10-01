@@ -333,6 +333,15 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "rel-failed", "type": "release", "status": "failed", "session": s, "title": "Nightly", "commit": "deadbeef"},
             {"artifact_id": "rel-active", "type": "release", "status": "active", "session": s, "title": "Rolling out"},
         ]
+    if kind == "directory":
+        return [
+            {"artifact_id": "dir-out", "type": "directory", "status": "ready", "session": s, "title": "The build's output",
+             "root": "workspace", "relative_path": "build/out"},
+            {"artifact_id": "dir-home", "type": "directory", "status": "ready", "session": s, "title": "Downloads", "root": "home",
+             "relative_path": "Downloads"},
+            {"artifact_id": "dir-escape", "type": "directory", "status": "ready", "session": s, "title": "Somewhere it should not go",
+             "root": "workspace", "relative_path": "../../etc"},
+        ]
     raise KeyError(kind)
 
 
@@ -724,6 +733,7 @@ class Handler(BaseHTTPRequestHandler):
                 artifacts = [a for a in artifacts if a.get("session") != session] + made
                 if not any(agent["session"] == session for agent in agents):
                     agents.append({"agent_id": session + "-id", "session": session, "persona": body.get("persona", session.title()),
+                                   "cwd": body.get("cwd", ""),
                                    "backend": "claude", "latest_state": "idle", "alive": True, "last_activity": 3000,
                                    "conversation_id": "c-" + session, "head_revision": revision})
                     created = True
