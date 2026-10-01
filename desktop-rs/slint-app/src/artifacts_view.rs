@@ -109,6 +109,16 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
         "plan" => plan_fields(&mut item, artifact),
+        "directory" => {
+            // iOS: the relative path; it opens in the file manager.
+            let relative = text(artifact, "relative_path");
+            item.repo = relative.clone().into();
+            if relative_ok(&relative) && matches!(text(artifact, "root").as_str(), "workspace" | "home") {
+                item.action = "Open folder".into();
+            } else {
+                item.file_info = "Folder unavailable".into();
+            }
+        }
         "release" => {
             // iOS's operation body: version ?? commit ?? "Unknown revision".
             item.revision = [text(artifact, "version"), text(artifact, "commit")].into_iter().find(|r| !r.is_empty()).unwrap_or_else(|| "Unknown revision".into()).into();
@@ -316,6 +326,41 @@ fn download(app: &App, artifact: &Value, purpose: &str) {
     FETCHING.with(|f| f.borrow_mut().insert(key, name));
     app.engine.borrow_mut().set_artifact_status(&id, "Downloading…");
     app.engine.borrow_mut().fetch_artifact_bytes(&id, purpose, path);
+}
+
+/// A directory's path stays under its root: relative, no "..".
+fn relative_ok(path: &str) -> bool {
+    !path.is_empty() && !path.starts_with('/') && !path.starts_with('~') && std::path::Path::new(path).components().all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Opens a directory artifact's folder in the file manager when this
+/// desktop shares the Host's files (iOS opens its own file explorer at
+/// "@root/path"); else the card says where it is on the Host.
+fn open_directory(app: &App, artifact: &Value) {
+    let id = text(artifact, "artifact_id");
+    let relative = text(artifact, "relative_path");
+    if !relative_ok(&relative) {
+        return;
+    }
+    let session = text(artifact, "session");
+    let base = match text(artifact, "root").as_str() {
+        "home" => std::env::var_os("HOME").map(std::path::PathBuf::from),
+        _ => app.engine.borrow().roster().find(&session).map(|a| std::path::PathBuf::from(&a.working_directory)).filter(|p| !p.as_os_str().is_empty()),
+    };
+    let shared = app.engine.borrow().shared_filesystem();
+    let local = base.as_ref().map(|b| b.join(&relative)).filter(|_| shared).and_then(|p| std::fs::canonicalize(p).ok()).filter(|p| p.is_dir());
+    let Some(folder) = local else {
+        let root = if text(artifact, "root") == "home" { "~" } else { "the agent's folder" };
+        app.engine.borrow_mut().set_artifact_status(&id, &format!("On the Host: {root}/{relative}"));
+        return;
+    };
+    match url::Url::from_file_path(&folder) {
+        Ok(url) => {
+            crate::profile_view::open_file_url(url.as_str());
+            app.engine.borrow_mut().set_artifact_status(&id, "");
+        }
+        Err(()) => eprintln!("clarp-slint: cannot open {}", folder.display()),
+    }
 }
 
 /// A Host-relative media path (`/media/<asset>`); iOS also plays https
@@ -934,6 +979,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
         "decision" | "question" => return send(app, id),
         "video" => download(app, &artifact, "video"),
         "file" => download(app, &artifact, "file"),
+        "directory" => open_directory(app, &artifact),
         "audio" => {
             let url = text(&artifact, "url");
             match host_path(&url) {

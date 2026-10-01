@@ -165,7 +165,7 @@ pub fn reduced_motion(app: &App) -> bool {
 
 /// Opens a `file://` URL in the desktop's file manager; checks record it in
 /// `CLARP_TEST_OPEN_URL` instead.
-fn open_file_url(url: &str) {
+pub(crate) fn open_file_url(url: &str) {
     if !url.starts_with("file://") {
         eprintln!("clarp-slint: not opening {url}: only local folders open here");
         return;

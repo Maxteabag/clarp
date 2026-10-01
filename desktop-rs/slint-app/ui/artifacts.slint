@@ -667,7 +667,7 @@ export component ArtifactCard inherits Rectangle {
         }
         if root.artifact.data-note != "": Text { text: root.artifact.data-note; color: Palette.warning; font-size: 12px; }
         // A change's where and how much, one line each (iOS's monospaced row).
-        if root.artifact.kind == "code_change": Text { text: root.artifact.repo; color: Palette.text; font-family: "JetBrains Mono"; font-size: 12px; overflow: elide; }
+        if root.artifact.kind == "code_change" || root.artifact.kind == "directory" || root.artifact.kind == "workflow_run": Text { text: root.artifact.repo; color: Palette.text; font-family: "JetBrains Mono"; font-size: 12px; overflow: elide; }
         if root.artifact.files != "" || root.artifact.additions != "" || root.artifact.deletions != "": HorizontalLayout {
             alignment: start;
             spacing: 10px;
