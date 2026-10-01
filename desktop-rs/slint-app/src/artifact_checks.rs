@@ -334,11 +334,41 @@ fn html_form_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+/// Stages that take the chat to its top (twice: the list corrects its
+/// estimates after the first jump) and save a shot there.
+fn top_shot(out: &str, name: &'static str) -> Vec<Stage> {
+    let out = out.to_owned();
+    vec![
+        ("to the top", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("at the top", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("top shot", Box::new(move |_, _, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            shot(&out, name);
+            true
+        })),
+    ]
+}
+
 // ---- decision
 
 fn decision_stages(out: &str) -> Vec<Stage> {
     let out = out.to_owned();
-    let ids = ["dec-deploy", "dec-refused", "dec-discard", "dec-approved", "dec-declined", "dec-expired", "dec-waiting", "dec-missing"];
+    let out2 = out.clone();
+    let ids = ["dec-deploy", "dec-refused", "dec-discard", "dec-approved", "dec-declined", "dec-expired", "dec-waiting", "dec-missing", "dec-click"];
     let mut stages = load_chat("art-decision", &["decision"]);
     stages.extend::<Vec<Stage>>(vec![
         ("decision cards", Box::new(move |app, window, elapsed| {
@@ -369,7 +399,7 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             if !report().transcript_focused {
                 return false;
             }
-            for _ in 0..8 {
+            for _ in 0..9 {
                 headless::press("k");
             }
             true
@@ -421,7 +451,23 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             shot(&out, "artifacts-03-decision");
             true
         })),
+        ("an approval button is clicked", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            // A real pointer click on the latest card's first button ("Turn
+            // on"), found from the bottom of the chat up its left edge.
+            let hit = (300..=760).rev().step_by(4).find(|y| {
+                super::click_at(window, 440.0, *y as f32);
+                !posts("/decisions/d-click/resolve").is_empty()
+            });
+            let body = posts("/decisions/d-click/resolve").last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
+            check(hit.is_some() && body == json!({"choice": "accepted", "expected_revision": 4}), &format!("clicking an approval's button sends it at once (at y {hit:?}): {body}"));
+            app_now().focus_transcript();
+            true
+        })),
     ]);
+    stages.extend(top_shot(&out2, "artifacts-03b-decision-top"));
     stages
 }
 

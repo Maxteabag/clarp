@@ -161,7 +161,8 @@ def artifact_fixtures(kind, session, now_ms):
                                   yes_label="Ship it", no_label="Hold", urgency="time_sensitive", response_effort="review",
                                   priority_reason="Blocks the release train")},
             {"artifact_id": "dec-refused", "type": "decision", "status": "active", "session": s, "title": "Rotate the API keys",
-             "decision": decision("d-refused", "pending", revision=2, question="Rotate the keys now?")},
+             "decision": decision("d-refused", "pending", revision=2, question="Rotate the keys now?",
+                                  _host_revision=3)},
             {"artifact_id": "dec-discard", "type": "decision", "status": "active", "session": s, "title": "Archive old branches",
              "decision": decision("d-discard", "pending", question="Archive the 40 merged branches?",
                                   deadline_at=iso_at(now_ms + 2 * day))},
@@ -174,6 +175,8 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "dec-waiting", "type": "decision", "status": "completed", "session": s, "title": "Merge the docs PR",
              "decision": decision("d-waiting", "accepted", question="Merge it?", delivery_pending=True)},
             {"artifact_id": "dec-missing", "type": "decision", "status": "active", "session": s, "title": "A decision without its question"},
+            {"artifact_id": "dec-click", "type": "decision", "status": "active", "session": s, "title": "Turn on the nightly backups",
+             "decision": decision("d-click", "pending", question="Back up every night at 03:00?", yes_label="Turn on", no_label="Not now")},
         ]
     raise KeyError(kind)
 
@@ -656,7 +659,8 @@ class Handler(BaseHTTPRequestHandler):
                         owner = artifact
                 if owner is not None:
                     held = owner["decision"]
-                    if body.get("expected_revision") != held.get("revision"):
+                    # `_host_revision`: the Host moved on since the card was listed.
+                    if body.get("expected_revision") != held.get("_host_revision", held.get("revision")):
                         return self.reply(409, {"error": "the decision changed since you saw it"})
                     if url.path.endswith("/dismiss"):
                         held["status"] = "cancelled"

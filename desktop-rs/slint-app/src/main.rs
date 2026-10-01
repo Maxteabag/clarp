@@ -73,6 +73,8 @@ pub struct App {
     pub launch: RefCell<Option<launch::Request>>,
     /// The artifact card the keyboard is on (J/K in the chat), "" for none.
     pub artifact_cursor: RefCell<String>,
+    /// The answer chosen on each decision or question card (1-9).
+    pub artifact_choices: RefCell<std::collections::HashMap<String, i32>>,
 }
 
 /// View preferences the window keeps (the Qt controller's names).
@@ -514,6 +516,7 @@ fn main() {
         overlay: RefCell::new(String::new()),
         launch: RefCell::new(None),
         artifact_cursor: RefCell::new(String::new()),
+        artifact_choices: RefCell::default(),
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
