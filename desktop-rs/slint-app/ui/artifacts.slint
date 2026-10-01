@@ -21,6 +21,11 @@ export struct ArtifactItem {
     countdown-set: bool,
     countdown-line: string,
     countdown-note: string,
+    // What Enter or a click does ("" for nothing), and how it went.
+    action: string,
+    status-text: string,
+    // The keyboard's card in the chat (J/K).
+    selected: bool,
 }
 
 // What the cards share: the clock countdowns read, and their actions.
@@ -30,6 +35,8 @@ export global ArtifactBridge {
     // "Remaining", "Target reached" or "Since target", and the clock.
     pure callback countdown-phase(int, int) -> string;
     pure callback countdown-clock(int, int) -> string;
+    // A click (or Enter on the selected card) on the card's action.
+    callback open(string);
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
