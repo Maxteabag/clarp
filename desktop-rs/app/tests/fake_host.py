@@ -209,6 +209,27 @@ def artifact_fixtures(kind, session, now_ms):
              "decision": question("q-click", "pending", [{"id": "coffee", "label": "Coffee"}, {"id": "tea", "label": "Tea"}],
                                   question="Coffee or tea?")},
         ]
+    if kind == "plan":
+        def item(title, status, subtasks=(), detail=""):
+            return {"item_id": title[:8], "title": title, "status": status, "detail": detail, "subtasks": list(subtasks)}
+        ship = [item("Freeze the API", "completed"),
+                item("Port the transcript to Slint without changing how it scrolls for a reader who is up", "in_progress", [
+                    item("Embed the cards", "completed"), item("Measure the row heights before and after", "in_progress")]),
+                item("Write the release notes", "pending", detail="Short, for the changelog")]
+        return [
+            {"artifact_id": "plan-ship", "type": "plan", "status": "active", "session": s,
+             "title": "Ship the Slint desktop client to the beta group before the end of the quarter",
+             "summary": "Three steps, the second under way.",
+             "plan": {"plan_id": "p1", "title": "Ship 2.0", "status": "active", "goal": "Beta testers on the Slint app",
+                      "items": ship, "completed_count": 2, "total_count": 5}},
+            {"artifact_id": "plan-done", "type": "plan", "status": "completed", "session": s, "title": "Tidy the repo",
+             "plan": {"plan_id": "p2", "title": "Tidy", "status": "completed", "items": [item("Prune branches", "completed")],
+                      "completed_count": 1, "total_count": 1}},
+            {"artifact_id": "plan-blocked", "type": "plan", "status": "failed", "session": s, "title": "Migrate the database",
+             "plan": {"plan_id": "p3", "title": "Migrate", "status": "blocked",
+                      "items": [item("Back up", "completed"), item("Wait for the DBA", "blocked")], "completed_count": 1, "total_count": 2}},
+            {"artifact_id": "plan-missing", "type": "plan", "status": "active", "session": s, "title": "A plan whose details went missing"},
+        ]
     raise KeyError(kind)
 
 

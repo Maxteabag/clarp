@@ -57,6 +57,11 @@ export struct ArtifactItem {
     allow-custom: bool,
     draft: string,
     editing: bool,
+    // plan / workflow_run: how far along (0-1, -1 for unknown, -2 for
+    // under way without a count), "done/total", and the step under way.
+    progress-value: float,
+    progress-count: string,
+    current: string,
     // Keeps the why/delivery line: the card is or was pending in this
     // window, or has something to say there.
     keep-line: bool,
