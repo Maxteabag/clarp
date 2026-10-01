@@ -21,6 +21,9 @@ export struct ArtifactItem {
     countdown-set: bool,
     countdown-line: string,
     countdown-note: string,
+    // The artifact's Markdown body where the card shows it, and drawn.
+    note: string,
+    note-styled: styled-text,
     // What Enter or a click does ("" for nothing), and how it went.
     action: string,
     status-text: string,
