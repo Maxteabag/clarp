@@ -189,7 +189,11 @@ export component Pane inherits Rectangle {
         // Pair rooms are the Host's read-only projection: no composer.
         Rectangle {
           visible: !root.pane.pair;
-          height: root.pane.pair ? 0px : composer.preferred-height + Frame.top + Frame.bottom;
+          // Folded to its "[i] Insert" line until it has the keyboard (or
+          // holds a draft, which stays in view).
+          property <bool> folded: !composer.editor-focused && composer.draft == "";
+          height: root.pane.pair ? 0px : self.folded ? 16px : composer.preferred-height + Frame.top + Frame.bottom;
+          clip: true;
           composer := Composer {
             x: Frame.side;
             y: Frame.top;

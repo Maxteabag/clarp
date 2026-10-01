@@ -210,6 +210,10 @@ impl App {
                 let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
                 chat.fold_count = folded_under.get(&row.session).copied().unwrap_or(0);
                 chat.queue = queue.iter().position(|s| *s == row.session).map_or(0, |i| i as i32 + 1);
+                if row.busy {
+                    let letters: Vec<slint::SharedString> = row.name.chars().map(|c| c.to_string().into()).collect();
+                    chat.letters = ModelRc::new(VecModel::from(letters));
+                }
                 chat.folded = !unfolded.contains(&row.session);
                 if let Some(line) = sidebar.footers(&row.session).first().filter(|_| !chat.folded) {
                     chat.done_parent = line.parent_agent_id.clone().into();
