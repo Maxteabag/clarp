@@ -115,6 +115,10 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 item.preview = clarp_core::text::plain_preview_text(&markdown).chars().take(600).collect::<String>().into();
                 item.action = if kind == "document" { "Open document" } else { "Open research" }.into();
             }
+            let sources = https_sources(artifact).len();
+            if sources > 0 {
+                item.sources = format!("{sources} source{}", if sources == 1 { "" } else { "s" }).into();
+            }
         }
         "html_form" => {
             let report = is_report(artifact);
@@ -385,11 +389,27 @@ fn plan_fields(item: &mut ArtifactItem, artifact: &Value) {
     item.action = "Open plan".into();
 }
 
+/// A research artifact's sources that open: titled https links (iOS shows
+/// no others).
+fn https_sources(artifact: &Value) -> Vec<(String, String)> {
+    artifact
+        .get("sources")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|s| (text(s, "title"), text(s, "url")))
+        .filter(|(_, url)| url.starts_with("https://"))
+        .map(|(title, url)| (if title.is_empty() { url.clone() } else { title }, url))
+        .collect()
+}
+
 /// The report viewer's model for an artifact without a report body:
 /// what its card stands for, in full.
 pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
     let artifact = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned()?;
     let card = artifact_item(&artifact);
+    // Whether the body came from HTML (already read as Markdown here).
+    let mut from_html = false;
     let (summary, body) = match text(&artifact, "type").as_str() {
         "plan" => {
             let plan = artifact.get("plan").filter(|p| p.is_object())?;
@@ -416,9 +436,24 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
             let lines = rows;
             (summary, lines.join("\n"))
         }
+        "research" => {
+            // The body as the Host's report (HTML sanitized, read as
+            // Markdown), then the sources as links.
+            let report = app.engine.borrow().report_for_artifact(id).unwrap_or_default();
+            let body = clarp_core::json::string(&report, "body");
+            from_html = clarp_core::json::boolean(&report, "isHtml");
+            let mut markdown = if from_html { crate::updates_view::html_markdown(&body) } else { body };
+            let sources = https_sources(&artifact);
+            if !sources.is_empty() {
+                let escape = |t: &str| t.replace('[', "\\[").replace(']', "\\]");
+                let list: Vec<String> = sources.iter().map(|(title, url)| format!("- [{}]({url})", escape(title))).collect();
+                markdown = format!("{markdown}\n\n## Sources\n\n{}", list.join("\n"));
+            }
+            (text(&artifact, "summary"), markdown)
+        }
         _ => return None,
     };
-    serde_json::json!({"artifact_id": id, "title": card.title.as_str(), "summary": summary, "type": card.kind.as_str(), "isHtml": false, "kind": card.label.as_str(), "body": body})
+    serde_json::json!({"artifact_id": id, "title": card.title.as_str(), "summary": summary, "type": card.kind.as_str(), "isHtml": from_html, "converted": true, "kind": card.label.as_str(), "body": body})
         .as_object()
         .cloned()
 }
