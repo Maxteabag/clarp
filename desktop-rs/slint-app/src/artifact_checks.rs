@@ -123,6 +123,14 @@ fn countdown_stages(out: &str) -> Vec<Stage> {
             headless::press(slint::platform::Key::Home);
             true
         })),
+        ("countdown at the top", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            // Again, once the list has measured the rows it estimated.
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
         ("long countdown in view", Box::new(move |_, _, elapsed| {
             if elapsed < Duration::from_millis(500) {
                 return false;

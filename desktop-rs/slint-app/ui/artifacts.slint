@@ -40,6 +40,7 @@ export global ArtifactBridge {
     pure callback countdown-clock(int, int) -> string;
     // A click (or Enter on the selected card) on the card's action.
     callback open(string);
+    callback link-clicked(string);
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
@@ -75,7 +76,7 @@ component CountdownBody inherits VerticalLayout {
     spacing: 3px;
     if !root.artifact.countdown-set: Text {
         text: root.artifact.countdown-note;
-        color: Palette.muted;
+        color: root.artifact.countdown-note == "Cancelled" ? Palette.muted : Palette.warning;
         font-size: 13px;
     }
     if root.artifact.countdown-set: Text {
@@ -162,6 +163,14 @@ export component ArtifactCard inherits Rectangle {
             wrap: word-wrap;
             overflow: elide;
             max-height: 2 * 18px;
+        }
+        if root.artifact.note != "": StyledText {
+            text: root.artifact.note-styled;
+            default-color: Palette.text;
+            default-font-size: 13px;
+            default-font-family: Palette.body-family;
+            link-color: Palette.link;
+            link-clicked(url) => { ArtifactBridge.link-clicked(url); }
         }
         if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
         if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
