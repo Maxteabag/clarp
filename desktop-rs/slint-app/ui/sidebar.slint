@@ -297,7 +297,7 @@ export component Sidebar inherits Rectangle {
     // scope and the list.
     property <bool> explorer-active: Focus.mode == "sidebar" || Focus.mode == "search";
     VerticalLayout {
-        padding-top: 6px + Frame.top;
+        padding-top: 2px + Frame.top;
         padding-left: 8px;
         padding-right: 8px;
         padding-bottom: 8px + Frame.bottom;
@@ -382,11 +382,12 @@ export component Sidebar inherits Rectangle {
             clicked => { root.showing-archive = !root.showing-archive; }
         }
     }
+    // Level with the panes' frames (their pane pads 2px).
     PaneFrame {
         x: 4px;
-        y: 6px;
+        y: 2px;
         width: parent.width - 8px;
-        height: parent.height - 10px;
+        height: parent.height - 4px;
         key: Focus.mode == "composer" ? "ctrl+e" : "e";
         label: "Explorer";
         active: root.explorer-active;
