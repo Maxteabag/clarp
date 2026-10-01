@@ -30,6 +30,8 @@ pub(crate) struct Updates {
     jobs: JobTracker,
     /// Bumped whenever the job tracker changes (Qt `processRevision`).
     process_revision: u64,
+    /// artifact id -> how its form's latest answers went.
+    form_status: std::collections::HashMap<String, String>,
 }
 
 impl Engine {
@@ -116,7 +118,33 @@ impl Engine {
         clarp_core::roster::describe_agent_processes(&self.roster, &self.updates.jobs, session, now)
     }
 
+    /// How the form's latest answers went: "Sending…", "Answers accepted"
+    /// or "Not sent: …" ("" before any).
+    pub fn form_status(&self, artifact_id: &str) -> &str {
+        self.updates.form_status.get(artifact_id).map_or("", String::as_str)
+    }
+
+    /// A form the window could not open or send says why on its card.
+    pub fn set_form_status(&mut self, artifact_id: &str, status: &str) {
+        self.updates.form_status.insert(artifact_id.to_owned(), status.to_owned());
+        self.changes.push(Change::Updates);
+    }
+
     // ---- commands --------------------------------------------------------
+
+    /// Sends an HTML form's answers (iOS `HTMLFormView`): a fresh submission
+    /// id with the form's version; the Host's receipt must echo both.
+    pub fn submit_html_form(&mut self, artifact_id: &str, version: Value, answers: Value) {
+        if artifact_id.is_empty() || !answers.is_object() {
+            return;
+        }
+        let submission = uuid::Uuid::new_v4().to_string();
+        self.updates.form_status.insert(artifact_id.to_owned(), "Sending…".into());
+        self.changes.push(Change::Updates);
+        let path = format!("/artifacts/{}/submit", clarp_core::endpoint::percent_encode_segment(artifact_id));
+        let body = json!({"submission_id": submission, "version": version.clone(), "answers": answers});
+        self.api.post_json(&format!("form-submit:{artifact_id}|{submission}|{version}"), &path, body, None);
+    }
 
     pub fn load_updates(&mut self) {
         self.updates.generation += 1;
@@ -207,6 +235,16 @@ impl Engine {
             self.updates.pending_actions.remove(action);
             self.changes.push(Change::Updates);
             self.load_updates();
+        } else if let Some(rest) = tag.strip_prefix("form-submit:") {
+            let mut parts = rest.splitn(3, '|');
+            let (artifact, submission, version) = (parts.next().unwrap_or_default(), parts.next().unwrap_or_default(), parts.next().unwrap_or_default());
+            let echoed = object.get("accepted").and_then(Value::as_bool) == Some(true)
+                && json::string(object, "submission_id") == submission
+                && json::string(object, "artifact_id") == artifact
+                && object.get("version").map(Value::to_string).as_deref() == Some(version);
+            let status = if echoed { "Answers accepted".to_owned() } else { "Not sent: the Host's receipt did not match these answers".to_owned() };
+            self.updates.form_status.insert(artifact.to_owned(), status);
+            self.changes.push(Change::Updates);
         } else {
             return false;
         }
@@ -223,6 +261,10 @@ impl Engine {
         } else if let Some(action) = tag.strip_prefix("update-action:") {
             self.updates.pending_actions.remove(action);
             self.updates.error = detail.to_owned();
+            self.changes.push(Change::Updates);
+        } else if let Some(rest) = tag.strip_prefix("form-submit:") {
+            let artifact = rest.split('|').next().unwrap_or_default();
+            self.updates.form_status.insert(artifact.to_owned(), format!("Not sent: {detail}"));
             self.changes.push(Change::Updates);
         } else {
             return false;

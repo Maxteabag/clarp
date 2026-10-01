@@ -247,6 +247,7 @@ impl App {
         let expanded = self.expanded.borrow();
         let stamps = self.prefs.borrow().timestamps;
         let artifacts = crate::cells_view::artifacts_by_row(&presented, &self.engine.borrow().artifacts_for_session(&pane.session));
+        let cursor = self.artifact_cursor.borrow().clone();
         let rows: Vec<MessageRow> = presented
             .iter()
             .zip(&artifacts)
@@ -255,7 +256,8 @@ impl App {
                 if !stamps {
                     shown.stamp = SharedString::new();
                 }
-                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(crate::artifacts_view::artifact_item).collect();
+                let engine = self.engine.borrow();
+                let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(|a| crate::artifacts_view::card(a, &engine, &cursor)).collect();
                 shown.artifacts = ModelRc::new(VecModel::from(cards));
                 shown
             })
@@ -304,7 +306,12 @@ impl App {
         drop(engine);
         let signature = |artifacts: &Vec<serde_json::Value>, row: &MessageRow| {
             let explained: Vec<String> = row.tools.iter().map(|t| format!("{}:{}", t.narrated, t.explanation)).collect();
-            let cards = artifacts.iter().map(|a| format!("{}@{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default())).collect::<Vec<_>>().join(",");
+            let engine = self.engine.borrow();
+            let cards = artifacts
+                .iter()
+                .map(|a| format!("{}@{}{}", text_of(a, "artifact_id"), a.get("updated_at").cloned().unwrap_or_default(), crate::artifacts_view::card_signature(a, &engine, &cursor)))
+                .collect::<Vec<_>>()
+                .join(",");
             format!("{cards}|{}", explained.join(","))
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();

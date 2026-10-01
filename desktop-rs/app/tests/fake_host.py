@@ -506,19 +506,28 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "artifact-updated", "session": body.get("session", "")})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/artifact-chat":
-            # Test control: Rachel's (or `session`'s) chat becomes one reply
-            # per fixture artifact of `types`, and the artifacts are listed.
+            # Test control: `session` (a new agent unless it exists) gets a
+            # chat of one reply per fixture artifact of `types`; its
+            # artifacts replace that chat's, the other chats' stay.
             session = body.get("session", "rachel")
             rows, made = artifact_chat(session, body.get("types", []), int(time.time() * 1000))
+            created = False
             with state_lock:
                 for row in rows:
                     revision += 1
                     row["revision"] = revision
                 turns[session] = rows
-                artifacts = made + [a for a in artifacts if a.get("session") != session] if body.get("keep_others") else made
+                artifacts = [a for a in artifacts if a.get("session") != session] + made
+                if not any(agent["session"] == session for agent in agents):
+                    agents.append({"agent_id": session + "-id", "session": session, "persona": body.get("persona", session.title()),
+                                   "backend": "claude", "latest_state": "idle", "alive": True, "last_activity": 3000,
+                                   "conversation_id": "c-" + session, "head_revision": revision})
+                    created = True
                 for agent in agents:
                     if agent["session"] == session:
                         agent["head_revision"] = revision
+            if created:
+                broadcast({"type": "agent-roster", "session": session, "kind": "created"})
             broadcast({"type": "transcript-updated", "session": session})
             broadcast({"type": "artifact-updated", "session": session})
             return self.reply(200, {"ok": True, "artifacts": made})
