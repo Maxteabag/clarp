@@ -1359,7 +1359,8 @@ fn release_stages(out: &str) -> Vec<Stage> {
             // iOS's detail: version, build, revision, repository, then the notes and a link.
             let facts = blocks.iter().find(|b| b.kind == "table").map(|b| b.rows.row_count()).unwrap_or(0);
             check(window.get_report_kind() == "RELEASE" && facts == 5, &format!("the release in the report viewer, its facts in a table: {:?} {facts} rows", window.get_report_kind()));
-            check(blocks.iter().any(|b| b.kind == "heading") && blocks.len() >= 4, &format!("with its notes and a link to its source: {} blocks", blocks.len()));
+            let body = crate::artifacts_view::detail(&app_now(), "rel-ready").map(|d| clarp_core::json::string(&d, "body")).unwrap_or_default();
+            check(blocks.iter().any(|b| b.kind == "heading") && body.contains("Every artifact type embedded") && body.contains("[Open source](https://github.com/example/clarp/releases/2.4.0)"), &format!("with its notes and a link to its source: {body:?}"));
             shot(&out2, "artifacts-13b-release-open");
             headless::press(slint::platform::Key::Escape);
             true
