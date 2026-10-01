@@ -82,7 +82,8 @@ fn state(name: &str) -> Vec<Binding> {
             b("chats", &["Ctrl+1"], "Chats", false, Always, false),
             b("updates", &["Ctrl+2"], "Updates", false, Always, false),
             b("teams", &["Ctrl+3"], "Teams", false, Always, false),
-            b("refresh", &["Ctrl+R"], "Refresh", false, Always, false),
+            b("recent-agents", &["Ctrl+R"], "Recent", true, Always, false),
+            b("refresh", &["F5"], "Refresh", false, Always, false),
             b("mute", &["Ctrl+M"], "Mute", false, Always, false),
             b("overview", &["Ctrl+Shift+O"], "Overview", false, Always, false),
             b("tools", &["Ctrl+Shift+T"], "Tools", false, Always, false),
@@ -168,7 +169,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("settings-open", &["Return"], "Change", true, Always, true),
             b("escape", &["Escape"], "Back", true, Always, false),
         ],
-        "updates" => vec![b("refresh", &["Ctrl+R"], "Refresh", true, Always, false), b("escape", &["Escape"], "Chats", true, Always, false)],
+        "updates" => vec![b("refresh", &["F5"], "Refresh", true, Always, false), b("escape", &["Escape"], "Chats", true, Always, false)],
         "teams" => vec![b("escape", &["Escape"], "Chats", true, Always, false)],
         "launch" => vec![
             b("switcher", &["Ctrl+K"], "Commands", true, Always, false),
@@ -337,6 +338,7 @@ pub fn chord(text: &str, control: bool, alt: bool, shift: bool) -> Option<String
         (Key::Delete, "Delete"),
         (Key::Backspace, "Backspace"),
         (Key::F2, "F2"),
+        (Key::F5, "F5"),
         (Key::Space, "Space"),
     ];
     let modifiers = [Key::Control, Key::Alt, Key::AltGr, Key::Shift, Key::ShiftR, Key::Meta, Key::MetaR, Key::ControlR];

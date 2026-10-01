@@ -90,7 +90,8 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         command("Retry latest failed message", "retry-message", "Ctrl+Alt+R", "view", "resend send delivery not delivered"),
         command("Dismiss conversation error", "dismiss-error", "Esc", "view", "clear close error warning banner voice synthesis failed"),
         command("Change directory", "change-directory", "Ctrl+Alt+D", "agent", "folder workspace cwd new chat"),
-        command("Refresh conversation", "refresh", "Ctrl+R", "view", ""),
+        command("Recent agents", "recent-agents", "Ctrl+R", "agent", "last previous switch back mru history"),
+        command("Refresh conversation", "refresh", "F5", "view", ""),
         command("Agent overview", "overview", "Ctrl+Shift+O", "view", ""),
         command("Chats", "chats", "Ctrl+1", "destination", ""),
         command("Updates", "updates", "Ctrl+2", "destination", ""),
@@ -191,6 +192,24 @@ pub fn agents(engine: &Engine, query: &str) -> Vec<Item> {
         .collect();
     rows.sort_by_key(|(rank, _)| *rank);
     rows.into_iter().map(|(_, item)| item).collect()
+}
+
+/// Ctrl+R: agents by recency, the open chat left out so the first row is
+/// the one before it. Chats opened in this window come first (most recent
+/// first), then the rest by their latest activity.
+pub fn recent(engine: &Engine, opened: &[String], query: &str) -> Vec<Item> {
+    let selected = engine.selected_session();
+    let mut all = agents(engine, query);
+    let activity = |session: &str| engine.roster().rows().iter().find(|r| r.session == session).map_or(0, |r| r.last_activity);
+    let rank = |item: &Item| opened.iter().position(|s| *s == item.target);
+    all.retain(|item| item.target != selected);
+    all.sort_by(|a, b| match (rank(a), rank(b)) {
+        (Some(x), Some(y)) => x.cmp(&y),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => activity(&b.target).cmp(&activity(&a.target)),
+    });
+    all
 }
 
 // ---- launch dialogs
