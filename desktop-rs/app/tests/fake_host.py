@@ -131,6 +131,24 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "cd-broken", "type": "countdown", "status": "active", "session": s, "title": "Someday",
              "target_at": "next tuesday", "time_zone": "UTC"},
         ]
+    if kind == "html_form":
+        form = ("<h1>Trip planner</h1><form><label>Destination <input name=\"destination\" value=\"Bergen\"></label>"
+                "<label>Nights <input name=\"nights\" type=\"number\" value=\"2\"></label>"
+                "<label><input name=\"train\" type=\"checkbox\"> By train</label><button>Send</button></form>")
+        schema = {"type": "object", "properties": {"destination": {"type": "string"}, "nights": {"type": "number"},
+                                                   "train": {"type": "boolean"}}}
+        return [
+            {"artifact_id": "form-trip", "type": "html_form", "status": "active", "session": s, "version": 3,
+             "title": "Plan the team offsite: destination, nights, and whether we take the night train from Oslo",
+             "summary": "Pick where we go and for how long.", "content": form, "answer_schema": schema},
+            {"artifact_id": "form-report", "type": "html_form", "status": "ready", "session": s, "version": 1, "read_only": True,
+             "title": "Quarterly cost report", "summary": "Spend by team, read only.",
+             "content": "<h1>Costs</h1><p>Compute is <b>up 12%</b>.</p><ul><li>Core: 40k</li><li>Web: 12k</li></ul>",
+             "answer_schema": {"type": "object", "properties": {}}},
+            {"artifact_id": "form-stale", "type": "html_form", "status": "active", "session": s, "version": 1,
+             "title": "Lunch order", "summary": "", "content": "<form><input name=\"dish\"></form>",
+             "answer_schema": {"type": "object", "properties": {"dish": {"type": "string"}}}},
+        ]
     raise KeyError(kind)
 
 
@@ -584,6 +602,14 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 attention[:] = [a for a in attention if a.get("id") != decision]
             return self.reply(200, {"ok": True, "decision_id": decision, "status": body.get("choice")})
+        if url.path.startswith("/artifacts/") and url.path.endswith("/submit"):
+            # A form's answers: a receipt echoing the submission, or 409
+            # when the form changed since it was opened.
+            artifact = url.path.split("/")[2]
+            if artifact == "form-stale":
+                return self.reply(409, {"error": "form version changed"})
+            return self.reply(200, {"accepted": True, "submission_id": body.get("submission_id"),
+                                    "artifact_id": artifact, "version": body.get("version")})
         if url.path == "/agent-archive":
             # Archive or restore: the agent's row moves and the roster says so.
             with state_lock:
