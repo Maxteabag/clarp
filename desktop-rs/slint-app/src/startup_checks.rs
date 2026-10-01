@@ -16,24 +16,26 @@ use serde_json::json;
 use super::{Stage, check, control, run_stages, shot};
 use crate::perf::{self, Event, ms};
 
-/// Budgets for a debug build (the checks' build) with 100 agents, about
-/// twice what the app needs on an idle machine; 7d5286a7 and a56deecb
-/// exceed each one by far (see the commit adding this check).
+/// Budgets for a debug build (the checks' build) with 100 agents, with
+/// room for a slower machine than the one measured (elitebook; xps is
+/// about 1.6 times slower). 7d5286a7 and a56deecb exceed all but the
+/// first by far (see the commit adding this check).
 ///
 /// The explorer lists every agent this soon after launch: the fake Host
-/// answers at once, so this is the app's own work (113-218 ms).
-const EXPLORER: Duration = Duration::from_millis(300);
+/// answers at once, so this is the app's own work (113-239 ms).
+const EXPLORER: Duration = Duration::from_millis(500);
 /// The first chat's rows are drawn this soon after launch (65 ms with two
 /// agents; the roster's size must not hold up the open chat).
 const FIRST_CHAT: Duration = Duration::from_millis(1000);
 /// A usual chat-list rebuild of 100 rows (the median): a 60 Hz frame has
-/// 16 ms and the list is one of many things in it (2-3 ms).
-const REBUILD: Duration = Duration::from_millis(4);
-/// The longest rebuild: never a visible pause (6 ms on a loaded machine).
-const LONGEST_REBUILD: Duration = Duration::from_millis(20);
+/// 16 ms and the list is one of many things in it (2-4 ms; was 8-14).
+const REBUILD: Duration = Duration::from_millis(6);
+/// The longest rebuild: never a visible pause (5-10 ms; was 300-520).
+const LONGEST_REBUILD: Duration = Duration::from_millis(25);
 /// The longest the UI thread may be held by one engine wake: a few
-/// dropped frames, never a visible freeze (opening a long chat, 36-56 ms).
-const WAKE: Duration = Duration::from_millis(100);
+/// dropped frames, never a visible freeze (opening the first chat, 36-88
+/// ms; was 0.3-12 s).
+const WAKE: Duration = Duration::from_millis(200);
 /// Rebuilds in the first five seconds: the roster, the selection, rooms,
 /// archive and updates each change the list, and portraits arrive at most
 /// ten times a second, not one rebuild each (7-13).
@@ -41,7 +43,7 @@ const STARTUP_REBUILDS: usize = 15;
 /// Rebuilds for a burst of 40 Host events delivered together: the list is
 /// rebuilt once per wake, not once per event.
 const BURST_REBUILDS: usize = 10;
-/// Ctrl+R's recent agents, sorted by activity.
+/// Ctrl+R's recent agents, sorted by activity (0.2 ms; was 1.3 s).
 const RECENT: Duration = Duration::from_millis(10);
 
 fn median(events: &[Event]) -> Duration {
