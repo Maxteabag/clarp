@@ -274,6 +274,22 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "cc-failed", "type": "code_change", "status": "failed", "session": s, "title": "Rebase onto main",
              "repository": "clarp", "branch": "rebase", "files_changed": 1, "additions": 0, "deletions": 3},
         ]
+    if kind == "data":
+        regions = ["Nordics", "Benelux", "Iberia", "Baltics"]
+        sales = [[f"{regions[i % 4]} {i}", 100 + i, 120 + i, 90 + 2 * i, 150 + 3 * i, i % 3 == 0, None if i % 5 == 0 else "ok"]
+                 for i in range(120)]
+        wide = [[f"r{r}c{c}" for c in range(30)] for r in range(3)]
+        return [
+            {"artifact_id": "data-sales", "type": "data", "status": "ready", "session": s,
+             "title": "Quarterly sales by region, every store, with the audit flags the finance team asked for",
+             "columns": ["Region", "Q1", "Q2", "Q3", "Q4", "Audited", "Note"], "rows": sales,
+             "chart": {"kind": "bar", "category_column": "Region", "value_column": "Q4"}},
+            {"artifact_id": "data-wide", "type": "data", "status": "ready", "session": s, "title": "Thirty columns",
+             "columns": [f"Column {c}" for c in range(30)], "rows": wide},
+            {"artifact_id": "data-empty", "type": "data", "status": "ready", "session": s, "title": "No rows yet",
+             "columns": ["Name", "Value"], "rows": []},
+            {"artifact_id": "data-broken", "type": "data", "status": "failed", "session": s, "title": "Export that failed"},
+        ]
     raise KeyError(kind)
 
 
