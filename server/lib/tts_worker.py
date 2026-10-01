@@ -30,8 +30,9 @@ from .config import load as load_config
 from .eleven_ws import ElevenWSError, synthesize_streaming
 from .log import log_exception
 from .paths import RuntimePaths
+from . import tts_mode
 from .voice import (
-    CARTESIA, DEEPGRAM, ELEVENLABS, resolve_voice,
+    CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, resolve_voice,
 )
 
 
@@ -103,10 +104,23 @@ def synth_one(*,
                 # WebSocket/local synthesis writes through one delivery
                 # contract; provider selection stays inside _synthesize.
                 active_delivery = delivery or ChunkedFileDelivery(broker=broker)
+                clip_route = tts_mode.route(voice_config, agent, row["session"])
+                # Raw PCM is Cartesia's live stream; any other provider's
+                # clip is an MP3 that every client plays from its URL.
+                if (clip_route.provider != CARTESIA
+                        and getattr(active_delivery, "name", "") == "raw-pcm"):
+                    active_delivery = ChunkedFileDelivery(broker=broker)
+                _emit("tts_worker", "route",
+                      context=_event_context(row, agent),
+                      detail={"mode": clip_route.mode,
+                              "provider": clip_route.provider,
+                              "chat_open": clip_route.chat_open,
+                              "delivery": getattr(active_delivery, "name", "")})
                 result = _synth_pwa_via_delivery(
                     row, agent, audio_dir,
                     delivery=active_delivery,
                     stream=stream, herald=herald,
+                    clip_route=clip_route,
                 )
         else:
             result = _PwaStreamResult(
@@ -173,7 +187,8 @@ class _PwaStreamResult:
 
 def _synthesize(*, cfg, row: dict, agent: dict,
                 out_path, on_chunk, trace_id,
-                delivery_fields: dict | None = None) -> int:
+                delivery_fields: dict | None = None,
+                clip_route: "tts_mode.Route | None" = None) -> int:
     """Provider dispatch for one clip.
 
     Cartesia (Sonic) is primary; ElevenLabs is the backup. The agent's
@@ -189,11 +204,18 @@ def _synthesize(*, cfg, row: dict, agent: dict,
     persona = (agent or {}).get("persona", "")
     text = row["text"]
 
-    cartesia_voice = (resolve_voice(raw_voice, CARTESIA)
-                      or cfg.cartesia_voice_for(persona))
-    eleven_voice = resolve_voice(raw_voice, ELEVENLABS) or raw_voice
+    if clip_route is None:
+        clip_route = tts_mode.live_route(cfg, cfg.tts_provider)
+    provider = clip_route.provider
 
-    provider = cfg.tts_provider
+    def voice_for(selected: str) -> str | None:
+        """Per-agent [tts.agents] voice for the routed provider, else stored."""
+        if selected == provider and clip_route.voice:
+            return clip_route.voice
+        return resolve_voice(raw_voice, selected)
+
+    cartesia_voice = voice_for(CARTESIA) or cfg.cartesia_voice_for(persona)
+    eleven_voice = voice_for(ELEVENLABS) or raw_voice
     want_cartesia = (provider == CARTESIA
                      and cartesia_voice and cfg.cartesia_key())
     wants_raw_pcm = (delivery_fields or {}).get("delivery") == "raw-pcm"
@@ -230,10 +252,16 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 api_key=cfg.eleven_key(), model=cfg.eleven_model,
                 speed=cfg.eleven_speed, on_chunk=on_chunk,
                 trace_id=trace_id)
+        if selected == GEMINI:
+            from .gemini_tts import synthesize as gemini_synthesize
+            return gemini_synthesize(
+                text=text, voice=voice_for(GEMINI) or cfg.gemini_voice,
+                out_path=out_path, api_key=cfg.gemini_key(),
+                model=cfg.gemini_model, on_chunk=on_chunk,
+                trace_id=trace_id)
         if selected == DEEPGRAM:
             from .deepgram_tts import synthesize as deepgram_synthesize
-            deepgram_voice = (
-                resolve_voice(raw_voice, DEEPGRAM) or cfg.deepgram_model)
+            deepgram_voice = voice_for(DEEPGRAM) or cfg.deepgram_model
             return deepgram_synthesize(
                 text=text, voice_id=deepgram_voice, out_path=out_path,
                 api_key=cfg.deepgram_key(), on_chunk=on_chunk,
@@ -242,8 +270,7 @@ def _synthesize(*, cfg, row: dict, agent: dict,
         from .tts_providers import VALID_IDS, synthesize as provider_synthesize
         manifest = custom_adapter(selected, reserved_ids=VALID_IDS)
         if manifest is not None:
-            adapter_voice = (
-                resolve_voice(raw_voice, selected) or manifest.default_voice)
+            adapter_voice = voice_for(selected) or manifest.default_voice
             return provider_synthesize(
                 selected, text=text, voice=adapter_voice,
                 out_path=out_path, on_chunk=on_chunk)
@@ -252,7 +279,7 @@ def _synthesize(*, cfg, row: dict, agent: dict,
     try:
         return run(provider)
     except Exception as primary_error:
-        fallback = cfg.tts_fallback
+        fallback = clip_route.fallback
         if fallback in {"", "none", provider}:
             raise
         _emit("tts_worker", "providerFallback",
@@ -267,7 +294,9 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
                             *,
                             delivery: ClipDelivery,
                             stream: Any | None = None,
-                            herald: Any | None = None) -> _PwaStreamResult:
+                            herald: Any | None = None,
+                            clip_route: "tts_mode.Route | None" = None,
+                            ) -> _PwaStreamResult:
     """Synthesize a PWA-mode clip via the ElevenLabs WebSocket endpoint,
     routing bytes through the configured `ClipDelivery`.
 
@@ -322,6 +351,7 @@ def _synth_pwa_via_delivery(row: dict, agent: dict,
             on_chunk=paced_feed,
             trace_id=trace_id,
             delivery_fields=session.sse_fields,
+            clip_route=clip_route,
         )
     except Exception as e:  # provider adapters normalize failures to queue state
         session.fail(str(e))

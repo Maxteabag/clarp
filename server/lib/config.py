@@ -370,6 +370,15 @@ class Config:
     # uses ElevenLabs only. Override via [tts] provider or CLAUDE_PWA_TTS_PROVIDER.
     tts_provider: str = "cartesia"
     tts_fallback: str = "none"
+    # Voice used when the agent's chat is NOT open on any client (see
+    # lib.tts_mode). "" keeps every clip on `tts_provider`.
+    tts_quality_provider: str = ""
+    # Per-agent overrides from [tts.agents.<name or session>]:
+    # live_provider, quality_provider and <provider>_voice. Keys lowercased.
+    tts_agent_overrides: dict[str, dict] = field(default_factory=dict)
+    gemini_api_key: str = ""             # [gemini_tts] api_key or env GEMINI_API_KEY
+    gemini_model: str = "gemini-3.8-flash-tts"
+    gemini_voice: str = "Kore"
     cartesia_api_key: str = ""           # [cartesia] api_key or env CARTESIA_API_KEY
     deepgram_api_key: str = ""            # [deepgram] api_key or env DEEPGRAM_API_KEY
     deepgram_model: str = "flux-haley-en"
@@ -489,6 +498,18 @@ class Config:
     def eleven_key(self) -> str:
         """Resolved ElevenLabs key: config first, env fallback."""
         return self.auth_token_or_env(self.eleven_api_key, "ELEVEN_API_KEY")
+
+    def gemini_key(self) -> str:
+        """Resolved Gemini API key: config first, env fallback."""
+        return self.auth_token_or_env(self.gemini_api_key, "GEMINI_API_KEY")
+
+    def tts_override_for(self, agent: dict | None) -> dict:
+        """[tts.agents.*] entry for this agent, matched by name then session."""
+        agent = agent or {}
+        for key in (agent.get("name"), agent.get("persona"), agent.get("session")):
+            if key and str(key).strip().lower() in self.tts_agent_overrides:
+                return self.tts_agent_overrides[str(key).strip().lower()]
+        return {}
 
     def cartesia_key(self) -> str:
         """Resolved Cartesia key: config first, env fallback."""
@@ -716,6 +737,13 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     provider = (os.environ.get("CLAUDE_PWA_TTS_PROVIDER")
                 or str(tts.get("provider", "cartesia"))).strip().lower()
     fallback = str(tts.get("fallback", "none")).strip().lower()
+    gemini = data.get("gemini_tts", {}) or {}
+    tts_agent_overrides = {
+        str(name).strip().lower(): {
+            str(k).strip().lower(): str(v).strip()
+            for k, v in entry.items() if str(v).strip()}
+        for name, entry in (tts.get("agents") or {}).items()
+        if isinstance(entry, dict)}
     cartesia_voices = cartesia.get("voices")
     _CACHED = Config(
         _config_path     = str(path),
@@ -735,6 +763,11 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         eleven_speed    = float(eleven.get("speed", 1.2)),
         tts_provider    = provider,
         tts_fallback    = fallback,
+        tts_quality_provider = str(tts.get("quality_provider", "")).strip().lower(),
+        tts_agent_overrides = tts_agent_overrides,
+        gemini_api_key  = str(gemini.get("api_key", "")),
+        gemini_model    = str(gemini.get("model", "gemini-3.8-flash-tts")).strip() or "gemini-3.8-flash-tts",
+        gemini_voice    = str(gemini.get("voice", "Kore")).strip() or "Kore",
         cartesia_api_key = str(cartesia.get("api_key", "")),
         deepgram_api_key = str(deepgram.get("api_key", "")),
         deepgram_model  = str(deepgram.get("model", "flux-haley-en")),

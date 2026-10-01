@@ -31,6 +31,22 @@ default_session = "claude"
 provider = "cartesia"
 # Explicit fallback only. Use none to avoid moving work to another paid API.
 fallback = "none"
+# Voice for clips whose chat is not open on any client (docs/tts-live-quality.md).
+# Empty keeps every clip on `provider`. Example: "gemini".
+quality_provider = ""
+
+# Per-agent overrides, keyed by agent name or session:
+# [tts.agents.Jax]
+# live_provider = "cartesia"
+# quality_provider = "gemini"
+# gemini_voice = "Charon"        # <provider>_voice picks that provider's voice
+
+[gemini_tts]
+# API key. If empty, falls back to GEMINI_API_KEY.
+api_key = ""
+model = "gemini-3.8-flash-tts"
+# Prebuilt voice name, or a Voice Design id ("voice_...").
+voice = "Kore"
 
 
 [cartesia]
