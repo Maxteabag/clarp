@@ -683,6 +683,10 @@ pub(super) fn scroll_check(out: String) {
                 return false;
             }
             check(report().offset > -50.0 && !report().follows, &format!("Home reaches the top (offset {})", report().offset));
+            true
+        })),
+        reader_holds(s(), "an agent works while the reader is at the top", agent_turn("scroll", 4)),
+        ("press end", Box::new(|_, _, _| {
             headless::press(Key::End);
             true
         })),
