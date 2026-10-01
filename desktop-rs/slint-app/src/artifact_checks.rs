@@ -334,9 +334,103 @@ fn html_form_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- a chat full of artifacts
+
+/// Every type so far, the one ending on a clickable card last.
+const ALL_TYPES: &[&str] = &["countdown", "html_form"];
+
+/// The chat full of artifacts opens at its latest message and stays there
+/// while the cards settle; a reader scrolled up stays put while artifacts
+/// update and arrive.
+fn scroll_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let out2 = out.clone();
+    let offset = Rc::new(Cell::new(0.0f32));
+    let offset2 = offset.clone();
+    let held = Rc::new(Cell::new(0.0f32));
+    let held2 = held.clone();
+    let mut stages = load_chat("art-all", ALL_TYPES);
+    stages.extend::<Vec<Stage>>(vec![
+        ("full chat opens", Box::new(move |_, window, elapsed| {
+            let last = cards(window).last().map(|(_, a)| a.id.to_string()).unwrap_or_default();
+            if last != "form-stale" || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            check(report().follows && report().at_end, &format!("a chat full of artifacts opens at its latest message (follows {}, at end {}, offset {})", report().follows, report().at_end, report().offset));
+            offset.set(report().offset);
+            true
+        })),
+        ("full chat settles", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(1000) {
+                return false;
+            }
+            let moved = (report().offset - offset2.get()).abs();
+            check(report().at_end && moved < 1.0, &format!("and stays there while the cards settle: no card changes height ({moved}px)"));
+            shot(&out, "artifacts-90-full-chat-latest");
+            // The latest card is the last thing in the chat: a click just
+            // above the chat's bottom edge lands on it.
+            let before = opened().len();
+            let bottom = (300..=760).rev().step_by(4).find(|y| {
+                super::click_at(window, 560.0, *y as f32);
+                opened().len() > before
+            });
+            let hit = bottom.is_some_and(|y| y >= 640);
+            check(hit && opened().last().is_some_and(|u| u.contains("/form/")), &format!("the latest card is at the bottom of the chat, in reach of a click (first hit at y {bottom:?})"));
+            app_now().focus_transcript();
+            true
+        })),
+        ("reader scrolls up", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::PageUp);
+            headless::press(slint::platform::Key::PageUp);
+            true
+        })),
+        ("reader is up", Box::new(move |_, _, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(!report().follows && !report().at_end, "Page Up takes the reader into the history");
+            held.set(report().offset);
+            // A card above the reader changes, and a new one arrives below.
+            let changed = json!({"session": "art-all", "id": "cd-launch", "set": {"summary": "Freeze moved: it now starts two hours before the window, so plan around it."}});
+            let added = json!({"session": "art-all", "add": [{"artifact_id": "cd-new", "type": "countdown", "status": "active", "session": "art-all",
+                "title": "A countdown made while the reader was away", "target_at": "2026-12-24T18:00:00+01:00", "time_zone": "Europe/Oslo"}]});
+            check(control("/__control/artifact-update", &changed).is_ok() && control("/__control/artifact-update", &added).is_ok(), "the Host updates a card and adds one");
+            true
+        })),
+        ("reader stays put", Box::new(move |_, window, elapsed| {
+            let updated = card(window, "cd-launch").is_some_and(|c| c.summary.starts_with("Freeze moved")) && card(window, "cd-new").is_some();
+            if !updated || elapsed < Duration::from_millis(800) {
+                if elapsed > Duration::from_secs(5) {
+                    check(false, "the updated and new cards show");
+                    return true;
+                }
+                return false;
+            }
+            let moved = (report().offset - held2.get()).abs();
+            check(!report().follows && moved < 1.0, &format!("a reader scrolled up is not moved when artifacts update or arrive ({moved}px)"));
+            shot(&out2, "artifacts-91-reader-held");
+            headless::press(slint::platform::Key::End);
+            true
+        })),
+        ("back to the latest", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let last = cards(window).last().map(|(_, a)| a.id.to_string()).unwrap_or_default();
+            check(report().at_end && report().follows && last == "cd-new", &format!("End returns to the latest, the new card last: {last}"));
+            true
+        })),
+    ]);
+    stages
+}
+
 pub(super) fn artifacts_check(out: String) {
     let mut stages: Vec<Stage> = Vec::new();
     stages.extend(countdown_stages(&out));
     stages.extend(html_form_stages(&out));
+    stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
