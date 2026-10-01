@@ -12,7 +12,7 @@ use crate::jobs::{JobCounts, JobTracker, is_sub_agent};
 use crate::json::{self, Object};
 use crate::list_ops::ListOp;
 use crate::protocol::{Agent, display_name, is_busy_state};
-use crate::text::{name_order, plain_preview_text};
+use crate::text::name_order;
 use crate::time_format::compact_duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -172,8 +172,8 @@ impl Roster {
             avatar_symbol: agent.avatar_symbol.clone(),
             state: if live { agent.latest_state.clone() } else { "offline".into() },
             status_text: if live { agent.status_text.clone() } else { String::new() },
-            last_message: plain_preview_text(&agent.last_message),
-            last_completed_message: plain_preview_text(&agent.last_completed_message),
+            last_message: agent.last_message.clone(),
+            last_completed_message: agent.last_completed_message.clone(),
             last_activity: agent.last_activity,
             conversation_id: agent.conversation_id.clone(),
             head_revision: agent.head_revision,

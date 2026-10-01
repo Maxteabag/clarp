@@ -5,7 +5,7 @@ use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
 use serde_json::{Map, Value, json};
 
 use crate::json::{self, Object};
-use crate::text::cleaned_display_text;
+use crate::text::{cleaned_display_text, plain_preview_text};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Agent {
@@ -20,6 +20,8 @@ pub struct Agent {
     pub avatar_symbol: String,
     pub latest_state: String,
     pub status_text: String,
+    /// The latest messages' previews as plain text (the Host's markdown
+    /// stripped once, on arrival, not on every chat-list rebuild).
     pub last_message: String,
     pub last_completed_message: String,
     pub conversation_id: String,
@@ -132,8 +134,8 @@ impl Agent {
             avatar_url: s("avatar_url"),
             avatar_symbol: s("avatar_symbol"),
             status_text: s("status_text"),
-            last_message: s("last_message"),
-            last_completed_message: s("last_completed_message"),
+            last_message: plain_preview_text(&s("last_message")),
+            last_completed_message: plain_preview_text(&s("last_completed_message")),
             conversation_id: s("conversation_id"),
             voice_id: s("voice_id"),
             parent_agent_id: s("parent_agent_id"),
