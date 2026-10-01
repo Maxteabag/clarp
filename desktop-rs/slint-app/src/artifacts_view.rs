@@ -109,6 +109,29 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
         "plan" => plan_fields(&mut item, artifact),
+        "file" => {
+            // iOS's detail: the kind (from the type or the name) and size.
+            let name = text(artifact, "file_name");
+            let mime = text(artifact, "mime_type");
+            let ext = std::path::Path::new(&name).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
+            let sub = mime.rsplit('/').next().unwrap_or_default().to_uppercase();
+            let kind = if !ext.is_empty() && ext.len() <= 5 { ext } else if !sub.is_empty() { sub } else { "File".into() };
+            let size = number(artifact, "size_bytes");
+            let size = if size >= 1 << 20 {
+                format!("{:.1} MB", size as f64 / f64::from(1 << 20))
+            } else if size > 0 {
+                format!("{:.1} KB", size as f64 / 1024.0)
+            } else {
+                String::new()
+            };
+            let info = [kind, size].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
+            if host_path(&text(artifact, "url")).is_some() {
+                item.file_info = info.into();
+                item.action = "Open file".into();
+            } else {
+                item.file_info = format!("File unavailable · {info}").into();
+            }
+        }
         "video" => {
             let length = number(artifact, "duration_ms") / 1000;
             if length > 0 {
@@ -878,6 +901,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
         }
         "decision" | "question" => return send(app, id),
         "video" => download(app, &artifact, "video"),
+        "file" => download(app, &artifact, "file"),
         "audio" => {
             let url = text(&artifact, "url");
             match host_path(&url) {
