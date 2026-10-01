@@ -1066,6 +1066,10 @@ fn data_stages(out: &str) -> Vec<Stage> {
 
 fn audio_stages(out: &str) -> Vec<Stage> {
     let out = out.to_owned();
+    let (out_idle, out_end) = (out.clone(), out.clone());
+    // The clip's height while idle, which playing, pausing and ending keep.
+    let idle: Rc<Cell<f32>> = Rc::default();
+    let (idle2, idle3, idle4) = (idle.clone(), idle.clone(), idle.clone());
     let ids = ["aud-brief", "aud-gone", "aud-elsewhere"];
     let mut stages = load_chat("art-audio", &["audio"]);
     stages.extend::<Vec<Stage>>(vec![
@@ -1097,11 +1101,13 @@ fn audio_stages(out: &str) -> Vec<Stage> {
                 }
                 return false;
             }
+            idle.set(height_of(app, "aud-brief"));
+            shot(&out_idle, "artifacts-10a-audio-idle");
             headless::press("j");
             headless::press(slint::platform::Key::Return);
             true
         })),
-        ("audio plays", Box::new(move |_, window, elapsed| {
+        ("audio plays", Box::new(move |app, window, elapsed| {
             let brief = card(window, "aud-brief").expect("brief");
             if brief.media_state != "playing" || elapsed < Duration::from_millis(1600) {
                 return elapsed > Duration::from_secs(4) && { check(false, &format!("Enter plays it: {:?} {:?}", brief.media_state, brief.media_text)); true };
@@ -1112,16 +1118,20 @@ fn audio_stages(out: &str) -> Vec<Stage> {
             let bridge = window.global::<ArtifactBridge>();
             let position = bridge.invoke_media_position(brief.media_played, brief.media_started, bridge.get_now());
             check(position.as_str() != "0:00" && position.starts_with("0:0"), &format!("its position moves: {position}"));
+            let (before, now) = (idle2.get(), height_of(app, "aud-brief"));
+            check(before > 0.0 && (before - now).abs() < 0.5, &format!("playing keeps the card's height: {before} then {now}"));
             shot(&out, "artifacts-10-audio");
             headless::press(slint::platform::Key::Return);
             true
         })),
-        ("audio paused", Box::new(|_, window, elapsed| {
+        ("audio paused", Box::new(move |app, window, elapsed| {
             let brief = card(window, "aud-brief").expect("brief");
             if brief.media_state != "paused" {
                 return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter again pauses it: {:?}", brief.media_state)); true };
             }
             check(brief.media_text == "Paused" && brief.action == "Play" && brief.media_played >= 1, &format!("paused where it was: {:?} {}s", brief.media_text, brief.media_played));
+            let (before, now) = (idle3.get(), height_of(app, "aud-brief"));
+            check((before - now).abs() < 0.5, &format!("pausing keeps it: {before} then {now}"));
             headless::press(slint::platform::Key::Return);
             true
         })),
@@ -1133,12 +1143,18 @@ fn audio_stages(out: &str) -> Vec<Stage> {
             check(true, "and again resumes it");
             true
         })),
-        ("audio ends", Box::new(|_, window, elapsed| {
+        ("audio ends", Box::new(move |app, window, elapsed| {
             let brief = card(window, "aud-brief").expect("brief");
             if brief.media_state != "idle" {
                 return elapsed > Duration::from_secs(8) && { check(false, &format!("the clip ends: {:?}", brief.media_state)); true };
             }
             check(brief.action == "Play", "at its end it can play again");
+            let (before, now) = (idle4.get(), height_of(app, "aud-brief"));
+            check((before - now).abs() < 0.5, &format!("and the card is as tall as before it played: {before} then {now}"));
+            let end = format!("{out_end}/artifacts-10c-audio-ended.png");
+            shot(&out_end, "artifacts-10c-audio-ended");
+            let shift = vertical_shift(&format!("{out_end}/artifacts-10a-audio-idle.png"), &end);
+            check(shift.as_ref().is_ok_and(|s| s.abs() <= 1), &format!("nothing in the chat moved while it played: {shift:?} px"));
             window.global::<ArtifactBridge>().invoke_open("aud-gone".into());
             true
         })),
