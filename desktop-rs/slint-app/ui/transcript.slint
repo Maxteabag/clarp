@@ -8,9 +8,23 @@ export struct TableRow {
     header: bool,
 }
 
+// An image in a message (iOS MediaImageBlock / MediaGalleryBlock): its
+// caption, and the picture once fetched from the Host.
+export struct MessageImage {
+    url: string,
+    alt: string,
+    image: image,
+    loaded: bool,
+    // Could not be fetched, or not from the Host: "Image unavailable".
+    failed: bool,
+}
+
 export struct MessageBlock {
-    // prose, heading, code, quote, table, rule
+    // prose, heading, code, quote, table, rule, images (one image or a
+    // gallery: gallery true)
     kind: string,
+    images: [MessageImage],
+    gallery: bool,
     styled: styled-text,
     text: string,
     level: int,

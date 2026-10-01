@@ -1517,6 +1517,69 @@ fn workflow_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- images in messages
+
+/// The image blocks of a row: (gallery, [(alt, loaded, failed, width)]).
+fn image_blocks(window: &crate::AppWindow, id: &str) -> Vec<(bool, Vec<(String, bool, bool, u32)>)> {
+    let Some(row) = rows(window).into_iter().find(|r| r.id == id) else { return Vec::new() };
+    row.blocks
+        .iter()
+        .filter(|b| b.kind == "images")
+        .map(|b| (b.gallery, b.images.iter().map(|i| (i.alt.to_string(), i.loaded, i.failed, i.image.size().width)).collect()))
+        .collect()
+}
+
+fn image_stages(out: &str) -> Vec<Stage> {
+    let (out_before, out_after) = (out.to_owned(), out.to_owned());
+    let turns = json!({"session": "art-images", "turns": [
+        {"id": "im-ask", "role": "user", "text": "Show me the charts"},
+        {"id": "im-one", "role": "assistant", "text": "Here is the chart:\n\n![Sales by region](clarp-media://asset/img-chart)\n\nAs you can see, Nordics lead."},
+        {"id": "im-gallery", "role": "assistant", "text": "And the rest:\n\n```clarp-gallery\n![Q1](clarp-media://asset/img-a)\n![Q2](/media/img-b)\n![Q3](media/img-c)\n![Q4 (missing)](clarp-media://asset/img-gone)\n```"},
+        {"id": "im-away", "role": "assistant", "text": "One from the web:\n\n![A tracker](https://tracker.example/p.png)"},
+        {"id": "im-slow", "role": "assistant", "text": "The last one is large:\n\n![Slow chart](clarp-media://asset/img-slow)"},
+    ]});
+    let mut stages = load_chat("art-images", &[]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("image turns", Box::new(move |_, _, _| {
+            check(control("/__control/turns", &turns).is_ok(), "the Host takes replies with images");
+            true
+        })),
+        ("images placed", Box::new(move |_, window, elapsed| {
+            let slow = image_blocks(window, "im-slow");
+            if slow.is_empty() || elapsed < Duration::from_millis(300) {
+                return elapsed > Duration::from_secs(4) && { check(false, "a reply's image shows as an image block"); true };
+            }
+            // The slow one is still on its way: its space is already kept.
+            check(slow[0].1.first().is_some_and(|(alt, loaded, failed, _)| alt == "Slow chart" && !loaded && !failed), &format!("an image on its way keeps its caption, not yet loaded: {slow:?}"));
+            shot(&out_before, "artifacts-16a-images-loading");
+            true
+        })),
+        ("images load", Box::new(move |_, window, elapsed| {
+            let slow = image_blocks(window, "im-slow");
+            let loaded = slow.first().is_some_and(|b| b.1.first().is_some_and(|i| i.1));
+            if !loaded || elapsed < Duration::from_millis(500) {
+                return elapsed > Duration::from_secs(6) && { check(false, "the slow image arrives"); true };
+            }
+            let one = image_blocks(window, "im-one");
+            check(one.len() == 1 && !one[0].0 && one[0].1 == [("Sales by region".to_owned(), true, false, 400)], &format!("a single image, fetched from the Host: {one:?}"));
+            let gallery = image_blocks(window, "im-gallery");
+            let tiles: Vec<(String, bool, bool)> = gallery.first().map(|g| g.1.iter().map(|(a, l, f, _)| (a.clone(), *l, *f)).collect()).unwrap_or_default();
+            check(gallery.first().is_some_and(|g| g.0) && tiles == [("Q1".into(), true, false), ("Q2".into(), true, false), ("Q3".into(), true, false), ("Q4 (missing)".into(), false, true)],
+                &format!("a gallery of four, the missing one marked: {tiles:?}"));
+            let away = image_blocks(window, "im-away");
+            check(away.first().is_some_and(|b| b.1.first().is_some_and(|i| i.2 && !i.1)), &format!("an image not on the Host is not fetched: {away:?}"));
+            check(super::requests("GET", "/media/img-chart").last().is_some_and(|r| r["authorization"] == "Bearer probe-token"), "images come from the Host with the app's token");
+            check(super::requests("GET", "/p.png").is_empty(), "and nothing is fetched from the web");
+            let after = format!("{out_after}/artifacts-16-images.png");
+            shot(&out_after, "artifacts-16-images");
+            let shift = vertical_shift(&format!("{out_after}/artifacts-16a-images-loading.png"), &after);
+            check(report().at_end && shift.as_ref().is_ok_and(|s| s.abs() <= 1), &format!("images landing in their kept space move nothing: at end {}, shift {shift:?}", report().at_end));
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
@@ -1767,6 +1830,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(release_stages(&out));
     stages.extend(directory_stages(&out));
     stages.extend(workflow_stages(&out));
+    stages.extend(image_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }

@@ -493,6 +493,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply_bytes(200, b"%PDF-1.4 fixture contract", "application/pdf")
         if url.path == "/media/csv1":
             return self.reply_bytes(200, b"region,q3\nNordics,150\n", "text/csv")
+        if url.path in ("/media/img-chart", "/media/img-a", "/media/img-b", "/media/img-c"):
+            colours = {"/media/img-chart": (200, 80, 40, 255), "/media/img-a": (40, 120, 200, 255),
+                       "/media/img-b": (60, 180, 90, 255), "/media/img-c": (220, 190, 40, 255)}
+            return self.reply_bytes(200, solid_png(400, 240, colours[url.path]), "image/png")
+        if url.path == "/media/img-slow":
+            # An image that takes its time: the message must not grow when it lands.
+            time.sleep(1.5)
+            return self.reply_bytes(200, solid_png(300, 300, (150, 60, 200, 255)), "image/png")
         if url.path == "/media/vid1":
             return self.reply_bytes(200, b"\x00\x00\x00\x18ftypmp42fixture-video", "video/mp4")
         if url.path == "/media/thumb-slow":
