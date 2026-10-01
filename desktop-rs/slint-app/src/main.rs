@@ -282,8 +282,13 @@ impl App {
             recent.retain(|s| *s != selected);
             recent.insert(0, selected.clone());
         }
-        let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Avatars | Change::Updates));
+        let mut list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Avatars | Change::Updates));
         drop(engine);
+        // New portraits alone: the list changes once they are decoded.
+        let portraits_only = changes.iter().all(|c| !matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Updates));
+        if list_changed && portraits_only && !profile_view::portraits_ready(self) {
+            list_changed = false;
+        }
         if list_changed {
             let started = std::time::Instant::now();
             let mut laps = perf::Laps::new();
@@ -854,6 +859,7 @@ fn main() {
     platform::audio::start(muted);
     platform::serve_mpris();
     platform::desktop::start();
+    profile_view::prewarm_portraits();
     preview_view::start(false);
     preview_view::wire(&window);
     preview_view::show();
