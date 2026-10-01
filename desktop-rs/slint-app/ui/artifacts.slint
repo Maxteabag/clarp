@@ -65,6 +65,11 @@ export struct ArtifactItem {
     preview: string,
     // research: how many sources it cites that can be opened.
     sources: string,
+    // code_change: where (repository and branch) and how much.
+    repo: string,
+    files: string,
+    additions: string,
+    deletions: string,
     // Keeps the why/delivery line: the card is or was pending in this
     // window, or has something to say there.
     keep-line: bool,
