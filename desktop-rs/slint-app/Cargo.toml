@@ -35,6 +35,9 @@ slint = { version = "1.18", default-features = false, features = [
 ] }
 # Element geometry for the checks (the transcript's rows on screen).
 i-slint-backend-testing = { version = "=1.18.1", default-features = false }
+# Wheel and touchpad input with the gesture phases winit sends (the public
+# PointerScrolled event jumps instead of animating like a real wheel).
+i-slint-core = { version = "=1.18.1", default-features = false }
 # The attach dialog, through the desktop's file-chooser portal.
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 

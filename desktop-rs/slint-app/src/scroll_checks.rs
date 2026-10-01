@@ -147,7 +147,7 @@ fn tool_rows_around() -> (Option<String>, Option<String>) {
     let (Some(&first), Some(&last)) = (shown.iter().min(), shown.iter().max()) else { return (None, None) };
     let tools = |i: &usize| !rows[*i].activity_label.is_empty() && rows[*i].group_id.is_empty() && !rows[*i].expanded;
     let above = (0..first.saturating_sub(3)).rev().find(tools).map(|i| rows[i].id.to_string());
-    let below = (last + 3..rows.len()).find(tools).map(|i| rows[i].id.to_string());
+    let below = (last + 1..rows.len()).find(tools).map(|i| rows[i].id.to_string());
     (above, below)
 }
 
@@ -159,6 +159,163 @@ fn toggle(id: &str) {
 
 fn expanded(id: &str) -> bool {
     crate::window().map(|w| rows(&w)).is_some_and(|r| r.iter().any(|r| r.id == id && r.expanded))
+}
+
+
+fn event(body: serde_json::Value) {
+    if let Err(error) = control("/__control/event", &body) {
+        check(false, &format!("the Host pushes an event: {error}"));
+    }
+}
+
+fn agent_state(session: &str, state: &str) {
+    if let Err(error) = control("/__control/agent", &json!({"session": session, "set": {"latest_state": state}})) {
+        check(false, &format!("the Host takes the agent's state: {error}"));
+    }
+    event(json!({"type": "agent-state", "session": session, "kind": state, "ts": 1}));
+}
+
+/// One working turn of an agent as the Host reports it: it starts
+/// thinking, runs tools (activity rows that come and go), files tool-only
+/// turns, streams a live reply that grows, then the durable reply
+/// replaces the live row and the agent goes idle.
+fn agent_turn(session: &'static str, turn: usize) -> Vec<(String, Box<dyn Fn()>)> {
+    let id = move |name: &str| format!("{session}-t{turn}-{name}");
+    let mut steps: Vec<(String, Box<dyn Fn()>)> = vec![
+        ("the agent starts thinking".into(), Box::new(move || agent_state(session, "thinking"))),
+        ("a tool starts".into(), Box::new(move || {
+            agent_state(session, "tool");
+            event(json!({"type": "agent-activity", "session": session, "state": "tool", "activity_tool": "Read",
+                         "activity_file_path": format!("src/file{turn}.rs"), "activity_summary": format!("src/file{turn}.rs"), "activity_status": "running"}));
+            event(json!({"type": "agent-activity", "session": session, "state": "tool", "activity_tool": "Bash",
+                         "activity_summary": "cargo test --workspace", "activity_status": "running"}));
+        })),
+        ("the tools finish and are filed".into(), Box::new(move || {
+            event(json!({"type": "agent-activity", "session": session, "state": "tool", "activity_tool": "Read",
+                         "activity_file_path": format!("src/file{turn}.rs"), "activity_summary": format!("src/file{turn}.rs"), "activity_status": "ok"}));
+            upsert(session, json!([
+                {"id": id("tool-a"), "role": "assistant", "text": "", "tools": [{"name": "Read", "file_path": format!("src/file{turn}.rs"), "status": "completed", "result": "fn main() {}"}]},
+                {"id": id("tool-b"), "role": "assistant", "text": "", "tools": [{"name": "Bash", "command": "cargo test --workspace", "status": "completed", "result": "test result: ok. 41 passed"}]}]));
+        })),
+        ("the agent thinks again".into(), Box::new(move || agent_state(session, "thinking"))),
+    ];
+    for n in 0..4 {
+        steps.push((format!("the live reply grows ({n})"), Box::new(move || {
+            upsert(session, json!([{"id": id("live"), "role": "assistant", "kind": "live", "text": streamed(n)}]));
+        })));
+    }
+    steps.push(("the durable reply replaces the live one".into(), Box::new(move || {
+        upsert(session, json!([{"id": id("reply"), "role": "assistant", "text": streamed(4)}]));
+    })));
+    steps.push(("the agent goes idle".into(), Box::new(move || agent_state(session, "idle"))));
+    steps
+}
+
+/// A stage that plays `steps`, 500 ms apart, and checks after each that
+/// the reader's first visible row has not moved from where it was when
+/// the stage began.
+fn reader_holds(state: Rc<RefCell<State>>, label: &'static str, steps: Vec<(String, Box<dyn Fn()>)>) -> Stage {
+    (label, Box::new(move |_, _, _| {
+        let mut st = state.borrow_mut();
+        if st.step == 0 {
+            st.anchor = geometry().anchor();
+            st.since = None;
+        }
+        if st.step > 0 {
+            if st.since.is_none() {
+                st.since = Some(Instant::now());
+            }
+            if !settled(&st, 500) {
+                return false;
+            }
+            let Some(anchor) = st.anchor.clone() else {
+                check(false, &format!("{label}: a row shows"));
+                return true;
+            };
+            let (held, numbers) = anchor_moved(&anchor);
+            check(held && !report().follows, &format!("{label}, {}: the reader stays put (follows {}): {numbers}", steps[st.step - 1].0, report().follows));
+        }
+        st.since = None;
+        if st.step == steps.len() {
+            st.step = 0;
+            return true;
+        }
+        (steps[st.step].1)();
+        st.step += 1;
+        false
+    }))
+}
+
+/// The row drawn nearest the viewport's middle and its top's distance
+/// from the viewport's top: it stays drawn through a wheel notch.
+fn middle_row() -> Option<(String, f32)> {
+    let geo = geometry();
+    let middle = (geo.top + geo.bottom) / 2.0;
+    geo.rows
+        .iter()
+        .filter(|r| r.2 > geo.top && r.1 < geo.bottom)
+        .min_by(|a, b| (a.1 - middle).abs().total_cmp(&(b.1 - middle).abs()))
+        .map(|r| (r.0.clone(), r.1 - geo.top))
+}
+
+/// A stage of `count` wheel notches of `delta`, 300 ms apart: each must
+/// move the rows by exactly `delta` on screen (the wheel's own distance),
+/// whatever the agent does meanwhile (`stream`: a reply growing each notch).
+fn wheel_steps(state: Rc<RefCell<State>>, label: &'static str, delta: f32, count: usize, stream: Option<&'static str>) -> Stage {
+    (label, Box::new(move |_, _, _| {
+        let mut st = state.borrow_mut();
+        if st.step > 0 {
+            if st.since.is_none() {
+                st.since = Some(Instant::now());
+            }
+            if !settled(&st, 300) {
+                return false;
+            }
+            if let Some(anchor) = st.anchor.clone() {
+                let geo = geometry();
+                let line = match geo.find(&anchor.0) {
+                    Some((top, _)) => {
+                        let moved = (top - geo.top) - anchor.1;
+                        let ok = (moved - delta).abs() <= 2.0;
+                        if !ok {
+                            st.still += 1;
+                        }
+                        format!("{}notch {}: {} moved {moved:.1}px", if ok { "" } else { "WRONG " }, st.step, anchor.0)
+                    }
+                    None => {
+                        st.still += 1;
+                        format!("WRONG notch {}: {} vanished ({})", st.step, anchor.0, geo.drawn())
+                    }
+                };
+                st.target.push_str(&line);
+                st.target.push_str("; ");
+            }
+        }
+        st.since = None;
+        if st.step == count {
+            if let Some(session) = stream {
+                upsert(session, json!([{"id": format!("{session}-{}", label.replace(' ', "-")), "role": "assistant", "kind": "", "text": streamed(count)}]));
+            }
+            let wrong = st.still;
+            check(wrong == 0, &format!("{label}: every notch of {delta}px moves the rows {delta}px ({wrong} of {count} wrong): {}", st.target));
+            check(!report().follows, &format!("{label}: the reader is not following"));
+            st.step = 0;
+            st.still = 0;
+            st.target.clear();
+            return true;
+        }
+        if st.step == 0 {
+            st.still = 0;
+            st.target.clear();
+        }
+        if let Some(session) = stream {
+            upsert(session, json!([{"id": format!("{session}-{}", label.replace(' ', "-")), "role": "assistant", "kind": "live", "text": streamed(st.step)}]));
+        }
+        st.anchor = middle_row();
+        wheel(delta);
+        st.step += 1;
+        false
+    }))
 }
 
 #[derive(Default)]
@@ -253,44 +410,34 @@ pub(super) fn scroll_check(out: String) {
             shot(&out1, "scroll-01-opened");
             true
         })),
-        // 2. Following: new rows and a growing streaming reply stay in view.
-        ("follows a stream", Box::new({
+        // 2. One wheel notch up from the end leaves the end and stays there.
+        ("one notch up", Box::new({
             let state = s();
             move |_, _, _| {
                 let mut st = state.borrow_mut();
-                let step = st.step;
-                // Each update: wait for it to land, then measure.
-                if step > 0 {
-                    let landed = if step <= streams { holds("stream-1", &streamed(step - 1)) } else { has_row(&st.target) };
-                    if !landed {
-                        return false;
-                    }
-                    if st.since.is_none() {
-                        st.since = Some(Instant::now());
-                    }
-                    if !settled(&st, 250) {
-                        return false;
-                    }
-                    let (visible, numbers) = last_row_visible();
-                    check(visible && report().follows, &format!("following, update {step} keeps the last row in view (follows {}): {numbers}", report().follows));
-                }
-                st.since = None;
                 st.step += 1;
-                let next = st.step;
-                if next <= streams {
-                    upsert("scroll", json!([{"id": "stream-1", "role": "assistant", "text": streamed(next - 1)}]));
-                } else if next == streams + 1 {
-                    upsert("scroll", json!([{"id": "scroll-user-1", "role": "user", "text": "Thanks, and the docs?"},
-                                            {"id": "scroll-reply-1", "role": "assistant", "text": LOREM.repeat(4)}]));
-                    st.target = "scroll-reply-1".into();
-                } else {
-                    st.step = 0;
-                    return true;
+                if st.step == 1 {
+                    st.anchor = middle_row();
+                    wheel(120.0);
+                    return false;
                 }
-                false
+                if st.step < 8 {
+                    return false;
+                }
+                let geo = geometry();
+                let moved = st.anchor.as_ref().and_then(|a| geo.find(&a.0).map(|(top, _)| top - geo.top - a.1));
+                check(
+                    moved.is_some_and(|m| (m - 120.0).abs() <= 2.0) && !report().follows,
+                    &format!("one wheel notch (120px) up from the end moves the rows down {moved:?}px and stops following (follows {})", report().follows),
+                );
+                st.step = 0;
+                true
             }
         })),
-        // 3. The wheel scrolls up into the history and stops following.
+        // 3. The owner's bug: an agent works while the reader is just above
+        // the end (the latest rows partly on screen).
+        reader_holds(s(), "an agent works just above the reader's place", agent_turn("scroll", 1)),
+        // 4. The wheel scrolls up into the history and stops following.
         ("wheel up", Box::new({
             let state = s();
             move |_, _, _| {
@@ -332,17 +479,66 @@ pub(super) fn scroll_check(out: String) {
                 true
             }
         })),
-        // 4. Activity does not move a reader in the history.
-        ("activity while reading", Box::new({
+        // 5. An agent works and its reply streams while the reader is deep
+        // in the history; their place must not change at all (measured
+        // against where they stopped, not step by step).
+        ("streams while reading", Box::new({
             let state = s();
             move |_, _, _| {
                 let mut st = state.borrow_mut();
                 let step = st.step;
                 if step > 0 {
+                    if !holds("stream-1", &streamed(step - 1)) {
+                        return false;
+                    }
+                    if st.since.is_none() {
+                        st.since = Some(Instant::now());
+                    }
+                    if !settled(&st, 400) {
+                        return false;
+                    }
+                    let Some(anchor) = st.anchor.clone() else {
+                        check(false, "a row shows after wheeling up");
+                        return true;
+                    };
+                    let (held, numbers) = anchor_moved(&anchor);
+                    check(held && !report().follows, &format!("an agent streams (update {step} of {streams}) while the reader is up: the reader stays put (follows {}): {numbers}", report().follows));
+                }
+                st.since = None;
+                st.step += 1;
+                if step == 0 {
+                    check(control("/__control/agent", &json!({"session": "scroll", "set": {"latest_state": "thinking"}})).is_ok(), "the agent starts working");
+                }
+                if st.step <= streams {
+                    upsert("scroll", json!([{"id": "stream-1", "role": "assistant", "text": streamed(st.step - 1)}]));
+                    return false;
+                }
+                st.step = 0;
+                st.anchor = geometry().anchor();
+                true
+            }
+        })),
+        reader_holds(s(), "an agent works while the reader is deep in the history", agent_turn("scroll", 2)),
+        // Each wheel notch moves the rows by its own distance, with and
+        // without an agent streaming meanwhile.
+        wheel_steps(s(), "wheeling up in the history", 120.0, 8, None),
+        wheel_steps(s(), "wheeling down in the history", -120.0, 8, None),
+        wheel_steps(s(), "wheeling up while an agent streams", 120.0, 8, Some("scroll")),
+        wheel_steps(s(), "wheeling down while an agent streams", -120.0, 8, Some("scroll")),
+        // 6. Other activity does not move a reader in the history either.
+        ("activity while reading", Box::new({
+            let state = s();
+            move |_, _, _| {
+                let mut st = state.borrow_mut();
+                let step = st.step;
+                if step == 0 {
+                    st.anchor = geometry().anchor();
+                    (st.above, st.below) = tool_rows_around();
+                }
+                if step > 0 {
                     let landed = match step {
                         1 => has_row("scroll-new-3"),
-                        2..=4 => holds("stream-2", &streamed(step - 1)),
-                        5 => st.below.as_deref().is_none_or(expanded),
+                        2 => st.below.as_deref().is_none_or(expanded),
                         _ => st.above.as_deref().is_none_or(expanded),
                     };
                     if !landed {
@@ -354,12 +550,13 @@ pub(super) fn scroll_check(out: String) {
                     if !settled(&st, 400) {
                         return false;
                     }
-                    let what = ["", "three rows arrive", "a reply starts streaming", "the reply grows", "the reply grows again", "tool calls open below the reader", "tool calls open above the reader"][step];
+                    let what = ["", "three rows arrive", "tool calls open below the reader", "tool calls open above the reader"][step];
                     let Some(anchor) = st.anchor.clone() else { return true };
                     let (held, numbers) = anchor_moved(&anchor);
                     check(held && !report().follows, &format!("{what}: the reader stays put (follows {}): {numbers}", report().follows));
                     // Measure each change on its own.
                     st.anchor = geometry().anchor();
+                    (st.above, st.below) = tool_rows_around();
                 }
                 st.since = None;
                 st.step += 1;
@@ -370,15 +567,11 @@ pub(super) fn scroll_check(out: String) {
                             {"id": "scroll-new-2", "role": "assistant", "text": LOREM.repeat(6)},
                             {"id": "scroll-new-3", "role": "assistant", "text": format!("```\n{}\n```", "line\n".repeat(12))}]));
                     }
-                    2..=4 => {
-                        let n = st.step - 1;
-                        upsert("scroll", json!([{"id": "stream-2", "role": "assistant", "text": streamed(n)}]));
-                    }
-                    5 => match st.below.clone() {
+                    2 => match st.below.clone() {
                         Some(id) => toggle(&id),
                         None => check(false, "a row with tool calls lies below the reader"),
                     },
-                    6 => match st.above.clone() {
+                    3 => match st.above.clone() {
                         Some(id) => toggle(&id),
                         None => check(false, "a row with tool calls lies above the reader"),
                     },
@@ -391,7 +584,7 @@ pub(super) fn scroll_check(out: String) {
                 false
             }
         })),
-        // 5. The wheel reaches the true end and following resumes.
+        // 7. The wheel reaches the true end and following resumes.
         ("wheel to the end", Box::new({
             let state = s();
             move |_, _, _| {
@@ -410,7 +603,44 @@ pub(super) fn scroll_check(out: String) {
                 true
             }
         })),
-        // 6. Page Down from the history reaches the true end.
+        // 8. Following: new rows and a growing streaming reply stay in view.
+        ("follows a stream", Box::new({
+            let state = s();
+            move |_, _, _| {
+                let mut st = state.borrow_mut();
+                let step = st.step;
+                // Each update: wait for it to land, then measure.
+                if step > 0 {
+                    let landed = if step <= streams { holds("stream-2", &streamed(step - 1)) } else { has_row(&st.target) };
+                    if !landed {
+                        return false;
+                    }
+                    if st.since.is_none() {
+                        st.since = Some(Instant::now());
+                    }
+                    if !settled(&st, 250) {
+                        return false;
+                    }
+                    let (visible, numbers) = last_row_visible();
+                    check(visible && report().follows, &format!("following, update {step} keeps the last row in view (follows {}): {numbers}", report().follows));
+                }
+                st.since = None;
+                st.step += 1;
+                let next = st.step;
+                if next <= streams {
+                    upsert("scroll", json!([{"id": "stream-2", "role": "assistant", "text": streamed(next - 1)}]));
+                } else if next == streams + 1 {
+                    upsert("scroll", json!([{"id": "scroll-user-2", "role": "user", "text": "Thanks, and the docs?"},
+                                            {"id": "scroll-reply-2", "role": "assistant", "text": LOREM.repeat(4)}]));
+                    st.target = "scroll-reply-2".into();
+                } else {
+                    st.step = 0;
+                    return true;
+                }
+                false
+            }
+        })),
+        // 9. Page Down from the history reaches the true end.
         ("page up", Box::new({
             let state = s();
             move |_, _, _| {
@@ -447,7 +677,7 @@ pub(super) fn scroll_check(out: String) {
                 true
             }
         })),
-        // 7. End (and Ctrl+End) return to the latest and follow again.
+        // 10. End (and Ctrl+End) return to the latest and follow again.
         ("end", Box::new(|_, _, elapsed| {
             if elapsed < Duration::from_millis(400) {
                 return false;
@@ -492,7 +722,31 @@ pub(super) fn scroll_check(out: String) {
             check(visible && report().follows && report().at_end, &format!("Ctrl+End returns to the latest and follows (follows {}): {numbers}", report().follows));
             true
         })),
-        // 8. An older page loading above keeps the reader's place.
+        // A touchpad swipe up from the end (gesture phases, then a glide)
+        // stops following, and the agent's activity leaves the reader alone.
+        ("touchpad swipe up", Box::new({
+            let state = s();
+            move |_, _, _| {
+                let mut st = state.borrow_mut();
+                let geo = geometry();
+                let (x, y) = (geo.left + geo.width / 2.0, (geo.top + geo.bottom) / 2.0);
+                st.step += 1;
+                match st.step {
+                    1 => headless::scroll(x, y, 0.0, headless::Phase::Started),
+                    2..=7 => headless::scroll(x, y, 40.0, headless::Phase::Moved),
+                    8 => headless::scroll(x, y, 0.0, headless::Phase::Ended),
+                    9..=20 => {}
+                    _ => {
+                        check(!report().follows && !report().at_end, &format!("a touchpad swipe up from the end stops following (follows {}, at end {})", report().follows, report().at_end));
+                        st.step = 0;
+                        return true;
+                    }
+                }
+                false
+            }
+        })),
+        reader_holds(s(), "an agent works after a touchpad swipe up", agent_turn("scroll", 3)),
+        // 11. An older page loading above keeps the reader's place.
         ("older pages", Box::new(|_, _, _| {
             check(
                 control("/__control/older-delay", &json!({"seconds": 1.5})).is_ok()

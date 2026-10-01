@@ -153,13 +153,38 @@ pub fn click(x: f32, y: f32) {
     window.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
 }
 
-/// A mouse wheel turn over a logical position: a positive `delta_y`
-/// scrolls up (towards older content), as a wheel sends it.
+/// A mouse wheel turn over a logical position, as winit delivers it (a
+/// `Moved` phase, which Slint animates): a positive `delta_y` scrolls up
+/// (towards older content). A real wheel line is 60 px.
 pub fn wheel(x: f32, y: f32, delta_y: f32) {
+    scroll(x, y, delta_y, Phase::Moved);
+}
+
+/// The phase of a touchpad gesture (winit's `TouchPhase`).
+#[derive(Debug, Clone, Copy)]
+pub enum Phase {
+    Started,
+    Moved,
+    Ended,
+}
+
+/// One touchpad (or wheel) scroll event with its gesture phase.
+pub fn scroll(x: f32, y: f32, delta_y: f32, phase: Phase) {
+    use i_slint_core::input::{BackendMouseEvent, TouchPhase};
     let Some(window) = window() else { return };
     let position = slint::LogicalPosition::new(x, y);
     window.dispatch_event(WindowEvent::PointerMoved { position });
-    window.dispatch_event(WindowEvent::PointerScrolled { position, delta_x: 0.0, delta_y });
+    let phase = match phase {
+        Phase::Started => TouchPhase::Started,
+        Phase::Moved => TouchPhase::Moved,
+        Phase::Ended => TouchPhase::Ended,
+    };
+    window.dispatch_event(WindowEvent::internal(BackendMouseEvent::Wheel {
+        position: i_slint_core::lengths::LogicalPoint::new(x as _, y as _),
+        delta_x: 0.0,
+        delta_y: delta_y as _,
+        phase,
+    }));
 }
 
 pub fn type_text(text: &str) {
