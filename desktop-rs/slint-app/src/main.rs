@@ -75,6 +75,11 @@ pub struct App {
     pub artifact_cursor: RefCell<String>,
     /// The answer chosen on each decision or question card (1-9).
     pub artifact_choices: RefCell<std::collections::HashMap<String, i32>>,
+    /// Answers of one's own as typed, and the card whose field is open.
+    pub artifact_drafts: RefCell<std::collections::HashMap<String, String>>,
+    pub artifact_editing: RefCell<String>,
+    /// Decision cards this window has shown pending.
+    pub artifact_seen_pending: RefCell<std::collections::HashSet<String>>,
 }
 
 /// View preferences the window keeps (the Qt controller's names).
@@ -517,6 +522,9 @@ fn main() {
         launch: RefCell::new(None),
         artifact_cursor: RefCell::new(String::new()),
         artifact_choices: RefCell::default(),
+        artifact_drafts: RefCell::default(),
+        artifact_editing: RefCell::default(),
+        artifact_seen_pending: RefCell::default(),
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));

@@ -26,7 +26,8 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     }
     if window.get_search_focused() {
         "search"
-    } else if app.active_report().composer_focused {
+    } else if app.active_report().composer_focused || window.global::<crate::ArtifactBridge>().get_editing() {
+        // A card's answer field types like the composer.
         "composer"
     } else if window.get_sidebar_focused() {
         "sidebar"

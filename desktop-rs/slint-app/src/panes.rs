@@ -249,7 +249,16 @@ impl App {
         let artifacts = crate::cells_view::artifacts_by_row(&presented, &self.engine.borrow().artifacts_for_session(&pane.session));
         let cursor = self.artifact_cursor.borrow().clone();
         let choices = self.artifact_choices.borrow().clone();
-        let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices };
+        let drafts = self.artifact_drafts.borrow().clone();
+        let editing = self.artifact_editing.borrow().clone();
+        // Decisions shown pending keep their height once answered.
+        for artifact in self.engine.borrow().artifacts_for_session(&pane.session) {
+            if artifact.get("decision").and_then(|d| d.get("status")).and_then(serde_json::Value::as_str) == Some("pending") {
+                self.artifact_seen_pending.borrow_mut().insert(text_of(&artifact, "artifact_id"));
+            }
+        }
+        let seen_pending = self.artifact_seen_pending.borrow().clone();
+        let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
         let rows: Vec<MessageRow> = presented
             .iter()
             .zip(&artifacts)
