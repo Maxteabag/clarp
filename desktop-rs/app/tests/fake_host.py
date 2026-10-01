@@ -342,6 +342,22 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "dir-escape", "type": "directory", "status": "ready", "session": s, "title": "Somewhere it should not go",
              "root": "workspace", "relative_path": "../../etc"},
         ]
+    if kind == "workflow_run":
+        run = lambda n: f"https://github.com/example/clarp/actions/runs/{n}"
+        return [
+            {"artifact_id": "wf-ci", "type": "workflow_run", "status": "active", "session": s,
+             "title": "CI for the artifact cards branch: build, unit tests, every headless check, and the release bundle",
+             "provider": "github", "run_id": "901", "run_url": run(901), "workflow_name": "CI",
+             "current_step": "Run the headless checks (artifacts, transcript, composer, panes)", "total_steps": 8, "completed_steps": 3},
+            {"artifact_id": "wf-queued", "type": "workflow_run", "status": "active", "session": s, "title": "Nightly",
+             "provider": "github", "run_id": "902", "run_url": run(902), "workflow_name": "Nightly"},
+            {"artifact_id": "wf-done", "type": "workflow_run", "status": "completed", "conclusion": "success", "session": s,
+             "title": "Lint", "provider": "github", "run_id": "903", "run_url": run(903), "workflow_name": "Lint",
+             "total_steps": 4, "completed_steps": 4},
+            {"artifact_id": "wf-failed", "type": "workflow_run", "status": "completed", "conclusion": "failure", "session": s,
+             "title": "Deploy", "provider": "github", "run_id": "904", "run_url": run(904), "workflow_name": "Deploy",
+             "current_step": "Push the image", "total_steps": 5, "completed_steps": 2},
+        ]
     raise KeyError(kind)
 
 

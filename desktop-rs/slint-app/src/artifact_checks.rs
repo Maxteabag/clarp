@@ -1464,10 +1464,63 @@ fn directory_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- workflow_run
+
+fn workflow_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let ids = ["wf-ci", "wf-queued", "wf-done", "wf-failed"];
+    let mut stages = load_chat("art-workflow", &["workflow_run"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("workflow cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let ci = card(window, "wf-ci").expect("ci");
+            check(ci.label == "WORKFLOW RUN" && ci.progress_count == "3/8" && (ci.progress_value - 0.375).abs() < 0.01, &format!("a run's progress: {:?} {}", ci.progress_count, ci.progress_value));
+            check(ci.current.starts_with("Run the headless checks") && ci.action == "Open in GitHub" && ci.repo == "CI · run 901", &format!("its step, workflow and run, and it opens: {:?} {:?} {:?}", ci.current, ci.repo, ci.action));
+            let queued = card(window, "wf-queued").expect("queued");
+            check(queued.progress_value < -1.5 && queued.progress_count.is_empty(), &format!("under way without a count: indeterminate {}", queued.progress_value));
+            let failed = card(window, "wf-failed").expect("failed");
+            check(failed.failed && failed.outcome == "failure", &format!("a failed run is marked: {:?}", failed.outcome));
+            app.focus_transcript();
+            true
+        })),
+        ("workflow keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("workflow first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("wf-ci") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            shot(&out, "artifacts-15-workflow");
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("workflow opens", Box::new(|_, _, elapsed| {
+            let url = "https://github.com/example/clarp/actions/runs/901".to_owned();
+            if !opened().contains(&url) {
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("Enter opens the run on GitHub: {:?}", opened())); true };
+            }
+            check(true, "Enter opens the run on GitHub");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "file", "release", "directory", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "file", "release", "directory", "workflow_run", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1713,6 +1766,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(file_stages(&out));
     stages.extend(release_stages(&out));
     stages.extend(directory_stages(&out));
+    stages.extend(workflow_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
