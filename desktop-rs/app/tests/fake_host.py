@@ -230,6 +230,18 @@ def artifact_fixtures(kind, session, now_ms):
                       "items": [item("Back up", "completed"), item("Wait for the DBA", "blocked")], "completed_count": 1, "total_count": 2}},
             {"artifact_id": "plan-missing", "type": "plan", "status": "active", "session": s, "title": "A plan whose details went missing"},
         ]
+    if kind == "document":
+        spec = ("# Slint client: design notes\n\nThe **transcript** keeps its offset while a reader is up; cards keep their height.\n\n"
+                "## Keyboard\n\nK and J move over the cards on screen. Enter acts on the selected one.\n\n"
+                "- one\n- two\n\n```rust\nfn main() {}\n```")
+        huge = "\n\n".join(f"## Section {i}\n\nParagraph {i} of a long report, with enough words to wrap across the card's width at least once." for i in range(120))
+        return [
+            {"artifact_id": "doc-spec", "type": "document", "status": "ready", "session": s,
+             "title": "Design notes for the Slint desktop client's transcript, cards and keyboard", "content": spec},
+            {"artifact_id": "doc-summary", "type": "document", "status": "draft", "session": s, "title": "Outline only",
+             "summary": "Only a summary so far; the body comes later."},
+            {"artifact_id": "doc-huge", "type": "document", "status": "ready", "session": s, "title": "A very long report", "content": huge},
+        ]
     raise KeyError(kind)
 
 
