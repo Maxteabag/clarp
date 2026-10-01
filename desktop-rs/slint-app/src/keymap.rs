@@ -27,6 +27,10 @@ pub enum Guard {
     Behind,
     /// Some chat in the explorer has sub-agents to fold or unfold.
     Folds,
+    /// The open chat shows artifact cards.
+    Artifacts,
+    /// The keyboard is on an artifact card.
+    Artifact,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +66,7 @@ fn parent(state: &str) -> Option<&'static str> {
 }
 
 fn state(name: &str) -> Vec<Binding> {
-    use Guard::{Agent, Attention, Behind, Busy, Folds, None as Always, Playing, Rows, Send};
+    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, None as Always, Playing, Rows, Send};
     let b = binding;
     match name {
         "main" => vec![
@@ -124,6 +128,12 @@ fn state(name: &str) -> Vec<Binding> {
             b("escape", &["Escape"], "Chat", false, Always, false),
         ],
         "pane" => vec![
+            // The chat's artifact cards: K from the chat is the latest card.
+            b("artifact-previous", &["K"], "Cards", true, Artifacts, false),
+            b("artifact-next", &["J"], "Next card", false, Artifacts, false),
+            b("artifact-open", &["Return"], "Open", true, Artifact, false),
+            b("artifact-choose", &["1", "2", "3", "4", "5", "6", "7", "8", "9"], "Choose", false, Artifact, false),
+            b("artifact-discard", &["Delete"], "Discard", false, Artifact, false),
             b("move-left", &["Alt+Left", "Ctrl+Alt+Left"], "Left pane", false, Always, false),
             b("move-right", &["Alt+Right", "Ctrl+Alt+Right"], "Right pane", false, Always, false),
             b("move-up", &["Alt+Up", "Ctrl+Alt+Up"], "Upper pane", false, Always, false),
@@ -200,6 +210,8 @@ pub struct Facts {
     pub playing: bool,
     pub behind: bool,
     pub folds: bool,
+    pub artifacts: bool,
+    pub artifact: bool,
 }
 
 impl Facts {
@@ -214,6 +226,8 @@ impl Facts {
             Guard::Playing => self.playing,
             Guard::Behind => self.behind,
             Guard::Folds => self.folds,
+            Guard::Artifacts => self.artifacts,
+            Guard::Artifact => self.artifact,
         }
     }
 }
@@ -374,7 +388,7 @@ mod tests {
     use super::*;
 
     fn all() -> Facts {
-        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true }
+        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true }
     }
 
     #[test]

@@ -187,14 +187,17 @@ pub fn open_report(app: &App, window: &AppWindow, artifact_id: &str) {
 /// The report's title, summary and body (Markdown blocks) for the viewer.
 fn show_report(app: &App, window: &AppWindow) {
     let id = REPORT.with(|r| r.borrow().clone());
-    let report = app.engine.borrow().report_for_artifact(&id).unwrap_or_default();
+    // What a card stands for (a plan, research with its sources...),
+    // else the artifact's report body.
+    let report = crate::artifacts_view::detail(app, &id).or_else(|| app.engine.borrow().report_for_artifact(&id)).unwrap_or_default();
     let html = json::boolean(&report, "isHtml");
     let body = text(&report, "body");
-    let markdown = if html { html_markdown(&body) } else { body };
+    let markdown = if html && !json::boolean(&report, "converted") { html_markdown(&body) } else { body };
     let blocks: Vec<MessageBlock> = clarp_engine::blocks::blocks(&markdown).iter().map(|b| crate::view::message_block(b, false)).collect();
     window.set_report_title(text(&report, "title").into());
     window.set_report_summary(text(&report, "summary").into());
     window.set_report_html(html);
+    window.set_report_kind(text(&report, "kind").into());
     window.set_report_blocks(model(blocks));
 }
 

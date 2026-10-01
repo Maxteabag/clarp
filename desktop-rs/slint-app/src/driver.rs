@@ -19,6 +19,9 @@ mod profile_checks;
 // ---- the chat's scrolling
 #[path = "scroll_checks.rs"]
 mod scroll_checks;
+// ---- artifacts in the chat
+#[path = "artifact_checks.rs"]
+mod artifact_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -333,6 +336,7 @@ pub fn start_check(name: &str, out: String) {
         "profile" => profile_checks::profile_check(out),
         "overview" => profile_checks::overview_check(out),
         "extras" => profile_checks::extras_check(out),
+        "artifacts" => artifact_checks::artifacts_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();

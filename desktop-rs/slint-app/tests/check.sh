@@ -4,6 +4,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
+# Every artifact type and its interactions run in one long check.
+case $name in artifacts) limit=300 ;; *) limit=120 ;; esac
+# The null sink "plays" a clip this long, so a check can pause it.
+case $name in artifacts) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; esac
 scratch=$(mktemp -d /var/tmp/clarp-slint-check.XXXXXX)
 trap 'kill "$host" 2>/dev/null; wait "$host" 2>/dev/null; rm -rf "$scratch"' EXIT
 cp slint-app/docs/screens/markdown-paper.png "$scratch/photo.png"
@@ -25,6 +29,6 @@ env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0
     CLARP_TEST_ATTACH_FILE="$scratch/photo.png" CLARP_TEST_NOTIFY_LOG="$scratch/notifications" \
     CLARP_TEST_FOREGROUND=1 CLARP_TEST_CLIPBOARD="$scratch/clipboard" \
     CLARP_TEST_TERMINAL_LOG="$scratch/terminal.jsonl" PATH="$scratch/bin:$PATH" \
-    timeout 120 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
+    timeout "$limit" dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
     target/debug/clarp-slint --check "$name" --out "$out" 2>&1 | tee "$scratch/run.log" | grep -E "^(ok|FAIL|E2E)|panicked"
 grep -q "^E2E_PASS" "$scratch/run.log"

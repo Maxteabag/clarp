@@ -24,6 +24,8 @@ mod updates_view;
 mod agent_dialogs_view;
 mod launch_view;
 // ---- profile and overview
+mod artifacts_view;
+mod form_server;
 mod cells_view;
 mod orchestrator_view;
 mod overview_view;
@@ -69,6 +71,15 @@ pub struct App {
     pub overlay: RefCell<String>,
     /// An agent the launch asked for, until the window starts it.
     pub launch: RefCell<Option<launch::Request>>,
+    /// The artifact card the keyboard is on (J/K in the chat), "" for none.
+    pub artifact_cursor: RefCell<String>,
+    /// The answer chosen on each decision or question card (1-9).
+    pub artifact_choices: RefCell<std::collections::HashMap<String, i32>>,
+    /// Answers of one's own as typed, and the card whose field is open.
+    pub artifact_drafts: RefCell<std::collections::HashMap<String, String>>,
+    pub artifact_editing: RefCell<String>,
+    /// Decision cards this window has shown pending.
+    pub artifact_seen_pending: RefCell<std::collections::HashSet<String>>,
 }
 
 /// View preferences the window keeps (the Qt controller's names).
@@ -418,6 +429,7 @@ pub fn audio_notices(notices: Vec<platform::audio::Notice>) {
             }
             Notice::Changed => {
                 app.voice_state();
+                artifacts_view::media_changed(&app);
                 platform::publish_playback();
             }
         }
@@ -509,6 +521,11 @@ fn main() {
         switcher: RefCell::new(SwitcherState::default()),
         overlay: RefCell::new(String::new()),
         launch: RefCell::new(None),
+        artifact_cursor: RefCell::new(String::new()),
+        artifact_choices: RefCell::default(),
+        artifact_drafts: RefCell::default(),
+        artifact_editing: RefCell::default(),
+        artifact_seen_pending: RefCell::default(),
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
@@ -758,6 +775,7 @@ fn main() {
     window.on_show_processes(|session, x, y| with_window(|app, window| updates_view::open_processes(app, window, &session, x, y)));
     window.on_process_helper_opened(|session| with_window(|app, window| updates_view::open_helper(app, window, &session)));
     window.on_team_action(|action, argument| with_window(|app, window| teams_view::action(app, window, &action, &argument)));
+    artifacts_view::bind(&window);
     window.on_team_created(|name| with_window(|app, window| teams_view::created(app, window, &name)));
     window.on_team_saved(|name, colour, leader| with_window(|app, window| teams_view::saved(app, window, &name, &colour, leader)));
     window.on_team_member_added(|index| with_window(|app, window| teams_view::member_added(app, window, index)));

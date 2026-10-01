@@ -1,0 +1,1275 @@
+//! Artifact cards in the chat (iOS `ArtifactCard`): each type's inline
+//! fields, the clock countdowns tick on, and what the cards' actions do.
+
+use std::sync::OnceLock;
+use std::time::Duration;
+
+use serde_json::Value;
+use slint::ComponentHandle;
+
+use clarp_engine::{Change, Engine};
+use slint::Model;
+
+use crate::{App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption};
+
+fn text(value: &Value, key: &str) -> String {
+    match value.get(key) {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Number(number)) => number.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn number(value: &Value, key: &str) -> i64 {
+    value.get(key).and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0)
+}
+
+/// The epoch second `ArtifactBridge.now` counts from: the cards' clock is
+/// small integers, which Slint holds exactly.
+fn epoch() -> i64 {
+    static START: OnceLock<i64> = OnceLock::new();
+    *START.get_or_init(|| chrono::Utc::now().timestamp())
+}
+
+/// Seconds on the cards' clock now.
+pub fn clock_now() -> i32 {
+    (chrono::Utc::now().timestamp() - epoch()) as i32
+}
+
+/// iOS `CountdownDisplay`: before the target the time remaining, for a
+/// minute after it "Now", then the time since.
+pub fn countdown(target: i64, now: i64) -> (&'static str, String) {
+    let delta = target - now;
+    let clock = |seconds: i64| {
+        let (days, rest) = (seconds / 86_400, seconds % 86_400);
+        let hms = format!("{:02}:{:02}:{:02}", rest / 3600, rest % 3600 / 60, rest % 60);
+        if days > 0 { format!("{days}d {hms}") } else { hms }
+    };
+    if delta > 0 {
+        ("Remaining", clock(delta))
+    } else if delta > -60 {
+        ("Target reached", "Now".to_owned())
+    } else {
+        ("Since target", clock(-delta))
+    }
+}
+
+/// The status worth a badge (iOS shows draft, failed, cancelled, expired).
+fn badge(status: &str) -> String {
+    match status {
+        "draft" | "failed" | "cancelled" | "expired" => {
+            let mut chars = status.chars();
+            chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+        }
+        _ => String::new(),
+    }
+}
+
+/// The card's fields for one artifact (the Host's flat-v1 shape).
+pub fn artifact_item(artifact: &Value) -> ArtifactItem {
+    let kind = if text(artifact, "type").is_empty() { "item".to_owned() } else { text(artifact, "type") };
+    let status = text(artifact, "status");
+    let outcome = [text(artifact, "conclusion"), status.clone()].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| "unknown".into());
+    let failed = matches!(outcome.as_str(), "failed" | "failure" | "timed_out" | "action_required");
+    let plan = artifact.get("plan").cloned().unwrap_or(Value::Null);
+    let (total, completed) = if kind == "plan" {
+        (number(&plan, "total_count"), number(&plan, "completed_count"))
+    } else {
+        (number(artifact, "total_steps"), number(artifact, "completed_steps"))
+    };
+    let progress = if !matches!(kind.as_str(), "plan" | "workflow_run") {
+        String::new()
+    } else if total > 0 {
+        format!("{} / {} completed", completed.max(0), total)
+    } else if outcome == "active" {
+        "In progress".into()
+    } else {
+        String::new()
+    };
+    // iOS names only a file card for its file.
+    let named = if kind == "file" { text(artifact, "file_name") } else { String::new() };
+    let title = [named, text(artifact, "title"), text(artifact, "file_name")].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| "Artifact".into());
+    let mut item = ArtifactItem {
+        id: text(artifact, "artifact_id").into(),
+        label: kind.replace('_', " ").to_uppercase().into(),
+        kind: kind.clone().into(),
+        outcome: outcome.into(),
+        failed,
+        badge: badge(&status).into(),
+        title: title.into(),
+        summary: text(artifact, "summary").into(),
+        progress: progress.into(),
+        form: kind == "html_form",
+        ..ArtifactItem::default()
+    };
+    match kind.as_str() {
+        "countdown" => {
+            countdown_fields(&mut item, artifact, &status);
+            set_note(&mut item, &text(artifact, "content"));
+        }
+        "decision" | "question" => decision_fields(&mut item, artifact),
+        "plan" => plan_fields(&mut item, artifact),
+        "directory" => {
+            // iOS: the relative path; it opens in the file manager.
+            let relative = text(artifact, "relative_path");
+            item.repo = relative.clone().into();
+            if relative_ok(&relative) && matches!(text(artifact, "root").as_str(), "workspace" | "home") {
+                item.action = "Open folder".into();
+            } else {
+                item.file_info = "Folder unavailable".into();
+            }
+        }
+        "workflow_run" => {
+            // iOS: the step under way and completed/total, a bar when it
+            // counts, an indeterminate one while active.
+            let (total, done) = (number(artifact, "total_steps"), number(artifact, "completed_steps"));
+            item.label = "WORKFLOW RUN".into();
+            item.current = text(artifact, "current_step").into();
+            item.repo = [text(artifact, "workflow_name"), format!("run {}", text(artifact, "run_id"))].into_iter().filter(|p| !p.is_empty() && p != "run ").collect::<Vec<_>>().join(" · ").into();
+            if total > 0 {
+                item.progress_value = done.clamp(0, total) as f32 / total as f32;
+                item.progress_count = format!("{done}/{total}").into();
+            } else if status == "active" {
+                item.progress_value = -2.0;
+            } else {
+                item.progress_value = -1.0;
+            }
+            if text(artifact, "run_url").starts_with("https://github.com/") {
+                item.action = "Open in GitHub".into();
+            }
+        }
+        "release" => {
+            // iOS's operation body: version ?? commit ?? "Unknown revision".
+            item.revision = [text(artifact, "version"), text(artifact, "commit")].into_iter().find(|r| !r.is_empty()).unwrap_or_else(|| "Unknown revision".into()).into();
+            item.release_state = match status.as_str() {
+                "ready" | "completed" => "ready",
+                "failed" => "failed",
+                "active" => "active",
+                _ => "other",
+            }
+            .into();
+            item.action = "Open release".into();
+        }
+        "file" => {
+            // iOS's detail: the kind (from the type or the name) and size.
+            let name = text(artifact, "file_name");
+            let mime = text(artifact, "mime_type");
+            let ext = std::path::Path::new(&name).extension().map(|e| e.to_string_lossy().to_uppercase()).unwrap_or_default();
+            let sub = mime.rsplit('/').next().unwrap_or_default().to_uppercase();
+            let kind = if !ext.is_empty() && ext.len() <= 5 { ext } else if !sub.is_empty() { sub } else { "File".into() };
+            let size = number(artifact, "size_bytes");
+            let size = if size >= 1 << 20 {
+                format!("{:.1} MB", size as f64 / f64::from(1 << 20))
+            } else if size > 0 {
+                format!("{:.1} KB", size as f64 / 1024.0)
+            } else {
+                String::new()
+            };
+            let info = [kind, size].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ");
+            if host_path(&text(artifact, "url")).is_some() {
+                item.file_info = info.into();
+                item.action = "Open file".into();
+            } else {
+                item.file_info = format!("File unavailable · {info}").into();
+            }
+        }
+        "video" => {
+            let length = number(artifact, "duration_ms") / 1000;
+            if length > 0 {
+                item.media_length = format!("{}:{:02}", length / 60, length % 60).into();
+            }
+            if host_path(&text(artifact, "url")).is_some() {
+                item.action = "Play video".into();
+            } else {
+                item.media_text = "Video unavailable".into();
+            }
+        }
+        "audio" => {
+            item.media_state = "idle".into();
+            item.media_started = -1;
+            let length = number(artifact, "duration_ms") / 1000;
+            if length > 0 {
+                item.media_length = format!("{}:{:02}", length / 60, length % 60).into();
+                item.media_seconds = length as i32;
+            }
+            if host_path(&text(artifact, "url")).is_some() {
+                item.action = "Play".into();
+            } else {
+                item.media_text = "Audio unavailable".into();
+            }
+        }
+        "data" => data_fields(&mut item, artifact),
+        "code_change" => {
+            // iOS: the repository (or "Repository"), the branch, the files
+            // and lines changed.
+            let repository = text(artifact, "repository");
+            let branch = text(artifact, "branch");
+            let repo = if repository.is_empty() { "Repository".to_owned() } else { repository };
+            item.repo = if branch.is_empty() { repo } else { format!("{repo} · {branch}") }.into();
+            if artifact.get("files_changed").is_some() {
+                let files = number(artifact, "files_changed");
+                item.files = format!("{files} file{}", if files == 1 { "" } else { "s" }).into();
+            }
+            if artifact.get("additions").is_some() {
+                item.additions = format!("+{}", number(artifact, "additions")).into();
+            }
+            if artifact.get("deletions").is_some() {
+                item.deletions = format!("−{}", number(artifact, "deletions")).into();
+            }
+            if !text(artifact, "diff").is_empty() || text(artifact, "source_url").starts_with("https://") {
+                item.action = "Open change".into();
+            }
+        }
+        "document" | "research" => {
+            let content = text(artifact, "content");
+            if !content.trim().is_empty() {
+                // HTML reads as its text, Markdown without its marks.
+                let markdown = if clarp_core::text::looks_like_html_report(&content) { crate::updates_view::html_markdown(&content) } else { content };
+                item.preview = preview_text(&markdown).chars().take(600).collect::<String>().into();
+                item.action = if kind == "document" { "Open document" } else { "Open research" }.into();
+            }
+            let sources = https_sources(artifact).len();
+            if sources > 0 {
+                item.sources = format!("{sources} source{}", if sources == 1 { "" } else { "s" }).into();
+            }
+        }
+        "html_form" => {
+            let report = is_report(artifact);
+            item.label = if report { "REPORT" } else { "FORM" }.into();
+            item.action = if report { "Open report" } else { "Open form" }.into();
+            item.form = false;
+        }
+        _ => {}
+    }
+    item
+}
+
+/// The Markdown body the card shows under its summary.
+fn set_note(item: &mut ArtifactItem, markdown: &str) {
+    let markdown = markdown.trim();
+    item.note = markdown.into();
+    item.note_styled = crate::view::styled(markdown, false);
+}
+
+/// What the window holds for the cards beyond the artifacts: the card the
+/// keyboard is on and the answers chosen on cards.
+pub struct CardState<'a> {
+    pub cursor: &'a str,
+    pub choices: &'a std::collections::HashMap<String, i32>,
+    /// Answers of one's own as typed, and the card whose field is open.
+    pub drafts: &'a std::collections::HashMap<String, String>,
+    pub editing: &'a str,
+    /// Decisions this window has shown pending.
+    pub seen_pending: &'a std::collections::HashSet<String>,
+}
+
+thread_local! {
+    /// Posters fetched for video cards, by artifact.
+    static POSTERS: std::cell::RefCell<std::collections::HashMap<String, slint::Image>> = std::cell::RefCell::default();
+    /// Fetches in flight: (artifact, purpose), and for "open" the file name.
+    static FETCHING: std::cell::RefCell<std::collections::HashMap<(String, String), String>> = std::cell::RefCell::default();
+}
+
+/// Before a chat's cards are drawn: asks for posters not yet fetched, and
+/// takes what has arrived (posters decoded, files saved and opened).
+pub fn settle_downloads(app: &App, session: &str) {
+    let artifacts = app.engine.borrow().artifacts_for_session(session);
+    for artifact in &artifacts {
+        let id = text(artifact, "artifact_id");
+        let poster = text(artifact, "thumbnail_url");
+        let key = (id.clone(), "poster".to_owned());
+        let wanted = POSTERS.with(|p| !p.borrow().contains_key(&id)) && !FETCHING.with(|f| f.borrow().contains_key(&key));
+        if text(artifact, "type") == "video" && host_path(&poster).is_some() && wanted {
+            FETCHING.with(|f| f.borrow_mut().insert(key, String::new()));
+            app.engine.borrow_mut().fetch_artifact_bytes(&id, "poster", &poster);
+        }
+    }
+    let pending: Vec<((String, String), String)> = FETCHING.with(|f| f.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+    for ((id, purpose), name) in pending {
+        let Some(result) = app.engine.borrow_mut().take_artifact_bytes(&id, &purpose) else { continue };
+        FETCHING.with(|f| f.borrow_mut().remove(&(id.clone(), purpose.clone())));
+        match (purpose.as_str(), result) {
+            ("image", Ok(bytes)) => {
+                let picture = match image::load_from_memory(&bytes) {
+                    Ok(decoded) => {
+                        let rgba = decoded.to_rgba8();
+                        Picture::Loaded(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height())))
+                    }
+                    Err(error) => {
+                        eprintln!("clarp-slint: {id} is not an image: {error}");
+                        Picture::Failed
+                    }
+                };
+                PICTURES.with(|p| p.borrow_mut().insert(id.clone(), picture));
+                PICTURES_LANDED.with(|l| l.set(l.get() + 1));
+            }
+            ("image", Err(error)) => {
+                eprintln!("clarp-slint: no image at {id}: {error}");
+                PICTURES.with(|p| p.borrow_mut().insert(id.clone(), Picture::Failed));
+                PICTURES_LANDED.with(|l| l.set(l.get() + 1));
+            }
+            ("poster", Ok(bytes)) => match image::load_from_memory(&bytes) {
+                Ok(decoded) => {
+                    let rgba = decoded.to_rgba8();
+                    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
+                    POSTERS.with(|p| p.borrow_mut().insert(id, slint::Image::from_rgba8(buffer)));
+                }
+                Err(error) => eprintln!("clarp-slint: the poster for {id} is not an image: {error}"),
+            },
+            ("poster", Err(error)) => eprintln!("clarp-slint: no poster for {id}: {error}"),
+            (_, Ok(bytes)) => {
+                let said = match save_and_open(&id, &name, &bytes) {
+                    Ok(()) => if purpose == "video" { "Opened in your video player" } else { "Opened" }.to_owned(),
+                    Err(error) => format!("Couldn't open it: {error}"),
+                };
+                app.engine.borrow_mut().set_artifact_status(&id, &said);
+            }
+            (_, Err(error)) => app.engine.borrow_mut().set_artifact_status(&id, &format!("Couldn't download it: {error}")),
+        }
+    }
+}
+
+/// Saves a downloaded artifact under the cache (its own folder, its file's
+/// own name) and opens it with the desktop's app for it; checks record it
+/// to `CLARP_TEST_OPEN_URL` instead.
+fn save_and_open(id: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+    let root = clarp_core::media::cache_dir().ok_or("no cache folder")?;
+    let safe = |s: &str| s.chars().map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') { c } else { '_' }).collect::<String>();
+    let file = std::path::Path::new(name).file_name().map(|n| safe(&n.to_string_lossy())).filter(|n| !n.is_empty() && n != "." && n != "..").unwrap_or_else(|| "artifact".into());
+    let folder = root.join("artifacts").join(safe(id));
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let path = folder.join(file);
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    if let Some(record) = std::env::var_os("CLARP_TEST_OPEN_URL") {
+        use std::io::Write;
+        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(record).map_err(|e| e.to_string())?;
+        return writeln!(log, "file://{}", path.display()).map_err(|e| e.to_string());
+    }
+    std::process::Command::new("xdg-open").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Downloads an artifact's file from the Host to open it.
+fn download(app: &App, artifact: &Value, purpose: &str) {
+    let id = text(artifact, "artifact_id");
+    let url = text(artifact, "url");
+    let Some(path) = host_path(&url) else {
+        eprintln!("clarp-slint: not downloading {url}: only the Host's media is fetched");
+        return;
+    };
+    let key = (id.clone(), purpose.to_owned());
+    if FETCHING.with(|f| f.borrow().contains_key(&key)) {
+        return;
+    }
+    let name = [text(artifact, "file_name"), text(artifact, "title")].into_iter().find(|n| !n.is_empty()).unwrap_or_default();
+    FETCHING.with(|f| f.borrow_mut().insert(key, name));
+    app.engine.borrow_mut().set_artifact_status(&id, "Downloading…");
+    app.engine.borrow_mut().fetch_artifact_bytes(&id, purpose, path);
+}
+
+/// A directory's path stays under its root: relative, no "..".
+fn relative_ok(path: &str) -> bool {
+    !path.is_empty() && !path.starts_with('/') && !path.starts_with('~') && std::path::Path::new(path).components().all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Opens a directory artifact's folder in the file manager when this
+/// desktop shares the Host's files (iOS opens its own file explorer at
+/// "@root/path"); else the card says where it is on the Host.
+fn open_directory(app: &App, artifact: &Value) {
+    let id = text(artifact, "artifact_id");
+    let relative = text(artifact, "relative_path");
+    if !relative_ok(&relative) {
+        return;
+    }
+    let session = text(artifact, "session");
+    let base = match text(artifact, "root").as_str() {
+        "home" => std::env::var_os("HOME").map(std::path::PathBuf::from),
+        _ => app.engine.borrow().roster().find(&session).map(|a| std::path::PathBuf::from(&a.working_directory)).filter(|p| !p.as_os_str().is_empty()),
+    };
+    let shared = app.engine.borrow().shared_filesystem();
+    // Resolved, it must still be under its root: a link inside the folder
+    // does not lead out of it.
+    let root = base.as_ref().and_then(|b| std::fs::canonicalize(b).ok());
+    let local = base
+        .as_ref()
+        .map(|b| b.join(&relative))
+        .filter(|_| shared)
+        .and_then(|p| std::fs::canonicalize(p).ok())
+        .filter(|p| p.is_dir() && root.as_ref().is_some_and(|r| p.starts_with(r)));
+    let Some(folder) = local else {
+        let root = if text(artifact, "root") == "home" { "~" } else { "the agent's folder" };
+        app.engine.borrow_mut().set_artifact_status(&id, &format!("On the Host: {root}/{relative}"));
+        return;
+    };
+    match url::Url::from_file_path(&folder) {
+        Ok(url) => {
+            crate::profile_view::open_file_url(url.as_str());
+            app.engine.borrow_mut().set_artifact_status(&id, "");
+        }
+        Err(()) => eprintln!("clarp-slint: cannot open {}", folder.display()),
+    }
+}
+
+// ---- images in messages
+
+/// How a message's image is going, by its Host path.
+#[derive(Clone)]
+enum Picture {
+    Loading,
+    Loaded(slint::Image),
+    Failed,
+}
+
+thread_local! {
+    static PICTURES: std::cell::RefCell<std::collections::HashMap<String, Picture>> = std::cell::RefCell::default();
+    /// Bumped whenever a picture lands, so rows with images are drawn again.
+    static PICTURES_LANDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// iOS `mediaRequest`: clarp-media://asset/<id> and /media/... (or
+/// media/...) are the Host's; anything else is not fetched.
+fn media_path(reference: &str) -> Option<String> {
+    if let Some(asset) = reference.strip_prefix("clarp-media://asset/") {
+        let ok = !asset.is_empty() && asset.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
+        return ok.then(|| format!("/media/{asset}"));
+    }
+    if reference.starts_with("/media/") {
+        return Some(reference.to_owned());
+    }
+    reference.starts_with("media/").then(|| format!("/{reference}"))
+}
+
+/// The `![alt](url)` references a paragraph consists of, or None when it
+/// holds anything else.
+fn image_lines(paragraph: &str) -> Option<Vec<(String, String)>> {
+    let mut found = Vec::new();
+    for line in paragraph.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let rest = line.strip_prefix("![")?;
+        let (alt, rest) = rest.split_once("](")?;
+        let url = rest.strip_suffix(')')?;
+        if url.contains(char::is_whitespace) {
+            return None;
+        }
+        found.push((alt.to_owned(), url.to_owned()));
+    }
+    (!found.is_empty()).then_some(found)
+}
+
+/// A message's image (fetched once from the Host, with the app's token).
+fn message_image(alt: &str, reference: &str) -> crate::MessageImage {
+    let mut image = crate::MessageImage { url: reference.into(), alt: alt.into(), ..crate::MessageImage::default() };
+    let Some(path) = media_path(reference) else {
+        image.failed = true;
+        image.foreign = true;
+        return image;
+    };
+    let state = PICTURES.with(|p| p.borrow().get(&path).cloned());
+    match state {
+        Some(Picture::Loaded(picture)) => {
+            image.image = picture;
+            image.loaded = true;
+        }
+        Some(Picture::Failed) => image.failed = true,
+        Some(Picture::Loading) => {}
+        None => {
+            PICTURES.with(|p| p.borrow_mut().insert(path.clone(), Picture::Loading));
+            FETCHING.with(|f| f.borrow_mut().insert((path.clone(), "image".into()), String::new()));
+            if let Some(app) = crate::app() {
+                app.engine.borrow_mut().fetch_artifact_bytes(&path, "image", &path);
+            }
+        }
+    }
+    image
+}
+
+fn images_block(images: Vec<crate::MessageImage>, gallery: bool) -> crate::MessageBlock {
+    crate::MessageBlock { kind: "images".into(), images: slint::ModelRc::new(slint::VecModel::from(images)), gallery, ..crate::MessageBlock::default() }
+}
+
+/// A message block as the transcript draws it: a paragraph of image
+/// references becomes an image (a single one) or a gallery, and a
+/// clarp-gallery fence a gallery (iOS's MarkdownParser).
+pub fn with_images(block: &clarp_engine::blocks::Block, literal: bool) -> Vec<crate::MessageBlock> {
+    use clarp_engine::blocks::Block;
+    match block {
+        Block::Code { language, text } if !literal && matches!(language.as_str(), "clarp-gallery" | "gallery") => {
+            match image_lines(text) {
+                Some(found) => vec![images_block(found.iter().map(|(a, u)| message_image(a, u)).collect(), true)],
+                None => vec![crate::view::message_block(block, literal)],
+            }
+        }
+        Block::Prose(markdown) if !literal && markdown.contains("![") => {
+            let mut out = Vec::new();
+            let mut prose: Vec<&str> = Vec::new();
+            for paragraph in markdown.split("\n\n") {
+                match image_lines(paragraph) {
+                    Some(found) => {
+                        if !prose.is_empty() {
+                            out.push(crate::view::message_block(&Block::Prose(prose.join("\n\n")), literal));
+                            prose.clear();
+                        }
+                        let gallery = found.len() > 1;
+                        out.push(images_block(found.iter().map(|(a, u)| message_image(a, u)).collect(), gallery));
+                    }
+                    None => prose.push(paragraph),
+                }
+            }
+            if !prose.is_empty() {
+                out.push(crate::view::message_block(&Block::Prose(prose.join("\n\n")), literal));
+            }
+            out
+        }
+        _ => vec![crate::view::message_block(block, literal)],
+    }
+}
+
+/// What a row's images add to its signature (they redraw when one lands).
+pub fn pictures_landed() -> u64 {
+    PICTURES_LANDED.with(std::cell::Cell::get)
+}
+
+/// A Host-relative media path (`/media/<asset>`); iOS also plays https
+/// links, but the app only fetches from its Host, with its token.
+fn host_path(url: &str) -> Option<&str> {
+    (url.starts_with('/') && !url.starts_with("//")).then_some(url)
+}
+
+/// The card's playback as the audio has it.
+fn media_fields(item: &mut ArtifactItem) {
+    let Some(media) = crate::platform::audio::with(|audio| audio.media().cloned()).flatten() else { return };
+    if media.artifact != item.id.as_str() {
+        return;
+    }
+    use crate::platform::audio::MediaState;
+    let (state, said, action) = match &media.state {
+        MediaState::Preparing => ("preparing", "Preparing audio…".to_owned(), "Play"),
+        MediaState::Playing => ("playing", "Playing".to_owned(), "Pause"),
+        MediaState::Paused => ("paused", "Paused".to_owned(), "Play"),
+        MediaState::Failed(why) => ("failed", why.clone(), "Play"),
+    };
+    item.media_state = state.into();
+    item.media_text = said.into();
+    item.action = action.into();
+    item.media_played = media.played.as_secs() as i32;
+    // The clock's second this stretch began.
+    item.media_started = match media.since {
+        Some(since) => clock_now() - since.elapsed().as_secs() as i32,
+        None => -1,
+    };
+}
+
+/// What the cards last showed of playback, to redraw them when it moves.
+fn media_snapshot() -> String {
+    crate::platform::audio::with(|audio| audio.media().map(|m| format!("{}{:?}{}", m.artifact, m.state, m.played.as_millis()))).flatten().unwrap_or_default()
+}
+
+thread_local! {
+    static MEDIA_SHOWN: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// The audio changed: the cards follow when their playback did.
+pub fn media_changed(app: &App) {
+    let now = media_snapshot();
+    if MEDIA_SHOWN.with(|m| *m.borrow() != now) {
+        MEDIA_SHOWN.with(|m| *m.borrow_mut() = now);
+        app.refresh(&[Change::Updates]);
+    }
+}
+
+/// A card as the chat shows it: its fields, whether the keyboard is on it,
+/// what it chose and how its latest action went.
+pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactItem {
+    let mut item = artifact_item(artifact);
+    item.selected = !state.cursor.is_empty() && item.id == state.cursor;
+    item.status_text = engine.artifact_status(&item.id).into();
+    if item.kind == "audio" && !item.action.is_empty() {
+        media_fields(&mut item);
+    }
+    if let Some(poster) = POSTERS.with(|p| p.borrow().get(item.id.as_str()).cloned()) {
+        item.poster = poster;
+        item.has_poster = true;
+    }
+    if item.pending {
+        let choices = item.options.row_count() + usize::from(item.allow_custom);
+        item.chosen = state.choices.get(item.id.as_str()).copied().filter(|c| (*c as usize) < choices).unwrap_or(-1);
+        item.draft = state.drafts.get(item.id.as_str()).cloned().unwrap_or_default().into();
+        item.editing = item.allow_custom && state.editing == item.id.as_str();
+    }
+    // Answered in this window, it keeps the line it had, so its height.
+    item.keep_line = (item.pending && !item.meta.is_empty()) || !item.delivery.is_empty() || state.seen_pending.contains(item.id.as_str());
+    item
+}
+
+/// Brings a reply's card model to `cards`, in place when the same cards
+/// are there (only the ones that changed are set).
+pub fn update_cards(model: &slint::VecModel<ArtifactItem>, cards: Vec<ArtifactItem>) {
+    let same = model.row_count() == cards.len() && cards.iter().enumerate().all(|(i, c)| model.row_data(i).is_some_and(|m| m.id == c.id));
+    if !same {
+        model.set_vec(cards);
+        return;
+    }
+    for (index, card) in cards.into_iter().enumerate() {
+        if model.row_data(index).as_ref() != Some(&card) {
+            model.set_row_data(index, card);
+        }
+    }
+}
+
+/// iOS `DecisionResponseView`: while pending the question, why and how
+/// urgent, and its answers; once answered, how and with what.
+fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
+    let Some(decision) = artifact.get("decision").filter(|d| d.is_object()) else { return };
+    let status = text(decision, "status");
+    item.question = text(decision, "question").into();
+    item.context = text(decision, "context").into();
+    let response = text(decision, "response_type");
+    item.approval = response.is_empty() || response == "approval";
+    let options: Vec<ArtifactOption> = if item.approval {
+        let label = |key: &str, fallback: &str| Some(text(decision, key)).filter(|l| !l.is_empty()).unwrap_or_else(|| fallback.to_owned());
+        vec![
+            ArtifactOption { id: "yes".into(), label: label("yes_label", "Yes").into(), ..ArtifactOption::default() },
+            ArtifactOption { id: "no".into(), label: label("no_label", "No").into(), ..ArtifactOption::default() },
+        ]
+    } else {
+        let recommended = text(decision, "recommended_option_id");
+        decision
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|options| {
+                options
+                    .iter()
+                    .map(|o| {
+                        let (id, label) = (text(o, "id"), text(o, "label"));
+                        let recommended = !recommended.is_empty() && id == recommended && !label.to_lowercase().contains("recommended");
+                        ArtifactOption { id: id.into(), label: label.into(), detail: text(o, "description").into(), recommended }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    item.pending = status == "pending";
+    item.chosen = -1;
+    item.allow_custom = !item.approval && decision.get("allow_custom_text").and_then(Value::as_bool) == Some(true);
+    // A question keeps its options once answered, the answer marked, so
+    // its card keeps its height.
+    if response == "single_choice" {
+        item.options = slint::ModelRc::new(slint::VecModel::from(options.clone()));
+    }
+    if item.pending {
+        let mut meta = Vec::new();
+        if !text(decision, "priority_reason").is_empty() {
+            meta.push(text(decision, "priority_reason"));
+        }
+        match text(decision, "response_effort").as_str() {
+            "quick" | "" => {}
+            "short" => meta.push("About a minute".into()),
+            _ => meta.push("Needs a closer look".into()),
+        }
+        let deadline = chrono::DateTime::parse_from_rfc3339(&text(decision, "deadline_at"));
+        if let Ok(deadline) = deadline {
+            meta.insert(0, format!("Due {}", deadline.with_timezone(&chrono::Local).format("%b %-d at %H:%M")));
+        } else if text(decision, "urgency") == "time_sensitive" {
+            meta.push("Time sensitive".into());
+        }
+        if !item.approval && response != "single_choice" {
+            meta.push("Update Clarp to answer this kind of question".into());
+        }
+        item.meta = meta.join(" · ").into();
+        if item.approval {
+            item.options = slint::ModelRc::new(slint::VecModel::from(options));
+        }
+        return;
+    }
+    let (resolved, ok) = match status.as_str() {
+        "answered" => ("Answer saved", true),
+        "accepted" => ("Approved", true),
+        "rejected" => ("Declined", false),
+        "cancelled" => ("Discarded", false),
+        "expired" => ("Expired", false),
+        _ => ("", false),
+    };
+    item.resolved = resolved.into();
+    item.resolved_ok = ok;
+    let answer = decision.get("answer").cloned().unwrap_or(Value::Null);
+    let chosen = text(&answer, "option_id");
+    item.answer = [text(&answer, "text"), text(&answer, "label")]
+        .into_iter()
+        .find(|t| !t.is_empty())
+        .or_else(|| options.iter().find(|o| !chosen.is_empty() && o.id == chosen.as_str()).map(|o| o.label.to_string()))
+        .unwrap_or_default()
+        .into();
+    if !text(&answer, "text").is_empty() {
+        item.chosen = options.len() as i32;
+        item.draft = text(&answer, "text").into();
+    } else if let Some(index) = options.iter().position(|o| !chosen.is_empty() && o.id == chosen.as_str()) {
+        item.chosen = index as i32;
+    }
+    if decision.get("delivery_pending").and_then(Value::as_bool) == Some(true) {
+        item.delivery = "Saved. Waiting to deliver to the agent.".into();
+    }
+}
+
+/// 1-9 on a card: the answer the keyboard chose.
+pub fn choose(app: &App, id: &str, index: i32) {
+    let Some(card) = card_item(app, id).filter(|c| c.pending) else { return };
+    let options = card.options.row_count();
+    if index < 0 || index as usize > options || (index as usize == options && !card.allow_custom) {
+        return;
+    }
+    app.artifact_choices.borrow_mut().insert(id.to_owned(), index);
+    // The last number is an answer of one's own: its field takes the keyboard.
+    *app.artifact_editing.borrow_mut() = if index as usize == options { id.to_owned() } else { String::new() };
+    *app.artifact_cursor.borrow_mut() = id.to_owned();
+    app.refresh(&[Change::Updates]);
+}
+
+/// The card as the open chat shows it.
+fn card_item(app: &App, id: &str) -> Option<ArtifactItem> {
+    app.active_messages()?.iter().flat_map(|row| row.artifacts.iter().collect::<Vec<_>>()).find(|a| a.id == id)
+}
+
+/// Sends a decision's chosen answer.
+pub fn send(app: &App, id: &str) {
+    let Some(artifact) = artifact(app, id) else { return };
+    let Some(card) = card_item(app, id).filter(|c| c.pending) else { return };
+    let decision = artifact.get("decision").cloned().unwrap_or(Value::Null);
+    let own = card.allow_custom && card.chosen == card.options.row_count() as i32;
+    if own {
+        // iOS caps an answer of one's own at 4,000 characters.
+        let written: String = app.artifact_drafts.borrow().get(id).map(|d| d.trim().chars().take(4000).collect()).unwrap_or_default();
+        if written.is_empty() {
+            app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first: write one");
+            app.refresh(&[Change::Updates]);
+            return;
+        }
+        app.artifact_editing.borrow_mut().clear();
+        // Sent: the keyboard is back on the chat.
+        app.focus_transcript();
+        app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "resolve", serde_json::json!({"answer": {"text": written}}), number(&decision, "revision"));
+        pump();
+        return;
+    }
+    let Some(option) = usize::try_from(card.chosen).ok().and_then(|i| card.options.row_data(i)) else {
+        app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first (1-9)");
+        app.refresh(&[Change::Updates]);
+        return;
+    };
+    let body = if card.approval {
+        serde_json::json!({"choice": if option.id == "yes" { "accepted" } else { "rejected" }})
+    } else {
+        serde_json::json!({"answer": {"option_id": option.id.as_str()}})
+    };
+    app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "resolve", body, number(&decision, "revision"));
+    pump();
+}
+
+/// Discards a pending decision (iOS "Discard").
+pub fn discard(app: &App, id: &str) {
+    let Some(artifact) = artifact(app, id) else { return };
+    if !card_item(app, id).is_some_and(|c| c.pending) {
+        return;
+    }
+    let decision = artifact.get("decision").cloned().unwrap_or(Value::Null);
+    app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "dismiss", serde_json::json!({}), number(&decision, "revision"));
+    pump();
+}
+
+/// Shows the engine's change at once.
+fn pump() {
+    if let Some(app) = crate::app() {
+        crate::pump_now(&app);
+    }
+}
+
+fn artifact(app: &App, id: &str) -> Option<Value> {
+    let found = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned();
+    if found.is_none() {
+        eprintln!("clarp-slint: no artifact {id}");
+    }
+    found
+}
+
+/// A body's first lines as plain text: its blocks (paragraphs, headings,
+/// lists) kept apart by " · ", code left out.
+fn preview_text(markdown: &str) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+    let (mut current, mut fenced) = (Vec::new(), false);
+    for line in markdown.lines() {
+        if line.trim_start().starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        // A heading or a list item starts a block of its own.
+        let starts = line.trim_start().starts_with('#') || line.trim_start().starts_with("- ") || line.trim_start().starts_with("* ");
+        if line.trim().is_empty() || starts {
+            blocks.push(current.join("\n"));
+            current.clear();
+        }
+        if !line.trim().is_empty() {
+            current.push(line);
+        }
+    }
+    blocks.push(current.join("\n"));
+    blocks.iter().map(|b| clarp_core::text::plain_preview_text(b)).filter(|b| !b.is_empty()).collect::<Vec<_>>().join(" · ")
+}
+
+/// iOS `ArtifactScalar`: true reads Yes, false No, null —.
+fn scalar(value: &Value) -> String {
+    match value {
+        Value::Null => "—".into(),
+        Value::Bool(true) => "Yes".into(),
+        Value::Bool(false) => "No".into(),
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// A data artifact's columns and rows (as text), when it has columns.
+fn table(artifact: &Value) -> Option<(Vec<String>, Vec<Vec<String>>)> {
+    let columns: Vec<String> = artifact.get("columns")?.as_array()?.iter().map(scalar).collect();
+    if columns.is_empty() {
+        return None;
+    }
+    let rows = artifact
+        .get("rows")
+        .and_then(Value::as_array)
+        .map(|rows| rows.iter().map(|r| r.as_array().map(|cells| cells.iter().map(scalar).collect()).unwrap_or_default()).collect())
+        .unwrap_or_default();
+    Some((columns, rows))
+}
+
+/// At most seven cells: six and what is left.
+fn clipped(cells: &[String], rest: impl Fn(usize) -> String) -> Vec<slint::SharedString> {
+    if cells.len() <= 7 {
+        return cells.iter().map(|c| c.as_str().into()).collect();
+    }
+    cells[..6].iter().map(|c| c.as_str().into()).chain(std::iter::once(rest(cells.len() - 6).into())).collect()
+}
+
+/// iOS's data card: the header and the first row, and how many rows.
+fn data_fields(item: &mut ArtifactItem, artifact: &Value) {
+    let Some((columns, rows)) = table(artifact) else {
+        item.data_note = "Structured data unavailable".into();
+        return;
+    };
+    let model = |cells: Vec<slint::SharedString>| slint::ModelRc::new(slint::VecModel::from(cells));
+    item.head = model(clipped(&columns, |more| format!("+{more}")));
+    if let Some(first) = rows.first() {
+        item.first_row = model(clipped(first, |_| "…".into()));
+    }
+    item.rows_count = format!("{} row{}", rows.len(), if rows.len() == 1 { "" } else { "s" }).into();
+    item.action = "Open table".into();
+}
+
+/// A Markdown table of `rows` under `head`.
+fn markdown_table(head: &[String], rows: &[Vec<String>]) -> String {
+    let cell = |t: &str| t.replace('|', "\\|").replace('\n', " ");
+    let line = |cells: &[String]| format!("| {} |", cells.iter().map(|c| cell(c)).collect::<Vec<_>>().join(" | "));
+    let mut lines = vec![line(head), format!("|{}|", vec!["---"; head.len()].join("|"))];
+    lines.extend(rows.iter().map(|r| line(r)));
+    lines.join("\n")
+}
+
+/// A plan's items and subtasks, depth first.
+fn plan_items(plan: &Value) -> Vec<(usize, Value)> {
+    fn walk(items: &Value, depth: usize, out: &mut Vec<(usize, Value)>) {
+        for item in items.as_array().into_iter().flatten() {
+            out.push((depth, item.clone()));
+            walk(item.get("subtasks").unwrap_or(&Value::Null), depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(plan.get("items").unwrap_or(&Value::Null), 0, &mut out);
+    out
+}
+
+/// iOS's plan card: items and subtasks completed against the plan's
+/// total, and the first one under way.
+fn plan_fields(item: &mut ArtifactItem, artifact: &Value) {
+    let Some(plan) = artifact.get("plan").filter(|p| p.is_object()) else {
+        item.progress_value = -1.0;
+        item.current = "Plan details unavailable".into();
+        return;
+    };
+    let items = plan_items(plan);
+    let done = items.iter().filter(|(_, i)| text(i, "status") == "completed").count() as i64;
+    let total = match number(plan, "total_count") {
+        0 => items.len() as i64,
+        total => total,
+    };
+    item.progress_value = done as f32 / total.max(1) as f32;
+    item.progress_count = format!("{done}/{total}").into();
+    item.current = items.iter().find(|(_, i)| text(i, "status") == "in_progress").map(|(_, i)| text(i, "title")).unwrap_or_default().into();
+    // Nothing under way but a step blocked: that step, marked.
+    if item.current.is_empty() {
+        if let Some((_, blocked)) = items.iter().find(|(_, i)| matches!(text(i, "status").as_str(), "blocked" | "failed")) {
+            item.current = text(blocked, "title").into();
+            item.current_blocked = true;
+        }
+    }
+    item.action = "Open plan".into();
+}
+
+/// A research artifact's sources that open: titled https links (iOS shows
+/// no others).
+fn https_sources(artifact: &Value) -> Vec<(String, String)> {
+    artifact
+        .get("sources")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|s| (text(s, "title"), text(s, "url")))
+        .filter(|(_, url)| url.starts_with("https://"))
+        .map(|(title, url)| (if title.is_empty() { url.clone() } else { title }, url))
+        .collect()
+}
+
+/// The report viewer's model for an artifact without a report body:
+/// what its card stands for, in full.
+pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
+    let artifact = app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned()?;
+    let card = artifact_item(&artifact);
+    // Whether the body came from HTML (already read as Markdown here).
+    let mut from_html = false;
+    let (summary, body) = match text(&artifact, "type").as_str() {
+        "plan" => {
+            let plan = artifact.get("plan").filter(|p| p.is_object())?;
+            let summary = [text(plan, "title"), text(plan, "goal"), format!("{} done", card.progress_count)]
+                .into_iter()
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+                .join(" · ");
+            // A table: one row per item and subtask, the state beside it.
+            let cell = |t: String| t.replace('|', "\\|");
+            let mut rows = vec!["| Step | State |".to_owned(), "|---|---|".to_owned()];
+            for (depth, i) in plan_items(plan) {
+                let (mark, state) = match text(&i, "status").as_str() {
+                    "completed" => ("✓", "done"),
+                    "in_progress" => ("▶", "under way"),
+                    "blocked" | "failed" => ("✕", "blocked"),
+                    _ => ("○", "to do"),
+                };
+                let detail = text(&i, "detail");
+                let indent = "↳ ".repeat(depth);
+                let state = if detail.is_empty() { state.to_owned() } else { format!("{state} · *{}*", cell(detail)) };
+                rows.push(format!("| {indent}{mark} {} | {state} |", cell(text(&i, "title"))));
+            }
+            let lines = rows;
+            (summary, lines.join("\n"))
+        }
+        "research" => {
+            // The body as the Host's report (HTML sanitized, read as
+            // Markdown), then the sources as links.
+            let report = app.engine.borrow().report_for_artifact(id).unwrap_or_default();
+            let body = clarp_core::json::string(&report, "body");
+            from_html = clarp_core::json::boolean(&report, "isHtml");
+            let mut markdown = if from_html { crate::updates_view::html_markdown(&body) } else { body };
+            let sources = https_sources(&artifact);
+            if !sources.is_empty() {
+                let escape = |t: &str| t.replace('[', "\\[").replace(']', "\\]");
+                let list: Vec<String> = sources.iter().map(|(title, url)| format!("- [{}]({url})", escape(title))).collect();
+                markdown = format!("{markdown}\n\n## Sources\n\n{}", list.join("\n"));
+            }
+            (text(&artifact, "summary"), markdown)
+        }
+        "release" => {
+            let facts: Vec<Vec<String>> = [("Version", "version"), ("Build", "build"), ("Revision", "commit"), ("Repository", "repository")]
+                .iter()
+                .filter_map(|(label, key)| Some(text(&artifact, key)).filter(|v| !v.is_empty()).map(|v| vec![(*label).to_owned(), v]))
+                .collect();
+            let mut parts = Vec::new();
+            if !facts.is_empty() {
+                parts.push(markdown_table(&["Release".to_owned(), card.title.to_string()], &facts));
+            }
+            let notes = text(&artifact, "content");
+            if !notes.trim().is_empty() {
+                parts.push(notes);
+            }
+            let source = text(&artifact, "source_url");
+            if source.starts_with("https://") {
+                parts.push(format!("[Open source]({source})"));
+            }
+            let build = text(&artifact, "build");
+            (if build.is_empty() { card.revision.to_string() } else { format!("{} · build {build}", card.revision) }, parts.join("\n\n"))
+        }
+        "code_change" => {
+            let commit = text(&artifact, "commit");
+            let summary = if commit.is_empty() { card.repo.to_string() } else { format!("{} · {commit}", card.repo) };
+            let mut parts = Vec::new();
+            let stats = [card.files.to_string(), card.additions.to_string(), card.deletions.to_string()].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>();
+            if !stats.is_empty() {
+                parts.push(stats.join(" · "));
+            }
+            let diff = text(&artifact, "diff");
+            if !diff.is_empty() {
+                parts.push(format!("```diff\n{}\n```", diff.trim_end()));
+            }
+            let source = text(&artifact, "source_url");
+            if source.starts_with("https://") {
+                parts.push(format!("[Open source]({source})"));
+            }
+            (summary, parts.join("\n\n"))
+        }
+        "data" => {
+            let (columns, rows) = table(&artifact)?;
+            let mut parts = Vec::new();
+            // The chart as bars: the first 30 categories, scaled to the largest.
+            let chart = artifact.get("chart").cloned().unwrap_or(Value::Null);
+            let at = |key: &str, fallback: usize| columns.iter().position(|c| *c == text(&chart, key)).unwrap_or(fallback);
+            if matches!(text(&chart, "kind").as_str(), "bar" | "line") {
+                let (category, value) = (at("category_column", 0), at("value_column", 1));
+                let points: Vec<(String, f64)> = rows.iter().take(30).filter_map(|r| Some((r.get(category)?.clone(), r.get(value)?.parse::<f64>().ok()?))).collect();
+                let top = points.iter().map(|(_, v)| v.abs()).fold(0.0, f64::max).max(f64::MIN_POSITIVE);
+                let bars: Vec<Vec<String>> =
+                    points.iter().map(|(c, v)| vec![c.clone(), format!("{} {v}", "━".repeat(((v.abs() / top) * 24.0).round() as usize))]).collect();
+                if !bars.is_empty() {
+                    parts.push(markdown_table(&[columns[category].clone(), columns.get(value).cloned().unwrap_or_default()], &bars));
+                }
+            }
+            // The grid, as iOS caps it: 500 rows.
+            parts.push(markdown_table(&columns, &rows[..rows.len().min(500)]));
+            (format!("{} · {} columns", card.rows_count, columns.len()), parts.join("\n\n"))
+        }
+        _ => return None,
+    };
+    serde_json::json!({"artifact_id": id, "title": card.title.as_str(), "summary": summary, "type": card.kind.as_str(), "isHtml": from_html, "converted": true, "kind": card.label.as_str(), "body": body})
+        .as_object()
+        .cloned()
+}
+
+/// iOS `isHTMLReport`: read-only, or an answer schema that asks nothing.
+fn is_report(artifact: &Value) -> bool {
+    let flagged = |v: &Value| v.get("read_only").and_then(Value::as_bool) == Some(true);
+    if flagged(artifact) || artifact.get("payload").is_some_and(flagged) {
+        return true;
+    }
+    let schema = artifact.get("answer_schema").cloned().unwrap_or(Value::Null);
+    let fields = schema.get("properties").and_then(Value::as_object).map(|p| p.len());
+    fields == Some(0) || (fields.is_none() && schema.get("additionalProperties") == Some(&Value::Bool(false)))
+}
+
+/// Where a card was when it last reported.
+struct Report {
+    shown: bool,
+    height: f32,
+    /// The report numbers of its last three reports, newest first.
+    seqs: [u64; 3],
+}
+
+thread_local! {
+    static SHOWN: std::cell::RefCell<(u64, std::collections::HashMap<String, Report>)> = std::cell::RefCell::default();
+}
+
+/// A drawn card reports where it is every 150 ms. A row the list dropped
+/// stops: it has lapsed once another card has reported three times since
+/// (counted in reports, not time, so a busy moment lapses nothing).
+fn card_shown(id: &str, top: f32, height: f32, view_top: f32, view_bottom: f32) {
+    let shown = top + height > view_top + 4.0 && top < view_bottom - 4.0;
+    SHOWN.with(|s| {
+        let (seq, reports) = &mut *s.borrow_mut();
+        *seq += 1;
+        let report = reports.entry(id.to_owned()).or_insert(Report { shown, height, seqs: [0; 3] });
+        report.shown = shown;
+        report.height = height;
+        report.seqs = [*seq, report.seqs[0], report.seqs[1]];
+    });
+}
+
+/// The heights the cards on screen last reported (for the checks).
+pub fn card_heights(app: &App) -> Vec<(String, f32)> {
+    let ids = on_screen(app);
+    SHOWN.with(|s| ids.into_iter().filter_map(|id| s.borrow().1.get(&id).map(|r| r.height).map(|h| (id, h))).collect())
+}
+
+/// The open chat's cards now on screen, top to bottom.
+pub fn on_screen(app: &App) -> Vec<String> {
+    SHOWN.with(|s| {
+        let s = s.borrow();
+        let reports = &s.1;
+        let lapsed = |report: &Report| reports.values().any(|other| other.seqs[2] > report.seqs[0]);
+        card_ids(app).into_iter().filter(|id| reports.get(id).is_some_and(|r| r.shown && !lapsed(r))).collect()
+    })
+}
+
+/// The open chat's card ids, top to bottom.
+fn card_ids(app: &App) -> Vec<String> {
+    app.active_messages()
+        .map(|rows| rows.iter().flat_map(|row| row.artifacts.iter().map(|a| a.id.to_string()).collect::<Vec<_>>()).collect())
+        .unwrap_or_default()
+}
+
+pub fn has_cards(app: &App) -> bool {
+    !card_ids(app).is_empty()
+}
+
+/// The card the keyboard is on, while it is on screen in the open chat.
+pub fn selected(app: &App) -> Option<String> {
+    let cursor = app.artifact_cursor.borrow().clone();
+    (!cursor.is_empty() && on_screen(app).contains(&cursor)).then_some(cursor)
+}
+
+/// J/K: the next or previous card on screen; from none, J is the topmost
+/// and K the lowest. Cards off screen are out of reach (scroll to them).
+pub fn step(app: &App, direction: i32) {
+    let ids = on_screen(app);
+    let Some(last) = ids.len().checked_sub(1) else { return };
+    let at = selected(app).and_then(|id| ids.iter().position(|i| *i == id));
+    let next = match at {
+        None if direction > 0 => 0,
+        None => last,
+        Some(index) => (index as i64 + i64::from(direction)).clamp(0, last as i64) as usize,
+    };
+    *app.artifact_cursor.borrow_mut() = ids[next].clone();
+    app.refresh(&[Change::Updates]);
+}
+
+/// A card's action (Enter on the selected card, or a click).
+pub fn open(app: &App, window: &AppWindow, id: &str) {
+    let Some(artifact) = artifact(app, id) else { return };
+    *app.artifact_cursor.borrow_mut() = id.to_owned();
+    match text(&artifact, "type").as_str() {
+        "html_form" if !is_report(&artifact) => {
+            let version = artifact.get("version").cloned().unwrap_or(Value::Null);
+            match crate::form_server::serve(id, version, &text(&artifact, "content")) {
+                Ok(url) => crate::open_link(&url),
+                Err(error) => {
+                    eprintln!("clarp-slint: {error}");
+                    app.engine.borrow_mut().set_artifact_status(id, &format!("Not opened: {error}"));
+                }
+            }
+        }
+        "decision" | "question" => return send(app, id),
+        "video" => download(app, &artifact, "video"),
+        "file" => download(app, &artifact, "file"),
+        "directory" => open_directory(app, &artifact),
+        "workflow_run" => crate::open_link(&text(&artifact, "run_url")),
+        "audio" => {
+            let url = text(&artifact, "url");
+            match host_path(&url) {
+                Some(path) => {
+                    let path = path.to_owned();
+                    crate::platform::audio::with(|audio| audio.toggle_media(id, &path));
+                }
+                None => eprintln!("clarp-slint: not playing {url}: only the Host's media plays"),
+            }
+        }
+        "plan" | "code_change" | "data" | "release" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
+        _ if app.engine.borrow().report_for_artifact(id).is_some() => crate::updates_view::open_report(app, window, id),
+        // Nothing to open: Enter only selects.
+        _ => {}
+    }
+    app.refresh(&[Change::Updates]);
+}
+
+/// A countdown's target on the cards' clock, and its date in the target's
+/// own offset (the Host requires one) with the zone it names.
+fn countdown_fields(item: &mut ArtifactItem, artifact: &Value, status: &str) {
+    if status == "cancelled" {
+        item.countdown_note = "Cancelled".into();
+        return;
+    }
+    let Ok(target) = chrono::DateTime::parse_from_rfc3339(&text(artifact, "target_at")) else {
+        item.countdown_note = "Countdown unavailable".into();
+        return;
+    };
+    let zone = text(artifact, "time_zone");
+    item.countdown_set = true;
+    item.countdown_at = (target.timestamp() - epoch()).clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
+    item.countdown_line = format!("{} · {}", target.format("%b %-d, %Y at %H:%M"), if zone.is_empty() { "UTC" } else { &zone }).into();
+}
+
+/// The bridge's clock and callbacks.
+pub fn bind(window: &AppWindow) {
+    let bridge = window.global::<ArtifactBridge>();
+    bridge.on_countdown_phase(|target, now| countdown(i64::from(target), i64::from(now)).0.into());
+    bridge.on_countdown_clock(|target, now| countdown(i64::from(target), i64::from(now)).1.into());
+    bridge.on_media_position(|played, started, now| {
+        let seconds = played + if started >= 0 { (now - started).max(0) } else { 0 };
+        format!("{}:{:02}", seconds / 60, seconds % 60).into()
+    });
+    bridge.set_now(clock_now());
+    bridge.on_link_clicked(|url| crate::open_link(&url));
+    bridge.on_card_shown(|id, top, height, view_top, view_bottom| card_shown(&id, top, height, view_top, view_bottom));
+    bridge.on_choose(|id, index| {
+        if let Some(app) = crate::app() {
+            choose(&app, &id, index);
+        }
+    });
+    bridge.on_send(|id| {
+        if let Some(app) = crate::app() {
+            send(&app, &id);
+        }
+    });
+    bridge.on_draft_edited(|id, text| {
+        if let Some(app) = crate::app() {
+            app.artifact_drafts.borrow_mut().insert(id.to_string(), text.to_string());
+        }
+    });
+    bridge.on_editing_changed(|id, editing| {
+        if let Some(app) = crate::app() {
+            if !editing && *app.artifact_editing.borrow() == id.as_str() {
+                // Left without sending: the field stays with its draft, but
+                // no longer takes the keyboard (the card updates in place).
+                app.artifact_editing.borrow_mut().clear();
+                app.refresh(&[Change::Updates]);
+            }
+        }
+    });
+    bridge.on_discard(|id| {
+        if let Some(app) = crate::app() {
+            discard(&app, &id);
+        }
+    });
+    bridge.on_open(|id| {
+        if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+            open(&app, &window, &id);
+        }
+    });
+    let weak = window.as_weak();
+    let timer = slint::Timer::default();
+    // A quarter-second check keeps the tick within 250 ms of the second.
+    timer.start(slint::TimerMode::Repeated, Duration::from_millis(250), move || {
+        if let Some(window) = weak.upgrade() {
+            let bridge = window.global::<ArtifactBridge>();
+            let now = clock_now();
+            if bridge.get_now() != now {
+                bridge.set_now(now);
+            }
+            // A selected card scrolled away is no longer selected.
+            if let Some(app) = crate::app() {
+                let cursor = app.artifact_cursor.borrow().clone();
+                if !cursor.is_empty() && selected(&app).is_none() && app.artifact_editing.borrow().is_empty() {
+                    app.artifact_cursor.borrow_mut().clear();
+                    app.refresh(&[Change::Updates]);
+                }
+            }
+        }
+    });
+    CLOCK.with(|clock| *clock.borrow_mut() = Some(timer));
+}
+
+thread_local! {
+    static CLOCK: std::cell::RefCell<Option<slint::Timer>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_countdown_counts_down_then_up() {
+        assert_eq!(countdown(100 + 86_400 + 3 * 3600 + 4 * 60 + 5, 100), ("Remaining", "1d 03:04:05".to_owned()));
+        assert_eq!(countdown(100, 99), ("Remaining", "00:00:01".to_owned()));
+        assert_eq!(countdown(100, 100), ("Target reached", "Now".to_owned()));
+        assert_eq!(countdown(100, 159), ("Target reached", "Now".to_owned()));
+        assert_eq!(countdown(100, 160), ("Since target", "00:01:00".to_owned()));
+    }
+
+    #[test]
+    fn only_unfinished_states_get_a_badge() {
+        assert_eq!(badge("cancelled"), "Cancelled");
+        assert_eq!(badge("active"), "");
+    }
+}
