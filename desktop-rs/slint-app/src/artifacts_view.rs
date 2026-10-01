@@ -418,7 +418,7 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
         }
         _ => return None,
     };
-    serde_json::json!({"artifact_id": id, "title": card.title.as_str(), "summary": summary, "type": card.kind.as_str(), "isHtml": false, "body": body})
+    serde_json::json!({"artifact_id": id, "title": card.title.as_str(), "summary": summary, "type": card.kind.as_str(), "isHtml": false, "kind": card.label.as_str(), "body": body})
         .as_object()
         .cloned()
 }

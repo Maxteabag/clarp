@@ -192,6 +192,8 @@ export component AppWindow inherits Window {
     in property <string> report-title;
     in property <string> report-summary;
     in property <bool> report-html;
+    // What the report is, when it is not a document's body (PLAN...).
+    in property <string> report-kind;
     in property <[MessageBlock]> report-blocks;
     in property <[TeamView]> team-list;
     in property <[TeamMessageView]> team-messages;
@@ -489,6 +491,7 @@ export component AppWindow inherits Window {
             title: root.report-title;
             summary: root.report-summary;
             html: root.report-html;
+            kind: root.report-kind;
             blocks: root.report-blocks;
             link-clicked(url) => { root.link-clicked(url); }
             done => { root.overlay-closed(); }

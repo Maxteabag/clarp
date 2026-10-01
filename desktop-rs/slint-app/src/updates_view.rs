@@ -197,6 +197,7 @@ fn show_report(app: &App, window: &AppWindow) {
     window.set_report_title(text(&report, "title").into());
     window.set_report_summary(text(&report, "summary").into());
     window.set_report_html(html);
+    window.set_report_kind(text(&report, "kind").into());
     window.set_report_blocks(model(blocks));
 }
 

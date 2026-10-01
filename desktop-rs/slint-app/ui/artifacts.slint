@@ -420,16 +420,19 @@ component ProgressBody inherits VerticalLayout {
         }
         if root.artifact.progress-count != "": Text { text: root.artifact.progress-count; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
     }
-    if root.artifact.current != "": HorizontalLayout {
+    // One line, there whenever the plan is known: a step finishing, the
+    // next beginning or the plan completing never changes the height.
+    if root.artifact.current != "" || root.artifact.progress-value >= 0: HorizontalLayout {
         spacing: 6px;
-        if root.artifact.progress-value >= 0: Text { text: "▶"; color: root.tint; font-size: 10px; }
+        if root.artifact.current != "" && root.artifact.progress-value >= 0: Text { text: "▶"; color: root.tint; font-size: 10px; vertical-alignment: center; }
         Text {
-            text: root.artifact.current;
-            color: root.artifact.progress-value >= 0 ? Palette.text : Palette.warning;
+            text: root.artifact.current != "" ? root.artifact.current
+                : root.artifact.progress-value >= 0.999 ? "All steps done" : "Nothing under way";
+            color: root.artifact.current == "" ? Palette.muted : root.artifact.progress-value >= 0 ? Palette.text : Palette.warning;
             font-size: 12px;
-            wrap: word-wrap;
             overflow: elide;
-            height: 32px;
+            height: 16px;
+            vertical-alignment: center;
             horizontal-stretch: 1;
         }
     }
