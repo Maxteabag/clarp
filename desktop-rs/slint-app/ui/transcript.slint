@@ -1,5 +1,5 @@
 import { Palette } from "theme.slint";
-import { ListView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard, ArtifactItem, ArtifactCard } from "cells.slint";
 
 export struct TableRow {
@@ -193,7 +193,11 @@ export component Transcript inherits FocusScope {
     Rectangle { background: Palette.window; }
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
-    list := ListView {
+    // Every row is laid out (no virtual list): a virtual list estimates the
+    // rows it has not drawn and re-estimates as they stream, which moved a
+    // reader who had scrolled up. Laid out for real, rows added or growing
+    // at the end leave the reader's place alone.
+    list := ScrollView {
         // A reader who scrolls away from the end stops following.
         scrolled => {
             root.holding = false;
@@ -202,6 +206,10 @@ export component Transcript inherits FocusScope {
         }
         width: parent.width;
         height: parent.height;
+        content-width: self.visible-width;
+        content-height: rows-layout.preferred-height;
+        rows-layout := VerticalLayout {
+        width: list.visible-width;
         for row in root.rows: HorizontalLayout {
             padding-left: 16px;
             padding-right: 16px;
@@ -261,6 +269,7 @@ export component Transcript inherits FocusScope {
                 }
             }
         }
+        }
     }
     changed rows => {
         if (root.follow) { root.scroll-to-latest(); }
@@ -280,9 +289,8 @@ export component Transcript inherits FocusScope {
             root.reached-top();
         }
     }
-    // The list estimates the height of rows it has not drawn yet and
-    // corrects it as they appear; while following, keep pinning the end
-    // until the estimate settles.
+    // While following, keep pinning the end as late rows settle (images,
+    // fonts).
     Timer {
         interval: 16ms;
         running: root.follow && !root.at-end;

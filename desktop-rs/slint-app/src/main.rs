@@ -57,6 +57,8 @@ pub struct App {
     workspaces: RefCell<clarp_core::workspace::WorkspaceContext>,
     /// Messages whose tool calls the reader opened (not groups).
     expanded: RefCell<std::collections::HashSet<String>>,
+    /// A live-preview selection (explorer cursor): the keyboard stays put.
+    pub previewing: std::cell::Cell<bool>,
     /// Chats opened in this window, the most recent first (Ctrl+R).
     pub recent: RefCell<Vec<String>>,
     /// Chats whose sub-agents show in the explorer; the rest fold them.
@@ -306,7 +308,7 @@ impl App {
         }
         self.refresh_panes(&window, changes);
         // A chat opens ready to type into, unless the reader is scrolling.
-        if changes.contains(&Change::Selection) && !self.active_report().transcript_focused {
+        if changes.contains(&Change::Selection) && !self.active_report().transcript_focused && !self.previewing.get() {
             self.focus_composer();
         }
         let engine = self.engine.borrow();
@@ -497,6 +499,7 @@ fn main() {
         sidebar: RefCell::new(clarp_core::sidebar::Sidebar::default()),
         unfolded: RefCell::new(std::collections::HashSet::new()),
         recent: RefCell::new(Vec::new()),
+        previewing: std::cell::Cell::new(false),
         workspaces: RefCell::new(clarp_core::workspace::WorkspaceContext::default()),
         prefs: RefCell::new(prefs),
         switcher: RefCell::new(SwitcherState::default()),

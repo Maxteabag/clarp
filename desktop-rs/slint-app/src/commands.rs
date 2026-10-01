@@ -199,9 +199,10 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
                 // pane while the keyboard stays in the explorer.
                 let preview = app.engine.borrow().settings().boolean("explorer/livePreview", false);
                 if preview && !next.starts_with("pair:") && app.engine.borrow().selected_session() != next.as_str() {
+                    app.previewing.set(true);
                     app.engine.borrow_mut().select(next);
                     pump_now(app);
-                    focus_sidebar(app, window);
+                    app.previewing.set(false);
                     window.set_sidebar_cursor(next.as_str().into());
                 }
             }

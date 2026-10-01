@@ -1460,6 +1460,10 @@ fn narration_check(out: String) {
     run_stages(stages);
 }
 
+thread_local! {
+    static PREVIEW_FROM: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
 /// `--check sidebar --out DIR`: search and the Unread scope filter the
 /// chats, finished helpers fold under their parent, an archived agent is
 /// restored, and the pane header says what the agent runs.
@@ -1467,6 +1471,7 @@ fn sidebar_check(out: String) {
     use slint::platform::Key;
     let out2 = out.clone();
     let out3 = out.clone();
+    let out4 = out.clone();
     fn names(window: &crate::AppWindow) -> Vec<String> {
         window.get_chats().iter().map(|r| r.name.to_string()).collect()
     }
@@ -1609,6 +1614,36 @@ fn sidebar_check(out: String) {
             let width = window.get_explorer_compact_width();
             check(width < 320.0 && width >= 120.0, &format!("the compact explorer narrows to an average row: {width}px"));
             shot(&out3, "sidebar-02-compact");
+            window.invoke_focus_search();
+            true
+        })),
+        ("compact search", Box::new(move |_, window, elapsed| {
+            if !window.get_search_focused() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(true, "/ opens the search in the compact explorer");
+            shot(&out4, "sidebar-03-compact-search");
+            if let Some(app) = crate::app() {
+                crate::commands::run(&app, window, "focus-sidebar");
+                crate::commands::run(&app, window, "toggle-preview");
+            }
+            true
+        })),
+        ("preview on", Box::new(|app, window, _| {
+            if !window.get_sidebar_focused() {
+                return false;
+            }
+            let before = app.engine.borrow().selected_session().to_owned();
+            headless::press(if window.get_sidebar_cursor() == "mike" { "k" } else { "j" });
+            PREVIEW_FROM.with(|p| *p.borrow_mut() = before);
+            true
+        })),
+        ("previewed", Box::new(|app, window, elapsed| {
+            let before = PREVIEW_FROM.with(|p| p.borrow().clone());
+            if app.engine.borrow().selected_session() == before || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(window.get_sidebar_focused() && !report().composer_focused, "live preview opens the chat under the cursor and leaves the keyboard in the explorer");
             true
         })),
     ];
@@ -1715,6 +1750,24 @@ fn transcript_check(out: String) {
             check(!report().follows, "new rows do not pull a reader who scrolled up");
             let moved = (report().offset - offset2.get()).abs();
             check(moved < 1.0, &format!("the reader's place holds ({moved}px)"));
+            // Up to the top, then back down by paging alone (no End).
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("at the top", Box::new(|_, _window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            for _ in 0..80 {
+                headless::press(slint::platform::Key::PageDown);
+            }
+            true
+        })),
+        ("paged down", Box::new(|_, _window, elapsed| {
+            if elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(report().at_end, &format!("paging down from the top reaches the latest again (offset {}, at end {})", report().offset, report().at_end));
             headless::press(slint::platform::Key::End);
             true
         })),
