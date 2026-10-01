@@ -1,4 +1,4 @@
-//! Ports of desktop/tests/tst_tool_narrator.cpp for the shared-Host narrator,
+//! Ports of the C++ client's `tst_tool_narrator.cpp` for the shared-Host narrator,
 //! driving the state machine directly and asserting the effects it returns.
 
 use clarp_core::narrator::*;

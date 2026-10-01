@@ -19,7 +19,7 @@ mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
 # since CLARP_TEST_TERMINAL_LOG records the launch instead.
 mkdir -p "$scratch/bin"
 for program in claude xdg-terminal-exec; do printf '#!/bin/sh\nexit 1\n' > "$scratch/bin/$program"; chmod +x "$scratch/bin/$program"; done
-/usr/bin/python3 app/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" "${host_args[@]}" &
+/usr/bin/python3 tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" "${host_args[@]}" &
 host=$!
 for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
 # A check runs the app once; startup runs it twice, with an empty portrait

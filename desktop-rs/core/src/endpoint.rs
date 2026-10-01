@@ -1,7 +1,7 @@
 //! Host endpoint rules shared by the API and SSE clients: base URL
 //! normalisation, path resolution, the same-origin test that guards
 //! authenticated media, reconnect backoff, and error-body messages.
-//! Ports the pure parts of `desktop/src/network/ApiClient` and `SseClient`.
+//! Ports the pure parts of the C++ client's `ApiClient` and `SseClient`.
 
 use std::time::Duration;
 

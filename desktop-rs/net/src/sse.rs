@@ -1,4 +1,4 @@
-//! Port of `desktop/src/network/SseClient`: one `/events` stream per Host,
+//! Port of the C++ client's `SseClient`: one `/events` stream per Host,
 //! resumed with `Last-Event-ID`, aborted after a silent watchdog interval and
 //! reopened with capped exponential backoff.
 

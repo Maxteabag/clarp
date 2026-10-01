@@ -1,5 +1,5 @@
 //! Incremental `text/event-stream` parser. Port of
-//! `desktop/src/network/SseParser`: only blocks whose data is a non-empty JSON
+//! the C++ client's `SseParser`: only blocks whose data is a non-empty JSON
 //! object are delivered; comments, keep-alives and bad JSON are dropped.
 
 use crate::json::Object;

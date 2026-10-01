@@ -1,5 +1,5 @@
 //! Chat-list stamps, transcript day headings and running durations. Port of
-//! `desktop/src/app/TimeFormat`. `now` is injected so tests are deterministic;
+//! the C++ client's `TimeFormat`. `now` is injected so tests are deterministic;
 //! instants are shown in `now`'s time zone. Text follows the en_US QLocale
 //! formats the C++ client produced on this machine (short time "6:10 PM",
 //! short date "6/12/26").

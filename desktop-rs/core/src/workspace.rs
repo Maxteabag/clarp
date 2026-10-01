@@ -1,5 +1,5 @@
 //! What an agent's working directory is: a plain folder, a Git repository or
-//! a linked worktree. Port of `desktop/src/app/WorkspaceContext`. Reads only
+//! a linked worktree. Port of the C++ client's `WorkspaceContext`. Reads only
 //! local Git metadata when the Host shares this filesystem; never runs Git
 //! and never infers identity from directory names a remote Host reports.
 

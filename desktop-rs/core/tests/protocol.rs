@@ -1,6 +1,6 @@
-//! Ports of the protocol-level cases in `desktop/tests/tst_native_core.cpp`.
-//! Assertions that need Qt's QTextDocument (rich-text round trips) belong to
-//! the app crate and are tracked in PARITY.md.
+//! Ports of the protocol-level cases in the former C++ client's
+//! `tst_native_core.cpp`. Rich-text round trips that needed Qt's
+//! QTextDocument are not ported.
 
 use clarp_core::protocol::{Agent, AudioClip, Message, describe_subagent_cell, parse_iso_date};
 use clarp_core::sse::SseParser;

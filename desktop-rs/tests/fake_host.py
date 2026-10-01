@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A minimal scripted Clarp Host for controller probes (stdlib only).
+"""A minimal scripted Clarp Host for the desktop checks (stdlib only).
 
 Serves /server-info, /agents/snapshot, /log, /select, /send, /stop,
 /agent-model-options and an /events SSE stream. A /send files the user row
@@ -132,7 +132,7 @@ def rich_turn(i):
     return {"role": "user", "text": f"Follow-up {i}: " + LOREM[: 30 + size * 20]}
 
 
-AVATAR_DIR = pathlib.Path(__file__).resolve().parents[3] / "static" / "avatars"
+AVATAR_DIR = pathlib.Path(__file__).resolve().parents[2] / "static" / "avatars"
 
 
 def fill_roster(count):

@@ -1,6 +1,6 @@
 //! The sidebar's view of the roster: search, the unread scope, helper nesting
 //! and collapsed "N helpers done" lines. Pure half of
-//! `desktop/src/models/AgentFilterModel`; the Qt proxy asks this for filter
+//! the C++ client's `AgentFilterModel`; the Qt proxy asks this for filter
 //! and sort decisions.
 
 use std::collections::{HashMap, HashSet};

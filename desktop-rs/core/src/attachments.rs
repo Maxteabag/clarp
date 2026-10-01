@@ -1,5 +1,5 @@
 //! Composer attachment rules. Port of the attachment helpers in
-//! `desktop/src/app/AppController.cpp`.
+//! the C++ client's `AppController.cpp`.
 
 use serde_json::Value;
 

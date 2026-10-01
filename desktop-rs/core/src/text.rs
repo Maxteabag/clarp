@@ -1,5 +1,5 @@
 //! Transcript and preview text rules. Port of the free functions in
-//! `desktop/src/protocol/ProtocolTypes.cpp`.
+//! the C++ client's `ProtocolTypes.cpp`.
 
 use std::sync::LazyLock;
 

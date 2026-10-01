@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "net", "engine", "app", "switcher-slint", "slint-app"]
+members = ["core", "net", "engine", "switcher-slint", "slint-app"]
 
 # Debug builds decode and scale images (portraits, attachments) with the
 # image crates optimised, as release does: unoptimised, a hundred portraits

@@ -1,5 +1,5 @@
 //! The Updates, Teams and agent profile panels against the fake Host
-//! (`app/tests/fake_host.py`), with no UI.
+//! (`tests/fake_host.py`), with no UI.
 
 use std::io::{Read, Write};
 use std::process::{Child, Command};
@@ -23,7 +23,7 @@ impl Host {
         let dir = std::env::temp_dir().join(format!("clarp-engine-panels-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let (port, log) = (dir.join("port"), dir.join("host.log"));
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../app/tests/fake_host.py");
+        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fake_host.py");
         let child = Command::new("/usr/bin/python3")
             .args([script, "--port-file", port.to_str().unwrap(), "--log", log.to_str().unwrap()])
             .spawn()

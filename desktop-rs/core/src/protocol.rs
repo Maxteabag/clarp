@@ -1,5 +1,5 @@
 //! Wire types from `/agents/snapshot`, `/log` and SSE audio events.
-//! Port of `desktop/src/protocol/ProtocolTypes`.
+//! Port of the C++ client's `ProtocolTypes`.
 
 use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
 use serde_json::{Map, Value, json};

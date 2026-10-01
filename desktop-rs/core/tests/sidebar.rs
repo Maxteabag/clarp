@@ -1,4 +1,4 @@
-//! Ports of the AgentFilterModel cases in desktop/tests/tst_native_core.cpp,
+//! Ports of the AgentFilterModel cases in the C++ client's `tst_native_core.cpp`,
 //! run against the pure sidebar logic over real roster rows.
 
 use clarp_core::roster::Roster;

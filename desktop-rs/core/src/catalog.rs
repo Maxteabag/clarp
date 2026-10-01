@@ -1,5 +1,5 @@
 //! The Host's `/agent-model-options` catalog as the launch dialogs read it.
-//! Port of the catalog helpers in `desktop/src/app/AppController.cpp`.
+//! Port of the catalog helpers in the C++ client's `AppController.cpp`.
 
 use serde_json::{Value, json};
 

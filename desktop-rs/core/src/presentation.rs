@@ -1,7 +1,7 @@
 //! How a transcript is shown: tool-only runs grouped, repeated explanations
 //! folded, and provisional streaming text hidden in show-when-ready mode.
-//! Port of `desktop/src/models/ConversationPresentationModel` (see
-//! `desktop/docs/activity-grouping.md`).
+//! Port of the C++ client's `ConversationPresentationModel` (see
+//! the C++ client's `activity-grouping.md`).
 //!
 //! [`present`] recomputes the visible rows from the conversation's rows; the
 //! Qt adapter applies [`diff`] so unchanged rows keep their delegates and a

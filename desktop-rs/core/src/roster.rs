@@ -1,4 +1,4 @@
-//! The agent roster. Port of `desktop/src/models/AgentListModel`.
+//! The agent roster. Port of the C++ client's `AgentListModel`.
 //!
 //! Ops carry fully presented [`AgentRow`]s: offline state, live job counts
 //! and helper counts are resolved here, so the Qt adapter's `data()` is a

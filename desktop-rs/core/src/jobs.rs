@@ -1,6 +1,6 @@
 //! Active background jobs per agent, fed by `GET /background-jobs` and the
 //! `background-job-updated` SSE event. Port of
-//! `desktop/src/models/BackgroundJobTracker`: only queued and running jobs are
+//! the C++ client's `BackgroundJobTracker`: only queued and running jobs are
 //! kept, because the roster shows what is still running, not history.
 
 use std::collections::HashMap;

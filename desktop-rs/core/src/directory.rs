@@ -1,5 +1,5 @@
 //! Contacts (personas not yet running) and the voice picker. Ports of
-//! `desktop/src/models/ContactListModel` and `VoiceListModel`; both are
+//! the C++ client's `ContactListModel` and `VoiceListModel`; both are
 //! replaced wholesale on each response.
 
 use std::collections::{HashMap, HashSet};

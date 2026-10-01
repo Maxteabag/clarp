@@ -1,5 +1,5 @@
 //! The depth-first walk TeamsPanel.qml uses for `parent_team_id`, keyed on
-//! any parent id. Port of `desktop/src/models/TreeOrder.h`.
+//! any parent id. Port of the C++ client's `TreeOrder.h`.
 
 use std::collections::HashMap;
 
