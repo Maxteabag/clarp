@@ -25,7 +25,7 @@ impl Engine {
 
     /// Byte replies (portraits, media images); anything else is unexpected.
     pub(crate) fn panels_bytes(&mut self, tag: &str, bytes: &[u8], content_type: &str) {
-        if !self.avatar_bytes(tag, bytes, content_type) && !self.profile_bytes(tag, bytes, content_type) {
+        if !self.updates_bytes(tag, bytes) && !self.avatar_bytes(tag, bytes, content_type) && !self.profile_bytes(tag, bytes, content_type) {
             eprintln!("Engine: unexpected bytes reply {tag}");
         }
     }

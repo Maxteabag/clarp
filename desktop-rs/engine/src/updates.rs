@@ -32,6 +32,8 @@ pub(crate) struct Updates {
     process_revision: u64,
     /// artifact id -> how its latest answer (a form's, a decision's) went.
     artifact_status: std::collections::HashMap<String, String>,
+    /// "purpose:artifact" -> the bytes fetched for it, or why not.
+    artifact_bytes: std::collections::HashMap<String, Result<Vec<u8>, String>>,
 }
 
 impl Engine {
@@ -128,6 +130,17 @@ impl Engine {
     pub fn set_artifact_status(&mut self, artifact_id: &str, status: &str) {
         self.updates.artifact_status.insert(artifact_id.to_owned(), status.to_owned());
         self.changes.push(Change::Updates);
+    }
+
+    /// Fetches an artifact's bytes from the Host (a poster, a file to
+    /// open); `take_artifact_bytes` hands them over once they arrive.
+    pub fn fetch_artifact_bytes(&mut self, artifact_id: &str, purpose: &str, path: &str) {
+        let tag = format!("artifact-bytes:{purpose}:{artifact_id}:{}", uuid::Uuid::new_v4().simple());
+        self.api.get_bytes(&tag, path);
+    }
+
+    pub fn take_artifact_bytes(&mut self, artifact_id: &str, purpose: &str) -> Option<Result<Vec<u8>, String>> {
+        self.updates.artifact_bytes.remove(&format!("{purpose}:{artifact_id}"))
     }
 
     // ---- commands --------------------------------------------------------
@@ -275,7 +288,20 @@ impl Engine {
         true
     }
 
+    /// An artifact's bytes arrived.
+    pub(crate) fn updates_bytes(&mut self, tag: &str, bytes: &[u8]) -> bool {
+        let Some(key) = artifact_bytes_key(tag) else { return false };
+        self.updates.artifact_bytes.insert(key, Ok(bytes.to_vec()));
+        self.changes.push(Change::Updates);
+        true
+    }
+
     pub(crate) fn updates_failure(&mut self, tag: &str, detail: &str) -> bool {
+        if let Some(key) = artifact_bytes_key(tag) {
+            self.updates.artifact_bytes.insert(key, Err(detail.to_owned()));
+            self.changes.push(Change::Updates);
+            return true;
+        }
         if let Some(rest) = tag.strip_prefix("updates:") {
             let generation = rest.split(':').next().and_then(|g| g.parse::<u64>().ok());
             if generation == Some(self.updates.generation) {
@@ -327,4 +353,11 @@ impl Engine {
             self.load_updates();
         }
     }
+}
+
+/// "purpose:artifact" from an `artifact-bytes:purpose:artifact:nonce` tag.
+fn artifact_bytes_key(tag: &str) -> Option<String> {
+    let rest = tag.strip_prefix("artifact-bytes:")?;
+    let (key, _nonce) = rest.rsplit_once(':')?;
+    Some(key.to_owned())
 }
