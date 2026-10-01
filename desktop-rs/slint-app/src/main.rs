@@ -12,6 +12,7 @@ mod headless;
 mod keymap;
 mod launch;
 mod panes;
+mod perf;
 mod preview_view;
 mod platform;
 mod settings_view;
@@ -37,7 +38,7 @@ use std::rc::Rc;
 
 use clarp_core::settings::Settings;
 use clarp_engine::{Change, Config, Engine};
-use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 slint::include_modules!();
 
@@ -139,7 +140,9 @@ impl App {
     /// Qt sidebar (`clarp_core::sidebar`).
     fn chat_rows(&self, engine: &Engine, window: &AppWindow) -> Vec<ChatRow> {
         use clarp_core::sidebar::{FilterInput, TreeInput};
+        let mut laps = perf::Laps::new();
         let rows = engine.roster().rows();
+        laps.lap("roster rows");
         let trees: Vec<TreeInput> = rows
             .iter()
             .map(|r| TreeInput {
@@ -164,11 +167,14 @@ impl App {
         let mut sidebar = self.sidebar.borrow_mut();
         sidebar.query = window.get_query().to_string();
         sidebar.unread_only = window.get_scope() == "unread";
+        laps.lap("inputs");
         sidebar.rebuild(&trees);
+        laps.lap("sidebar rebuild");
         let selected = engine.selected_session();
         let tree_active = sidebar.tree_active();
         let visible: Vec<&clarp_core::roster::AgentRow> =
             sidebar.visible(&trees, &filters).into_iter().filter_map(|session| rows.iter().find(|r| r.session == session)).collect();
+        laps.lap("visible");
         // Sub-agents fold under their chat unless it is unfolded; the open
         // chat's own ancestors stay open so it is always in the list.
         let parent_of = |row: &clarp_core::roster::AgentRow| -> Option<&clarp_core::roster::AgentRow> {
@@ -193,6 +199,7 @@ impl App {
             unfolded.extend(ancestors(open));
         }
         let queue = engine.attention_queue();
+        laps.lap("queue");
         let mut folded_under: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
         let mut shown = Vec::new();
         for row in &visible {
@@ -204,7 +211,8 @@ impl App {
                 shown.push(*row);
             }
         }
-        shown
+        laps.lap("folding");
+        let chats = shown
             .into_iter()
             .map(|row| {
                 let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
@@ -222,7 +230,10 @@ impl App {
                 }
                 chat
             })
-            .collect()
+            .collect();
+        laps.lap("rows");
+        laps.done("chat rows");
+        chats
     }
 
     /// Folds (`Some(false)`), unfolds (`Some(true)`) or toggles (`None`) the
@@ -260,6 +271,7 @@ impl App {
 
     fn refresh(&self, changes: &[Change]) {
         let Some(window) = self.window.upgrade() else { return };
+        let mut whole = perf::Laps::new();
         let engine = self.engine.borrow();
         if changes.contains(&Change::Preferences) {
             apply_theme(&window, &engine.reading_theme());
@@ -273,10 +285,16 @@ impl App {
         let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Avatars | Change::Updates));
         drop(engine);
         if list_changed {
+            let started = std::time::Instant::now();
+            let mut laps = perf::Laps::new();
             let chats = self.chat_rows(&self.engine.borrow(), &window);
+            laps.lap("chat rows");
             let chats = self.with_portraits(chats);
+            laps.lap("portraits");
             window.set_explorer_compact_width(compact_width(&window, &chats));
+            laps.lap("compact width");
             self.chats.set_vec(chats);
+            laps.lap("set");
             let engine = self.engine.borrow();
             let rooms: Vec<ChatRow> = engine
                 .rooms()
@@ -309,8 +327,14 @@ impl App {
             self.rooms.set_vec(rooms);
             let archived = self.with_portraits(archived);
             self.archived.set_vec(archived);
+            laps.lap("rooms and archive");
+            laps.done("list");
+            perf::rebuilt(started, format!("{} rows; {}", self.chats.row_count(), change_names(changes)));
+            self.startup_milestones();
         }
+        whole.lap("list");
         self.refresh_panes(&window, changes);
+        whole.lap("panes");
         // A chat opens ready to type into, unless the reader is scrolling.
         if changes.contains(&Change::Selection) && !self.active_report().transcript_focused && !self.previewing.get() {
             self.focus_composer();
@@ -345,16 +369,21 @@ impl App {
         if changes.iter().any(|c| matches!(c, Change::Selection | Change::Panes | Change::Composer(_))) {
             commands::show_hints(self, &window);
         }
+        whole.lap("status");
         if changes.iter().any(|c| matches!(c, Change::Roster | Change::Preferences)) {
             commands::refresh_switcher(self, &window);
         }
+        whole.lap("switcher");
         self.voice(changes);
         if changes.iter().any(|c| matches!(c, Change::HostStatus | Change::Preferences | Change::Connection | Change::ServerInfo)) {
             settings_view::show(self, &window);
         }
         // ---- updates and teams
+        whole.lap("voice and settings");
         updates_view::refresh(self, &window, changes);
+        whole.lap("updates");
         teams_view::refresh(self, &window, changes);
+        whole.lap("teams");
         if changes.contains(&Change::Roster) {
             commands::show_hints(self, &window);
         }
@@ -363,9 +392,43 @@ impl App {
             launch_view::refresh(&app, &window, changes);
             agent_dialogs_view::refresh(&app, &window, changes);
         }
+        whole.lap("launch");
         // ---- profile and overview
         profile_view::refresh(self, &window, changes);
+        whole.lap("profile");
+        whole.done("refresh");
+        if self.active_messages().is_some_and(|m| m.row_count() > 0) {
+            perf::reached(|s| &mut s.first_chat, "first chat");
+        }
     }
+
+    /// The `perf` milestones the chat list reached: the roster, every agent
+    /// listed (helpers under their chat), every portrait shown.
+    fn startup_milestones(&self) {
+        let engine = self.engine.borrow();
+        let agents = engine.roster().agents();
+        if agents.is_empty() {
+            return;
+        }
+        perf::reached(|s| &mut s.snapshot, "roster");
+        let listed: std::collections::HashMap<String, bool> =
+            self.chats.iter().map(|c| (c.session.to_string(), c.portrait.size().width > 0)).collect();
+        if agents.iter().filter(|a| a.role != "helper").all(|a| listed.contains_key(&a.session)) {
+            perf::reached(|s| &mut s.explorer_complete, "explorer complete");
+        }
+        let with_portrait = |a: &&clarp_core::protocol::Agent| {
+            !clarp_core::media::avatar_url(&a.avatar_url, clarp_core::protocol::display_name(a)).is_empty()
+        };
+        if agents.iter().filter(with_portrait).all(|a| listed.get(&a.session).is_none_or(|shown| *shown)) {
+            perf::reached(|s| &mut s.portraits_complete, "portraits complete");
+        }
+    }
+}
+
+/// `Roster, Updates, Conversation` for a perf log line.
+fn change_names(changes: &[Change]) -> String {
+    let names: Vec<String> = changes.iter().map(|c| format!("{c:?}").split(['(', ' ', '{']).next().unwrap_or_default().to_owned()).collect();
+    names.join(", ")
 }
 
 impl App {
@@ -429,13 +492,17 @@ pub fn audio_notices(notices: Vec<platform::audio::Notice>) {
 pub fn pump() {
     platform::diagnostics::awake();
     let Some(app) = app() else { return };
+    let started = std::time::Instant::now();
     let changes = app.engine.borrow_mut().pump();
     if !changes.is_empty() {
+        let engine = started.elapsed();
         app.refresh(&changes);
+        perf::woke(started, format!("engine {:.1} ms; {}", perf::ms(engine), change_names(&changes)));
     }
 }
 
 fn main() {
+    perf::launched();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let e2e_out = args.iter().position(|a| a == "--e2e-out").and_then(|i| args.get(i + 1)).cloned();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
@@ -847,8 +914,10 @@ fn with_window(act: impl FnOnce(&Rc<App>, &AppWindow)) {
 /// Commands change state synchronously (an optimistic row, a selection):
 /// show it without waiting for the next wake.
 pub fn pump_now(app: &Rc<App>) {
+    let started = std::time::Instant::now();
     let mut changes = app.engine.borrow_mut().pump();
     let sessions: Vec<String> = app.pane_state.borrow().iter().map(|p| p.session.clone()).collect();
     changes.extend(sessions.into_iter().map(Change::Conversation));
     app.refresh(&changes);
+    perf::woke(started, format!("command: {}", change_names(&changes)));
 }
