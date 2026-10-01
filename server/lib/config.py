@@ -596,6 +596,15 @@ class Config:
                 or voices.get(_ANONYMOUS_SUFFIX.sub("", persona).casefold())
                 or None)
 
+    def gemini_voice_for_cartesia(self, cartesia_voice: str | None) -> str | None:
+        """Gemini voice of the contact that owns `cartesia_voice`, if any."""
+        if not cartesia_voice:
+            return None
+        for persona, voice in self.cartesia_voices.items():
+            if voice == cartesia_voice and self.gemini_voice_for(persona):
+                return self.gemini_voice_for(persona)
+        return None
+
     def cartesia_voice_for(self, persona: str) -> str | None:
         """Cartesia voice id for a persona, or None if unmapped.
 

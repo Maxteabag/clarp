@@ -58,7 +58,8 @@ def providers(monkeypatch):
 
 def _speak(env, agent_key, session, delivery=None):
     from lib.tts_worker import synth_one
-    tts_queue.enqueue(agent_id=env[agent_key], text="hello there", voice_id="",
+    voice_id = agents_db.get_by_agent_id(env[agent_key])["voice_id"] or ""
+    tts_queue.enqueue(agent_id=env[agent_key], text="hello there", voice_id=voice_id,
                       session=session, source=TurnSource.PWA, trace_id="t-1")
     assert synth_one(audio_dir=env["audio_dir"], delivery=delivery) is True
     return tts_queue.recent(limit=1)[0]
@@ -84,6 +85,23 @@ def test_gemini_provider_uses_contact_voice_map(env, providers, monkeypatch):
     _speak(env, "mike", "mike-1")
     # Mike's stored voice map has no gemini entry; the contact map supplies it.
     assert providers == [{"provider": "gemini", "voice": "voice_mike"}]
+
+
+def test_gemini_voice_follows_cartesia_voice_or_stays_silent(env, providers, monkeypatch):
+    from lib import config
+    monkeypatch.setattr(config, "_CACHED", config.Config(
+        tts_provider="gemini", gemini_api_key="simulated",
+        cartesia_voices={"Arnold": "cart-au"}, gemini_voices={"Arnold": "voice_au"}))
+    helper = agents_db.create_agent(persona="R1_MAIN", voice_id='{"cartesia":"cart-au"}',
+                                    cwd="/tmp", session="r1")
+    silent = agents_db.create_agent(persona="Janitor", voice_id="", cwd="/tmp",
+                                    session="janitor")
+    env.update(helper=helper, silent=silent)
+    _speak(env, "helper", "r1")
+    assert providers == [{"provider": "gemini", "voice": "voice_au"}]
+    row = _speak(env, "silent", "janitor")
+    assert row["status"] == tts_queue.FAILED
+    assert len(providers) == 1
 
 
 def test_config_reads_agent_overrides(tmp_path):

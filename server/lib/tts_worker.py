@@ -252,11 +252,22 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 speed=cfg.eleven_speed, on_chunk=on_chunk,
                 trace_id=trace_id)
         if selected == GEMINI:
-            from .gemini_tts import synthesize as gemini_synthesize
+            from .gemini_tts import GeminiTTSError, synthesize as gemini_synthesize
+            gemini_voice = (
+                voice_for(GEMINI) or cfg.gemini_voice_for(persona)
+                # A helper speaking with a contact's Cartesia voice keeps
+                # that contact's Gemini voice.
+                or cfg.gemini_voice_for_cartesia(cartesia_voice)
+                # The default voice is only for agents moved to Gemini on
+                # purpose; a contact with no voice stays silent as before.
+                or (cfg.gemini_voice
+                    if cfg.tts_override_for(agent).get("provider") == GEMINI
+                    else None))
+            if not gemini_voice:
+                raise GeminiTTSError(f"no Gemini voice configured for {persona!r}")
             return gemini_synthesize(
                 text=text,
-                voice=(voice_for(GEMINI) or cfg.gemini_voice_for(persona)
-                       or cfg.gemini_voice),
+                voice=gemini_voice,
                 out_path=out_path, api_key=cfg.gemini_key(),
                 model=cfg.gemini_model, on_chunk=on_chunk,
                 trace_id=trace_id)
