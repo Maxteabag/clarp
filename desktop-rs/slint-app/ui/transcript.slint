@@ -211,9 +211,13 @@ export component Transcript inherits FocusScope {
         width: parent.width;
         height: parent.height;
         content-width: self.visible-width;
-        content-height: rows-layout.preferred-height;
+        // The rows' real height: a row that needs more than its preferred
+        // height is laid out taller, so the preferred sum alone left the
+        // latest messages below the end of the scroll range.
+        content-height: Math.max(rows-layout.preferred-height, rows-layout.min-height);
         rows-layout := VerticalLayout {
         width: list.visible-width;
+        height: list.content-height;
         for row in root.rows: HorizontalLayout {
             padding-left: 16px;
             padding-right: 16px;
