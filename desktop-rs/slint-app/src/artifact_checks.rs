@@ -991,10 +991,81 @@ fn code_change_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- data
+
+fn data_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let ids = ["data-sales", "data-wide", "data-empty", "data-broken"];
+    let strings = |m: slint::ModelRc<slint::SharedString>| m.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let mut stages = load_chat("art-data", &["data"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("data cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let sales = card(window, "data-sales").expect("sales");
+            check(sales.label == "DATA" && sales.action == "Open table" && sales.rows_count == "120 rows", &format!("a table, its rows counted: {:?} {:?}", sales.action, sales.rows_count));
+            // iOS: the header and the first row; true reads Yes, null —.
+            check(strings(sales.head.clone()) == ["Region", "Q1", "Q2", "Q3", "Q4", "Audited", "Note"], &format!("its header: {:?}", strings(sales.head.clone())));
+            check(strings(sales.first_row.clone()) == ["Nordics 0", "100", "120", "90", "150", "Yes", "—"], &format!("and its first row: {:?}", strings(sales.first_row.clone())));
+            let wide = card(window, "data-wide").expect("wide");
+            let head = strings(wide.head.clone());
+            check(head.len() == 7 && head[6] == "+24", &format!("thirty columns show six and how many more: {head:?}"));
+            let empty = card(window, "data-empty").expect("empty");
+            check(empty.rows_count == "0 rows" && empty.first_row.row_count() == 0, &format!("an empty table: {:?}", empty.rows_count));
+            let broken = card(window, "data-broken").expect("broken");
+            check(broken.data_note == "Structured data unavailable" && broken.head.row_count() == 0 && broken.action.is_empty(), &format!("no columns, no table: {:?}", broken.data_note));
+            app.focus_transcript();
+            true
+        })),
+        ("data keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("data first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("data-sales") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            shot(&out, "artifacts-09-data");
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("data opens", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the table: overlay {:?}", window.get_overlay())); true };
+            }
+            let tables: Vec<usize> = window.get_report_blocks().iter().filter(|b| b.kind == "table").map(|b| b.rows.row_count()).collect();
+            // The chart (bar: a row per category) and the grid (header and 120 rows).
+            check(window.get_report_kind() == "DATA" && tables.contains(&121), &format!("the whole table in the report viewer: {tables:?}"));
+            // The chart's first 30 categories as bars, then the grid.
+            check(tables == [31, 121], &format!("with its chart first, a bar per category: {tables:?}"));
+            shot(&out2, "artifacts-09b-data-open");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("data closed", Box::new(|_, window, elapsed| {
+            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_overlay().is_empty(), "Escape closes it");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1234,6 +1305,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(document_stages(&out));
     stages.extend(research_stages(&out));
     stages.extend(code_change_stages(&out));
+    stages.extend(data_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }

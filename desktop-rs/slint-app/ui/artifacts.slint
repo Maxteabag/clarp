@@ -67,6 +67,12 @@ export struct ArtifactItem {
     preview: string,
     // research: how many sources it cites that can be opened.
     sources: string,
+    // data: the header and the first row (iOS shows one), the row count,
+    // or why there is no table.
+    head: [string],
+    first-row: [string],
+    rows-count: string,
+    data-note: string,
     // code_change: where (repository and branch) and how much.
     repo: string,
     files: string,
