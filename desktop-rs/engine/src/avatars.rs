@@ -4,6 +4,9 @@
 //! and gets None until it is there.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 use crate::{Change, Engine};
 
@@ -21,7 +24,27 @@ pub(crate) struct Avatars {
     revision: u64,
     /// Where portraits are cached; by default the Rust client's cache.
     directory: Option<std::path::PathBuf>,
+    /// The portrait rounder's queue (started with the first portrait).
+    rounder: Option<Sender<Round>>,
 }
+
+/// A downloaded portrait to round and write to `path`.
+struct Round {
+    tag: String,
+    path: PathBuf,
+    bytes: Vec<u8>,
+}
+
+/// A rounded portrait written to `path`, or why not.
+pub(crate) struct Cached {
+    tag: String,
+    path: PathBuf,
+    result: Result<(), String>,
+}
+
+/// How often the rounder hands finished portraits over: each hand-over
+/// rebuilds the chat list once.
+const HAND_OVER: Duration = Duration::from_millis(100);
 
 impl Engine {
     /// Bumped whenever a portrait arrives.
@@ -83,25 +106,44 @@ impl Engine {
         if !tag.starts_with("avatar:") {
             return false;
         }
-        let Some((session, url)) = self.avatars.requests.remove(tag) else { return true };
+        // The request stays listed until the portrait is cached, so it is
+        // not asked for again meanwhile.
+        let Some((session, url)) = self.avatars.requests.get(tag).cloned() else { return true };
         let mime = clarp_core::media::mime(content_type);
         if bytes.is_empty() || bytes.len() > clarp_core::media::MAX_PORTRAIT_BYTES || !mime.starts_with("image/") {
             eprintln!("Engine: {session}'s portrait is not an image ({mime}, {} bytes)", bytes.len());
+            self.avatars.requests.remove(tag);
             self.avatars.failures.insert(session, url);
             return true;
         }
         let Some(path) = self.portrait_root().map(|root| clarp_core::media::portrait_cache_path(&root, &format!("{}{url}", self.base_url)))
         else {
             eprintln!("Engine: no cache folder for portraits");
+            self.avatars.requests.remove(tag);
             self.avatars.failures.insert(session, url);
             return true;
         };
-        let portrait = clarp_core::media::rounded_portrait(bytes).unwrap_or_else(|| bytes.to_vec());
-        let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, portrait));
-        if let Err(error) = written {
+        // Decoding, scaling and encoding a Host portrait (512 px) takes
+        // milliseconds, a hundred of them at a first launch: one thread
+        // does them in turn, leaving the UI thread and the other cores be.
+        let round = Round { tag: tag.to_owned(), path, bytes: bytes.to_vec() };
+        let rounder = self.avatars.rounder.get_or_insert_with(|| start_rounder(self.sender.clone(), self.wake.clone()));
+        if let Err(error) = rounder.send(round) {
+            eprintln!("Engine: the portrait rounder stopped");
+            self.avatars.rounder = None;
+            let round = error.0;
+            self.avatars.requests.remove(&round.tag);
+        }
+        true
+    }
+
+    pub(crate) fn portrait_cached(&mut self, cached: Cached) {
+        let Cached { tag, path, result } = cached;
+        let Some((session, url)) = self.avatars.requests.remove(&tag) else { return };
+        if let Err(error) = result {
             eprintln!("Engine: could not cache {}: {error}", path.display());
             self.avatars.failures.insert(session, url);
-            return true;
+            return;
         }
         if self.avatars.urls.get(&session) == Some(&url) {
             let source = url::Url::from_file_path(&path).map(|u| u.to_string()).unwrap_or_default();
@@ -109,7 +151,6 @@ impl Engine {
             self.avatars.revision += 1;
             self.changes.push(Change::Avatars);
         }
-        true
     }
 
     pub(crate) fn avatar_failure(&mut self, tag: &str, detail: &str) -> bool {
@@ -122,4 +163,36 @@ impl Engine {
         }
         true
     }
+}
+
+/// The rounder thread: rounds what is queued, handing results over every
+/// `HAND_OVER` and whenever the queue runs dry.
+fn start_rounder(sender: Sender<crate::Message>, wake: std::sync::Arc<dyn Fn() + Send + Sync>) -> Sender<Round> {
+    let (queue, rounds) = std::sync::mpsc::channel::<Round>();
+    let hand_over = move |cached: &mut Vec<Cached>| {
+        if !cached.is_empty() && sender.send(crate::Message::PortraitsCached(std::mem::take(cached))).is_ok() {
+            wake();
+        }
+    };
+    let spawned = std::thread::Builder::new().name("portrait-rounder".into()).spawn(move || {
+        while let Ok(first) = rounds.recv() {
+            let (mut cached, mut since) = (Vec::new(), Instant::now());
+            let mut next = Some(first);
+            while let Some(Round { tag, path, bytes }) = next {
+                let portrait = clarp_core::media::rounded_portrait(&bytes).unwrap_or(bytes);
+                let result = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, portrait));
+                cached.push(Cached { tag, path, result: result.map_err(|e| e.to_string()) });
+                if since.elapsed() >= HAND_OVER {
+                    hand_over(&mut cached);
+                    since = Instant::now();
+                }
+                next = rounds.try_recv().ok();
+            }
+            hand_over(&mut cached);
+        }
+    });
+    if let Err(error) = spawned {
+        eprintln!("Engine: no portrait rounder: {error}");
+    }
+    queue
 }

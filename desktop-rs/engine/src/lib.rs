@@ -123,6 +123,8 @@ enum Message {
     /// Look again for a created session the roster did not show yet.
     CreatedAgentDue(String),
     UpdatesDue,
+    /// Portraits rounded and written (or not) off the UI thread.
+    PortraitsCached(Vec<avatars::Cached>),
 }
 
 pub struct Config {
@@ -356,6 +358,7 @@ impl Engine {
                 Message::CredentialRemoved { base, result } => self.credential_removed(&base, result),
                 Message::CreatedAgentDue(session) => self.created_agent_due(&session),
                 Message::UpdatesDue => self.updates_due(),
+                Message::PortraitsCached(cached) => cached.into_iter().for_each(|c| self.portrait_cached(c)),
             }
         }
         let mut changes = std::mem::take(&mut self.changes);
