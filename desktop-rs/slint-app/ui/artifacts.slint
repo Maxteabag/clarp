@@ -534,6 +534,20 @@ export component ArtifactCard inherits Rectangle {
             height: 64px;
             vertical-alignment: top;
         }
+        // A table's header and first row, equal columns, one line each.
+        if root.artifact.head.length > 0: VerticalLayout {
+            spacing: 1px;
+            HorizontalLayout {
+                spacing: 6px;
+                for cell in root.artifact.head: Text { text: cell; color: Palette.chrome-text; font-size: 11px; font-weight: 600; overflow: elide; horizontal-stretch: 1; min-width: 0; preferred-width: 0; }
+            }
+            if root.artifact.first-row.length > 0: HorizontalLayout {
+                spacing: 6px;
+                for cell in root.artifact.first-row: Text { text: cell; color: Palette.text; font-family: "JetBrains Mono"; font-size: 11px; overflow: elide; horizontal-stretch: 1; min-width: 0; preferred-width: 0; }
+            }
+            Text { text: root.artifact.rows-count; color: Palette.faint; font-size: 11px; }
+        }
+        if root.artifact.data-note != "": Text { text: root.artifact.data-note; color: Palette.warning; font-size: 12px; }
         // A change's where and how much, one line each (iOS's monospaced row).
         if root.artifact.kind == "code_change": Text { text: root.artifact.repo; color: Palette.text; font-family: "JetBrains Mono"; font-size: 12px; overflow: elide; }
         if root.artifact.files != "" || root.artifact.additions != "" || root.artifact.deletions != "": HorizontalLayout {
