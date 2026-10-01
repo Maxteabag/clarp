@@ -298,7 +298,7 @@ impl App {
             laps.lap("portraits");
             window.set_explorer_compact_width(compact_width(&window, &chats));
             laps.lap("compact width");
-            self.chats.set_vec(chats);
+            sync_rows(&self.chats, chats);
             laps.lap("set");
             let engine = self.engine.borrow();
             let rooms: Vec<ChatRow> = engine
@@ -329,9 +329,9 @@ impl App {
             window.set_unread_rooms(engine.unread_rooms() as i32);
             drop(engine);
             let rooms = self.with_portraits(rooms);
-            self.rooms.set_vec(rooms);
+            sync_rows(&self.rooms, rooms);
             let archived = self.with_portraits(archived);
-            self.archived.set_vec(archived);
+            sync_rows(&self.archived, archived);
             laps.lap("rooms and archive");
             laps.done("list");
             perf::rebuilt(started, format!("{} rows; {}", self.chats.row_count(), change_names(changes)));
@@ -427,6 +427,28 @@ impl App {
         if agents.iter().filter(with_portrait).all(|a| listed.get(&a.session).is_none_or(|shown| *shown)) {
             perf::reached(|s| &mut s.portraits_complete, "portraits complete");
         }
+    }
+}
+
+/// Puts `rows` in `model`, changing only the rows that differ: replacing
+/// the whole list makes the view build every row again. A busy row keeps
+/// its shimmer letters while its name stays.
+fn sync_rows(model: &VecModel<ChatRow>, mut rows: Vec<ChatRow>) {
+    for (index, row) in rows.iter_mut().enumerate() {
+        let Some(old) = model.row_data(index) else { break };
+        if old.session == row.session && old.name == row.name && old.letters.row_count() > 0 && row.letters.row_count() > 0 {
+            row.letters = old.letters.clone();
+        }
+        if old != *row {
+            model.set_row_data(index, row.clone());
+        }
+    }
+    let shared = model.row_count().min(rows.len());
+    for _ in shared..model.row_count() {
+        model.remove(model.row_count() - 1);
+    }
+    for row in rows.into_iter().skip(shared) {
+        model.push(row);
     }
 }
 
