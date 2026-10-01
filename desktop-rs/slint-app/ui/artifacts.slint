@@ -671,6 +671,13 @@ export component ArtifactCard inherits Rectangle {
             if root.artifact.additions != "": Text { text: root.artifact.additions; color: Palette.success; font-family: "JetBrains Mono"; font-size: 12px; }
             if root.artifact.deletions != "": Text { text: root.artifact.deletions; color: Palette.danger; font-family: "JetBrains Mono"; font-size: 12px; }
         }
+        if root.artifact.file-info != "": Text {
+            text: root.artifact.file-info;
+            color: root.artifact.action == "" ? Palette.warning : Palette.muted;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+            overflow: elide;
+        }
         if root.artifact.sources != "": Text { text: root.artifact.sources; color: Palette.faint; font-size: 11px; }
         if root.artifact.kind == "audio": MediaBody { artifact: root.artifact; tint: root.tint; }
         if root.artifact.kind == "video": VideoBody { artifact: root.artifact; tint: root.tint; }
