@@ -178,6 +178,34 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "dec-click", "type": "decision", "status": "active", "session": s, "title": "Turn on the nightly backups",
              "decision": decision("d-click", "pending", question="Back up every night at 03:00?", yes_label="Turn on", no_label="Not now")},
         ]
+    if kind == "question":
+        def question(did, status, options, revision=7, **more):
+            return {"decision_id": did, "status": status, "revision": revision, "response_type": "single_choice",
+                    "response_effort": "quick", "urgency": "normal", "options": options, **more}
+        trip = [{"id": "bergen", "label": "Bergen", "description": "Fjords and rain; seven hours by train from Oslo."},
+                {"id": "tromso", "label": "Tromsø", "description": "Northern lights season starts in October."},
+                {"id": "stay", "label": "Stay in Oslo (recommended)", "description": ""}]
+        days = [{"id": "thu", "label": "Thursday"}, {"id": "fri", "label": "Friday"}]
+        return [
+            {"artifact_id": "q-trip", "type": "question", "status": "active", "session": s,
+             "title": "Where should the team offsite go this autumn, given the budget we agreed in August?",
+             "decision": question("q-trip", "pending", trip, question="Where should we go?",
+                                  context="Budget is 40k for twelve people, travel included.", recommended_option_id="tromso",
+                                  allow_custom_text=True, response_effort="short")},
+            {"artifact_id": "q-custom", "type": "question", "status": "active", "session": s, "title": "Pick the demo day",
+             "decision": question("q-custom", "pending", days, question="Which day suits the demo?", allow_custom_text=True)},
+            {"artifact_id": "q-picked", "type": "question", "status": "completed", "session": s, "title": "Database for the prototype",
+             "decision": question("q-picked", "answered", [{"id": "pg", "label": "Postgres"}, {"id": "lite", "label": "SQLite"}],
+                                  question="Which database?", answer={"option_id": "lite"})},
+            {"artifact_id": "q-written", "type": "question", "status": "completed", "session": s, "title": "Name the release",
+             "decision": question("q-written", "answered", [{"id": "a", "label": "Aurora"}], question="Which name?",
+                                  allow_custom_text=True, answer={"text": "Let's call it Fjord instead"})},
+            {"artifact_id": "q-ranking", "type": "question", "status": "active", "session": s, "title": "Rank the features",
+             "decision": {**question("q-ranking", "pending", []), "response_type": "ranking", "question": "Rank them"}},
+            {"artifact_id": "q-click", "type": "question", "status": "active", "session": s, "title": "Coffee or tea at the offsite",
+             "decision": question("q-click", "pending", [{"id": "coffee", "label": "Coffee"}, {"id": "tea", "label": "Tea"}],
+                                  question="Coffee or tea?")},
+        ]
     raise KeyError(kind)
 
 

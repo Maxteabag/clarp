@@ -471,10 +471,134 @@ fn decision_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- question
+
+fn question_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let ids = ["q-trip", "q-custom", "q-picked", "q-written", "q-ranking", "q-click"];
+    let mut stages = load_chat("art-question", &["question"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("question cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let trip = card(window, "q-trip").expect("trip");
+            check(trip.label == "QUESTION" && trip.pending && !trip.approval && trip.allow_custom, &format!("a pending question with a custom answer: {:?} {} {} {}", trip.label, trip.pending, trip.approval, trip.allow_custom));
+            let options: Vec<(String, String, bool)> = trip.options.iter().map(|o| (o.label.to_string(), o.detail.to_string(), o.recommended)).collect();
+            check(
+                options.len() == 3 && options[0] == ("Bergen".into(), "Fjords and rain; seven hours by train from Oslo.".into(), false) && options[1].2 && !options[2].2,
+                &format!("its options with their descriptions, the recommended one tagged unless its label says so: {options:?}"),
+            );
+            check(trip.meta.contains("About a minute") && trip.context.starts_with("Budget is 40k"), &format!("its effort and context: {:?}", trip.meta));
+            let picked = card(window, "q-picked").expect("picked");
+            check(!picked.pending && picked.resolved == "Answer saved" && picked.answer == "SQLite" && picked.chosen == 1, &format!("an answered one names the option, marked: {:?} {:?} {}", picked.resolved, picked.answer, picked.chosen));
+            let written = card(window, "q-written").expect("written");
+            check(written.answer == "Let's call it Fjord instead" && written.draft == "Let's call it Fjord instead", &format!("or the answer written: {:?}", written.answer));
+            let ranking = card(window, "q-ranking").expect("ranking");
+            check(ranking.options.row_count() == 0 && ranking.meta.contains("Update Clarp"), &format!("a kind of question this app cannot answer says so: {:?}", ranking.meta));
+            app.focus_transcript();
+            true
+        })),
+        ("question keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            for _ in 0..6 {
+                headless::press("k");
+            }
+            true
+        })),
+        ("question chosen", Box::new(|_, window, elapsed| {
+            if selected(window) != "q-trip" {
+                if elapsed > Duration::from_secs(2) {
+                    check(false, &format!("K reaches the first question: {:?}", selected(window)));
+                    return true;
+                }
+                return false;
+            }
+            headless::press("2");
+            let chosen = card(window, "q-trip").map(|c| c.chosen).unwrap_or(-2);
+            check(chosen == 1 && posts("/decisions/q-trip/resolve").is_empty(), &format!("2 chooses Tromsø and sends nothing yet: {chosen}"));
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("question answered", Box::new(|_, window, elapsed| {
+            let sent = posts("/decisions/q-trip/resolve");
+            let shown = card(window, "q-trip").is_some_and(|c| c.resolved == "Answer saved" && c.answer == "Tromsø");
+            if (sent.is_empty() || !shown) && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            let body = sent.last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
+            check(body == json!({"answer": {"option_id": "tromso"}, "expected_revision": 7}), &format!("Enter sends the chosen option: {body}"));
+            check(shown, "the card shows the answer saved");
+            headless::press("j");
+            true
+        })),
+        ("custom answer", Box::new(|_, window, elapsed| {
+            if selected(window) != "q-custom" {
+                return elapsed > Duration::from_secs(2) && { check(false, "J moves to the next question"); true };
+            }
+            // Its last number writes an answer of one's own.
+            headless::press("3");
+            true
+        })),
+        ("writing", Box::new(|app, window, elapsed| {
+            let editing = card(window, "q-custom").is_some_and(|c| c.chosen == 2 && c.editing);
+            if !editing || elapsed < Duration::from_millis(300) {
+                return elapsed > Duration::from_secs(2) && { check(false, "3 opens the answer of one's own"); true };
+            }
+            check(crate::commands::context(app, window) == "composer", "the keyboard types into it (letters are not shortcuts)");
+            headless::type_text("Friday, after lunch");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("custom answer sent", Box::new(move |_, window, elapsed| {
+            let sent = posts("/decisions/q-custom/resolve");
+            let shown = card(window, "q-custom").is_some_and(|c| c.resolved == "Answer saved" && c.answer == "Friday, after lunch");
+            if (sent.is_empty() || !shown) && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            let body = sent.last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
+            check(body == json!({"answer": {"text": "Friday, after lunch"}, "expected_revision": 7}), &format!("Enter in it sends the written answer: {body}"));
+            check(shown, "and the card shows it");
+            shot(&out, "artifacts-04-question");
+            true
+        })),
+        ("question clicked", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            // Real pointer clicks on the latest card: an option, then Send
+            // answer (below the options; a click on it first says to choose).
+            let option = (300..=760).rev().step_by(4).find(|y| {
+                super::click_at(window, 440.0, *y as f32);
+                card(window, "q-click").is_some_and(|c| c.chosen >= 0)
+            });
+            let chosen = card(window, "q-click").map(|c| c.chosen).unwrap_or(-1);
+            let send = (300..=760).rev().step_by(4).find(|y| {
+                super::click_at(window, 440.0, *y as f32);
+                !posts("/decisions/q-click/resolve").is_empty()
+            });
+            let body = posts("/decisions/q-click/resolve").last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
+            check(option.is_some() && send.is_some() && body["answer"]["option_id"].is_string(), &format!("clicking an option and Send answer sends it (option {chosen} at {option:?}, send at {send:?}): {body}"));
+            true
+        })),
+        ("clicked question answered", Box::new(move |_, window, elapsed| {
+            let done = card(window, "q-click").is_some_and(|c| c.resolved == "Answer saved");
+            if !done || elapsed < Duration::from_millis(500) {
+                return elapsed > Duration::from_secs(4) && { check(false, "the clicked question is answered"); true };
+            }
+            shot(&out2, "artifacts-04b-question-clicked");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -625,6 +749,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(countdown_stages(&out));
     stages.extend(html_form_stages(&out));
     stages.extend(decision_stages(&out));
+    stages.extend(question_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
