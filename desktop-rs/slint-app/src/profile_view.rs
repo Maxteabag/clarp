@@ -27,6 +27,12 @@ struct State {
     effort_ids: Vec<String>,
     /// Decoded images by `file://` URL, so a refresh does not decode again.
     images: HashMap<String, slint::Image>,
+    /// Portraits the decoder has and has not delivered yet.
+    decoding: std::collections::HashSet<String>,
+    /// Of those, the ones a list asked for: their arrival refreshes it.
+    wanted: std::collections::HashSet<String>,
+    /// Some arrived since the lists last asked (`portraits_ready`).
+    delivered: bool,
 }
 
 thread_local! {
@@ -154,9 +160,159 @@ pub fn image(url: &str) -> slint::Image {
 }
 
 /// The agent's portrait (fetched on first use; empty until it arrives).
+/// An agent's portrait for a list: decoded on the portrait decoder, so a
+/// hundred of them never hold the UI thread. Empty (the initial shows)
+/// until it is there; its arrival refreshes the lists.
 pub fn portrait(app: &App, session: &str) -> slint::Image {
-    let source = app.engine.borrow_mut().avatar_source(session);
-    source.map(|url| image(&url)).unwrap_or_default()
+    let Some(url) = app.engine.borrow_mut().avatar_source(session) else { return slint::Image::default() };
+    let cached = STATE.with(|s| s.borrow().images.get(&url).cloned());
+    cached.unwrap_or_else(|| {
+        STATE.with(|s| s.borrow_mut().wanted.insert(url.clone()));
+        decode_later(vec![url]);
+        slint::Image::default()
+    })
+}
+
+/// Whether the lists have portraits to show: every agent's is decoded, or
+/// some arrived since they last asked. The missing ones are asked for,
+/// and refresh the lists when they arrive.
+pub fn portraits_ready(app: &App) -> bool {
+    let sessions: Vec<String> = app.engine.borrow().roster().agents().iter().map(|a| a.session.clone()).collect();
+    let urls: Vec<String> = sessions.iter().filter_map(|s| app.engine.borrow_mut().avatar_source(s)).collect();
+    let (missing, delivered) = STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        let missing: Vec<String> = urls.into_iter().filter(|u| !state.images.contains_key(u)).collect();
+        state.wanted.extend(missing.iter().cloned());
+        (missing, std::mem::take(&mut state.delivered))
+    });
+    let ready = delivered || missing.is_empty();
+    decode_later(missing);
+    ready
+}
+
+/// Decodes the cached portraits (newest first) while the Host is asked
+/// for the roster, so a usual launch lists every agent with its portrait.
+pub fn prewarm_portraits() {
+    let Some(folder) = clarp_core::media::cache_dir().map(|c| c.join("portraits")) else { return };
+    let Ok(entries) = std::fs::read_dir(&folder) else { return };
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    // A portrait is 147 KB decoded: no more than a large roster's worth.
+    let urls = files.into_iter().take(200).filter_map(|(_, path)| url::Url::from_file_path(path).ok()).map(String::from).collect();
+    decode_later(urls);
+}
+
+type Decoded = Vec<(String, Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>)>;
+
+/// Hands `urls` to the decoder thread, each once.
+fn decode_later(urls: Vec<String>) {
+    use std::sync::{Mutex, OnceLock, mpsc};
+    static DECODER: OnceLock<Mutex<mpsc::Sender<String>>> = OnceLock::new();
+    let urls: Vec<String> = STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        urls.into_iter().filter(|u| !state.images.contains_key(u) && state.decoding.insert(u.clone())).collect()
+    });
+    if urls.is_empty() {
+        return;
+    }
+    let decoder = DECODER.get_or_init(|| {
+        let (sender, receiver) = mpsc::channel::<String>();
+        let spawned = std::thread::Builder::new().name("portraits".into()).spawn(move || {
+            while let Ok(first) = receiver.recv() {
+                // What queued meanwhile goes in the same batch: one list
+                // refresh for many portraits.
+                let started = std::time::Instant::now();
+                let batch: Decoded = std::iter::once(first).chain(receiver.try_iter()).map(|url| {
+                    let pixels = decode(&url);
+                    (url, pixels)
+                }).collect();
+                let took = started.elapsed();
+                if let Err(error) = slint::invoke_from_event_loop(move || decoded(batch, took)) {
+                    eprintln!("clarp-slint: dropped decoded portraits: {error}");
+                }
+            }
+        });
+        if let Err(error) = spawned {
+            eprintln!("clarp-slint: no portrait decoder: {error}");
+        }
+        Mutex::new(sender)
+    });
+    if let Ok(sender) = decoder.lock() {
+        for url in urls {
+            let _ = sender.send(url);
+        }
+    }
+}
+
+fn decode(url: &str) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
+    let loaded = file_path(url).map(|p| std::fs::read(&p).map_err(|e| e.to_string()).and_then(|bytes| image::load_from_memory(&bytes).map_err(|e| e.to_string())));
+    match loaded {
+        Some(Ok(decoded)) => {
+            let rgba = decoded.to_rgba8();
+            Some(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height()))
+        }
+        Some(Err(error)) => {
+            eprintln!("clarp-slint: cannot load {url}: {error}");
+            None
+        }
+        None => {
+            eprintln!("clarp-slint: not a local file: {url}");
+            None
+        }
+    }
+}
+
+/// On the UI thread: the decoder's batch joins the cache, and lists that
+/// show one of them refresh once.
+fn decoded(batch: Decoded, took: std::time::Duration) {
+    let count = batch.len();
+    let wanted = STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        let mut wanted = false;
+        for (url, pixels) in batch {
+            state.decoding.remove(&url);
+            wanted |= state.wanted.remove(&url);
+            state.images.insert(url, pixels.map(slint::Image::from_rgba8).unwrap_or_default());
+        }
+        state.delivered |= wanted;
+        wanted
+    });
+    if wanted {
+        refresh_for_portraits(format!("{count} portraits decoded in {:.1} ms", crate::perf::ms(took)));
+    }
+}
+
+/// Refreshes the lists for arrived portraits, at most every 100 ms: at a
+/// first launch they arrive a few at a time for a while.
+fn refresh_for_portraits(why: String) {
+    use std::time::{Duration, Instant};
+    const EVERY: Duration = Duration::from_millis(100);
+    thread_local! {
+        /// The last refresh, and whether one is already scheduled.
+        static PACE: std::cell::Cell<(Option<Instant>, bool)> = const { std::cell::Cell::new((None, false)) };
+    }
+    let (last, scheduled) = PACE.get();
+    if scheduled {
+        return;
+    }
+    let refresh = move || {
+        PACE.set((Some(Instant::now()), false));
+        if let Some(app) = crate::app() {
+            let started = Instant::now();
+            app.refresh(&[Change::Avatars]);
+            crate::perf::woke(started, why);
+        }
+    };
+    match last.map_or(Duration::ZERO, |at| EVERY.saturating_sub(at.elapsed())) {
+        wait if wait.is_zero() => refresh(),
+        wait => {
+            PACE.set((last, true));
+            slint::Timer::single_shot(wait, refresh);
+        }
+    }
 }
 
 pub fn reduced_motion(app: &App) -> bool {
