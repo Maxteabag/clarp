@@ -1,7 +1,6 @@
-"""Live/quality voice split: which provider speaks a queued clip.
+"""Per-agent voice provider: which provider speaks a queued clip.
 
-Exercised through `synth_one`, the worker boundary, with the real focus
-table and application-activity leases standing in for "the chat is open".
+Exercised through `synth_one`, the worker boundary.
 """
 from __future__ import annotations
 
@@ -9,7 +8,6 @@ import base64
 import json
 import pathlib
 import sys
-import uuid
 
 import pytest
 
@@ -29,28 +27,25 @@ def env(tmp_path, monkeypatch):
     cfg = config.Config(
         tts_provider="cartesia", cartesia_api_key="simulated",
         gemini_api_key="simulated",
-        tts_agent_overrides={"jax": {"quality_provider": "gemini",
+        tts_agent_overrides={"jax": {"provider": "gemini",
                                      "gemini_voice": "Charon"}})
     monkeypatch.setattr(config, "_CACHED", cfg)
     jax = agents_db.create_agent(persona="Jax", voice_id="", cwd=str(tmp_path),
                                  session="jax-1")
     mike = agents_db.create_agent(persona="Mike", voice_id="V_MIKE",
                                   cwd=str(tmp_path), session="mike-1")
-    return {"audio_dir": audio_dir, "cfg": cfg, "jax": jax, "mike": mike}
+    return {"audio_dir": audio_dir, "jax": jax, "mike": mike}
 
 
 @pytest.fixture
 def providers(monkeypatch):
     """Record which provider each clip went to; write a tiny mp3 for each."""
     calls: list[dict] = []
-    failing: set[str] = set()
 
     def fake(name):
         def synth(*, text, out_path, on_chunk=None, **kw):
-            calls.append({"provider": name, "voice": kw.get("voice") or kw.get("voice_id"),
-                          "text": text})
-            if name in failing:
-                raise RuntimeError(f"{name} unavailable")
+            calls.append({"provider": name,
+                          "voice": kw.get("voice") or kw.get("voice_id")})
             pathlib.Path(out_path).write_bytes(b"\xff\xfb\x90\x00")
             return 4
         return synth
@@ -58,7 +53,7 @@ def providers(monkeypatch):
     from lib import gemini_tts, tts_worker
     monkeypatch.setattr(tts_worker, "cartesia_synthesize", fake("cartesia"))
     monkeypatch.setattr(gemini_tts, "synthesize", fake("gemini"))
-    return {"calls": calls, "failing": failing}
+    return calls
 
 
 def _speak(env, agent_key, session, delivery=None):
@@ -69,53 +64,27 @@ def _speak(env, agent_key, session, delivery=None):
     return tts_queue.recent(limit=1)[0]
 
 
-def _open_chat(agent_id):
-    from lib import application_activity, db
-    agents_db.set_focus(agent_id)
-    application_activity.report("administrator", str(uuid.uuid4()), 1, True, 0,
-                                db.now_ms())
-
-
-def test_closed_chat_uses_quality_voice_only_for_overridden_agent(env, providers):
+def test_agent_override_picks_provider_and_voice_under_raw_pcm(env, providers):
     from lib.clip_delivery.raw_pcm import RawPcmDelivery
     row = _speak(env, "jax", "jax-1", delivery=RawPcmDelivery())
     assert row["status"] == tts_queue.DONE
-    assert providers["calls"][-1] == {"provider": "gemini", "voice": "Charon",
-                                      "text": "hello there"}
-    # Agents without an override keep the live provider.
+    assert providers == [{"provider": "gemini", "voice": "Charon"}]
+
+
+def test_agents_without_override_keep_the_global_provider(env, providers):
     _speak(env, "mike", "mike-1")
-    assert providers["calls"][-1]["provider"] == "cartesia"
+    assert [c["provider"] for c in providers] == ["cartesia"]
 
 
-def test_open_chat_uses_live_voice(env, providers):
-    _open_chat(env["jax"])
-    _speak(env, "jax", "jax-1")
-    assert [c["provider"] for c in providers["calls"]] == ["cartesia"]
-
-
-def test_focus_without_a_foreground_client_counts_as_closed(env, providers):
-    agents_db.set_focus(env["jax"])
-    _speak(env, "jax", "jax-1")
-    assert [c["provider"] for c in providers["calls"]] == ["gemini"]
-
-
-def test_failed_quality_clip_is_spoken_by_live_voice(env, providers):
-    providers["failing"].add("gemini")
-    row = _speak(env, "jax", "jax-1")
-    assert row["status"] == tts_queue.DONE
-    assert [c["provider"] for c in providers["calls"]] == ["gemini", "cartesia"]
-
-
-def test_config_reads_quality_provider_and_agent_overrides(tmp_path):
+def test_config_reads_agent_overrides(tmp_path):
     from lib import config
     path = tmp_path / "config.toml"
     path.write_text('''
 [tts]
 provider = "cartesia"
-quality_provider = "gemini"
 
 [tts.agents.Jax]
-live_provider = "elevenlabs"
+provider = "gemini"
 gemini_voice = "voice_abc"
 
 [gemini_tts]
@@ -123,11 +92,10 @@ api_key = "k"
 model = "gemini-3.8-flash-lite-tts"
 ''')
     cfg = config.load(path)
-    assert cfg.tts_quality_provider == "gemini"
     assert cfg.gemini_model == "gemini-3.8-flash-lite-tts"
     assert cfg.gemini_voice == "Kore"
     assert cfg.tts_override_for({"persona": "jax"}) == {
-        "live_provider": "elevenlabs", "gemini_voice": "voice_abc"}
+        "provider": "gemini", "gemini_voice": "voice_abc"}
     assert cfg.tts_override_for({"persona": "Mike", "session": "mike-1"}) == {}
 
 

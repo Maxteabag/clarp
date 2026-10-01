@@ -3,9 +3,9 @@
 Gemini streams headerless 16-bit mono PCM at 24 kHz over SSE. The clip
 pipeline speaks MP3 (chunked-file delivery, `/audio/<name>.mp3` replay), so
 the PCM is piped through ffmpeg and the encoder's output is handed to
-`on_chunk` as it appears. First audio arrives ~1-1.5 s after the request on
-gemini-3.8-flash-tts, which is why lib.tts_mode only uses this provider
-when nobody has the agent's chat open.
+`on_chunk` as it appears. First audio arrives ~1-2.5 s after the request on
+gemini-3.8-flash-tts, slower than Cartesia; agents opt in through
+`[tts.agents.<name>] provider = "gemini"` (lib.tts_mode).
 
     POST https://generativelanguage.googleapis.com/v1beta/models/<model>:streamGenerateContent?alt=sse
     headers: x-goog-api-key

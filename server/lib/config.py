@@ -370,11 +370,8 @@ class Config:
     # uses ElevenLabs only. Override via [tts] provider or CLAUDE_PWA_TTS_PROVIDER.
     tts_provider: str = "cartesia"
     tts_fallback: str = "none"
-    # Voice used when the agent's chat is NOT open on any client (see
-    # lib.tts_mode). "" keeps every clip on `tts_provider`.
-    tts_quality_provider: str = ""
-    # Per-agent overrides from [tts.agents.<name or session>]:
-    # live_provider, quality_provider and <provider>_voice. Keys lowercased.
+    # Per-agent overrides from [tts.agents.<name or session>]: provider and
+    # <provider>_voice (see lib.tts_mode). Keys lowercased.
     tts_agent_overrides: dict[str, dict] = field(default_factory=dict)
     gemini_api_key: str = ""             # [gemini_tts] api_key or env GEMINI_API_KEY
     gemini_model: str = "gemini-3.8-flash-tts"
@@ -763,7 +760,6 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         eleven_speed    = float(eleven.get("speed", 1.2)),
         tts_provider    = provider,
         tts_fallback    = fallback,
-        tts_quality_provider = str(tts.get("quality_provider", "")).strip().lower(),
         tts_agent_overrides = tts_agent_overrides,
         gemini_api_key  = str(gemini.get("api_key", "")),
         gemini_model    = str(gemini.get("model", "gemini-3.8-flash-tts")).strip() or "gemini-3.8-flash-tts",
