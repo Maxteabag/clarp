@@ -1,0 +1,132 @@
+// The reading theme's colours (set from Rust per theme), like Theme.qml.
+export global Palette {
+    in property <color> window: #1a1b26;
+    in property <color> raised: #20212e;
+    in property <color> sunken: #12131a;
+    in property <color> control: #292b3a;
+    in property <color> hover: #22232f;
+    in property <color> border: #41445a;
+    in property <color> rule: #303342;
+    in property <color> text: #e7e1dc;
+    in property <color> chrome-text: #c0caf5;
+    in property <color> muted: #8f96bc;
+    in property <color> faint: #8085a0;
+    in property <color> accent: #bb9af7;
+    in property <color> accent-text: #1a1b26;
+    in property <color> bubble: #20212e;
+    in property <color> success: #9ece6a;
+    in property <color> warning: #e0af68;
+    in property <color> danger: #c98a98;
+    in property <color> danger-surface: #2b2028;
+    in property <color> link: #7aa2f7;
+    in property <length> body-size: 15px;
+    in property <string> body-family: "JetBrains Mono";
+}
+
+// Where the keyboard is: the keyboard map's state (commands::context), set
+// from Rust with the shortcut bar. Every region that owns a state draws the
+// one FocusRing when it is the one; lists mark their cursor with Cursor.
+export global Focus {
+    in property <string> mode: "pane";
+    out property <color> cursor: Palette.accent.with-alpha(0.16);
+}
+
+// The focus style: a ring over the region the keyboard is in. Place it last
+// in the region so it draws on top (it fills its parent unless placed); it
+// takes no input.
+export component FocusRing inherits Rectangle {
+    in property <bool> shown;
+    border-width: root.shown ? 1px : 0px;
+    border-color: Palette.accent;
+    border-radius: 6px;
+}
+
+// A keyboard region as sqlit draws its panes: a rounded grey outline with
+// "[key] Label" set into the top-left of the border; the outline and title
+// take the accent while the region has the keyboard. Place it last in the
+// region (it fills it) and keep the content FRAME-INSET inside.
+export global Frame {
+    out property <length> top: 16px;
+    out property <length> side: 6px;
+    out property <length> bottom: 6px;
+}
+
+export component PaneFrame inherits Rectangle {
+    in property <string> key;
+    in property <string> label;
+    in property <bool> active;
+    // What shows behind the title, so it cuts the border line.
+    in property <color> surface: Palette.window;
+    // An optional title on the right of the border: a name (clickable) and
+    // muted details, as the chat frame shows its agent.
+    in property <string> info-name;
+    in property <string> info;
+    callback info-clicked();
+    property <color> tone: root.active ? Palette.accent : Palette.border;
+    Rectangle {
+        x: 0;
+        y: 7px;
+        width: root.width;
+        height: root.height - 7px;
+        border-width: 1px;
+        border-color: root.tone;
+        border-radius: 6px;
+    }
+    Rectangle {
+        x: 10px;
+        y: 0;
+        width: title.preferred-width + 8px;
+        height: 14px;
+        background: root.surface;
+        title := Text {
+            x: 4px;
+            height: parent.height;
+            text: "[" + root.key + "] " + root.label;
+            color: root.active ? Palette.accent : Palette.muted;
+            font-size: 11px;
+            font-weight: root.active ? 700 : 400;
+            vertical-alignment: center;
+        }
+    }
+    // Sized from its two texts' own widths (not from a layout sized by
+    // this box, which could settle on a stale width and leave the title
+    // mid-border with the line missing after it).
+    property <length> info-gap: root.info-name != "" && root.info != "" ? 6px : 0px;
+    property <length> info-room: Math.max(0px, root.width - 40px - 2 * 10px - 60px);
+    property <length> info-want: (root.info-name != "" ? name-text.preferred-width : 0px) + root.info-gap + (root.info != "" ? info-text.preferred-width : 0px);
+    if root.info-name != "" || root.info != "": Rectangle {
+        width: Math.min(root.info-want, root.info-room) + 8px;
+        height: 14px;
+        x: root.width - self.width - 10px;
+        y: 0;
+        background: root.surface;
+    }
+    name-text := Text {
+        visible: root.info-name != "";
+        x: root.width - 10px - 4px - Math.min(root.info-want, root.info-room);
+        y: 0;
+        height: 14px;
+        width: Math.min(self.preferred-width, root.info-room);
+        text: root.info-name;
+        color: name-touch.has-hover ? Palette.accent : Palette.chrome-text;
+        font-size: 11px;
+        font-weight: 700;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: button;
+        accessible-label: "Agent profile";
+        name-touch := TouchArea { mouse-cursor: pointer; clicked => { root.info-clicked(); } }
+    }
+    info-text := Text {
+        visible: root.info != "";
+        x: name-text.x + (root.info-name != "" ? name-text.width : 0px) + root.info-gap;
+        y: 0;
+        height: 14px;
+        width: Math.max(0px, root.width - 10px - 4px - self.x);
+        text: root.info;
+        color: Palette.muted;
+        font-size: 11px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}

@@ -1,0 +1,45 @@
+[package]
+name = "clarp-slint"
+version = "0.1.0"
+edition = "2024"
+description = "The Clarp desktop in Slint (Rust-native UI, no Qt) on clarp-engine"
+
+[[bin]]
+name = "clarp-slint"
+path = "src/main.rs"
+
+[dependencies]
+clarp-core = { path = "../core" }
+clarp-net = { path = "../net" }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+rodio = "0.22"
+serde = "1"
+ksni = { version = "0.3", default-features = false, features = ["tokio"] }
+futures-util = { version = "0.3", default-features = false }
+libc = "0.2"
+arboard = { version = "3", default-features = false, features = ["wayland-data-control", "image-data"] }
+backtrace = { version = "0.3", features = ["cpp_demangle"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+clarp-engine = { path = "../engine" }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+slint = { version = "1.18", default-features = false, features = [
+    "std", "compat-1-2", "accessibility",
+    "backend-winit", "backend-winit-wayland", "backend-winit-x11",
+    "renderer-software", "software-renderer-systemfonts", "image-default-formats",
+    # The window system's own events (focus, input) for desktop presence.
+    "unstable-winit-030",
+] }
+# Element geometry for the checks (the transcript's rows on screen).
+i-slint-backend-testing = { version = "=1.18.1", default-features = false }
+# Wheel and touchpad input with the gesture phases winit sends (the public
+# PointerScrolled event jumps instead of animating like a real wheel).
+i-slint-core = { version = "=1.18.1", default-features = false }
+# The attach dialog, through the desktop's file-chooser portal.
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+
+[build-dependencies]
+slint-build = "1.18"

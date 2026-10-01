@@ -1,0 +1,385 @@
+import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
+import { Composer, Attachment } from "composer.slint";
+import { Transcript, MessageRow } from "transcript.slint";
+import { AgentDialogs } from "agent_dialogs.slint";
+import { TypingIndicator } from "cells.slint";
+import { ProfileBridge } from "profile.slint";
+
+// One pane of the workspace: where it sits (fractions of the workspace),
+// the chat it shows, and that chat's composer state. The counters ask the
+// pane to act (focus its composer or transcript, jump to the latest) when
+// they change.
+export struct PaneView {
+    id: string,
+    session: string,
+    name: string,
+    workspace-kind: string,
+    workspace-label: string,
+    model: string,
+    effort: string,
+    // The agent's status line and the effort its provider runs at unset.
+    status: string,
+    default-effort: string,
+    busy: bool,
+    // "Working…" under the transcript (Show when ready, agent working).
+    working: bool,
+    pair: bool,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    shown: bool,
+    active: bool,
+    messages: [MessageRow],
+    draft: string,
+    // Bumped when `draft` should replace what the composer holds (another
+    // chat, a send, the same chat typed in another pane).
+    draft-set: int,
+    attachments: [Attachment],
+    queued: int,
+    quota-notice: string,
+    can-send: bool,
+    transcribing: int,
+    recording: bool,
+    playing: bool,
+    focus-composer: int,
+    focus-transcript: int,
+    to-latest: int,
+}
+
+export struct SplitView {
+    id: string,
+    vertical: bool,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    ratio: float,
+}
+
+export struct WorkspaceTab {
+    id: string,
+    name: string,
+    active: bool,
+}
+
+// PaneLeaf.qml + ConversationPane.qml.
+export component Pane inherits Rectangle {
+    in property <PaneView> pane;
+    callback activate();
+    callback send(string, bool);
+    callback stop();
+    callback draft-edited(string);
+    callback attach();
+    callback remove-attachment(string);
+    callback link-clicked(string);
+    callback load-older();
+    callback toggle-activity(string, string);
+    callback copy-message(string);
+    callback silence();
+    callback cancel-transcription();
+    callback paste-image() -> bool;
+    // The transcript and composer tell the window where the keyboard is and
+    // whether the reader follows, for shortcuts and checks.
+    callback reported(bool, bool, length, bool, bool);
+    background: root.pane.active ? Palette.control : Palette.raised;
+    border-width: 0px;
+    border-radius: 3px;
+    clip: true;
+    opacity: root.pane.active ? 1 : 0.76;
+    animate opacity { duration: 120ms; }
+
+    function report() {
+        root.reported(transcript.follow, transcript.at-end, transcript.offset, transcript.has-focus, composer.editor-focused);
+    }
+    // A pane made for a request (a split's focus) acts on it at once.
+    init => { root.apply-requests(); }
+    changed pane => { root.apply-requests(); }
+    function apply-requests() {
+        if (root.draft-set-seen != root.pane.draft-set) {
+            root.draft-set-seen = root.pane.draft-set;
+            composer.draft = root.pane.draft;
+        }
+        if (root.focus-composer-seen != root.pane.focus-composer) {
+            root.focus-composer-seen = root.pane.focus-composer;
+            root.pending-focus = "composer";
+        }
+        if (root.focus-transcript-seen != root.pane.focus-transcript) {
+            root.focus-transcript-seen = root.pane.focus-transcript;
+            root.pending-focus = "transcript";
+        }
+        if (root.to-latest-seen != root.pane.to-latest) {
+            root.to-latest-seen = root.pane.to-latest;
+            transcript.scroll-to-latest();
+        }
+    }
+    // Focus moves once the pane is live: a new pane's composer, or one just
+    // enabled by its chat, cannot take the keyboard in the same update.
+    property <string> pending-focus;
+    Timer {
+        interval: 1ms;
+        running: root.pending-focus != "";
+        triggered => {
+            if (root.pending-focus == "composer") { composer.focus(); } else { transcript.focus(); }
+            root.pending-focus = "";
+        }
+    }
+    property <int> draft-set-seen;
+    property <int> focus-composer-seen;
+    property <int> focus-transcript-seen;
+    property <int> to-latest-seen;
+    property <bool> follows: transcript.follow;
+    property <bool> at-end: transcript.at-end;
+    property <length> offset: transcript.offset;
+    property <bool> transcript-focused: transcript.has-focus;
+    property <bool> composer-focused: composer.editor-focused;
+    changed follows => { root.report(); }
+    changed at-end => { root.report(); }
+    changed offset => { root.report(); }
+    changed transcript-focused => { root.report(); if (self.transcript-focused) { root.activate(); } }
+    changed composer-focused => { root.report(); if (self.composer-focused) { root.activate(); } }
+
+    // A click anywhere but the composer makes the pane active.
+    TouchArea {
+        clicked => { root.activate(); }
+    }
+    VerticalLayout {
+        padding: 2px;
+        // [c] Chat and [i] Insert: the pane's two keyboard regions, framed
+        // as sqlit frames its panes.
+        Rectangle {
+          vertical-stretch: 1;
+          transcript := Transcript {
+            x: Frame.side;
+            y: Frame.top;
+            width: parent.width - 2 * Frame.side;
+            height: parent.height - Frame.top - Frame.bottom;
+            rows: root.pane.messages;
+            link-clicked(url) => { root.link-clicked(url); }
+            toggle-activity(id, group) => { root.toggle-activity(id, group); }
+            copy-message(id) => { root.copy-message(id); }
+            reached-top => { root.load-older(); }
+          }
+          // In the composer letters type: Ctrl+H is the way back to the chat.
+          // The agent's name, folder and runtime sit on the right of the
+          // frame's border (there is no separate header).
+          PaneFrame {
+            info-name: root.pane.session == "" ? "No agent selected" : root.pane.name;
+            info: root.pane.session == "" || root.pane.pair ? root.pane.workspace-label
+                : (root.pane.workspace-label != "" ? root.pane.workspace-label + "  ·  " : "")
+                + (root.pane.status != "" ? root.pane.status + "  ·  " : "")
+                + (root.pane.model != "" ? root.pane.model : "model not reported")
+                + "  ·  " + (root.pane.effort != "" ? "effort " + root.pane.effort
+                    : root.pane.default-effort != "" ? "effort " + root.pane.default-effort + " (default)" : "effort default")
+                + (root.pane.busy ? "  ·  working" : "");
+            info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
+            key: root.pane.active && Focus.mode == "composer" ? "ctrl+h" : "h"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
+        }
+        // The transcript's footer (ConversationPane.qml).
+        if root.pane.working: Rectangle {
+            background: Palette.window;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-top: 7px;
+                padding-bottom: 7px;
+                alignment: start;
+                TypingIndicator { reduced-motion: ProfileBridge.reduced-motion; }
+            }
+        }
+        // Pair rooms are the Host's read-only projection: no composer.
+        Rectangle {
+          visible: !root.pane.pair;
+          // Folded to its "[i] Insert" line until it has the keyboard (or
+          // holds a draft, which stays in view).
+          property <bool> folded: !composer.editor-focused && composer.draft == "";
+          height: root.pane.pair ? 0px : self.folded ? 16px : composer.preferred-height + Frame.top + Frame.bottom;
+          clip: true;
+          composer := Composer {
+            x: Frame.side;
+            y: Frame.top;
+            width: parent.width - 2 * Frame.side;
+            height: parent.height - Frame.top - Frame.bottom;
+            init => { self.draft = root.pane.draft; root.draft-set-seen = root.pane.draft-set; }
+            attachments: root.pane.attachments;
+            queued: root.pane.queued;
+            quota-notice: root.pane.quota-notice;
+            busy: root.pane.busy;
+            can-send: root.pane.can-send;
+            transcribing: root.pane.transcribing;
+            recording: root.pane.recording;
+            playing: root.pane.playing && root.pane.active;
+            silence => { root.silence(); }
+            cancel-transcription => { root.cancel-transcription(); }
+            paste-image => { return root.paste-image(); }
+            active: root.pane.session != "";
+            agent-name: root.pane.name;
+            send(text, queue) => { root.send(text, queue); }
+            stop => { root.stop(); }
+            edited(text) => { root.draft-edited(text); }
+            attach => { root.attach(); }
+            remove-attachment(id) => { root.remove-attachment(id); }
+            escape => { transcript.focus(); }
+            jump-to-latest => { transcript.scroll-to-latest(); }
+            queue-requested => { AgentDialogs.queue-open(root.pane.session); }
+          }
+          PaneFrame { key: "i"; label: "Insert"; active: root.pane.active && Focus.mode == "composer"; surface: root.background; }
+        }
+    }
+}
+
+// The split between two panes: drag to resize, double-click to balance.
+component Handle inherits Rectangle {
+    in property <SplitView> split;
+    in property <length> area-width;
+    in property <length> area-height;
+    in property <length> top;
+    in property <length> gap;
+    callback resized(string, float);
+    callback balance();
+    property <length> sx: root.split.x * root.area-width;
+    property <length> sy: root.top + root.split.y * root.area-height;
+    property <length> sw: root.split.width * root.area-width;
+    property <length> sh: root.split.height * root.area-height;
+    property <float> live-ratio: root.split.ratio;
+    x: root.split.vertical ? root.sx + root.sw * root.live-ratio - root.gap / 2 : root.sx;
+    y: root.split.vertical ? root.sy : root.sy + root.sh * root.live-ratio - root.gap / 2;
+    width: root.split.vertical ? root.gap : root.sw;
+    height: root.split.vertical ? root.sh : root.gap;
+    background: drag.pressed ? Palette.muted : drag.has-hover ? Palette.faint : Palette.window;
+    drag := TouchArea {
+        mouse-cursor: root.split.vertical ? col-resize : row-resize;
+        moved => {
+            if (self.pressed) {
+                root.live-ratio = root.split.vertical
+                    ? Math.clamp((root.x + self.mouse-x - root.sx) / root.sw, 0.15, 0.85)
+                    : Math.clamp((root.y + self.mouse-y - root.sy) / root.sh, 0.15, 0.85);
+            }
+        }
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.up && event.button == PointerEventButton.left) {
+                root.resized(root.split.id, root.live-ratio);
+            }
+        }
+        double-clicked => { root.balance(); }
+    }
+}
+
+// Workspace.qml: the workspace tabs, then the panes where the tree puts them.
+export component Workspace inherits Rectangle {
+    in property <[PaneView]> panes;
+    in property <[SplitView]> splits;
+    in property <[WorkspaceTab]> workspaces;
+    in property <string> save-warning;
+    in property <bool> bar-visible;
+    callback activate(string);
+    callback send(string, string, bool);
+    callback stop(string);
+    callback draft-edited(string, string);
+    callback attach(string);
+    callback remove-attachment(string, string);
+    callback link-clicked(string);
+    callback load-older(string);
+    callback toggle-activity(string, string, string);
+    callback copy-message(string, string);
+    callback silence();
+    callback cancel-transcription(string);
+    callback paste-image(string) -> bool;
+    callback reported(string, bool, bool, length, bool, bool);
+    callback switch-workspace(string);
+    callback create-workspace();
+    callback save-layout-instead();
+    callback resize-split(string, float);
+    callback balance();
+    property <length> gap: 4px;
+    property <length> bar-height: root.bar-visible ? 36px : 0px;
+    property <length> top: root.bar-height + (root.save-warning != "" ? 40px : 0px);
+    property <length> area-height: root.height - root.top;
+    background: Palette.window;
+
+    if root.bar-visible: HorizontalLayout {
+        y: 0;
+        height: 36px;
+        padding: 4px;
+        spacing: 4px;
+        alignment: start;
+        for tab in root.workspaces: Rectangle {
+            width: tab-label.preferred-width + 20px;
+            border-radius: 3px;
+            background: tab.active ? Palette.control : tab-touch.has-hover ? Palette.hover : transparent;
+            border-width: tab.active ? 1px : 0px;
+            border-color: Palette.border;
+            tab-label := Text {
+                text: tab.name;
+                color: tab.active ? Palette.text : Palette.muted;
+                font-size: 12px;
+            }
+            tab-touch := TouchArea { clicked => { root.switch-workspace(tab.id); } }
+        }
+        if root.workspaces.length < 8: Rectangle {
+            width: 28px;
+            border-radius: 3px;
+            background: plus-touch.has-hover ? Palette.hover : transparent;
+            accessible-role: button;
+            accessible-label: "New workspace";
+            Image {
+                source: @image-url("icons/rail-plus.svg");
+                width: 14px;
+                height: 14px;
+                colorize: Palette.muted;
+            }
+            plus-touch := TouchArea { clicked => { root.create-workspace(); } }
+        }
+    }
+    if root.save-warning != "": HorizontalLayout {
+        y: root.bar-height;
+        height: 40px;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+        Text {
+            text: root.save-warning;
+            color: Palette.warning;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        Rectangle {
+            width: save-label.preferred-width + 20px;
+            border-radius: 3px;
+            background: Palette.control;
+            save-label := Text { text: "Save this layout instead"; color: Palette.text; font-size: 12px; }
+            TouchArea { clicked => { root.save-layout-instead(); } }
+        }
+    }
+    for pane in root.panes: Pane {
+        visible: pane.shown;
+        x: Math.round(pane.x * root.width / 1px) * 1px + root.gap / 2;
+        y: root.top + Math.round(pane.y * root.area-height / 1px) * 1px + root.gap / 2;
+        width: Math.max(1px, Math.round(pane.width * root.width / 1px) * 1px - root.gap);
+        height: Math.max(1px, Math.round(pane.height * root.area-height / 1px) * 1px - root.gap);
+        pane: pane;
+        activate => { root.activate(pane.id); }
+        send(text, queue) => { root.send(pane.id, text, queue); }
+        stop => { root.stop(pane.id); }
+        draft-edited(text) => { root.draft-edited(pane.id, text); }
+        attach => { root.attach(pane.id); }
+        remove-attachment(id) => { root.remove-attachment(pane.id, id); }
+        link-clicked(url) => { root.link-clicked(url); }
+        load-older => { root.load-older(pane.id); }
+        toggle-activity(id, group) => { root.toggle-activity(pane.id, id, group); }
+        copy-message(id) => { root.copy-message(pane.id, id); }
+        silence => { root.silence(); }
+        cancel-transcription => { root.cancel-transcription(pane.id); }
+        paste-image => { return root.paste-image(pane.id); }
+        reported(follows, at-end, offset, transcript, composer) => { root.reported(pane.id, follows, at-end, offset, transcript, composer); }
+    }
+    for split in root.splits: Handle {
+        split: split;
+        area-width: root.width;
+        area-height: root.area-height;
+        top: root.top;
+        gap: root.gap;
+        resized(id, ratio) => { root.resize-split(id, ratio); }
+        balance => { root.balance(); }
+    }
+}

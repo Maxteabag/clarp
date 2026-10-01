@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["core", "net", "engine", "app", "switcher-slint", "slint-app"]
+
+# Debug builds decode and scale images (portraits, attachments) with the
+# image crates optimised, as release does: unoptimised, a hundred portraits
+# take seconds and the headless checks time the decoder, not the app.
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.crc32fast]
+opt-level = 3
+[profile.dev.package.simd-adler32]
+opt-level = 3

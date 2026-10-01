@@ -1,0 +1,112 @@
+import { Palette } from "theme.slint";
+
+// AgentAvatar.qml: the agent's portrait, else its symbol or initial in a
+// bordered square.
+export component AgentAvatar inherits Rectangle {
+    in property <image> portrait;
+    in property <string> name;
+    in property <string> symbol;
+    in property <length> size: 40px;
+    in property <length> radius: 2px;
+    width: root.size;
+    height: root.size;
+    border-radius: root.radius;
+    clip: true;
+    property <bool> has-portrait: root.portrait.width > 0;
+    border-width: root.has-portrait ? 0px : 1px;
+    border-color: Palette.border;
+    accessible-role: image;
+    accessible-label: root.name;
+    if !root.has-portrait: Text {
+        text: root.symbol != "" ? root.symbol : root.initial;
+        color: Palette.text;
+        font-family: "JetBrains Mono";
+        font-size: Math.max(9px, root.size * 0.38);
+        font-weight: 600;
+    }
+    if root.has-portrait: Image {
+        width: root.size;
+        height: root.size;
+        source: root.portrait;
+        image-fit: cover;
+    }
+    // The first letter, upper-cased (set from Rust: Slint has no slicing).
+    in property <string> initial;
+}
+
+// AvatarActivity.qml: an avatar with a breathing ring while its agent works.
+// Reduced motion keeps the ring still.
+export component AvatarActivity inherits Rectangle {
+    in property <image> portrait;
+    in property <string> name;
+    in property <string> initial;
+    in property <string> symbol;
+    in property <length> size: 40px;
+    in property <length> radius: 2px;
+    in property <bool> working;
+    in property <bool> reduced-motion;
+    // One breath every 1.6 s; only a working, moving avatar follows the clock.
+    out property <float> phase: root.working && !root.reduced-motion ? Math.mod(animation-tick() / 1600ms, 1.0) : 0.0;
+    width: root.size;
+    height: root.size;
+    AgentAvatar {
+        portrait: root.portrait;
+        name: root.name;
+        initial: root.initial;
+        symbol: root.symbol;
+        size: root.size;
+        radius: root.radius;
+    }
+    if root.working: Rectangle {
+        x: -3px;
+        y: -3px;
+        width: root.size + 6px;
+        height: root.size + 6px;
+        border-width: 2px;
+        border-color: Palette.success;
+        border-radius: root.radius + 3px;
+        opacity: root.reduced-motion ? 0.6 : 0.35 + 0.65 * (1 + Math.cos(root.phase * 360deg)) / 2;
+    }
+}
+
+// ActivitySweep.qml: a pale band crossing a working agent's line of text.
+export component ActivitySweep inherits Rectangle {
+    in property <bool> working;
+    in property <bool> reduced-motion;
+    in property <float> phase;
+    clip: true;
+    if root.working && !root.reduced-motion: Rectangle {
+        width: root.width * 0.3;
+        height: root.height;
+        x: -self.width + Math.max(0, (root.phase - 0.05) / 0.95) * (root.width + self.width);
+        background: Palette.success.with-alpha(0.1);
+    }
+}
+
+// StatusPill.qml: a state worth showing (working, waiting, offline).
+export component StatusPill inherits HorizontalLayout {
+    in property <string> status;
+    property <string> label: root.status != "" ? root.status : "offline";
+    property <bool> quiet: root.status == "live" || root.status == "done" || root.status == "idle";
+    property <color> tone: root.status == "thinking" || root.status == "tool" || root.status == "compacting" ? Palette.success
+        : root.status == "waiting" || root.status == "interrupted" ? Palette.danger
+        : Palette.faint;
+    visible: !root.quiet;
+    spacing: 5px;
+    alignment: center;
+    if !root.quiet: Rectangle {
+        width: 5px;
+        height: 5px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 2.5px;
+        background: root.tone;
+    }
+    if !root.quiet: Text {
+        text: root.label.to-uppercase();
+        color: root.tone;
+        font-family: "JetBrains Mono";
+        font-size: 9px;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
+}

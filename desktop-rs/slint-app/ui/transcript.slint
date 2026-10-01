@@ -1,0 +1,410 @@
+import { Palette } from "theme.slint";
+import { ListView } from "std-widgets.slint";
+import { DisplayCell, DisplayCellCard } from "cells.slint";
+import { ArtifactItem, ArtifactCard } from "artifacts.slint";
+
+export struct TableRow {
+    cells: [styled-text],
+    header: bool,
+}
+
+// An image in a message (iOS MediaImageBlock / MediaGalleryBlock): its
+// caption, and the picture once fetched from the Host.
+export struct MessageImage {
+    url: string,
+    alt: string,
+    image: image,
+    loaded: bool,
+    // Could not be fetched, or not from the Host: "Image unavailable".
+    failed: bool,
+    // Not on the Host, so never fetched: a line, not a box.
+    foreign: bool,
+}
+
+export struct MessageBlock {
+    // prose, heading, code, quote, table, rule, images (one image or a
+    // gallery: gallery true)
+    kind: string,
+    images: [MessageImage],
+    gallery: bool,
+    styled: styled-text,
+    text: string,
+    level: int,
+    rows: [TableRow],
+}
+
+export struct ToolRow {
+    name: string,
+    summary: string,
+    status: string,
+    detail: string,
+    // Plain-English tools on: the Host's explanation ("" while it comes).
+    narrated: bool,
+    explanation: string,
+}
+
+export struct MessageRow {
+    id: string,
+    // user, assistant, activity
+    author: string,
+    blocks: [MessageBlock],
+    sender: string,
+    stamp: string,
+    meta: string,
+    pending: bool,
+    failed: bool,
+    // Tool activity: the toggle's label, whether the cards show, the cards.
+    activity-label: string,
+    group-id: string,
+    expanded: bool,
+    tools: [ToolRow],
+    // The Host's display cells, shown with the tool cards.
+    cells: [DisplayCell],
+    // Artifacts the agent made while writing this reply.
+    artifacts: [ArtifactItem],
+}
+
+// One tool call (ToolCard.qml): name, summary, status; details on request.
+component ToolCard inherits Rectangle {
+    in property <ToolRow> tool;
+    property <bool> open;
+    background: Palette.raised;
+    border-radius: 2px;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 4px;
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 3px;
+                background: root.tool.status == "error" ? Palette.danger : root.tool.status == "running" ? Palette.warning : Palette.success;
+            }
+            if !root.tool.narrated: Text { text: root.tool.name; color: Palette.chrome-text; font-size: 12px; font-weight: 600; }
+            if !root.tool.narrated: Text { text: root.tool.summary; color: Palette.muted; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+            // ActivityExplanation.qml: the explanation in place of the call,
+            // dots until it arrives; a failed one falls back to the call.
+            if root.tool.narrated: Text {
+                text: root.tool.explanation != "" ? root.tool.explanation : "…";
+                color: Palette.text;
+                font-size: 12px;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+                accessible-label: root.tool.explanation != "" ? root.tool.explanation : "Explaining " + root.tool.name;
+            }
+            if root.tool.detail != "": TouchArea {
+                width: 60px;
+                clicked => { root.open = !root.open; }
+                Text { text: root.open ? "Hide" : "Details"; color: Palette.link; font-size: 12px; }
+            }
+        }
+        if root.open: Text {
+            text: root.tool.detail;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+            color: Palette.text;
+            wrap: word-wrap;
+        }
+    }
+}
+
+export component Block inherits VerticalLayout {
+    in property <MessageBlock> block;
+    in property <length> body-size;
+    in property <brush> body-color;
+    callback link-clicked(string);
+    if root.block.kind == "prose": StyledText {
+        text: root.block.styled;
+        default-color: root.body-color;
+        default-font-size: root.body-size;
+        default-font-family: Palette.body-family;
+        link-color: Palette.link;
+        link-clicked(url) => { root.link-clicked(url); }
+    }
+    if root.block.kind == "heading": StyledText {
+        text: root.block.styled;
+        default-color: Palette.chrome-text;
+        default-font-size: root.body-size * (root.block.level <= 1 ? 1.4 : root.block.level == 2 ? 1.25 : 1.1);
+        default-font-family: Palette.body-family;
+        link-color: Palette.link;
+        link-clicked(url) => { root.link-clicked(url); }
+    }
+    if root.block.kind == "code": Rectangle {
+        background: Palette.sunken;
+        border-radius: 2px;
+        VerticalLayout {
+            padding: 10px;
+            Text {
+                text: root.block.text;
+                font-family: "JetBrains Mono";
+                font-size: root.body-size * 0.9;
+                color: Palette.text;
+                wrap: word-wrap;
+            }
+        }
+    }
+    if root.block.kind == "quote": HorizontalLayout {
+        spacing: 10px;
+        Rectangle { width: 3px; background: Palette.accent; }
+        StyledText {
+            text: root.block.styled;
+            default-color: Palette.muted;
+            default-font-size: root.body-size;
+            default-font-family: Palette.body-family;
+            link-color: Palette.link;
+            link-clicked(url) => { root.link-clicked(url); }
+        }
+    }
+    if root.block.kind == "table": Rectangle {
+        border-width: 1px;
+        border-color: Palette.border;
+        VerticalLayout {
+            for table-row in root.block.rows: HorizontalLayout {
+                spacing: 0px;
+                for cell in table-row.cells: Rectangle {
+                    // Equal columns, so every row lines up: content never
+                    // decides a column's width.
+                    horizontal-stretch: 1;
+                    preferred-width: 0px;
+                    min-width: 0px;
+                    border-width: 1px;
+                    border-color: Palette.rule;
+                    background: table-row.header ? Palette.raised : transparent;
+                    VerticalLayout {
+                        padding: 6px;
+                        StyledText {
+                            text: cell;
+                            default-color: table-row.header ? Palette.chrome-text : root.body-color;
+                            default-font-size: root.body-size * 0.95;
+                            default-font-family: Palette.body-family;
+                            link-color: Palette.link;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if root.block.kind == "rule": Rectangle { height: 1px; background: Palette.rule; }
+    // An image keeps its space before it arrives (iOS: up to 360 tall; a
+    // gallery's tiles 120): landing never moves the chat.
+    if root.block.kind == "images": HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        for picture in root.block.images: Rectangle {
+            // The layout sizes them: a gallery's tiles up to 150 wide, an
+            // image up to 480, both shrinking to fit.
+            preferred-width: root.block.gallery ? 140px : 480px;
+            max-width: root.block.gallery ? 150px : 480px;
+            min-width: 48px;
+            height: picture.foreign && !root.block.gallery ? 36px : root.block.gallery ? 120px : 270px;
+            border-radius: 6px;
+            clip: true;
+            background: Palette.sunken;
+            accessible-role: image;
+            accessible-label: picture.alt;
+            if picture.loaded: Image {
+                width: parent.width;
+                height: parent.height;
+                source: picture.image;
+                image-fit: root.block.gallery ? cover : contain;
+            }
+            if !picture.loaded: Text {
+                width: parent.width - 16px;
+                x: 8px;
+                height: parent.height;
+                text: picture.failed ? "Image unavailable" + (picture.alt != "" ? " · " + picture.alt : "") : picture.alt;
+                color: picture.failed ? Palette.warning : Palette.faint;
+                font-size: 12px;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+// The transcript (TranscriptView/MessageDelegate in QML): a virtualised
+// list of Markdown messages, the user's in bubbles, tool activity folded
+// behind a toggle. It follows the latest while the reader is at the end;
+// scrolling up pauses it, and returning to the end (or End) resumes it.
+export component Transcript inherits FocusScope {
+    in property <[MessageRow]> rows;
+    in-out property <bool> follow: true;
+    out property <length> offset: list.content-y;
+    out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
+    callback link-clicked(string);
+    callback toggle-activity(string, string);
+    callback copy-message(string);
+    // The reader reached the oldest loaded row: time for the page before.
+    callback reached-top();
+    // While an older page lands above, the reader's place is held by its
+    // distance from the bottom, which prepended rows do not change.
+    property <bool> holding;
+    property <length> from-bottom;
+    Rectangle { background: Palette.window; }
+    // Mirrors the list's height so a streaming row that grows is followed.
+    property <length> list-height: list.content-height;
+    list := ListView {
+        // A reader who scrolls stops following at once. A wheel notch
+        // animates: this runs as it starts, before the list has moved, so
+        // whether they ended at the end (follow again) or the top (load the
+        // page before) is decided once the scroll has settled.
+        scrolled => {
+            root.holding = false;
+            root.follow = false;
+            if (!root.settling) { root.start-y = list.content-y; }
+            root.settled-y = list.content-y;
+            root.still-ticks = 0;
+            root.settling = true;
+        }
+        width: parent.width;
+        height: parent.height;
+        for row in root.rows: HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            padding-top: 7px;
+            padding-bottom: 7px;
+            alignment: row.author == "user" ? end : stretch;
+            Rectangle {
+                // One message of the list; the id finds it in the checks.
+                accessible-role: list-item;
+                accessible-id: "row:" + row.id;
+                background: row.author == "user" ? Palette.bubble : transparent;
+                border-radius: 2px;
+                max-width: row.author == "user" ? list.visible-width * 0.75 : list.visible-width;
+                // Hovering a message offers its copy button (Slint's rich text
+                // cannot be selected: the message's text is copied whole).
+                hover := TouchArea { }
+                if row.author != "activity": Rectangle {
+                    x: parent.width - 20px;
+                    y: 2px;
+                    width: 18px;
+                    height: 18px;
+                    opacity: hover.has-hover || copy.has-hover ? 1 : 0;
+                    accessible-role: button;
+                    accessible-label: "Copy message";
+                    Image { source: @image-url("icons/copy.svg"); width: 14px; height: 14px; colorize: Palette.faint; }
+                    copy := TouchArea { clicked => { root.copy-message(row.id); } }
+                }
+                VerticalLayout {
+                    padding: row.author == "user" ? 10px : 2px;
+                    spacing: 8px;
+                    if row.sender != "": Text { text: row.sender; color: Palette.accent; font-size: 12px; font-weight: 600; }
+                    for block in row.blocks: Block {
+                        block: block;
+                        body-size: row.author == "activity" ? 13px : Palette.body-size;
+                        body-color: row.author == "activity" ? Palette.muted : Palette.text;
+                        link-clicked(url) => { root.link-clicked(url); }
+                    }
+                    if row.activity-label != "": TouchArea {
+                        height: 20px;
+                        clicked => { root.toggle-activity(row.id, row.group-id); }
+                        Text {
+                            text: (row.expanded ? "Hide · " : "Show · ") + row.activity-label;
+                            color: Palette.faint;
+                            font-size: 12px;
+                            x: 0;
+                        }
+                    }
+                    if row.expanded: VerticalLayout {
+                        spacing: 1px;
+                        for cell in row.cells: DisplayCellCard { cell: cell; }
+                        for tool in row.tools: ToolCard { tool: tool; }
+                    }
+                    for artifact in row.artifacts: HorizontalLayout {
+                        alignment: start;
+                        ArtifactCard {
+                            artifact: artifact;
+                            preferred-width: 640px;
+                            max-width: 640px;
+                            view-top: root.absolute-position.y;
+                            view-bottom: root.absolute-position.y + root.height;
+                        }
+                    }
+                    if row.pending || row.failed || row.stamp != "": Text {
+                        text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
+                        color: row.failed ? Palette.danger : Palette.faint;
+                        font-size: 11px;
+                        horizontal-alignment: row.author == "user" ? right : left;
+                    }
+                }
+            }
+        }
+    }
+    changed rows => {
+        if (root.follow) { root.scroll-to-latest(); }
+    }
+    // Following also tracks rows that grow while streaming.
+    changed list-height => {
+        if (root.follow) {
+            root.scroll-to-latest();
+        } else if (root.holding) {
+            list.content-y = Math.min(0px, root.from-bottom - list.content-height);
+        }
+    }
+    function check-top() {
+        if (!root.follow && list.content-y >= -40px) {
+            root.holding = true;
+            root.from-bottom = list.content-height + list.content-y;
+            root.reached-top();
+        }
+    }
+    // Watches a scroll until the list holds still (within half a pixel for
+    // ten frames: the list keeps correcting its estimates for a while).
+    // Once it has moved and shows the end, the reader follows again.
+    property <bool> settling;
+    property <length> start-y;
+    property <length> settled-y;
+    property <int> still-ticks;
+    Timer {
+        interval: 16ms;
+        running: root.settling;
+        triggered => {
+            if (list.content-y != root.start-y) {
+                root.follow = root.at-end;
+            }
+            if (Math.abs((list.content-y - root.settled-y) / 1px) > 0.5) {
+                root.settled-y = list.content-y;
+                root.still-ticks = 0;
+                return;
+            }
+            root.still-ticks += 1;
+            if (root.still-ticks >= 10) {
+                root.settling = false;
+                root.follow = root.at-end;
+                root.check-top();
+            }
+        }
+    }
+    // The list estimates the height of rows it has not drawn yet and
+    // corrects it as they appear; while following, keep pinning the end
+    // until the estimate settles.
+    Timer {
+        interval: 16ms;
+        running: root.follow && !root.at-end;
+        triggered => { root.scroll-to-latest(); }
+    }
+    public function scroll-to-latest() {
+        root.follow = true;
+        list.content-y = Math.min(0px, list.visible-height - list.content-height);
+    }
+    public function scroll-by(delta: length) {
+        list.content-y = Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta));
+        root.holding = false;
+        root.follow = root.at-end;
+        root.check-top();
+    }
+    // After Escape the transcript has the keyboard: Up/Down, Page Up/Down,
+    // Home and End scroll it.
+    key-pressed(event) => {
+        if (event.text == Key.UpArrow) { root.scroll-by(-40px); return accept; }
+        if (event.text == Key.DownArrow) { root.scroll-by(40px); return accept; }
+        if (event.text == Key.PageUp) { root.scroll-by(-list.visible-height * 0.9); return accept; }
+        if (event.text == Key.PageDown) { root.scroll-by(list.visible-height * 0.9); return accept; }
+        if (event.text == Key.Home) { root.scroll-by(-list.content-height); return accept; }
+        if (event.text == Key.End) { root.scroll-to-latest(); return accept; }
+        reject
+    }
+}

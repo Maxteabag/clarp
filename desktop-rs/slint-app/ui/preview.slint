@@ -1,0 +1,145 @@
+import { Button } from "std-widgets.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
+import { Modal } from "dialogs.slint";
+
+export struct PreviewVersion {
+    hash: string,
+    label: string,
+}
+
+// PreviewVersionPanel.qml: the worktree preview's builds; choosing one
+// pins it and reopens the window on the same Host and conversation.
+export component PreviewPanel inherits Modal {
+    in property <[PreviewVersion]> versions;
+    in property <bool> can-restart: true;
+    in property <bool> busy;
+    in property <bool> pinned;
+    in property <string> error;
+    in property <string> notice;
+    in-out property <int> current;
+    callback choose(string);
+    callback done();
+    public function open() { keys.focus(); }
+    card-width: 620px;
+    card-height: 520px;
+    dismissed => { root.done(); }
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.DownArrow) { root.current = Math.min(root.current + 1, root.versions.length - 1); return accept; }
+            if (event.text == Key.UpArrow) { root.current = Math.max(root.current - 1, 0); return accept; }
+            if (event.text == Key.Return && root.can-restart && !root.busy && root.current >= 0 && root.current < root.versions.length) {
+                root.choose(root.versions[root.current].hash);
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 22px;
+            spacing: 12px;
+            Text { text: "Preview versions"; color: Palette.text; font-size: 17px; }
+            Text {
+                text: "Choose a build and reopen. Rolling back pauses automatic updates. Chats stay on the Host.";
+                color: Palette.text;
+                wrap: word-wrap;
+            }
+            if !root.can-restart: Text {
+                text: "Finish sending, uploads, recording, transcription or playback before switching versions.";
+                color: Palette.warning;
+                wrap: word-wrap;
+            }
+            if root.pinned: Text { text: "Pinned to an older build — automatic updates paused"; color: Palette.warning; }
+            VerticalLayout {
+                vertical-stretch: 1;
+                spacing: 4px;
+                alignment: start;
+                for version[index] in root.versions: Rectangle {
+                    height: 34px;
+                    border-radius: 3px;
+                    background: index == root.current && keys.has-focus ? Focus.cursor : Palette.border;
+                    opacity: root.busy || !root.can-restart ? 0.5 : 1;
+                    Text { x: 10px; text: version.label; color: Palette.text; vertical-alignment: center; }
+                    TouchArea {
+                        enabled: !root.busy && root.can-restart;
+                        clicked => { root.current = index; root.choose(version.hash); }
+                    }
+                }
+            }
+            if root.error != "": Text { text: root.error; color: Palette.danger; wrap: word-wrap; }
+            if root.notice != "": Text { text: root.notice; color: Palette.success; wrap: word-wrap; }
+            Text {
+                text: "Recovery is always available from Clarp Preview Versions in the app launcher.";
+                color: Palette.muted;
+                font-size: 11px;
+                wrap: word-wrap;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Button {
+                    text: "Latest · resume updates";
+                    enabled: !root.busy && root.can-restart;
+                    clicked => { root.choose("latest"); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button { text: "Close · Esc"; clicked => { root.done(); } }
+            }
+        }
+    }
+}
+
+// The line over the window when a newer preview is installed, it is
+// pinned, or the updater failed.
+export component PreviewBanner inherits Rectangle {
+    in property <string> update-label;
+    in property <bool> pinned;
+    in property <string> error;
+    in property <bool> can-update;
+    callback update();
+    callback versions();
+    height: 36px;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        Text {
+            text: root.error != "" ? root.error : root.update-label != "" ? "New update available" : "Preview pinned · automatic updates paused";
+            color: root.error != "" ? Palette.danger : Palette.muted;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+        if root.update-label != "": Button {
+            text: "Update " + root.update-label + " · Ctrl+Alt+U";
+            enabled: root.can-update;
+            clicked => { root.update(); }
+        }
+        Button { text: "Versions…"; clicked => { root.versions(); } }
+    }
+}
+
+// PreviewVersionWindow.qml: `--preview-versions`, the manager on its own.
+export component PreviewWindow inherits Window {
+    in property <[PreviewVersion]> versions;
+    in property <bool> busy;
+    in property <bool> pinned;
+    in property <string> error;
+    in property <string> notice;
+    in-out property <int> current;
+    callback choose(string);
+    callback done();
+    title: "Clarp preview versions";
+    preferred-width: 660px;
+    preferred-height: 560px;
+    background: Palette.raised;
+    default-font-family: "JetBrains Mono";
+    panel := PreviewPanel {
+        versions: root.versions;
+        busy: root.busy;
+        pinned: root.pinned;
+        error: root.error;
+        notice: root.notice;
+        current <=> root.current;
+        choose(hash) => { root.choose(hash); }
+        done => { root.done(); }
+    }
+    init => { panel.open(); }
+}

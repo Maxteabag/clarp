@@ -1,0 +1,209 @@
+import { Field, Editor, PlainEditor } from "fields.slint";
+import { Palette } from "theme.slint";
+
+export struct Attachment {
+    id: string,
+    name: string,
+    status: string,
+    thumbnail: image,
+}
+
+component IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <color> tint: Palette.muted;
+    callback clicked();
+    width: 32px;
+    height: 32px;
+    border-radius: 3px;
+    background: touch.has-hover && root.enabled ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    Image {
+        source: root.icon;
+        width: 18px;
+        height: 18px;
+        colorize: root.enabled ? root.tint : Palette.faint;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <Attachment> item;
+    callback remove();
+    height: 24px;
+    border-radius: 3px;
+    background: Palette.control;
+    border-width: 1px;
+    border-color: Palette.border;
+    HorizontalLayout {
+        padding-left: 7px;
+        spacing: 4px;
+        if root.item.thumbnail.width > 0: Image {
+            source: root.item.thumbnail;
+            width: 18px;
+            height: 18px;
+            y: 3px;
+            image-fit: cover;
+        }
+        Text {
+            text: root.item.name + (root.item.status == "ready" ? "" : " · " + root.item.status);
+            color: root.item.status == "failed" ? Palette.danger : Palette.text;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            max-width: 180px;
+        }
+        IconButton {
+            width: 22px;
+            height: 22px;
+            y: 1px;
+            icon: @image-url("icons/rail-close.svg");
+            label: "Remove " + root.item.name;
+            clicked => { root.remove(); }
+        }
+    }
+}
+
+// The composer (Composer.qml): notices above the editor, attachment chips,
+// then the editor. Enter sends, Shift+Enter is a new line, Ctrl+Enter
+// queues behind a running turn, Ctrl+End jumps to the latest, Escape hands
+// the keyboard to the transcript, Ctrl+Shift+O attaches a file.
+export component Composer inherits FocusScope {
+    forward-focus: editor;
+    capture-key-pressed(event) => {
+        if (!editor.has-focus) { return reject; }
+        if (event.text == Key.Escape) {
+            root.escape();
+            return accept;
+        }
+        if (event.text == Key.Return && !event.modifiers.shift) {
+            root.submit(event.modifiers.control);
+            return accept;
+        }
+        if (event.text == Key.End && event.modifiers.control) {
+            root.jump-to-latest();
+            return accept;
+        }
+        if ((event.text == "v" || event.text == "V") && event.modifiers.control && !event.modifiers.shift) {
+            if (root.paste-image()) { return accept; }
+            return reject;
+        }
+        if ((event.text == "o" || event.text == "O") && event.modifiers.control && event.modifiers.shift) {
+            root.attach();
+            return accept;
+        }
+        reject
+    }
+
+    in-out property <string> draft;
+    in property <[Attachment]> attachments;
+    in property <int> queued;
+    in property <string> quota-notice;
+    in property <string> starting;
+    in property <int> transcribing;
+    // Speech is playing (or paused): the Silence button shows.
+    in property <bool> playing;
+    // This chat's dictation is recording.
+    in property <bool> recording;
+    callback silence();
+    // Ctrl+V: true when the clipboard held an image and it was attached.
+    callback paste-image() -> bool;
+    in property <bool> busy;
+    in property <bool> can-send: true;
+    in property <bool> active: true;
+    in property <string> agent-name;
+    callback send(string, bool);
+    callback stop();
+    callback edited(string);
+    callback attach();
+    callback remove-attachment(string);
+    callback cancel-transcription();
+    callback escape();
+    callback jump-to-latest();
+    callback queue-requested();
+
+    out property <bool> editor-focused: editor.has-focus;
+    property <bool> sendable: root.can-send && (root.draft != "" || root.attachments.length > 0);
+    function submit(queue: bool) {
+        if (root.sendable) {
+            root.send(root.draft, queue);
+        }
+    }
+    // The [i] Insert frame is the box: the editor sits on the pane itself,
+    // and its actions are keys (the shortcut bar lists them).
+    VerticalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        spacing: 6px;
+        if root.starting != "": Text {
+            text: "Starting " + root.starting + "…";
+            color: Palette.muted;
+            font-size: 12px;
+        }
+        if root.recording: Text {
+            text: "● Recording · Ctrl+Shift+Space sends";
+            color: Palette.danger;
+            font-size: 12px;
+        }
+        if root.transcribing > 0: HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.transcribing == 1 ? "Transcribing voice in background…" : root.transcribing + " voice notes transcribing…";
+                color: Palette.muted;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: "Cancel";
+                color: Palette.link;
+                font-size: 12px;
+                TouchArea { clicked => { root.cancel-transcription(); } }
+            }
+        }
+        if root.quota-notice != "": Text {
+            text: "! " + root.quota-notice;
+            color: Palette.warning;
+            font-size: 12px;
+            overflow: elide;
+            accessible-label: root.quota-notice;
+        }
+        if root.queued > 0: Text {
+            text: root.queued + (root.queued == 1 ? " message queued" : " messages queued") + "  ·  Ctrl+Enter queues next";
+            color: Palette.muted;
+            font-size: 12px;
+            overflow: elide;
+            accessible-role: button;
+            // Opens the queue dialog (launch dialogs).
+            TouchArea { mouse-cursor: pointer; clicked => { root.queue-requested(); } }
+        }
+        if root.attachments.length > 0: HorizontalLayout {
+            spacing: 5px;
+            alignment: start;
+            for item in root.attachments: Chip {
+                item: item;
+                remove => { root.remove-attachment(item.id); }
+            }
+        }
+        editor := PlainEditor {
+            text <=> root.draft;
+            enabled: root.active;
+            wrap: word-wrap;
+            font-size: Palette.body-size;
+            font-family: Palette.body-family;
+            // One line to start; grows with the text up to 240px, then
+            // scrolls.
+            height: clamp(self.text-height, Palette.body-size * 1.6, 240px);
+            accessible-label: "Message to " + root.agent-name;
+            edited(text) => { root.edited(text); }
+        }
+    }
+}

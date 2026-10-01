@@ -1,0 +1,98 @@
+import { Palette } from "theme.slint";
+import { ListView } from "std-widgets.slint";
+import { Modal } from "dialogs.slint";
+import { IconButton, Busy } from "agent_controls.slint";
+
+export struct VoiceItem {
+    id: string,
+    label: string,
+    // "Current", "Used by …" or "Available"
+    status: string,
+    current: bool,
+    taken: bool,
+}
+
+// The voice dialog's state and commands (Rust sets and handles them).
+export global VoiceBridge {
+    in property <string> agent-name;
+    in property <string> bio;
+    in property <bool> loading;
+    in property <[VoiceItem]> voices;
+    in property <bool> reduced-motion;
+    callback close();
+    callback preview(string);
+    callback choose(string);
+}
+
+// VoiceDialog.qml: the voices an agent can take, each with a preview (the
+// Host speaks a greeting in it) and Use for a free one.
+export component VoiceDialog inherits Modal {
+    card-width: 560px;
+    card-height: 680px;
+    dismissed => { VoiceBridge.close(); }
+    // The panel's own surface (Theme.raised), under the card's contents.
+    Rectangle {
+        x: 1px;
+        y: 1px;
+        width: Math.min(root.card-width, root.width - 40px) - 2px;
+        height: Math.min(root.card-height, root.height - 40px) - 2px;
+        border-radius: 3px;
+        background: Palette.raised;
+    }
+    VerticalLayout {
+        padding: 24px;
+        spacing: 14px;
+        HorizontalLayout {
+            Text {
+                text: (VoiceBridge.agent-name != "" ? VoiceBridge.agent-name : "Agent") + "’s voice";
+                color: Palette.text;
+                font-size: 17px;
+                font-weight: 600;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            IconButton { icon: @image-url("icons/close.svg"); tip: "Close"; clicked => { VoiceBridge.close(); } }
+        }
+        if VoiceBridge.bio != "": Text { text: VoiceBridge.bio; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
+        if VoiceBridge.loading: Busy { height: 18px; reduced-motion: VoiceBridge.reduced-motion; }
+        ListView {
+            vertical-stretch: 1;
+            for voice in VoiceBridge.voices: VerticalLayout {
+                padding-bottom: 7px;
+                Rectangle {
+                    height: 54px;
+                    border-radius: 2px;
+                    background: voice.current ? Palette.control : Palette.raised;
+                    border-width: 1px;
+                    border-color: voice.current ? Palette.accent : Palette.border;
+                    accessible-role: list-item;
+                    accessible-label: voice.label;
+                    HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 9px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 1px;
+                            horizontal-stretch: 1;
+                            Text { text: voice.label; color: Palette.text; font-size: 13px; font-weight: 500; }
+                            Text { text: voice.status; color: voice.taken ? Palette.chrome-text : Palette.faint; font-size: 10px; }
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: @image-url("icons/play.svg");
+                            tip: "Preview";
+                            clicked => { VoiceBridge.preview(voice.id); }
+                        }
+                        if !voice.current && !voice.taken: IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: @image-url("icons/check.svg");
+                            tip: "Use";
+                            clicked => { VoiceBridge.choose(voice.id); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
