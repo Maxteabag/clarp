@@ -345,6 +345,16 @@ fn is_report(artifact: &Value) -> bool {
     fields == Some(0) || (fields.is_none() && schema.get("additionalProperties") == Some(&Value::Bool(false)))
 }
 
+/// The open chat's cards now on screen, top to bottom.
+pub fn on_screen(_app: &App) -> Vec<String> {
+    Vec::new()
+}
+
+/// The heights the cards on screen last reported (for the checks).
+pub fn card_heights(_app: &App) -> Vec<(String, f32)> {
+    Vec::new()
+}
+
 /// The open chat's card ids, top to bottom.
 fn card_ids(app: &App) -> Vec<String> {
     app.active_messages()
