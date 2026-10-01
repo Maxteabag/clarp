@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use clarp_core::audio::{Effect, Output, PENDING_PLAYBACK_MS, PLAYBACK_RATE, Player, RecordingLease, Transcriptions};
+use clarp_core::audio::{Effect, Output, PENDING_PLAYBACK_MS, PLAYBACK_RATE, Playback, Player, RecordingLease, Transcriptions};
 use clarp_core::json::{self, Object};
 use clarp_net::{ApiClient, ApiReply};
 use serde_json::Value;
@@ -53,6 +53,36 @@ pub struct Audio {
     recording: bool,
     recording_session: String,
     notices: Vec<Notice>,
+    /// An artifact's audio the user plays (a card's Play), beside the
+    /// voice queue, which waits while it plays.
+    media: Option<Media>,
+}
+
+/// How an artifact's audio is going.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MediaState {
+    Preparing,
+    Playing,
+    Paused,
+    Failed(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct Media {
+    pub artifact: String,
+    pub state: MediaState,
+    /// Played before the current stretch, and when that began.
+    pub played: Duration,
+    pub since: Option<std::time::Instant>,
+    tag: String,
+    generation: u64,
+}
+
+impl Media {
+    /// Seconds played so far.
+    pub fn position(&self) -> Duration {
+        self.played + self.since.map(|s| s.elapsed()).unwrap_or_default()
+    }
 }
 
 thread_local! {
@@ -104,6 +134,7 @@ pub fn start(muted: bool) {
         recording: false,
         recording_session: String::new(),
         notices: Vec::new(),
+        media: None,
     };
     audio.set_muted(muted);
     AUDIO.with(|slot| *slot.borrow_mut() = Some(audio));
@@ -173,9 +204,78 @@ impl Audio {
         super::mpris::Status { playing: self.playing(), paused: self.paused(), available }
     }
 
-    /// Clips wait while the microphone is in use or another window plays.
+    /// Clips wait while the microphone is in use, another window plays, or
+    /// an artifact's audio plays here.
     fn hold(&self) -> bool {
-        self.lease.busy() || !self.coordinator.as_ref().is_some_and(Coordinator::owner)
+        let media = self.media.as_ref().is_some_and(|m| matches!(m.state, MediaState::Preparing | MediaState::Playing | MediaState::Paused));
+        media || self.lease.busy() || !self.coordinator.as_ref().is_some_and(Coordinator::owner)
+    }
+
+    /// The artifact audio playing, paused or failed, if any.
+    pub fn media(&self) -> Option<&Media> {
+        self.media.as_ref()
+    }
+
+    /// A card's Play/Pause: pauses or resumes its audio, or (again after
+    /// a failure) fetches it from the Host and plays it, stopping speech.
+    pub fn toggle_media(&mut self, artifact: &str, path: &str) {
+        if let Some(media) = self.media.as_mut().filter(|m| m.artifact == artifact) {
+            match media.state {
+                MediaState::Playing => {
+                    media.played = media.position();
+                    media.since = None;
+                    media.state = MediaState::Paused;
+                    self.output.pause();
+                    self.notices.push(Notice::Changed);
+                    return;
+                }
+                MediaState::Paused => {
+                    media.since = Some(std::time::Instant::now());
+                    media.state = MediaState::Playing;
+                    self.output.resume();
+                    self.notices.push(Notice::Changed);
+                    return;
+                }
+                MediaState::Preparing => return,
+                MediaState::Failed(_) => {}
+            }
+        }
+        let effects = self.player.silence();
+        self.apply(effects);
+        self.output_generation += 1;
+        self.output.stop();
+        let tag = self.tag("media-download");
+        self.api.get_bytes(&tag, path);
+        self.media = Some(Media {
+            artifact: artifact.to_owned(),
+            state: MediaState::Preparing,
+            played: Duration::ZERO,
+            since: None,
+            tag,
+            generation: self.output_generation,
+        });
+        self.notices.push(Notice::Changed);
+    }
+
+    fn media_event(&mut self, generation: u64, event: OutputEvent) {
+        let Some(media) = self.media.as_mut().filter(|m| m.generation == generation && generation == self.output_generation) else { return };
+        match event {
+            OutputEvent::Started => {
+                media.state = MediaState::Playing;
+                media.since = Some(std::time::Instant::now());
+            }
+            OutputEvent::Ended { result: Ok(()), .. } => {
+                self.media = None;
+                self.output_generation += 1;
+            }
+            OutputEvent::Ended { result: Err(error), .. } => {
+                eprintln!("clarp-slint audio: an artifact's audio failed: {error}");
+                media.state = MediaState::Failed("Couldn't play audio".into());
+                media.since = None;
+                self.output_generation += 1;
+            }
+        }
+        self.notices.push(Notice::Changed);
     }
 
     fn tag(&mut self, kind: &str) -> String {
@@ -365,7 +465,25 @@ impl Audio {
     }
 
     fn handle_reply(&mut self, reply: ApiReply) {
+        let media_tag = self.media.as_ref().map(|m| m.tag.clone()).unwrap_or_default();
         match reply {
+            ApiReply::Bytes { tag, bytes, .. } if !media_tag.is_empty() && tag == media_tag => {
+                let generation = self.output_generation;
+                if let Some(media) = self.media.as_mut() {
+                    media.tag.clear();
+                    media.generation = generation;
+                }
+                let events = std::sync::Arc::new(move |event: OutputEvent| later(move |audio| audio.media_event(generation, event)));
+                self.output.play(Playback::Media { bytes }, 1.0, events);
+            }
+            ApiReply::Failed { tag, message, status } if !media_tag.is_empty() && tag == media_tag => {
+                eprintln!("clarp-slint audio: an artifact's audio could not be fetched: {message} ({status})");
+                if let Some(media) = self.media.as_mut() {
+                    media.tag.clear();
+                    media.state = MediaState::Failed("Couldn't prepare audio".into());
+                }
+                self.notices.push(Notice::Changed);
+            }
             ApiReply::Bytes { tag, bytes, .. } if tag == self.download_tag => {
                 self.download_tag.clear();
                 let effects = self.player.downloaded(Ok(bytes));
