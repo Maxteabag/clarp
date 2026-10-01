@@ -12,6 +12,8 @@ export component ReportView inherits Modal {
     in property <string> title;
     in property <string> summary;
     in property <bool> html;
+    // Shown instead of HTML/MARKDOWN for what is not a document's body.
+    in property <string> kind;
     in property <[MessageBlock]> blocks;
     callback link-clicked(string);
     callback done();
@@ -33,7 +35,7 @@ export component ReportView inherits Modal {
                     Text { text: root.title == "" ? "Report" : root.title; color: Palette.text; font-size: 17px; font-weight: 600; overflow: elide; }
                     if root.summary != "": Text { text: root.summary; color: Palette.muted; font-size: 12px; overflow: elide; }
                 }
-                Text { text: root.html ? "HTML" : "MARKDOWN"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
+                Text { text: root.kind != "" ? root.kind : root.html ? "HTML" : "MARKDOWN"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
                 IconButton {
                     icon: @image-url("icons/rail-close.svg");
                     label: "Close report";
