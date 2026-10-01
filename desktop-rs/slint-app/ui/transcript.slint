@@ -17,6 +17,8 @@ export struct MessageImage {
     loaded: bool,
     // Could not be fetched, or not from the Host: "Image unavailable".
     failed: bool,
+    // Not on the Host, so never fetched: a line, not a box.
+    foreign: bool,
 }
 
 export struct MessageBlock {
@@ -185,6 +187,42 @@ export component Block inherits VerticalLayout {
         }
     }
     if root.block.kind == "rule": Rectangle { height: 1px; background: Palette.rule; }
+    // An image keeps its space before it arrives (iOS: up to 360 tall; a
+    // gallery's tiles 120): landing never moves the chat.
+    if root.block.kind == "images": HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        for picture in root.block.images: Rectangle {
+            // The layout sizes them: a gallery's tiles up to 150 wide, an
+            // image up to 480, both shrinking to fit.
+            preferred-width: root.block.gallery ? 140px : 480px;
+            max-width: root.block.gallery ? 150px : 480px;
+            min-width: 48px;
+            height: picture.foreign && !root.block.gallery ? 36px : root.block.gallery ? 120px : 270px;
+            border-radius: 6px;
+            clip: true;
+            background: Palette.sunken;
+            accessible-role: image;
+            accessible-label: picture.alt;
+            if picture.loaded: Image {
+                width: parent.width;
+                height: parent.height;
+                source: picture.image;
+                image-fit: root.block.gallery ? cover : contain;
+            }
+            if !picture.loaded: Text {
+                width: parent.width - 16px;
+                x: 8px;
+                height: parent.height;
+                text: picture.failed ? "Image unavailable" + (picture.alt != "" ? " · " + picture.alt : "") : picture.alt;
+                color: picture.failed ? Palette.warning : Palette.faint;
+                font-size: 12px;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
 }
 
 // The transcript (TranscriptView/MessageDelegate in QML): a virtualised

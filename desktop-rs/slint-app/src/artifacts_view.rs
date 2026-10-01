@@ -289,6 +289,25 @@ pub fn settle_downloads(app: &App, session: &str) {
         let Some(result) = app.engine.borrow_mut().take_artifact_bytes(&id, &purpose) else { continue };
         FETCHING.with(|f| f.borrow_mut().remove(&(id.clone(), purpose.clone())));
         match (purpose.as_str(), result) {
+            ("image", Ok(bytes)) => {
+                let picture = match image::load_from_memory(&bytes) {
+                    Ok(decoded) => {
+                        let rgba = decoded.to_rgba8();
+                        Picture::Loaded(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height())))
+                    }
+                    Err(error) => {
+                        eprintln!("clarp-slint: {id} is not an image: {error}");
+                        Picture::Failed
+                    }
+                };
+                PICTURES.with(|p| p.borrow_mut().insert(id.clone(), picture));
+                PICTURES_LANDED.with(|l| l.set(l.get() + 1));
+            }
+            ("image", Err(error)) => {
+                eprintln!("clarp-slint: no image at {id}: {error}");
+                PICTURES.with(|p| p.borrow_mut().insert(id.clone(), Picture::Failed));
+                PICTURES_LANDED.with(|l| l.set(l.get() + 1));
+            }
             ("poster", Ok(bytes)) => match image::load_from_memory(&bytes) {
                 Ok(decoded) => {
                     let rgba = decoded.to_rgba8();
@@ -380,6 +399,124 @@ fn open_directory(app: &App, artifact: &Value) {
         }
         Err(()) => eprintln!("clarp-slint: cannot open {}", folder.display()),
     }
+}
+
+// ---- images in messages
+
+/// How a message's image is going, by its Host path.
+#[derive(Clone)]
+enum Picture {
+    Loading,
+    Loaded(slint::Image),
+    Failed,
+}
+
+thread_local! {
+    static PICTURES: std::cell::RefCell<std::collections::HashMap<String, Picture>> = std::cell::RefCell::default();
+    /// Bumped whenever a picture lands, so rows with images are drawn again.
+    static PICTURES_LANDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// iOS `mediaRequest`: clarp-media://asset/<id> and /media/... (or
+/// media/...) are the Host's; anything else is not fetched.
+fn media_path(reference: &str) -> Option<String> {
+    if let Some(asset) = reference.strip_prefix("clarp-media://asset/") {
+        let ok = !asset.is_empty() && asset.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
+        return ok.then(|| format!("/media/{asset}"));
+    }
+    if reference.starts_with("/media/") {
+        return Some(reference.to_owned());
+    }
+    reference.starts_with("media/").then(|| format!("/{reference}"))
+}
+
+/// The `![alt](url)` references a paragraph consists of, or None when it
+/// holds anything else.
+fn image_lines(paragraph: &str) -> Option<Vec<(String, String)>> {
+    let mut found = Vec::new();
+    for line in paragraph.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let rest = line.strip_prefix("![")?;
+        let (alt, rest) = rest.split_once("](")?;
+        let url = rest.strip_suffix(')')?;
+        if url.contains(char::is_whitespace) {
+            return None;
+        }
+        found.push((alt.to_owned(), url.to_owned()));
+    }
+    (!found.is_empty()).then_some(found)
+}
+
+/// A message's image (fetched once from the Host, with the app's token).
+fn message_image(alt: &str, reference: &str) -> crate::MessageImage {
+    let mut image = crate::MessageImage { url: reference.into(), alt: alt.into(), ..crate::MessageImage::default() };
+    let Some(path) = media_path(reference) else {
+        image.failed = true;
+        image.foreign = true;
+        return image;
+    };
+    let state = PICTURES.with(|p| p.borrow().get(&path).cloned());
+    match state {
+        Some(Picture::Loaded(picture)) => {
+            image.image = picture;
+            image.loaded = true;
+        }
+        Some(Picture::Failed) => image.failed = true,
+        Some(Picture::Loading) => {}
+        None => {
+            PICTURES.with(|p| p.borrow_mut().insert(path.clone(), Picture::Loading));
+            FETCHING.with(|f| f.borrow_mut().insert((path.clone(), "image".into()), String::new()));
+            if let Some(app) = crate::app() {
+                app.engine.borrow_mut().fetch_artifact_bytes(&path, "image", &path);
+            }
+        }
+    }
+    image
+}
+
+fn images_block(images: Vec<crate::MessageImage>, gallery: bool) -> crate::MessageBlock {
+    crate::MessageBlock { kind: "images".into(), images: slint::ModelRc::new(slint::VecModel::from(images)), gallery, ..crate::MessageBlock::default() }
+}
+
+/// A message block as the transcript draws it: a paragraph of image
+/// references becomes an image (a single one) or a gallery, and a
+/// clarp-gallery fence a gallery (iOS's MarkdownParser).
+pub fn with_images(block: &clarp_engine::blocks::Block, literal: bool) -> Vec<crate::MessageBlock> {
+    use clarp_engine::blocks::Block;
+    match block {
+        Block::Code { language, text } if !literal && matches!(language.as_str(), "clarp-gallery" | "gallery") => {
+            match image_lines(text) {
+                Some(found) => vec![images_block(found.iter().map(|(a, u)| message_image(a, u)).collect(), true)],
+                None => vec![crate::view::message_block(block, literal)],
+            }
+        }
+        Block::Prose(markdown) if !literal && markdown.contains("![") => {
+            let mut out = Vec::new();
+            let mut prose: Vec<&str> = Vec::new();
+            for paragraph in markdown.split("\n\n") {
+                match image_lines(paragraph) {
+                    Some(found) => {
+                        if !prose.is_empty() {
+                            out.push(crate::view::message_block(&Block::Prose(prose.join("\n\n")), literal));
+                            prose.clear();
+                        }
+                        let gallery = found.len() > 1;
+                        out.push(images_block(found.iter().map(|(a, u)| message_image(a, u)).collect(), gallery));
+                    }
+                    None => prose.push(paragraph),
+                }
+            }
+            if !prose.is_empty() {
+                out.push(crate::view::message_block(&Block::Prose(prose.join("\n\n")), literal));
+            }
+            out
+        }
+        _ => vec![crate::view::message_block(block, literal)],
+    }
+}
+
+/// What a row's images add to its signature (they redraw when one lands).
+pub fn pictures_landed() -> u64 {
+    PICTURES_LANDED.with(std::cell::Cell::get)
 }
 
 /// A Host-relative media path (`/media/<asset>`); iOS also plays https
