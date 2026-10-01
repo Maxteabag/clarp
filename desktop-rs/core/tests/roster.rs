@@ -293,6 +293,10 @@ fn next_attention_cycles_waiting_unread_and_pending() {
     assert_eq!(next(&roster, "b", &[]).as_deref(), Some("c"));
     assert_eq!(next(&roster, "c", &[]).as_deref(), Some("b"));
     assert_eq!(next(&roster, "c", &["d"]).as_deref(), Some("d"));
+    // The whole queue, in the order Ctrl+J visits it (the explorer numbers it).
+    let queue = |current: &str, pending: &[&str]| roster.attention_queue(current, &pending.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    assert_eq!(queue("c", &["d"]), ["d", "b"]);
+    assert_eq!(queue("a", &["d"]), ["b", "c", "d"]);
     roster.clear_unread("b");
     assert_eq!(next(&roster, "a", &[]).as_deref(), Some("c"));
     assert_eq!(next(&roster, "c", &[]), None);

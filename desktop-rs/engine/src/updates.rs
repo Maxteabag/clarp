@@ -73,6 +73,19 @@ impl Engine {
         self.roster.next_attention_session(&self.selected, &pending).unwrap_or_default()
     }
 
+    /// The agents Ctrl+J will visit, in order (the explorer numbers them).
+    pub fn attention_queue(&self) -> Vec<String> {
+        let pending: Vec<String> = self
+            .updates
+            .attention_items
+            .iter()
+            .filter_map(|item| item.get("session").and_then(Value::as_str))
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        self.roster.attention_queue(&self.selected, &pending)
+    }
+
     /// The artifacts one agent produced (profile panel).
     pub fn artifacts_for_session(&self, session: &str) -> Vec<Value> {
         self.updates.artifacts.iter().filter(|a| a.get("session").and_then(Value::as_str) == Some(session)).cloned().collect()

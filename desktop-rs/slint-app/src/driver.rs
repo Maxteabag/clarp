@@ -1952,6 +1952,8 @@ fn updates_check(out: String) {
             check(true, "Escape goes back to the chats, ready to type");
             window.invoke_surface_chosen("updates".into());
             check(window.get_surface() == "updates", "the rail's Updates button opens them again");
+            let mike = window.get_chats().iter().find(|r| r.session == "mike").map_or(0, |r| r.queue);
+            check(mike == 1, &format!("the explorer numbers the attention queue: Mike, with a pending decision, is next ({mike})"));
             headless::press_with(&[Key::Control], "j");
             true
         })),
