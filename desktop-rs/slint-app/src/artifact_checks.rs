@@ -925,10 +925,75 @@ fn research_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- code_change
+
+fn code_change_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let ids = ["cc-big", "cc-bare", "cc-failed"];
+    let mut stages = load_chat("art-code", &["code_change"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("code cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let big = card(window, "cc-big").expect("big");
+            check(big.label == "CODE CHANGE" && big.repo == "clarp · slint-artifacts" && big.action == "Open change", &format!("a change says where: {:?} {:?}", big.repo, big.action));
+            check(big.files == "12 files" && big.additions == "+840" && big.deletions == "−132", &format!("and how much: {:?} {:?} {:?}", big.files, big.additions, big.deletions));
+            let bare = card(window, "cc-bare").expect("bare");
+            check(bare.repo == "Repository" && bare.files.is_empty() && bare.additions.is_empty() && bare.action.is_empty(), &format!("one without details names no repository and opens nothing: {:?} {:?}", bare.repo, bare.action));
+            let failed = card(window, "cc-failed").expect("failed");
+            check(failed.badge == "Failed" && failed.files == "1 file" && failed.additions == "+0" && failed.deletions == "−3", &format!("a failed one keeps its numbers: {:?} {:?}", failed.badge, failed.files));
+            app.focus_transcript();
+            true
+        })),
+        ("code keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("code first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("cc-big") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            shot(&out, "artifacts-08-code-change");
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("code opens", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the change: overlay {:?}", window.get_overlay())); true };
+            }
+            let blocks: Vec<crate::MessageBlock> = window.get_report_blocks().iter().collect();
+            let diff = blocks.iter().find(|b| b.kind == "code").map(|b| b.text.to_string()).unwrap_or_default();
+            check(window.get_report_kind() == "CODE CHANGE" && window.get_report_summary() == "clarp · slint-artifacts · 4560a8ed", &format!("the change, where and which commit: {:?} {:?}", window.get_report_kind(), window.get_report_summary()));
+            check(diff.contains("-fn main() {}") && diff.contains("+    println!(\"cards\");"), &format!("with its diff: {diff:?}"));
+            check(blocks.len() >= 2, "and a link to its source");
+            shot(&out2, "artifacts-08b-code-change-open");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("code closed", Box::new(|_, window, elapsed| {
+            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_overlay().is_empty(), "Escape closes it");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1167,6 +1232,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(plan_stages(&out));
     stages.extend(document_stages(&out));
     stages.extend(research_stages(&out));
+    stages.extend(code_change_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }

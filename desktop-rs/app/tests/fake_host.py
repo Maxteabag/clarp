@@ -261,6 +261,19 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "res-plain", "type": "research", "status": "ready", "session": s, "title": "Notes without sources",
              "content": "Short notes."},
         ]
+    if kind == "code_change":
+        diff = ("diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,4 @@\n"
+                " use std::io;\n-fn main() {}\n+fn main() {\n+    println!(\"cards\");\n+}\n")
+        return [
+            {"artifact_id": "cc-big", "type": "code_change", "status": "ready", "session": s,
+             "title": "Embed every artifact type in the Slint chat, test first, with stable card heights",
+             "repository": "clarp", "branch": "slint-artifacts", "commit": "4560a8ed", "files_changed": 12,
+             "additions": 840, "deletions": 132, "diff": diff, "source_url": "https://github.com/example/clarp/commit/4560a8ed"},
+            {"artifact_id": "cc-bare", "type": "code_change", "status": "draft", "session": s, "title": "A change without details",
+             "repository": ""},
+            {"artifact_id": "cc-failed", "type": "code_change", "status": "failed", "session": s, "title": "Rebase onto main",
+             "repository": "clarp", "branch": "rebase", "files_changed": 1, "additions": 0, "deletions": 3},
+        ]
     raise KeyError(kind)
 
 
