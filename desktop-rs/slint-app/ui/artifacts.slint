@@ -82,6 +82,9 @@ export struct ArtifactItem {
     media-played: int,
     media-started: int,
     media-seconds: int,
+    // video: its poster once fetched (has-poster), else a placeholder.
+    poster: image,
+    has-poster: bool,
     // code_change: where (repository and branch) and how much.
     repo: string,
     files: string,

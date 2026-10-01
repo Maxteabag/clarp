@@ -300,6 +300,18 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "aud-elsewhere", "type": "audio", "status": "ready", "session": s, "title": "A clip on another site",
              "url": "http://evil.example/x.mp3", "mime_type": "audio/mpeg", "file_name": "x.mp3"},
         ]
+    if kind == "video":
+        return [
+            {"artifact_id": "vid-demo", "type": "video", "status": "ready", "session": s,
+             "title": "Screen recording of the new artifact cards, keyboard first, with every type in one chat",
+             "url": "/media/vid1", "mime_type": "video/mp4", "file_name": "cards-demo.mp4", "duration_ms": 95000,
+             "thumbnail_url": "/media/thumb-slow"},
+            {"artifact_id": "vid-plain", "type": "video", "status": "ready", "session": s, "title": "No poster",
+             "url": "/media/vid1", "mime_type": "video/mp4", "file_name": "plain.mp4"},
+            {"artifact_id": "vid-gone", "type": "video", "status": "ready", "session": s, "title": "Expired video",
+             "url": "/media/gone", "mime_type": "video/mp4", "file_name": "gone.mp4"},
+            {"artifact_id": "vid-none", "type": "video", "status": "failed", "session": s, "title": "A video that never rendered"},
+        ]
     raise KeyError(kind)
 
 
@@ -431,6 +443,12 @@ class Handler(BaseHTTPRequestHandler):
             events = [{"type": "audio", "clip_id": 50, "session": query.get("session"), "url": "/clips/50/complete.mp3",
                        "complete_url": "/clips/50/complete.mp3", "trace_id": "recovered"}] if query.get("session") == "mike" else []
             return self.reply(200, {"events": events})
+        if url.path == "/media/vid1":
+            return self.reply_bytes(200, b"\x00\x00\x00\x18ftypmp42fixture-video", "video/mp4")
+        if url.path == "/media/thumb-slow":
+            # A poster that takes its time: the card must not grow when it lands.
+            time.sleep(1.5)
+            return self.reply_bytes(200, solid_png(320, 180, (40, 160, 90, 255)), "image/png")
         if url.path == "/media/aud1":
             data = (pathlib.Path(__file__).parent / "fixtures" / "clip.mp3").read_bytes()
             return self.reply_bytes(200, data, "audio/mpeg")

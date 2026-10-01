@@ -1154,10 +1154,87 @@ fn audio_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- video
+
+fn video_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let ids = ["vid-demo", "vid-plain", "vid-gone", "vid-none"];
+    let first: Rc<Cell<f32>> = Rc::default();
+    let first2 = first.clone();
+    let mut stages = load_chat("art-video", &["video"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("video cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let demo = card(window, "vid-demo").expect("demo");
+            check(demo.label == "VIDEO" && demo.action == "Play video" && demo.media_length == "1:35", &format!("a video offers to play, with its length: {:?} {:?}", demo.action, demo.media_length));
+            check(!demo.has_poster, "its poster is still on its way (the Host is slow)");
+            let none = card(window, "vid-none").expect("none");
+            check(none.media_text == "Video unavailable" && none.action.is_empty(), &format!("no url, nothing to play: {:?}", none.media_text));
+            app.focus_transcript();
+            true
+        })),
+        ("video keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("video first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("vid-demo") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            first.set(height_of(app, "vid-demo"));
+            true
+        })),
+        ("poster lands", Box::new(move |app, window, elapsed| {
+            let demo = card(window, "vid-demo").expect("demo");
+            if !demo.has_poster || elapsed < Duration::from_millis(400) {
+                return elapsed > Duration::from_secs(5) && { check(false, "the poster arrives from the Host"); true };
+            }
+            let (before, after) = (first2.get(), height_of(app, "vid-demo"));
+            check(demo.poster.size().width == 320 && before > 0.0 && (before - after).abs() < 0.5, &format!("the poster lands in the space kept for it: {before} then {after}"));
+            check(card(window, "vid-plain").is_some_and(|c| !c.has_poster), "a video without a poster keeps its placeholder");
+            shot(&out, "artifacts-11-video");
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("video opens", Box::new(|_, window, elapsed| {
+            let found = opened().into_iter().find(|u| u.starts_with("file://") && u.ends_with("cards-demo.mp4"));
+            let Some(url) = found else {
+                return elapsed > Duration::from_secs(4) && { check(false, &format!("Enter opens the video in the system's player: {:?}", opened())); true };
+            };
+            let fetched = super::requests("GET", "/media/vid1");
+            check(fetched.last().is_some_and(|r| r["authorization"] == "Bearer probe-token"), "the video comes from the Host with the app's token");
+            let path = url.trim_start_matches("file://").to_owned();
+            check(std::fs::read(&path).is_ok_and(|b| b.ends_with(b"fixture-video")), &format!("saved whole where it opened: {path}"));
+            check(card(window, "vid-demo").is_some_and(|c| c.status_text == "Opened in your video player"), "the card says where it went");
+            window.global::<ArtifactBridge>().invoke_open("vid-gone".into());
+            true
+        })),
+        ("video gone", Box::new(|_, window, elapsed| {
+            let gone = card(window, "vid-gone").map(|c| c.status_text.to_string()).unwrap_or_default();
+            if !gone.starts_with("Couldn't download") {
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("an expired video says so: {gone:?}")); true };
+            }
+            check(gone.contains("404"), &format!("an expired video says why, and Enter tries again: {gone:?}"));
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1399,6 +1476,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(code_change_stages(&out));
     stages.extend(data_stages(&out));
     stages.extend(audio_stages(&out));
+    stages.extend(video_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
