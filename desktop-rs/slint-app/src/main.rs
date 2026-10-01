@@ -429,6 +429,7 @@ pub fn audio_notices(notices: Vec<platform::audio::Notice>) {
             }
             Notice::Changed => {
                 app.voice_state();
+                artifacts_view::media_changed(&app);
                 platform::publish_playback();
             }
         }

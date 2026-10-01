@@ -86,7 +86,9 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
     } else {
         String::new()
     };
-    let title = [text(artifact, "file_name"), text(artifact, "title")].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| "Artifact".into());
+    // iOS names only a file card for its file.
+    let named = if kind == "file" { text(artifact, "file_name") } else { String::new() };
+    let title = [named, text(artifact, "title"), text(artifact, "file_name")].into_iter().find(|s| !s.is_empty()).unwrap_or_else(|| "Artifact".into());
     let mut item = ArtifactItem {
         id: text(artifact, "artifact_id").into(),
         label: kind.replace('_', " ").to_uppercase().into(),
@@ -107,6 +109,20 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
         "plan" => plan_fields(&mut item, artifact),
+        "audio" => {
+            item.media_state = "idle".into();
+            item.media_started = -1;
+            let length = number(artifact, "duration_ms") / 1000;
+            if length > 0 {
+                item.media_length = format!("{}:{:02}", length / 60, length % 60).into();
+                item.media_seconds = length as i32;
+            }
+            if host_path(&text(artifact, "url")).is_some() {
+                item.action = "Play".into();
+            } else {
+                item.media_text = "Audio unavailable".into();
+            }
+        }
         "data" => data_fields(&mut item, artifact),
         "code_change" => {
             // iOS: the repository (or "Repository"), the branch, the files
@@ -172,12 +188,63 @@ pub struct CardState<'a> {
     pub seen_pending: &'a std::collections::HashSet<String>,
 }
 
+/// A Host-relative media path (`/media/<asset>`); iOS also plays https
+/// links, but the app only fetches from its Host, with its token.
+fn host_path(url: &str) -> Option<&str> {
+    (url.starts_with('/') && !url.starts_with("//")).then_some(url)
+}
+
+/// The card's playback as the audio has it.
+fn media_fields(item: &mut ArtifactItem) {
+    let Some(media) = crate::platform::audio::with(|audio| audio.media().cloned()).flatten() else { return };
+    if media.artifact != item.id.as_str() {
+        return;
+    }
+    use crate::platform::audio::MediaState;
+    let (state, said, action) = match &media.state {
+        MediaState::Preparing => ("preparing", "Preparing audio…".to_owned(), "Play"),
+        MediaState::Playing => ("playing", "Playing".to_owned(), "Pause"),
+        MediaState::Paused => ("paused", "Paused".to_owned(), "Play"),
+        MediaState::Failed(why) => ("failed", why.clone(), "Play"),
+    };
+    item.media_state = state.into();
+    item.media_text = said.into();
+    item.action = action.into();
+    item.media_played = media.played.as_secs() as i32;
+    // The clock's second this stretch began.
+    item.media_started = match media.since {
+        Some(since) => clock_now() - since.elapsed().as_secs() as i32,
+        None => -1,
+    };
+}
+
+/// What the cards last showed of playback, to redraw them when it moves.
+fn media_snapshot() -> String {
+    crate::platform::audio::with(|audio| audio.media().map(|m| format!("{}{:?}{}", m.artifact, m.state, m.played.as_millis()))).flatten().unwrap_or_default()
+}
+
+thread_local! {
+    static MEDIA_SHOWN: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+/// The audio changed: the cards follow when their playback did.
+pub fn media_changed(app: &App) {
+    let now = media_snapshot();
+    if MEDIA_SHOWN.with(|m| *m.borrow() != now) {
+        MEDIA_SHOWN.with(|m| *m.borrow_mut() = now);
+        app.refresh(&[Change::Updates]);
+    }
+}
+
 /// A card as the chat shows it: its fields, whether the keyboard is on it,
 /// what it chose and how its latest action went.
 pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactItem {
     let mut item = artifact_item(artifact);
     item.selected = !state.cursor.is_empty() && item.id == state.cursor;
     item.status_text = engine.artifact_status(&item.id).into();
+    if item.kind == "audio" && !item.action.is_empty() {
+        media_fields(&mut item);
+    }
     if item.pending {
         let choices = item.options.row_count() + usize::from(item.allow_custom);
         item.chosen = state.choices.get(item.id.as_str()).copied().filter(|c| (*c as usize) < choices).unwrap_or(-1);
@@ -711,6 +778,16 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
             }
         }
         "decision" | "question" => return send(app, id),
+        "audio" => {
+            let url = text(&artifact, "url");
+            match host_path(&url) {
+                Some(path) => {
+                    let path = path.to_owned();
+                    crate::platform::audio::with(|audio| audio.toggle_media(id, &path));
+                }
+                None => eprintln!("clarp-slint: not playing {url}: only the Host's media plays"),
+            }
+        }
         "plan" | "code_change" | "data" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
         _ if app.engine.borrow().report_for_artifact(id).is_some() => crate::updates_view::open_report(app, window, id),
         // Nothing to open: Enter only selects.
@@ -741,6 +818,10 @@ pub fn bind(window: &AppWindow) {
     let bridge = window.global::<ArtifactBridge>();
     bridge.on_countdown_phase(|target, now| countdown(i64::from(target), i64::from(now)).0.into());
     bridge.on_countdown_clock(|target, now| countdown(i64::from(target), i64::from(now)).1.into());
+    bridge.on_media_position(|played, started, now| {
+        let seconds = played + if started >= 0 { (now - started).max(0) } else { 0 };
+        format!("{}:{:02}", seconds / 60, seconds % 60).into()
+    });
     bridge.set_now(clock_now());
     bridge.on_link_clicked(|url| crate::open_link(&url));
     bridge.on_card_shown(|id, top, height, view_top, view_bottom| card_shown(&id, top, height, view_top, view_bottom));

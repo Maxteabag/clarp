@@ -81,6 +81,7 @@ export struct ArtifactItem {
     media-length: string,
     media-played: int,
     media-started: int,
+    media-seconds: int,
     // code_change: where (repository and branch) and how much.
     repo: string,
     files: string,
@@ -420,6 +421,66 @@ component DecisionBody inherits VerticalLayout {
     }
 }
 
+// An audio card's player (iOS: play/pause, progress, m:ss / m:ss and a
+// status line), one row and one line, whatever its state.
+component MediaBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    in property <color> tint;
+    property <int> played: root.artifact.media-played + (root.artifact.media-started >= 0 ? Math.max(0, ArtifactBridge.now - root.artifact.media-started) : 0);
+    property <string> position: ArtifactBridge.media-position(root.artifact.media-played, root.artifact.media-started, ArtifactBridge.now);
+    spacing: 4px;
+    if root.artifact.action != "": HorizontalLayout {
+        spacing: 10px;
+        height: 32px;
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            border-radius: 16px;
+            background: play.has-hover ? root.tint.with-alpha(0.3) : root.tint.with-alpha(0.18);
+            accessible-role: button;
+            accessible-label: root.artifact.action;
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.artifact.media-state == "playing" ? "❚❚" : "▶";
+                color: root.tint;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            play := TouchArea { mouse-cursor: pointer; clicked => { ArtifactBridge.open(root.artifact.id); } }
+        }
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 4px;
+            horizontal-stretch: 1;
+            border-radius: 2px;
+            background: Palette.control;
+            Rectangle {
+                x: 0;
+                height: parent.height;
+                border-radius: 2px;
+                background: root.tint;
+                width: root.artifact.media-seconds <= 0 ? 0 : parent.width * Math.min(1, root.played / root.artifact.media-seconds);
+            }
+        }
+        Text {
+            text: root.position + (root.artifact.media-length != "" ? " / " + root.artifact.media-length : "");
+            color: Palette.muted;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+    Text {
+        height: 15px;
+        text: root.artifact.media-text;
+        color: root.artifact.media-state == "failed" || root.artifact.action == "" ? Palette.warning : Palette.muted;
+        font-size: 11px;
+        overflow: elide;
+    }
+}
+
 // A plan's or run's progress (iOS's ProgressView and caption) and the
 // step under way, in two lines whatever its length.
 component ProgressBody inherits VerticalLayout {
@@ -568,6 +629,7 @@ export component ArtifactCard inherits Rectangle {
             if root.artifact.deletions != "": Text { text: root.artifact.deletions; color: Palette.danger; font-family: "JetBrains Mono"; font-size: 12px; }
         }
         if root.artifact.sources != "": Text { text: root.artifact.sources; color: Palette.faint; font-size: 11px; }
+        if root.artifact.kind == "audio": MediaBody { artifact: root.artifact; tint: root.tint; }
         if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
         // Two lines, whatever the summary's length: a summary that grows
         // does not change the card's height.
@@ -592,7 +654,8 @@ export component ArtifactCard inherits Rectangle {
         if root.artifact.progress != "" && root.artifact.progress-count == "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
         if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
         // A decision shows its send's status in its own row.
-        if root.artifact.action != "" || (root.artifact.status-text != "" && root.artifact.kind != "decision" && root.artifact.kind != "question"): HorizontalLayout {
+        // Audio plays from its own button.
+        if root.artifact.kind != "audio" && (root.artifact.action != "" || (root.artifact.status-text != "" && root.artifact.kind != "decision" && root.artifact.kind != "question")): HorizontalLayout {
             spacing: 10px;
             if root.artifact.action != "": Text {
                 text: root.artifact.action + " ↗";
