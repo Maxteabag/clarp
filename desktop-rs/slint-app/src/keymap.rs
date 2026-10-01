@@ -23,6 +23,10 @@ pub enum Guard {
     Busy,
     /// A voice reply is playing.
     Playing,
+    /// The reader has scrolled up from the latest message.
+    Behind,
+    /// Some chat in the explorer has sub-agents to fold or unfold.
+    Folds,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,7 +62,7 @@ fn parent(state: &str) -> Option<&'static str> {
 }
 
 fn state(name: &str) -> Vec<Binding> {
-    use Guard::{Agent, Attention, Busy, None as Always, Playing, Rows, Send};
+    use Guard::{Agent, Attention, Behind, Busy, Folds, None as Always, Playing, Rows, Send};
     let b = binding;
     match name {
         "main" => vec![
@@ -92,10 +96,10 @@ fn state(name: &str) -> Vec<Binding> {
             b("focus-sidebar", &["Ctrl+E"], "Explorer", false, Always, false),
             b("focus-pane", &["Ctrl+H"], "Chat", false, Always, false),
             b("retry-message", &["Ctrl+Alt+R"], "Retry failed message", false, Agent, false),
-            b("jump-latest", &["Ctrl+End"], "Latest", true, Agent, false),
+            b("jump-latest", &["Ctrl+End"], "Latest", true, Behind, false),
             b("assign-agent", &["Ctrl+A"], "Assign contact", false, Agent, false),
             b("auto-assign-agent", &["Ctrl+Shift+A"], "Auto assign", false, Agent, false),
-            b("escape", &["Escape"], "Navigate", true, Always, false),
+            b("escape", &["Escape"], "Navigate", false, Always, false),
             b("move-left", &["Ctrl+Alt+Left"], "Left pane", false, Always, false),
             b("move-right", &["Ctrl+Alt+Right"], "Right pane", false, Always, false),
             b("move-up", &["Ctrl+Alt+Up"], "Upper pane", false, Always, false),
@@ -112,10 +116,10 @@ fn state(name: &str) -> Vec<Binding> {
         ],
         "navigation" => vec![
             b("next-attention", &["N", "Ctrl+J"], "Next attention", true, Attention, false),
-            b("focus-sidebar", &["E", "Ctrl+E"], "Explorer", true, Always, false),
-            b("focus-pane", &["C", "Ctrl+H"], "Chat", true, Always, false),
-            b("focus-composer", &["I"], "Insert", true, Agent, false),
-            b("toggle-focus", &["Tab", "Shift+Tab"], "Switch focus", true, Always, false),
+            b("focus-sidebar", &["E", "Ctrl+E"], "Explorer", false, Always, false),
+            b("focus-pane", &["C", "Ctrl+H"], "Chat", false, Always, false),
+            b("focus-composer", &["I"], "Insert", false, Agent, false),
+            b("toggle-focus", &["Tab", "Shift+Tab"], "Switch focus", false, Always, false),
             b("switcher", &["Space", "Ctrl+K"], "Commands", true, Always, false),
             b("escape", &["Escape"], "Chat", false, Always, false),
         ],
@@ -131,32 +135,33 @@ fn state(name: &str) -> Vec<Binding> {
             b("balance", &["Alt+=", "Ctrl+Alt+=", "Ctrl+Shift+="], "Balance panes", false, Always, false),
         ],
         "sidebar" => vec![
-            b("agent-next", &["J", "Down"], "Next", true, Rows, false),
-            b("agent-previous", &["K", "Up"], "Previous", true, Rows, false),
-            b("agent-open", &["Return", "Enter"], "Open", true, Rows, false),
-            b("agent-search", &["/"], "Search", true, Always, false),
+            b("agent-next", &["J", "Down"], "Next", false, Rows, false),
+            b("agent-previous", &["K", "Up"], "Previous", false, Rows, false),
+            b("agent-open", &["Return", "Enter"], "Open", false, Rows, false),
+            b("agent-search", &["/"], "Search", false, Always, false),
             b("toggle-preview", &["P"], "Preview", true, Always, false),
-            b("fold", &["H", "Left"], "Fold", true, Rows, false),
-            b("unfold", &["L", "Right"], "Unfold", true, Rows, false),
+            b("toggle-compact", &["V"], "Compact view", true, Always, false),
+            b("fold", &["H", "Left"], "Fold", true, Folds, false),
+            b("unfold", &["L", "Right"], "Unfold", true, Folds, false),
             // The explorer's header buttons, shown while it has the keyboard.
             b("new", &["Ctrl+N"], "New agent", true, Always, false),
             b("sidebar", &["Ctrl+B"], "Hide sidebar", true, Always, false),
         ],
         "composer" => vec![
-            b("jump-latest", &["Ctrl+End"], "Latest", true, Agent, true),
+            b("jump-latest", &["Ctrl+End"], "Latest", true, Behind, true),
             b("send", &["Return"], "Send", false, Send, true),
             b("newline", &["Shift+Return"], "New line", false, Always, true),
-            b("queue", &["Ctrl+Return"], "Queue", true, Send, true),
-            b("focus-pane", &["Ctrl+H"], "Chat", true, Always, false),
-            b("focus-sidebar", &["Ctrl+E"], "Explorer", true, Always, false),
+            b("queue", &["Ctrl+Return"], "Queue", true, Busy, true),
+            b("focus-pane", &["Ctrl+H"], "Chat", false, Always, false),
+            b("focus-sidebar", &["Ctrl+E"], "Explorer", false, Always, false),
             // The composer has no buttons: its actions are keys, shown here.
             b("attach", &["Ctrl+Shift+O"], "Attach", true, Agent, true),
             b("stop-agent", &["Ctrl+."], "Stop", true, Busy, false),
             b("silence", &["Ctrl+Shift+M"], "Stop voice", true, Playing, false),
         ],
         "search" => vec![
-            b("search-next", &["Down"], "Results", true, Rows, true),
-            b("escape", &["Escape"], "Explorer", true, Always, false),
+            b("search-next", &["Down"], "Results", false, Rows, true),
+            b("escape", &["Escape"], "Explorer", false, Always, false),
         ],
         "settings" => vec![
             b("settings-move", &["Up", "Down"], "Move", true, Always, true),
@@ -186,6 +191,8 @@ pub struct Facts {
     pub can_send: bool,
     pub busy: bool,
     pub playing: bool,
+    pub behind: bool,
+    pub folds: bool,
 }
 
 impl Facts {
@@ -198,6 +205,8 @@ impl Facts {
             Guard::Send => self.can_send,
             Guard::Busy => self.busy,
             Guard::Playing => self.playing,
+            Guard::Behind => self.behind,
+            Guard::Folds => self.folds,
         }
     }
 }
@@ -357,7 +366,7 @@ mod tests {
     use super::*;
 
     fn all() -> Facts {
-        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true }
+        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true }
     }
 
     #[test]

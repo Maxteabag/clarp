@@ -81,6 +81,8 @@ component Row inherits Rectangle {
     in property <ChatRow> chat;
     // The keyboard cursor is on this row.
     in property <bool> cursor;
+    // Compact explorer: the avatar and the name only.
+    in property <bool> compact;
     // The cursor landed here: its place in the list, to scroll it into view.
     callback reveal(length, length);
     changed cursor => { if (self.cursor) { root.reveal(self.y, self.height); } }
@@ -90,7 +92,9 @@ component Row inherits Rectangle {
     callback done-toggled(string);
     callback fold-toggled();
     callback restore();
-    height: (root.chat.activity != "" ? 72px : 58px) + (root.chat.done-count > 0 ? 22px : 0px) + (root.chat.fold-count > 0 ? 22px : 0px);
+    height: root.compact
+        ? 40px + (root.chat.fold-count > 0 ? 20px : 0px)
+        : (root.chat.activity != "" ? 72px : 58px) + (root.chat.done-count > 0 ? 22px : 0px) + (root.chat.fold-count > 0 ? 22px : 0px);
     opacity: root.chat.archived ? 0.65 : 1;
     background: root.cursor ? Focus.cursor : root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
     accessible-role: list-item;
@@ -101,10 +105,10 @@ component Row inherits Rectangle {
         padding-right: 10px;
         spacing: 10px;
         Rectangle {
-            width: 36px;
-            height: 36px;
-            y: 10px;
-            border-radius: 18px;
+            width: root.compact ? 28px : 36px;
+            height: self.width;
+            y: root.compact ? 6px : 10px;
+            border-radius: self.width / 2;
             border-width: root.chat.busy ? 2px : 1px;
             border-color: root.chat.busy ? Palette.success : Palette.border;
             clip: true;
@@ -125,7 +129,7 @@ component Row inherits Rectangle {
             }
         }
         VerticalLayout {
-            padding-top: 8px;
+            padding-top: root.compact ? 10px : 8px;
             spacing: 2px;
             HorizontalLayout {
                 spacing: 6px;
@@ -136,16 +140,16 @@ component Row inherits Rectangle {
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
-                ProcessIndicator {
+                if !root.compact: ProcessIndicator {
                     y: 3px;
                     jobs: root.chat.jobs;
                     sub-agents: root.chat.sub-agents;
                     children: root.chat.children;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
-                Text { text: root.chat.stamp; color: Palette.faint; font-size: 11px; }
+                if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11px; }
             }
-            HorizontalLayout {
+            if !root.compact: HorizontalLayout {
                 spacing: 6px;
                 Text {
                     text: root.chat.preview;
@@ -164,7 +168,7 @@ component Row inherits Rectangle {
                     background: Palette.accent;
                 }
             }
-            if root.chat.activity != "": Text {
+            if !root.compact && root.chat.activity != "": Text {
                 text: root.chat.activity;
                 color: Palette.warning;
                 font-size: 11px;
@@ -182,7 +186,7 @@ component Row inherits Rectangle {
                 }
                 fold-touch := TouchArea { clicked => { root.fold-toggled(); } }
             }
-            if root.chat.done-count > 0: Rectangle {
+            if !root.compact && root.chat.done-count > 0: Rectangle {
                 height: 20px;
                 accessible-role: button;
                 accessible-label: root.chat.done-count + " helpers done";
@@ -255,6 +259,7 @@ export component Sidebar inherits Rectangle {
     callback new-agent();
     // Minimal UI hides the hide button (Ctrl+B still works).
     in property <bool> minimal;
+    in property <bool> compact;
     public function focus-search() { search.focus(); }
     public function clear-search() { search.text = ""; root.filter-changed(); }
     background: Palette.raised;
@@ -321,6 +326,7 @@ export component Sidebar inherits Rectangle {
                 for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
                     chat: row;
                     cursor: list.has-focus && row.session == root.cursor;
+                    compact: root.compact;
                     // J/K keep the cursor's row in view.
                     reveal(y, h) => {
                         if (y + flick.content-y < 0px) {

@@ -45,6 +45,8 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         can_send: engine.can_send(selected),
         busy: engine.roster().find(selected).is_some_and(|a| matches!(a.latest_state.as_str(), "thinking" | "tool" | "compacting")),
         playing: crate::platform::audio::with(|audio| audio.playing()).unwrap_or(false),
+        behind: !app.active_report().at_end,
+        folds: window.get_chats().iter().any(|c| c.fold_count > 0),
     }
 }
 
@@ -195,6 +197,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
                 }
             }
         }
+        "toggle-compact" => crate::settings_view::change(app, window, "compact-explorer", 1),
         "toggle-preview" => {
             let on = app.engine.borrow().settings().boolean("explorer/livePreview", false);
             app.engine.borrow_mut().settings_mut().set("explorer/livePreview", !on);
