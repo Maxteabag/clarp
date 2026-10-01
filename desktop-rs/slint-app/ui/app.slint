@@ -1,0 +1,619 @@
+import { Palette as WidgetPalette } from "std-widgets.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
+import { Sidebar, ChatRow } from "sidebar.slint";
+import { NavRail } from "navrail.slint";
+import { Attachment } from "composer.slint";
+import { MessageRow, MessageBlock, MessageImage, TableRow, ToolRow } from "transcript.slint";
+import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
+import { Switcher, SwitcherRow } from "switcher.slint";
+import { Settings, SettingRow } from "settings.slint";
+import { KeymapEditor, ConnectionPage } from "dialogs.slint";
+import { PreviewPanel, PreviewBanner, PreviewWindow, PreviewVersion } from "preview.slint";
+// ---- updates and teams
+import { Updates, AttentionView, JobView, ArtifactView } from "updates.slint";
+import { ReportView } from "report.slint";
+import { Teams, TeamView, TeamMessageView, TeamMemberView, TeamCreateDialog, TeamEditDialog, TeamMemberDialog, TeamDeleteDialog } from "teams.slint";
+import { ProcessPopover, ProcessJob, ProcessHelper } from "processes.slint";
+// ---- launch dialogs
+import { NewSessionHub, StartAgentDialog, LaunchHub, StartAgent, ProviderChip, ContactCard, DirRow, PastRow, McpChoice } from "launch.slint";
+import { RenameAgentDialog, AssignAgentDialog, QueueDialog, AgentDialogs, QueuedTurn } from "agent_dialogs.slint";
+export { LaunchHub, StartAgent, ProviderChip, ContactCard, DirRow, PastRow, McpChoice, AgentDialogs, QueuedTurn }
+// ---- profile and overview
+import { AgentProfile, ProfileLayers, ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact } from "profile.slint";
+import { MediaItem } from "media.slint";
+import { AgentOverview, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact } from "overview.slint";
+import { VoiceDialog, VoiceBridge, VoiceItem } from "voice.slint";
+import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
+import { DisplayCell, CellLine } from "cells.slint";
+import { ArtifactItem, ArtifactBridge } from "artifacts.slint";
+export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge }
+
+export { Palette, Focus, ChatRow, MessageRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
+// ---- updates and teams
+export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
+
+export struct Hint {
+    label: string,
+    keys: string,
+}
+
+// ShortcutBar.qml: where the keyboard is, and what it can do there.
+component ShortcutBar inherits Rectangle {
+    in property <string> mode;
+    in property <[Hint]> hints;
+    in property <string> connection;
+    height: 30px;
+    background: Palette.sunken;
+    Rectangle { y: 0; height: 1px; background: Palette.border; }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 16px;
+        // The hints clip at the window's edge: however many the state has,
+        // they never widen the layout above them.
+        Rectangle {
+            horizontal-stretch: 1;
+            min-width: 0px;
+            clip: true;
+            HorizontalLayout {
+                x: 0;
+                width: self.preferred-width;
+                spacing: 16px;
+                for hint in root.hints: HorizontalLayout {
+                    spacing: 5px;
+                    Text { text: hint.label + ":"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+                    Text { text: hint.keys; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                }
+            }
+        }
+        Text {
+            text: root.connection;
+            color: root.connection == "live" ? Palette.success : Palette.warning;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: root.selected-name == "" ? "Clarp" : root.selected-name + " — Clarp";
+    preferred-width: 1100px;
+    preferred-height: 700px;
+    background: Palette.window;
+    // The chrome keeps the terminal face; the reading theme styles the
+    // transcript and the composer (as in the Qt app).
+    default-font-family: "JetBrains Mono";
+    default-font-size: Palette.body-size;
+
+    in property <[ChatRow]> chats;
+    in property <[ChatRow]> rooms;
+    in property <[ChatRow]> archived;
+    in property <int> unread-rooms;
+    in property <int> attention;
+    in property <bool> muted;
+    in property <string> server-initial;
+    in-out property <string> surface: "chats";
+    out property <string> query: sidebar.query;
+    out property <string> scope: sidebar.scope;
+    in property <string> selected-name;
+    in property <string> connection;
+    in property <string> error;
+    in property <[PaneView]> panes;
+    in property <[SplitView]> splits;
+    in property <[WorkspaceTab]> workspaces;
+    in property <string> save-warning;
+    in property <bool> workspace-bar;
+    in-out property <bool> sidebar-visible: true;
+    in-out property <bool> shortcuts-visible: true;
+    in property <string> keyboard-mode;
+    in property <[Hint]> hints;
+    // The chat the sidebar's keyboard cursor is on.
+    in property <string> sidebar-cursor;
+    out property <bool> search-focused: sidebar.search-has-focus;
+    out property <bool> sidebar-focused: sidebar.list-has-focus;
+    public function focus-search() { sidebar.focus-search(); }
+    public function choose-scope(scope: string) { sidebar.choose-scope(scope); }
+    public function show-archive(on: bool) { sidebar.show-archive(on); }
+    public function show-pairs(on: bool) { sidebar.show-pairs(on); }
+    out property <bool> showing-archive: sidebar.showing-archive;
+    out property <bool> showing-pairs: sidebar.showing-pairs;
+    public function focus-sidebar() { sidebar.focus-list(); }
+
+    callback chat-chosen(string);
+    callback done-helpers-toggled(string);
+    callback fold-toggled(string);
+    callback restore-agent(string);
+    callback filter-changed();
+    callback toggle-muted();
+    callback open-switcher();
+    callback link-clicked(string);
+    callback dismiss-error();
+    // Every key reaches the keyboard map first; true when it ran a command.
+    callback shortcut(string, bool, bool, bool) -> bool;
+    // Tells the map where the keyboard went.
+    callback focus-moved();
+    // Pane events carry the pane's id.
+    callback pane-activated(string);
+    callback send(string, string, bool);
+    callback stop(string);
+    callback draft-edited(string, string);
+    callback attach(string);
+    callback remove-attachment(string, string);
+    callback load-older(string);
+    callback toggle-activity(string, string, string);
+    callback copy-message(string, string);
+    callback silence();
+    callback cancel-transcription(string);
+    callback paste-image(string) -> bool;
+    callback pane-reported(string, bool, bool, length, bool, bool);
+    callback switch-workspace(string);
+    callback create-workspace();
+    callback save-layout-instead();
+    callback resize-split(string, float);
+    callback balance();
+    in property <[SettingRow]> setting-rows;
+    in-out property <int> setting-current;
+    in property <bool> minimal-ui;
+    // The rail of destinations (Chats, Updates, Teams, Settings); Ctrl+1..4
+    // and Ctrl+K reach them without it.
+    in property <bool> nav-rail-visible: true;
+    in property <bool> explorer-compact;
+    // Set from the names (Rust): the compact explorer fits an average row.
+    in property <length> explorer-compact-width: 200px;
+    out property <bool> settings-focused: settings.list-focused;
+    public function focus-settings() { settings.focus-list(); }
+    callback setting-changed(string, int);
+    callback surface-chosen(string);
+    callback sidebar-hide();
+    callback run-command(string);
+    // The dialog over the window ("" for none): Escape closes it.
+    in property <string> overlay;
+    // ---- updates and teams
+    in property <[AttentionView]> update-attention;
+    in property <[JobView]> update-jobs;
+    in property <[ArtifactView]> update-artifacts;
+    in property <bool> updates-loading;
+    in property <string> updates-error;
+    out property <bool> updates-focused: updates.focused;
+    callback updates-refresh();
+    callback resolve-decision(string, string, int);
+    callback cancel-job(string);
+    callback open-report(string);
+    // Opens a chat from a panel (and goes back to the chats).
+    callback open-chat(string);
+    public function focus-updates() { updates.take-focus(); }
+    in property <string> report-title;
+    in property <string> report-summary;
+    in property <bool> report-html;
+    // What the report is, when it is not a document's body (PLAN...).
+    in property <string> report-kind;
+    in property <[MessageBlock]> report-blocks;
+    in property <[TeamView]> team-list;
+    in property <[TeamMessageView]> team-messages;
+    in property <[TeamMemberView]> team-members;
+    in property <string> team-selected;
+    in property <string> team-title;
+    in property <string> team-subtitle;
+    in property <bool> team-nudging;
+    in property <bool> teams-loading;
+    in property <string> teams-error;
+    in property <bool> teams-grouped: true;
+    in property <[string]> team-leaders;
+    in-out property <int> team-leader-index;
+    in property <[string]> team-agents;
+    in-out property <int> team-agent-index;
+    out property <bool> teams-focused: teams.focused;
+    // select, refresh, grouping, create, edit, nudging, delete, add-member, remove-member
+    callback team-action(string, string);
+    callback team-created(string);
+    callback team-saved(string, string, int);
+    callback team-member-added(int);
+    callback team-deleted();
+    public function focus-teams() { teams.take-focus(); }
+    public function open-team-create() { team-create.open(); }
+    public function open-team-edit(name: string, colour: string) { team-edit.open(name, colour); }
+    in property <string> process-name;
+    in property <string> process-count;
+    in property <[ProcessJob]> process-jobs;
+    in property <[ProcessHelper]> process-helpers;
+    in property <string> process-note;
+    in property <length> process-x;
+    in property <length> process-y;
+    callback show-processes(string, length, length);
+    callback process-helper-opened(string);
+    // ---- launch dialogs: the switcher's contacts-only mode
+    in property <string> switcher-placeholder: "Agent, contact, setting or command";
+    in property <string> switcher-empty: "No matching agent or contact";
+    in property <[string]> keymap-actions;
+    in property <string> keymap-error;
+    in-out property <string> keymap-profile;
+    callback keymap-apply(string, string);
+    callback keymap-import(string);
+    callback keymap-export();
+    callback keymap-reset();
+    callback overlay-closed();
+    public function open-keymap() { keymap.open(); }
+    in property <string> base-url;
+    in property <bool> connecting;
+    in property <bool> stored-credential;
+    in property <bool> has-agents;
+    callback connect-host(string, string);
+    callback pair-host(string, string);
+    callback forget-host();
+    public function open-connection-page() { connection-page.open(); }
+    // ---- preview versions
+    in property <bool> preview-enabled;
+    in property <[PreviewVersion]> preview-versions;
+    in property <bool> preview-busy;
+    in property <bool> preview-pinned;
+    in property <string> preview-error;
+    in property <string> preview-notice;
+    in property <string> preview-update-label;
+    in property <bool> preview-can-restart: true;
+    in-out property <int> preview-current;
+    callback preview-choose(string);
+    callback preview-update();
+    public function open-preview() { preview-panel.open(); }
+    in property <bool> switcher-open;
+    in property <[SwitcherRow]> switcher-rows;
+    in property <int> switcher-current;
+    out property <string> switcher-query: switcher.query;
+    callback switcher-edited(string);
+    callback switcher-chosen(int);
+    callback switcher-moved(int);
+    callback switcher-dismissed();
+    public function show-switcher() { switcher.open(); }
+
+    changed search-focused => { root.focus-moved(); }
+    changed sidebar-focused => { root.focus-moved(); }
+
+    keys := FocusScope {
+        width: root.width;
+        height: root.height;
+        focus-on-click: false;
+        capture-key-pressed(event) => {
+            if (root.shortcut(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift)) {
+                return accept;
+            }
+            reject
+        }
+        // The shortcut bar is the window's footer, under every column.
+        HorizontalLayout {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height - (root.shortcuts-visible ? footer.height : 0px);
+            if root.nav-rail-visible: NavRail {
+                surface: root.surface;
+                attention: root.attention;
+                muted: root.muted;
+                server-initial: root.server-initial;
+                select-surface(surface) => { root.surface-chosen(surface); }
+                toggle-muted => { root.toggle-muted(); }
+                open-switcher => { root.open-switcher(); }
+                open-connection => { root.run-command("connection"); }
+                live: root.connection == "live";
+            }
+            sidebar := Sidebar {
+                visible: root.sidebar-visible;
+                width: !root.sidebar-visible ? 0px : root.explorer-compact ? root.explorer-compact-width : 320px;
+                rows: root.chats;
+                rooms: root.rooms;
+                archived: root.archived;
+                unread-rooms: root.unread-rooms;
+                cursor: root.sidebar-cursor;
+                minimal: root.minimal-ui;
+                compact: root.explorer-compact;
+                hide => { root.run-command("sidebar"); }
+                new-agent => { root.run-command("new"); }
+                chosen(session) => { root.chat-chosen(session); }
+                processes(session, x, y) => { root.show-processes(session, x, y); }
+                filter-changed => { root.filter-changed(); }
+                done-toggled(parent) => { root.done-helpers-toggled(parent); }
+                fold-toggled(session) => { root.fold-toggled(session); }
+                restore(session) => { root.restore-agent(session); }
+            }
+            VerticalLayout {
+                if root.preview-enabled && (root.preview-update-label != "" || root.preview-pinned || root.preview-error != ""): PreviewBanner {
+                    update-label: root.preview-update-label;
+                    pinned: root.preview-pinned;
+                    error: root.preview-error;
+                    can-update: root.preview-can-restart && !root.preview-busy;
+                    update => { root.preview-update(); }
+                    versions => { root.run-command("preview-versions"); }
+                }
+                if root.error != "": Rectangle {
+                    height: 36px;
+                    background: Palette.danger-surface;
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        Text {
+                            text: root.error;
+                            color: Palette.danger;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                        Rectangle {
+                            width: 28px;
+                            accessible-role: button;
+                            accessible-label: "Dismiss";
+                            Image {
+                                source: @image-url("icons/rail-close.svg");
+                                width: 16px;
+                                height: 16px;
+                                colorize: Palette.danger;
+                            }
+                            TouchArea { clicked => { root.dismiss-error(); } }
+                        }
+                    }
+                }
+                // The surfaces share this area; the workspace stays alive
+                // (its panes keep their place) while another shows.
+                Rectangle {
+                    vertical-stretch: 1;
+                    Workspace {
+                    visible: root.surface != "settings" && root.surface != "updates" && root.surface != "teams";
+                    width: parent.width;
+                    height: parent.height;
+                    panes: root.panes;
+                    splits: root.splits;
+                    workspaces: root.workspaces;
+                    save-warning: root.save-warning;
+                    bar-visible: root.workspace-bar;
+                    activate(id) => { root.pane-activated(id); }
+                    send(id, text, queue) => { root.send(id, text, queue); }
+                    stop(id) => { root.stop(id); }
+                    draft-edited(id, text) => { root.draft-edited(id, text); }
+                    attach(id) => { root.attach(id); }
+                    remove-attachment(id, attachment) => { root.remove-attachment(id, attachment); }
+                    link-clicked(url) => { root.link-clicked(url); }
+                    load-older(id) => { root.load-older(id); }
+                    toggle-activity(id, message, group) => { root.toggle-activity(id, message, group); }
+                    copy-message(id, message) => { root.copy-message(id, message); }
+                    silence => { root.silence(); }
+                    cancel-transcription(id) => { root.cancel-transcription(id); }
+                    paste-image(id) => { return root.paste-image(id); }
+                    reported(id, follows, at-end, offset, transcript, composer) => {
+                        root.pane-reported(id, follows, at-end, offset, transcript, composer);
+                    }
+                    switch-workspace(id) => { root.switch-workspace(id); }
+                    create-workspace => { root.create-workspace(); }
+                    save-layout-instead => { root.save-layout-instead(); }
+                    resize-split(id, ratio) => { root.resize-split(id, ratio); }
+                    balance => { root.balance(); }
+                }
+                settings := Settings {
+                    visible: root.surface == "settings";
+                    width: parent.width;
+                    height: parent.height;
+                    rows: root.setting-rows;
+                    current: root.setting-current;
+                    moved(index) => { root.setting-current = index; }
+                    activated(id) => { root.setting-changed(id, 1); }
+                    adjusted(id, delta) => { root.setting-changed(id, delta); }
+                }
+                // ---- updates and teams
+                updates := Updates {
+                    visible: root.surface == "updates";
+                    width: parent.width;
+                    height: parent.height;
+                    attention: root.update-attention;
+                    jobs: root.update-jobs;
+                    artifacts: root.update-artifacts;
+                    loading: root.updates-loading;
+                    error: root.updates-error;
+                    refresh => { root.updates-refresh(); }
+                    resolve(id, choice, revision) => { root.resolve-decision(id, choice, revision); }
+                    cancel-job(id) => { root.cancel-job(id); }
+                    open-report(id) => { root.open-report(id); }
+                    open-chat(session) => { root.open-chat(session); }
+                }
+                teams := Teams {
+                    visible: root.surface == "teams";
+                    width: parent.width;
+                    height: parent.height;
+                    teams: root.team-list;
+                    messages: root.team-messages;
+                    members: root.team-members;
+                    selected: root.team-selected;
+                    title: root.team-title;
+                    subtitle: root.team-subtitle;
+                    nudging: root.team-nudging;
+                    loading: root.teams-loading;
+                    error: root.teams-error;
+                    grouped: root.teams-grouped;
+                    select(id) => { root.team-action("select", id); }
+                    refresh => { root.team-action("refresh", ""); }
+                    toggle-grouping => { root.team-action("grouping", ""); }
+                    create => { root.team-action("create", ""); }
+                    edit => { root.team-action("edit", ""); }
+                    toggle-nudging => { root.team-action("nudging", ""); }
+                    delete => { root.team-action("delete", ""); }
+                    add-member => { root.team-action("add-member", ""); }
+                    remove-member(id) => { root.team-action("remove-member", id); }
+                    open-chat(session) => { root.open-chat(session); }
+                }
+                FocusRing { shown: Focus.mode == "settings" || Focus.mode == "updates" || Focus.mode == "teams"; }
+                }
+            }
+        }
+        footer := ShortcutBar {
+            visible: root.shortcuts-visible;
+            y: parent.height - self.height;
+            width: parent.width;
+            mode: root.keyboard-mode;
+            connection: root.connection;
+            hints: root.hints;
+        }
+        connection-page := ConnectionPage {
+            visible: root.overlay == "connection";
+            width: parent.width;
+            height: parent.height;
+            base-url: root.base-url;
+            state: root.connection;
+            error: root.error;
+            connecting: root.connecting;
+            can-cancel: root.has-agents;
+            stored: root.stored-credential;
+            connect(url, token) => { root.connect-host(url, token); }
+            pair(url, code) => { root.pair-host(url, code); }
+            forget => { root.forget-host(); }
+            cancel => { root.overlay-closed(); }
+        }
+        keymap := KeymapEditor {
+            visible: root.overlay == "keymap";
+            width: parent.width;
+            height: parent.height;
+            actions: root.keymap-actions;
+            error: root.keymap-error;
+            profile <=> root.keymap-profile;
+            apply(action, key) => { root.keymap-apply(action, key); }
+            import-profile(text) => { root.keymap-import(text); }
+            export-profile => { root.keymap-export(); }
+            reset => { root.keymap-reset(); }
+            done => { root.overlay-closed(); }
+        }
+        // ---- updates and teams
+        ReportView {
+            visible: root.overlay == "report";
+            width: parent.width;
+            height: parent.height;
+            title: root.report-title;
+            summary: root.report-summary;
+            html: root.report-html;
+            kind: root.report-kind;
+            blocks: root.report-blocks;
+            link-clicked(url) => { root.link-clicked(url); }
+            done => { root.overlay-closed(); }
+        }
+        team-create := TeamCreateDialog {
+            visible: root.overlay == "team-create";
+            width: parent.width;
+            height: parent.height;
+            create(name) => { root.team-created(name); }
+            done => { root.overlay-closed(); }
+        }
+        team-edit := TeamEditDialog {
+            visible: root.overlay == "team-edit";
+            width: parent.width;
+            height: parent.height;
+            leaders: root.team-leaders;
+            leader-index <=> root.team-leader-index;
+            save(name, colour, leader) => { root.team-saved(name, colour, leader); }
+            done => { root.overlay-closed(); }
+        }
+        TeamMemberDialog {
+            visible: root.overlay == "team-member";
+            width: parent.width;
+            height: parent.height;
+            agents: root.team-agents;
+            agent-index <=> root.team-agent-index;
+            add(index) => { root.team-member-added(index); }
+            done => { root.overlay-closed(); }
+        }
+        TeamDeleteDialog {
+            visible: root.overlay == "team-delete";
+            width: parent.width;
+            height: parent.height;
+            team: root.team-title;
+            confirm => { root.team-deleted(); }
+            done => { root.overlay-closed(); }
+        }
+        ProcessPopover {
+            visible: root.overlay == "processes";
+            width: parent.width;
+            height: parent.height;
+            name: root.process-name;
+            count: root.process-count;
+            jobs: root.process-jobs;
+            helpers: root.process-helpers;
+            note: root.process-note;
+            anchor-x: root.process-x;
+            anchor-y: root.process-y;
+            helper-opened(session) => { root.process-helper-opened(session); }
+            dismissed => { root.overlay-closed(); }
+        }
+        // ---- launch dialogs
+        NewSessionHub {
+            visible: root.overlay == "new-session";
+            width: parent.width;
+            height: parent.height;
+        }
+        StartAgentDialog {
+            visible: root.overlay == "start-agent";
+            width: parent.width;
+            height: parent.height;
+        }
+        RenameAgentDialog {
+            visible: root.overlay == "rename-agent";
+            width: parent.width;
+            height: parent.height;
+        }
+        AssignAgentDialog {
+            visible: root.overlay == "assign-agent";
+            width: parent.width;
+            height: parent.height;
+        }
+        QueueDialog {
+            visible: root.overlay == "queue";
+            width: parent.width;
+            height: parent.height;
+        }
+        // ---- preview versions
+        preview-panel := PreviewPanel {
+            visible: root.overlay == "preview";
+            width: parent.width;
+            height: parent.height;
+            versions: root.preview-versions;
+            can-restart: root.preview-can-restart;
+            busy: root.preview-busy;
+            pinned: root.preview-pinned;
+            error: root.preview-error;
+            notice: root.preview-notice;
+            current <=> root.preview-current;
+            choose(hash) => { root.preview-choose(hash); }
+            done => { root.overlay-closed(); }
+        }
+        // ---- profile and overview
+        AgentOverview {
+            visible: root.overlay == "overview";
+            width: parent.width;
+            height: parent.height;
+        }
+        AgentProfile {
+            visible: root.overlay == "profile";
+            width: parent.width;
+            height: parent.height;
+        }
+        ProfileLayers {
+            visible: root.overlay == "profile";
+            width: parent.width;
+            height: parent.height;
+        }
+        VoiceDialog {
+            visible: root.overlay == "voices";
+            width: parent.width;
+            height: parent.height;
+        }
+        OrchestratorDialog {
+            visible: root.overlay == "orchestrator";
+            width: parent.width;
+            height: parent.height;
+        }
+        switcher := Switcher {
+            visible: root.switcher-open;
+            placeholder: root.switcher-placeholder;
+            empty-text: root.switcher-empty;
+            width: parent.width;
+            height: parent.height;
+            rows: root.switcher-rows;
+            current: root.switcher-current;
+            edited(text) => { root.switcher-edited(text); }
+            chosen(index) => { root.switcher-chosen(index); }
+            moved(index) => { root.switcher-moved(index); }
+            dismissed => { root.switcher-dismissed(); }
+        }
+    }
+}

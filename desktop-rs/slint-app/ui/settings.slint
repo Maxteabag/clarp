@@ -1,0 +1,144 @@
+import { ListView } from "std-widgets.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
+
+// One line of the settings surface: a section title, a switch, a choice
+// that steps through values, an action, or read-only information.
+export struct SettingRow {
+    kind: string,
+    id: string,
+    label: string,
+    detail: string,
+    on: bool,
+}
+
+// SettingsPanel.qml: sections of switches and choices. Up/Down (or Tab)
+// move between the rows that do something, Space/Enter change the current
+// one, Left/Right step a choice, Escape goes back to the chats.
+export component Settings inherits Rectangle {
+    in property <[SettingRow]> rows;
+    in-out property <int> current;
+    callback activated(string);
+    callback adjusted(string, int);
+    callback moved(int);
+    public function focus-list() { keys.focus(); }
+    out property <bool> list-focused: keys.has-focus;
+    background: Palette.window;
+
+    function actionable(index: int) -> bool {
+        return index >= 0 && index < root.rows.length && root.rows[index].kind != "section" && root.rows[index].kind != "info";
+    }
+    // The next row that does something, from `index` in `step`s.
+    function next(index: int, step: int) -> int {
+        if (root.actionable(index + step)) { return index + step; }
+        if (root.actionable(index + 2 * step)) { return index + 2 * step; }
+        if (root.actionable(index + 3 * step)) { return index + 3 * step; }
+        return index;
+    }
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.DownArrow || (event.text == Key.Tab && !event.modifiers.shift)) {
+                root.moved(root.next(root.current, 1));
+                return accept;
+            }
+            if (event.text == Key.UpArrow || event.text == Key.Backtab) {
+                root.moved(root.next(root.current, -1));
+                return accept;
+            }
+            if (event.text == Key.Home) { root.moved(root.next(-1, 1)); return accept; }
+            if (event.text == Key.End) { root.moved(root.next(root.rows.length, -1)); return accept; }
+            if (event.text == Key.Return || event.text == " ") {
+                if (root.actionable(root.current)) { root.activated(root.rows[root.current].id); }
+                return accept;
+            }
+            if (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+                if (root.actionable(root.current)) {
+                    root.adjusted(root.rows[root.current].id, event.text == Key.RightArrow ? 1 : -1);
+                }
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding-left: 24px;
+            padding-right: 24px;
+            padding-top: 18px;
+            spacing: 6px;
+            HorizontalLayout {
+                spacing: 16px;
+                Text { text: "SETTINGS"; color: Palette.chrome-text; font-size: 16px; font-weight: 700; }
+                Text {
+                    text: "↑↓ / Tab move · Space / Enter change · Esc back to chat";
+                    color: Palette.muted;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+            list := ListView {
+                vertical-stretch: 1;
+                for row[index] in root.rows: Rectangle {
+                    height: row.kind == "section" ? 40px : 36px;
+                    border-radius: 3px;
+                    background: index == root.current && keys.has-focus ? Focus.cursor : touch.has-hover && root.actionable(index) ? Palette.hover : transparent;
+                    touch := TouchArea {
+                        enabled: root.actionable(index);
+                        clicked => {
+                            root.moved(index);
+                            root.activated(row.id);
+                            keys.focus();
+                        }
+                    }
+                    if row.kind == "section": Text {
+                        x: 4px;
+                        y: parent.height - self.height - 6px;
+                        text: row.label;
+                        color: Palette.accent;
+                        font-size: 11px;
+                        font-weight: 700;
+                    }
+                    if row.kind != "section": HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 12px;
+                        Text { text: row.label; color: Palette.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                        if row.kind == "choice": Text {
+                            text: "‹  " + row.detail + "  ›";
+                            color: Palette.accent;
+                            vertical-alignment: center;
+                        }
+                        if row.kind == "info" || row.kind == "action": Text {
+                            text: row.detail;
+                            color: Palette.muted;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        if row.kind == "toggle": Rectangle {
+                            width: 34px;
+                            height: 18px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 9px;
+                            background: row.on ? Palette.accent : Palette.sunken;
+                            border-width: 1px;
+                            border-color: Palette.border;
+                            accessible-role: switch;
+                            accessible-checked: row.on;
+                            accessible-label: row.label;
+                            Rectangle {
+                                width: 12px;
+                                height: 12px;
+                                border-radius: 6px;
+                                x: row.on ? parent.width - self.width - 3px : 3px;
+                                background: row.on ? Palette.accent-text : Palette.muted;
+                                animate x { duration: 100ms; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    changed current => {
+        list.content-y = Math.min(Math.max(list.content-y, -root.current * 36px), list.visible-height - (root.current + 2) * 36px);
+    }
+}

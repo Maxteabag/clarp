@@ -1,0 +1,138 @@
+import { Palette } from "theme.slint";
+
+export struct CellLine {
+    // diff_old, diff_new, error, or ""
+    kind: string,
+    text: string,
+}
+
+// One display cell (DisplayCellCard.qml): the Host's summary of an activity,
+// a harness sub-agent's phase and task, and its detail lines on request.
+export struct DisplayCell {
+    title: string,
+    summary: string,
+    status: string,
+    lines: [CellLine],
+    more: int,
+    subagent: bool,
+    phase: string,
+}
+
+export component DisplayCellCard inherits Rectangle {
+    in property <DisplayCell> cell;
+    property <bool> open;
+    property <bool> has-detail: root.cell.lines.length > 0 || root.cell.more > 0;
+    property <color> status-color: root.cell.status == "error" ? Palette.danger
+        : root.cell.status == "running" || root.cell.status == "ok" ? Palette.chrome-text : Palette.muted;
+    property <color> phase-color: root.cell.phase == "failed" ? Palette.danger : root.cell.phase == "finished" ? Palette.muted : Palette.link;
+    background: touch.has-hover ? Palette.control : transparent;
+    border-radius: 2px;
+    accessible-role: list-item;
+    accessible-label: root.cell.title + " " + root.cell.summary;
+    touch := TouchArea {
+        enabled: root.has-detail;
+        clicked => { root.open = !root.open; }
+    }
+    VerticalLayout {
+        padding: 3px;
+        spacing: 3px;
+        HorizontalLayout {
+            spacing: 7px;
+            if !root.cell.subagent: Rectangle {
+                width: 6px;
+                height: 6px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 3px;
+                background: root.status-color;
+            }
+            if root.cell.subagent: Text {
+                // ProcessGlyph's "agent" kind.
+                text: "◆";
+                color: root.phase-color;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            if root.cell.subagent: Text {
+                text: root.cell.phase == "activity" ? "sub-agent" : root.cell.phase;
+                color: root.phase-color;
+                font-family: "JetBrains Mono";
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.cell.title;
+                color: Palette.text;
+                font-family: "JetBrains Mono";
+                font-size: 12px;
+                font-weight: 600;
+                overflow: elide;
+                max-width: root.cell.subagent ? 240px : 100000px;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.cell.summary;
+                color: Palette.muted;
+                font-size: 12px;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            if root.has-detail: Text {
+                text: root.open ? "−" : "+";
+                color: Palette.chrome-text;
+                font-size: 13px;
+                vertical-alignment: center;
+            }
+        }
+        if root.open: VerticalLayout {
+            padding-left: 15px;
+            for line in root.cell.lines: Rectangle {
+                border-radius: 2px;
+                background: line.kind == "diff_old" ? Palette.danger-surface : line.kind == "diff_new" ? Palette.success.with-alpha(0.16) : transparent;
+                VerticalLayout {
+                    padding: 2px;
+                    Text {
+                        text: line.text;
+                        color: line.kind == "error" ? Palette.danger : Palette.chrome-text;
+                        font-family: "JetBrains Mono";
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+            if root.cell.more > 0: Text {
+                text: root.cell.more + " more details available";
+                color: Palette.muted;
+                font-family: "JetBrains Mono";
+                font-size: 11px;
+            }
+        }
+    }
+}
+
+// TypingIndicator.qml: "Working…" and three dots while the agent works and
+// its reply waits to be shown whole ("Show when ready").
+export component TypingIndicator inherits Rectangle {
+    in property <bool> reduced-motion;
+    property <float> phase: root.reduced-motion ? 0.0 : Math.mod(animation-tick() / 1200ms, 1.0);
+    width: 132px;
+    height: 32px;
+    border-radius: 2px;
+    background: Palette.window;
+    accessible-role: text;
+    accessible-label: "Agent is working";
+    HorizontalLayout {
+        alignment: center;
+        spacing: 5px;
+        Text { text: "Working…"; color: Palette.text; font-size: 12px; vertical-alignment: center; }
+        for index in 3: Rectangle {
+            width: 6px;
+            height: 6px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: Palette.accent;
+            // Each dot brightens in turn, 140 ms after the one before.
+            opacity: root.reduced-motion ? 0.7 : 0.4 + 0.6 * Math.max(0, 1 - Math.abs(root.phase * 3 - index - 0.5) * 2);
+        }
+    }
+}

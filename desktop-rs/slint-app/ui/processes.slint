@@ -1,0 +1,168 @@
+import { ListView } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+
+export struct ProcessJob {
+    title: string,
+    // kind · queued · detail
+    detail: string,
+    elapsed: string,
+    heartbeat: string,
+    sub-agent: bool,
+}
+
+export struct ProcessHelper {
+    session: string,
+    name: string,
+    detail: string,
+}
+
+// ProcessGlyph.qml: the hourglass while an agent waits on a background job,
+// the agent mark while a sub-agent or helper runs; both follow the theme.
+export component ProcessGlyph inherits Image {
+    in property <string> kind: "hourglass";
+    in property <length> glyph-size: 14px;
+    width: root.glyph-size;
+    height: root.glyph-size;
+    source: root.kind == "agent" ? @image-url("icons/agent.svg") : @image-url("icons/hourglass.svg");
+    colorize: Palette.link;
+}
+
+// ProcessIndicator.qml: one glyph for an agent's background work, with a
+// count once more than one process runs. Clicking asks for the list.
+export component ProcessIndicator inherits Rectangle {
+    in property <int> jobs;
+    in property <int> sub-agents;
+    in property <int> children;
+    in property <length> glyph-size: 14px;
+    // "jobs" or "agents" shows only that kind (the explorer gives each its
+    // own icon); empty shows both as one glyph.
+    in property <string> only;
+    callback clicked();
+    property <int> plain: root.only == "agents" ? 0 : Math.max(0, root.jobs - root.sub-agents);
+    property <int> agents: root.only == "jobs" ? 0 : Math.max(root.sub-agents, root.children, 0);
+    out property <int> total: root.plain + root.agents;
+    out property <string> summary: (root.plain > 0 ? root.plain + (root.plain == 1 ? " background job" : " background jobs") : "")
+        + (root.plain > 0 && root.agents > 0 ? ", " : "")
+        + (root.agents > 0 ? root.agents + (root.agents == 1 ? " sub-agent" : " sub-agents") : "");
+    visible: root.total > 0;
+    width: root.total > 0 ? root.glyph-size + (root.total > 1 ? 10px : 0px) + 2px : 0px;
+    height: root.glyph-size + 2px;
+    accessible-role: button;
+    accessible-label: root.summary != "" ? root.summary + " running" : "Nothing running";
+    accessible-action-default => { root.clicked(); }
+    ProcessGlyph {
+        x: 0;
+        y: parent.height - self.height;
+        glyph-size: root.glyph-size;
+        kind: root.agents > 0 ? "agent" : "hourglass";
+    }
+    if root.total > 1: Rectangle {
+        x: root.glyph-size * 0.8;
+        y: -3px;
+        width: Math.max(11px, badge.preferred-width + 5px);
+        height: 11px;
+        border-radius: 5.5px;
+        background: root.agents > 0 ? Palette.link : Palette.muted;
+        border-width: 1px;
+        border-color: Palette.window;
+        badge := Text {
+            text: root.total > 9 ? "9+" : root.total;
+            color: Palette.window;
+            font-size: 8px;
+            font-weight: 700;
+        }
+    }
+    TouchArea {
+        x: -4px;
+        y: -4px;
+        width: parent.width + 8px;
+        height: parent.height + 8px;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ProcessPopover.qml: what an agent runs right now, one line per active
+// job and one per running helper (choosing a helper opens its chat), placed
+// under the indicator that opened it. Escape and a click outside close it.
+export component ProcessPopover inherits Rectangle {
+    in property <string> name;
+    in property <string> count;
+    in property <[ProcessJob]> jobs;
+    in property <[ProcessHelper]> helpers;
+    in property <string> note;
+    // Where the indicator's bottom right is, in window coordinates.
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    callback helper-opened(string);
+    callback dismissed();
+    TouchArea { clicked => { root.dismissed(); } }
+    card := Rectangle {
+        width: 340px;
+        height: body.preferred-height;
+        x: Math.max(8px, Math.min(root.anchor-x - self.width, root.width - self.width - 8px));
+        y: Math.max(8px, Math.min(root.anchor-y + 4px, root.height - self.height - 8px));
+        background: Palette.raised;
+        border-width: 1px;
+        border-color: Palette.border;
+        border-radius: 3px;
+        // Clicks on the card stay on it.
+        TouchArea { }
+        body := VerticalLayout {
+            HorizontalLayout {
+                padding: 10px;
+                padding-bottom: 6px;
+                spacing: 8px;
+                Text { text: root.name; color: Palette.text; font-size: 12px; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
+                Text { text: root.count; color: Palette.muted; font-size: 11px; }
+            }
+            Rectangle { height: 1px; background: Palette.rule; }
+            for job in root.jobs: HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+                spacing: 8px;
+                ProcessGlyph { y: 1px; glyph-size: 13px; kind: job.sub-agent ? "agent" : "hourglass"; }
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 1px;
+                    Text { text: job.title; color: Palette.text; font-size: 12px; overflow: elide; }
+                    if job.detail != "": Text { text: job.detail; color: Palette.muted; font-size: 10px; overflow: elide; }
+                }
+                VerticalLayout {
+                    alignment: start;
+                    spacing: 1px;
+                    Text { text: job.elapsed; color: Palette.chrome-text; font-size: 11px; horizontal-alignment: right; }
+                    if job.heartbeat != "": Text { text: "♥ " + job.heartbeat; color: Palette.faint; font-size: 10px; horizontal-alignment: right; }
+                }
+            }
+            for helper in root.helpers: Rectangle {
+                background: helper-touch.has-hover ? Palette.control : transparent;
+                accessible-role: button;
+                accessible-label: "Open " + helper.name;
+                helper-touch := TouchArea { clicked => { root.helper-opened(helper.session); } }
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    spacing: 8px;
+                    ProcessGlyph { glyph-size: 13px; kind: "agent"; y: 1px; }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 1px;
+                        Text { text: helper.name; color: Palette.text; font-size: 12px; overflow: elide; }
+                        Text { text: helper.detail; color: Palette.muted; font-size: 10px; overflow: elide; }
+                    }
+                    Text { text: "›"; color: Palette.chrome-text; font-size: 14px; vertical-alignment: center; }
+                }
+            }
+            if root.note != "": HorizontalLayout {
+                padding: 10px;
+                Text { text: root.note; color: Palette.muted; font-size: 11px; wrap: word-wrap; }
+            }
+            Rectangle { height: 4px; }
+        }
+    }
+}

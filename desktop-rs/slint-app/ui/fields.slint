@@ -1,0 +1,132 @@
+// The std text inputs without Fluent's accent underline: the FocusRing is
+// the one focus style. Each wraps the std widget in a rounded clip and makes
+// it 2px taller, so the underline (its bottom 2px) falls outside.
+import { LineEdit, TextEdit, Palette as WidgetPalette } from "std-widgets.slint";
+import { Palette } from "theme.slint";
+
+export component Field inherits Rectangle {
+    in-out property <string> text <=> inner.text;
+    in property <string> placeholder-text <=> inner.placeholder-text;
+    in property <InputType> input-type <=> inner.input-type;
+    in property <bool> enabled <=> inner.enabled;
+    in property <bool> read-only <=> inner.read-only;
+    in property <length> font-size <=> inner.font-size;
+    out property <bool> has-focus: inner.has-focus;
+    callback accepted <=> inner.accepted;
+    callback edited <=> inner.edited;
+    public function select-all() { inner.select-all(); }
+    forward-focus: inner;
+    accessible-role: none;
+    border-radius: 4px;
+    clip: true;
+    min-height: inner.min-height - 2px;
+    preferred-height: inner.preferred-height - 2px;
+    min-width: inner.min-width;
+    preferred-width: inner.preferred-width;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    inner := LineEdit {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height + 2px;
+        accessible-label: root.accessible-label;
+    }
+    // The bottom edge the clip took with the underline.
+    Rectangle {
+        x: 4px;
+        y: parent.height - 1px;
+        width: parent.width - 8px;
+        height: 1px;
+        background: WidgetPalette.border;
+    }
+}
+
+export component Editor inherits Rectangle {
+    in-out property <string> text <=> inner.text;
+    in property <TextWrap> wrap <=> inner.wrap;
+    in property <bool> enabled <=> inner.enabled;
+    in property <bool> read-only <=> inner.read-only;
+    in property <length> font-size <=> inner.font-size;
+    in property <string> font-family <=> inner.font-family;
+    out property <bool> has-focus: inner.has-focus;
+    callback edited <=> inner.edited;
+    forward-focus: inner;
+    accessible-role: none;
+    border-radius: 4px;
+    clip: true;
+    min-height: inner.min-height - 2px;
+    preferred-height: inner.preferred-height - 2px;
+    min-width: inner.min-width;
+    preferred-width: inner.preferred-width;
+    inner := TextEdit {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height + 2px;
+        accessible-label: root.accessible-label;
+    }
+    // The bottom edge the clip took with the underline.
+    Rectangle {
+        x: 4px;
+        y: parent.height - 1px;
+        width: parent.width - 8px;
+        height: 1px;
+        background: WidgetPalette.border;
+    }
+}
+
+// A multi-line editor with no box of its own (the composer): the text on
+// the region's background, scrolling to keep the cursor in view, as
+// TextEditBase does.
+export component PlainEditor inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <string> placeholder-text;
+    in property <bool> enabled <=> input.enabled;
+    in property <length> font-size <=> input.font-size;
+    in property <string> font-family <=> input.font-family;
+    in property <TextWrap> wrap <=> input.wrap;
+    out property <bool> has-focus: input.has-focus;
+    // The text's own height: the composer grows with it.
+    out property <length> text-height: input.preferred-height;
+    callback edited(string);
+    forward-focus: input;
+    accessible-role: text-input;
+    accessible-value: root.text;
+    accessible-placeholder-text: root.placeholder-text;
+    clip: true;
+    scroll := Flickable {
+        content-width: self.width;
+        content-height: max(self.height, input.preferred-height);
+        input := TextInput {
+            width: scroll.width;
+            single-line: false;
+            wrap: word-wrap;
+            color: Palette.text;
+            selection-background-color: Palette.accent.with-alpha(0.35);
+            selection-foreground-color: Palette.text;
+            page-height: scroll.height;
+            accessible-role: none;
+            edited => { root.edited(self.text); }
+            cursor-position-changed(cpos) => {
+                if (cpos.y + scroll.content-y < 0px) {
+                    scroll.content-y = min(0px, -cpos.y);
+                } else if (cpos.y + scroll.content-y > scroll.height - 20px) {
+                    scroll.content-y = min(0px, max(scroll.height - self.height, scroll.height - cpos.y - 20px));
+                }
+            }
+        }
+    }
+    if root.text == "" && input.preedit-text == "": Text {
+        x: 0;
+        y: 0;
+        width: root.width;
+        vertical-alignment: top;
+        text: root.placeholder-text;
+        font-size: input.font-size;
+        font-family: input.font-family;
+        color: Palette.faint;
+        overflow: elide;
+        accessible-role: none;
+    }
+}

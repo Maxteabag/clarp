@@ -1,0 +1,396 @@
+import { Field, Editor } from "fields.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
+import { ProcessIndicator } from "processes.slint";
+import { ProfileBridge } from "profile.slint";
+
+export struct ChatRow {
+    session: string,
+    name: string,
+    initial: string,
+    stamp: string,
+    preview: string,
+    activity: string,
+    depth: int,
+    queued: int,
+    busy: bool,
+    unread: bool,
+    muted: bool,
+    selected: bool,
+    // Background work (ProcessIndicator.qml): jobs, sub-agents, helpers.
+    jobs: int,
+    sub-agents: int,
+    children: int,
+    // The agent's portrait (empty until cached); a pair room's two.
+    portrait: image,
+    portrait2: image,
+    // Finished helpers folded under this row ("N helpers done").
+    done-parent: string,
+    done-count: int,
+    done-expanded: bool,
+    // Its place in the Ctrl+J queue (1 is next), or 0.
+    queue: int,
+    // A working agent's name, letter by letter, for the shimmer.
+    letters: [string],
+    // Sub-agents under this row, and whether they are folded away.
+    fold-count: int,
+    folded: bool,
+    // An archived agent: Restore instead of opening.
+    archived: bool,
+}
+
+// A small labelled toggle, like the QML scope chips.
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> on;
+    callback clicked();
+    height: 26px;
+    width: text.preferred-width + 20px;
+    border-radius: 13px;
+    background: root.on ? Palette.accent : touch.has-hover ? Palette.hover : Palette.control;
+    text := Text {
+        text: root.label;
+        color: root.on ? Palette.accent-text : Palette.chrome-text;
+        font-size: 12px;
+    }
+    touch := TouchArea { clicked => { root.clicked(); } }
+}
+
+// One entry row ("Agent conversations", "Archived") that swaps the list.
+component ListSwitch inherits Rectangle {
+    in property <string> glyph;
+    in property <string> label;
+    in property <string> count;
+    in property <int> unread;
+    callback clicked();
+    height: 36px;
+    background: touch.has-hover ? Palette.hover : transparent;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+        Text { text: root.glyph; color: Palette.muted; vertical-alignment: center; }
+        Text { text: root.label; color: Palette.chrome-text; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+        if root.unread > 0: Rectangle {
+            width: 20px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            background: Palette.accent;
+            Text { text: root.unread; color: Palette.accent-text; font-size: 11px; }
+        }
+        Text { text: root.count; color: Palette.faint; font-size: 12px; vertical-alignment: center; }
+    }
+}
+
+component Row inherits Rectangle {
+    in property <ChatRow> chat;
+    // The keyboard cursor is on this row.
+    in property <bool> cursor;
+    // Compact explorer: the avatar and the name only.
+    in property <bool> compact;
+    in property <bool> reduced-motion;
+    // The cursor landed here: its place in the list, to scroll it into view.
+    callback reveal(length, length);
+    changed cursor => { if (self.cursor) { root.reveal(self.y, self.height); } }
+    callback clicked();
+    // The process indicator was clicked: its bottom right, in the window.
+    callback processes(length, length);
+    callback done-toggled(string);
+    callback fold-toggled();
+    callback restore();
+    height: root.compact
+        ? 40px
+        : (root.chat.activity != "" ? 72px : 58px) + (root.chat.done-count > 0 ? 22px : 0px);
+    opacity: root.chat.archived ? 0.65 : 1;
+    background: root.cursor ? Focus.cursor : root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
+    accessible-role: list-item;
+    accessible-label: root.chat.name;
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 10px + root.chat.depth * 18px;
+        padding-right: 10px;
+        spacing: 10px;
+        Rectangle {
+            width: root.compact ? 28px : 36px;
+            height: self.width;
+            y: root.compact ? 6px : 10px;
+            border-radius: self.width / 2;
+            border-width: 1px;
+            border-color: Palette.border;
+            clip: true;
+            Text { text: root.chat.initial; color: Palette.chrome-text; font-size: 15px; }
+            if root.chat.portrait.width > 0: Image {
+                source: root.chat.portrait;
+                width: root.chat.portrait2.width > 0 ? parent.width / 2 : parent.width;
+                x: 0;
+                height: parent.height;
+                image-fit: cover;
+            }
+            if root.chat.portrait2.width > 0: Image {
+                source: root.chat.portrait2;
+                width: parent.width / 2;
+                x: parent.width / 2;
+                height: parent.height;
+                image-fit: cover;
+            }
+        }
+        VerticalLayout {
+            padding-top: root.compact ? 10px : 8px;
+            spacing: 2px;
+            HorizontalLayout {
+                spacing: 6px;
+                // The attention queue: 1 is where Ctrl+J goes next.
+                if root.chat.queue > 0: Rectangle {
+                    width: Math.max(16px, number.preferred-width + 8px);
+                    height: 16px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 8px;
+                    background: root.chat.queue == 1 ? Palette.accent : Palette.accent.with-alpha(0.25);
+                    accessible-role: text;
+                    accessible-label: "Next attention, number " + root.chat.queue;
+                    number := Text {
+                        text: root.chat.queue;
+                        color: root.chat.queue == 1 ? Palette.accent-text : Palette.accent;
+                        font-size: 10px;
+                        font-weight: 700;
+                    }
+                }
+                // A working agent's name is green, and a glow travels through
+                // its letters (still green, with Reduce Motion).
+                if !root.chat.busy || root.reduced-motion || root.chat.letters.length == 0: Text {
+                    text: root.chat.name;
+                    color: root.chat.busy ? Palette.success : Palette.chrome-text;
+                    font-weight: root.chat.unread || root.chat.busy ? 700 : 500;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if root.chat.busy && !root.reduced-motion && root.chat.letters.length > 0: shimmer := Rectangle {
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                    clip: true;
+                    // The glow's centre runs a little past both ends.
+                    property <float> phase: Math.mod(animation-tick() / 1800ms, 1.0) * 1.6 - 0.3;
+                    property <int> count: root.chat.letters.length;
+                    HorizontalLayout {
+                        alignment: start;
+                        spacing: 0px;
+                        for letter[i] in root.chat.letters: Text {
+                            property <float> at: (i + 0.5) / shimmer.count;
+                            property <float> glow: Math.max(0, 1 - Math.abs(self.at - shimmer.phase) * 4);
+                            text: letter;
+                            color: Palette.success.mix(#ffffff, 1 - self.glow * 0.75);
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+                // Background jobs and sub-agents, each its own icon; Right
+                // unfolds the sub-agents' chats into the list.
+                if !root.compact: ProcessIndicator {
+                    y: 3px;
+                    only: "jobs";
+                    jobs: root.chat.jobs;
+                    sub-agents: root.chat.sub-agents;
+                    clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
+                }
+                if !root.compact: ProcessIndicator {
+                    y: 3px;
+                    only: "agents";
+                    jobs: root.chat.jobs;
+                    sub-agents: root.chat.sub-agents;
+                    children: Math.max(root.chat.children, root.chat.fold-count);
+                    clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
+                }
+                if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11px; }
+            }
+            if !root.compact: HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.chat.preview;
+                    color: Palette.muted;
+                    font-size: 12px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                if root.chat.muted: Text { text: "⊘"; color: Palette.faint; font-size: 12px; }
+                if root.chat.queued > 0: Text { text: root.chat.queued + " queued"; color: Palette.warning; font-size: 11px; }
+                if root.chat.unread: Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 4px;
+                    background: Palette.accent;
+                }
+            }
+            if !root.compact && root.chat.activity != "": Text {
+                text: root.chat.activity;
+                color: Palette.warning;
+                font-size: 11px;
+                overflow: elide;
+            }
+            if !root.compact && root.chat.done-count > 0: Rectangle {
+                height: 20px;
+                accessible-role: button;
+                accessible-label: root.chat.done-count + " helpers done";
+                Text {
+                    x: 0;
+                    text: (root.chat.done-expanded ? "▾ " : "▸ ") + root.chat.done-count + (root.chat.done-count == 1 ? " helper done" : " helpers done");
+                    color: done-touch.has-hover ? Palette.muted : Palette.faint;
+                    font-size: 11px;
+                }
+                done-touch := TouchArea { clicked => { root.done-toggled(root.chat.done-parent); } }
+            }
+        }
+        if root.chat.archived: Rectangle {
+            width: 30px;
+            height: 30px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 3px;
+            background: restore-touch.has-hover ? Palette.hover : transparent;
+            accessible-role: button;
+            accessible-label: "Restore " + root.chat.name;
+            Image { source: @image-url("icons/restore.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
+            restore-touch := TouchArea { clicked => { root.restore(); } }
+        }
+    }
+}
+
+export component Sidebar inherits Rectangle {
+    in property <[ChatRow]> rows;
+    in property <[ChatRow]> rooms;
+    in property <[ChatRow]> archived;
+    in property <int> unread-rooms;
+    in-out property <bool> showing-pairs;
+    in-out property <bool> showing-archive;
+    in-out property <string> scope: "all";
+    out property <string> query: search.text;
+    out property <bool> search-has-focus: search.has-focus;
+    in property <string> cursor;
+    out property <bool> list-has-focus: list.has-focus;
+    public function focus-list() { list.focus(); }
+    // The All/Unread chips, as a click does.
+    public function choose-scope(scope: string) { root.scope = scope; root.filter-changed(); }
+    // The archive list, as its row's click does.
+    public function show-archive(on: bool) { root.showing-archive = on; root.showing-pairs = false; }
+    // The agent-to-agent rooms, as their switch's click does.
+    public function show-pairs(on: bool) { root.showing-pairs = on; root.showing-archive = false; }
+    callback chosen(string);
+    callback processes(string, length, length);
+    callback filter-changed();
+    callback restore(string);
+    callback done-toggled(string);
+    callback fold-toggled(string);
+    callback hide();
+    callback new-agent();
+    // Minimal UI hides the hide button (Ctrl+B still works).
+    in property <bool> minimal;
+    in property <bool> compact;
+    // The search shows only while in use: / opens it, and leaving it empty
+    // hides it again.
+    property <bool> searching;
+    property <bool> search-focus: search.has-focus;
+    changed search-focus => { if (!self.search-focus && search.text == "") { root.searching = false; } }
+    public function focus-search() { root.searching = true; search.focus(); }
+    public function clear-search() { search.text = ""; root.searching = search.has-focus; root.filter-changed(); }
+    background: Palette.raised;
+    // The [e] Explorer frame holds the whole sidebar: search, New agent,
+    // scope and the list.
+    property <bool> explorer-active: Focus.mode == "sidebar" || Focus.mode == "search";
+    VerticalLayout {
+        padding-top: 2px + Frame.top;
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-bottom: 8px + Frame.bottom;
+        spacing: 8px;
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            vertical-stretch: 0;
+            spacing: 6px;
+            visible: root.searching || search.text != "";
+            height: self.visible ? 34px : 0px;
+            Rectangle {
+                height: 34px;
+                horizontal-stretch: 1;
+                opacity: root.explorer-active ? 1 : 0.45;
+                min-width: 0px;
+                search := Field {
+                    width: parent.width;
+                    height: parent.height;
+                    placeholder-text: root.compact ? "Search" : "Search agents · /";
+                    edited => { root.filter-changed(); }
+                }
+                FocusRing { shown: Focus.mode == "search"; }
+            }
+            // Hide sidebar and New agent are keys (Ctrl+B, Ctrl+N) in the
+            // shortcut bar, not buttons.
+        }
+        // Minimal UI keeps the list alone: scope, rooms and the archive stay
+        // in Ctrl+K.
+        if !root.minimal: HorizontalLayout {
+            padding-left: 10px;
+            spacing: 6px;
+            alignment: start;
+            vertical-stretch: 0;
+            Chip { label: "All"; on: root.scope == "all"; clicked => { root.scope = "all"; root.filter-changed(); } }
+            Chip { label: "Unread"; on: root.scope == "unread"; clicked => { root.scope = "unread"; root.filter-changed(); } }
+        }
+        if !root.showing-archive && (!root.minimal || root.showing-pairs): ListSwitch {
+            glyph: root.showing-pairs ? "‹" : "↔";
+            label: root.showing-pairs ? "Back to chats" : "Agent conversations";
+            count: root.rooms.length;
+            unread: root.unread-rooms;
+            clicked => { root.showing-pairs = !root.showing-pairs; }
+        }
+        // Holds the keyboard for J/K/Enter navigation (the keyboard map).
+        list := FocusScope {
+          vertical-stretch: 1;
+          flick := Flickable {
+            viewport := VerticalLayout {
+                for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
+                    chat: row;
+                    cursor: list.has-focus && row.session == root.cursor;
+                    compact: root.compact;
+                    reduced-motion: ProfileBridge.reduced-motion;
+                    // J/K keep the cursor's row in view.
+                    reveal(y, h) => {
+                        if (y + flick.content-y < 0px) {
+                            flick.content-y = -y;
+                        } else if (y + h + flick.content-y > flick.height) {
+                            flick.content-y = flick.height - y - h;
+                        }
+                    }
+                    clicked => { if (!row.archived) { root.chosen(row.session); } }
+                    done-toggled(parent) => { root.done-toggled(parent); }
+                    fold-toggled => { root.fold-toggled(row.session); }
+                    restore => { root.restore(row.session); }
+                    processes(x, y) => { root.processes(row.session, x, y); }
+                }
+                if root.showing-pairs && root.rooms.length == 0: Text {
+                    text: "No agent-to-agent conversations yet.";
+                    color: Palette.muted;
+                    font-size: 12px;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+        }
+        if !root.showing-pairs && (!root.minimal || root.showing-archive): ListSwitch {
+            glyph: root.showing-archive ? "‹" : "≡";
+            label: root.showing-archive ? "Back to chats" : "Archived";
+            count: root.archived.length;
+            clicked => { root.showing-archive = !root.showing-archive; }
+        }
+    }
+    // Level with the panes' frames (their pane pads 2px).
+    PaneFrame {
+        x: 4px;
+        y: 2px;
+        width: parent.width - 8px;
+        height: parent.height - 4px;
+        key: Focus.mode == "composer" ? "ctrl+e" : "e";
+        label: "Explorer";
+        active: root.explorer-active;
+        surface: Palette.raised;
+    }
+}
