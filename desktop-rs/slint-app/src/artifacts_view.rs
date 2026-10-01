@@ -153,13 +153,19 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     item
 }
 
-/// What a card's row depends on beyond the artifact itself.
-pub fn card_signature(artifact: &Value, engine: &Engine, state: &CardState) -> String {
-    let id = text(artifact, "artifact_id");
-    let chosen = state.choices.get(&id).copied().unwrap_or(-1);
-    // The draft is left out: typing must not rebuild the card it types in.
-    let editing = if id == state.editing { "+" } else { "" };
-    format!("{}{editing}{chosen}{}", if id == state.cursor { "*" } else { "" }, engine.artifact_status(&id))
+/// Brings a reply's card model to `cards`, in place when the same cards
+/// are there (only the ones that changed are set).
+pub fn update_cards(model: &slint::VecModel<ArtifactItem>, cards: Vec<ArtifactItem>) {
+    let same = model.row_count() == cards.len() && cards.iter().enumerate().all(|(i, c)| model.row_data(i).is_some_and(|m| m.id == c.id));
+    if !same {
+        model.set_vec(cards);
+        return;
+    }
+    for (index, card) in cards.into_iter().enumerate() {
+        if model.row_data(index).as_ref() != Some(&card) {
+            model.set_row_data(index, card);
+        }
+    }
 }
 
 /// iOS `DecisionResponseView`: while pending the question, why and how
@@ -290,6 +296,8 @@ pub fn send(app: &App, id: &str) {
             return;
         }
         app.artifact_editing.borrow_mut().clear();
+        // Sent: the keyboard is back on the chat.
+        app.focus_transcript();
         app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "resolve", serde_json::json!({"answer": {"text": written}}), number(&decision, "revision"));
         pump();
         return;
@@ -345,14 +353,47 @@ fn is_report(artifact: &Value) -> bool {
     fields == Some(0) || (fields.is_none() && schema.get("additionalProperties") == Some(&Value::Bool(false)))
 }
 
-/// The open chat's cards now on screen, top to bottom.
-pub fn on_screen(_app: &App) -> Vec<String> {
-    Vec::new()
+/// Where a card was when it last reported.
+struct Report {
+    shown: bool,
+    height: f32,
+    /// The report numbers of its last three reports, newest first.
+    seqs: [u64; 3],
+}
+
+thread_local! {
+    static SHOWN: std::cell::RefCell<(u64, std::collections::HashMap<String, Report>)> = std::cell::RefCell::default();
+}
+
+/// A drawn card reports where it is every 150 ms. A row the list dropped
+/// stops: it has lapsed once another card has reported three times since
+/// (counted in reports, not time, so a busy moment lapses nothing).
+fn card_shown(id: &str, top: f32, height: f32, view_top: f32, view_bottom: f32) {
+    let shown = top + height > view_top + 4.0 && top < view_bottom - 4.0;
+    SHOWN.with(|s| {
+        let (seq, reports) = &mut *s.borrow_mut();
+        *seq += 1;
+        let report = reports.entry(id.to_owned()).or_insert(Report { shown, height, seqs: [0; 3] });
+        report.shown = shown;
+        report.height = height;
+        report.seqs = [*seq, report.seqs[0], report.seqs[1]];
+    });
 }
 
 /// The heights the cards on screen last reported (for the checks).
-pub fn card_heights(_app: &App) -> Vec<(String, f32)> {
-    Vec::new()
+pub fn card_heights(app: &App) -> Vec<(String, f32)> {
+    let ids = on_screen(app);
+    SHOWN.with(|s| ids.into_iter().filter_map(|id| s.borrow().1.get(&id).map(|r| r.height).map(|h| (id, h))).collect())
+}
+
+/// The open chat's cards now on screen, top to bottom.
+pub fn on_screen(app: &App) -> Vec<String> {
+    SHOWN.with(|s| {
+        let s = s.borrow();
+        let reports = &s.1;
+        let lapsed = |report: &Report| reports.values().any(|other| other.seqs[2] > report.seqs[0]);
+        card_ids(app).into_iter().filter(|id| reports.get(id).is_some_and(|r| r.shown && !lapsed(r))).collect()
+    })
 }
 
 /// The open chat's card ids, top to bottom.
@@ -366,18 +407,20 @@ pub fn has_cards(app: &App) -> bool {
     !card_ids(app).is_empty()
 }
 
-/// The card the keyboard is on, while it is in the open chat.
+/// The card the keyboard is on, while it is on screen in the open chat.
 pub fn selected(app: &App) -> Option<String> {
     let cursor = app.artifact_cursor.borrow().clone();
-    (!cursor.is_empty() && card_ids(app).contains(&cursor)).then_some(cursor)
+    (!cursor.is_empty() && on_screen(app).contains(&cursor)).then_some(cursor)
 }
 
-/// J/K: the next or previous card; from none, the latest.
+/// J/K: the next or previous card on screen; from none, J is the topmost
+/// and K the lowest. Cards off screen are out of reach (scroll to them).
 pub fn step(app: &App, direction: i32) {
-    let ids = card_ids(app);
+    let ids = on_screen(app);
     let Some(last) = ids.len().checked_sub(1) else { return };
     let at = selected(app).and_then(|id| ids.iter().position(|i| *i == id));
     let next = match at {
+        None if direction > 0 => 0,
         None => last,
         Some(index) => (index as i64 + i64::from(direction)).clamp(0, last as i64) as usize,
     };
@@ -432,6 +475,7 @@ pub fn bind(window: &AppWindow) {
     bridge.on_countdown_clock(|target, now| countdown(i64::from(target), i64::from(now)).1.into());
     bridge.set_now(clock_now());
     bridge.on_link_clicked(|url| crate::open_link(&url));
+    bridge.on_card_shown(|id, top, height, view_top, view_bottom| card_shown(&id, top, height, view_top, view_bottom));
     bridge.on_choose(|id, index| {
         if let Some(app) = crate::app() {
             choose(&app, &id, index);
@@ -450,9 +494,10 @@ pub fn bind(window: &AppWindow) {
     bridge.on_editing_changed(|id, editing| {
         if let Some(app) = crate::app() {
             if !editing && *app.artifact_editing.borrow() == id.as_str() {
-                // Left without sending: the field stays, but no longer
-                // takes the keyboard when the card is drawn again.
+                // Left without sending: the field stays with its draft, but
+                // no longer takes the keyboard (the card updates in place).
                 app.artifact_editing.borrow_mut().clear();
+                app.refresh(&[Change::Updates]);
             }
         }
     });
@@ -475,6 +520,14 @@ pub fn bind(window: &AppWindow) {
             let now = clock_now();
             if bridge.get_now() != now {
                 bridge.set_now(now);
+            }
+            // A selected card scrolled away is no longer selected.
+            if let Some(app) = crate::app() {
+                let cursor = app.artifact_cursor.borrow().clone();
+                if !cursor.is_empty() && selected(&app).is_none() && app.artifact_editing.borrow().is_empty() {
+                    app.artifact_cursor.borrow_mut().clear();
+                    app.refresh(&[Change::Updates]);
+                }
             }
         }
     });

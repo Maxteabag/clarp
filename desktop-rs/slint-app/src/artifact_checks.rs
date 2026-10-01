@@ -409,11 +409,17 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             headless::press(slint::platform::Key::Home);
             true
         })),
-        ("decision first card", Box::new(|_, _, elapsed| {
-            if elapsed < Duration::from_millis(400) {
+        ("decision first card", Box::new(move |app, _, elapsed| {
+            // Cards report where they are every 150 ms: wait for the first.
+            // Home can stop short of the top while the list corrects its
+            // estimates (the transcript's): press it again now and then.
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("dec-deploy") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
                 return false;
             }
-            // J from none: the topmost card on screen.
             headless::press("j");
             true
         })),
@@ -492,7 +498,7 @@ fn decision_stages(out: &str) -> Vec<Stage> {
 // ---- question
 
 fn question_stages(out: &str) -> Vec<Stage> {
-    let (out, out2) = (out.to_owned(), out.to_owned());
+    let (out, out2, out3) = (out.to_owned(), out.to_owned(), out.to_owned());
     let ids = ["q-trip", "q-custom", "q-picked", "q-written", "q-ranking", "q-escape", "q-click"];
     let tall: Rc<Cell<f32>> = Rc::default();
     let tall2 = tall.clone();
@@ -533,10 +539,18 @@ fn question_stages(out: &str) -> Vec<Stage> {
             headless::press(slint::platform::Key::Home);
             true
         })),
-        ("question first card", Box::new(|_, _, elapsed| {
-            if elapsed < Duration::from_millis(400) {
+        ("question first card", Box::new(move |app, _, elapsed| {
+            // Cards report where they are every 150 ms: wait for the first.
+            // Home can stop short of the top while the list corrects its
+            // estimates (the transcript's): press it again now and then.
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("q-trip") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
                 return false;
             }
+            shot(&out3, "artifacts-04a-question-top");
             headless::press("j");
             true
         })),
@@ -618,7 +632,7 @@ fn question_stages(out: &str) -> Vec<Stage> {
             true
         })),
         ("escape from the field", Box::new(|_, _, elapsed| {
-            if elapsed < Duration::from_millis(600) {
+            if elapsed < Duration::from_millis(700) {
                 return false;
             }
             // From the latest card (q-click), K once more is q-escape.
