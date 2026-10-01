@@ -129,6 +129,11 @@ fn set_note(item: &mut ArtifactItem, markdown: &str) {
 pub struct CardState<'a> {
     pub cursor: &'a str,
     pub choices: &'a std::collections::HashMap<String, i32>,
+    /// Answers of one's own as typed, and the card whose field is open.
+    pub drafts: &'a std::collections::HashMap<String, String>,
+    pub editing: &'a str,
+    /// Decisions this window has shown pending.
+    pub seen_pending: &'a std::collections::HashSet<String>,
 }
 
 /// A card as the chat shows it: its fields, whether the keyboard is on it,
@@ -138,8 +143,13 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     item.selected = !state.cursor.is_empty() && item.id == state.cursor;
     item.status_text = engine.artifact_status(&item.id).into();
     if item.pending {
-        item.chosen = state.choices.get(item.id.as_str()).copied().filter(|c| (*c as usize) < item.options.row_count()).unwrap_or(-1);
+        let choices = item.options.row_count() + usize::from(item.allow_custom);
+        item.chosen = state.choices.get(item.id.as_str()).copied().filter(|c| (*c as usize) < choices).unwrap_or(-1);
+        item.draft = state.drafts.get(item.id.as_str()).cloned().unwrap_or_default().into();
+        item.editing = item.allow_custom && state.editing == item.id.as_str();
     }
+    // Answered in this window, it keeps the line it had, so its height.
+    item.keep_line = item.pending || !item.delivery.is_empty() || state.seen_pending.contains(item.id.as_str());
     item
 }
 
@@ -147,7 +157,9 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
 pub fn card_signature(artifact: &Value, engine: &Engine, state: &CardState) -> String {
     let id = text(artifact, "artifact_id");
     let chosen = state.choices.get(&id).copied().unwrap_or(-1);
-    format!("{}{chosen}{}", if id == state.cursor { "*" } else { "" }, engine.artifact_status(&id))
+    // The draft is left out: typing must not rebuild the card it types in.
+    let editing = if id == state.editing { "+" } else { "" };
+    format!("{}{editing}{chosen}{}", if id == state.cursor { "*" } else { "" }, engine.artifact_status(&id))
 }
 
 /// iOS `DecisionResponseView`: while pending the question, why and how
@@ -184,6 +196,12 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
     };
     item.pending = status == "pending";
     item.chosen = -1;
+    item.allow_custom = !item.approval && decision.get("allow_custom_text").and_then(Value::as_bool) == Some(true);
+    // A question keeps its options once answered, the answer marked, so
+    // its card keeps its height.
+    if response == "single_choice" {
+        item.options = slint::ModelRc::new(slint::VecModel::from(options.clone()));
+    }
     if item.pending {
         let mut meta = Vec::new();
         if !text(decision, "priority_reason").is_empty() {
@@ -204,7 +222,7 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
             meta.push("Update Clarp to answer this kind of question".into());
         }
         item.meta = meta.join(" · ").into();
-        if item.approval || response == "single_choice" {
+        if item.approval {
             item.options = slint::ModelRc::new(slint::VecModel::from(options));
         }
         return;
@@ -227,6 +245,12 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
         .or_else(|| options.iter().find(|o| !chosen.is_empty() && o.id == chosen.as_str()).map(|o| o.label.to_string()))
         .unwrap_or_default()
         .into();
+    if !text(&answer, "text").is_empty() {
+        item.chosen = options.len() as i32;
+        item.draft = text(&answer, "text").into();
+    } else if let Some(index) = options.iter().position(|o| !chosen.is_empty() && o.id == chosen.as_str()) {
+        item.chosen = index as i32;
+    }
     if decision.get("delivery_pending").and_then(Value::as_bool) == Some(true) {
         item.delivery = "Saved. Waiting to deliver to the agent.".into();
     }
@@ -234,11 +258,14 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
 
 /// 1-9 on a card: the answer the keyboard chose.
 pub fn choose(app: &App, id: &str, index: i32) {
-    let options = card_item(app, id).map(|c| c.options.row_count()).unwrap_or(0);
-    if index < 0 || index as usize >= options {
+    let Some(card) = card_item(app, id).filter(|c| c.pending) else { return };
+    let options = card.options.row_count();
+    if index < 0 || index as usize > options || (index as usize == options && !card.allow_custom) {
         return;
     }
     app.artifact_choices.borrow_mut().insert(id.to_owned(), index);
+    // The last number is an answer of one's own: its field takes the keyboard.
+    *app.artifact_editing.borrow_mut() = if index as usize == options { id.to_owned() } else { String::new() };
     *app.artifact_cursor.borrow_mut() = id.to_owned();
     app.refresh(&[Change::Updates]);
 }
@@ -253,6 +280,20 @@ pub fn send(app: &App, id: &str) {
     let Some(artifact) = artifact(app, id) else { return };
     let Some(card) = card_item(app, id).filter(|c| c.pending) else { return };
     let decision = artifact.get("decision").cloned().unwrap_or(Value::Null);
+    let own = card.allow_custom && card.chosen == card.options.row_count() as i32;
+    if own {
+        // iOS caps an answer of one's own at 4,000 characters.
+        let written: String = app.artifact_drafts.borrow().get(id).map(|d| d.trim().chars().take(4000).collect()).unwrap_or_default();
+        if written.is_empty() {
+            app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first: write one");
+            app.refresh(&[Change::Updates]);
+            return;
+        }
+        app.artifact_editing.borrow_mut().clear();
+        app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "resolve", serde_json::json!({"answer": {"text": written}}), number(&decision, "revision"));
+        pump();
+        return;
+    }
     let Some(option) = usize::try_from(card.chosen).ok().and_then(|i| card.options.row_data(i)) else {
         app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first (1-9)");
         app.refresh(&[Change::Updates]);
@@ -389,6 +430,20 @@ pub fn bind(window: &AppWindow) {
     bridge.on_send(|id| {
         if let Some(app) = crate::app() {
             send(&app, &id);
+        }
+    });
+    bridge.on_draft_edited(|id, text| {
+        if let Some(app) = crate::app() {
+            app.artifact_drafts.borrow_mut().insert(id.to_string(), text.to_string());
+        }
+    });
+    bridge.on_editing_changed(|id, editing| {
+        if let Some(app) = crate::app() {
+            if !editing && *app.artifact_editing.borrow() == id.as_str() {
+                // Left without sending: the field stays, but no longer
+                // takes the keyboard when the card is drawn again.
+                app.artifact_editing.borrow_mut().clear();
+            }
         }
     });
     bridge.on_discard(|id| {

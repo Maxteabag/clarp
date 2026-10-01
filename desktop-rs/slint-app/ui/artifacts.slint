@@ -1,4 +1,5 @@
 import { Palette } from "theme.slint";
+import { LineEdit } from "std-widgets.slint";
 
 // One answer a decision or question offers.
 export struct ArtifactOption {
@@ -56,6 +57,9 @@ export struct ArtifactItem {
     allow-custom: bool,
     draft: string,
     editing: bool,
+    // Keeps the why/delivery line: the card is or was pending in this
+    // window, or has something to say there.
+    keep-line: bool,
 }
 
 // What the cards share: the clock countdowns read, and their actions.
@@ -77,6 +81,7 @@ export global ArtifactBridge {
     // keyboard (letters then type, they are not shortcuts).
     callback draft-edited(string, string);
     in-out property <bool> editing;
+    callback editing-changed(string, bool);
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
@@ -164,6 +169,110 @@ component AnswerButton inherits Rectangle {
     area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
+// One of a question's answers (iOS's radio rows): a fixed height, so
+// choosing never moves the chat.
+component OptionRow inherits Rectangle {
+    in property <int> number;
+    in property <string> label;
+    in property <string> detail;
+    in property <bool> recommended;
+    in property <bool> chosen;
+    in property <bool> enabled;
+    in property <bool> show-number;
+    callback clicked();
+    height: root.detail != "" ? 38px : 26px;
+    border-radius: 6px;
+    background: root.chosen ? Palette.accent.with-alpha(0.14) : area.has-hover && root.enabled ? Palette.hover : transparent;
+    accessible-role: radio-button;
+    accessible-checked: root.chosen;
+    accessible-label: root.label;
+    area := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 8px;
+        Text {
+            width: 14px;
+            text: root.chosen ? (root.enabled ? "●" : "✓") : "○";
+            color: root.chosen ? Palette.accent : Palette.faint;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 8px;
+                if root.show-number: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+                Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: 12px; font-weight: root.chosen ? 600 : 400; overflow: elide; }
+                if root.recommended: Text { text: "Recommended"; color: Palette.success; font-size: 10px; vertical-alignment: center; }
+            }
+            if root.detail != "": Text { text: root.detail; color: Palette.muted; font-size: 11px; overflow: elide; }
+        }
+    }
+}
+
+// "Write my own answer": the last numbered answer, its field typing like
+// the composer (Enter sends, Escape goes back to the chat).
+component OwnAnswer inherits HorizontalLayout {
+    in property <ArtifactItem> artifact;
+    in property <int> number;
+    property <bool> chosen: root.artifact.chosen == root.artifact.options.length;
+    height: 30px;
+    padding-left: 6px;
+    spacing: 8px;
+    Text {
+        width: 14px;
+        text: root.chosen ? (root.artifact.pending ? "●" : "✓") : "○";
+        color: root.chosen ? Palette.accent : Palette.faint;
+        font-size: 12px;
+        vertical-alignment: center;
+    }
+    if root.artifact.selected && root.artifact.pending: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+    // Asked once, after the row is in the window (focus during its
+    // creation is ignored); Escape gives the keyboard back for good.
+    property <bool> asked;
+    if root.artifact.pending: HorizontalLayout {
+        horizontal-stretch: 1;
+        field := LineEdit {
+            horizontal-stretch: 1;
+            text: root.artifact.draft;
+            placeholder-text: "Write my own answer";
+            edited(text) => {
+                ArtifactBridge.draft-edited(root.artifact.id, text);
+                if (!root.chosen) {
+                    ArtifactBridge.choose(root.artifact.id, root.artifact.options.length);
+                }
+            }
+            accepted => { ArtifactBridge.send(root.artifact.id); }
+            changed has-focus => {
+                ArtifactBridge.editing = self.has-focus;
+                ArtifactBridge.editing-changed(root.artifact.id, self.has-focus);
+            }
+        }
+        Timer {
+            interval: 30ms;
+            running: root.artifact.editing && !root.asked;
+            triggered => {
+                root.asked = true;
+                field.focus();
+            }
+        }
+    }
+    if !root.artifact.pending: Text {
+        text: root.chosen ? root.artifact.draft : "Write my own answer";
+        color: root.chosen ? Palette.text : Palette.faint;
+        font-size: 12px;
+        overflow: elide;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+    }
+}
+
 // A decision's or question's body (iOS DecisionResponseView). Its height
 // is the same pending and answered, so a decision answered above a reader
 // who scrolled up does not move what they read: one line for why and how
@@ -171,15 +280,35 @@ component AnswerButton inherits Rectangle {
 // how it was answered), with the send's status beside them.
 component DecisionBody inherits VerticalLayout {
     in property <ArtifactItem> artifact;
+    property <bool> question: !root.artifact.approval;
     spacing: 5px;
     if root.artifact.question != "": Text { text: root.artifact.question; color: Palette.text; font-size: 13px; font-weight: 600; wrap: word-wrap; }
     if root.artifact.context != "": Text { text: root.artifact.context; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
-    if root.artifact.question != "" || root.artifact.resolved != "": Text {
+    // Settled with nothing to say, a decision has no line to keep.
+    if root.artifact.keep-line: Text {
         height: 15px;
         text: root.artifact.pending ? root.artifact.meta : root.artifact.delivery;
         color: root.artifact.pending ? Palette.warning : Palette.muted;
         font-size: 11px;
         overflow: elide;
+    }
+    // A question's options, pending and answered alike (the answer marked).
+    if root.question: VerticalLayout {
+        spacing: 2px;
+        for option[index] in root.artifact.options: OptionRow {
+            number: index + 1;
+            label: option.label;
+            detail: option.detail;
+            recommended: option.recommended;
+            chosen: root.artifact.chosen == index;
+            enabled: root.artifact.pending;
+            show-number: root.artifact.selected && root.artifact.pending;
+            clicked => { ArtifactBridge.choose(root.artifact.id, index); }
+        }
+        if root.artifact.allow-custom: OwnAnswer {
+            artifact: root.artifact;
+            number: root.artifact.options.length + 1;
+        }
     }
     if root.artifact.question != "" || root.artifact.resolved != "": HorizontalLayout {
         height: 28px;
@@ -197,11 +326,17 @@ component DecisionBody inherits VerticalLayout {
                     ArtifactBridge.send(root.artifact.id);
                 }
             }
-            AnswerButton {
-                key: root.artifact.selected ? "Del" : "";
-                label: "Discard";
-                clicked => { ArtifactBridge.discard(root.artifact.id); }
-            }
+        }
+        if root.artifact.pending && root.question && root.artifact.options.length + (root.artifact.allow-custom ? 1 : 0) > 0: AnswerButton {
+            key: root.artifact.selected ? "Enter" : "";
+            label: "Send answer";
+            primary: true;
+            clicked => { ArtifactBridge.send(root.artifact.id); }
+        }
+        if root.artifact.pending: AnswerButton {
+            key: root.artifact.selected ? "Del" : "";
+            label: "Discard";
+            clicked => { ArtifactBridge.discard(root.artifact.id); }
         }
         if !root.artifact.pending && root.artifact.resolved != "": HorizontalLayout {
             spacing: 6px;

@@ -547,7 +547,7 @@ fn question_stages(out: &str) -> Vec<Stage> {
             if !editing || elapsed < Duration::from_millis(300) {
                 return elapsed > Duration::from_secs(2) && { check(false, "3 opens the answer of one's own"); true };
             }
-            check(crate::commands::context(app, window) == "composer", "the keyboard types into it (letters are not shortcuts)");
+            check(crate::commands::context(app, window) == "composer", &format!("the keyboard types into it (letters are not shortcuts): context {}, field focused {}", crate::commands::context(app, window), window.global::<ArtifactBridge>().get_editing()));
             headless::type_text("Friday, after lunch");
             headless::press(slint::platform::Key::Return);
             true
