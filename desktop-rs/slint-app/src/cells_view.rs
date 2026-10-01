@@ -111,6 +111,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         progress: progress.into(),
         countdown: countdown.trim().to_owned().into(),
         form: kind == "html_form",
+        ..ArtifactItem::default()
     }
 }
 
