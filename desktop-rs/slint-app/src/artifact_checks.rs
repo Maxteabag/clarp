@@ -1311,10 +1311,74 @@ fn file_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- release
+
+fn release_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let ids = ["rel-ready", "rel-failed", "rel-active"];
+    let mut stages = load_chat("art-release", &["release"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("release cards", Box::new(move |app, window, elapsed| {
+            if !placed(window, &ids, elapsed) {
+                return false;
+            }
+            let ready = card(window, "rel-ready").expect("ready");
+            check(ready.label == "RELEASE" && ready.revision == "2.4.0" && ready.release_state == "ready" && ready.action == "Open release", &format!("a release, its version and state: {:?} {:?} {:?}", ready.revision, ready.release_state, ready.action));
+            let failed = card(window, "rel-failed").expect("failed");
+            check(failed.revision == "deadbeef" && failed.release_state == "failed", &format!("without a version, its commit: {:?} {:?}", failed.revision, failed.release_state));
+            let active = card(window, "rel-active").expect("active");
+            check(active.revision == "Unknown revision" && active.release_state == "active", &format!("without either, iOS's Unknown revision: {:?}", active.revision));
+            app.focus_transcript();
+            true
+        })),
+        ("release keyboard", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("release first card", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if shown.first().map(String::as_str) != Some("rel-ready") && elapsed < Duration::from_secs(3) {
+                if elapsed.as_millis() % 500 < 100 {
+                    headless::press(slint::platform::Key::Home);
+                }
+                return false;
+            }
+            shot(&out, "artifacts-13-release");
+            headless::press("j");
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("release opens", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" {
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the release: overlay {:?}", window.get_overlay())); true };
+            }
+            let blocks: Vec<crate::MessageBlock> = window.get_report_blocks().iter().collect();
+            // iOS's detail: version, build, revision, repository, then the notes and a link.
+            let facts = blocks.iter().find(|b| b.kind == "table").map(|b| b.rows.row_count()).unwrap_or(0);
+            check(window.get_report_kind() == "RELEASE" && facts == 5, &format!("the release in the report viewer, its facts in a table: {:?} {facts} rows", window.get_report_kind()));
+            check(blocks.iter().any(|b| b.kind == "heading") && blocks.len() >= 4, &format!("with its notes and a link to its source: {} blocks", blocks.len()));
+            shot(&out2, "artifacts-13b-release-open");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("release closed", Box::new(|_, window, elapsed| {
+            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_overlay().is_empty(), "Escape closes it");
+            true
+        })),
+    ]);
+    stages
+}
+
 // ---- a chat full of artifacts
 
 /// Every type so far, the one ending on a clickable card last.
-const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "file", "html_form"];
+const ALL_TYPES: &[&str] = &["countdown", "decision", "question", "plan", "document", "research", "code_change", "data", "audio", "video", "file", "release", "html_form"];
 
 /// How far the chat's content moved down between two saved frames (rows
 /// of the chat's left half, the best match of their mean brightness).
@@ -1558,6 +1622,7 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(audio_stages(&out));
     stages.extend(video_stages(&out));
     stages.extend(file_stages(&out));
+    stages.extend(release_stages(&out));
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }

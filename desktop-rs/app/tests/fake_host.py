@@ -324,6 +324,15 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "file-elsewhere", "type": "file", "status": "ready", "session": s, "title": "Elsewhere",
              "url": "https://files.example/x.bin", "mime_type": "application/octet-stream", "file_name": "x.bin"},
         ]
+    if kind == "release":
+        return [
+            {"artifact_id": "rel-ready", "type": "release", "status": "ready", "session": s,
+             "title": "Clarp 2.4: artifact cards in the Slint desktop client, and the keyboard to reach them",
+             "version": "2.4.0", "build": "1234", "commit": "4560a8ed", "repository": "clarp",
+             "content": "## What's new\n\n- Every artifact type embedded\n- **J/K** reach the cards", "source_url": "https://github.com/example/clarp/releases/2.4.0"},
+            {"artifact_id": "rel-failed", "type": "release", "status": "failed", "session": s, "title": "Nightly", "commit": "deadbeef"},
+            {"artifact_id": "rel-active", "type": "release", "status": "active", "session": s, "title": "Rolling out"},
+        ]
     raise KeyError(kind)
 
 

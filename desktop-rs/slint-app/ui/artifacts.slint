@@ -87,6 +87,10 @@ export struct ArtifactItem {
     has-poster: bool,
     // file: its kind and size ("PDF · 1.2 MB").
     file-info: string,
+    // release: the version (or commit), and how it went (ready, failed,
+    // active or other).
+    revision: string,
+    release-state: string,
     // code_change: where (repository and branch) and how much.
     repo: string,
     files: string,
