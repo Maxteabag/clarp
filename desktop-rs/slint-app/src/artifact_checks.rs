@@ -1380,10 +1380,12 @@ fn release_stages(out: &str) -> Vec<Stage> {
 
 fn directory_stages(out: &str) -> Vec<Stage> {
     let out = out.to_owned();
-    let ids = ["dir-out", "dir-home", "dir-escape"];
+    let ids = ["dir-out", "dir-home", "dir-escape", "dir-link"];
     // The agent works in the check's scratch folder, which has build/out.
     let folder = std::env::var("CLARP_TEST_HOST_LOG").ok().and_then(|l| std::path::Path::new(&l).parent().map(|p| p.to_path_buf())).unwrap_or_default();
     let made = std::fs::create_dir_all(folder.join("build/out"));
+    // A link inside the agent's folder to a folder outside it.
+    let outside = std::fs::create_dir_all(folder.join("elsewhere")).and_then(|()| std::os::unix::fs::symlink("/usr", folder.join("build/outside")));
     let workspace = folder.to_string_lossy().into_owned();
     let workspace2 = workspace.clone();
     let mut stages: Vec<Stage> = vec![
@@ -1391,7 +1393,7 @@ fn directory_stages(out: &str) -> Vec<Stage> {
             if app.engine.borrow().connection_state() != "live" {
                 return false;
             }
-            check(made.is_ok(), "the agent's folder has build/out");
+            check(made.is_ok() && outside.is_ok(), "the agent's folder has build/out, and a link out of it");
             let loaded = control("/__control/artifact-chat", &json!({"session": "art-directory", "types": ["directory"], "cwd": workspace}));
             check(loaded.is_ok(), "the Host takes a chat of directories");
             // Its folders open only when this desktop shares the Host's files.
@@ -1447,6 +1449,10 @@ fn directory_stages(out: &str) -> Vec<Stage> {
                 return elapsed > Duration::from_secs(3) && { check(false, &format!("Enter opens the folder in the file manager: want {expected}, got {:?}", opened())); true };
             }
             check(true, "Enter opens the folder in the file manager");
+            // A link that leads out of the agent's folder is not followed.
+            let before = opened().len();
+            window.global::<ArtifactBridge>().invoke_open("dir-link".into());
+            check(opened().len() == before && !opened().iter().any(|u| u == "file:///usr"), &format!("a link out of the agent's folder does not open: {:?}", opened().last()));
             // Not shared: the folder is on the Host, and the card says so.
             app.engine.borrow_mut().set_shared_filesystem(false);
             window.global::<ArtifactBridge>().invoke_open("dir-out".into());
