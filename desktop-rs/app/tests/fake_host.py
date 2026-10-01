@@ -312,6 +312,18 @@ def artifact_fixtures(kind, session, now_ms):
              "url": "/media/gone", "mime_type": "video/mp4", "file_name": "gone.mp4"},
             {"artifact_id": "vid-none", "type": "video", "status": "failed", "session": s, "title": "A video that never rendered"},
         ]
+    if kind == "file":
+        return [
+            {"artifact_id": "file-pdf", "type": "file", "status": "ready", "session": s, "title": "The signed contract",
+             "url": "/media/pdf1", "mime_type": "application/pdf", "file_name": "contract-2026-signed.pdf", "size_bytes": 1258291},
+            {"artifact_id": "file-csv", "type": "file", "status": "ready", "session": s, "title": "Numbers",
+             "url": "/media/csv1", "mime_type": "text/csv",
+             "file_name": "third-quarter-numbers-for-every-region-and-store-with-the-audit-flags.csv", "size_bytes": 2048},
+            {"artifact_id": "file-gone", "type": "file", "status": "ready", "session": s, "title": "Expired",
+             "url": "/media/gone", "mime_type": "application/zip", "file_name": "logs.zip", "size_bytes": 900},
+            {"artifact_id": "file-elsewhere", "type": "file", "status": "ready", "session": s, "title": "Elsewhere",
+             "url": "https://files.example/x.bin", "mime_type": "application/octet-stream", "file_name": "x.bin"},
+        ]
     raise KeyError(kind)
 
 
@@ -443,6 +455,10 @@ class Handler(BaseHTTPRequestHandler):
             events = [{"type": "audio", "clip_id": 50, "session": query.get("session"), "url": "/clips/50/complete.mp3",
                        "complete_url": "/clips/50/complete.mp3", "trace_id": "recovered"}] if query.get("session") == "mike" else []
             return self.reply(200, {"events": events})
+        if url.path == "/media/pdf1":
+            return self.reply_bytes(200, b"%PDF-1.4 fixture contract", "application/pdf")
+        if url.path == "/media/csv1":
+            return self.reply_bytes(200, b"region,q3\nNordics,150\n", "text/csv")
         if url.path == "/media/vid1":
             return self.reply_bytes(200, b"\x00\x00\x00\x18ftypmp42fixture-video", "video/mp4")
         if url.path == "/media/thumb-slow":
