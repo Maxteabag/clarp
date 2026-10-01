@@ -399,15 +399,28 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             if !report().transcript_focused {
                 return false;
             }
-            for _ in 0..9 {
-                headless::press("k");
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("decision at the top", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
             }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("decision first card", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            // J from none: the topmost card on screen.
+            headless::press("j");
             true
         })),
         ("decision chosen", Box::new(|_, window, elapsed| {
             if selected(window) != "dec-deploy" {
                 if elapsed > Duration::from_secs(2) {
-                    check(false, &format!("K reaches the first decision: {:?}", selected(window)));
+                    check(false, &format!("J at the top selects the first decision: {:?}", selected(window)));
                     return true;
                 }
                 return false;
@@ -451,8 +464,13 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             shot(&out, "artifacts-03-decision");
             true
         })),
+        ("decision to the latest", Box::new(|_, _, _| {
+            app_now().focus_transcript();
+            headless::press(slint::platform::Key::End);
+            true
+        })),
         ("an approval button is clicked", Box::new(|_, window, elapsed| {
-            if elapsed < Duration::from_millis(300) {
+            if elapsed < Duration::from_millis(600) {
                 return false;
             }
             // A real pointer click on the latest card's first button ("Turn
@@ -475,7 +493,9 @@ fn decision_stages(out: &str) -> Vec<Stage> {
 
 fn question_stages(out: &str) -> Vec<Stage> {
     let (out, out2) = (out.to_owned(), out.to_owned());
-    let ids = ["q-trip", "q-custom", "q-picked", "q-written", "q-ranking", "q-click"];
+    let ids = ["q-trip", "q-custom", "q-picked", "q-written", "q-ranking", "q-escape", "q-click"];
+    let tall: Rc<Cell<f32>> = Rc::default();
+    let tall2 = tall.clone();
     let mut stages = load_chat("art-question", &["question"]);
     stages.extend::<Vec<Stage>>(vec![
         ("question cards", Box::new(move |app, window, elapsed| {
@@ -503,15 +523,27 @@ fn question_stages(out: &str) -> Vec<Stage> {
             if !report().transcript_focused {
                 return false;
             }
-            for _ in 0..6 {
-                headless::press("k");
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("question at the top", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
             }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("question first card", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            headless::press("j");
             true
         })),
         ("question chosen", Box::new(|_, window, elapsed| {
             if selected(window) != "q-trip" {
                 if elapsed > Duration::from_secs(2) {
-                    check(false, &format!("K reaches the first question: {:?}", selected(window)));
+                    check(false, &format!("J at the top selects the first question: {:?}", selected(window)));
                     return true;
                 }
                 return false;
@@ -534,10 +566,14 @@ fn question_stages(out: &str) -> Vec<Stage> {
             headless::press("j");
             true
         })),
-        ("custom answer", Box::new(|_, window, elapsed| {
+        ("custom answer", Box::new(move |app, window, elapsed| {
             if selected(window) != "q-custom" {
-                return elapsed > Duration::from_secs(2) && { check(false, "J moves to the next question"); true };
+                return elapsed > Duration::from_secs(2) && {
+                    check(false, &format!("J moves to the next question: {:?} (cursor {:?}, keyboard in {}, field {}) of {:?}", selected(window), app.artifact_cursor.borrow(), crate::commands::context(app, window), window.global::<ArtifactBridge>().get_editing(), crate::artifacts_view::on_screen(app)));
+                    true
+                };
             }
+            tall.set(height_of(app, "q-custom"));
             // Its last number writes an answer of one's own.
             headless::press("3");
             true
@@ -549,6 +585,14 @@ fn question_stages(out: &str) -> Vec<Stage> {
             }
             check(crate::commands::context(app, window) == "composer", &format!("the keyboard types into it (letters are not shortcuts): context {}, field focused {}", crate::commands::context(app, window), window.global::<ArtifactBridge>().get_editing()));
             headless::type_text("Friday, after lunch");
+            true
+        })),
+        ("typed", Box::new(move |app, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            let (before, after) = (tall2.get(), height_of(app, "q-custom"));
+            check(before > 0.0 && (before - after).abs() < 0.5, &format!("opening the answer of one's own and typing keep the card's height: {before} then {after}"));
             headless::press(slint::platform::Key::Return);
             true
         })),
@@ -564,8 +608,62 @@ fn question_stages(out: &str) -> Vec<Stage> {
             shot(&out, "artifacts-04-question");
             true
         })),
+        ("keyboard back", Box::new(|_, window, elapsed| {
+            let back = report().transcript_focused && !window.global::<ArtifactBridge>().get_editing() && card(window, "q-custom").is_some_and(|c| !c.editing && !c.pending);
+            if !back && elapsed < Duration::from_secs(1) {
+                return false;
+            }
+            check(back, "sent, the keyboard is back on the chat and the field is gone");
+            headless::press(slint::platform::Key::End);
+            true
+        })),
+        ("escape from the field", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            // From the latest card (q-click), K once more is q-escape.
+            headless::press("k");
+            headless::press("k");
+            true
+        })),
+        ("escape writing", Box::new(|app, window, elapsed| {
+            if selected(window) != "q-escape" {
+                return elapsed > Duration::from_secs(2) && {
+                    check(false, &format!("K reaches the question above the latest: {:?} (cursor {:?}) of {:?}", selected(window), app.artifact_cursor.borrow(), crate::artifacts_view::on_screen(app)));
+                    true
+                };
+            }
+            headless::press("3");
+            true
+        })),
+        ("escape typed", Box::new(|app, window, elapsed| {
+            let editing = window.global::<ArtifactBridge>().get_editing();
+            if !editing {
+                return elapsed > Duration::from_secs(2) && { check(false, "3 opens its field"); true };
+            }
+            headless::type_text("Somewhere warm");
+            headless::press(slint::platform::Key::Escape);
+            let _ = app;
+            true
+        })),
+        ("escaped", Box::new(|app, window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            let shown = card(window, "q-escape");
+            check(report().transcript_focused && crate::commands::context(app, window) == "pane" && !window.global::<ArtifactBridge>().get_editing(),
+                "Escape gives the keyboard back to the chat");
+            check(shown.as_ref().is_some_and(|c| !c.editing && c.pending && c.draft == "Somewhere warm") && posts("/decisions/q-escape/resolve").is_empty(),
+                &format!("the field stops taking the keyboard, keeps the draft and sends nothing: {:?}", shown.map(|c| (c.editing, c.draft))));
+            true
+        })),
+        ("question to the latest", Box::new(|_, _, _| {
+            app_now().focus_transcript();
+            headless::press(slint::platform::Key::End);
+            true
+        })),
         ("question clicked", Box::new(|_, window, elapsed| {
-            if elapsed < Duration::from_millis(300) {
+            if elapsed < Duration::from_millis(600) {
                 return false;
             }
             // Real pointer clicks on the latest card: an option, then Send
@@ -624,6 +722,19 @@ fn vertical_shift(before: &str, after: &str) -> Result<i32, String> {
     Ok(best.1)
 }
 
+/// A card's height as it last reported it (0 when it is not on screen).
+fn height_of(app: &crate::App, id: &str) -> f32 {
+    crate::artifacts_view::card_heights(app).into_iter().find(|(card, _)| card == id).map_or(0.0, |(_, h)| h)
+}
+
+/// The cards in both lists whose heights differ.
+fn changed_heights(before: &[(String, f32)], after: &[(String, f32)]) -> Vec<(String, f32, f32)> {
+    before
+        .iter()
+        .filter_map(|(id, h)| after.iter().find(|(other, _)| other == id).filter(|(_, a)| (a - h).abs() >= 0.5).map(|(_, a)| (id.clone(), *h, *a)))
+        .collect()
+}
+
 /// The chat full of artifacts opens at its latest message and stays there
 /// while the cards settle; a reader scrolled up stays put while the cards
 /// around them change state and size (summaries grow, decisions are
@@ -635,6 +746,10 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
     let offset2 = offset.clone();
     let held = Rc::new(Cell::new(0.0f32));
     let held2 = held.clone();
+    let heights: Rc<RefCell<Vec<(String, f32)>>> = Rc::default();
+    let heights2 = heights.clone();
+    let at_end: Rc<RefCell<Vec<(String, f32)>>> = Rc::default();
+    let at_end2 = at_end.clone();
     let mut stages = vec![
         ("load", Box::new(move |app: &crate::App, _: &crate::AppWindow, _: Duration| {
             if app.engine.borrow().connection_state() != "live" {
@@ -682,20 +797,60 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
             app_now().focus_transcript();
             true
         })),
-        ("reader scrolls up", Box::new(|_, _, _| {
+        ("keyboard on screen", Box::new(|app, window, _| {
             if !report().transcript_focused {
                 return false;
             }
+            app.artifact_cursor.borrow_mut().clear();
+            headless::press("k");
+            let shown = crate::artifacts_view::on_screen(app);
+            check(!shown.is_empty() && selected(window) == "form-stale-all" && shown.contains(&selected(window)), &format!("K selects the lowest card on screen: {:?} of {shown:?}", selected(window)));
+            for _ in 0..40 {
+                headless::press("k");
+            }
+            true
+        })),
+        ("K at the top of the screen", Box::new(|app, window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let shown = crate::artifacts_view::on_screen(app);
+            check(shown.first() == Some(&selected(window)), &format!("K never leaves the screen: it stops at the topmost card shown {:?} of {shown:?}", selected(window)));
+            headless::press(slint::platform::Key::PageUp);
             headless::press(slint::platform::Key::PageUp);
             headless::press(slint::platform::Key::PageUp);
             true
         })),
-        ("reader is up", Box::new(move |_, window, elapsed| {
+        ("selection off screen", Box::new(|app, window, elapsed| {
+            // A card the list dropped lapses 600 ms after its last report.
+            if elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            let before = (opened().len(), window.get_overlay().to_string());
+            let gone = !crate::artifacts_view::on_screen(app).contains(&app.artifact_cursor.borrow());
+            headless::press(slint::platform::Key::Return);
+            let after = (opened().len(), window.get_overlay().to_string());
+            check(gone && crate::artifacts_view::selected(app).is_none() && before == after, &format!("a selected card scrolled off screen is not acted on: off {gone}, {before:?} then {after:?}"));
+            check(selected(window).is_empty(), "and shows no selection");
+            headless::press("k");
+            let shown = crate::artifacts_view::on_screen(app);
+            check(shown.last() == Some(&selected(window)), &format!("K then picks the lowest card now on screen: {:?} of {shown:?}", selected(window)));
+            app.artifact_cursor.borrow_mut().clear();
+            true
+        })),
+        ("reader scrolls up", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            true
+        })),
+        ("reader is up", Box::new(move |app, window, elapsed| {
             if elapsed < Duration::from_millis(600) {
                 return false;
             }
             check(!report().follows && !report().at_end, "Page Up takes the reader into the history");
             held.set(report().offset);
+            *heights.borrow_mut() = crate::artifacts_view::card_heights(app);
             shot(&out2, "artifacts-91a-before-update");
             // Around the reader: every summary grows a line, the pending
             // decisions are answered, a form's answers go out (Sending…,
@@ -711,7 +866,7 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
             check(sent.is_ok_and(|(status, _)| status == 202), "a form's answers go out while the reader is up");
             true
         })),
-        ("reader stays put", Box::new(move |_, window, elapsed| {
+        ("reader stays put", Box::new(move |app, window, elapsed| {
             let settled = card(window, "dec-deploy-all").is_some_and(|c| c.resolved == "Approved")
                 && card(window, "cd-launch-all").is_some_and(|c| c.summary.contains("Updated by the agent"))
                 && card(window, "form-trip-all").is_some_and(|c| c.status_text == "Answers accepted")
@@ -729,6 +884,8 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
             let shift = vertical_shift(&format!("{out3}/artifacts-91a-before-update.png"), &after);
             check(!report().follows && moved < 1.0, &format!("a reader scrolled up keeps the offset while cards around change ({moved}px)"));
             check(shift.as_ref().is_ok_and(|s| s.abs() <= 1), &format!("and what they read does not move on screen: {shift:?} px"));
+            let changed = changed_heights(&heights2.borrow(), &crate::artifacts_view::card_heights(app));
+            check(!heights2.borrow().is_empty() && changed.is_empty(), &format!("no card on screen changed height as it changed state: {changed:?}"));
             headless::press(slint::platform::Key::End);
             true
         })),
@@ -738,6 +895,29 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
             }
             let last = cards(window).last().map(|(_, a)| a.id.to_string()).unwrap_or_default();
             check(report().at_end && report().follows && last == "cd-new", &format!("End returns to the latest, the new card last: {last}"));
+            true
+        })),
+        ("scrolling keeps heights", Box::new(move |app, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            *at_end.borrow_mut() = crate::artifacts_view::card_heights(app);
+            headless::press(slint::platform::Key::PageUp);
+            true
+        })),
+        ("paged up and back", Box::new(|_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            headless::press(slint::platform::Key::PageDown);
+            true
+        })),
+        ("heights after scrolling", Box::new(move |app, _, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            let changed = changed_heights(&at_end2.borrow(), &crate::artifacts_view::card_heights(app));
+            check(!at_end2.borrow().is_empty() && changed.is_empty(), &format!("scrolling away and back changes no card's height: {changed:?}"));
             true
         })),
     ]);
