@@ -109,6 +109,18 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
         "plan" => plan_fields(&mut item, artifact),
+        "release" => {
+            // iOS's operation body: version ?? commit ?? "Unknown revision".
+            item.revision = [text(artifact, "version"), text(artifact, "commit")].into_iter().find(|r| !r.is_empty()).unwrap_or_else(|| "Unknown revision".into()).into();
+            item.release_state = match status.as_str() {
+                "ready" | "completed" => "ready",
+                "failed" => "failed",
+                "active" => "active",
+                _ => "other",
+            }
+            .into();
+            item.action = "Open release".into();
+        }
         "file" => {
             // iOS's detail: the kind (from the type or the name) and size.
             let name = text(artifact, "file_name");
@@ -753,6 +765,26 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
             }
             (text(&artifact, "summary"), markdown)
         }
+        "release" => {
+            let facts: Vec<Vec<String>> = [("Version", "version"), ("Build", "build"), ("Revision", "commit"), ("Repository", "repository")]
+                .iter()
+                .filter_map(|(label, key)| Some(text(&artifact, key)).filter(|v| !v.is_empty()).map(|v| vec![(*label).to_owned(), v]))
+                .collect();
+            let mut parts = Vec::new();
+            if !facts.is_empty() {
+                parts.push(markdown_table(&["Release".to_owned(), String::new()], &facts));
+            }
+            let notes = text(&artifact, "content");
+            if !notes.trim().is_empty() {
+                parts.push(notes);
+            }
+            let source = text(&artifact, "source_url");
+            if source.starts_with("https://") {
+                parts.push(format!("[Open source]({source})"));
+            }
+            let build = text(&artifact, "build");
+            (if build.is_empty() { card.revision.to_string() } else { format!("{} · build {build}", card.revision) }, parts.join("\n\n"))
+        }
         "code_change" => {
             let commit = text(&artifact, "commit");
             let summary = if commit.is_empty() { card.repo.to_string() } else { format!("{} · {commit}", card.repo) };
@@ -912,7 +944,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                 None => eprintln!("clarp-slint: not playing {url}: only the Host's media plays"),
             }
         }
-        "plan" | "code_change" | "data" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
+        "plan" | "code_change" | "data" | "release" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
         _ if app.engine.borrow().report_for_artifact(id).is_some() => crate::updates_view::open_report(app, window, id),
         // Nothing to open: Enter only selects.
         _ => {}

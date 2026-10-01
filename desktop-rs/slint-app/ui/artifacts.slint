@@ -675,6 +675,17 @@ export component ArtifactCard inherits Rectangle {
             if root.artifact.additions != "": Text { text: root.artifact.additions; color: Palette.success; font-family: "JetBrains Mono"; font-size: 12px; }
             if root.artifact.deletions != "": Text { text: root.artifact.deletions; color: Palette.danger; font-family: "JetBrains Mono"; font-size: 12px; }
         }
+        // iOS's release row: the revision large, its state marked.
+        if root.artifact.kind == "release": HorizontalLayout {
+            spacing: 8px;
+            Text { text: root.artifact.revision; color: Palette.text; font-family: "JetBrains Mono"; font-size: 15px; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
+            Text {
+                text: root.artifact.release-state == "ready" ? "✓ Released" : root.artifact.release-state == "failed" ? "✕ Failed" : root.artifact.release-state == "active" ? "● Rolling out" : "○ Release";
+                color: root.artifact.release-state == "ready" ? Palette.success : root.artifact.release-state == "failed" ? Palette.danger : root.artifact.release-state == "active" ? Palette.warning : Palette.muted;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+        }
         if root.artifact.file-info != "": Text {
             text: root.artifact.file-info;
             color: root.artifact.action == "" ? Palette.warning : Palette.muted;
