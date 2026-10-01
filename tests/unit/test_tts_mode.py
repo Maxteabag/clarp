@@ -76,6 +76,16 @@ def test_agents_without_override_keep_the_global_provider(env, providers):
     assert [c["provider"] for c in providers] == ["cartesia"]
 
 
+def test_gemini_provider_uses_contact_voice_map(env, providers, monkeypatch):
+    from lib import config
+    monkeypatch.setattr(config, "_CACHED", config.Config(
+        tts_provider="gemini", gemini_api_key="simulated",
+        gemini_voices={"Mike": "voice_mike"}))
+    _speak(env, "mike", "mike-1")
+    # Mike's stored voice map has no gemini entry; the contact map supplies it.
+    assert providers == [{"provider": "gemini", "voice": "voice_mike"}]
+
+
 def test_config_reads_agent_overrides(tmp_path):
     from lib import config
     path = tmp_path / "config.toml"
@@ -90,10 +100,16 @@ gemini_voice = "voice_abc"
 [gemini_tts]
 api_key = "k"
 model = "gemini-3.8-flash-lite-tts"
+
+[gemini_tts.voices]
+Arnold = "voice_arnold"
 ''')
     cfg = config.load(path)
     assert cfg.gemini_model == "gemini-3.8-flash-lite-tts"
     assert cfg.gemini_voice == "Kore"
+    assert cfg.gemini_voice_for("arnold") == "voice_arnold"
+    assert cfg.gemini_voice_for("Arnold-1a2b") == "voice_arnold"
+    assert cfg.gemini_voice_for("Mike") is None
     assert cfg.tts_override_for({"persona": "jax"}) == {
         "provider": "gemini", "gemini_voice": "voice_abc"}
     assert cfg.tts_override_for({"persona": "Mike", "session": "mike-1"}) == {}

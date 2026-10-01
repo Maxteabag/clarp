@@ -1,3 +1,5 @@
+import json
+
 from lib import agents, db, personas
 
 
@@ -99,3 +101,17 @@ def test_builtin_contact_avatar_can_be_repaired():
 
     assert personas.get("Mike")["avatar_symbol"] == ""
     assert personas.get("Mike")["builtin"] == 1
+
+
+def test_builtin_contact_gains_gemini_voice_beside_cartesia(monkeypatch):
+    from lib import config
+    cfg = config.Config(gemini_voices={"arnold": "voice_arnold_au"})
+    monkeypatch.setattr(config, "_CACHED", cfg)
+    monkeypatch.setattr(personas, "_seeded_db", "")
+    personas.ensure_builtins()
+
+    voices = json.loads(personas.get("Arnold")["voice_id"])
+    # The Google voice is added; the Cartesia (Australian) voice is untouched.
+    assert voices["gemini"] == "voice_arnold_au"
+    assert voices["cartesia"] == cfg.cartesia_voice_for("Arnold")
+    assert "gemini" not in json.loads(personas.get("Mike")["voice_id"])

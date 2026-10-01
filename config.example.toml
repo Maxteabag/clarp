@@ -42,8 +42,11 @@ fallback = "none"
 # API key. If empty, falls back to GEMINI_API_KEY.
 api_key = ""
 model = "gemini-3.8-flash-tts"
-# Prebuilt voice name, or a Voice Design id ("voice_...").
+# Prebuilt voice name, or a Voice Design id ("voice_..."). Default voice.
 voice = "Kore"
+# Per-contact Gemini voices; the contact's other provider voices are kept.
+# [gemini_tts.voices]
+# Arnold = "voice_..."
 
 
 [cartesia]
