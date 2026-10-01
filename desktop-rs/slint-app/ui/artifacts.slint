@@ -1,5 +1,4 @@
 import { Palette } from "theme.slint";
-import { LineEdit } from "std-widgets.slint";
 
 // One answer a decision or question offers.
 export struct ArtifactOption {
@@ -213,6 +212,7 @@ component OptionRow inherits Rectangle {
             alignment: center;
             horizontal-stretch: 1;
             HorizontalLayout {
+                alignment: start;
                 spacing: 8px;
                 if root.show-number: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
                 Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: 12px; font-weight: root.chosen ? 600 : 400; overflow: elide; }
@@ -239,32 +239,53 @@ component OwnAnswer inherits HorizontalLayout {
         font-size: 12px;
         vertical-alignment: center;
     }
-    if root.artifact.selected && root.artifact.pending: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+    if root.artifact.pending: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
     // Asked once, after the row is in the window (focus during its
     // creation is ignored); Escape gives the keyboard back for good.
     property <bool> asked;
     if root.artifact.pending: HorizontalLayout {
         horizontal-stretch: 1;
-        field := LineEdit {
+        Rectangle {
             horizontal-stretch: 1;
-            text: root.artifact.draft;
-            placeholder-text: "Write my own answer";
-            font-size: 12px;
-            edited(text) => {
-                ArtifactBridge.draft-edited(root.artifact.id, text);
-                if (!root.chosen) {
-                    ArtifactBridge.choose(root.artifact.id, root.artifact.options.length);
+            height: 26px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: field.has-focus ? Palette.accent : Palette.border;
+            background: Palette.sunken;
+            if field.text == "": Text {
+                x: 8px;
+                height: parent.height;
+                text: "Write my own answer";
+                color: Palette.faint;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+            field := TextInput {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                text: root.artifact.draft;
+                color: Palette.text;
+                font-size: 12px;
+                single-line: true;
+                vertical-alignment: center;
+                accessible-label: "Write my own answer";
+                edited => {
+                    ArtifactBridge.draft-edited(root.artifact.id, self.text);
+                    if (!root.chosen) {
+                        ArtifactBridge.choose(root.artifact.id, root.artifact.options.length);
+                    }
                 }
-            }
-            // The keyboard leaves the field before sending: the answered
-            // card has no field, and a focused one must not be destroyed.
-            accepted => {
-                self.clear-focus();
-                ArtifactBridge.send(root.artifact.id);
-            }
-            changed has-focus => {
-                ArtifactBridge.editing = self.has-focus;
-                ArtifactBridge.editing-changed(root.artifact.id, self.has-focus);
+                // The keyboard leaves the field before sending: the answered
+                // card has no field, and a focused one must not be destroyed.
+                accepted => {
+                    self.clear-focus();
+                    ArtifactBridge.send(root.artifact.id);
+                }
+                changed has-focus => {
+                    ArtifactBridge.editing = self.has-focus;
+                    ArtifactBridge.editing-changed(root.artifact.id, self.has-focus);
+                }
             }
         }
         Timer {
@@ -315,7 +336,7 @@ component DecisionBody inherits VerticalLayout {
             recommended: option.recommended;
             chosen: root.artifact.chosen == index;
             enabled: root.artifact.pending;
-            show-number: root.artifact.selected && root.artifact.pending;
+            show-number: root.artifact.pending;
             clicked => { ArtifactBridge.choose(root.artifact.id, index); }
         }
         if root.artifact.allow-custom: OwnAnswer {
@@ -368,6 +389,46 @@ component DecisionBody inherits VerticalLayout {
             font-size: 12px;
             overflow: elide;
             vertical-alignment: center;
+        }
+    }
+}
+
+// A plan's or run's progress (iOS's ProgressView and caption) and the
+// step under way, in two lines whatever its length.
+component ProgressBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    in property <color> tint;
+    spacing: 4px;
+    if root.artifact.progress-value >= 0 || root.artifact.progress-value < -1.5: HorizontalLayout {
+        spacing: 8px;
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            height: 6px;
+            horizontal-stretch: 1;
+            border-radius: 3px;
+            background: Palette.control;
+            Rectangle {
+                x: 0;
+                height: parent.height;
+                // Under way without a count: a third, at rest.
+                width: parent.width * (root.artifact.progress-value < 0 ? 0.33 : Math.min(1, root.artifact.progress-value));
+                border-radius: 3px;
+                background: root.tint;
+            }
+        }
+        if root.artifact.progress-count != "": Text { text: root.artifact.progress-count; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+    }
+    if root.artifact.current != "": HorizontalLayout {
+        spacing: 6px;
+        if root.artifact.progress-value >= 0: Text { text: "▶"; color: root.tint; font-size: 10px; }
+        Text {
+            text: root.artifact.current;
+            color: root.artifact.progress-value >= 0 ? Palette.text : Palette.warning;
+            font-size: 12px;
+            wrap: word-wrap;
+            overflow: elide;
+            height: 32px;
+            horizontal-stretch: 1;
         }
     }
 }
@@ -438,6 +499,7 @@ export component ArtifactCard inherits Rectangle {
         }
         if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
         if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; }
+        if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
         // Two lines, whatever the summary's length: a summary that grows
         // does not change the card's height.
         if root.artifact.summary != "": Text {
@@ -457,7 +519,8 @@ export component ArtifactCard inherits Rectangle {
             link-color: Palette.link;
             link-clicked(url) => { ArtifactBridge.link-clicked(url); }
         }
-        if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
+        // The bar's count says it already.
+        if root.artifact.progress != "" && root.artifact.progress-count == "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
         if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
         // A decision shows its send's status in its own row.
         if root.artifact.action != "" || (root.artifact.status-text != "" && root.artifact.kind != "decision" && root.artifact.kind != "question"): HorizontalLayout {

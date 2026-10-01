@@ -187,7 +187,9 @@ pub fn open_report(app: &App, window: &AppWindow, artifact_id: &str) {
 /// The report's title, summary and body (Markdown blocks) for the viewer.
 fn show_report(app: &App, window: &AppWindow) {
     let id = REPORT.with(|r| r.borrow().clone());
-    let report = app.engine.borrow().report_for_artifact(&id).unwrap_or_default();
+    // Artifacts without a report body (a plan, a release...) show what
+    // the card stands for.
+    let report = app.engine.borrow().report_for_artifact(&id).or_else(|| crate::artifacts_view::detail(app, &id)).unwrap_or_default();
     let html = json::boolean(&report, "isHtml");
     let body = text(&report, "body");
     let markdown = if html { html_markdown(&body) } else { body };

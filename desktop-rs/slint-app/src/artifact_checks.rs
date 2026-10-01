@@ -758,8 +758,9 @@ fn plan_stages(out: &str) -> Vec<Stage> {
             }
             check(window.get_report_title() == "Ship the Slint desktop client to the beta group before the end of the quarter", "the plan opens in the report viewer, under its title");
             check(window.get_report_summary() == "Ship 2.0 · Beta testers on the Slint app · 2/5 done", &format!("with its plan, goal and progress: {:?}", window.get_report_summary()));
-            // Three items and two subtasks, one line each.
-            check(window.get_report_blocks().row_count() >= 5, &format!("and every item and subtask: {} blocks", window.get_report_blocks().row_count()));
+            // Three items and two subtasks, a row each under the header.
+            let rows = window.get_report_blocks().iter().find(|b| b.kind == "table").map(|b| b.rows.row_count()).unwrap_or(0);
+            check(rows == 6, &format!("and every item and subtask, a row each: {rows} rows"));
             shot(&out2, "artifacts-05b-plan-open");
             headless::press(slint::platform::Key::Escape);
             true
