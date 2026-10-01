@@ -1,5 +1,5 @@
 import { Palette } from "theme.slint";
-import { ScrollView } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard, ArtifactItem, ArtifactCard } from "cells.slint";
 
 export struct TableRow {
@@ -181,10 +181,6 @@ export component Transcript inherits FocusScope {
     in-out property <bool> follow: true;
     out property <length> offset: list.content-y;
     out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
-    // Close enough to the end to keep following: a reader within a couple of
-    // lines of the bottom (or a resize that nudged the view) still follows;
-    // only scrolling up into the history stops it.
-    property <bool> near-end: list.content-height + list.content-y - list.visible-height < 48px;
     callback link-clicked(string);
     callback toggle-activity(string, string);
     callback copy-message(string);
@@ -197,27 +193,15 @@ export component Transcript inherits FocusScope {
     Rectangle { background: Palette.window; }
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
-    // Every row is laid out (no virtual list): a virtual list estimates the
-    // rows it has not drawn and re-estimates as they stream, which moved a
-    // reader who had scrolled up. Laid out for real, rows added or growing
-    // at the end leave the reader's place alone.
-    list := ScrollView {
+    list := ListView {
         // A reader who scrolls away from the end stops following.
         scrolled => {
             root.holding = false;
-            root.follow = root.near-end;
+            root.follow = root.at-end;
             root.check-top();
         }
         width: parent.width;
         height: parent.height;
-        content-width: self.visible-width;
-        // The rows' real height: a row that needs more than its preferred
-        // height is laid out taller, so the preferred sum alone left the
-        // latest messages below the end of the scroll range.
-        content-height: Math.max(rows-layout.preferred-height, rows-layout.min-height);
-        rows-layout := VerticalLayout {
-        width: list.visible-width;
-        height: list.content-height;
         for row in root.rows: HorizontalLayout {
             padding-left: 16px;
             padding-right: 16px;
@@ -277,7 +261,6 @@ export component Transcript inherits FocusScope {
                 }
             }
         }
-        }
     }
     changed rows => {
         if (root.follow) { root.scroll-to-latest(); }
@@ -297,8 +280,9 @@ export component Transcript inherits FocusScope {
             root.reached-top();
         }
     }
-    // While following, keep pinning the end as late rows settle (images,
-    // fonts).
+    // The list estimates the height of rows it has not drawn yet and
+    // corrects it as they appear; while following, keep pinning the end
+    // until the estimate settles.
     Timer {
         interval: 16ms;
         running: root.follow && !root.at-end;
@@ -311,7 +295,7 @@ export component Transcript inherits FocusScope {
     public function scroll-by(delta: length) {
         list.content-y = Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta));
         root.holding = false;
-        root.follow = root.near-end;
+        root.follow = root.at-end;
         root.check-top();
     }
     // After Escape the transcript has the keyboard: Up/Down, Page Up/Down,
