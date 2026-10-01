@@ -119,6 +119,25 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
                 item.file_info = "Folder unavailable".into();
             }
         }
+        "workflow_run" => {
+            // iOS: the step under way and completed/total, a bar when it
+            // counts, an indeterminate one while active.
+            let (total, done) = (number(artifact, "total_steps"), number(artifact, "completed_steps"));
+            item.label = "WORKFLOW RUN".into();
+            item.current = text(artifact, "current_step").into();
+            item.repo = [text(artifact, "workflow_name"), format!("run {}", text(artifact, "run_id"))].into_iter().filter(|p| !p.is_empty() && p != "run ").collect::<Vec<_>>().join(" · ").into();
+            if total > 0 {
+                item.progress_value = done.clamp(0, total) as f32 / total as f32;
+                item.progress_count = format!("{done}/{total}").into();
+            } else if status == "active" {
+                item.progress_value = -2.0;
+            } else {
+                item.progress_value = -1.0;
+            }
+            if text(artifact, "run_url").starts_with("https://github.com/") {
+                item.action = "Open in GitHub".into();
+            }
+        }
         "release" => {
             // iOS's operation body: version ?? commit ?? "Unknown revision".
             item.revision = [text(artifact, "version"), text(artifact, "commit")].into_iter().find(|r| !r.is_empty()).unwrap_or_else(|| "Unknown revision".into()).into();
@@ -980,6 +999,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
         "video" => download(app, &artifact, "video"),
         "file" => download(app, &artifact, "file"),
         "directory" => open_directory(app, &artifact),
+        "workflow_run" => crate::open_link(&text(&artifact, "run_url")),
         "audio" => {
             let url = text(&artifact, "url");
             match host_path(&url) {
