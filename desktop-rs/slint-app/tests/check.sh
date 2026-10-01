@@ -6,6 +6,7 @@ cd "$(dirname "$0")/../.."
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
 scratch=$(mktemp -d /var/tmp/clarp-slint-check.XXXXXX)
 trap 'kill "$host" 2>/dev/null; wait "$host" 2>/dev/null; rm -rf "$scratch"' EXIT
+host_args=(); [ "$name" = startup ] && host_args=(--roster 100)
 cp slint-app/docs/screens/markdown-paper.png "$scratch/photo.png"
 # The "microphone": a second of tone, never the user's device.
 /usr/bin/python3 -c "import math,struct,wave,sys; w=wave.open(sys.argv[1],'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(i/8))) for i in range(16000))); w.close()" "$scratch/voice.wav"
@@ -14,10 +15,16 @@ mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
 # since CLARP_TEST_TERMINAL_LOG records the launch instead.
 mkdir -p "$scratch/bin"
 for program in claude xdg-terminal-exec; do printf '#!/bin/sh\nexit 1\n' > "$scratch/bin/$program"; chmod +x "$scratch/bin/$program"; done
-/usr/bin/python3 app/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
+/usr/bin/python3 app/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" "${host_args[@]}" &
 host=$!
 for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
-env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS=off \
+# A check runs the app once; startup runs it twice, with an empty portrait
+# cache and then with the one the first run filled (a usual launch).
+# CLARP_CHECK_PROFILE=release runs the release build.
+passes=(once); [ "$name" = startup ] && passes=(cold warm)
+for pass in "${passes[@]}"; do
+[ "$pass" = once ] || echo "perf pass: $pass"
+CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS=off \
     HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/run" \
     XDG_CONFIG_HOME="$scratch/c" XDG_CACHE_HOME="$scratch/k" XDG_DATA_HOME="$scratch/d" XDG_STATE_HOME="$scratch/s" \
     CLARP_AUDIO_OUTPUT=null CLARP_AUDIO_INPUT="file:$scratch/voice.wav" CLARP_KEYRING=off \
@@ -26,5 +33,6 @@ env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0
     CLARP_TEST_FOREGROUND=1 CLARP_TEST_CLIPBOARD="$scratch/clipboard" \
     CLARP_TEST_TERMINAL_LOG="$scratch/terminal.jsonl" PATH="$scratch/bin:$PATH" \
     timeout 120 dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
-    target/debug/clarp-slint --check "$name" --out "$out" 2>&1 | tee "$scratch/run.log" | grep -E "^(ok|FAIL|E2E)|panicked"
-grep -q "^E2E_PASS" "$scratch/run.log"
+    "target/${CLARP_CHECK_PROFILE:-debug}/clarp-slint" --check "$name" --out "$out" 2>&1 | tee -a "$scratch/run.log" | grep -E "^(ok|FAIL|E2E|perf)|panicked"
+done
+grep -q "^E2E_PASS" "$scratch/run.log" && ! grep -q "^E2E_FAIL" "$scratch/run.log"
