@@ -31,8 +31,8 @@ struct State {
     decoding: std::collections::HashSet<String>,
     /// Of those, the ones a list asked for: their arrival refreshes it.
     wanted: std::collections::HashSet<String>,
-    /// Some arrived since the lists last asked (`portraits_ready`).
-    delivered: bool,
+    /// The paced refresh for arrived portraits is running (`portraits_due`).
+    due: bool,
 }
 
 thread_local! {
@@ -173,21 +173,26 @@ pub fn portrait(app: &App, session: &str) -> slint::Image {
     })
 }
 
-/// Whether the lists have portraits to show: every agent's is decoded, or
-/// some arrived since they last asked. The missing ones are asked for,
-/// and refresh the lists when they arrive.
-pub fn portraits_ready(app: &App) -> bool {
+/// Whether a portraits-only change rebuilds the lists now: only in the
+/// paced refresh for arrived portraits. Otherwise the new ones are
+/// decoded first, or the paced refresh is asked for when they already are.
+pub fn portraits_due(app: &App) -> bool {
+    if STATE.with(|s| std::mem::take(&mut s.borrow_mut().due)) {
+        return true;
+    }
     let sessions: Vec<String> = app.engine.borrow().roster().agents().iter().map(|a| a.session.clone()).collect();
     let urls: Vec<String> = sessions.iter().filter_map(|s| app.engine.borrow_mut().avatar_source(s)).collect();
-    let (missing, delivered) = STATE.with(|s| {
+    let missing: Vec<String> = STATE.with(|s| {
         let mut state = s.borrow_mut();
         let missing: Vec<String> = urls.into_iter().filter(|u| !state.images.contains_key(u)).collect();
         state.wanted.extend(missing.iter().cloned());
-        (missing, std::mem::take(&mut state.delivered))
+        missing
     });
-    let ready = delivered || missing.is_empty();
+    if missing.is_empty() {
+        refresh_for_portraits("new portraits already decoded".into());
+    }
     decode_later(missing);
-    ready
+    false
 }
 
 /// Decodes the cached portraits (newest first) while the Host is asked
@@ -277,7 +282,6 @@ fn decoded(batch: Decoded, took: std::time::Duration) {
             wanted |= state.wanted.remove(&url);
             state.images.insert(url, pixels.map(slint::Image::from_rgba8).unwrap_or_default());
         }
-        state.delivered |= wanted;
         wanted
     });
     if wanted {
@@ -302,7 +306,9 @@ fn refresh_for_portraits(why: String) {
         PACE.set((Some(Instant::now()), false));
         if let Some(app) = crate::app() {
             let started = Instant::now();
+            STATE.with(|s| s.borrow_mut().due = true);
             app.refresh(&[Change::Avatars]);
+            STATE.with(|s| s.borrow_mut().due = false);
             crate::perf::woke(started, why);
         }
     };

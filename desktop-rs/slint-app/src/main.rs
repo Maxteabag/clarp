@@ -284,9 +284,10 @@ impl App {
         }
         let mut list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Avatars | Change::Updates));
         drop(engine);
-        // New portraits alone: the list changes once they are decoded.
+        // New portraits alone: the list changes once they are decoded, at
+        // most every 100 ms.
         let portraits_only = changes.iter().all(|c| !matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Updates));
-        if list_changed && portraits_only && !profile_view::portraits_ready(self) {
+        if list_changed && portraits_only && !profile_view::portraits_due(self) {
             list_changed = false;
         }
         if list_changed {
