@@ -120,6 +120,15 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             app.engine.borrow_mut().settings_mut().set("appearance/shortcutsVisible", visible);
         }
         "switcher" => open_switcher(app, window),
+        // Ctrl+R: the recent agents, newest first; Enter on the first row
+        // goes back to the chat before this one.
+        "recent-agents" => {
+            open_switcher(app, window);
+            app.switcher.borrow_mut().recent_only = true;
+            window.set_switcher_placeholder("Recent agents".into());
+            window.set_switcher_empty("No other agents yet".into());
+            refresh_switcher(app, window);
+        }
         "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
         // ---- profile and overview
         "escape" if crate::profile_view::owns(app) => crate::profile_view::escape(app, window),
@@ -398,6 +407,7 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
         state.selected.clear();
         state.restore_composer = app.active_report().composer_focused;
         state.contacts_only = false;
+        state.recent_only = false;
     }
     window.set_switcher_placeholder("Agent, contact, setting or command".into());
     window.set_switcher_empty("No matching agent or contact".into());
@@ -417,7 +427,11 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
         .into_iter()
         .map(|r| (r.kind.to_string(), r.id.to_string(), r.label.to_string(), r.detail.to_string(), r.on))
         .collect();
-    let items = switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings));
+    let items = if app.switcher.borrow().recent_only {
+        switcher::recent(&app.engine.borrow(), &app.recent.borrow(), &query)
+    } else {
+        switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings))
+    };
     let mut state = app.switcher.borrow_mut();
     let current = switcher::keep_selection(&items, &state.selected);
     state.selected = usize::try_from(current).ok().and_then(|i| items.get(i)).map(switcher::Item::key_of).unwrap_or_default();

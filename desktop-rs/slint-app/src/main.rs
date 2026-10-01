@@ -57,6 +57,8 @@ pub struct App {
     workspaces: RefCell<clarp_core::workspace::WorkspaceContext>,
     /// Messages whose tool calls the reader opened (not groups).
     expanded: RefCell<std::collections::HashSet<String>>,
+    /// Chats opened in this window, the most recent first (Ctrl+R).
+    pub recent: RefCell<Vec<String>>,
     /// Chats whose sub-agents show in the explorer; the rest fold them.
     pub unfolded: RefCell<std::collections::HashSet<String>>,
     pub prefs: RefCell<Prefs>,
@@ -93,6 +95,8 @@ pub struct SwitcherState {
     pub restore_composer: bool,
     // ---- launch dialogs: "Start an idle contact" lists only idle contacts.
     pub contacts_only: bool,
+    /// Ctrl+R: recent agents only, the last opened first.
+    pub recent_only: bool,
 }
 
 pub fn app() -> Option<Rc<App>> {
@@ -240,6 +244,11 @@ impl App {
             apply_theme(&window, &engine.reading_theme());
         }
         let selected = engine.selected_session().to_owned();
+        if changes.contains(&Change::Selection) && !selected.is_empty() {
+            let mut recent = self.recent.borrow_mut();
+            recent.retain(|s| *s != selected);
+            recent.insert(0, selected.clone());
+        }
         let list_changed = changes.iter().any(|c| matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Avatars));
         drop(engine);
         if list_changed {
@@ -471,6 +480,7 @@ fn main() {
         pane_state: RefCell::new(Vec::new()),
         sidebar: RefCell::new(clarp_core::sidebar::Sidebar::default()),
         unfolded: RefCell::new(std::collections::HashSet::new()),
+        recent: RefCell::new(Vec::new()),
         workspaces: RefCell::new(clarp_core::workspace::WorkspaceContext::default()),
         prefs: RefCell::new(prefs),
         switcher: RefCell::new(SwitcherState::default()),

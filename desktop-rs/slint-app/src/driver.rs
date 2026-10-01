@@ -520,6 +520,23 @@ fn composer_check(out: String) {
                 return false;
             }
             check(window.get_keyboard_mode() == "CHAT", "and Ctrl+H to the chat");
+            headless::press_with(&[Key::Control], "r");
+            true
+        })),
+        ("recent", Box::new(|_, window, _| {
+            if !window.get_switcher_open() || window.get_switcher_rows().row_count() == 0 {
+                return false;
+            }
+            let first = window.get_switcher_rows().row_data(0).map(|r| r.label.to_string()).unwrap_or_default();
+            check(first == "Mike", &format!("Ctrl+R lists the recent agents, the one before this chat first: {first}"));
+            headless::press(Key::Return);
+            true
+        })),
+        ("back", Box::new(|app, _window, _| {
+            if app.engine.borrow().selected_session() != "mike" {
+                return false;
+            }
+            check(true, "and Enter goes back to it");
             true
         })),
     ];
@@ -1817,7 +1834,7 @@ fn updates_check(out: String) {
             }
             check(true, "the job shows in Rachel's row and the rail counts two decisions");
             // The hourglass on Rachel's row.
-            click_at(window, 311.0, 150.0);
+            click_at(window, 297.0, 128.0);
             let jobs: Vec<crate::ProcessJob> = window.get_process_jobs().iter().collect();
             check(window.get_overlay() == "processes", "clicking the row's indicator opens the process popover");
             check(
@@ -1893,14 +1910,14 @@ fn updates_check(out: String) {
             }
             check(true, "the cancel reaches the Host");
             gets.set(requests("GET", "/attention").len());
-            headless::press_with(&[Key::Control], "r");
+            headless::press(Key::F5);
             true
         })),
         ("refreshed", Box::new(move |app, window, _| {
             if requests("GET", "/attention").len() <= attention_gets.get() || app.engine.borrow().updates_loading() {
                 return false;
             }
-            check(true, "Ctrl+R reloads the updates");
+            check(true, "F5 reloads the updates");
             window.invoke_open_report("doc1".into());
             true
         })),
