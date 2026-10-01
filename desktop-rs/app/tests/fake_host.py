@@ -104,6 +104,55 @@ def broadcast(event):
             subscriber.put(payload)
 
 
+def iso_at(ms, offset_hours=0):
+    """An ISO 8601 stamp with an explicit offset, as the Host requires."""
+    import datetime
+    zone = datetime.timezone(datetime.timedelta(hours=offset_hours))
+    return datetime.datetime.fromtimestamp(ms / 1000, zone).isoformat(timespec="seconds")
+
+
+def artifact_fixtures(kind, session, now_ms):
+    """Realistic artifacts of one type, as the Host's flat-v1 list returns
+    them: long titles, failed and expired states, missing parts."""
+    s = session
+    day = 86_400_000
+    if kind == "countdown":
+        return [
+            {"artifact_id": "cd-launch", "type": "countdown", "status": "active", "session": s,
+             "title": "Launch window for the Nordics production rollout of the new billing pipeline (phase two of three)",
+             "summary": "Freeze starts an hour before.", "content": "Remember to **page** the on-call.",
+             "target_at": iso_at(now_ms + day + 7_384_000 + 600, 2), "time_zone": "Europe/Oslo"},
+            {"artifact_id": "cd-reached", "type": "countdown", "status": "active", "session": s, "title": "Stand-up",
+             "target_at": iso_at(now_ms - 20_000), "time_zone": "UTC"},
+            {"artifact_id": "cd-past", "type": "countdown", "status": "completed", "session": s, "title": "Deploy finished",
+             "target_at": iso_at(now_ms - 7_500_000, -4), "time_zone": "America/New_York"},
+            {"artifact_id": "cd-cancelled", "type": "countdown", "status": "cancelled", "session": s, "title": "Offsite (called off)",
+             "target_at": iso_at(now_ms + 3 * day, 2), "time_zone": "Europe/Oslo"},
+            {"artifact_id": "cd-broken", "type": "countdown", "status": "active", "session": s, "title": "Someday",
+             "target_at": "next tuesday", "time_zone": "UTC"},
+        ]
+    raise KeyError(kind)
+
+
+def artifact_chat(session, kinds, now_ms):
+    """A chat where each artifact is made while its own reply is written:
+    an ask, then a reply 30 s later, the artifact 10 s into it. The last
+    reply carries the last artifact, so the chat ends on a card."""
+    made = [a for kind in kinds for a in artifact_fixtures(kind, session, now_ms)]
+    base = now_ms - 3 * 3_600_000
+    rows = []
+    for index, artifact in enumerate(made):
+        at = base + index * 60_000
+        artifact.setdefault("created_at", at + 10_000)
+        artifact.setdefault("updated_at", at + 10_000)
+        rows.append({"id": f"ask-{index}", "role": "user", "text": f"Make the {artifact['type'].replace('_', ' ')} please",
+                     "timestamp": iso_at(at)})
+        rows.append({"id": f"made-{artifact['artifact_id']}", "role": "assistant",
+                     "text": f"Here it is: **{artifact.get('title') or artifact.get('file_name', '')}**.",
+                     "timestamp": iso_at(at + 30_000)})
+    return rows, made
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -438,6 +487,23 @@ class Handler(BaseHTTPRequestHandler):
                 artifacts = body.get("artifacts", [])
             broadcast({"type": "artifact-updated", "session": body.get("session", "")})
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/artifact-chat":
+            # Test control: Rachel's (or `session`'s) chat becomes one reply
+            # per fixture artifact of `types`, and the artifacts are listed.
+            session = body.get("session", "rachel")
+            rows, made = artifact_chat(session, body.get("types", []), int(time.time() * 1000))
+            with state_lock:
+                for row in rows:
+                    revision += 1
+                    row["revision"] = revision
+                turns[session] = rows
+                artifacts = made + [a for a in artifacts if a.get("session") != session] if body.get("keep_others") else made
+                for agent in agents:
+                    if agent["session"] == session:
+                        agent["head_revision"] = revision
+            broadcast({"type": "transcript-updated", "session": session})
+            broadcast({"type": "artifact-updated", "session": session})
+            return self.reply(200, {"ok": True, "artifacts": made})
         if url.path == "/__control/jobs":
             # Test control: replace the job list, then push an optional event.
             global jobs

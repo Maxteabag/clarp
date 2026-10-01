@@ -18,19 +18,6 @@ export struct DisplayCell {
     phase: string,
 }
 
-// ArtifactSummaryCard.qml's content.
-export struct ArtifactItem {
-    id: string,
-    kind: string,
-    outcome: string,
-    failed: bool,
-    title: string,
-    summary: string,
-    progress: string,
-    countdown: string,
-    form: bool,
-}
-
 export component DisplayCellCard inherits Rectangle {
     in property <DisplayCell> cell;
     property <bool> open;
@@ -120,36 +107,6 @@ export component DisplayCellCard inherits Rectangle {
                 font-size: 11px;
             }
         }
-    }
-}
-
-export component ArtifactCard inherits Rectangle {
-    in property <ArtifactItem> artifact;
-    background: Palette.window;
-    border-width: 1px;
-    border-color: root.artifact.failed ? Palette.danger : Palette.border;
-    border-radius: 6px;
-    accessible-role: groupbox;
-    accessible-label: root.artifact.title;
-    VerticalLayout {
-        padding: 12px;
-        spacing: 6px;
-        HorizontalLayout {
-            Text { text: root.artifact.kind; color: Palette.chrome-text; font-size: 11px; horizontal-stretch: 1; }
-            Text { text: root.artifact.outcome; color: root.artifact.failed ? Palette.danger : Palette.text; font-size: 12px; }
-        }
-        Text { text: root.artifact.title; color: Palette.text; font-size: 15px; wrap: word-wrap; }
-        if root.artifact.summary != "": Text {
-            text: root.artifact.summary;
-            color: Palette.text;
-            font-size: 12px;
-            wrap: word-wrap;
-            overflow: elide;
-            max-height: 2 * 18px;
-        }
-        if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
-        if root.artifact.countdown != "": Text { text: root.artifact.countdown; color: Palette.text; font-size: 12px; wrap: word-wrap; }
-        if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
     }
 }
 
