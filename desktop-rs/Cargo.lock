@@ -1016,6 +1016,7 @@ dependencies = [
  "clarp-engine",
  "clarp-net",
  "futures-util",
+ "i-slint-backend-testing",
  "image",
  "ksni",
  "libc",

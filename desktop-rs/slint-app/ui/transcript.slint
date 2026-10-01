@@ -209,6 +209,9 @@ export component Transcript inherits FocusScope {
             padding-bottom: 7px;
             alignment: row.author == "user" ? end : stretch;
             Rectangle {
+                // One message of the list; the id finds it in the checks.
+                accessible-role: list-item;
+                accessible-id: "row:" + row.id;
                 background: row.author == "user" ? Palette.bubble : transparent;
                 border-radius: 2px;
                 max-width: row.author == "user" ? list.visible-width * 0.75 : list.visible-width;
