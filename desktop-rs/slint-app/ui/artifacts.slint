@@ -424,6 +424,42 @@ component DecisionBody inherits VerticalLayout {
     }
 }
 
+// A video's poster (iOS plays it inline; the desktop opens it in the
+// system's player): 180 px tall before and after the poster lands.
+component VideoBody inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    in property <color> tint;
+    spacing: 4px;
+    Rectangle {
+        height: 180px;
+        border-radius: 6px;
+        clip: true;
+        background: Palette.sunken;
+        if root.artifact.has-poster: Image {
+            width: parent.width;
+            height: parent.height;
+            source: root.artifact.poster;
+            image-fit: contain;
+        }
+        if root.artifact.action != "": Rectangle {
+            width: 44px;
+            height: 44px;
+            border-radius: 22px;
+            background: Palette.window.with-alpha(0.7);
+            Text { width: parent.width; height: parent.height; text: "▶"; color: root.tint; font-size: 18px; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        if root.artifact.media-length != "": Text {
+            x: parent.width - self.width - 8px;
+            y: parent.height - self.height - 6px;
+            text: root.artifact.media-length;
+            color: Palette.text;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+        }
+    }
+    if root.artifact.media-text != "": Text { text: root.artifact.media-text; color: Palette.warning; font-size: 11px; }
+}
+
 // An audio card's player (iOS: play/pause, progress, m:ss / m:ss and a
 // status line), one row and one line, whatever its state.
 component MediaBody inherits VerticalLayout {
@@ -633,6 +669,7 @@ export component ArtifactCard inherits Rectangle {
         }
         if root.artifact.sources != "": Text { text: root.artifact.sources; color: Palette.faint; font-size: 11px; }
         if root.artifact.kind == "audio": MediaBody { artifact: root.artifact; tint: root.tint; }
+        if root.artifact.kind == "video": VideoBody { artifact: root.artifact; tint: root.tint; }
         if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
         // Two lines, whatever the summary's length: a summary that grows
         // does not change the card's height.

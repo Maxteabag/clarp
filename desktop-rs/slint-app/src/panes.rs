@@ -247,6 +247,7 @@ impl App {
     }
 
     fn messages(&self, pane: &mut PaneState) {
+        crate::artifacts_view::settle_downloads(self, &pane.session);
         let presented = self.engine.borrow_mut().presented(&pane.session);
         let always = self.engine.borrow().activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE;
         let expanded = self.expanded.borrow();

@@ -109,6 +109,17 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         }
         "decision" | "question" => decision_fields(&mut item, artifact),
         "plan" => plan_fields(&mut item, artifact),
+        "video" => {
+            let length = number(artifact, "duration_ms") / 1000;
+            if length > 0 {
+                item.media_length = format!("{}:{:02}", length / 60, length % 60).into();
+            }
+            if host_path(&text(artifact, "url")).is_some() {
+                item.action = "Play video".into();
+            } else {
+                item.media_text = "Video unavailable".into();
+            }
+        }
         "audio" => {
             item.media_state = "idle".into();
             item.media_started = -1;
@@ -188,6 +199,90 @@ pub struct CardState<'a> {
     pub seen_pending: &'a std::collections::HashSet<String>,
 }
 
+thread_local! {
+    /// Posters fetched for video cards, by artifact.
+    static POSTERS: std::cell::RefCell<std::collections::HashMap<String, slint::Image>> = std::cell::RefCell::default();
+    /// Fetches in flight: (artifact, purpose), and for "open" the file name.
+    static FETCHING: std::cell::RefCell<std::collections::HashMap<(String, String), String>> = std::cell::RefCell::default();
+}
+
+/// Before a chat's cards are drawn: asks for posters not yet fetched, and
+/// takes what has arrived (posters decoded, files saved and opened).
+pub fn settle_downloads(app: &App, session: &str) {
+    let artifacts = app.engine.borrow().artifacts_for_session(session);
+    for artifact in &artifacts {
+        let id = text(artifact, "artifact_id");
+        let poster = text(artifact, "thumbnail_url");
+        let key = (id.clone(), "poster".to_owned());
+        let wanted = POSTERS.with(|p| !p.borrow().contains_key(&id)) && !FETCHING.with(|f| f.borrow().contains_key(&key));
+        if text(artifact, "type") == "video" && host_path(&poster).is_some() && wanted {
+            FETCHING.with(|f| f.borrow_mut().insert(key, String::new()));
+            app.engine.borrow_mut().fetch_artifact_bytes(&id, "poster", &poster);
+        }
+    }
+    let pending: Vec<((String, String), String)> = FETCHING.with(|f| f.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+    for ((id, purpose), name) in pending {
+        let Some(result) = app.engine.borrow_mut().take_artifact_bytes(&id, &purpose) else { continue };
+        FETCHING.with(|f| f.borrow_mut().remove(&(id.clone(), purpose.clone())));
+        match (purpose.as_str(), result) {
+            ("poster", Ok(bytes)) => match image::load_from_memory(&bytes) {
+                Ok(decoded) => {
+                    let rgba = decoded.to_rgba8();
+                    let buffer = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
+                    POSTERS.with(|p| p.borrow_mut().insert(id, slint::Image::from_rgba8(buffer)));
+                }
+                Err(error) => eprintln!("clarp-slint: the poster for {id} is not an image: {error}"),
+            },
+            ("poster", Err(error)) => eprintln!("clarp-slint: no poster for {id}: {error}"),
+            (_, Ok(bytes)) => {
+                let said = match save_and_open(&id, &name, &bytes) {
+                    Ok(()) => if purpose == "video" { "Opened in your video player" } else { "Opened" }.to_owned(),
+                    Err(error) => format!("Couldn't open it: {error}"),
+                };
+                app.engine.borrow_mut().set_artifact_status(&id, &said);
+            }
+            (_, Err(error)) => app.engine.borrow_mut().set_artifact_status(&id, &format!("Couldn't download it: {error}")),
+        }
+    }
+}
+
+/// Saves a downloaded artifact under the cache (its own folder, its file's
+/// own name) and opens it with the desktop's app for it; checks record it
+/// to `CLARP_TEST_OPEN_URL` instead.
+fn save_and_open(id: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+    let root = clarp_core::media::cache_dir().ok_or("no cache folder")?;
+    let safe = |s: &str| s.chars().map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') { c } else { '_' }).collect::<String>();
+    let file = std::path::Path::new(name).file_name().map(|n| safe(&n.to_string_lossy())).filter(|n| !n.is_empty() && n != "." && n != "..").unwrap_or_else(|| "artifact".into());
+    let folder = root.join("artifacts").join(safe(id));
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let path = folder.join(file);
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    if let Some(record) = std::env::var_os("CLARP_TEST_OPEN_URL") {
+        use std::io::Write;
+        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(record).map_err(|e| e.to_string())?;
+        return writeln!(log, "file://{}", path.display()).map_err(|e| e.to_string());
+    }
+    std::process::Command::new("xdg-open").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Downloads an artifact's file from the Host to open it.
+fn download(app: &App, artifact: &Value, purpose: &str) {
+    let id = text(artifact, "artifact_id");
+    let url = text(artifact, "url");
+    let Some(path) = host_path(&url) else {
+        eprintln!("clarp-slint: not downloading {url}: only the Host's media is fetched");
+        return;
+    };
+    let key = (id.clone(), purpose.to_owned());
+    if FETCHING.with(|f| f.borrow().contains_key(&key)) {
+        return;
+    }
+    let name = [text(artifact, "file_name"), text(artifact, "title")].into_iter().find(|n| !n.is_empty()).unwrap_or_default();
+    FETCHING.with(|f| f.borrow_mut().insert(key, name));
+    app.engine.borrow_mut().set_artifact_status(&id, "Downloading…");
+    app.engine.borrow_mut().fetch_artifact_bytes(&id, purpose, path);
+}
+
 /// A Host-relative media path (`/media/<asset>`); iOS also plays https
 /// links, but the app only fetches from its Host, with its token.
 fn host_path(url: &str) -> Option<&str> {
@@ -244,6 +339,10 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     item.status_text = engine.artifact_status(&item.id).into();
     if item.kind == "audio" && !item.action.is_empty() {
         media_fields(&mut item);
+    }
+    if let Some(poster) = POSTERS.with(|p| p.borrow().get(item.id.as_str()).cloned()) {
+        item.poster = poster;
+        item.has_poster = true;
     }
     if item.pending {
         let choices = item.options.row_count() + usize::from(item.allow_custom);
@@ -778,6 +877,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
             }
         }
         "decision" | "question" => return send(app, id),
+        "video" => download(app, &artifact, "video"),
         "audio" => {
             let url = text(&artifact, "url");
             match host_path(&url) {
