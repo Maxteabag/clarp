@@ -39,7 +39,7 @@ def decision_queues_if_busy(pending: dict) -> bool:
     queue when the originating agent is busy; dismissing an inbox item must
     never interrupt an unrelated in-flight turn.
     """
-    return (pending.get("response_type") == "single_choice"
+    return (pending.get("response_type") in ("single_choice", "text_input")
             or pending.get("choice") not in {"accepted", "rejected"})
 
 

@@ -44,6 +44,15 @@ shows a readable error. Archived items can be restored.
   decision push is `time-sensitive` only when it blocks progress *and* has
   `urgency: time_sensitive`.
 
+## Urgent typed input and expiry (Host contract 29)
+
+`response_type: "text_input"` asks for a typed value such as an SMS code. It has
+no options, resolves only with `{"answer": {"text": ...}}`, and may carry
+`input_hint: "one_time_code"`. Its push uses category `input-request`, so the
+app offers an inline reply on the notification. Any request may set
+`expires_at`; at expiry it becomes `expired` (artifact kept, agent notified).
+Agents use `clarp-agent-artifacts input ... --expires-in S` and `wait`.
+
 ## Host contract
 
 Creation continues to use `POST /decisions`; old requests default to an approval.

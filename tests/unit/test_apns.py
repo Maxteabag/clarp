@@ -968,3 +968,14 @@ def test_push_hook_failure_does_not_undo_the_request(tmp_path, monkeypatch):
     monkeypatch.setattr(apns, "on_decision_created", boom)
     created = artifacts.create_decision(session="nadia", title="Deploy?", question="Now?")
     assert artifacts.get(created["artifact_id"])["decision"]["status"] == "pending"
+
+
+def test_text_input_push_offers_an_inline_reply():
+    p = apns.decision_payload("Rita", "rita", "SMS code", "Enter the code",
+                              decision_id="d9", artifact_id="a9", time_sensitive=True,
+                              text_input=True, revision=1, expires_at=123)
+    assert p["aps"]["category"] == "input-request"
+    assert p["aps"]["interruption-level"] == "time-sensitive"
+    assert p["response_type"] == "text_input" and p["revision"] == 1 and p["expires_at"] == 123
+    plain = apns.decision_payload("Rita", "rita", "Deploy?", "Now?", decision_id="d1", artifact_id="a1")
+    assert "category" not in plain["aps"] and "response_type" not in plain

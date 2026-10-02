@@ -314,6 +314,8 @@ def _public(row) -> dict:
             "SELECT * FROM artifact_decisions WHERE artifact_id=?", (item["artifact_id"],)).fetchone()
         item["decision"] = (_public_decision(decision, archived_at=item["archived_at"])
                             if decision else None)
+        if item["decision"] and item["decision"]["response_type"] == "text_input":
+            item["decision"]["input_hint"] = _input_hint(item["payload"])
     elif item["type"] == "plan" and item.get("reference_id"):
         from . import task_plans
         item["plan"] = task_plans.get(item["reference_id"])
@@ -482,6 +484,11 @@ def _priority(item: dict) -> int:
     return (200 if item["blocks_progress"] else 100) + (10 if item["urgency"] == "time_sensitive" else 0)
 
 
+def _input_hint(payload: Any) -> str:
+    hint = payload.get("input_hint") if isinstance(payload, dict) else None
+    return hint if hint in ("text", "one_time_code") else "text"
+
+
 def _public_decision(row, *, archived_at: int | None = None) -> dict:
     item = dict(row)
     item["options"] = json.loads(item.pop("options_json"))
@@ -502,13 +509,24 @@ def create_decision(*, session: str, title: str, question: str, context: str = "
                     recommended_option_id: str | None = None,
                     blocks_progress: bool = False, priority_reason: str = "",
                     urgency: str = "normal", response_effort: str = "review",
-                    deadline_at: int | None = None) -> dict:
+                    deadline_at: int | None = None, input_hint: str | None = None) -> dict:
     question = _decision_text(question, "decision question", 4000, required=True)
     context = _decision_text(context, "decision context", 16000)
     yes_label = _decision_text(yes_label, "decision label", 80) or "Yes"
     no_label = _decision_text(no_label, "decision label", 80) or "No"
-    if response_type not in ("approval", "single_choice"):
+    if response_type not in ("approval", "single_choice", "text_input"):
         raise ValueError("unsupported response_type")
+    if response_type == "text_input":
+        # A typed answer the agent needs, e.g. an SMS code. Old clients render
+        # it as a question with only "Write my own answer", which still works.
+        if options not in (None, []) or recommended_option_id is not None or allow_custom_text is False:
+            raise ValueError("text input requests take no options")
+        allow_custom_text = True
+        if input_hint not in (None, "text", "one_time_code"):
+            raise ValueError("input_hint must be text or one_time_code")
+        payload = {**(payload if isinstance(payload, dict) else {}), "input_hint": input_hint or "text"}
+    elif input_hint is not None:
+        raise ValueError("input_hint applies only to text input requests")
     if allow_custom_text is None:
         allow_custom_text = response_type == "single_choice"
     if not isinstance(allow_custom_text, bool):
@@ -529,6 +547,8 @@ def create_decision(*, session: str, title: str, question: str, context: str = "
                 recommended_option_id, "recommended_option_id", 80, required=True)
             if recommended_option_id not in {option["id"] for option in options}:
                 raise ValueError("recommended_option_id must identify an option")
+    elif response_type == "text_input":
+        options = []
     else:
         if options is not None or recommended_option_id is not None or allow_custom_text:
             raise ValueError("approval requests do not support options or custom text")
@@ -541,7 +561,7 @@ def create_decision(*, session: str, title: str, question: str, context: str = "
         _integer(deadline_at, "deadline_at")
     con = db.conn(); con.execute("BEGIN IMMEDIATE")
     try:
-        artifact = _create(session=session, type="question" if response_type == "single_choice" else "decision",
+        artifact = _create(session=session, type="decision" if response_type == "approval" else "question",
                            title=title, summary=question, status="active",
                            reference_id=reference_id, payload=payload)
         con.execute(
@@ -577,10 +597,12 @@ def _answer(row, *, choice: Any, answer: Any) -> tuple[str, dict]:
         if choice not in {"accepted", "rejected"}:
             raise ValueError("invalid decision choice")
         return choice, {"choice": choice}
-    if row["response_type"] != "single_choice":
+    if row["response_type"] not in ("single_choice", "text_input"):
         raise ValueError("unsupported response_type")
     if choice is not None:
         raise ValueError("questions require a typed answer, not a binary choice")
+    if row["response_type"] == "text_input" and (not isinstance(answer, dict) or set(answer) != {"text"}):
+        raise ValueError("text input requests take a text answer")
     if not isinstance(answer, dict) or set(answer) not in ({"option_id"}, {"text"}):
         raise ValueError("answer must contain exactly one of option_id or text")
     if "option_id" in answer:
@@ -811,15 +833,22 @@ def attention(*, include_questions: bool = False, include_archived: bool = False
     _expire_decisions()
     rows = db.conn().execute(
         """SELECT d.*,a.agent_id,a.session,a.title,a.summary,a.created_at,a.updated_at,a.archived_at,
+                  a.payload_json AS artifact_payload_json,
                   g.persona AS agent_name FROM artifact_decisions d JOIN artifacts a
                   ON a.artifact_id=d.artifact_id JOIN agents g ON g.agent_id=a.agent_id
             WHERE d.status='pending' AND a.deleted_at IS NULL AND g.deleted_at IS NULL
               AND (? OR d.response_type='approval') AND (? OR a.archived_at IS NULL)
               AND (d.expires_at IS NULL OR d.expires_at>?)""",
         (include_questions, include_archived, db.now_ms())).fetchall()
-    items = [{**_public_decision(row, archived_at=row["archived_at"]),
-              "kind": "question" if row["response_type"] == "single_choice" else "decision"}
-             for row in rows]
+    items = []
+    for row in rows:
+        item = {**_public_decision(row, archived_at=row["archived_at"]),
+                "kind": "decision" if row["response_type"] == "approval" else "question"}
+        payload_json = item.pop("artifact_payload_json", None)
+        if row["response_type"] == "text_input":
+            try: item["input_hint"] = _input_hint(json.loads(payload_json or "{}"))
+            except json.JSONDecodeError: item["input_hint"] = "text"
+        items.append(item)
     return sorted(items, key=lambda item: (
         -item["priority"], item["deadline_at"] is None, item["deadline_at"] or 0,
         item["created_at"], item["decision_id"]))
@@ -845,7 +874,7 @@ def format_delivery_prompt(delivery: dict) -> str:
     elif choice == "dismissed":
         outcome = ("The user discarded this request. This is not an answer or approval. Do not "
                    "guess permission or repeat the unchanged request. Continue independent work only.")
-    elif response_type == "single_choice" and choice == "answered" and isinstance(answer, dict):
+    elif response_type in ("single_choice", "text_input") and choice == "answered" and isinstance(answer, dict):
         outcome = ("The user answered this clarification: " + json.dumps(answer, ensure_ascii=False)
                    + ". Continue using this answer. This does not grant approval for unrelated protected actions.")
     elif response_type == "approval" and choice in {"accepted", "rejected"}:
