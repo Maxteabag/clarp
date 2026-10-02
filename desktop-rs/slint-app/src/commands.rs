@@ -62,8 +62,12 @@ pub fn overrides(app: &App) -> keymap::Overrides {
 /// Updates the shortcut bar for where the keyboard is.
 pub fn show_hints(app: &App, window: &AppWindow) {
     let state = context(app, window);
-    let hints: Vec<Hint> = keymap::hints(state, &overrides(app), facts(app, window))
+    let card_keys = if state == "pane" { crate::artifacts_view::selected_hints(app) } else { None };
+    let mut hints: Vec<Hint> = keymap::hints(state, &overrides(app), facts(app, window))
         .into_iter()
+        // The keyboard's card says what its keys do (below).
+        .filter(|b| card_keys.is_none() || !b.action.starts_with("artifact-") || b.action == "artifact-previous")
+        .filter(|b| b.action != "artifact-open")
         .map(|b| Hint {
             // J and K both walk the cards.
             keys: if b.action == "artifact-previous" { "J/K".into() } else { b.keys.first().map(|k| k.replace("Return", "Enter").replace("Escape", "Esc")).unwrap_or_default().into() },
@@ -74,6 +78,16 @@ pub fn show_hints(app: &App, window: &AppWindow) {
             },
         })
         .collect();
+    if let Some(keys) = card_keys {
+        let at = hints.iter().position(|h| h.label == "Cards").map_or(0, |i| i + 1);
+        for (offset, (keys, label)) in keys.into_iter().enumerate() {
+            hints.insert(at + offset, Hint { keys: keys.into(), label: label.into() });
+        }
+    }
+    // From the composer, the way onto the chat's cards.
+    if state == "composer" && crate::artifacts_view::has_cards(app) && !window.global::<crate::ArtifactBridge>().get_editing() {
+        hints.push(Hint { keys: "Esc K".into(), label: "Cards".into() });
+    }
     let mode = match state {
         "composer" => "INSERT".to_owned(),
         "sidebar" => "EXPLORER".to_owned(),
@@ -203,9 +217,19 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             None => return false,
         },
         "artifact-open" => match crate::artifacts_view::selected(app) {
-            Some(id) => crate::artifacts_view::open(app, window, &id),
+            Some(id) => crate::artifacts_view::activate(app, window, &id),
             None => return false,
         },
+        "artifact-back" | "artifact-forward" => {
+            if !crate::artifacts_view::nudge(app, window, if action == "artifact-back" { -1 } else { 1 }) {
+                return false;
+            }
+        }
+        "artifact-stop" => {
+            if !crate::artifacts_view::stop(app) {
+                return false;
+            }
+        }
         "focus-pane" => app.focus_transcript(),
         "focus-composer" => app.focus_composer(),
         "toggle-focus" => {
@@ -605,6 +629,13 @@ pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
 pub fn close_overlay(app: &App, window: &AppWindow) {
     app.overlay.borrow_mut().clear();
     window.set_overlay("".into());
+    // A viewer opened from a card gives the keyboard back to the chat, on
+    // that card.
+    if crate::artifacts_view::take_return() && window.get_surface() == "chats" {
+        app.focus_transcript();
+        show_hints(app, window);
+        return;
+    }
     // ---- updates and teams
     match window.get_surface().as_str() {
         "updates" => window.invoke_focus_updates(),

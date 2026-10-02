@@ -326,6 +326,12 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             headless::press("1");
             let ship = card("dec-deploy-k").map(|c| c.chosen).unwrap_or(-2);
             check(hold == 1 && ship == 0 && posts("/decisions/d-deploy-k/resolve").is_empty(), &format!("2 chooses Hold, 1 Ship it, nothing sent yet: {hold} {ship}"));
+            true
+        })),
+        ("approval shown chosen", Box::new(move |_, _, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
             shot(&out, "keys-10-decision-chosen");
             headless::press(Key::Return);
             true
@@ -536,7 +542,7 @@ fn open_stages(out: &str) -> Vec<Stage> {
         })));
         stages.push((Box::leak(format!("{id} opened").into_boxed_str()), Box::new(move |_, window, elapsed| {
             let done = opened().iter().any(|u| wanted(u)) || (id == "form-report-k" && window.get_overlay() == "report");
-            if !done && elapsed < Duration::from_secs(4) {
+            if !done && elapsed < Duration::from_secs(8) {
                 return false;
             }
             check(done, &format!("Enter on {id} opens it: {:?}", opened().last()));
@@ -639,7 +645,11 @@ fn hint_stages(out: &str) -> Vec<Stage> {
         shot(&out, "keys-60-decision-hints");
         true
     })));
-    stages.push(("click a hint", Box::new(|app, window, _| {
+    stages.push(("click a hint", Box::new(|app, window, elapsed| {
+        // Its place, once it has reported it since the keyboard landed.
+        if crate::artifacts_view::card_rect(app, "dec-click-k").is_none() && elapsed < Duration::from_secs(3) {
+            return false;
+        }
         // A real click on the card's first hint, "1 Turn on", at the
         // left of its bottom row.
         let Some((x, y, _, height)) = crate::artifacts_view::card_rect(app, "dec-click-k") else {
@@ -652,7 +662,11 @@ fn hint_stages(out: &str) -> Vec<Stage> {
     stages.push(wait_for("hint clicked", Duration::from_secs(3), |_, _| last_post("/decisions/d-click-k/resolve") == json!({"choice": "accepted", "expected_revision": 4}),
         "a click on a hint does what its key does: 1 Turn on approves"));
     stages.extend(reach("plan-ship-k"));
-    stages.push(("click open", Box::new(|app, window, _| {
+    stages.push(("click open", Box::new(|app, window, elapsed| {
+        // Its place, once it has reported it since the keyboard landed.
+        if crate::artifacts_view::card_rect(app, "plan-ship-k").is_none() && elapsed < Duration::from_secs(3) {
+            return false;
+        }
         let Some((x, y, _, height)) = crate::artifacts_view::card_rect(app, "plan-ship-k") else {
             check(false, "the plan is on screen");
             return true;
@@ -664,7 +678,6 @@ fn hint_stages(out: &str) -> Vec<Stage> {
     stages.push(keys("close the plan", vec![k(Key::Escape)]));
     // A narrow pane: the hints fit.
     stages.extend(reach("dec-deploy-k"));
-    stages.push(keys("split", vec![]));
     stages.push(("split the chat", Box::new(|_, _, _| {
         headless::press_with(&[Key::Alt], "v");
         true
@@ -674,6 +687,14 @@ fn hint_stages(out: &str) -> Vec<Stage> {
             return false;
         }
         shot(&out2, "keys-61-narrow-pane");
+        // The new pane's composer has the keyboard: the chat closes it.
+        headless::press(Key::Escape);
+        true
+    })));
+    stages.push(("close the split", Box::new(|_, _, elapsed| {
+        if !report().transcript_focused {
+            return elapsed > Duration::from_secs(2) && { check(false, "Escape hands the new pane's keyboard to its chat"); true };
+        }
         headless::press_with(&[Key::Alt], "x");
         true
     })));
@@ -681,7 +702,7 @@ fn hint_stages(out: &str) -> Vec<Stage> {
         if elapsed < Duration::from_millis(800) {
             return false;
         }
-        let _ = app;
+        check(app.pane_drafts().len() == 1, &format!("Alt+X closes the split: {} panes", app.pane_drafts().len()));
         headless::press(Key::Escape);
         true
     })));

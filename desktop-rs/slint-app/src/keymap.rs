@@ -134,6 +134,10 @@ fn state(name: &str) -> Vec<Binding> {
             b("artifact-open", &["Return"], "Open", true, Artifact, false),
             b("artifact-choose", &["1", "2", "3", "4", "5", "6", "7", "8", "9"], "Choose", false, Artifact, false),
             b("artifact-discard", &["Delete"], "Discard", false, Artifact, false),
+            // A gallery's tiles, an audio clip's position; S stops a clip.
+            b("artifact-back", &["Left"], "Back", false, Artifact, false),
+            b("artifact-forward", &["Right"], "Forward", false, Artifact, false),
+            b("artifact-stop", &["S"], "Stop", false, Artifact, false),
             b("move-left", &["Alt+Left", "Ctrl+Alt+Left"], "Left pane", false, Always, false),
             b("move-right", &["Alt+Right", "Ctrl+Alt+Right"], "Right pane", false, Always, false),
             b("move-up", &["Alt+Up", "Ctrl+Alt+Up"], "Upper pane", false, Always, false),

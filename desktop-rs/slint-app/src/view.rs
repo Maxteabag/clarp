@@ -357,9 +357,17 @@ pub(crate) fn message_row(
     MessageRow {
         id: m.id.clone().into(),
         author: author.into(),
-        blocks: ModelRc::new(VecModel::from(
-            blocks.iter().flat_map(|b| crate::artifacts_view::with_images(b, author == "user")).collect::<Vec<_>>(),
-        )),
+        blocks: ModelRc::new(VecModel::from({
+            let mut shown: Vec<crate::MessageBlock> = blocks.iter().flat_map(|b| crate::artifacts_view::with_images(b, author == "user")).collect();
+            // Image blocks the keyboard reaches (J/K) and enlarges: not the
+            // web's, which are never fetched.
+            for (index, block) in shown.iter_mut().enumerate() {
+                if block.kind == "images" && slint::Model::iter(&block.images).any(|i| !i.foreign) {
+                    block.key = crate::artifacts_view::image_key(&m.id, index).into();
+                }
+            }
+            shown
+        })),
         sender: if from_agent { m.sender_name.clone() } else { String::new() }.into(),
         stamp: message_stamp(&m.timestamp).into(),
         meta: SharedString::new(),

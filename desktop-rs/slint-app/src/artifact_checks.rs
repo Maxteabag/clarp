@@ -769,7 +769,8 @@ fn plan_stages(out: &str) -> Vec<Stage> {
             true
         })),
         ("plan closed", Box::new(|_, window, elapsed| {
-            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+            // The viewer had the keyboard: the chat gets it back a moment later.
+            if (!window.get_overlay().is_empty() || !report().transcript_focused) && elapsed < Duration::from_secs(2) {
                 return false;
             }
             check(window.get_overlay().is_empty() && report().transcript_focused, "Escape closes it, back on the chat");

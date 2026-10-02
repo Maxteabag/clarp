@@ -2,7 +2,7 @@ import { ListView } from "std-widgets.slint";
 import { Palette } from "theme.slint";
 import { Modal } from "dialogs.slint";
 import { Block, MessageBlock } from "transcript.slint";
-import { IconButton } from "updates.slint";
+import { KeyHint } from "artifacts.slint";
 
 // ReportView.qml: a read-only reading surface for an agent's report. The
 // body is Markdown drawn as the transcript's blocks; an HTML body arrives
@@ -19,6 +19,33 @@ export component ReportView inherits Modal {
     callback done();
     // How far the body is scrolled (0 at its top).
     out property <length> offset: body.content-y;
+    // How many links its body has: 1-9 open them, in order.
+    in property <int> links;
+    callback open-link(int);
+    // The keyboard reads it: arrows and Page keys scroll it.
+    public function focus-body() { keys.focus(); }
+    // Home and End: the list measures rows as they draw, so the top or the
+    // end is pinned for a few frames until it holds.
+    property <int> pin-ticks;
+    property <bool> pin-end;
+    Timer {
+        interval: 16ms;
+        running: root.pin-ticks > 0;
+        triggered => {
+            if (root.pin-ticks <= 0) { return; }
+            body.content-y = root.pin-end ? Math.min(0px, body.visible-height - body.content-height) : 0px;
+            root.pin-ticks -= 1;
+        }
+    }
+    function pin(end: bool) {
+        root.pin-end = end;
+        root.pin-ticks = 30;
+        body.content-y = end ? Math.min(0px, body.visible-height - body.content-height) : 0px;
+    }
+    function scroll(delta: length) {
+        root.pin-ticks = 0;
+        body.content-y = Math.max(Math.min(0px, body.visible-height - body.content-height), Math.min(0px, body.content-y - delta));
+    }
     card-width: 980px;
     card-height: 2000px;
     dismissed => { root.done(); }
@@ -38,17 +65,32 @@ export component ReportView inherits Modal {
                     if root.summary != "": Text { text: root.summary; color: Palette.muted; font-size: 12px; overflow: elide; }
                 }
                 Text { text: root.kind != "" ? root.kind : root.html ? "HTML" : "MARKDOWN"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
-                IconButton {
-                    icon: @image-url("icons/rail-close.svg");
-                    label: "Close report";
-                    clicked => { root.done(); }
-                }
+                KeyHint { key: "↑/↓"; label: "Scroll"; emphasised: true; }
+                if root.links > 0: KeyHint { key: root.links == 1 ? "1" : "1-" + Math.min(9, root.links); label: root.links == 1 ? "Open link" : "Open links"; emphasised: true; clicked => { root.open-link(0); } }
+                KeyHint { key: "Esc"; label: "Close"; emphasised: true; clicked => { root.done(); } }
             }
             Rectangle { height: 1px; background: Palette.border; }
             if root.blocks.length == 0: Text {
                 text: "This artifact has no readable body.";
                 color: Palette.muted;
                 font-size: 13px;
+            }
+            keys := FocusScope {
+                width: 0px;
+                height: 0px;
+                key-pressed(event) => {
+                    if (event.text == Key.UpArrow) { root.scroll(-40px); return accept; }
+                    if (event.text == Key.DownArrow) { root.scroll(40px); return accept; }
+                    if (event.text == Key.PageUp) { root.scroll(-body.visible-height * 0.9); return accept; }
+                    if (event.text == Key.PageDown || event.text == " ") { root.scroll(body.visible-height * 0.9); return accept; }
+                    if (event.text == Key.Home) { root.pin(false); return accept; }
+                    if (event.text == Key.End) { root.pin(true); return accept; }
+                    if (event.text.character-count == 1 && event.text.is-float() && event.text != "0") {
+                        root.open-link(event.text.to-float() - 1);
+                        return accept;
+                    }
+                    reject
+                }
             }
             body := ListView {
                 vertical-stretch: 1;

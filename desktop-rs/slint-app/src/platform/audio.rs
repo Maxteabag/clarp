@@ -257,6 +257,35 @@ impl Audio {
         self.notices.push(Notice::Changed);
     }
 
+    /// Left/Right on a card: moves its clip by `delta` seconds, within its
+    /// `length` when known.
+    pub fn seek_media(&mut self, artifact: &str, delta: i64, length: Option<Duration>) {
+        let Some(media) = self.media.as_mut().filter(|m| m.artifact == artifact && matches!(m.state, MediaState::Playing | MediaState::Paused)) else { return };
+        let now = media.position().as_secs_f64();
+        let mut to = (now + delta as f64).max(0.0);
+        if let Some(length) = length {
+            to = to.min(length.as_secs_f64().max(0.0));
+        }
+        let to = Duration::from_secs_f64(to);
+        media.played = to;
+        if media.since.is_some() {
+            media.since = Some(std::time::Instant::now());
+        }
+        self.output.seek(to);
+        self.notices.push(Notice::Changed);
+    }
+
+    /// S on a card: stops its clip (playing, paused or preparing).
+    pub fn stop_media(&mut self, artifact: &str) {
+        if !self.media.as_ref().is_some_and(|m| m.artifact == artifact) {
+            return;
+        }
+        self.media = None;
+        self.output_generation += 1;
+        self.output.stop();
+        self.notices.push(Notice::Changed);
+    }
+
     fn media_event(&mut self, generation: u64, event: OutputEvent) {
         let Some(media) = self.media.as_mut().filter(|m| m.generation == generation && generation == self.output_generation) else { return };
         match event {
