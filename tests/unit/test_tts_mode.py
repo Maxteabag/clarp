@@ -99,9 +99,13 @@ def test_gemini_voice_follows_cartesia_voice_or_stays_silent(env, providers, mon
     env.update(helper=helper, silent=silent)
     _speak(env, "helper", "r1")
     assert providers == [{"provider": "gemini", "voice": "voice_au"}]
+    from lib import db
+    clips_before = db.conn().execute("SELECT count(*) FROM clips").fetchone()[0]
     row = _speak(env, "silent", "janitor")
     assert row["status"] == tts_queue.FAILED
     assert len(providers) == 1
+    # No clip is announced for audio that can never be made.
+    assert db.conn().execute("SELECT count(*) FROM clips").fetchone()[0] == clips_before
 
 
 def test_config_reads_agent_overrides(tmp_path):
@@ -143,3 +147,29 @@ def test_gemini_sse_stream_yields_pcm_and_surfaces_errors():
     assert list(iter_pcm(lines)) == [pcm]
     with pytest.raises(GeminiTTSError):
         list(iter_pcm([b'data: {"error": {"code": 429}}']))
+
+
+def test_gemini_retries_a_busy_response_before_any_audio(monkeypatch, tmp_path):
+    import io, shutil, urllib.error
+    from lib import gemini_tts
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    chunk = {"candidates": [{"content": {"parts": [{"inlineData": {
+        "data": base64.b64encode(b"\x00\x00" * 2400).decode()}}]}}]}
+    calls = []
+
+    class Body(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_urlopen(req, timeout):
+        calls.append(1)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(req.full_url, 503, "busy", {}, io.BytesIO(b"{}"))
+        return Body(("data: " + json.dumps(chunk) + "\n").encode())
+
+    monkeypatch.setattr(gemini_tts.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(gemini_tts.time, "sleep", lambda s: None)
+    out = tmp_path / "clip.mp3"
+    assert gemini_tts.synthesize(text="hi", voice="Kore", out_path=out, api_key="k") > 0
+    assert len(calls) == 2 and out.stat().st_size > 0

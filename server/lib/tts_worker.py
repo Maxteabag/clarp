@@ -110,6 +110,16 @@ def synth_one(*,
                 if (clip_route.provider != CARTESIA
                         and getattr(active_delivery, "name", "") == "raw-pcm"):
                     active_delivery = ChunkedFileDelivery(broker=broker)
+                if not _route_has_voice(voice_config, row, agent, clip_route):
+                    # Nothing can speak this: fail before a clip is announced,
+                    # or the phone waits for audio that never comes.
+                    result = _PwaStreamResult(
+                        False, error=f"no {clip_route.provider} voice configured "
+                                     f"for {(agent or {}).get('persona')!r}")
+                    tts_queue.mark_failed(queue_id, result.error)
+                    _emit("tts_worker", "noVoice", context=_event_context(row, agent),
+                          detail={"provider": clip_route.provider})
+                    return True
                 _emit("tts_worker", "route",
                       context=_event_context(row, agent),
                       detail={"provider": clip_route.provider,
@@ -183,6 +193,40 @@ class _PwaStreamResult:
     clip_id: int | None = None
 
 
+def _gemini_voice(cfg, raw_voice, persona: str, agent: dict | None,
+                  route_voice: str | None, cartesia_voice: str | None) -> str | None:
+    """Gemini voice for this clip, or None when the agent has none.
+
+    A helper speaking with a contact's Cartesia voice keeps that contact's
+    Gemini voice. The default voice is only for agents moved to Gemini on
+    purpose; a contact with no voice stays silent, as it would under Cartesia.
+    """
+    return (route_voice or resolve_voice(raw_voice, GEMINI)
+            or cfg.gemini_voice_for(persona)
+            or cfg.gemini_voice_for_cartesia(cartesia_voice)
+            or (cfg.gemini_voice
+                if cfg.tts_override_for(agent).get("provider") == GEMINI else None))
+
+
+def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
+    """False only when the routed provider certainly has no voice and no
+    fallback could speak instead (Cartesia and Gemini; others decide later)."""
+    if clip_route.fallback:
+        return True
+    raw_voice = row.get("voice_id")
+    persona = (agent or {}).get("persona", "")
+    route_voice = clip_route.voice
+    cartesia_voice = ((route_voice if clip_route.provider == CARTESIA else None)
+                      or resolve_voice(raw_voice, CARTESIA)
+                      or cfg.cartesia_voice_for(persona))
+    if clip_route.provider == CARTESIA:
+        return bool(cartesia_voice)
+    if clip_route.provider == GEMINI:
+        return bool(_gemini_voice(cfg, raw_voice, persona, agent,
+                                  route_voice, cartesia_voice))
+    return True
+
+
 def _synthesize(*, cfg, row: dict, agent: dict,
                 out_path, on_chunk, trace_id,
                 delivery_fields: dict | None = None,
@@ -253,16 +297,9 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 trace_id=trace_id)
         if selected == GEMINI:
             from .gemini_tts import GeminiTTSError, synthesize as gemini_synthesize
-            gemini_voice = (
-                voice_for(GEMINI) or cfg.gemini_voice_for(persona)
-                # A helper speaking with a contact's Cartesia voice keeps
-                # that contact's Gemini voice.
-                or cfg.gemini_voice_for_cartesia(cartesia_voice)
-                # The default voice is only for agents moved to Gemini on
-                # purpose; a contact with no voice stays silent as before.
-                or (cfg.gemini_voice
-                    if cfg.tts_override_for(agent).get("provider") == GEMINI
-                    else None))
+            gemini_voice = _gemini_voice(
+                cfg, raw_voice, persona, agent,
+                clip_route.voice if provider == GEMINI else None, cartesia_voice)
             if not gemini_voice:
                 raise GeminiTTSError(f"no Gemini voice configured for {persona!r}")
             return gemini_synthesize(

@@ -188,3 +188,17 @@ def test_language_settings_round_trip_and_reject_bad_values(keys):
                 {"agent_languages": {"Mochi": "norsk"}}):
         with pytest.raises(ValueError):
             stt_providers.update_settings(bad)
+
+
+def test_recording_chat_beats_the_shared_focus(cartesia_by_language, tmp_path):
+    from lib import agents, client_chat, stt_language
+    asked = cartesia_by_language
+    agents.create_agent(persona="Mochi", voice_id="", cwd=str(tmp_path), session="mochi")
+    orion = agents.create_agent(persona="Orion", voice_id="", cwd=str(tmp_path), session="orion")
+    stt_providers.update_settings({"agent_languages": {"Mochi": "no"}})
+    agents.set_focus(orion)            # moved by someone else's activity
+    client_chat.record("device-1", "mochi")
+    assert client_chat.current("device-1") == "mochi" and client_chat.current("device-2") == ""
+    with stt_language.bound_session(client_chat.current("device-1")):
+        stt_providers.transcribe("cartesia:ink-whisper", b"x", "audio/wav", "")
+    assert asked == ["no"]

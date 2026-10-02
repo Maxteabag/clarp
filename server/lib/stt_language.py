@@ -10,6 +10,8 @@ has focus, the same agent the transcript is recorded against.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import re
 
@@ -19,6 +21,23 @@ LANGUAGE_KEY = "transcription.language"
 AGENT_LANGUAGES_KEY = "transcription.agent_languages"
 DEFAULT_LANGUAGE = "en"
 _CODE = re.compile(r"^[a-z]{2,3}$")
+# The chat the clip being transcribed belongs to, set by the transcription
+# pipeline for the duration of one engine call (same thread).
+_SESSION: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "transcription_session", default=None)
+
+
+@contextlib.contextmanager
+def bound_session(session: str | None):
+    token = _SESSION.set(session or None)
+    try:
+        yield
+    finally:
+        _SESSION.reset(token)
+
+
+def current_session() -> str | None:
+    return _SESSION.get()
 
 
 def selected() -> str:

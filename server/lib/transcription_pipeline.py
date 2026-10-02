@@ -120,8 +120,10 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         # 429 — best-effort live-transcription partials must yield to it.
         model_transcribe = getattr(stt, "transcribe_model_bytes", None)
         if requested_model and callable(model_transcribe):
-            text, ends_terminal, _dur = model_transcribe(
-                requested_model, audio_bytes, ctype, prompt, wait=10.0)
+            from .stt_language import bound_session
+            with bound_session(focus):
+                text, ends_terminal, _dur = model_transcribe(
+                    requested_model, audio_bytes, ctype, prompt, wait=10.0)
         elif requested_model and requested_model != "server-default":
             raise STTUnknownModelError(
                 f"transcription model not installed: {requested_model}")

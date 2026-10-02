@@ -824,6 +824,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, b"not found")
             target = pathlib.Path(row["path"] or "").resolve()
             status = str(row["producer_status"] or "").lower()
+            if status == "failed":
+                return self._send(410, b"clip failed")
             if status == "complete" and target.is_file():
                 audio_root = self.ctx.audio_dir.resolve()
                 if target == audio_root or audio_root not in target.parents:
@@ -2810,6 +2812,9 @@ class Handler(BaseHTTPRequestHandler):
         if not sid:
             return self._json_error(400, "session required")
         agent = identity.lookup(sid)
+        if agent:
+            from lib import client_chat
+            client_chat.record(self.principal().principal, sid)
         herald = getattr(self.ctx, "herald", None)
         if agent and herald is not None:
             try:
@@ -4897,6 +4902,8 @@ class Handler(BaseHTTPRequestHandler):
         agent = identity.lookup(session)
         if not agent:
             return self._json_error(404, "no such session")
+        from lib import client_chat
+        client_chat.record(self.principal().principal, session)
         # Persist focus in the DB (what transcribe, upload and the herald read
         # via lib.focus) and mirror it into the small focus-state file kept for
         # anything outside this process.
@@ -5207,16 +5214,29 @@ class Handler(BaseHTTPRequestHandler):
                                    text=cached.get("text"),
                                    detail={"bytes": n, "content_type": ctype})
                 return self._json_ok(cached)
+            target = self._transcription_session()
             outcome = run_transcription(
                 self.ctx, audio_bytes=audio_bytes, ctype=ctype,
                 hands_free=hands_free, requested_model=requested_model,
                 transcription_id=transcription_id, fingerprint=fingerprint,
                 utterance_id=utterance_id, client_ts=client_ts,
                 record_voice=self._record_voice,
-                spawn_voice_metrics=_spawn_voice_metrics)
+                spawn_voice_metrics=_spawn_voice_metrics,
+                **({"focus_session": lambda: target} if target else {}))
             if outcome.trace_id:
                 self._trace_id = outcome.trace_id
             return self._json(outcome.status, outcome.payload)
+
+    def _transcription_session(self) -> str:
+        """The chat a recording is for: the client's explicit
+        `X-Transcription-Session`, else the chat this device last opened.
+        Empty means fall back to the shared focus."""
+        from lib import client_chat
+        explicit = (self.headers.get("X-Transcription-Session") or "").strip()
+        if explicit and identity.lookup(explicit):
+            return explicit
+        last = client_chat.current(self.principal().principal)
+        return last if last and identity.lookup(last) else ""
 
     def _record_voice(self, event: str, **fields) -> None:
         """Best-effort voice-timeline row; never fails the request."""

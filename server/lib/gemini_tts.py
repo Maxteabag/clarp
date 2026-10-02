@@ -32,6 +32,10 @@ _URL = ("https://generativelanguage.googleapis.com/v1beta/models/"
         "{model}:streamGenerateContent?alt=sse")
 _SAMPLE_RATE = 24000
 _READ_BYTES = 16 * 1024
+# Gemini answers 429/500/503 under load ("high demand"). Nothing has been
+# played yet when that happens, so the request is retried before failing.
+_RETRY_STATUS = {429, 500, 503}
+_RETRY_DELAYS = (1.0, 2.5)
 
 
 class GeminiTTSError(Exception):
@@ -141,7 +145,18 @@ def synthesize(*,
     reader.start()
     try:
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            for attempt, delay in enumerate((*_RETRY_DELAYS, None)):
+                try:
+                    resp = urllib.request.urlopen(req, timeout=timeout)
+                    break
+                except urllib.error.HTTPError as e:
+                    if delay is None or e.code not in _RETRY_STATUS:
+                        raise
+                    _emit("gemini_tts", "retry", level="warn", trace_id=trace_id,
+                          detail={"status": e.code, "attempt": attempt + 1})
+                    e.close()
+                    time.sleep(delay)
+            with resp:
                 for pcm in iter_pcm(resp):
                     if not t_first_pcm:
                         t_first_pcm.append(time.perf_counter())

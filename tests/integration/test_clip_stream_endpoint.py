@@ -170,3 +170,17 @@ def test_audio_endpoint_supports_range_requests(running_server):
     with urllib.request.urlopen(req, timeout=2) as r:
         assert r.status == 206
         assert r.read() == data[-10:]
+
+
+def test_complete_clip_of_a_failed_synthesis_answers_at_once(running_server):
+    # Regression: a failed clip kept the phone waiting 30 s for a 504, so
+    # playback stalled until Peter pressed play.
+    base, _ctx, audio, agent_id = running_server
+    clip_id = agents_db.record_clip(
+        agent_id=agent_id, path=str(audio / "failed.mp3"), voice_id="V_MIKE",
+        byte_count=0, producer_status=ClipProducerStatus.FAILED)
+    started = time.monotonic()
+    with pytest.raises(urllib.error.HTTPError) as err:
+        urllib.request.urlopen(f"{base}/clips/{clip_id}/complete.mp3", timeout=5)
+    assert err.value.code == 410
+    assert time.monotonic() - started < 2
