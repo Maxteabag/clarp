@@ -267,3 +267,14 @@ def test_unreachable_gemini_falls_back_to_gpt_live_for_the_call(monkeypatch):
     # Held off afterwards: the phone's reconnect does not try Gemini again.
     assert oracle_live_stable._connect_voice(cfg, "openai-key", "gemini") == ("openai-socket", "openai")
     assert attempts == ["key"]
+
+
+def test_closing_while_the_reader_waits_still_delivers_session_closed(monkeypatch):
+    class ClosingSocket(FakeGemini):
+        def recv(self):
+            upstream.finish("client_closed")  # the Host closes while this read is blocked
+            raise ConnectionError("socket closed")
+    monkeypatch.setattr(oracle_gemini_live, "_connect", lambda _: ClosingSocket())
+    upstream = oracle_gemini_live.GeminiUpstream("k", model="m", voice="v")
+    assert json.loads(upstream.recv())["type"] == "session.closed"
+    assert upstream.recv() == ""

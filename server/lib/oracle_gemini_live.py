@@ -260,14 +260,14 @@ class GeminiUpstream:
                 raise
             except Exception:
                 if self.closed:
-                    return ""
+                    continue  # deliver session.closed queued by finish()
                 if self.resume("connection_lost"):
                     continue
                 self.lost()
                 raise
             if not raw:
                 if self.closed:
-                    return ""
+                    continue
                 if self.resume("connection_lost"):
                     continue
                 self.lost()
