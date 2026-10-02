@@ -33,6 +33,12 @@ def _client_tools(tools: Any, display_cells: Any) -> list:
     return tools
 
 
+class UnknownHistoryCursor(LookupError):
+    """An older-history request named a message this conversation does not
+    store. Answering with an empty page would tell the client the history
+    has ended, so callers report it as a conflict instead."""
+
+
 def list_messages(*, agent_id: str, backend_session_id: str = "",
                   after_revision: int = 0,
                   before_message_id: str = "",
@@ -55,7 +61,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             (before_message_id, agent_id, backend_session_id, backend_session_id),
         ).fetchone()
         if cursor is None:
-            return []
+            raise UnknownHistoryCursor(before_message_id)
         where += """ AND (
             COALESCE(m.timestamp, '') < ?
             OR (COALESCE(m.timestamp, '') = ? AND m.seq < ?)

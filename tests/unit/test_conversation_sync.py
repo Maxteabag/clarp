@@ -91,6 +91,14 @@ def test_snapshot_reports_more_visible_history(tmp_path):
     assert older["has_more"] is True
 
 
+def test_unknown_older_history_cursor_is_an_error_not_the_end_of_history(tmp_path):
+    from lib.message_previews import UnknownHistoryCursor
+    agent_id = _agent(tmp_path)
+    _store(agent_id, [{"role": "user", "text": "message 0", "timestamp": "2026-01-01T00:00:00Z"}])
+    with pytest.raises(UnknownHistoryCursor):
+        _load("reliable", limit=2, include_automated=False, before_message_id="live-not-stored")
+
+
 def test_truncated_delta_cursor_stops_at_last_delivered_revision(tmp_path):
     agent_id = _agent(tmp_path)
     _store(agent_id, [
