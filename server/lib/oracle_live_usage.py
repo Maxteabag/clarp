@@ -8,7 +8,7 @@ def _number(value):
 
 class LiveUsage:
     def __init__(self, mode="api"):
-        if mode not in ("api", "subscription"):
+        if mode not in ("api", "subscription", "gemini"):
             raise ValueError("Unsupported Live billing mode")
         self.mode = mode
         self.seconds = None
@@ -17,6 +17,7 @@ class LiveUsage:
         self.finalized = False
         self.usage_final = False
         self.reason = None
+        self.estimate = None
 
     def observe(self, event):
         kind = event.get("type")
@@ -29,6 +30,9 @@ class LiveUsage:
         seconds = usage.get("seconds") if isinstance(usage, dict) else None
         if _number(seconds):
             self.seconds = seconds  # Replacement snapshot, never addition.
+        estimate = usage.get("voice_estimate_usd") if isinstance(usage, dict) else None
+        if self.mode == "gemini" and _number(estimate):
+            self.estimate = estimate  # Token-priced by GeminiUpstream.
         context = event.get("context_window")
         ratio = context.get("usage_ratio") if isinstance(context, dict) else None
         if _number(ratio) and ratio <= 1:
@@ -40,6 +44,10 @@ class LiveUsage:
         return True
 
     def snapshot(self):
+        if self.mode == "gemini":
+            return {"seconds": self.seconds, "context_ratio": None, "expires_at": None,
+                    "finalized": self.finalized, "usage_final": self.usage_final, "reason": self.reason,
+                    "voice_estimate_usd": self.estimate, "billing": "gemini_api", "scope": "voice_only"}
         return {"seconds": self.seconds, "context_ratio": self.context_ratio,
                 "expires_at": self.expires_at, "finalized": self.finalized,
                 "usage_final": self.usage_final, "reason": self.reason,

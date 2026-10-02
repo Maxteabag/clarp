@@ -422,6 +422,12 @@ class Config:
     oracle_live_webrtc: bool = False
     # [oracle] earcons: short sound cues in Oracle v2 calls (oracle_earcons).
     oracle_earcons: bool = True
+    # [oracle] voice_provider: the voice model of Oracle v2 calls, "openai"
+    # (GPT-Live, default) or "gemini" (Gemini Live). The phone's choice in
+    # settings overrides it (oracle_voice_provider.py).
+    oracle_voice_provider: str = "openai"
+    oracle_gemini_model: str = "gemini-3.8-live"
+    oracle_gemini_voice: str = ""
     openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
@@ -795,6 +801,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
                 or str(tts.get("provider", "cartesia"))).strip().lower()
     fallback = str(tts.get("fallback", "none")).strip().lower()
     gemini = data.get("gemini_tts", {}) or {}
+    _oracle = data.get("oracle") if isinstance(data.get("oracle"), dict) else {}
     tts_agent_overrides = {
         str(name).strip().lower(): {
             str(k).strip().lower(): str(v).strip()
@@ -850,6 +857,9 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         oracle_live_webrtc = bool(openai.get("oracle_live_webrtc", False)),
         oracle_earcons = (data.get("oracle") or {}).get("earcons", True) is not False
             if isinstance(data.get("oracle"), dict) else True,
+        oracle_voice_provider = str(_oracle.get("voice_provider", "openai")).strip().lower() or "openai",
+        oracle_gemini_model = str(_oracle.get("gemini_model", "gemini-3.8-live")).strip() or "gemini-3.8-live",
+        oracle_gemini_voice = str(_oracle.get("gemini_voice", "")).strip(),
         openai_realtime_transcription_model = str(openai.get(
             "realtime_transcription_model", "gpt-4o-mini-transcribe")).strip(),
         cartesia_model  = str(cartesia.get("model", "sonic-3.5")),
