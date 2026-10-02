@@ -25,6 +25,8 @@ class PromptAdmission:
     client_admission_id: str
     trace_id: str
     original_text: str
+    # The app that sent it (``"desktop"``), when it said; "" otherwise.
+    client: str = ""
 
     def to_json(self) -> str:
         return json.dumps(dataclasses.asdict(self), separators=(",", ":"))
@@ -50,6 +52,7 @@ class PromptAdmission:
                 client_admission_id=str(value["client_admission_id"]),
                 trace_id=str(value["trace_id"]),
                 original_text=str(value["original_text"]),
+                client=str(value.get("client") or ""),
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             return None
@@ -65,6 +68,7 @@ def create(
     client_admission_id: str,
     trace_id: str,
     original_text: str,
+    client: str = "",
 ) -> PromptAdmission:
     normalized_origin = (origin or "").strip()
     sender = (sender_agent_id or "").strip()
@@ -90,6 +94,7 @@ def create(
         client_admission_id=client_admission_id,
         trace_id=trace_id,
         original_text=original_text,
+        client=client,
     )
 
 
@@ -125,8 +130,8 @@ def record(
                cooperative_principal,principal_id,origin,sender_agent_id,
                channel,observed_at,
                client_admission_id,trace_id,agent_id,session,message_id,
-               original_text
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               original_text,client
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             admission.admission_id,
             admission.admission_version,
@@ -143,6 +148,7 @@ def record(
             session,
             expected_message_id,
             admission.original_text,
+            admission.client,
         ),
     )
     return admission.admission_id

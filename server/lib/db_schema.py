@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 101
+_SCHEMA_VERSION = 102
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -827,6 +827,7 @@ CREATE TABLE prompt_admissions (
     session TEXT NOT NULL,
     message_id TEXT NOT NULL,
     original_text TEXT NOT NULL,
+    client TEXT NOT NULL DEFAULT '',
     UNIQUE(agent_id, client_admission_id)
 );
 CREATE INDEX idx_prompt_admissions_history ON prompt_admissions( agent_id, cooperative_principal, observed_at DESC, admission_id );
