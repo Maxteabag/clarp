@@ -73,9 +73,12 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
     # An agent's own engine is more specific than the phone's device-wide
     # model choice (sent as X-Transcription-Model), so it wins over both.
     agent_engine = None
+    agent_fallbacks: list[str] = []
     try:
-        from .stt_language import engine_for
-        agent_engine = engine_for(focus)
+        from .stt_language import engines_for
+        agent_engines = engines_for(focus)
+        if agent_engines:
+            agent_engine, agent_fallbacks = agent_engines[0], agent_engines[1:]
     except Exception as e:  # noqa: BLE001
         log_exception("sttAgentEngineFail", e)
     if agent_engine:
@@ -133,8 +136,20 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         if requested_model and callable(model_transcribe):
             from .stt_language import bound_session
             with bound_session(focus):
-                text, ends_terminal, _dur = model_transcribe(
-                    requested_model, audio_bytes, ctype, prompt, wait=10.0)
+                # The agent's fallback engines are tried in order when its
+                # first engine fails, so one provider outage does not lose
+                # the user's recording.
+                for index, engine in enumerate([requested_model, *agent_fallbacks]):
+                    try:
+                        text, ends_terminal, _dur = model_transcribe(
+                            engine, audio_bytes, ctype, prompt, wait=10.0)
+                        break
+                    except (STTUnknownModelError, STTModelLoadingError, STTBusyError):
+                        raise
+                    except Exception as e:  # noqa: BLE001
+                        if index == len(agent_fallbacks):
+                            raise
+                        log_exception("sttAgentEngineFallback", e, detail=engine)
         elif requested_model and requested_model != "server-default":
             raise STTUnknownModelError(
                 f"transcription model not installed: {requested_model}")
@@ -153,7 +168,18 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         return TranscriptionOutcome.error(429, "whisper busy", trace_id)
     except Exception as e:  # noqa: BLE001
         health.mark_error("stt", e)
-        log_exception("transcribeFail", e)
+        log_exception("transcribeFail", e,
+                      detail=f"model={requested_model} bytes={len(audio_bytes)}")
+        # Keep the failed clip too (when retention is on), so the failure can
+        # be reproduced; a successful clip is retained further down.
+        try:
+            from . import heard_audio
+            heard_audio.retain(
+                _cache_dir(), trace_id=trace_id, audio_bytes=audio_bytes,
+                content_type=ctype, session=focus, run_id=vocab_run_id,
+                model=f"{requested_model or ''} (failed)")
+        except Exception as retain_error:  # noqa: BLE001
+            log_exception("heardAudioRetainFail", retain_error)
         record_voice("error", utterance_id=utterance_id or None,
                      client_ts=client_ts,
                      detail={"message": str(e)[:300], "stage": "stt"})

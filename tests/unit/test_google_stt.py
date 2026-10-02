@@ -132,3 +132,22 @@ def test_catalogue_lists_chirp_available_only_with_credentials_and_project(
     assert stt_providers.update_settings(
         {"agent_engines": {"Mochi": "google:chirp_3"}})["agent_engines"] == {
             "mochi": "google:chirp_3"}
+
+
+def test_a_stuck_recognize_is_retried_quickly(chirp, monkeypatch):
+    # Regression: four Mochi recordings in a row waited 30 s for a Chirp request
+    # that never answered, then failed.
+    real = google_stt.urllib.request.urlopen
+    timeouts = []
+
+    def flaky(request, timeout):
+        if request.full_url != google_stt.TOKEN_URL:
+            timeouts.append(timeout)
+            if len(timeouts) == 1:
+                raise TimeoutError("The read operation timed out")
+        return real(request, timeout)
+
+    monkeypatch.setattr(google_stt.urllib.request, "urlopen", flaky)
+    text, _, _ = stt_providers.transcribe("google:chirp_3", wav_seconds(3), "audio/wav", "")
+    assert text == "piece of 3 s"
+    assert len(timeouts) == 2 and max(timeouts) < 10

@@ -154,6 +154,11 @@ def _recognize(wav: bytes, *, credentials_file: str, project: str,
                    "features": {"enableAutomaticPunctuation": True}},
         "content": base64.b64encode(wav).decode("ascii"),
     }).encode()
+    # Chirp answers a 55 s piece in ~1-2 s, so a long wait means a stuck
+    # request (seen 2026-10-02: four 30 s timeouts in a row). Give up early
+    # and try once more instead of making the user wait half a minute.
+    seconds = len(wav) / _BYTES_PER_SECOND
+    attempt_timeout = min(timeout, 8.0 + seconds / 5.0)
     for attempt in (0, 1):
         request = urllib.request.Request(
             url, data=body, method="POST",
@@ -161,12 +166,17 @@ def _recognize(wav: bytes, *, credentials_file: str, project: str,
                      "x-goog-user-project": project,
                      "Content-Type": "application/json"})
         try:
-            payload = _post(request, timeout, "Google STT")
+            payload = _post(request, attempt_timeout, "Google STT")
             break
         except GoogleSTTError as error:
             # A revoked or early-expired token: refresh once and retry.
             if attempt == 0 and "HTTP 401" in str(error):
                 _forget_token(credentials_file)
+                continue
+            # A stuck or overloaded request: one retry.
+            message = str(error)
+            if attempt == 0 and ("timed out" in message or "HTTP 5" in message
+                                 or "HTTP 429" in message):
                 continue
             raise
     texts = []
