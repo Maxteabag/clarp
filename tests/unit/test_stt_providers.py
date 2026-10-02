@@ -144,10 +144,10 @@ def test_missing_key_and_unknown_model_fail_loudly(monkeypatch):
     assert stt_providers.split_terms(" a, b ,, c ") == ["a", "b", "c"]
 
 
+
 @pytest.fixture
 def cartesia_by_language(monkeypatch):
     """Fake Cartesia batch STT that answers in the language it was asked for."""
-    from lib import settings_store
     monkeypatch.setattr(config, "_CACHED", config.Config(cartesia_api_key="ca"))
     asked = []
     answers = {"en": "Hi Peter, how do I sound?", "no": "Hei Peter, hvordan høres jeg ut?"}
@@ -158,71 +158,33 @@ def cartesia_by_language(monkeypatch):
         return Response({"text": answers[language], "duration": 1.0})
 
     monkeypatch.setattr(cartesia_stt.urllib.request, "urlopen", fake_urlopen)
-    return settings_store, asked
+    return asked
 
 
-def test_auto_language_keeps_the_cartesia_result_for_the_detected_language(
-        cartesia_by_language, monkeypatch):
-    from lib import stt_language
-    settings_store, asked = cartesia_by_language
-    settings_store.set_text(stt_language.LANGUAGE_KEY, "auto")
-    monkeypatch.setattr(stt_language, "detect", lambda audio, candidates: "no")
-    text, _, _ = stt_providers.transcribe("cartesia:ink-whisper", b"x", "audio/wav", "")
-    # Without auto, Cartesia (language=en) would translate this into English.
-    assert text == "Hei Peter, hvordan høres jeg ut?"
-    assert sorted(asked) == ["en", "no"]
+def test_focused_agent_language_overrides_the_default(cartesia_by_language, tmp_path):
+    from lib import agents
+    asked = cartesia_by_language
+    mochi = agents.create_agent(persona="Mochi", voice_id="", cwd=str(tmp_path), session="mochi")
+    agents.create_agent(persona="Mike", voice_id="", cwd=str(tmp_path), session="mike")
+    stt_providers.update_settings({"agent_languages": {"Mochi": "no"}})
 
-
-def test_auto_language_falls_back_to_first_candidate_when_detection_fails(
-        cartesia_by_language, monkeypatch):
-    from lib import stt_language
-    settings_store, _ = cartesia_by_language
-    settings_store.set_text(stt_language.LANGUAGE_KEY, "auto")
-
-    def broken(audio, candidates):
-        raise RuntimeError("model missing")
-    monkeypatch.setattr(stt_language, "detect", broken)
-    text, _, _ = stt_providers.transcribe("cartesia:ink-whisper", b"x", "audio/wav", "")
-    assert text == "Hi Peter, how do I sound?"
-
-
-def test_fixed_language_is_sent_once(cartesia_by_language):
-    from lib import stt_language
-    settings_store, asked = cartesia_by_language
-    settings_store.set_text(stt_language.LANGUAGE_KEY, "no")
-    text, _, _ = stt_providers.transcribe("cartesia:ink-whisper", b"x", "audio/wav", "")
-    assert (text, asked) == ("Hei Peter, hvordan høres jeg ut?", ["no"])
-
-
-def test_auto_language_lets_elevenlabs_detect(keys, monkeypatch):
-    from lib import settings_store, stt_language
-    settings_store.set_text(stt_language.LANGUAGE_KEY, "auto")
-    seen = {}
-
-    def fake_urlopen(request, timeout):
-        seen["body"] = request.data
-        return Response({"text": "Hei.", "language_code": "nor"})
-
-    monkeypatch.setattr(eleven_stt.urllib.request, "urlopen", fake_urlopen)
-    stt_providers.transcribe("elevenlabs:scribe_v2", b"x", "audio/wav", "")
-    assert b'name="language_code"' not in seen["body"]
+    agents.set_focus(mochi)
+    # Cartesia translates into the language it is given, so Mochi must get "no".
+    assert stt_providers.transcribe("cartesia:ink-whisper", b"x", "audio/wav", "")[0] \
+        == "Hei Peter, hvordan høres jeg ut?"
+    agents.set_focus(agents.get_by_session("mike")["agent_id"])
+    assert stt_providers.transcribe("cartesia:ink-whisper", b"x", "audio/wav", "")[0] \
+        == "Hi Peter, how do I sound?"
+    assert asked == ["no", "en"]
 
 
 def test_language_settings_round_trip_and_reject_bad_values(keys):
-    status = stt_providers.update_settings({"language": "NO", "auto_languages": "en, no, sv"})
-    assert status["language"] == "no"
-    assert status["auto_languages"] == ["en", "no", "sv"]
-    assert stt_providers.status()["language"] == "no"
-    for bad in ({"language": "norsk"}, {"language": 3}, {"auto_languages": ["en"]}):
+    status = stt_providers.update_settings({"language": "EN", "agent_languages": {"Mochi": "no", "Rachel": "sv"}})
+    assert status["language"] == "en"
+    assert status["agent_languages"] == {"mochi": "no", "rachel": "sv"}
+    status = stt_providers.update_settings({"agent_languages": {"Rachel": None}})
+    assert status["agent_languages"] == {"mochi": "no"}
+    for bad in ({"language": "auto"}, {"language": "norsk"}, {"agent_languages": ["no"]},
+                {"agent_languages": {"Mochi": "norsk"}}):
         with pytest.raises(ValueError):
             stt_providers.update_settings(bad)
-
-
-def test_auto_language_sends_large_clips_once(cartesia_by_language, monkeypatch):
-    from lib import stt_language
-    settings_store, asked = cartesia_by_language
-    settings_store.set_text(stt_language.LANGUAGE_KEY, "auto")
-    monkeypatch.setattr(stt_language, "detect", lambda audio, candidates: "no")
-    big = b"x" * (stt_language._PARALLEL_MAX_BYTES + 1)
-    text, _, _ = stt_providers.transcribe("cartesia:ink-whisper", big, "audio/wav", "")
-    assert (text, asked) == ("Hei Peter, hvordan høres jeg ut?", ["no"])
