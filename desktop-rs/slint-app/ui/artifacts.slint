@@ -8,6 +8,15 @@ export struct ArtifactOption {
     recommended: bool,
 }
 
+// One of a card's key hints: the key, what it does, the action a click on
+// it runs (as the key would), and whether it is the answer chosen.
+export struct CardHint {
+    key: string,
+    label: string,
+    action: string,
+    chosen: bool,
+}
+
 // One artifact card in the chat (iOS ArtifactCard): what every type shows
 // inline, and the state its controls are in.
 export struct ArtifactItem {
@@ -99,10 +108,16 @@ export struct ArtifactItem {
     // Keeps the why/delivery line: the card is or was pending in this
     // window, or has something to say there.
     keep-line: bool,
+    // Its keys, shown as hints (the selected card's emphasised).
+    hints: [CardHint],
 }
 
 // What the cards share: the clock countdowns read, and their actions.
 export global ArtifactBridge {
+    // The keyboard's place in the chat (a card, or an image block) and,
+    // in a gallery, its tile.
+    in property <string> cursor;
+    in property <int> tile;
     // Seconds since the window started, ticking once a second.
     in property <int> now;
     // "Remaining", "Target reached" or "Since target", and the clock.

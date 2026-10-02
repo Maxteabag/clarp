@@ -17,6 +17,8 @@ export component ReportView inherits Modal {
     in property <[MessageBlock]> blocks;
     callback link-clicked(string);
     callback done();
+    // How far the body is scrolled (0 at its top).
+    out property <length> offset: body.content-y;
     card-width: 980px;
     card-height: 2000px;
     dismissed => { root.done(); }
@@ -48,7 +50,7 @@ export component ReportView inherits Modal {
                 color: Palette.muted;
                 font-size: 13px;
             }
-            ListView {
+            body := ListView {
                 vertical-stretch: 1;
                 for block in root.blocks: VerticalLayout {
                     padding-bottom: 10px;
