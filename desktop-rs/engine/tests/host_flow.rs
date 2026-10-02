@@ -121,6 +121,7 @@ fn a_send_shows_at_once_and_is_confirmed_by_the_log() {
     assert!(!sent.pending && !sent.delivery_failed);
     let body = &host.requests("POST", "/send")[0]["body"];
     assert_eq!((body["session"].as_str(), body["text"].as_str()), (Some("rachel"), Some("Hello from the engine")));
+    assert_eq!(body["client"], "desktop", "the Host must know the desktop sent it, so the reply does not push to the phone");
     d.engine.stop();
     d.until("stop posted", |_| !host.requests("POST", "/stop").is_empty());
     assert_eq!(host.requests("POST", "/stop")[0]["body"]["session"], "rachel");

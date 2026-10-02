@@ -183,3 +183,20 @@ def test_admit_records_the_admission_even_for_empty_text(monkeypatch):
     assert seen["trace_id"] == req.trace_id
     assert seen["original_text"] == ""
     assert isinstance(seen["observed_at"], int)
+
+
+def test_the_sending_client_is_named_and_admitted():
+    assert _parse({"text": "x"}).client == ""
+    assert _parse({"text": "x", "client": " Desktop "}).client == "desktop"
+    # Anything that is not a short plain name is dropped rather than stored.
+    assert _parse({"text": "x", "client": "a b"}).client == ""
+    assert _parse({"text": "x", "client": "x" * 33}).client == ""
+    assert _parse({"text": "x", "client": 7}).client == ""
+
+
+def test_admit_carries_the_client(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(prompt_admissions, "create",
+                        lambda **kw: seen.update(kw) or "admission")
+    _parse({"text": "x", "client": "desktop"}).admit()
+    assert seen["client"] == "desktop"

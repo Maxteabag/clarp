@@ -311,6 +311,41 @@ def test_v101_drops_per_agent_fallbacks_and_keeps_retry_receipts(tmp_path):
     db._migrate(upgraded)  # idempotent on a database that no longer has the table
 
 
+def test_v102_names_the_client_that_admitted_a_prompt(tmp_path):
+    path = tmp_path / "v101.sqlite"
+    con = _fresh(path)
+    assert "client" in _columns(con, "prompt_admissions")
+    con.executescript("""
+        INSERT INTO agents (agent_id, persona, voice_id, cwd, session, created_at, is_janitor)
+            VALUES ('a1', 'Ada', 'v', '/tmp', 'ada', 1, 0);
+        CREATE TABLE prompt_admissions_old AS SELECT * FROM prompt_admissions;
+        DROP TABLE prompt_admissions;
+        CREATE TABLE prompt_admissions (
+            admission_id TEXT PRIMARY KEY, admission_version INTEGER NOT NULL,
+            authenticated_at_admission INTEGER NOT NULL,
+            cooperative_principal TEXT NOT NULL, principal_id TEXT NOT NULL DEFAULT '',
+            origin TEXT NOT NULL, sender_agent_id TEXT NOT NULL DEFAULT '',
+            channel TEXT NOT NULL, observed_at INTEGER NOT NULL,
+            client_admission_id TEXT NOT NULL, trace_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL REFERENCES agents(agent_id), session TEXT NOT NULL,
+            message_id TEXT NOT NULL, original_text TEXT NOT NULL,
+            UNIQUE(agent_id, client_admission_id));
+        DROP TABLE prompt_admissions_old;
+        INSERT INTO prompt_admissions VALUES
+            ('padm-1', 1, 1, 'user', 'user', 'user', '', 'chat', 5, 'm-1', 't-1',
+             'a1', 'ada', 'u-m-1', 'hi');
+        PRAGMA user_version = 101;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert upgraded.execute("SELECT client FROM prompt_admissions").fetchone()[0] == ""
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    db._migrate(upgraded)
+
+
 def test_v94_indexes_tool_explanation_release_expiry(tmp_path):
     path = tmp_path / "v93.sqlite"
     con = _fresh(path)

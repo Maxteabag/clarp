@@ -5,7 +5,7 @@ import itertools
 
 from lib import agents as agents_db
 from lib import artifacts, db, message_store, user_notifications
-from lib import team_store
+from lib import prompt_admissions, team_store
 
 
 _IDS = itertools.count()
@@ -26,16 +26,28 @@ def _team_leader() -> str:
 
 def _turn(agent_id: str, *, origin: str, assistant: str,
           backend_session_id: str = "bs-1", done_ts: int | None = None,
-          sender_agent_id: str = ""
+          sender_agent_id: str = "", client: str | None = None
           ) -> int:
     suffix = next(_IDS)
+    client_msg_id = f"u-{origin}-{db.now_ms()}-{suffix}"
+    prompt_admission_id = ""
+    if client is not None:
+        # Admitted through /send, the way a client's message really arrives.
+        admission = prompt_admissions.create(
+            authenticated_at_admission=True, origin=origin,
+            sender_agent_id=sender_agent_id, channel="chat",
+            observed_at=db.now_ms(), client_admission_id=client_msg_id,
+            trace_id=f"t-{suffix}", original_text="prompt", client=client)
+        prompt_admission_id = prompt_admissions.record(
+            admission, agent_id=agent_id, session="arnold")
     message_store.record_user_message(
         agent_id=agent_id,
         backend_session_id=backend_session_id,
-        client_msg_id=f"u-{origin}-{db.now_ms()}-{suffix}",
+        client_msg_id=client_msg_id,
         text="prompt",
         origin=origin,
         sender_agent_id=sender_agent_id,
+        prompt_admission_id=prompt_admission_id,
     )
     # Read the clock *after* the user row is stamped. Taking it before left the
     # row only 2ms to be written before `done_ts`, so on a loaded machine the
@@ -573,3 +585,58 @@ def test_janitor_origin_stays_quiet_independently_of_category_and_setting(monkey
         result = _classify(aid, done_ts)
         assert result["reason"] == "janitor-maintenance"
         assert all(result[key] is False for key in ("notify", "push", "badge", "unread"))
+
+
+def test_a_reply_to_a_desktop_message_badges_but_does_not_push(monkeypatch):
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    aid = _agent()
+    done_ts = _turn(aid, origin="user", client="desktop",
+                    assistant="<speak>You asked at your desk.</speak>")
+
+    notification = _classify(aid, done_ts)
+
+    assert notification["notify"] is True
+    assert notification["push"] is False
+    assert notification["badge"] is True
+    assert notification["unread"] is True
+    assert notification["muted"] is False
+    assert notification["reason"] == "speak-desktop"
+    assert user_notifications.event_payload(notification)["push"] is False
+
+
+def test_a_later_message_from_the_phone_pushes_again(monkeypatch):
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    aid = _agent()
+    first = _turn(aid, origin="user", client="desktop", assistant="From the desk.")
+    assert _classify(aid, first)["push"] is False
+    # A follow-up completion with no new user message still answers the
+    # desktop message, so it stays off the phone too.
+    db.conn().execute(
+        "INSERT INTO state_log (agent_id, ts, kind) VALUES (?, ?, 'done')",
+        (aid, first))
+    later = _turn(aid, origin="user", client="", assistant="From the phone.")
+
+    notification = _classify(aid, later)
+
+    assert notification["push"] is True
+    assert notification["reason"] == "text-reply"
+
+
+def test_a_follow_up_turn_on_the_same_desktop_message_does_not_push(monkeypatch):
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    aid = _agent()
+    first = _turn(aid, origin="user", client="desktop", assistant="Working on it.")
+    assert _classify(aid, first)["push"] is False
+    # The agent keeps going on the same message: a second completion with
+    # more prose and no new user row in between.
+    now = db.now_ms()
+    db.conn().execute(
+        """INSERT INTO messages (
+               message_id, agent_id, backend_session_id, seq, role, text,
+               tools_json, updated_at, origin
+           ) VALUES (?, ?, 'bs-1', 2, 'assistant', 'Done now.', '[]', ?, 'user')""",
+        (f"a-follow-{now}", aid, now + 1))
+
+    notification = _classify(aid, now + 2)
+
+    assert notification["push"] is False
