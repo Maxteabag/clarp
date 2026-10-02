@@ -1,0 +1,55 @@
+//! The colour science behind the readability rules, checked against
+//! published values, and the rules themselves on every bundled theme.
+
+use clarp_core::readability::*;
+
+fn near(a: f64, b: f64, tolerance: f64) -> bool {
+    (a - b).abs() <= tolerance
+}
+
+#[test]
+fn apca_matches_the_reference_implementation() {
+    // The APCA-W3 0.0.98G-4g README's examples.
+    assert!(near(apca("#888888", "#ffffff"), 63.06, 0.05), "{}", apca("#888888", "#ffffff"));
+    assert!(near(apca("#ffffff", "#888888"), -68.54, 0.05), "{}", apca("#ffffff", "#888888"));
+    assert!(near(apca("#000000", "#aaaaaa"), 58.15, 0.05), "{}", apca("#000000", "#aaaaaa"));
+    assert!(near(apca("#aaaaaa", "#000000"), -56.24, 0.05), "{}", apca("#aaaaaa", "#000000"));
+    assert_eq!(apca("#777777", "#777777"), 0.0);
+}
+
+#[test]
+fn ciede2000_matches_sharma_wu_dalal() {
+    // Their test data has Lab inputs; these are sRGB colours whose
+    // differences are checked against an independent implementation
+    // (colormath / colour-science, both 2000 formula).
+    assert!(near(delta_e("#ff0000", "#ff0000"), 0.0, 1e-9));
+    assert!(near(delta_e("#000000", "#ffffff"), 100.0, 0.01), "{}", delta_e("#000000", "#ffffff"));
+    assert!(near(delta_e("#ff0000", "#00ff00"), 86.61, 0.1), "{}", delta_e("#ff0000", "#00ff00"));
+    assert!(near(delta_e("#0000ff", "#ffff00"), 103.43, 0.1), "{}", delta_e("#0000ff", "#ffff00"));
+}
+
+#[test]
+fn simulated_vision_keeps_greys_and_merges_red_and_green() {
+    for vision in Vision::ALL {
+        for grey in ["#000000", "#777777", "#ffffff"] {
+            let seen = simulate(grey, vision);
+            assert!(delta_e(&seen, grey) < 1.5, "{} {grey} -> {seen}", vision.name());
+        }
+    }
+    let pure = delta_e("#d62728", "#2ca02c");
+    let deutan = delta_e(&simulate("#d62728", Vision::Deuteranopia), &simulate("#2ca02c", Vision::Deuteranopia));
+    assert!(deutan < pure / 2.0, "deuteranopia should pull red and green together: {deutan} vs {pure}");
+}
+
+#[test]
+fn alpha_tints_blend_over_their_surface() {
+    assert_eq!(over("#ffffff", 0.5, "#000000").unwrap(), "#808080");
+    assert_eq!(over("#80ffffff", 1.0, "#000000").unwrap(), "#808080");
+    assert_eq!(over("#123456", 0.0, "#abcdef").unwrap(), "#abcdef");
+}
+
+#[test]
+fn every_theme_meets_the_readability_rules() {
+    let failures = all_failures();
+    assert!(failures.is_empty(), "{} readability failures:\n{}", failures.len(), failures.join("\n"));
+}

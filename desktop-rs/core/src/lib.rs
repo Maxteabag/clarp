@@ -27,6 +27,7 @@ pub mod presence;
 pub mod preview;
 pub mod protocol;
 pub mod reading_theme;
+pub mod readability;
 pub mod roster;
 pub mod settings;
 pub mod sidebar;
