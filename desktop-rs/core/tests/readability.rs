@@ -48,8 +48,27 @@ fn alpha_tints_blend_over_their_surface() {
     assert_eq!(over("#123456", 0.0, "#abcdef").unwrap(), "#abcdef");
 }
 
+/// The themes Peter kept as they were when the rules arrived (2026-10-02).
+/// They fail some rules (docs/readability.md lists them); every other
+/// theme, and any new one, must pass.
+const KEPT_AS_THEY_WERE: [&str; 4] = ["terminal", "paper", "dusk", "hyperlegible"];
+
 #[test]
-fn every_theme_meets_the_readability_rules() {
-    let failures = all_failures();
+fn every_new_theme_meets_the_readability_rules() {
+    let failures: Vec<String> = all_failures()
+        .into_iter()
+        .filter(|f| !KEPT_AS_THEY_WERE.iter().any(|id| f.starts_with(&format!("{id}:"))))
+        .collect();
     assert!(failures.is_empty(), "{} readability failures:\n{}", failures.len(), failures.join("\n"));
+}
+
+#[test]
+fn the_kept_themes_still_exist() {
+    let ids: Vec<String> = clarp_core::reading_theme::themes().iter().filter_map(|t| t.get("id").and_then(|v| v.as_str()).map(str::to_owned)).collect();
+    for id in KEPT_AS_THEY_WERE {
+        assert!(ids.iter().any(|i| i == id), "{id} is no longer a theme: drop it from KEPT_AS_THEY_WERE");
+    }
+    for id in ["sepia", "graphite", "night", "contrast", "studio"] {
+        assert!(ids.iter().any(|i| i == id), "the {id} theme is missing");
+    }
 }
