@@ -103,6 +103,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/revisioned_cache.py", "_REGISTRY"): "the cache registry itself: names are unique and reset_all() walks it",
     ("lib/server_identity.py", "FEATURE_CONTRACTS"): IMPORT,
     ("lib/server_update.py", "_cache"): CACHE,
+    ("lib/stt_language.py", "_model"): CLIENT,  # one loaded Whisper language detector per process
     ("lib/telemetry.py", "TELEMETRY_PATH"): PATHS,
     ("lib/telemetry.py", "_SCHEMA_READY"): PATHS,
     ("lib/terminal_ws.py", "_live"): JOBS,

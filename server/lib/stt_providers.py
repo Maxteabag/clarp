@@ -175,8 +175,14 @@ def status() -> dict:
     models = cloud_models()
     selected_row = next((m for m in models if m["id"] == engine), None)
     from .heard_audio import enabled as retain_audio
+    from . import stt_language
+    language = stt_language.selected()
+    if language == stt_language.AUTO:
+        stt_language.warm()
     return {
         "engine": engine,
+        "language": language,
+        "auto_languages": list(stt_language.auto_languages()),
         "turn_taking": strategy,
         "retain_audio": retain_audio(),
         "long_form_model": long_form_model(),
@@ -248,7 +254,18 @@ def update_settings(data: dict) -> dict:
                 "long_form_threshold_sec must be between "
                 f"{MIN_LONG_FORM_THRESHOLD_SEC} and "
                 f"{MAX_LONG_FORM_THRESHOLD_SEC}")
+    from . import stt_language
+    language = data.get("language")
+    if language is not None:
+        language = stt_language.validate(language)
+    auto_languages = data.get("auto_languages")
+    if auto_languages is not None:
+        auto_languages = stt_language.validate_auto_languages(auto_languages)
     settings_store.set_text(ENGINE_KEY, engine)
+    if language is not None:
+        settings_store.set_text(stt_language.LANGUAGE_KEY, language)
+    if auto_languages is not None:
+        settings_store.set_text(stt_language.AUTO_LANGUAGES_KEY, auto_languages)
     if long_model is not None:
         settings_store.set_text(LONG_FORM_MODEL_KEY, long_model)
     if threshold is not None:
@@ -295,9 +312,24 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
         from .cartesia_stt_ws import transcribe as run
     else:
         from .cartesia_stt import transcribe as run
-    text, duration = run(
-        audio_bytes=audio_bytes, content_type=content_type, api_key=api_key,
-        model=row["model"], keyterms=terms, timeout=timeout)
+    from . import stt_language
+
+    def call(language):
+        return run(
+            audio_bytes=audio_bytes, content_type=content_type, api_key=api_key,
+            model=row["model"], keyterms=terms, language=language,
+            timeout=timeout)
+
+    language = stt_language.selected()
+    if language != stt_language.AUTO:
+        text, duration = call(language)
+    elif provider == "cartesia":
+        # Cartesia cannot detect language; see lib.stt_language.
+        _chosen, (text, duration) = stt_language.run_auto(
+            call, audio_bytes, stt_language.auto_languages())
+    else:
+        # ElevenLabs detects with no language; Deepgram with "multi".
+        text, duration = call(None if provider == "elevenlabs" else "multi")
     from .judgment_sites import is_junk
     text = (text or "").strip()
     if is_junk(text):

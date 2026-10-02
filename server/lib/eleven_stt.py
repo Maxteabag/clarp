@@ -42,11 +42,14 @@ def _filename_for(content_type: str) -> str:
 
 def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
                model: str = "scribe_v2", keyterms: list[str] | None = None,
-               language: str = "en", timeout: float = 60.0
+               language: str | None = "en", timeout: float = 60.0
                ) -> tuple[str, float]:
     if not api_key:
         raise ElevenSTTError("ElevenLabs API key is not configured")
-    fields: list[tuple[str, str]] = [("model_id", model), ("language_code", language)]
+    # No language_code lets Scribe detect the language itself.
+    fields: list[tuple[str, str]] = [("model_id", model)]
+    if language:
+        fields.append(("language_code", language))
     # Each term is its own `keyterms` field; the API allows up to 1000 terms of
     # under 50 characters and the compiler stays far below both.
     fields.extend(("keyterms", term[:49]) for term in (keyterms or []))
