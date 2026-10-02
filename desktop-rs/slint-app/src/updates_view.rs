@@ -111,12 +111,18 @@ fn objects(values: &[Value]) -> impl Iterator<Item = &Object> {
     values.iter().filter_map(Value::as_object)
 }
 
+/// The artifacts the Updates surface lists. CI runs stay in their chat: the
+/// owner cannot act on them here, and a blocked agent asks a question instead.
+fn updates_listed(values: &[Value]) -> impl Iterator<Item = &Object> {
+    objects(values).filter(|artifact| text(artifact, "type") != "workflow_run")
+}
+
 /// Rebuilds the surface's lists from the engine.
 pub fn show(app: &App, window: &AppWindow) {
     let engine = app.engine.borrow();
     window.set_update_attention(model(objects(engine.attention_items()).map(|i| attention_view(&engine, i)).collect()));
     window.set_update_jobs(model(objects(engine.background_jobs()).map(|j| job_view(&engine, j)).collect()));
-    window.set_update_artifacts(model(objects(engine.update_artifacts()).map(|a| artifact_view(&engine, a)).collect()));
+    window.set_update_artifacts(model(updates_listed(engine.update_artifacts()).map(|a| artifact_view(&engine, a)).collect()));
     window.set_updates_loading(engine.updates_loading());
     window.set_updates_error(engine.updates_error().into());
     window.set_attention(engine.attention_count() as i32);
@@ -431,7 +437,19 @@ pub fn open_helper(app: &Rc<App>, window: &AppWindow, session: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::html_markdown;
+    use super::{html_markdown, text, updates_listed};
+    use serde_json::json;
+
+    #[test]
+    fn ci_runs_never_reach_the_updates_list() {
+        let values = vec![
+            json!({"artifact_id": "doc", "type": "document"}),
+            json!({"artifact_id": "ci", "type": "workflow_run", "status": "completed", "conclusion": "failure"}),
+            json!({"artifact_id": "page", "type": "html_report"}),
+        ];
+        let listed: Vec<String> = updates_listed(&values).map(|a| text(a, "artifact_id")).collect();
+        assert_eq!(listed, ["doc", "page"]);
+    }
 
     #[test]
     fn report_html_reads_as_markdown() {
