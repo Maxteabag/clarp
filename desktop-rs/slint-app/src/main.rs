@@ -880,12 +880,10 @@ fn main() {
     overview_view::wire(&window);
     voice_view::wire(&window);
     orchestrator_view::wire(&window);
-    window.on_dismiss_error(|| {
-        if let Some(app) = app() {
-            app.engine.borrow_mut().clear_error();
-            pump_now(&app);
-        }
-    });
+    window.set_error_dismiss_key("Esc".into());
+    window.on_dismiss_error(|| with_window(|app, window| {
+        commands::run(app, window, "dismiss-error");
+    }));
     // ---- launch dialogs
     launch_view::wire(&window);
     agent_dialogs_view::wire(&window);

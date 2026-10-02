@@ -337,6 +337,13 @@ export component AppWindow inherits Window {
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
+                        // The key that dismisses it, as the shortcut bar spells keys.
+                        if root.error-dismiss-key != "": HorizontalLayout {
+                            spacing: 4px;
+                            padding-left: 12px;
+                            Text { text: root.error-dismiss-key; color: Palette.danger; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                            Text { text: "Dismiss"; color: Palette.danger; font-size: 11px; vertical-alignment: center; }
+                        }
                         Rectangle {
                             width: 28px;
                             accessible-role: button;

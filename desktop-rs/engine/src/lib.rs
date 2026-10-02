@@ -600,6 +600,16 @@ impl Engine {
     pub fn clear_error(&mut self) {
         self.set_error("");
     }
+    /// The banner's dismiss: the Host's error and the open conversation's,
+    /// which a failed fetch sets too (clearing one leaves the other showing).
+    pub fn dismiss_error(&mut self) {
+        self.set_error("");
+        let session = self.selected.clone();
+        self.with_conversation(&session, |c| {
+            c.set_error("");
+            c.set_voice_error("");
+        });
+    }
     fn set_sending(&mut self, value: bool) {
         if self.sending != value {
             self.sending = value;
