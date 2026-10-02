@@ -181,6 +181,21 @@ mod tests {
     }
 
     #[test]
+    fn a_code_block_inside_a_list_is_a_block_of_its_own() {
+        // Slint's StyledText has no code blocks: one left in a list's prose
+        // fails the whole list over to plain text (raw ** and backticks).
+        let markdown = "Steps:\n\n1. Switch the profile:\n   ```bash\n   hotseat switch personal\n   ```\n2. Verify it:\n   - **Session:** `orion`";
+        assert_eq!(
+            blocks(markdown),
+            vec![
+                Block::Prose("Steps:\n\n1. Switch the profile:".into()),
+                Block::Code { language: "bash".into(), text: "hotseat switch personal".into() },
+                Block::Prose("2. Verify it:\n   - **Session:** `orion`".into()),
+            ]
+        );
+    }
+
+    #[test]
     fn plain_text_is_one_prose_block() {
         assert_eq!(blocks("Hello there"), vec![Block::Prose("Hello there".into())]);
         assert_eq!(blocks(""), vec![]);
