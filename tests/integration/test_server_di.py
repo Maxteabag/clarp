@@ -3884,3 +3884,20 @@ def test_transcription_follows_the_recording_chat_not_the_shared_focus(running_s
     claude = agents_db.get_by_session("claude")["agent_id"]
     assert agents_db.get_trace(rachel)
     assert not agents_db.get_trace(claude)
+
+
+def test_agent_engine_overrides_the_phones_pinned_model(running_server, monkeypatch):
+    # Regression: Mochi's Norwegian went through Cartesia Ink-Whisper (pinned by
+    # the phone) and came out as Icelandic; Mochi's own engine must win.
+    base, ctx, _srv = running_server
+    from lib import stt_providers
+    stt_providers.update_settings({"agent_engines": {"Rachel": "elevenlabs:scribe_v2"}})
+    used = []
+    monkeypatch.setattr(ctx.stt, "transcribe_model_bytes",
+                        lambda model, *a, **k: used.append(model) or ("Hei.", True, 1.0),
+                        raising=False)
+    headers = {"Content-Type": "audio/webm", "X-Transcription-ID": "agent-engine-1",
+               "X-Transcription-Session": "rachel",
+               "X-Transcription-Model": "cartesia:ink-whisper"}
+    assert _post_raw(base + "/transcribe", b"voice audio", headers)[0] == 200
+    assert used == ["elevenlabs:scribe_v2"]

@@ -180,6 +180,7 @@ def status() -> dict:
         "engine": engine,
         "language": stt_language.selected(),
         "agent_languages": stt_language.agent_languages(),
+        "agent_engines": stt_language.agent_engines(),
         "turn_taking": strategy,
         "retain_audio": retain_audio(),
         "long_form_model": long_form_model(),
@@ -255,6 +256,10 @@ def update_settings(data: dict) -> dict:
     language = data.get("language")
     if language is not None:
         language = stt_language.validate(language)
+    agent_engines = data.get("agent_engines")
+    if agent_engines is not None:
+        agent_engines = stt_language.merge_agent_engines(
+            agent_engines, is_valid=lambda e: _model_row(e) is not None)
     agent_languages = data.get("agent_languages")
     if agent_languages is not None:
         agent_languages = stt_language.merge_agent_languages(agent_languages)
@@ -263,6 +268,8 @@ def update_settings(data: dict) -> dict:
         settings_store.set_text(stt_language.LANGUAGE_KEY, language)
     if agent_languages is not None:
         settings_store.set_text(stt_language.AGENT_LANGUAGES_KEY, agent_languages)
+    if agent_engines is not None:
+        settings_store.set_text(stt_language.AGENT_ENGINES_KEY, agent_engines)
     if long_model is not None:
         settings_store.set_text(LONG_FORM_MODEL_KEY, long_model)
     if threshold is not None:

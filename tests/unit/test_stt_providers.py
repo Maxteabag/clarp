@@ -202,3 +202,23 @@ def test_recording_chat_beats_the_shared_focus(cartesia_by_language, tmp_path):
     with stt_language.bound_session(client_chat.current("device-1")):
         stt_providers.transcribe("cartesia:ink-whisper", b"x", "audio/wav", "")
     assert asked == ["no"]
+
+
+def test_agent_engine_settings_round_trip_and_reject_unknown(keys):
+    status = stt_providers.update_settings({"agent_engines": {"Mochi": "elevenlabs:scribe_v2"}})
+    assert status["agent_engines"] == {"mochi": "elevenlabs:scribe_v2"}
+    with pytest.raises(ValueError):
+        stt_providers.update_settings({"agent_engines": {"Mochi": "cartesia:ink-9"}})
+    assert stt_providers.update_settings({"agent_engines": {"Mochi": None}})["agent_engines"] == {}
+
+
+def test_scribe_is_asked_not_to_tag_audio_events(keys, monkeypatch):
+    seen = {}
+
+    def fake_urlopen(request, timeout):
+        seen["body"] = request.data
+        return Response({"text": "Hallo, kan du høre meg?"})
+
+    monkeypatch.setattr(eleven_stt.urllib.request, "urlopen", fake_urlopen)
+    stt_providers.transcribe("elevenlabs:scribe_v2", b"x", "audio/wav", "")
+    assert b'name="tag_audio_events"\r\n\r\nfalse' in seen["body"]
