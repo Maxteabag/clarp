@@ -47,6 +47,10 @@ def _decision_request(cmd: str, args: list[str]) -> dict:
         parser.add_argument("yes_label")
         parser.add_argument("no_label")
         parser.add_argument("payload_json", nargs="?", default="{}")
+    elif cmd == "input":
+        parser.add_argument("--hint", choices=("text", "one_time_code"), default="text",
+                            help="one_time_code shows a code keypad with SMS autofill")
+        parser.add_argument("--payload", dest="payload_json", default="{}")
     else:
         parser.add_argument("options_json", help="JSON array containing two or three option objects")
         parser.add_argument("--recommend", dest="recommended_option_id")
@@ -59,6 +63,8 @@ def _decision_request(cmd: str, args: list[str]) -> dict:
     parser.add_argument("--effort", choices=("quick", "short", "review"), default="review")
     parser.add_argument("--deadline-at", type=int, help="actual deadline, epoch milliseconds")
     parser.add_argument("--expires-at", type=int, help="expiry, epoch milliseconds")
+    parser.add_argument("--expires-in", type=int, metavar="SECONDS",
+                        help="expiry relative to now; the card is marked expired, never deleted")
     parser.add_argument("--dry-run", action="store_true", help="validate and print request without network calls")
     parsed = parser.parse_args(args)
     payload = json.loads(parsed.payload_json)
@@ -72,6 +78,13 @@ def _decision_request(cmd: str, args: list[str]) -> dict:
             "payload": payload, "context": parsed.context, "reference_id": parsed.reference,
             "blocks_progress": parsed.blocks_progress, "priority_reason": parsed.priority_reason,
             "urgency": parsed.urgency, "response_effort": parsed.effort}
+    if parsed.expires_in is not None:
+        if parsed.expires_at is not None:
+            raise ValueError("use --expires-in or --expires-at, not both")
+        if parsed.expires_in <= 0:
+            raise ValueError("--expires-in must be positive seconds")
+        import time
+        parsed.expires_at = int(time.time() * 1000) + parsed.expires_in * 1000
     for key in ("deadline_at", "expires_at"):
         value = getattr(parsed, key)
         if value is not None:
@@ -80,6 +93,8 @@ def _decision_request(cmd: str, args: list[str]) -> dict:
             body[key] = value
     if cmd == "decision":
         body.update(yes_label=parsed.yes_label, no_label=parsed.no_label)
+    elif cmd == "input":
+        body.update(response_type="text_input", input_hint=parsed.hint)
     else:
         options = json.loads(parsed.options_json)
         if not isinstance(options, list) or not 2 <= len(options) <= 3:
@@ -105,11 +120,36 @@ def _decision_request(cmd: str, args: list[str]) -> dict:
                     recommended_option_id=parsed.recommended_option_id)
     if parsed.dry_run:
         return {"method": "POST", "path": "/decisions", "body": body}
-    if cmd == "question":
+    if cmd in ("question", "input"):
         capability = _request("GET", "/attention?decision_format=2")
         if capability.get("decision_format") != 2:
             raise ValueError("this Host does not support native questions; ask in ordinary text instead")
     return _request("POST", "/decisions", body)["artifact"]
+
+
+def _wait(args: list[str]) -> tuple[dict, int]:
+    """Block until the user answers (or the request ends) and print the outcome.
+
+    Exit 0 answered/accepted/rejected, 3 expired/withdrawn/discarded, 4 timeout."""
+    import time
+    parser = _Parser(prog="clarp-agent-artifacts wait")
+    parser.add_argument("artifact_id")
+    parser.add_argument("--timeout", type=int, default=600, metavar="SECONDS")
+    parser.add_argument("--interval", type=float, default=2.0)
+    parsed = parser.parse_args(args)
+    deadline = time.monotonic() + max(1, parsed.timeout)
+    while True:
+        artifact = _request("GET", "/artifacts/" + urllib.parse.quote(parsed.artifact_id))["artifact"]
+        decision = artifact.get("decision") or {}
+        status = decision.get("status", "")
+        if status and status != "pending":
+            outcome = {"status": status, "answer": decision.get("answer"),
+                       "resolved_choice": decision.get("resolved_choice"),
+                       "decision_id": decision.get("decision_id"), "artifact_id": parsed.artifact_id}
+            return outcome, 0 if status in ("answered", "accepted", "rejected") else 3
+        if time.monotonic() >= deadline:
+            return {"status": "pending", "timeout": True, "artifact_id": parsed.artifact_id}, 4
+        time.sleep(max(0.5, parsed.interval))
 
 
 def _attention(args: list[str]) -> dict:
@@ -184,6 +224,8 @@ def main(argv: list[str]) -> int:
              "create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V] | "
              "decision SESSION TITLE QUESTION YES_LABEL NO_LABEL [JSON_PAYLOAD] [OPTIONS] | "
              "question SESSION TITLE QUESTION JSON_OPTIONS [OPTIONS] | "
+             "input SESSION TITLE PROMPT [--hint one_time_code] [--expires-in S] [OPTIONS] | "
+             "wait ARTIFACT_ID [--timeout S] | "
              "attention [--session SESSION] [--include-archived] | withdraw SESSION DECISION_ID | "
              "update ARTIFACT_ID STATUS [JSON_PAYLOAD] | progress ARTIFACT_ID VALUE [CONTENT] | list SESSION")
     try:
@@ -197,8 +239,11 @@ def main(argv: list[str]) -> int:
                 "session": argv[2], "type": argv[3], "title": argv[4],
                 "summary": argv[5] if len(argv) >= 6 else "",
                 "payload": json.loads(argv[6]) if len(argv) == 7 else {}})["artifact"]
-        elif cmd in {"decision", "question"}:
+        elif cmd in {"decision", "question", "input"}:
             result = _decision_request(cmd, argv[2:])
+        elif cmd == "wait":
+            result, code = _wait(argv[2:])
+            print(json.dumps(result, ensure_ascii=False)); return code
         elif cmd == "attention":
             result = _attention(argv[2:])
         elif cmd == "withdraw" and len(argv) == 4:

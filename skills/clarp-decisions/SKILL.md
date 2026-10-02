@@ -70,6 +70,36 @@ continuing work that does not depend on the answer. A selected option comes back
 with its immutable label; custom text preserves the user's wording. Neither is
 blanket authorization for unrelated or protected actions.
 
+## Ask for urgent typed input (codes, short answers)
+
+When you need a value only the user has, right now (an SMS or e-mail login
+code, a short reference), ask with a text input card instead of in chat. It
+shows a text box, a countdown, and a reply field on the notification itself.
+
+```bash
+artifact=$(clarp-agent-artifacts input "$CLAUDE_PWA_SESSION" \
+  "Ruter SMS code" "Ruter just sent an SMS code to your phone. Enter it here." \
+  --hint one_time_code --expires-in 300 --blocks-progress --urgency time_sensitive \
+  --priority-reason "The login is waiting for the code and the code expires in 5 minutes." \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["artifact_id"])')
+clarp-agent-artifacts wait "$artifact" --timeout 300
+```
+
+- `--hint one_time_code` gives a code keypad with SMS autofill; use `text` otherwise.
+- `wait` blocks until the answer arrives and prints it: exit 0 answered,
+  3 expired/withdrawn/discarded, 4 timed out. Use it when you would otherwise
+  sit idle; the answer is also delivered to you as a normal decision result.
+- Treat the typed value as a secret when it is one: use it, never echo it into
+  chat, commits or files.
+
+## Always say how long the user has
+
+If the answer is only useful for a limited time (a login window, a code's
+lifetime, a meeting starting), set `--expires-in SECONDS` (or `--expires-at`)
+on any card. The card shows a countdown, and when time runs out it is marked
+**Expired**: it stays in the conversation, it is never deleted, and you are
+told it expired. Do not create short-lived cards without an expiry.
+
 ## Request explicit authorization
 
 ```bash

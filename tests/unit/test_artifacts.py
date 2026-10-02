@@ -771,3 +771,37 @@ def test_owner_message_supersedes_every_open_request_of_that_agent(tmp_path):
     assert not artifacts.has_pending_decision(agent_id)
     assert artifacts.get(approval["artifact_id"])["decision"]["resolved_choice"] == "superseded"
     assert artifacts.close_for_user_message(agent_id) == []
+
+
+def test_text_input_request_takes_only_typed_text_and_expires_without_deletion(tmp_path, monkeypatch):
+    _agent(tmp_path)
+    with pytest.raises(ValueError, match="no options"):
+        artifacts.create_decision(session="mike", title="Code", question="Code?",
+                                  response_type="text_input", options=[{"id": "a", "label": "A"}])
+    with pytest.raises(ValueError, match="input_hint"):
+        artifacts.create_decision(session="mike", title="Code", question="Code?", input_hint="one_time_code")
+    item = artifacts.create_decision(
+        session="mike", title="SMS code", question="Enter the SMS code", response_type="text_input",
+        input_hint="one_time_code", blocks_progress=True, urgency="time_sensitive",
+        priority_reason="The login waits for the code")
+    assert item["type"] == "question" and item["payload"]["input_hint"] == "one_time_code"
+    decision = item["decision"]
+    assert decision["response_type"] == "text_input" and decision["allow_custom_text"] is True
+    assert decision["options"] == [] and decision["input_hint"] == "one_time_code"
+    assert artifacts.attention(include_questions=True)[0]["input_hint"] == "one_time_code"
+    with pytest.raises(ValueError, match="text answer"):
+        artifacts.resolve(decision["decision_id"], expected_revision=1, answer={"option_id": "x"})
+    with pytest.raises(ValueError):
+        artifacts.resolve(decision["decision_id"], expected_revision=1, choice="accepted")
+    answered, _ = artifacts.resolve(decision["decision_id"], expected_revision=1, answer={"text": " 1225 "})
+    assert answered["decision"]["answer"] == {"text": "1225"}
+    prompt = artifacts.format_delivery_prompt(artifacts.pending_deliveries()[0])
+    assert '"1225"' in prompt
+
+    expiring = artifacts.create_decision(session="mike", title="Code", question="Code?",
+                                         response_type="text_input", expires_at=db.now_ms() + 50)
+    monkeypatch.setattr(db, "now_ms", lambda: expiring["decision"]["expires_at"] + 1)
+    artifacts.attention(include_questions=True)
+    expired = artifacts.get(expiring["artifact_id"])
+    assert expired is not None and expired["deleted_at"] is None
+    assert expired["status"] == "expired" and expired["decision"]["status"] == "expired"

@@ -680,7 +680,8 @@ def on_user_notification(notification: dict) -> None:
 # until the user happens to open the right chat.
 def decision_payload(persona: str, session: str | None, title: str, question: str,
                      *, decision_id: str, artifact_id: str,
-                     time_sensitive: bool = False,
+                     time_sensitive: bool = False, text_input: bool = False,
+                     revision: int = 1, expires_at: int | None = None,
                      avatar_url: str | None = None, avatar_custom: bool = False,
                      server_instance_id: str = "") -> dict:
     """APNs payload for a newly created decision. Tapping it deep-links to the
@@ -700,6 +701,14 @@ def decision_payload(persona: str, session: str | None, title: str, question: st
     # be interrupted for; an ordinary question stays at the messaging level.
     payload["aps"]["interruption-level"] = "time-sensitive" if time_sensitive else "active"
     payload["reason"] = "decision"
+    if text_input:
+        # The app registers this category with a text-reply action, so the
+        # answer (an SMS code, say) can be typed straight from the banner.
+        payload["aps"]["category"] = "input-request"
+        payload["response_type"] = "text_input"
+        payload["revision"] = revision
+        if expires_at is not None:
+            payload["expires_at"] = expires_at
     payload["decision_id"] = decision_id
     payload["artifact_id"] = artifact_id
     return payload
@@ -767,6 +776,9 @@ def send_decision_created(artifact: dict) -> dict:
                     persona, session, title, question,
                     decision_id=decision_id, artifact_id=artifact_id,
                     time_sensitive=time_sensitive,
+                    text_input=decision.get("response_type") == "text_input",
+                    revision=int(decision.get("revision") or 1),
+                    expires_at=decision.get("expires_at"),
                     avatar_url=avatar_url, avatar_custom=avatar_custom,
                     server_instance_id=_server_instance_id())
                 try:

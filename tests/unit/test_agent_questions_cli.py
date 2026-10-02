@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,11 @@ import pytest
 _ROOT = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("agent_questions_cli", _ROOT / "scripts/agent_artifacts.py")
 cli = importlib.util.module_from_spec(_spec)
+# The helper prepends the installed release to sys.path; keep the suite on
+# this checkout's server modules.
+_path = list(sys.path)
 _spec.loader.exec_module(cli)
+sys.path[:] = _path
 
 
 OPTIONS = [{"id": "keep", "label": "Keep the current layout"},
@@ -150,3 +155,41 @@ def test_create_report_posts_and_rejects_empty_html(tmp_path, requests, capsys):
     html.write_text("  ")
     assert cli.main(["cli", "create-report", "theo", "R", str(html)]) == 1
     assert "empty" in capsys.readouterr().err
+
+
+def test_input_request_carries_hint_and_relative_expiry(requests, monkeypatch):
+    import time
+    monkeypatch.setattr(time, "time", lambda: 1000.0)
+    args = ["cli", "input", "rita", "SMS code", "Enter the Ruter SMS code", "--hint", "one_time_code",
+            "--expires-in", "300", "--blocks-progress", "--urgency", "time_sensitive",
+            "--priority-reason", "The login waits for the code"]
+    assert cli.main(args) == 0
+    body = requests[1][2]
+    assert body["response_type"] == "text_input" and body["input_hint"] == "one_time_code"
+    assert body["expires_at"] == 1000 * 1000 + 300 * 1000
+    assert "options" not in body
+    assert cli.main(["cli", "input", "rita", "Code", "Code?", "--expires-in", "5",
+                     "--expires-at", "99"]) == 1
+
+
+@pytest.mark.parametrize("status,code", [("answered", 0), ("expired", 3), ("cancelled", 3)])
+def test_wait_returns_the_outcome_and_an_exit_code(monkeypatch, capsys, status, code):
+    seen = iter([{"status": "pending"}, {"status": status, "answer": {"text": "1225"} if code == 0 else None}])
+    monkeypatch.setattr(cli, "_request", lambda method, path, body=None: {"artifact": {"decision": next(seen)}})
+    import time
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    assert cli.main(["cli", "wait", "artifact-1", "--timeout", "60"]) == code
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == status
+    if code == 0:
+        assert out["answer"] == {"text": "1225"}
+
+
+def test_wait_times_out_while_still_pending(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_request", lambda method, path, body=None: {"artifact": {"decision": {"status": "pending"}}})
+    import time
+    clock = iter([0, 0, 5, 10])
+    monkeypatch.setattr(time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+    assert cli.main(["cli", "wait", "artifact-1", "--timeout", "4"]) == 4
+    assert json.loads(capsys.readouterr().out)["timeout"] is True

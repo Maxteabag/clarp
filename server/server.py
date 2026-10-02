@@ -4384,7 +4384,8 @@ class Handler(BaseHTTPRequestHandler):
                 priority_reason=data.get("priority_reason", ""),
                 urgency=data.get("urgency", "normal"),
                 response_effort=data.get("response_effort", "review"),
-                deadline_at=data.get("deadline_at"))
+                deadline_at=data.get("deadline_at"),
+                input_hint=data.get("input_hint"))
         except (ValueError, sqlite3.IntegrityError) as exc:
             return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
