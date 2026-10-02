@@ -385,12 +385,9 @@ mod tests {
     /// anonymised) must show as Markdown, not fall back to raw plain text.
     #[test]
     fn a_reply_with_code_inside_a_list_renders_as_markdown() {
-        let message = Message {
-            id: "a1".into(),
-            role: "assistant".into(),
-            text: include_str!("../tests/fixtures/nested-code-reply.md").into(),
-            ..Message::default()
-        };
+        // As the Host sends it: the app cleans the voice tags out on parsing.
+        let json = serde_json::json!({"id": "a1", "role": "assistant", "text": include_str!("../tests/fixtures/nested-code-reply.md")});
+        let message = Message::from_json(json.as_object().expect("an object"));
         let presented = clarp_core::presentation::present(&[message], &mut clarp_core::presentation::Settings::default(), None);
         let row = presented.rows.first().expect("the reply is presented");
         let text = if row.body.is_empty() { row.message.text.clone() } else { row.body.clone() };
@@ -399,7 +396,8 @@ mod tests {
         assert_eq!(codes, 2, "both commands are code blocks: {blocks:#?}");
         for block in &blocks {
             if let clarp_engine::blocks::Block::Prose(markdown) = block {
-                assert!(slint::StyledText::from_markdown(markdown).is_ok(), "Slint parses this prose as Markdown:\n{markdown}");
+                let parsed = slint::StyledText::from_markdown(markdown);
+                assert!(parsed.is_ok(), "Slint parses this prose as Markdown ({:?}):\n{markdown}", parsed.err().map(|e| e.to_string()));
             }
         }
     }
