@@ -3,7 +3,7 @@ import pytest
 
 from lib import origins
 from lib.policies.notifications import (
-    AgentCapabilities, CompletedTurn, Notify, NotificationSettings, Suppress,
+    AGENT_CHATTER_ORIGINS, AgentCapabilities, CompletedTurn, Notify, NotificationSettings, Suppress,
     notify_decision)
 
 ALL_ORIGINS = sorted(
@@ -25,10 +25,12 @@ def turn(content="speak", *, agent_id="a1", has_cause=True, interrupted=False):
 
 @pytest.mark.parametrize("origin", ALL_ORIGINS)
 @pytest.mark.parametrize("content", ["speak", "text-reply"])
-def test_special_treatment_off_notifies_every_non_janitor_origin(origin, content):
+def test_special_treatment_off_notifies_every_origin_except_agent_chatter(origin, content):
     decision = notify_decision(origin, turn(content), CHAT, LAX)
     if origin == "janitor":
         assert decision == Suppress("janitor-maintenance")
+    elif origin in AGENT_CHATTER_ORIGINS:
+        assert decision == Suppress(f"agent-chatter:{origin}")
     else:
         assert decision == Notify(reason=content, kind=content, push=True, muted=False)
 
@@ -38,6 +40,8 @@ def test_special_treatment_on_pages_only_user_facing_origins(origin):
     decision = notify_decision(origin, turn(), CHAT, STRICT)
     if origin == "janitor":
         assert decision == Suppress("janitor-maintenance")
+    elif origin in AGENT_CHATTER_ORIGINS:
+        assert decision == Suppress(f"agent-chatter:{origin}")
     elif origin == "leader_tick":
         assert decision == Suppress("leader-tick-non-leader")
     elif origin in origins.USER_FACING_ORIGINS:
@@ -94,7 +98,8 @@ def test_muted_agent_keeps_badge_but_not_push(content):
 
 
 def test_origin_is_stripped():
-    assert notify_decision("  agent ", turn(), CHAT, STRICT) == Suppress("not-user-facing-origin:agent")
+    assert notify_decision("  schedule ", turn(), CHAT, STRICT) == Suppress("agent-chatter:schedule")
+    assert notify_decision("  automation ", turn(), CHAT, STRICT) == Suppress("not-user-facing-origin:automation")
 
 
 @pytest.mark.parametrize("content", ["speak", "text-reply"])

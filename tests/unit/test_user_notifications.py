@@ -128,7 +128,7 @@ def test_answering_the_decision_drops_needs_response_on_the_next_turn(monkeypatc
     assert notification["needs_response"] is False
 
 
-def test_worker_origin_speak_is_suppressed(monkeypatch):
+def test_worker_origin_speak_is_suppressed_with_special_treatment(monkeypatch):
     user_notifications.settings_store.set_text(
         "automation_special_treatment", "true")
     monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
@@ -141,10 +141,12 @@ def test_worker_origin_speak_is_suppressed(monkeypatch):
     assert notification["push"] is False
     assert notification["badge"] is False
     assert notification["preview"] == ""
-    assert notification["reason"] == "not-user-facing-origin:agent"
+    assert notification["reason"] == "agent-chatter:agent"
 
 
-def test_worker_origin_not_suppressed_when_special_treatment_is_off(monkeypatch):
+def test_reply_to_another_agent_never_badges_or_pushes_even_with_special_treatment_off(monkeypatch):
+    """Forty agents acknowledging a coordinator's broadcast must not become
+    forty unread replies and pushes for the owner."""
     monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
     user_notifications.settings_store.set_text(
         "automation_special_treatment", "false")
@@ -153,10 +155,11 @@ def test_worker_origin_not_suppressed_when_special_treatment_is_off(monkeypatch)
 
     notification = _classify(aid, done_ts)
 
-    assert notification["notify"] is True
-    assert notification["push"] is True
-    assert notification["badge"] is True
-    assert notification["preview"] == "Worker status."
+    assert notification["notify"] is False
+    assert notification["push"] is False
+    assert notification["badge"] is False
+    assert notification["unread"] is False
+    assert notification["reason"] == "agent-chatter:agent"
 
 
 def test_watcher_origin_summary_notifies(monkeypatch):
@@ -208,7 +211,7 @@ def test_leader_delegated_agent_origin_is_suppressed(monkeypatch):
     assert notification["push"] is False
     assert notification["badge"] is False
     assert notification["preview"] == ""
-    assert notification["reason"] == "not-user-facing-origin:agent"
+    assert notification["reason"] == "agent-chatter:agent"
 
 
 def test_leader_tick_speak_is_proactive_notification(monkeypatch):
