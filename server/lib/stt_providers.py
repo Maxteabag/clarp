@@ -71,6 +71,15 @@ CATALOG: tuple[dict, ...] = (
          {"id": "cartesia:ink-whisper", "model": "ink-whisper",
           "name": "Cartesia Ink-Whisper", "biasing": "none"},
      )},
+    # Chirp 3 over Speech-to-Text v2 sync recognize, authenticated with the
+    # Host user's Application Default Credentials rather than an API key.
+    {"id": "google", "name": "Google Chirp", "kind": "cloud",
+     "credential": "GOOGLE_APPLICATION_CREDENTIALS", "streaming": False,
+     "turn_detection": "native", "turn_detection_model": "",
+     "models": (
+         {"id": "google:chirp_3", "model": "chirp_3",
+          "name": "Google Chirp 3", "biasing": "none"},
+     )},
 )
 VALID_IDS = frozenset(item["id"] for item in CATALOG)
 
@@ -107,6 +116,9 @@ def _key_for(cfg, provider: str) -> str:
         return cfg.eleven_key()
     if provider == "cartesia":
         return cfg.cartesia_key()
+    if provider == "google":
+        # The "key" is the readable ADC file; without a project it is unusable.
+        return cfg.google_stt_credentials_file() if cfg.google_stt_project else ""
     return ""
 
 
@@ -314,6 +326,12 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
     elif provider == "cartesia" and row["model"] in _CARTESIA_SOCKET_MODELS:
         # Keyterms only exist on the socket, so the biasing models go there.
         from .cartesia_stt_ws import transcribe as run
+    elif provider == "google":
+        import functools
+        from .google_stt import transcribe as google_run
+        cfg = load()
+        run = functools.partial(google_run, project=cfg.google_stt_project,
+                                location=cfg.google_stt_location)
     else:
         from .cartesia_stt import transcribe as run
     from . import stt_language

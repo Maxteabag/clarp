@@ -402,6 +402,13 @@ class Config:
     cartesia_api_key: str = ""           # [cartesia] api_key or env CARTESIA_API_KEY
     deepgram_api_key: str = ""            # [deepgram] api_key or env DEEPGRAM_API_KEY
     deepgram_model: str = "flux-haley-en"
+    # [google_stt] Chirp 3 over Cloud Speech-to-Text v2. The Speech API takes
+    # no API keys, so it authenticates with Application Default Credentials
+    # (credentials, else env GOOGLE_APPLICATION_CREDENTIALS, else gcloud's
+    # file); project is the quota/billing project and has no default.
+    google_stt_project: str = ""
+    google_stt_location: str = "eu"
+    google_stt_credentials: str = ""
     openai_api_key: str = ""             # [openai] api_key or env OPENAI_API_KEY
     typesafe_api_key: str = ""           # [typesafe] api_key or env TYPESAFE_API_KEY
     openai_realtime_model: str = "gpt-realtime-2.1"
@@ -538,6 +545,14 @@ class Config:
     def deepgram_key(self) -> str:
         """Resolved Deepgram key: config first, env fallback."""
         return self.auth_token_or_env(self.deepgram_api_key, "DEEPGRAM_API_KEY")
+
+    def google_stt_credentials_file(self) -> str:
+        """The ADC file Chirp authenticates with ("" unless it is readable)."""
+        configured = (self.google_stt_credentials
+                      or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "")
+        path = pathlib.Path(os.path.expanduser(configured.strip())) if configured.strip() \
+            else pathlib.Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+        return str(path) if os.access(path, os.R_OK) and path.is_file() else ""
 
     def openai_key(self) -> str:
         """Resolved OpenAI key: config first, env fallback."""
@@ -749,6 +764,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     eleven  = data.get("elevenlabs", {}) or {}
     cartesia = data.get("cartesia", {}) or {}
     deepgram = data.get("deepgram", {}) or {}
+    google_stt = data.get("google_stt", {}) or {}
     openai  = data.get("openai", {}) or {}
     typesafe = data.get("typesafe", {}) or {}
     tts     = data.get("tts", {}) or {}
@@ -814,6 +830,9 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         cartesia_api_key = str(cartesia.get("api_key", "")),
         deepgram_api_key = str(deepgram.get("api_key", "")),
         deepgram_model  = str(deepgram.get("model", "flux-haley-en")),
+        google_stt_project = str(google_stt.get("project", "")).strip(),
+        google_stt_location = str(google_stt.get("location", "eu")).strip() or "eu",
+        google_stt_credentials = str(google_stt.get("credentials", "")).strip(),
         openai_api_key  = str(openai.get("api_key", "")),
         typesafe_api_key = str(typesafe.get("api_key", "")),
         openai_realtime_model = str(

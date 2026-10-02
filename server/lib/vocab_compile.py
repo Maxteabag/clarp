@@ -55,6 +55,10 @@ _BUDGETS: dict[str, Budget] = {
     "elevenlabs": Budget(
         provider="elevenlabs", model="scribe_v2", unit=Unit.TERMS,
         capacity=100, max_term_chars=49),
+    # Chirp 3 is sent without adaptation phrases (they are not offered for
+    # chirp_3 in every location), so nothing is compiled for it.
+    "google": Budget(
+        provider="google", model="chirp_3", unit=Unit.TERMS, capacity=0),
     "assemblyai": Budget(
         provider="assemblyai", model="universal-3", unit=Unit.WORDS,
         capacity=1500, supports_prose=True),

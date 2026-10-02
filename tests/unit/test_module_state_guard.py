@@ -72,6 +72,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/diagnostics_settings.py", "_CACHED_AT"): CONFIG,
     ("lib/dreaming.py", "_advance_request_callback"): CLIENT,
     ("lib/elevenlabs_voices.py", "_cache"): CACHE,
+    ("lib/google_stt.py", "_TOKENS"): CACHE,
     ("lib/eventlog.py", "LOG_DIR"): PATHS,
     ("lib/health.py", "_STATE"): JOBS,
     ("lib/heartbeat.py", "_STATE_BY_AGENT"): "per-agent heartbeat timers of the running worker; rebuilt from agents rows on start",
