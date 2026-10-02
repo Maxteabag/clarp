@@ -33,7 +33,10 @@ Optional creation flags:
 - `--blocks-progress`: this work cannot continue without the answer.
 - `--priority-reason TEXT`: what is blocked, why timing matters, and the effect
   of waiting. Required for blocking or time-sensitive requests.
-- `--urgency normal|time_sensitive`: use time-sensitive only for a real reason.
+- `--urgency normal|time_sensitive`: time-sensitive breaks through the user's
+  Focus, and only when combined with `--blocks-progress`. Use it only when you
+  are blocked AND waiting has a real cost (a login window, a deadline).
+  Everything else is an ordinary notification.
 - `--deadline-at MILLISECONDS`: an actual deadline as epoch milliseconds.
 - `--effort quick|short|review`: quick answer, about a minute, or closer review.
   Effort is separate from importance; a short question need not be urgent.
@@ -88,13 +91,31 @@ Do not substitute a multiple-choice preference for required explicit approval.
   on the user's behalf. Creation does not authorize the requested action.
 - An accepted approval, rejected approval, selected option, and custom text are
   different outcomes. Respect the actual response and its scope.
-- Discard or expiry grants neither approval nor an answer. Stop the dependent
+- Discard is silent: you are not told. Expiry grants neither approval nor an
+  answer and is delivered to you. Neither is permission. Stop the dependent
   action; do not guess permission or immediately recreate the unchanged request.
 - Archive only hides the card from the inbox; it does not answer or cancel work.
 - If creation times out, inspect `attention --session SESSION` before retrying
   to avoid duplicate questions. Do not create duplicates merely to test a helper.
 - A saved answer can still have `delivery_pending: true`. It is durable but does
   not prove that the originating agent has resumed; the Host retries delivery.
-- Question answers, discard notices, and expiry notices queue behind busy work.
+- Question answers and expiry notices queue behind busy work.
   Successful delivery can mean durable admission to that queue, not execution;
   do not stop another active turn merely to process the notification.
+
+## Keep your requests current
+
+Updates is only useful if every card in it still matters. You own your cards:
+
+- When a request is no longer valid (you found the answer, the plan changed,
+  the time window passed, a newer card replaces it), withdraw it at once:
+  `clarp-agent-artifacts withdraw "$CLAUDE_PWA_SESSION" DECISION_ID`.
+  Withdrawal is silent and closes the card everywhere.
+- Never post a second card for the same question; withdraw the old one first.
+- When the user writes to you in chat, Clarp closes all your open requests as
+  `superseded`. Treat their message as the reply. If it did not answer
+  something you still need, ask again, as a new card if necessary.
+- Short-lived prompts ("approve within 3 minutes", "pick 67 in the app") get
+  an `--expires-at` matching the window, so they disappear on their own.
+- Do not file CI results as attention. If a failing workflow blocks your work,
+  ask a question that says what is blocked and what you propose.

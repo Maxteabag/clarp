@@ -646,7 +646,9 @@ def resolve(decision_id: str, *, expected_revision: int,
 
 
 def dismiss(decision_id: str, *, expected_revision: int) -> tuple[dict, bool]:
-    """User discards a pending request without answering or granting permission."""
+    """User discards a pending request without answering or granting permission.
+
+    Silent: nothing is delivered to the agent."""
     _integer(expected_revision, "expected_revision", minimum=1)
     _expire_decisions()
     con = db.conn(); con.execute("BEGIN IMMEDIATE")
@@ -667,8 +669,65 @@ def dismiss(decision_id: str, *, expected_revision: int) -> tuple[dict, bool]:
                     (now, decision_id))
         con.execute("UPDATE artifacts SET status='cancelled',updated_at=?,completed_at=? WHERE artifact_id=?",
                     (now, now, row["artifact_id"]))
-        _queue_delivery(con, row, choice="dismissed", answer=None, now=now)
+        # Discard evaporates the request. The agent is not woken or told: the
+        # owner chose to drop it, and a "discarded" prompt would only invite
+        # the agent to argue for it again.
         con.execute("COMMIT"); return get(row["artifact_id"]) or {}, True
+    except BaseException:
+        con.execute("ROLLBACK"); raise
+
+
+def _close_pending(con, rows, *, choice: str, by: str, now: int) -> list[str]:
+    """Close pending requests without an answer and without waking the agent."""
+    closed = []
+    for row in rows:
+        artifact = con.execute("SELECT updated_at FROM artifacts WHERE artifact_id=?",
+                               (row["artifact_id"],)).fetchone()
+        stamp = max(now, (artifact["updated_at"] if artifact else 0) + 1)
+        con.execute("""UPDATE artifact_decisions SET status='cancelled',resolved_choice=?,
+                       resolved_by=?,resolved_at=?,revision=revision+1
+                       WHERE decision_id=? AND status='pending'""",
+                    (choice, by, stamp, row["decision_id"]))
+        con.execute("UPDATE artifacts SET status='cancelled',updated_at=?,completed_at=? WHERE artifact_id=?",
+                    (stamp, stamp, row["artifact_id"]))
+        closed.append(row["artifact_id"])
+    return closed
+
+
+def withdraw(decision_id: str, *, session: str) -> tuple[dict, bool]:
+    """The asking agent revokes its own pending request because it is no
+    longer valid. Only the originating session may withdraw it."""
+    session = (session or "").strip()
+    if not session: raise ValueError("session required")
+    con = db.conn(); con.execute("BEGIN IMMEDIATE")
+    try:
+        row = con.execute(
+            """SELECT d.*,a.session FROM artifact_decisions d JOIN artifacts a
+                ON a.artifact_id=d.artifact_id WHERE d.decision_id=?""", (decision_id,)).fetchone()
+        if not row: raise ValueError("decision not found")
+        if row["session"] != session: raise PermissionError("only the asking agent may withdraw this request")
+        if row["status"] == "cancelled" and row["resolved_choice"] == "withdrawn":
+            con.execute("COMMIT"); return get(row["artifact_id"]) or {}, False
+        if row["status"] != "pending": raise ValueError("decision is no longer pending")
+        _close_pending(con, [row], choice="withdrawn", by="agent", now=db.now_ms())
+        con.execute("COMMIT"); return get(row["artifact_id"]) or {}, True
+    except BaseException:
+        con.execute("ROLLBACK"); raise
+
+
+def close_for_user_message(agent_id: str) -> list[str]:
+    """The owner wrote to the agent after it asked: their message supersedes
+    every request the agent still has open. Returns the closed artifact IDs."""
+    agent_id = (agent_id or "").strip()
+    if not agent_id: return []
+    con = db.conn(); con.execute("BEGIN IMMEDIATE")
+    try:
+        rows = con.execute(
+            """SELECT d.decision_id,d.artifact_id FROM artifact_decisions d JOIN artifacts a
+                ON a.artifact_id=d.artifact_id WHERE a.agent_id=? AND d.status='pending'""",
+            (agent_id,)).fetchall()
+        closed = _close_pending(con, rows, choice="superseded", by="user_message", now=db.now_ms())
+        con.execute("COMMIT"); return closed
     except BaseException:
         con.execute("ROLLBACK"); raise
 

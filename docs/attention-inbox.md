@@ -27,6 +27,23 @@ running agent/job or deletes an artifact's source file. Unsupported discard
 actions remain unavailable. Partial failure retains the affected selections and
 shows a readable error. Archived items can be restored.
 
+## Keeping Updates trustworthy (Host contract 28)
+
+- **Discard is silent.** Dismissing a decision or question cancels it without
+  waking or messaging the agent.
+- **Agents withdraw stale requests.** `POST /decisions/{id}/withdraw` with
+  `{"session": ...}` (only the asking session) closes the card as
+  `resolved_choice: withdrawn`, `resolved_by: agent`, with no delivery.
+- **Chat supersedes.** When the owner sends an agent a message through
+  `POST /send` (origin `user`, no sending agent), every pending request of that
+  agent closes as `superseded` / `user_message`. Agent-to-agent messages,
+  automation and decision deliveries do not.
+- **CI is not attention.** `workflow_run` artifacts are excluded from
+  `GET /attention/inbox`; an agent blocked by a failure asks a question.
+- **Interruptions are earned.** Turn-done pushes are always `active`. A new
+  decision push is `time-sensitive` only when it blocks progress *and* has
+  `urgency: time_sensitive`.
+
 ## Host contract
 
 Creation continues to use `POST /decisions`; old requests default to an approval.

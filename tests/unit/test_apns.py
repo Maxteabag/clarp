@@ -262,9 +262,11 @@ def test_turn_done_alerts_are_ordinary_messages_not_time_sensitive():
     assert p["needs_response"] is False
 
 
-def test_turn_done_needing_a_response_is_time_sensitive_with_sound():
+def test_turn_done_needing_a_response_adds_sound_but_never_interrupts():
+    """A pending request left over from earlier must not turn every later
+    reply from that agent into a Focus-breaking alert."""
     p = apns.turn_done_payload("Mike", "mike", needs_response=True)
-    assert p["aps"]["interruption-level"] == "time-sensitive"
+    assert p["aps"]["interruption-level"] == "active"
     assert p["aps"]["sound"] == "default"
     assert p["needs_response"] is True
 
@@ -781,7 +783,7 @@ def test_send_user_notification_carries_needs_response_into_the_wire_payload(tmp
     })
     sent = jsonlib.loads(calls[0]['content'])
     assert sent['needs_response'] is True
-    assert sent['aps']['interruption-level'] == 'time-sensitive'
+    assert sent['aps']['interruption-level'] == 'active'
     assert sent['aps']['sound'] == 'default'
 
     calls.clear()
@@ -875,13 +877,13 @@ def test_decision_payload_carries_question_and_deep_link_fields():
     assert "subtitle" not in same["aps"]["alert"]
 
 
-def test_blocking_or_time_sensitive_decisions_interrupt():
+def test_only_blocking_time_sensitive_decisions_interrupt():
     p = apns.decision_payload("Nadia", "nadia", "Deploy?", "Now?",
                               decision_id="d1", artifact_id="a1", time_sensitive=True)
     assert p["aps"]["interruption-level"] == "time-sensitive"
-    assert apns.decision_needs_interruption({"blocks_progress": True})
-    assert apns.decision_needs_interruption({"urgency": "time_sensitive"})
-    assert not apns.decision_needs_interruption({"blocks_progress": False, "urgency": "normal"})
+    assert apns.decision_needs_interruption({"blocks_progress": True, "urgency": "time_sensitive"})
+    assert not apns.decision_needs_interruption({"blocks_progress": True, "urgency": "normal"})
+    assert not apns.decision_needs_interruption({"blocks_progress": False, "urgency": "time_sensitive"})
 
 
 def _decision_row(agent_id="a1", session="nadia", persona="Nadia", **decision):
@@ -908,7 +910,7 @@ def test_send_decision_created_pushes_to_every_live_token(tmp_path, monkeypatch)
     monkeypatch.setattr(httpx, "Client", lambda *a, **k: _FakeClient(
         {"goodtoken": _FakeResp(200), "deadtoken": _FakeResp(410, "Unregistered")}, calls))
 
-    summary = apns.send_decision_created(_decision_row(blocks_progress=True))
+    summary = apns.send_decision_created(_decision_row(blocks_progress=True, urgency="time_sensitive"))
     assert summary == {"enabled": True, "sent": 1, "failed": 0, "disabled": 1}
     assert {c["token"] for c in calls} == {"goodtoken", "deadtoken"}
     assert {c["headers"]["apns-collapse-id"] for c in calls} == {"decision-d1"}

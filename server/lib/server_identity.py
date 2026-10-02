@@ -40,7 +40,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 27
+HOST_CONTRACT = 28
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -91,6 +91,7 @@ FEATURES: tuple[str, ...] = (
     "background_job_cancel_generation",
     "opencode_model_efforts",
     "desktop_send_quiet_push",
+    "decision_lifecycle",
 )
 
 
@@ -121,6 +122,7 @@ FEATURE_CONTRACTS["background_job_cancel_generation"] = 23
 FEATURE_CONTRACTS["provider_background_tasks"] = 24
 FEATURE_CONTRACTS["opencode_model_efforts"] = 25
 FEATURE_CONTRACTS["desktop_send_quiet_push"] = 27
+FEATURE_CONTRACTS["decision_lifecycle"] = 28
 
 
 def capabilities() -> dict[str, object]:

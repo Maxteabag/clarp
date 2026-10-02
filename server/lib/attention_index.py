@@ -4,7 +4,9 @@ Decisions and Janitor failures retain their dedicated authority endpoints.
 """
 import base64,hashlib,json,time
 from . import db,artifacts,countdown_attention
-TYPES={'countdown','document','research','file','audio','video','code_change','data','release','directory','workflow_run','html_form'}
+# workflow_run is deliberately absent: a CI result is not something the owner
+# can act on from Updates. An agent blocked by a failed run raises a question.
+TYPES={'countdown','document','research','file','audio','video','code_change','data','release','directory','html_form'}
 FAILURES={'failure','timed_out','action_required','startup_failure'}
 class StaleCursor(ValueError): pass
 
