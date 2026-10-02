@@ -56,13 +56,15 @@ def fit_keyterms(terms: Iterable[str]) -> list[str]:
 
 
 def connection_url(*, model: str, sample_rate: int,
-                   keyterms: Iterable[str] | None = None) -> str:
+                   keyterms: Iterable[str] | None = None,
+                   language: str = "en") -> str:
     """The wss URL for one transcription, keyterms included where honoured."""
     params: list[tuple[str, str]] = [
         ("model", model),
         ("encoding", ENCODING),
         ("sample_rate", str(int(sample_rate))),
         ("cartesia_version", API_VERSION),
+        ("language", language),
     ]
     if model in BIASING_MODELS:
         params.extend(("keyterm", term) for term in fit_keyterms(keyterms or []))
@@ -163,14 +165,15 @@ class _Socket:
 
 def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
                model: str = "ink-2", keyterms: list[str] | None = None,
-               timeout: float = 30.0) -> tuple[str, float]:
+               language: str = "en", timeout: float = 30.0) -> tuple[str, float]:
     """Adapter-shaped entry point: returns `(text, elapsed_seconds)`."""
     import time
     import websocket
 
     del content_type  # the decode below determines the real format
     pcm = pcm_16k_mono(audio_bytes)
-    url = connection_url(model=model, sample_rate=16_000, keyterms=keyterms or [])
+    url = connection_url(model=model, sample_rate=16_000, keyterms=keyterms or [],
+                         language=language)
     started = time.monotonic()
     raw = websocket.create_connection(
         url, timeout=timeout, header=[f"X-API-Key: {api_key}"])
