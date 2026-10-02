@@ -30,6 +30,11 @@ CONTENT_TEXT_REPLY = "text-reply"
 # The ``client`` the desktop app names on ``/send``.
 DESKTOP_CLIENT = "desktop"
 NOTIFYING_CONTENT = frozenset({CONTENT_SPEAK, CONTENT_TEXT_REPLY})
+# Turns started by another agent or by routine scheduling are chatter between
+# agents: they stay in the conversation but never badge, mark unread or push.
+# Replies to the owner, Oracle, watchers, leader reports and automation (which
+# carries decision results and wake-ups the owner asked for) still notify.
+AGENT_CHATTER_ORIGINS = frozenset({"agent", "schedule", "heartbeat", "dreaming"})
 
 
 @dataclass(frozen=True)
@@ -86,6 +91,8 @@ def notify_decision(origin: str, completed_turn: CompletedTurn,
         return Suppress("missing-agent")
     if not completed_turn.has_cause:
         return Suppress("missing-causing-row")
+    if origin in AGENT_CHATTER_ORIGINS:
+        return Suppress(f"agent-chatter:{origin}")
     if settings.special_automation and origin not in USER_FACING_ORIGINS:
         return Suppress(f"not-user-facing-origin:{origin or 'unknown'}")
     if (settings.special_automation and origin == "leader_tick"
