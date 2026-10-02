@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use slint::platform::Key;
-use slint::Model;
+use slint::{ComponentHandle, Model};
 
 use super::{Stage, app_now, check, control, headless, posts, report, rows, run_stages, shot};
 use crate::ArtifactItem;
@@ -51,7 +51,7 @@ fn bar(window: &crate::AppWindow) -> Vec<String> {
 /// once the last has landed on screen (a long way takes a few stages).
 fn reach(id: &'static str) -> Vec<Stage> {
     let mut stages: Vec<Stage> = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..6 {
         stages.push((Box::leak(format!("towards {id}").into_boxed_str()), Box::new(move |app, _, elapsed| {
             if on(app) == id || elapsed > Duration::from_secs(12) {
                 return true;
@@ -100,17 +100,6 @@ fn wait_for(name: &'static str, limit: Duration, mut ready: impl FnMut(&crate::A
             return false;
         }
         check(done, what);
-        true
-    }))
-}
-
-/// A stage that presses `key` (after `after`).
-fn press(name: &'static str, key: impl Into<slint::SharedString> + Clone + 'static, after: Duration) -> Stage {
-    (name, Box::new(move |_, _, elapsed| {
-        if elapsed < after {
-            return false;
-        }
-        headless::press(key.clone());
         true
     }))
 }
@@ -167,6 +156,14 @@ fn reach_stages(out: &str) -> Vec<Stage> {
     let latest = Rc::new(Cell::new(0.0f32));
     let latest2 = latest.clone();
     let mut stages: Vec<Stage> = vec![
+        ("from the latest, no card", Box::new(|app, _, _| {
+            if !cursor(app).is_empty() {
+                headless::press(Key::Escape);
+            }
+            headless::press(Key::End);
+            true
+        })),
+        ("at the latest", Box::new(|app, _, elapsed| elapsed > Duration::from_millis(800) && cursor(app).is_empty() && report().transcript_focused)),
         ("the bar says how to reach cards", Box::new(move |_, window, _| {
             check(bar(window).iter().any(|h| h == "J/K Cards"), &format!("the shortcut bar shows J/K Cards in the chat: {:?}", bar(window)));
             latest.set(report().offset);
@@ -285,9 +282,421 @@ fn reach_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+/// A card's hints as "key label".
+fn hints(id: &str) -> Vec<String> {
+    card(id).map(|c| c.hints.iter().map(|h| format!("{} {}", h.key, h.label)).collect()).unwrap_or_default()
+}
+
+/// The fake Host's last request body to `path`.
+fn last_post(path: &str) -> Value {
+    posts(path).last().map(|e| e["body"].clone()).unwrap_or(Value::Null)
+}
+
+/// A stage that presses `keys` in turn (characters or keys).
+fn keys(name: &'static str, keys: Vec<slint::SharedString>) -> Stage {
+    (name, Box::new(move |_, _, elapsed| {
+        if elapsed < Duration::from_millis(150) {
+            return false;
+        }
+        for key in &keys {
+            headless::press(key.clone());
+        }
+        true
+    }))
+}
+
+fn k(key: Key) -> slint::SharedString {
+    key.into()
+}
+
+fn c(text: &str) -> slint::SharedString {
+    text.into()
+}
+
+// ---- decisions and questions
+
+fn decision_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let mut stages: Vec<Stage> = Vec::new();
+    stages.extend(reach("dec-deploy-k"));
+    stages.extend::<Vec<Stage>>(vec![
+        ("approval chosen", Box::new(move |_, _, _| {
+            headless::press("2");
+            let hold = card("dec-deploy-k").map(|c| c.chosen).unwrap_or(-2);
+            headless::press("1");
+            let ship = card("dec-deploy-k").map(|c| c.chosen).unwrap_or(-2);
+            check(hold == 1 && ship == 0 && posts("/decisions/d-deploy-k/resolve").is_empty(), &format!("2 chooses Hold, 1 Ship it, nothing sent yet: {hold} {ship}"));
+            shot(&out, "keys-10-decision-chosen");
+            headless::press(Key::Return);
+            true
+        })),
+        wait_for("approval sent", Duration::from_secs(4), |_, _| last_post("/decisions/d-deploy-k/resolve") == json!({"choice": "accepted", "expected_revision": 4}),
+            "Enter sends the chosen answer: approved against the revision seen"),
+    ]);
+    stages.extend(reach("dec-discard-k"));
+    stages.push(keys("discard", vec![k(Key::Delete)]));
+    stages.push(wait_for("discarded", Duration::from_secs(4), |_, _| last_post("/decisions/d-discard-k/dismiss") == json!({"expected_revision": 4}), "Delete discards a pending decision"));
+    stages.extend(reach("q-trip-k"));
+    stages.push(keys("question option", vec![c("2"), k(Key::Return)]));
+    stages.push(wait_for("question answered", Duration::from_secs(4), |_, _| last_post("/decisions/q-trip-k/resolve")["answer"]["option_id"] == "tromso", "2 then Enter answers a question with its second option"));
+    stages.extend(reach("q-custom-k"));
+    stages.push(keys("own answer", vec![c("3")]));
+    stages.push(("own answer typed", Box::new(|app, window, elapsed| {
+        let editing = card("q-custom-k").is_some_and(|c| c.editing) && crate::commands::context(app, window) == "composer";
+        if !editing {
+            return elapsed > Duration::from_secs(2) && { check(false, "the last number opens the answer of one's own, typing into it"); true };
+        }
+        headless::type_text("Friday, after lunch");
+        headless::press(Key::Return);
+        true
+    })));
+    stages.push(wait_for("own answer sent", Duration::from_secs(4), |_, _| last_post("/decisions/q-custom-k/resolve")["answer"]["text"] == "Friday, after lunch", "Enter in it sends the written answer"));
+    stages.extend(reach("q-escape-k"));
+    stages.push(keys("own answer kept", vec![c("3")]));
+    stages.push(("own answer escaped", Box::new(|_, window, elapsed| {
+        if !window.global::<crate::ArtifactBridge>().get_editing() {
+            return elapsed > Duration::from_secs(2) && { check(false, "3 opens its field"); true };
+        }
+        headless::type_text("Somewhere warm");
+        headless::press(Key::Escape);
+        true
+    })));
+    stages.push(("back on the question", Box::new(|app, _, elapsed| {
+        if elapsed < Duration::from_millis(400) {
+            return false;
+        }
+        check(report().transcript_focused && cursor(app) == "q-escape-k" && card("q-escape-k").is_some_and(|c| c.pending && c.draft == "Somewhere warm"),
+            &format!("Escape keeps the draft and the keyboard on the question: cursor {:?}", cursor(app)));
+        headless::press(Key::Delete);
+        true
+    })));
+    stages.push(wait_for("question cancelled", Duration::from_secs(4), |_, _| !posts("/decisions/q-escape-k/dismiss").is_empty(), "Delete then cancels the question"));
+    stages
+}
+
+// ---- viewers
+
+fn viewer_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let mut stages: Vec<Stage> = Vec::new();
+    for (id, kind) in [("plan-ship-k", "PLAN"), ("doc-huge-k", ""), ("res-market-k", "RESEARCH"), ("cc-big-k", "CODE CHANGE"), ("data-sales-k", "DATA"), ("rel-ready-k", "RELEASE")] {
+        stages.extend(reach(id));
+        stages.push(keys("open the viewer", vec![k(Key::Return)]));
+        stages.push((Box::leak(format!("{id} viewer").into_boxed_str()), Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" {
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("Enter opens {id} in its viewer")); true };
+            }
+            check(kind.is_empty() || window.get_report_kind() == kind, &format!("Enter opens {id} in its viewer: {:?}", window.get_report_kind()));
+            true
+        })));
+        if id == "doc-huge-k" {
+            let out = out.clone();
+            let chat = Rc::new(Cell::new(0.0f32));
+            let (chat2, chat3) = (chat.clone(), chat.clone());
+            let top = Rc::new(Cell::new(0.0f32));
+            let (top2, top3) = (top.clone(), top.clone());
+            stages.push(("scroll the viewer", Box::new(move |_, window, elapsed| {
+                if elapsed < Duration::from_millis(300) {
+                    return false;
+                }
+                chat.set(report().offset);
+                top.set(window.get_report_offset());
+                headless::press(Key::DownArrow);
+                headless::press(Key::DownArrow);
+                true
+            })));
+            stages.push(("viewer arrows", Box::new(move |_, window, elapsed| {
+                if elapsed < Duration::from_millis(300) {
+                    return false;
+                }
+                let moved = top2.get() - window.get_report_offset();
+                check(moved > 30.0, &format!("Down scrolls the viewer ({moved}px)"));
+                top2.set(window.get_report_offset());
+                headless::press(Key::PageDown);
+                true
+            })));
+            stages.push(("viewer page", Box::new(move |_, window, elapsed| {
+                if elapsed < Duration::from_millis(300) {
+                    return false;
+                }
+                let moved = top3.get() - window.get_report_offset();
+                check(moved > 200.0, &format!("Page Down pages it ({moved}px)"));
+                headless::press(Key::End);
+                true
+            })));
+            stages.push(("viewer end", Box::new(move |_, window, elapsed| {
+                if elapsed < Duration::from_millis(300) {
+                    return false;
+                }
+                let at = window.get_report_offset();
+                check(at < -2000.0, &format!("End goes to its end ({at}px)"));
+                shot(&out, "keys-20-viewer-end");
+                headless::press(Key::PageUp);
+                headless::press(Key::UpArrow);
+                headless::press(Key::Home);
+                true
+            })));
+            stages.push(("viewer home", Box::new(move |_, window, elapsed| {
+                if elapsed < Duration::from_millis(300) {
+                    return false;
+                }
+                check(window.get_report_offset().abs() < 1.0, &format!("Home goes back to its top ({}px)", window.get_report_offset()));
+                check((report().offset - chat2.get()).abs() < 1.0, &format!("and none of these keys scrolled the chat under it ({} then {})", chat3.get(), report().offset));
+                true
+            })));
+        }
+        if id == "rel-ready-k" {
+            stages.push(("open the release's link", Box::new(|_, _, _| {
+                headless::press("1");
+                true
+            })));
+            stages.push(wait_for("release link opened", Duration::from_secs(2), |_, _| opened().iter().any(|u| u == "https://github.com/example/clarp/releases/2.4.0"),
+                "1 in the viewer opens its first link (the release's source)"));
+        }
+        stages.push(keys("close the viewer", vec![k(Key::Escape)]));
+        stages.push((Box::leak(format!("{id} closed").into_boxed_str()), Box::new(move |app, window, elapsed| {
+            let back = window.get_overlay().is_empty() && report().transcript_focused && on(app) == id;
+            if !back && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(back, &format!("Escape closes it, back on {id} in the chat: overlay {:?}, chat has the keyboard {}, on {:?}", window.get_overlay(), report().transcript_focused, on(app)));
+            true
+        })));
+    }
+    stages
+}
+
+// ---- audio
+
+fn audio_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let mut stages: Vec<Stage> = Vec::new();
+    stages.extend(reach("aud-brief-k"));
+    stages.push(keys("play", vec![k(Key::Return)]));
+    stages.push(("playing", Box::new(|_, _, elapsed| {
+        if !card("aud-brief-k").is_some_and(|c| c.media_state == "playing") {
+            return elapsed > Duration::from_secs(4) && { check(false, "Enter plays the clip"); true };
+        }
+        check(true, "Enter plays the clip");
+        headless::press(Key::RightArrow);
+        headless::press(Key::RightArrow);
+        true
+    })));
+    stages.push(("seeked forward", Box::new(move |_, _, elapsed| {
+        let played = card("aud-brief-k").map(|c| c.media_played).unwrap_or(0);
+        if played < 20 && elapsed < Duration::from_secs(2) {
+            return false;
+        }
+        check(played >= 20, &format!("Right twice seeks forward 20 s ({played}s)"));
+        shot(&out, "keys-30-audio-seek");
+        headless::press(Key::LeftArrow);
+        true
+    })));
+    stages.push(("seeked back", Box::new(|_, _, elapsed| {
+        let played = card("aud-brief-k").map(|c| c.media_played).unwrap_or(0);
+        if played >= 20 && elapsed < Duration::from_secs(2) {
+            return false;
+        }
+        check((10..20).contains(&played), &format!("Left seeks back 10 s ({played}s)"));
+        headless::press("s");
+        true
+    })));
+    stages.push(wait_for("stopped", Duration::from_secs(2), |_, _| card("aud-brief-k").is_some_and(|c| c.media_state == "idle" && c.action == "Play"), "S stops it"));
+    stages.push(keys("play again", vec![k(Key::Return)]));
+    stages.push(("playing again", Box::new(|_, _, elapsed| {
+        if !card("aud-brief-k").is_some_and(|c| c.media_state == "playing") {
+            return elapsed > Duration::from_secs(4) && { check(false, "Enter plays it again"); true };
+        }
+        headless::press(Key::Return);
+        true
+    })));
+    stages.push(wait_for("paused", Duration::from_secs(2), |_, _| card("aud-brief-k").is_some_and(|c| c.media_state == "paused"), "Enter pauses it"));
+    stages.push(keys("stop for good", vec![c("s")]));
+    stages
+}
+
+// ---- cards that open something
+
+fn open_stages(out: &str) -> Vec<Stage> {
+    let out = out.to_owned();
+    let mut stages: Vec<Stage> = Vec::new();
+    let opens: [(&'static str, &'static str, fn(&str) -> bool); 5] = [
+        ("form-trip-k", "Enter Open form", |u| u.contains("/form/")),
+        ("vid-demo-k", "Enter Play video", |u| u.starts_with("file://") && u.ends_with("cards-demo.mp4")),
+        ("file-pdf-k", "Enter Open file", |u| u.starts_with("file://") && u.ends_with("contract-2026-signed.pdf")),
+        ("wf-ci-k", "Enter Open in GitHub", |u| u == "https://github.com/example/clarp/actions/runs/901"),
+        ("form-report-k", "Enter Open report", |_| false),
+    ];
+    for (id, hint, wanted) in opens {
+        stages.extend(reach(id));
+        stages.push((Box::leak(format!("{id} hint").into_boxed_str()), Box::new(move |_, window, _| {
+            check(bar(window).iter().any(|h| h == hint), &format!("on {id} the shortcut bar shows {hint:?}: {:?}", bar(window)));
+            headless::press(Key::Return);
+            true
+        })));
+        stages.push((Box::leak(format!("{id} opened").into_boxed_str()), Box::new(move |_, window, elapsed| {
+            let done = opened().iter().any(|u| wanted(u)) || (id == "form-report-k" && window.get_overlay() == "report");
+            if !done && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            check(done, &format!("Enter on {id} opens it: {:?}", opened().last()));
+            if window.get_overlay() == "report" {
+                headless::press(Key::Escape);
+            }
+            true
+        })));
+    }
+    stages.extend(reach("dir-out-k"));
+    stages.push(keys("open the folder", vec![k(Key::Return)]));
+    stages.push(wait_for("folder", Duration::from_secs(3), |_, _| card("dir-out-k").is_some_and(|c| c.status_text.starts_with("On the Host")), "Enter on a folder the desktop cannot open says where it is"));
+    stages.extend(reach("cd-launch-k"));
+    stages.push(("countdown", Box::new(move |_, window, _| {
+        let before = (opened().len(), window.get_overlay().to_string());
+        headless::press(Key::Return);
+        check((opened().len(), window.get_overlay().to_string()) == before, "Enter on a countdown does nothing (it has no action)");
+        check(hints("cd-launch-k").is_empty() && !bar(window).iter().any(|h| h.starts_with("Enter")), &format!("and it shows no Enter hint: {:?} {:?}", hints("cd-launch-k"), bar(window)));
+        shot(&out, "keys-40-countdown-selected");
+        true
+    })));
+    stages
+}
+
+// ---- images and galleries
+
+const GALLERY: &str = "img:im-gallery-k:1";
+const IMAGE: &str = "img:im-one-k:1";
+
+fn image_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let mut stages: Vec<Stage> = Vec::new();
+    stages.extend(reach(GALLERY));
+    stages.push(("next tile", Box::new(|_, window, _| {
+        check(window.global::<crate::ArtifactBridge>().get_tile() == 0, "a gallery is reached on its first tile");
+        headless::press(Key::RightArrow);
+        true
+    })));
+    stages.push(wait_for("on the second tile", Duration::from_secs(1), |_, window| window.global::<crate::ArtifactBridge>().get_tile() == 1, "Right moves to the next tile"));
+    stages.push(("enlarge", Box::new(move |_, window, _| {
+        shot(&out, "keys-50-gallery-tile");
+        check(bar(window).iter().any(|h| h == "Enter Enlarge"), &format!("the bar says Enter enlarges it: {:?}", bar(window)));
+        headless::press(Key::Return);
+        true
+    })));
+    stages.push(("enlarged", Box::new(move |_, window, elapsed| {
+        if window.get_overlay() != "image" {
+            return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter enlarges the tile: overlay {:?}", window.get_overlay())); true };
+        }
+        check(window.get_image_view_index() == 1 && window.get_image_view_count() == 3, &format!("Enter enlarges the tile it is on: {} of {}", window.get_image_view_index(), window.get_image_view_count()));
+        shot(&out2, "keys-51-gallery-enlarged");
+        headless::press(Key::RightArrow);
+        headless::press(Key::RightArrow);
+        true
+    })));
+    stages.push(("moved in the viewer", Box::new(|_, window, elapsed| {
+        if elapsed < Duration::from_millis(200) {
+            return false;
+        }
+        check(window.get_image_view_index() == 2, &format!("Right moves to the next picture, and stops at the last: {}", window.get_image_view_index()));
+        headless::press(Key::LeftArrow);
+        headless::press(Key::Escape);
+        true
+    })));
+    stages.push(wait_for("back on the gallery", Duration::from_secs(2), |app, window| {
+        window.get_overlay().is_empty() && report().transcript_focused && on(app) == GALLERY && window.global::<crate::ArtifactBridge>().get_tile() == 1
+    }, "Left moves back; Escape closes it, back on the gallery's tile"));
+    stages.extend(reach(IMAGE));
+    stages.push(keys("enlarge the image", vec![k(Key::Return)]));
+    stages.push(wait_for("image enlarged", Duration::from_secs(2), |_, window| window.get_overlay() == "image" && window.get_image_view_count() == 1, "Enter enlarges a single image"));
+    stages.push(keys("close the image", vec![k(Key::Escape)]));
+    stages.push(wait_for("image closed", Duration::from_secs(2), |app, window| window.get_overlay().is_empty() && on(app) == IMAGE, "Escape closes it, back on the image"));
+    stages
+}
+
+// ---- hints in place of buttons
+
+fn hint_stages(out: &str) -> Vec<Stage> {
+    let (out, out2) = (out.to_owned(), out.to_owned());
+    let mut stages: Vec<Stage> = Vec::new();
+    stages.push(("every card's hints", Box::new(|app, _, _| {
+        let ids: Vec<String> = reachable(app).into_iter().filter(|i| !i.starts_with("img:")).collect();
+        let bare: Vec<String> = ids.iter().filter(|id| card(id).is_some_and(|c| !c.action.is_empty() && c.hints.row_count() == 0)).cloned().collect();
+        check(!ids.is_empty() && bare.is_empty(), &format!("every card with an action shows its keys as hints: without {bare:?}"));
+        check(hints("dec-click-k") == ["1 Turn on", "2 Not now", "Enter Send", "Del Discard"], &format!("an approval: {:?}", hints("dec-click-k")));
+        check(hints("q-click-k") == ["Enter Send", "Del Discard"], &format!("a question (its options are numbered): {:?}", hints("q-click-k")));
+        check(hints("plan-ship-k") == ["Enter Open plan"], &format!("a plan: {:?}", hints("plan-ship-k")));
+        check(hints("aud-gone-k") == ["Enter Play", "←/→ Seek", "S Stop"], &format!("audio: {:?}", hints("aud-gone-k")));
+        check(hints("vid-none-k").is_empty() && hints("cd-past-k").is_empty(), "a card with nothing to do has none");
+        true
+    })));
+    stages.extend(reach("dec-click-k"));
+    stages.push(("selected decision", Box::new(move |_, window, elapsed| {
+        if elapsed < Duration::from_millis(400) {
+            return false;
+        }
+        for hint in ["1 Turn on", "2 Not now", "Enter Send", "Del Discard"] {
+            check(bar(window).iter().any(|h| h == hint), &format!("the shortcut bar shows the card's {hint:?}: {:?}", bar(window)));
+        }
+        shot(&out, "keys-60-decision-hints");
+        true
+    })));
+    stages.push(("click a hint", Box::new(|app, window, _| {
+        // A real click on the card's first hint, "1 Turn on", at the
+        // left of its bottom row.
+        let Some((x, y, _, height)) = crate::artifacts_view::card_rect(app, "dec-click-k") else {
+            check(false, "the decision is on screen");
+            return true;
+        };
+        super::click_at(window, x + 24.0, y + height - 19.0);
+        true
+    })));
+    stages.push(wait_for("hint clicked", Duration::from_secs(3), |_, _| last_post("/decisions/d-click-k/resolve") == json!({"choice": "accepted", "expected_revision": 4}),
+        "a click on a hint does what its key does: 1 Turn on approves"));
+    stages.extend(reach("plan-ship-k"));
+    stages.push(("click open", Box::new(|app, window, _| {
+        let Some((x, y, _, height)) = crate::artifacts_view::card_rect(app, "plan-ship-k") else {
+            check(false, "the plan is on screen");
+            return true;
+        };
+        super::click_at(window, x + 24.0, y + height - 19.0);
+        true
+    })));
+    stages.push(wait_for("plan clicked", Duration::from_secs(3), |_, window| window.get_overlay() == "report", "a click on Enter Open plan opens the plan"));
+    stages.push(keys("close the plan", vec![k(Key::Escape)]));
+    // A narrow pane: the hints fit.
+    stages.extend(reach("dec-deploy-k"));
+    stages.push(keys("split", vec![]));
+    stages.push(("split the chat", Box::new(|_, _, _| {
+        headless::press_with(&[Key::Alt], "v");
+        true
+    })));
+    stages.push(("narrow pane", Box::new(move |_, _, elapsed| {
+        if elapsed < Duration::from_millis(1500) {
+            return false;
+        }
+        shot(&out2, "keys-61-narrow-pane");
+        headless::press_with(&[Key::Alt], "x");
+        true
+    })));
+    stages.push(("one pane again", Box::new(|app, _, elapsed| {
+        if elapsed < Duration::from_millis(800) {
+            return false;
+        }
+        let _ = app;
+        headless::press(Key::Escape);
+        true
+    })));
+    stages
+}
+
 pub(super) fn artifact_keys_check(out: String) {
     let mut stages: Vec<Stage> = Vec::new();
     stages.extend(chat_stages());
+    stages.extend(decision_stages(&out));
+    stages.extend(viewer_stages(&out));
+    stages.extend(audio_stages(&out));
+    stages.extend(open_stages(&out));
+    stages.extend(image_stages(&out));
+    stages.extend(hint_stages(&out));
     stages.extend(reach_stages(&out));
     let _ = (Value::Null, RefCell::new(()), app_now);
     run_stages(stages);

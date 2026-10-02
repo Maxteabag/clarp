@@ -25,8 +25,8 @@ import { AgentOverview, OverviewBridge, OverviewCard, OverviewSchedule, Overview
 import { VoiceDialog, VoiceBridge, VoiceItem } from "voice.slint";
 import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
 import { DisplayCell, CellLine } from "cells.slint";
-import { ArtifactItem, ArtifactBridge } from "artifacts.slint";
-export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge }
+import { ArtifactItem, ArtifactBridge, CardHint } from "artifacts.slint";
+export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint }
 
 export { Palette, Focus, ChatRow, MessageRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
@@ -190,6 +190,10 @@ export component AppWindow inherits Window {
     // What the report is, when it is not a document's body (PLAN...).
     in property <string> report-kind;
     in property <[MessageBlock]> report-blocks;
+    out property <length> report-offset: report-view.offset;
+    // The enlarged image: which of its block's pictures, of how many.
+    in property <int> image-view-index;
+    in property <int> image-view-count;
     in property <[TeamView]> team-list;
     in property <[TeamMessageView]> team-messages;
     in property <[TeamMemberView]> team-members;
@@ -485,7 +489,7 @@ export component AppWindow inherits Window {
             done => { root.overlay-closed(); }
         }
         // ---- updates and teams
-        ReportView {
+        report-view := ReportView {
             visible: root.overlay == "report";
             width: parent.width;
             height: parent.height;
