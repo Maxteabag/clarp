@@ -47,31 +47,46 @@ fn bar(window: &crate::AppWindow) -> Vec<String> {
     window.get_hints().iter().map(|h| format!("{} {}", h.keys, h.label)).collect()
 }
 
-/// A stage that walks the keyboard to `id` with J and K alone (one press
-/// at a time, each once the last has landed on screen).
-fn reach(id: &'static str) -> Stage {
-    let last = Rc::new(Cell::new(Duration::ZERO));
-    (Box::leak(format!("reach {id}").into_boxed_str()), Box::new(move |app, _, elapsed| {
-        if on(app) == id {
-            check(true, &format!("J/K reach {id}"));
-            return true;
-        }
-        if elapsed > Duration::from_secs(12) {
-            check(false, &format!("J/K reach {id}: on {:?}, cursor {:?}, reachable {:?}", on(app), cursor(app), crate::artifacts_view::on_screen(app)));
-            return true;
-        }
-        let ids = reachable(app);
-        let (Some(target), current) = (ids.iter().position(|i| i == id), ids.iter().position(|i| *i == cursor(app))) else { return false };
-        // Each press waits for the last to land (its card on screen).
-        let landed = cursor(app).is_empty() || !on(app).is_empty();
-        if !landed || elapsed.saturating_sub(last.get()) < Duration::from_millis(200) {
+/// Stages that walk the keyboard to `id` with J and K alone, one press
+/// once the last has landed on screen (a long way takes a few stages).
+fn reach(id: &'static str) -> Vec<Stage> {
+    let mut stages: Vec<Stage> = Vec::new();
+    for _ in 0..3 {
+        stages.push((Box::leak(format!("towards {id}").into_boxed_str()), Box::new(move |app, _, elapsed| {
+            if on(app) == id || elapsed > Duration::from_secs(12) {
+                return true;
+            }
+            let ids = reachable(app);
+            let (Some(target), current) = (ids.iter().position(|i| i == id), ids.iter().position(|i| *i == cursor(app))) else { return false };
+            if !cursor(app).is_empty() && on(app).is_empty() {
+                return false;
+            }
+            headless::press(if current.is_some_and(|at| at < target) { "j" } else { "k" });
+            false
+        })));
+    }
+    stages.push((Box::leak(format!("reached {id}").into_boxed_str()), Box::new(move |app, _, elapsed| {
+        if on(app) != id && elapsed < Duration::from_secs(2) {
             return false;
         }
-        last.set(elapsed);
-        match current {
-            Some(at) if at < target => headless::press("j"),
-            Some(_) => headless::press("k"),
-            None => headless::press("k"),
+        check(on(app) == id, &format!("J/K reach {id}: on {:?}, cursor {:?}, on screen {:?}", on(app), cursor(app), crate::artifacts_view::on_screen(app)));
+        true
+    })));
+    stages
+}
+
+/// A stage that presses `key` (J or K), one press once the last has
+/// landed on screen, until the first (`up`) or last card is reached, for
+/// at most 12 s (a walk over every card takes several of these).
+fn walk(name: &'static str, key: &'static str, up: bool) -> Stage {
+    (name, Box::new(move |app, _, elapsed| {
+        let ids = reachable(app);
+        let end = if up { ids.first() } else { ids.last() }.cloned().unwrap_or_default();
+        if on(app) == end || elapsed > Duration::from_secs(12) {
+            return true;
+        }
+        if !on(app).is_empty() {
+            headless::press(key);
         }
         false
     }))
@@ -151,7 +166,7 @@ fn reach_stages(out: &str) -> Vec<Stage> {
     let held2 = held.clone();
     let latest = Rc::new(Cell::new(0.0f32));
     let latest2 = latest.clone();
-    vec![
+    let mut stages: Vec<Stage> = vec![
         ("the bar says how to reach cards", Box::new(move |_, window, _| {
             check(bar(window).iter().any(|h| h == "J/K Cards"), &format!("the shortcut bar shows J/K Cards in the chat: {:?}", bar(window)));
             latest.set(report().offset);
@@ -160,66 +175,9 @@ fn reach_stages(out: &str) -> Vec<Stage> {
         })),
         wait_for("K from none", Duration::from_secs(2), |app, _| !on(app).is_empty() && reachable(app).last() == Some(&on(app)),
             "K from the chat selects the latest thing the keyboard can reach"),
-        ("K up the whole chat", Box::new(move |app, _, elapsed| {
-            let first = reachable(app).first().cloned().unwrap_or_default();
-            if on(app) == first {
-                let moved = (report().offset - latest2.get()).abs();
-                check(true, "K walks up every card to the first in the chat");
-                check(moved > 100.0 && !report().follows, &format!("the keypresses scroll the chat to it (moved {moved}px, follows {})", report().follows));
-                shot(&out, "keys-01-first-card");
-                held.set(report().offset);
-                // The Host moves every card on while the reader is up there.
-                let more = "Updated by the agent a moment ago with a longer explanation of what changed and why it matters now.";
-                check(control("/__control/artifact-settle", &json!({"session": "art-keys", "more": more})).is_ok(), "the Host moves the cards on");
-                return true;
-            }
-            if elapsed > Duration::from_secs(14) {
-                check(false, &format!("K walks up every card to the first in the chat: on {:?}, cursor {:?} of {:?}", on(app), cursor(app), crate::artifacts_view::on_screen(app)));
-                return true;
-            }
-            // One press at a time, each once the last has landed.
-            if !on(app).is_empty() {
-                headless::press("k");
-            }
-            false
-        })),
-        ("activity does not move the reader", Box::new(move |app, _, elapsed| {
-            let settled = card("dec-deploy-k").is_some_and(|c| c.resolved == "Approved") && card("cd-launch-k").is_some_and(|c| c.summary.contains("Updated by the agent"));
-            if !settled || elapsed < Duration::from_millis(1500) {
-                return elapsed > Duration::from_secs(6) && { check(false, "the cards move on"); true };
-            }
-            let moved = (report().offset - held2.get()).abs();
-            check(moved < 1.0, &format!("cards changing around a selected card move nothing ({moved}px)"));
-            check(!on(app).is_empty(), "and the card stays selected");
-            shot(&out2, "keys-02-held");
-            true
-        })),
-        ("J down the whole chat", Box::new(|app, _, elapsed| {
-            let last = reachable(app).last().cloned().unwrap_or_default();
-            if on(app) == last && !last.is_empty() {
-                check(true, "J walks down every card to the latest");
-                return true;
-            }
-            if elapsed > Duration::from_secs(14) {
-                check(false, &format!("J walks down every card to the latest: on {:?} of {:?}", on(app), reachable(app)));
-                return true;
-            }
-            if !on(app).is_empty() {
-                headless::press("j");
-            }
-            false
-        })),
-        ("Escape leaves the card", Box::new(|app, _, elapsed| {
-            if elapsed < Duration::from_millis(300) {
-                return false;
-            }
-            check(!cursor(app).is_empty(), "a card is selected");
-            headless::press(Key::Escape);
-            true
-        })),
-        wait_for("card left", Duration::from_secs(1), |app, _| cursor(app).is_empty() && report().transcript_focused,
-            "Escape on a card leaves it; the keyboard stays on the chat"),
-        reach("dec-refused-k"),
+    ];
+    stages.extend(reach("dec-refused-k"));
+    stages.extend::<Vec<Stage>>(vec![
         ("typing in the composer", Box::new(|_, _, _| {
             // I: the composer, where card keys are only letters.
             headless::press("i");
@@ -271,7 +229,60 @@ fn reach_stages(out: &str) -> Vec<Stage> {
             true
         })),
         wait_for("then the card", Duration::from_secs(1), |app, _| cursor(app).is_empty(), "the next Escape leaves the card"),
-    ]
+        ("K from none again", Box::new(|_, _, _| {
+            headless::press("k");
+            true
+        })),
+        walk("K up the chat", "k", true),
+        walk("K on up the chat", "k", true),
+        walk("K further up the chat", "k", true),
+        walk("K on up the chat again", "k", true),
+        walk("K on up to the top", "k", true),
+        ("K up the whole chat", Box::new(move |app, _, _| {
+            let first = reachable(app).first().cloned().unwrap_or_default();
+            let moved = (report().offset - latest2.get()).abs();
+            check(on(app) == first, &format!("K walks up every card to the first in the chat: on {:?}, cursor {:?} of {:?}", on(app), cursor(app), crate::artifacts_view::on_screen(app)));
+            check(moved > 100.0 && !report().follows, &format!("the keypresses scroll the chat to it (moved {moved}px, follows {})", report().follows));
+            shot(&out, "keys-01-first-card");
+            held.set(report().offset);
+            // The Host moves every card on while the reader is up there.
+            let more = "Updated by the agent a moment ago with a longer explanation of what changed and why it matters now.";
+            check(control("/__control/artifact-settle", &json!({"session": "art-keys", "more": more})).is_ok(), "the Host moves the cards on");
+            true
+        })),
+        ("activity does not move the reader", Box::new(move |app, _, elapsed| {
+            let settled = card("dec-deploy-k").is_some_and(|c| c.resolved == "Approved") && card("cd-launch-k").is_some_and(|c| c.summary.contains("Updated by the agent"));
+            if !settled || elapsed < Duration::from_millis(1500) {
+                return elapsed > Duration::from_secs(6) && { check(false, "the cards move on"); true };
+            }
+            let moved = (report().offset - held2.get()).abs();
+            check(moved < 1.0, &format!("cards changing around a selected card move nothing ({moved}px)"));
+            check(!on(app).is_empty(), "and the card stays selected");
+            shot(&out2, "keys-02-held");
+            true
+        })),
+        walk("J down the chat", "j", false),
+        walk("J on down the chat", "j", false),
+        walk("J further down the chat", "j", false),
+        walk("J on down the chat again", "j", false),
+        walk("J on down to the latest", "j", false),
+        ("J down the whole chat", Box::new(|app, _, _| {
+            let last = reachable(app).last().cloned().unwrap_or_default();
+            check(on(app) == last && !last.is_empty(), &format!("J walks down every card to the latest: on {:?} of {:?}", on(app), reachable(app)));
+            true
+        })),
+        ("Escape leaves the card", Box::new(|app, _, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(!cursor(app).is_empty(), "a card is selected");
+            headless::press(Key::Escape);
+            true
+        })),
+        wait_for("card left", Duration::from_secs(1), |app, _| cursor(app).is_empty() && report().transcript_focused,
+            "Escape on a card leaves it; the keyboard stays on the chat"),
+    ]);
+    stages
 }
 
 pub(super) fn artifact_keys_check(out: String) {

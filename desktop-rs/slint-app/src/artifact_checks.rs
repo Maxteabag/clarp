@@ -1698,17 +1698,16 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
             headless::press("k");
             let shown = crate::artifacts_view::on_screen(app);
             check(!shown.is_empty() && selected(window) == "form-stale-all" && shown.contains(&selected(window)), &format!("K selects the lowest card on screen: {:?} of {shown:?}", selected(window)));
-            for _ in 0..40 {
-                headless::press("k");
-            }
+            headless::press("k");
             true
         })),
         ("K at the top of the screen", Box::new(|app, window, elapsed| {
             if elapsed < Duration::from_millis(300) {
                 return false;
             }
+            // (K reaching cards off screen is the artifact-keys check's.)
             let shown = crate::artifacts_view::on_screen(app);
-            check(shown.first() == Some(&selected(window)), &format!("K never leaves the screen: it stops at the topmost card shown {:?} of {shown:?}", selected(window)));
+            check(shown.contains(&selected(window)) && selected(window) != "form-stale-all", &format!("K again selects the card above, on screen: {:?} of {shown:?}", selected(window)));
             headless::press(slint::platform::Key::PageUp);
             headless::press(slint::platform::Key::PageUp);
             headless::press(slint::platform::Key::PageUp);

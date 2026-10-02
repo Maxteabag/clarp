@@ -65,7 +65,8 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     let hints: Vec<Hint> = keymap::hints(state, &overrides(app), facts(app, window))
         .into_iter()
         .map(|b| Hint {
-            keys: b.keys.first().map(|k| k.replace("Return", "Enter").replace("Escape", "Esc")).unwrap_or_default().into(),
+            // J and K both walk the cards.
+            keys: if b.action == "artifact-previous" { "J/K".into() } else { b.keys.first().map(|k| k.replace("Return", "Enter").replace("Escape", "Esc")).unwrap_or_default().into() },
             label: if b.action == "toggle-preview" {
                 if app.engine.borrow().settings().boolean("explorer/livePreview", false) { "Preview: on".into() } else { "Preview: off".into() }
             } else {
@@ -168,6 +169,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         // Escape first dismisses the error banner over the chats.
         "escape" | "dismiss-error" if action == "dismiss-error" || (window.get_surface() == "chats" && !window.get_error().is_empty()) => {
             app.engine.borrow_mut().dismiss_error();
+        }
+        // Then it leaves the card the keyboard is on (in the chat).
+        "escape" if window.get_surface() == "chats" && context(app, window) == "pane" && !app.artifact_cursor.borrow().is_empty() => {
+            crate::artifacts_view::leave(app);
+            app.focus_transcript();
         }
         // Escape on another surface goes back to the chats.
         "escape" if window.get_surface() != "chats" => {
