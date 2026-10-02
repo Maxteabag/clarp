@@ -84,9 +84,20 @@ def language_for(session: str | None) -> str:
     return _for_session(agent_languages(), session) or selected()
 
 
+def engines_for(session: str | None) -> list[str]:
+    """The agent's own transcription engines in fallback order, or [].
+
+    A value may list several engines, comma-separated: the first is used and
+    the next ones only when it fails (e.g. "google:chirp_3,elevenlabs:scribe_v2").
+    """
+    value = _for_session(agent_engines(), session) or ""
+    return [e.strip() for e in value.split(",") if e.strip()]
+
+
 def engine_for(session: str | None) -> str | None:
-    """The agent's own transcription engine, or None for the global one."""
-    return _for_session(agent_engines(), session)
+    """The agent's first transcription engine, or None for the global one."""
+    engines = engines_for(session)
+    return engines[0] if engines else None
 
 
 def validate(value) -> str:
@@ -106,10 +117,12 @@ def merge_agent_engines(value, *, is_valid) -> str:
             raise ValueError("agent_engines keys must be agent names")
         if engine in (None, ""):
             merged.pop(key, None)
-        elif not isinstance(engine, str) or not is_valid(engine.strip()):
+        elif not isinstance(engine, str) or not all(
+                is_valid(e.strip()) for e in engine.split(",") if e.strip()) \
+                or not engine.strip(" ,"):
             raise ValueError(f"unknown transcription engine: {engine}")
         else:
-            merged[key] = engine.strip()
+            merged[key] = ",".join(e.strip() for e in engine.split(",") if e.strip())
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))
 
 

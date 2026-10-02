@@ -222,3 +222,11 @@ def test_scribe_is_asked_not_to_tag_audio_events(keys, monkeypatch):
     monkeypatch.setattr(eleven_stt.urllib.request, "urlopen", fake_urlopen)
     stt_providers.transcribe("elevenlabs:scribe_v2", b"x", "audio/wav", "")
     assert b'name="tag_audio_events"\r\n\r\nfalse' in seen["body"]
+
+
+def test_agent_engine_chain_is_validated_and_kept_in_order(keys):
+    status = stt_providers.update_settings(
+        {"agent_engines": {"Mochi": "google:chirp_3, elevenlabs:scribe_v2"}})
+    assert status["agent_engines"] == {"mochi": "google:chirp_3,elevenlabs:scribe_v2"}
+    with pytest.raises(ValueError):
+        stt_providers.update_settings({"agent_engines": {"Mochi": "google:chirp_3,nope:x"}})

@@ -3901,3 +3901,24 @@ def test_agent_engine_overrides_the_phones_pinned_model(running_server, monkeypa
                "X-Transcription-Model": "cartesia:ink-whisper"}
     assert _post_raw(base + "/transcribe", b"voice audio", headers)[0] == 200
     assert used == ["elevenlabs:scribe_v2"]
+
+
+def test_agent_fallback_engine_saves_the_recording_when_the_first_fails(running_server, monkeypatch):
+    base, ctx, _srv = running_server
+    from lib import stt_providers
+    stt_providers.update_settings(
+        {"agent_engines": {"Rachel": "google:chirp_3,elevenlabs:scribe_v2"}})
+    used = []
+
+    def flaky(model, *a, **k):
+        used.append(model)
+        if model == "google:chirp_3":
+            raise RuntimeError("Google STT request failed: The read operation timed out")
+        return ("Hei.", True, 1.0)
+
+    monkeypatch.setattr(ctx.stt, "transcribe_model_bytes", flaky, raising=False)
+    headers = {"Content-Type": "audio/webm", "X-Transcription-ID": "agent-fallback-1",
+               "X-Transcription-Session": "rachel"}
+    status, body = _post_raw(base + "/transcribe", b"voice audio", headers)
+    assert status == 200 and json.loads(body)["text"] == "Hei."
+    assert used == ["google:chirp_3", "elevenlabs:scribe_v2"]
