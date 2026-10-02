@@ -69,6 +69,17 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
     stt = ctx.stt
     if getattr(stt, "available", True) is False:
         return TranscriptionOutcome.error(503, "server transcription disabled")
+    focus = focus_session()
+    # An agent's own engine is more specific than the phone's device-wide
+    # model choice (sent as X-Transcription-Model), so it wins over both.
+    agent_engine = None
+    try:
+        from .stt_language import engine_for
+        agent_engine = engine_for(focus)
+    except Exception as e:  # noqa: BLE001
+        log_exception("sttAgentEngineFail", e)
+    if agent_engine:
+        requested_model = agent_engine
     if not requested_model:
         # A cloud engine chosen in settings stands in for the server
         # default; an explicit header from the client still wins.
@@ -87,7 +98,8 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         from . import audio_duration, stt_providers
         clip_seconds = audio_duration.seconds(audio_bytes)
         long_model = stt_providers.long_form_model_for(clip_seconds)
-        if long_model and long_model != requested_model:
+        # An agent's own engine was chosen for its language; keep it.
+        if long_model and long_model != requested_model and not agent_engine:
             log("sttLongFormRoute",
                 f"{clip_seconds:.1f}s >= "
                 f"{stt_providers.long_form_threshold_sec()}s → {long_model}"
@@ -100,7 +112,6 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
     # The trace is minted before compiling so the vocab run, the
     # transcribe event and everything downstream share one id.
     trace_id = _trace.new_trace_id()
-    focus = focus_session()
     vocab_run_id = 0
     vocab_fn = getattr(ctx, "vocab_for_transcription", None)
     if callable(vocab_fn):

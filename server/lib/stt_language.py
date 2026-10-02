@@ -19,6 +19,10 @@ from . import settings_store
 
 LANGUAGE_KEY = "transcription.language"
 AGENT_LANGUAGES_KEY = "transcription.agent_languages"
+# Per-agent transcription engine, e.g. Mochi on ElevenLabs Scribe because
+# Cartesia Ink-Whisper turns short Norwegian clips into Icelandic or invents
+# text on silence. Same keys as AGENT_LANGUAGES_KEY.
+AGENT_ENGINES_KEY = "transcription.agent_engines"
 DEFAULT_LANGUAGE = "en"
 _CODE = re.compile(r"^[a-z]{2,3}$")
 # The chat the clip being transcribed belongs to, set by the transcription
@@ -45,34 +49,68 @@ def selected() -> str:
     return value if _CODE.match(value) else DEFAULT_LANGUAGE
 
 
-def agent_languages() -> dict[str, str]:
+def _map(key: str) -> dict[str, str]:
     try:
-        raw = json.loads(settings_store.get_text(AGENT_LANGUAGES_KEY) or "{}")
+        raw = json.loads(settings_store.get_text(key) or "{}")
     except ValueError:
         return {}
     if not isinstance(raw, dict):
         return {}
-    return {str(k).strip().lower(): str(v).strip().lower()
-            for k, v in raw.items()
-            if str(k).strip() and _CODE.match(str(v).strip().lower())}
+    return {str(k).strip().lower(): str(v).strip()
+            for k, v in raw.items() if str(k).strip() and str(v).strip()}
 
 
-def language_for(session: str | None) -> str:
-    """The language for clips spoken to `session`'s agent."""
-    overrides = agent_languages()
+def agent_languages() -> dict[str, str]:
+    return {k: v.lower() for k, v in _map(AGENT_LANGUAGES_KEY).items()
+            if _CODE.match(v.lower())}
+
+
+def agent_engines() -> dict[str, str]:
+    return _map(AGENT_ENGINES_KEY)
+
+
+def _for_session(overrides: dict[str, str], session: str | None) -> str | None:
     if session and overrides:
         from . import agents as agents_db
         agent = agents_db.get_by_session(session) or {}
         for key in (agent.get("name"), agent.get("persona"), session):
             if key and str(key).strip().lower() in overrides:
                 return overrides[str(key).strip().lower()]
-    return selected()
+    return None
+
+
+def language_for(session: str | None) -> str:
+    """The language for clips spoken to `session`'s agent."""
+    return _for_session(agent_languages(), session) or selected()
+
+
+def engine_for(session: str | None) -> str | None:
+    """The agent's own transcription engine, or None for the global one."""
+    return _for_session(agent_engines(), session)
 
 
 def validate(value) -> str:
     if not isinstance(value, str) or not _CODE.match(value.strip().lower()):
         raise ValueError("language must be an ISO 639-1 code such as 'en' or 'no'")
     return value.strip().lower()
+
+
+def merge_agent_engines(value, *, is_valid) -> str:
+    """Apply `{agent: engine id}` changes (empty or null removes one)."""
+    if not isinstance(value, dict):
+        raise ValueError("agent_engines must be an object of agent -> engine")
+    merged = agent_engines()
+    for agent, engine in value.items():
+        key = str(agent).strip().lower()
+        if not key:
+            raise ValueError("agent_engines keys must be agent names")
+        if engine in (None, ""):
+            merged.pop(key, None)
+        elif not isinstance(engine, str) or not is_valid(engine.strip()):
+            raise ValueError(f"unknown transcription engine: {engine}")
+        else:
+            merged[key] = engine.strip()
+    return json.dumps(merged, sort_keys=True, separators=(",", ":"))
 
 
 def merge_agent_languages(value) -> str:

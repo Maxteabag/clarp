@@ -47,7 +47,9 @@ def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
     if not api_key:
         raise ElevenSTTError("ElevenLabs API key is not configured")
     # No language_code lets Scribe detect the language itself.
-    fields: list[tuple[str, str]] = [("model_id", model)]
+    # tag_audio_events off: Scribe otherwise writes "[lyd fra mikrofon]" or
+    # "(laughter)" into the transcript, which becomes a bogus message.
+    fields: list[tuple[str, str]] = [("model_id", model), ("tag_audio_events", "false")]
     if language:
         fields.append(("language_code", language))
     # Each term is its own `keyterms` field; the API allows up to 1000 terms of
