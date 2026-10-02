@@ -2763,7 +2763,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_team_add_member(rest[:-len("/members")].strip("/"))
             return self._handle_team_update(rest)
         if path.startswith("/decisions/"):
-            for action in ("resolve", "dismiss"):
+            for action in ("resolve", "dismiss", "withdraw"):
                 suffix = "/" + action
                 if path.endswith(suffix):
                     decision_id = unquote(path[len("/decisions/"):-len(suffix)].strip("/"))
@@ -4442,6 +4442,38 @@ class Handler(BaseHTTPRequestHandler):
             "delivery_pending": artifacts.delivery_pending(decision_id),
         })
 
+    def _handle_decision_withdraw(self, decision_id: str):
+        """The asking agent revokes its own request; silent for both sides."""
+        from lib import artifacts
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "json object required")
+        session = data.get("session")
+        if not isinstance(session, str) or not session.strip():
+            return self._json_error(400, "session required")
+        try:
+            row, changed = artifacts.withdraw(decision_id, session=session)
+        except PermissionError as exc:
+            return self._json_error(403, str(exc))
+        except ValueError as exc:
+            return self._json_error(409, str(exc))
+        self._broadcast_artifact(row)
+        return self._json_ok({"artifact": row, "changed": changed})
+
+    def _close_requests_for_user_message(self, session: str) -> None:
+        """A message from the owner answers whatever the agent asked before."""
+        from lib import artifacts
+        try:
+            agent = identity.resolve(session) if session else None
+            if agent is None:
+                return
+            for artifact_id in artifacts.close_for_user_message(agent.agent_id):
+                row = artifacts.get(artifact_id)
+                if row:
+                    self._broadcast_artifact(row)
+        except Exception as e:  # noqa: BLE001 - never fail an admitted send
+            log_exception("decisionSupersedeFail", e, detail=session)
+
     def _handle_artifact_archive(self, artifact_id: str):
         return self._handle_artifact_inbox_action(artifact_id, discard=False)
 
@@ -4984,6 +5016,9 @@ class Handler(BaseHTTPRequestHandler):
             body["error"] = orchestrated.error
         if orchestrated.ok and req.transcription_id:
             transcription_results.delete(req.transcription_id)
+        if (orchestrated.ok and orchestrated.session and req.origin == "user"
+                and not req.sender_agent_id):
+            self._close_requests_for_user_message(orchestrated.session)
         if orchestrated.ok and req.voice_utterance_id:
             self._record_voice(
                 "send", session=orchestrated.session or None,
@@ -5012,6 +5047,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(e.status, str(e).encode(), "text/plain")
         if req.origin == "agent" and req.sender_agent_id:
             self._note_helper_message(req.sender_agent_id, result.session)
+        if req.origin == "user" and not req.sender_agent_id:
+            self._close_requests_for_user_message(result.session)
         if req.transcription_id:
             transcription_results.delete(req.transcription_id)
         # File the timeline row before answering: a client that reads

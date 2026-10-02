@@ -184,7 +184,7 @@ def main(argv: list[str]) -> int:
              "create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V] | "
              "decision SESSION TITLE QUESTION YES_LABEL NO_LABEL [JSON_PAYLOAD] [OPTIONS] | "
              "question SESSION TITLE QUESTION JSON_OPTIONS [OPTIONS] | "
-             "attention [--session SESSION] [--include-archived] | "
+             "attention [--session SESSION] [--include-archived] | withdraw SESSION DECISION_ID | "
              "update ARTIFACT_ID STATUS [JSON_PAYLOAD] | progress ARTIFACT_ID VALUE [CONTENT] | list SESSION")
     try:
         cmd = argv[1]
@@ -201,6 +201,9 @@ def main(argv: list[str]) -> int:
             result = _decision_request(cmd, argv[2:])
         elif cmd == "attention":
             result = _attention(argv[2:])
+        elif cmd == "withdraw" and len(argv) == 4:
+            result = _request("POST", "/decisions/" + urllib.parse.quote(argv[3]) + "/withdraw",
+                              {"session": argv[2]})["artifact"]
         elif cmd == "update" and len(argv) in {4, 5}:
             body = {"status": argv[3]}
             if len(argv) == 5: body["payload"] = json.loads(argv[4])

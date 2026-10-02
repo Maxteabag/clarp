@@ -553,7 +553,7 @@ def test_archive_restore_are_durable_idempotent_and_timestamp_guarded(tmp_path, 
 
 
 @pytest.mark.parametrize("question_mode", [False, True])
-def test_dismissal_cancels_without_answer_or_permission_and_notifies_once(tmp_path, question_mode):
+def test_dismissal_cancels_silently_without_answer_or_permission(tmp_path, question_mode):
     _agent(tmp_path)
     item = _question() if question_mode else artifacts.create_decision(session="mike", title="Send", question="Send?")
     decision_id = item["decision"]["decision_id"]
@@ -564,12 +564,9 @@ def test_dismissal_cancels_without_answer_or_permission_and_notifies_once(tmp_pa
     assert dismissed["decision"]["status"] == "cancelled"
     assert dismissed["decision"]["answer"] is None
     assert dismissed["decision"]["resolved_by"] == "user"
-    delivery = artifacts.pending_deliveries()[0]
-    assert delivery["choice"] == "dismissed" and delivery["answer"] is None
-    prompt = artifacts.format_delivery_prompt(delivery)
-    assert "not an answer or approval" in prompt and "repeat the unchanged request" in prompt
+    assert artifacts.pending_deliveries() == []
     _, changed = artifacts.dismiss(decision_id, expected_revision=1)
-    assert not changed and len(artifacts.pending_deliveries()) == 1
+    assert not changed and artifacts.pending_deliveries() == []
     with pytest.raises(ValueError, match="already resolved"):
         artifacts.resolve(decision_id, expected_revision=1,
                           **({"answer": {"option_id": "current"}} if question_mode else {"choice": "accepted"}))
@@ -744,3 +741,33 @@ def test_markdown_upload_is_accepted_and_utf8_checked(tmp_path):
     with pytest.raises(media_store.MediaError, match="unsupported"):
         media_store.publish(session="mike", blob=b"\xff\xfe\x00bad", source_name="bad.md",
                             content_type="text/markdown", media_dir=tmp_path / "media")
+
+
+def test_asking_agent_can_withdraw_its_request_silently(tmp_path):
+    _agent(tmp_path)
+    item = _question()
+    decision_id = item["decision"]["decision_id"]
+    with pytest.raises(PermissionError):
+        artifacts.withdraw(decision_id, session="someone-else")
+    withdrawn, changed = artifacts.withdraw(decision_id, session="mike")
+    assert changed and withdrawn["decision"]["resolved_choice"] == "withdrawn"
+    assert withdrawn["decision"]["resolved_by"] == "agent" and withdrawn["decision"]["answer"] is None
+    assert artifacts.attention(include_questions=True) == []
+    assert artifacts.pending_deliveries() == []
+    _, changed = artifacts.withdraw(decision_id, session="mike")
+    assert not changed
+    with pytest.raises(ValueError, match="already resolved"):
+        artifacts.resolve(decision_id, expected_revision=1, answer={"option_id": "current"})
+
+
+def test_owner_message_supersedes_every_open_request_of_that_agent(tmp_path):
+    agent_id = _agent(tmp_path)
+    question = _question()
+    approval = artifacts.create_decision(session="mike", title="Send", question="Send?")
+    closed = artifacts.close_for_user_message(agent_id)
+    assert set(closed) == {question["artifact_id"], approval["artifact_id"]}
+    assert artifacts.attention(include_questions=True) == []
+    assert artifacts.pending_deliveries() == []
+    assert not artifacts.has_pending_decision(agent_id)
+    assert artifacts.get(approval["artifact_id"])["decision"]["resolved_choice"] == "superseded"
+    assert artifacts.close_for_user_message(agent_id) == []

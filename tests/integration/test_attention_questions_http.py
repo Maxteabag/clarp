@@ -168,7 +168,7 @@ def test_archive_restore_and_discard_decision_preserve_different_semantics(host)
     assert status == 200 and result["artifact"]["decision"]["status"] == "cancelled"
     assert result["delivery_pending"] is False
     status, result = _request(host, f"/decisions/{decision_id}/dismiss", {"expected_revision": 1})
-    assert status == 200 and result["changed"] is False and len(host.deliveries) == 1
+    assert status == 200 and result["changed"] is False and host.deliveries == []
     assert _request(host, "/attention?decision_format=2&include_archived=1")[1]["count"] == 0
 
 
@@ -253,7 +253,7 @@ def test_delivery_admission_policy_matches_foreground_and_background(
         assert sent["origin"] == "automation"
 
 
-@pytest.mark.parametrize("notification", ["question", "dismissal", "expiry"])
+@pytest.mark.parametrize("notification", ["question", "expiry"])
 @pytest.mark.parametrize("delivery_path", ["foreground", "background"])
 def test_notifications_preserve_active_nonsteerable_turn_and_queue_durably(
         host, tmp_path, monkeypatch, notification, delivery_path):
@@ -302,16 +302,12 @@ def test_notifications_preserve_active_nonsteerable_turn_and_queue_durably(
         if notification == "question":
             status, _ = _request(host, f"/decisions/{decision_id}/resolve",
                 {"expected_revision": 1, "answer": {"text": "Use compact spacing"}})
-        elif notification == "dismissal":
-            status, _ = _request(host, f"/decisions/{decision_id}/dismiss", {"expected_revision": 1})
         else:
             status, _ = _request(host, "/attention")
         assert status == 200
     else:
         if notification == "question":
             artifacts.resolve(decision_id, expected_revision=1, answer={"text": "Use compact spacing"})
-        elif notification == "dismissal":
-            artifacts.dismiss(decision_id, expected_revision=1)
         else:
             artifacts.attention()
         server_module._deliver_decision_rows(host.ctx)
@@ -346,3 +342,60 @@ def test_attention_index_http_auth_pagination_and_conflict(host):
     artifacts.create(session='theo', type='document', title='New result', payload={'content':'Changed snapshot'})
     code, conflict = _request(host, '/attention/inbox?cursor='+quote(first['next_cursor']))
     assert code == 409 and 'restart' in conflict['error']
+
+
+def test_asking_agent_withdraws_its_own_request_without_any_delivery(host):
+    agents.create_agent(persona="Mia", voice_id="V", cwd="/tmp", session="mia")
+    question = _question(host)
+    decision_id = question["decision"]["decision_id"]
+    status, _ = _request(host, f"/decisions/{decision_id}/withdraw", {"session": "mia"})
+    assert status == 403
+    status, _ = _request(host, f"/decisions/{decision_id}/withdraw", {})
+    assert status == 400
+    status, result = _request(host, f"/decisions/{decision_id}/withdraw", {"session": "theo"})
+    assert status == 200 and result["changed"] is True
+    assert result["artifact"]["decision"]["resolved_choice"] == "withdrawn"
+    assert _request(host, "/attention?decision_format=2&include_archived=1")[1]["count"] == 0
+    status, _ = _request(host, f"/decisions/{decision_id}/resolve",
+                         {"expected_revision": 2, "answer": {"option_id": "keep"}})
+    assert status == 409
+    assert host.deliveries == [] and artifacts.pending_deliveries() == []
+
+
+def test_owner_message_supersedes_open_requests_but_agent_messages_do_not(host, tmp_path, monkeypatch):
+    from lib import turn_dispatch
+
+    class Backend:
+        CLAUDE = "claude"
+
+        def normalize(self, backend):
+            return backend or "claude"
+
+        def active_handles(self, backend, agent_id):
+            return []
+
+        def spawn_turn(self, backend, **kwargs):
+            kwargs["on_result"]({"duration_ms": 1})
+
+        def interrupt(self, backend, agent_id):
+            pass
+
+    mia = agents.create_agent(persona="Mia", voice_id="V", cwd=str(tmp_path), session="mia")
+    agents.start_runtime(agents.get_by_session("theo")["agent_id"], "theo")
+    host.ctx.default_session = "theo"
+    host.ctx.agents_path = tmp_path / "unused.json"
+    service = turn_dispatch.TurnDispatchService(
+        host.ctx, backend_registry=Backend(), home=tmp_path, uuid_factory=lambda: "isolated-session")
+    monkeypatch.setattr(server_module, "TurnDispatchService", lambda ctx: service)
+    question = _question(host)
+    status, _ = _request(host, "/send", {"session": "theo", "text": "status?", "force_session": True,
+                                         "origin": "agent", "sender_agent_id": mia})
+    assert status == 200
+    assert _request(host, "/attention?decision_format=2")[1]["count"] == 1
+    status, _ = _request(host, "/send", {"session": "theo", "text": "Never mind, keep it", "force_session": True})
+    assert status == 200
+    assert _request(host, "/attention?decision_format=2&include_archived=1")[1]["count"] == 0
+    closed = artifacts.get(question["artifact_id"])
+    assert closed["decision"]["resolved_choice"] == "superseded"
+    assert closed["decision"]["resolved_by"] == "user_message"
+    assert artifacts.pending_deliveries() == []

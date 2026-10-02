@@ -329,10 +329,10 @@ def turn_done_payload(persona: str, session: str | None,
       so it respects Focus and Do Not Disturb rather than breaking through
       them.
     - A reply that leaves (or announces) something to answer plays the normal
-      system alert sound. `decision_payload` still decides interruption-level
-      on its own finer rule (`decision_needs_interruption`); this flag only
-      ever adds the sound, never removes the "time-sensitive" it may already
-      have set below.
+      system alert sound. It never sets "time-sensitive": a stale pending
+      request must not turn every later reply into an interruption. Only
+      `decision_payload` may raise the level, for the decision itself, under
+      `decision_needs_interruption`.
     """
     name = (persona or "").strip() or "Clarp"
     payload = {
@@ -349,7 +349,7 @@ def turn_done_payload(persona: str, session: str | None,
             # it respects Focus and Do Not Disturb rather than breaking through
             # them. "time-sensitive" is for alerts the user has asked to be
             # interrupted for, not for every finished turn.
-            "interruption-level": "time-sensitive" if needs_response else "active",
+            "interruption-level": "active",
             # Lets a Notification Service Extension rewrite the notification to
             # show the agent's avatar (WhatsApp-style). Ignored when no
             # extension is installed, so it's safe to send unconditionally.
@@ -710,7 +710,10 @@ def decision_notification_id(decision_id: str) -> str:
 
 
 def decision_needs_interruption(decision: dict) -> bool:
-    return bool(decision.get("blocks_progress")) or decision.get("urgency") == "time_sensitive"
+    """Break through Focus only when the agent is blocked on this request AND
+    has declared it time-sensitive (with a priority reason). Blocking alone,
+    or a time-sensitive nice-to-have, is an ordinary notification."""
+    return bool(decision.get("blocks_progress")) and decision.get("urgency") == "time_sensitive"
 
 
 def send_decision_created(artifact: dict) -> dict:

@@ -26,17 +26,13 @@ def test_invalid_cursor_and_limits(tmp_path):
  with pytest.raises(ValueError):attention_index.page(cursor='invalid')
  assert len(attention_index.page(limit=999)['artifacts'])==1
 
-def test_workflow_attempt_dedupe_and_failure_preservation(tmp_path):
+def test_workflow_runs_never_reach_updates(tmp_path):
  seed(tmp_path)
  payload={'provider':'github','repository':'example/app','run_id':'1','run_url':'https://github.com/example/app/actions/runs/1','workflow_name':'Build'}
- one=make('workflow_run','failed',{**payload,'conclusion':'failure'})
- two=make('workflow_run','failed',{**payload,'conclusion':'failure'})
- # Source supports preserving attempt metadata in payload even before public promotion.
- attempt=make('workflow_run','completed',{**payload,'run_attempt':2,'conclusion':'success'})
- result=attention_index.page()
- assert result['total']==2
- assert [r['attention_bucket'] for r in result['artifacts']]==['blocking','review']
- assert artifacts.get(one['artifact_id']) and artifacts.get(two['artifact_id'])
+ failed=make('workflow_run','failed',{**payload,'conclusion':'failure'})
+ make('workflow_run','completed',{**payload,'run_attempt':2,'conclusion':'success'})
+ assert attention_index.page()['total']==0
+ assert artifacts.get(failed['artifact_id'])
 
 def test_countdown_integration_preserves_unsettled_policy(tmp_path):
  seed(tmp_path)
