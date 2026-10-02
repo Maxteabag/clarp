@@ -1,0 +1,60 @@
+import { Palette } from "theme.slint";
+import { KeyHint } from "artifacts.slint";
+import { MessageImage } from "transcript.slint";
+
+// A message's image enlarged over the window (iOS's full-screen viewer):
+// Left and Right move between a gallery's pictures, Escape (through the
+// keyboard map), a click outside or the hint close it.
+export component ImageView inherits Rectangle {
+    in property <[MessageImage]> images;
+    in property <int> index;
+    callback moved(int);
+    callback done();
+    public function focus-keys() { keys.focus(); }
+    background: #000000d0;
+    TouchArea { clicked => { root.done(); } }
+    property <MessageImage> shown: root.images[root.index];
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow) { root.moved(-1); return accept; }
+            if (event.text == Key.RightArrow) { root.moved(1); return accept; }
+            reject
+        }
+    }
+    VerticalLayout {
+        padding: 24px;
+        spacing: 10px;
+        Rectangle {
+            vertical-stretch: 1;
+            if root.shown.loaded: Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.shown.image;
+                image-fit: contain;
+                accessible-role: image;
+                accessible-label: root.shown.alt;
+            }
+            if !root.shown.loaded: Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.shown.failed ? "Image unavailable" : "Loading…";
+                color: root.shown.failed ? Palette.warning : Palette.faint;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 14px;
+            height: 22px;
+            Text {
+                text: root.shown.alt + (root.images.length > 1 ? "  ·  " + (root.index + 1) + " / " + root.images.length : "");
+                color: Palette.text;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+            if root.images.length > 1: KeyHint { key: "←/→"; label: "Move"; emphasised: true; clicked => { root.moved(1); } }
+            KeyHint { key: "Esc"; label: "Close"; emphasised: true; clicked => { root.done(); } }
+        }
+    }
+}

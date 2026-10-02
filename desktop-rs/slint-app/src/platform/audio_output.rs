@@ -27,6 +27,8 @@ pub trait AudioOutput: Send {
     fn stop(&mut self);
     fn pause(&mut self);
     fn resume(&mut self);
+    /// Moves the clip playing to `to` (a no-op where nothing plays).
+    fn seek(&mut self, _to: Duration) {}
 }
 
 pub const MISSING_BACKEND: &str = "No audio output device is available";
@@ -85,6 +87,7 @@ enum Command {
     Stop,
     Pause,
     Resume,
+    Seek(Duration),
 }
 
 /// The default output device, on a thread of its own (the device stream is
@@ -122,6 +125,9 @@ impl AudioOutput for Speakers {
     }
     fn resume(&mut self) {
         self.send(Command::Resume);
+    }
+    fn seek(&mut self, to: Duration) {
+        self.send(Command::Seek(to));
     }
 }
 
@@ -185,6 +191,13 @@ fn speaker_thread(inbox: std::sync::mpsc::Receiver<Command>, device: bool) {
             Ok(Command::Resume) => {
                 if let Some((_, player)) = &output {
                     player.play();
+                }
+            }
+            Ok(Command::Seek(to)) => {
+                if let Some((_, player)) = &output
+                    && let Err(error) = player.try_seek(to)
+                {
+                    eprintln!("AudioController: cannot seek the clip: {error}");
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}

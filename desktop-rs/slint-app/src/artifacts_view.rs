@@ -10,7 +10,7 @@ use slint::ComponentHandle;
 use clarp_engine::{Change, Engine};
 use slint::Model;
 
-use crate::{App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption};
+use crate::{App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption, CardHint};
 
 fn text(value: &Value, key: &str) -> String {
     match value.get(key) {
@@ -596,7 +596,44 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     }
     // Answered in this window, it keeps the line it had, so its height.
     item.keep_line = (item.pending && !item.meta.is_empty()) || !item.delivery.is_empty() || state.seen_pending.contains(item.id.as_str());
+    item.hints = slint::ModelRc::new(slint::VecModel::from(card_hints(&item)));
     item
+}
+
+/// A card's keys, as its hints show them (and the shortcut bar while the
+/// keyboard is on it): what each does, and the action a click runs.
+fn card_hints(item: &ArtifactItem) -> Vec<CardHint> {
+    let hint = |key: &str, label: &str, action: &str| CardHint { key: key.into(), label: label.into(), action: action.into(), chosen: false };
+    let mut hints = Vec::new();
+    if matches!(item.kind.as_str(), "decision" | "question") {
+        if !item.pending {
+            return hints;
+        }
+        let answers = item.options.row_count() + usize::from(item.allow_custom);
+        if item.approval {
+            for (index, option) in item.options.iter().enumerate() {
+                hints.push(CardHint { chosen: item.chosen == index as i32, ..hint(&(index + 1).to_string(), &option.label, &format!("answer:{index}")) });
+            }
+        }
+        if answers > 0 {
+            hints.push(hint("Enter", "Send", "send"));
+        }
+        if item.editing {
+            hints.push(hint("Esc", "Keep draft", "keep-draft"));
+        } else {
+            hints.push(hint("Del", "Discard", "discard"));
+        }
+        return hints;
+    }
+    if item.action.is_empty() {
+        return hints;
+    }
+    hints.push(hint("Enter", &item.action, "open"));
+    if item.kind == "audio" {
+        hints.push(hint("←/→", "Seek", "seek"));
+        hints.push(hint("S", "Stop", "stop"));
+    }
+    hints
 }
 
 /// Brings a reply's card model to `cards`, in place when the same cards
@@ -1113,16 +1150,154 @@ pub fn on_screen(app: &App) -> Vec<String> {
     })
 }
 
-/// The open chat's card ids, top to bottom.
-fn card_ids(app: &App) -> Vec<String> {
-    app.active_messages()
-        .map(|rows| rows.iter().flat_map(|row| row.artifacts.iter().map(|a| a.id.to_string()).collect::<Vec<_>>()).collect())
-        .unwrap_or_default()
+/// What J/K reach in the open chat, top to bottom: each message's image
+/// blocks (a single image or a gallery) and then the cards made while it
+/// was written.
+pub fn selectables(app: &App) -> Vec<String> {
+    let Some(rows) = app.active_messages() else { return Vec::new() };
+    let mut ids = Vec::new();
+    for row in rows.iter() {
+        ids.extend(row.blocks.iter().filter(|b| !b.key.is_empty()).map(|b| b.key.to_string()));
+        ids.extend(row.artifacts.iter().map(|a| a.id.to_string()));
+    }
+    ids
 }
 
-/// What J/K reach in the open chat, top to bottom.
-pub fn selectables(app: &App) -> Vec<String> {
-    card_ids(app)
+/// An image block's key: its message and its place among the blocks.
+pub fn image_key(row: &str, index: usize) -> String {
+    format!("img:{row}:{index}")
+}
+
+/// The pictures of the image block `key` in the open chat.
+fn image_block(app: &App, key: &str) -> Option<Vec<crate::MessageImage>> {
+    let (row, index) = key.strip_prefix("img:")?.rsplit_once(':')?;
+    let index: usize = index.parse().ok()?;
+    let rows = app.active_messages()?;
+    let found = rows.iter().find(|r| r.id == row)?;
+    let block = found.blocks.row_data(index)?;
+    Some(block.images.iter().collect())
+}
+
+thread_local! {
+    /// The keyboard's tile in a gallery.
+    static TILE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    /// A viewer opened from the chat's keyboard: closing it goes back there.
+    static RETURN_TO_CHAT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn tile() -> i32 {
+    TILE.with(std::cell::Cell::get)
+}
+
+/// Whether the dialog closing was opened from a card (and so the chat, on
+/// that card, gets the keyboard back); asking clears it.
+pub fn take_return() -> bool {
+    RETURN_TO_CHAT.with(|r| r.replace(false))
+}
+
+/// Enter on what the keyboard is on: a card's action, or an image enlarged.
+pub fn activate(app: &App, window: &AppWindow, id: &str) {
+    if id.starts_with("img:") {
+        open_image(app, window, id, tile());
+    } else {
+        open(app, window, id);
+    }
+}
+
+/// Enlarges the image block `key` at picture `index`.
+pub fn open_image(app: &App, window: &AppWindow, key: &str, index: i32) {
+    let Some(images) = image_block(app, key) else {
+        eprintln!("clarp-slint: no image block {key}");
+        return;
+    };
+    let index = index.clamp(0, images.len().saturating_sub(1) as i32);
+    *app.artifact_cursor.borrow_mut() = key.to_owned();
+    TILE.with(|t| t.set(index));
+    window.set_image_view_count(images.len() as i32);
+    window.set_image_view_index(index);
+    window.set_image_view_images(slint::ModelRc::new(slint::VecModel::from(images)));
+    crate::commands::open_overlay(app, window, "image");
+    RETURN_TO_CHAT.with(|r| r.set(true));
+    window.invoke_focus_image_view();
+    app.refresh(&[Change::Updates]);
+}
+
+/// Left/Right in the enlarged image: the gallery's next or previous picture
+/// (the gallery's tile follows).
+pub fn image_view_moved(app: &App, window: &AppWindow, delta: i32) {
+    let index = (window.get_image_view_index() + delta).clamp(0, (window.get_image_view_count() - 1).max(0));
+    window.set_image_view_index(index);
+    TILE.with(|t| t.set(index));
+    window.global::<ArtifactBridge>().set_tile(index);
+    let _ = app;
+}
+
+/// Left/Right on the keyboard's card: a gallery's tiles, an audio clip's
+/// position (10 s); false when the card has neither.
+pub fn nudge(app: &App, window: &AppWindow, direction: i32) -> bool {
+    let Some(id) = selected(app) else { return false };
+    if id.starts_with("img:") {
+        let count = image_block(app, &id).map_or(0, |i| i.len() as i32);
+        if count < 2 {
+            return false;
+        }
+        let next = (tile() + direction).clamp(0, count - 1);
+        TILE.with(|t| t.set(next));
+        window.global::<ArtifactBridge>().set_tile(next);
+        return true;
+    }
+    let Some(card) = card_item(app, &id).filter(|c| c.kind == "audio" && !c.action.is_empty()) else { return false };
+    let length = (card.media_seconds > 0).then(|| Duration::from_secs(card.media_seconds as u64));
+    crate::platform::audio::with(|audio| audio.seek_media(&id, 10 * i64::from(direction), length));
+    true
+}
+
+/// S on an audio card: stops its clip.
+pub fn stop(app: &App) -> bool {
+    let Some(id) = selected(app).filter(|id| card_item(app, id).is_some_and(|c| c.kind == "audio")) else { return false };
+    crate::platform::audio::with(|audio| audio.stop_media(&id));
+    true
+}
+
+/// A click on a card's hint: what its key does, on that card.
+fn hint_clicked(app: &App, window: &AppWindow, id: &str, action: &str) {
+    *app.artifact_cursor.borrow_mut() = id.to_owned();
+    match action {
+        "open" => open(app, window, id),
+        "send" => send(app, id),
+        "discard" => discard(app, id),
+        "keep-draft" => app.focus_transcript(),
+        "seek" => {
+            nudge(app, window, 1);
+        }
+        "stop" => {
+            stop(app);
+        }
+        _ => match action.strip_prefix("answer:").and_then(|i| i.parse::<i32>().ok()) {
+            Some(index) => {
+                choose(app, id, index);
+                send(app, id);
+            }
+            None => eprintln!("clarp-slint: no hint action {action}"),
+        },
+    }
+    app.refresh(&[Change::Updates]);
+    crate::commands::show_hints(app, window);
+}
+
+/// The keys of what the keyboard is on, for the shortcut bar.
+pub fn selected_hints(app: &App) -> Option<Vec<(String, String)>> {
+    let id = selected(app)?;
+    if id.starts_with("img:") {
+        let gallery = image_block(app, &id).is_some_and(|i| i.len() > 1);
+        let mut hints = vec![("Enter".to_owned(), "Enlarge".to_owned())];
+        if gallery {
+            hints.push(("←/→".into(), "Tile".into()));
+        }
+        return Some(hints);
+    }
+    let card = card_item(app, &id)?;
+    Some(card.hints.iter().map(|h| (h.key.to_string(), h.label.to_string())).collect())
 }
 
 pub fn has_cards(app: &App) -> bool {
@@ -1158,6 +1333,9 @@ pub fn step(app: &App, direction: i32) {
             }
         },
     };
+    if ids[next] != cursor {
+        TILE.with(|t| t.set(0));
+    }
     *app.artifact_cursor.borrow_mut() = ids[next].clone();
     let toward = match at {
         Some(index) => (next as i64 - index as i64).signum() as i32,
@@ -1365,8 +1543,14 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                 None => eprintln!("clarp-slint: not playing {url}: only the Host's media plays"),
             }
         }
-        "plan" | "code_change" | "data" | "release" if detail(app, id).is_some() => crate::updates_view::open_report(app, window, id),
-        _ if app.engine.borrow().report_for_artifact(id).is_some() => crate::updates_view::open_report(app, window, id),
+        "plan" | "code_change" | "data" | "release" if detail(app, id).is_some() => {
+            crate::updates_view::open_report(app, window, id);
+            RETURN_TO_CHAT.with(|r| r.set(true));
+        }
+        _ if app.engine.borrow().report_for_artifact(id).is_some() => {
+            crate::updates_view::open_report(app, window, id);
+            RETURN_TO_CHAT.with(|r| r.set(true));
+        }
         // Nothing to open: Enter only selects.
         _ => {}
     }
@@ -1401,6 +1585,16 @@ pub fn bind(window: &AppWindow) {
     });
     bridge.set_now(clock_now());
     bridge.on_link_clicked(|url| crate::open_link(&url));
+    bridge.on_hint(|id, action| {
+        if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+            hint_clicked(&app, &window, &id, &action);
+        }
+    });
+    bridge.on_image_clicked(|key, index| {
+        if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+            open_image(&app, &window, &key, index);
+        }
+    });
     bridge.on_reader_moved(|| {
         SEEK.with(|s| s.borrow_mut().take());
     });

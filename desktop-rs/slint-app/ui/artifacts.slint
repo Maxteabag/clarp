@@ -144,6 +144,10 @@ export global ArtifactBridge {
     // The reader scrolled the chat themselves: J/K stop bringing a card
     // into view.
     callback reader-moved();
+    // A click on a card's hint: what its key does.
+    callback hint(string, string);
+    // A click on an image in a message (its block, its tile): enlarge it.
+    callback image-clicked(string, int);
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
@@ -169,6 +173,66 @@ export global ArtifactLook {
         if (kind == "file") { return "▣"; }
         if (kind == "workflow_run") { return "⟳"; }
         return "¶";
+    }
+}
+
+// A key and what it does, in the shortcut bar's style (the key in accent
+// bold, the label muted); brighter on the card the keyboard is on. A click
+// does what the key does.
+export component KeyHint inherits Rectangle {
+    in property <string> key;
+    in property <string> label;
+    in property <bool> emphasised;
+    in property <bool> chosen;
+    callback clicked();
+    height: 20px;
+    min-width: key-text.preferred-width + 12px;
+    preferred-width: row.preferred-width;
+    border-radius: 4px;
+    background: area.has-hover ? Palette.hover : root.chosen ? Palette.accent.with-alpha(0.16) : transparent;
+    accessible-role: button;
+    accessible-label: root.key + " " + root.label;
+    accessible-action-default => { root.clicked(); }
+    row := HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 5px;
+        key-text := Text {
+            text: root.key;
+            color: root.emphasised || root.chosen ? Palette.accent : Palette.accent.with-alpha(0.6);
+            font-size: 11px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label;
+            color: root.emphasised || root.chosen ? Palette.text : Palette.muted;
+            font-size: 11px;
+            font-weight: root.chosen ? 600 : 400;
+            vertical-alignment: center;
+            overflow: elide;
+            min-width: 0px;
+        }
+    }
+    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A card's hints, left to right; a narrow card elides their labels.
+component HintRow inherits Rectangle {
+    in property <ArtifactItem> artifact;
+    min-width: 0px;
+    clip: true;
+    height: 20px;
+    HorizontalLayout {
+        alignment: start;
+        spacing: 8px;
+        for hint in root.artifact.hints: KeyHint {
+            key: hint.key;
+            label: hint.label;
+            chosen: hint.chosen;
+            emphasised: root.artifact.selected;
+            clicked => { ArtifactBridge.hint(root.artifact.id, hint.action); }
+        }
     }
 }
 
@@ -206,32 +270,6 @@ component CountdownBody inherits VerticalLayout {
     }
 }
 
-// A decision's answer button (iOS's approval buttons): its key, its label.
-component AnswerButton inherits Rectangle {
-    in property <string> key;
-    in property <string> label;
-    in property <bool> primary;
-    in property <bool> chosen;
-    callback clicked();
-    height: 28px;
-    min-width: content.preferred-width + 20px;
-    border-radius: 6px;
-    border-width: root.chosen ? 2px : 1px;
-    border-color: root.chosen ? Palette.accent : root.primary ? Palette.warning : Palette.border;
-    background: area.has-hover ? Palette.hover : root.primary ? Palette.warning.with-alpha(0.18) : Palette.control;
-    accessible-role: button;
-    accessible-label: root.label;
-    accessible-action-default => { root.clicked(); }
-    content := HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: 6px;
-        if root.key != "": Text { text: root.key; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
-        Text { text: root.label; color: Palette.text; font-size: 12px; font-weight: 600; vertical-alignment: center; }
-    }
-    area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
-}
-
 // One of a question's answers (iOS's radio rows): a fixed height, so
 // choosing never moves the chat.
 component OptionRow inherits Rectangle {
@@ -242,6 +280,7 @@ component OptionRow inherits Rectangle {
     in property <bool> chosen;
     in property <bool> enabled;
     in property <bool> show-number;
+    in property <bool> emphasised;
     callback clicked();
     height: root.detail != "" ? 38px : 26px;
     border-radius: 6px;
@@ -271,7 +310,8 @@ component OptionRow inherits Rectangle {
             HorizontalLayout {
                 alignment: start;
                 spacing: 8px;
-                if root.show-number: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+                // Its key, as a hint.
+                if root.show-number: Text { text: root.number; color: root.emphasised ? Palette.accent : Palette.accent.with-alpha(0.6); font-size: 11px; font-weight: 700; vertical-alignment: center; }
                 Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: 12px; font-weight: root.chosen ? 600 : 400; overflow: elide; }
                 if root.recommended: Text { text: "Recommended"; color: Palette.success; font-size: 10px; vertical-alignment: center; }
             }
@@ -296,7 +336,7 @@ component OwnAnswer inherits HorizontalLayout {
         font-size: 12px;
         vertical-alignment: center;
     }
-    if root.artifact.pending: Text { text: root.number; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11px; vertical-alignment: center; }
+    if root.artifact.pending: Text { text: root.number; color: root.artifact.selected ? Palette.accent : Palette.accent.with-alpha(0.6); font-size: 11px; font-weight: 700; vertical-alignment: center; }
     // Asked once, after the row is in the window (focus during its
     // creation is ignored); Escape gives the keyboard back for good.
     property <bool> asked;
@@ -394,6 +434,7 @@ component DecisionBody inherits VerticalLayout {
             chosen: root.artifact.chosen == index;
             enabled: root.artifact.pending;
             show-number: root.artifact.pending;
+            emphasised: root.artifact.selected;
             clicked => { ArtifactBridge.choose(root.artifact.id, index); }
         }
         if root.artifact.allow-custom: OwnAnswer {
@@ -405,30 +446,8 @@ component DecisionBody inherits VerticalLayout {
         height: 28px;
         alignment: start;
         spacing: 8px;
-        if root.artifact.pending && root.artifact.approval: HorizontalLayout {
-            spacing: 8px;
-            for option[index] in root.artifact.options: AnswerButton {
-                key: index + 1;
-                label: option.label;
-                primary: index == 0;
-                chosen: root.artifact.chosen == index;
-                clicked => {
-                    ArtifactBridge.choose(root.artifact.id, index);
-                    ArtifactBridge.send(root.artifact.id);
-                }
-            }
-        }
-        if root.artifact.pending && root.question && root.artifact.options.length + (root.artifact.allow-custom ? 1 : 0) > 0: AnswerButton {
-            key: root.artifact.selected ? "Enter" : "";
-            label: "Send answer";
-            primary: true;
-            clicked => { ArtifactBridge.send(root.artifact.id); }
-        }
-        if root.artifact.pending: AnswerButton {
-            key: root.artifact.selected ? "Del" : "";
-            label: "Discard";
-            clicked => { ArtifactBridge.discard(root.artifact.id); }
-        }
+        // Its keys: an approval's answers, send and discard.
+        if root.artifact.pending: HintRow { artifact: root.artifact; }
         if !root.artifact.pending && root.artifact.resolved != "": HorizontalLayout {
             spacing: 6px;
             Text {
@@ -494,27 +513,10 @@ component MediaBody inherits VerticalLayout {
     property <int> played: root.artifact.media-played + (root.artifact.media-started >= 0 ? Math.max(0, ArtifactBridge.now - root.artifact.media-started) : 0);
     property <string> position: ArtifactBridge.media-position(root.artifact.media-played, root.artifact.media-started, ArtifactBridge.now);
     spacing: 4px;
+    // Played from the keyboard (its hints): the bar and the clock.
     if root.artifact.action != "": HorizontalLayout {
         spacing: 10px;
-        height: 32px;
-        Rectangle {
-            width: 32px;
-            height: 32px;
-            border-radius: 16px;
-            background: play.has-hover ? root.tint.with-alpha(0.3) : root.tint.with-alpha(0.18);
-            accessible-role: button;
-            accessible-label: root.artifact.action;
-            Text {
-                width: parent.width;
-                height: parent.height;
-                text: root.artifact.media-state == "playing" ? "❚❚" : "▶";
-                color: root.tint;
-                font-size: 12px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-            play := TouchArea { mouse-cursor: pointer; clicked => { ArtifactBridge.open(root.artifact.id); } }
-        }
+        height: 20px;
         Rectangle {
             y: (parent.height - self.height) / 2;
             height: 4px;
@@ -740,22 +742,17 @@ export component ArtifactCard inherits Rectangle {
         // The bar's count says it already.
         if root.artifact.progress != "" && root.artifact.progress-count == "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
         if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
-        // A decision shows its send's status in its own row.
-        // Audio plays from its own button.
-        if root.artifact.kind != "audio" && (root.artifact.action != "" || (root.artifact.status-text != "" && root.artifact.kind != "decision" && root.artifact.kind != "question")): HorizontalLayout {
+        // Its keys as hints (a decision shows them, and its send's status,
+        // in its own row), and how its action went.
+        if root.artifact.kind != "decision" && root.artifact.kind != "question" && (root.artifact.hints.length > 0 || root.artifact.status-text != ""): HorizontalLayout {
             spacing: 10px;
-            if root.artifact.action != "": Text {
-                text: root.artifact.action + " ↗";
-                color: Palette.link;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            if root.artifact.selected && root.artifact.action != "": Text { text: "Enter"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
+            if root.artifact.hints.length > 0: HintRow { artifact: root.artifact; }
             if root.artifact.status-text != "": Text {
                 text: root.artifact.status-text;
                 color: root.artifact.status-text.starts-with("Not ") ? Palette.danger : root.artifact.status-text == "Answers accepted" ? Palette.success : Palette.muted;
                 font-size: 12px;
                 overflow: elide;
+                vertical-alignment: center;
                 horizontal-stretch: 1;
             }
         }

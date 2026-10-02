@@ -267,6 +267,13 @@ impl App {
         let stamps = self.prefs.borrow().timestamps;
         let artifacts = crate::cells_view::artifacts_by_row(&presented, &self.engine.borrow().artifacts_for_session(&pane.session));
         let cursor = self.artifact_cursor.borrow().clone();
+        // Image blocks show the keyboard's place from the bridge.
+        if let Some(window) = crate::window() {
+            use slint::ComponentHandle;
+            let bridge = window.global::<crate::ArtifactBridge>();
+            bridge.set_cursor(cursor.clone().into());
+            bridge.set_tile(crate::artifacts_view::tile());
+        }
         let choices = self.artifact_choices.borrow().clone();
         let drafts = self.artifact_drafts.borrow().clone();
         let editing = self.artifact_editing.borrow().clone();

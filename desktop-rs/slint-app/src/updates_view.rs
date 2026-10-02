@@ -188,6 +188,35 @@ pub fn open_report(app: &App, window: &AppWindow, artifact_id: &str) {
     REPORT.with(|r| *r.borrow_mut() = artifact_id.to_owned());
     commands::open_overlay(app, window, "report");
     show_report(app, window);
+    // The keyboard reads it (arrows, Page keys, 1-9 for its links).
+    window.invoke_focus_report();
+}
+
+thread_local! {
+    /// The open report's links, in order (1-9 open them).
+    static REPORT_LINKS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The web links of a Markdown body, in order, once each.
+fn links(markdown: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    for (at, _) in markdown.match_indices("](") {
+        let rest = &markdown[at + 2..];
+        let Some(end) = rest.find(')') else { continue };
+        let url = rest[..end].trim();
+        if (url.starts_with("https://") || url.starts_with("http://")) && !found.iter().any(|f| f == url) {
+            found.push(url.to_owned());
+        }
+    }
+    found
+}
+
+/// 1-9 in the report: opens its link.
+pub fn open_report_link(index: i32) {
+    let url = REPORT_LINKS.with(|l| usize::try_from(index).ok().and_then(|i| l.borrow().get(i).cloned()));
+    if let Some(url) = url {
+        crate::open_link(&url);
+    }
 }
 
 /// The report's title, summary and body (Markdown blocks) for the viewer.
@@ -200,6 +229,9 @@ fn show_report(app: &App, window: &AppWindow) {
     let body = text(&report, "body");
     let markdown = if html && !json::boolean(&report, "converted") { html_markdown(&body) } else { body };
     let blocks: Vec<MessageBlock> = clarp_engine::blocks::blocks(&markdown).iter().map(|b| crate::view::message_block(b, false)).collect();
+    let found = links(&markdown);
+    window.set_report_links(found.len() as i32);
+    REPORT_LINKS.with(|l| *l.borrow_mut() = found);
     window.set_report_title(text(&report, "title").into());
     window.set_report_summary(text(&report, "summary").into());
     window.set_report_html(html);

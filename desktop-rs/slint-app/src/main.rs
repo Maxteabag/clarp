@@ -866,6 +866,8 @@ fn main() {
         pump_now(app);
     }));
     window.on_open_report(|id| with_window(|app, window| updates_view::open_report(app, window, &id)));
+    window.on_report_link(updates_view::open_report_link);
+    window.on_image_view_moved(|delta| with_window(|app, window| artifacts_view::image_view_moved(app, window, delta)));
     window.on_open_chat(|session| with_window(|app, window| updates_view::open_chat(app, window, &session)));
     window.on_show_processes(|session, x, y| with_window(|app, window| updates_view::open_processes(app, window, &session, x, y)));
     window.on_process_helper_opened(|session| with_window(|app, window| updates_view::open_helper(app, window, &session)));

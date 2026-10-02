@@ -1,7 +1,7 @@
 import { Palette } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
-import { ArtifactItem, ArtifactCard, ArtifactBridge } from "artifacts.slint";
+import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
 
 export struct TableRow {
     cells: [styled-text],
@@ -27,6 +27,8 @@ export struct MessageBlock {
     kind: string,
     images: [MessageImage],
     gallery: bool,
+    // An image block in the chat: what the keyboard calls it ("" for none).
+    key: string,
     styled: styled-text,
     text: string,
     level: int,
@@ -112,6 +114,11 @@ component ToolCard inherits Rectangle {
 
 export component Block inherits VerticalLayout {
     in property <MessageBlock> block;
+    // The chat's visible band (an image block in the chat reports where it
+    // is, like a card, so J/K reach it).
+    in property <length> view-top;
+    in property <length> view-bottom;
+    property <bool> selected: root.block.key != "" && ArtifactBridge.cursor == root.block.key;
     in property <length> body-size;
     in property <brush> body-color;
     callback link-clicked(string);
@@ -189,10 +196,15 @@ export component Block inherits VerticalLayout {
     if root.block.kind == "rule": Rectangle { height: 1px; background: Palette.rule; }
     // An image keeps its space before it arrives (iOS: up to 360 tall; a
     // gallery's tiles 120): landing never moves the chat.
-    if root.block.kind == "images": HorizontalLayout {
+    if root.block.kind == "images": images := HorizontalLayout {
         spacing: 6px;
         alignment: start;
-        for picture in root.block.images: Rectangle {
+        Timer {
+            interval: 150ms;
+            running: root.block.key != "";
+            triggered => { ArtifactBridge.card-shown(root.block.key, images.absolute-position.x, images.absolute-position.y, images.width, images.height, root.view-top, root.view-bottom); }
+        }
+        for picture[index] in root.block.images: Rectangle {
             // The layout sizes them: a gallery's tiles up to 150 wide, an
             // image up to 480, both shrinking to fit.
             preferred-width: root.block.gallery ? 140px : 480px;
@@ -204,11 +216,35 @@ export component Block inherits VerticalLayout {
             background: Palette.sunken;
             accessible-role: image;
             accessible-label: picture.alt;
+            // The keyboard's tile (a single image is its own).
+            property <bool> on-tile: root.selected && (!root.block.gallery || ArtifactBridge.tile == index);
+            border-width: self.on-tile ? 2px : 0px;
+            border-color: Palette.accent;
             if picture.loaded: Image {
                 width: parent.width;
                 height: parent.height;
                 source: picture.image;
                 image-fit: root.block.gallery ? cover : contain;
+            }
+            // A click enlarges it, as Enter does.
+            if root.block.key != "": TouchArea {
+                mouse-cursor: pointer;
+                clicked => { ArtifactBridge.image-clicked(root.block.key, index); }
+            }
+            if self.on-tile: Rectangle {
+                x: 6px;
+                y: parent.height - self.height - 6px;
+                width: hint-row.preferred-width + 8px;
+                height: 22px;
+                border-radius: 4px;
+                background: Palette.window.with-alpha(0.85);
+                hint-row := HorizontalLayout {
+                    padding-left: 4px;
+                    spacing: 6px;
+                    // A tile is narrow: its keys, briefly.
+                    KeyHint { key: "Enter"; label: root.block.gallery ? "Open" : "Enlarge"; emphasised: true; clicked => { ArtifactBridge.image-clicked(root.block.key, index); } }
+                    if root.block.gallery: KeyHint { key: "←/→"; label: ""; emphasised: true; }
+                }
             }
             if !picture.loaded: Text {
                 width: parent.width - 16px;
@@ -302,6 +338,8 @@ export component Transcript inherits FocusScope {
                     if row.sender != "": Text { text: row.sender; color: Palette.accent; font-size: 12px; font-weight: 600; }
                     for block in row.blocks: Block {
                         block: block;
+                        view-top: root.absolute-position.y;
+                        view-bottom: root.absolute-position.y + root.height;
                         body-size: row.author == "activity" ? 13px : Palette.body-size;
                         body-color: row.author == "activity" ? Palette.muted : Palette.text;
                         link-clicked(url) => { root.link-clicked(url); }

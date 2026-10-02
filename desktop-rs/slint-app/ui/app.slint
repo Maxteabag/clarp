@@ -12,6 +12,7 @@ import { PreviewPanel, PreviewBanner, PreviewWindow, PreviewVersion } from "prev
 // ---- updates and teams
 import { Updates, AttentionView, JobView, ArtifactView } from "updates.slint";
 import { ReportView } from "report.slint";
+import { ImageView } from "image_view.slint";
 import { Teams, TeamView, TeamMessageView, TeamMemberView, TeamCreateDialog, TeamEditDialog, TeamMemberDialog, TeamDeleteDialog } from "teams.slint";
 import { ProcessPopover, ProcessJob, ProcessHelper } from "processes.slint";
 // ---- launch dialogs
@@ -191,9 +192,16 @@ export component AppWindow inherits Window {
     in property <string> report-kind;
     in property <[MessageBlock]> report-blocks;
     out property <length> report-offset: report-view.offset;
-    // The enlarged image: which of its block's pictures, of how many.
+    // The enlarged image: its block's pictures, which one, of how many.
+    in property <[MessageImage]> image-view-images;
     in property <int> image-view-index;
     in property <int> image-view-count;
+    callback image-view-moved(int);
+    public function focus-image-view() { image-view.focus-keys(); }
+    // The report's links (1-9 open them) and its keyboard.
+    in property <int> report-links;
+    callback report-link(int);
+    public function focus-report() { report-view.focus-body(); }
     in property <[TeamView]> team-list;
     in property <[TeamMessageView]> team-messages;
     in property <[TeamMemberView]> team-members;
@@ -498,7 +506,18 @@ export component AppWindow inherits Window {
             html: root.report-html;
             kind: root.report-kind;
             blocks: root.report-blocks;
+            links: root.report-links;
+            open-link(index) => { root.report-link(index); }
             link-clicked(url) => { root.link-clicked(url); }
+            done => { root.overlay-closed(); }
+        }
+        image-view := ImageView {
+            visible: root.overlay == "image";
+            width: parent.width;
+            height: parent.height;
+            images: root.image-view-images;
+            index: root.image-view-index;
+            moved(delta) => { root.image-view-moved(delta); }
             done => { root.overlay-closed(); }
         }
         team-create := TeamCreateDialog {
