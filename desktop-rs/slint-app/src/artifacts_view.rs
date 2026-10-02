@@ -683,7 +683,12 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
         "answered" => ("Answer saved", true),
         "accepted" => ("Approved", true),
         "rejected" => ("Declined", false),
-        "cancelled" => ("Discarded", false),
+        // Host contract 28: why it was cancelled (iOS's labels).
+        "cancelled" => match text(decision, "resolved_choice").as_str() {
+            "withdrawn" => ("Withdrawn by agent", false),
+            "superseded" => ("Closed by your reply", false),
+            _ => ("Discarded", false),
+        },
         "expired" => ("Expired", false),
         _ => ("", false),
     };
@@ -1270,6 +1275,17 @@ mod tests {
         assert_eq!(countdown(100, 100), ("Target reached", "Now".to_owned()));
         assert_eq!(countdown(100, 159), ("Target reached", "Now".to_owned()));
         assert_eq!(countdown(100, 160), ("Since target", "00:01:00".to_owned()));
+    }
+
+    #[test]
+    fn a_cancelled_decision_says_why() {
+        let cancelled = |choice: &str| {
+            let artifact = serde_json::json!({"artifact_id": "d", "type": "decision", "decision": {"status": "cancelled", "resolved_choice": choice}});
+            artifact_item(&artifact).resolved.to_string()
+        };
+        assert_eq!(cancelled("withdrawn"), "Withdrawn by agent");
+        assert_eq!(cancelled("superseded"), "Closed by your reply");
+        assert_eq!(cancelled(""), "Discarded");
     }
 
     #[test]
