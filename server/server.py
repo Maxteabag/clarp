@@ -482,6 +482,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-helper-state": "_handle_agent_helper_state_get",
         "/oracle/status": "_handle_oracle_status",
         "/oracle/contact": "_handle_oracle_contact_get",
+        "/oracle/voice-provider": "_handle_oracle_voice_provider_get",
         "/oracle/handoff": "_handle_oracle_handoff_get",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
@@ -580,6 +581,7 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/calls/close": "_handle_oracle_call_close",
         "/oracle/v2/calls": "_handle_oracle_live_call_create",
         "/oracle/contact": "_handle_oracle_contact_post",
+        "/oracle/voice-provider": "_handle_oracle_voice_provider_post",
         "/oracle/connect": "_handle_oracle_connect",
         "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
         "/oracle/v2/calls/close": "_handle_oracle_live_call_close",
@@ -3961,6 +3963,26 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self._json_error(409, str(exc))
         log("oracleContactSet", f"session={result['session'] or '-'}")
+        return self._json_ok(result)
+
+    def _handle_oracle_voice_provider_get(self):
+        """Which voice model Oracle v2 calls use (docs/oracle-gemini-live.md)."""
+        from lib import config, oracle_voice_provider
+        return self._json_ok(oracle_voice_provider.status(config.load()))
+
+    def _handle_oracle_voice_provider_post(self):
+        """Choose the Oracle v2 voice model. Body: {"provider": "openai"|"gemini"}.
+        Applies to the next call; a call in progress keeps its model."""
+        from lib import config, oracle_voice_provider
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        try:
+            oracle_voice_provider.set_provider(data.get("provider"))
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        result = oracle_voice_provider.status(config.load())
+        log("oracleVoiceProvider", f"selected={result['selected']} effective={result['provider']}")
         return self._json_ok(result)
 
     def _handle_oracle_v2(self):

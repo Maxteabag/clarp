@@ -391,6 +391,10 @@ class Conversation:
         # Optional private journal (see docs/oracle-diagnostics.md) and always-on counters.
         self.journal = None
         self.counts = {"in_chunks": 0, "out_audible": 0, "out_silence_forwarded": 0, "out_silence_dropped": 0}
+        # Voice usage forwarded to the phone (Gemini Live only; see serve()).
+        self.usage = None
+        # Gemini Live (oracle_gemini_live) needs a few hooks GPT-Live does not.
+        self.gemini = getattr(upstream, "provider", None) == "gemini"
         resumed_work = set()
         if self.memory:
             self.memory.reconcile()
@@ -506,6 +510,8 @@ class Conversation:
             with self.lock:
                 if self.active_relay is not None:
                     self.active_relay.held = True
+            if self.gemini:
+                self.upstream.local_interrupt()  # drop the rest of this reply's audio
             if not self.held_for_handoff:
                 self.append("instructions", "Stop speaking now and listen. Do not cancel agent work.")
         else:
@@ -535,6 +541,20 @@ class Conversation:
                 self.counts["out_silence_dropped"] += 1
             return
         self.journal_event("server", event)
+        # Never ahead of session.started: legacy clients expect it first.
+        if self.usage is not None and kind != "session.started" and self.usage.observe(event):
+            self.downstream({"type": "oracle_v2.usage", **self.usage.snapshot()})
+        if kind == "session.output_audio.interrupted":
+            # The provider stopped its reply for the user's speech (Gemini
+            # Live): audio the phone has buffered is no longer the answer.
+            with self.lock:
+                self.last_output_active = False
+                if self.active_relay is not None:
+                    self.active_relay.held = True
+            for notice in ({"type": "oracle_v2.playback_flush"}, {"type": "oracle_v2.quiet"}):
+                self.journal_event("host", notice)
+                self.downstream(notice)
+            return
         if kind in ("session.input_transcript.delta", "session.output_transcript.delta"):
             if self.memory:
                 source = event.get("event_id") or __import__("hashlib").sha256(json.dumps(event, sort_keys=True).encode()).hexdigest()
@@ -591,9 +611,12 @@ class Conversation:
                 self.journal.record("route.held_for_handoff", {"delegation_id": ident})
             with self.lock:
                 self.routing -= 1
+            self.provider_routed(ident)
             return
         try:
             with self.route_lock:
+                if self.gemini:
+                    self.upstream.delegation_routing(ident)  # this route's appends answer its call
                 routed_revision = None
                 action_index = 0
                 covered_actions = set()
@@ -728,6 +751,12 @@ class Conversation:
         finally:
             with self.lock:
                 self.routing -= 1
+            self.provider_routed(ident)
+
+    def provider_routed(self, ident):
+        """Gemini Live answers the model's delegate call once its route ends."""
+        if self.gemini and not self.stop.is_set():
+            self.upstream.delegation_finished(ident)
 
     def tick(self):
         now = self.clock()
@@ -1112,6 +1141,26 @@ def _connect_upstream(key):
     return upstream
 
 
+def _connect_voice(cfg, key, provider):
+    """The upstream for ``provider`` and the provider it actually is.
+
+    Gemini Live is an alternative: when it cannot be reached this call runs
+    on GPT-Live instead of failing (oracle_voice_provider).
+    """
+    from . import oracle_gemini_live
+    if provider == "gemini" and not oracle_gemini_live.healthy():
+        log("oracleV2Gemini", "Gemini Live failed recently; using GPT-Live for this call")
+    elif provider == "gemini":
+        from . import oracle_voice_provider
+        try:
+            return oracle_gemini_live.GeminiUpstream(cfg.gemini_key(),
+                model=oracle_voice_provider.gemini_model(cfg),
+                voice=oracle_voice_provider.gemini_voice(cfg)), "gemini"
+        except Exception as exc:
+            log_exception("oracleV2Gemini", exc, "Gemini Live unavailable; using GPT-Live for this call")
+    return _connect_upstream(key), "openai"
+
+
 def serve(handler):
     headers = {k.lower(): v for k, v in handler.headers.items()}
     if not ws.is_websocket_upgrade(headers):
@@ -1196,7 +1245,10 @@ def serve(handler):
                 position=float(query.get("position", ["0"])[0]), context=podcast_context,
                 source=podcast_source, model=MODEL, voice=VOICE)
         import websocket
-        upstream = _connect_upstream(key)
+        from . import oracle_voice_provider
+        upstream, provider = _connect_voice(cfg, key,
+            oracle_voice_provider.effective(cfg) if podcast_context is None else "openai")
+        model, voice = (upstream.model, upstream.voice) if provider == "gemini" else (MODEL, VOICE)
         handler.wfile.write(ws.handshake_response(headers["sec-websocket-key"]))
         handler.wfile.flush()
         handler.connection.settimeout(CLIENT_IDLE_TIMEOUT)
@@ -1214,6 +1266,9 @@ def serve(handler):
             tools = AgentTools(handler.ctx, principal, fallback,
                 lambda session: handler._stop_agent_session(session, strict=True, defer_finish=True)[1])
             conversation = Conversation(upstream, downstream, tools, key, delegation_strategy=strategy, memory=memory, provider_session=token)
+            if provider == "gemini":
+                from .oracle_live_usage import LiveUsage
+                conversation.usage = LiveUsage("gemini")
             if not getattr(cfg, "oracle_earcons", True):
                 conversation.earcons = False
             conversation.voice_context = voice_context
@@ -1229,11 +1284,11 @@ def serve(handler):
             from .oracle_diagnostics import OracleJournal
             conversation.journal = OracleJournal()
             conversation.journal.record("session.open", {
-                "model": MODEL, "voice": VOICE, "transport": "clarp-live-v2",
+                "model": model, "voice": voice, "provider": provider, "transport": "clarp-live-v2",
                 "podcast": podcast_context is not None,
                 "voice_context_sha256": (voice_context or {}).get("sidecar_sha256")})
         opened_at = time.monotonic()
-        log("oracleV2Open", f"model={MODEL} voice={VOICE} podcast={podcast_context is not None}"
+        log("oracleV2Open", f"model={model} voice={voice} podcast={podcast_context is not None}"
             + (f" journal={conversation.journal.session_id}" if conversation.journal else ""))
 
         def stop_session():
@@ -1331,6 +1386,10 @@ def serve(handler):
             summary["seconds"] = round(time.monotonic() - opened_at, 1)
             summary["closed_by_upstream"] = conversation.closed.is_set()
             summary["taken_over"] = conversation.taken_over.is_set()
+            if conversation.usage is not None:
+                summary["provider"] = "gemini"
+                summary["voice_estimate_usd"] = conversation.usage.snapshot()["voice_estimate_usd"]
+                summary["reconnects"] = getattr(upstream, "reconnects", 0)
             log("oracleV2Close", " ".join(f"{k}={v}" for k, v in summary.items()))
             if conversation.journal:
                 conversation.journal.record("session.summary", summary)

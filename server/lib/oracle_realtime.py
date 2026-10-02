@@ -162,13 +162,18 @@ def capability() -> dict:
         live_available = direct_available and (getattr(cfg, "oracle_router_backend", "api") == "codex" or bool(cfg.openai_key()))
     except ValueError:
         live_wire, live_available, direct_available = LiveWire(), False, False
+    from . import oracle_voice_provider
+    provider = oracle_voice_provider.effective(cfg)
+    v2_voice = ({"model": oracle_voice_provider.gemini_model(cfg), "voice": oracle_voice_provider.gemini_voice(cfg)}
+                if provider == "gemini" else {"model": "gpt-live-1", "voice": "marin"})
     return {
         "available": bool(cfg.openai_key()),
         "model": cfg.openai_realtime_model,
         "voice": cfg.openai_realtime_voice,
         "transport": "clarp-websocket-proxy",
         "webrtc": True,
-        "v2": {"context_memory": True, "context_reset": True, "direct_contact": True, "direct_contact_available": bool(cfg.openai_key()), "available": bool(cfg.openai_key()), "model": "gpt-live-1", "voice": "marin", "podcast": True, "podcast_history": True},
+        "v2": {"context_memory": True, "context_reset": True, "direct_contact": True, "direct_contact_available": bool(cfg.openai_key()), "available": bool(cfg.openai_key()), **v2_voice, "podcast": True, "podcast_history": True,
+               "voice_provider": provider, "voice_providers": oracle_voice_provider.available(cfg)},
         "v2_tinkered": {"context_memory": True, "context_reset": True, "direct_contact": True, "direct_contact_available": direct_available, "available": live_available, "model": live_wire.model, "voice": live_wire.voice,
                "mode": mode, "webrtc": mode == "subscription" or getattr(cfg, "oracle_live_webrtc", False),
                "router": getattr(cfg, "oracle_router_backend", "api"), "podcast": True, "podcast_history": True},
