@@ -45,6 +45,10 @@ export struct PaneView {
     focus-composer: int,
     focus-transcript: int,
     to-latest: int,
+    // Bumped to scroll the transcript by `scroll-amount` px (J/K bringing
+    // a card into view: an explicit keypress, never activity).
+    scroll-request: int,
+    scroll-amount: float,
 }
 
 export struct SplitView {
@@ -93,7 +97,8 @@ export component Pane inherits Rectangle {
         root.reported(transcript.follow, transcript.at-end, transcript.offset, transcript.has-focus, composer.editor-focused);
     }
     // A pane made for a request (a split's focus) acts on it at once.
-    init => { root.apply-requests(); }
+    // An old scroll request is not replayed into a pane made later.
+    init => { root.scroll-request-seen = root.pane.scroll-request; root.apply-requests(); }
     changed pane => { root.apply-requests(); }
     function apply-requests() {
         if (root.draft-set-seen != root.pane.draft-set) {
@@ -112,6 +117,10 @@ export component Pane inherits Rectangle {
             root.to-latest-seen = root.pane.to-latest;
             transcript.scroll-to-latest();
         }
+        if (root.scroll-request-seen != root.pane.scroll-request) {
+            root.scroll-request-seen = root.pane.scroll-request;
+            transcript.scroll-by(root.pane.scroll-amount * 1px);
+        }
     }
     // Focus moves once the pane is live: a new pane's composer, or one just
     // enabled by its chat, cannot take the keyboard in the same update.
@@ -128,6 +137,7 @@ export component Pane inherits Rectangle {
     property <int> focus-composer-seen;
     property <int> focus-transcript-seen;
     property <int> to-latest-seen;
+    property <int> scroll-request-seen;
     property <bool> follows: transcript.follow;
     property <bool> at-end: transcript.at-end;
     property <length> offset: transcript.offset;

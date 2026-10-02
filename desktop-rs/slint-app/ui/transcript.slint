@@ -1,7 +1,7 @@
 import { Palette } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
-import { ArtifactItem, ArtifactCard } from "artifacts.slint";
+import { ArtifactItem, ArtifactCard, ArtifactBridge } from "artifacts.slint";
 
 export struct TableRow {
     cells: [styled-text],
@@ -244,6 +244,13 @@ export component Transcript inherits FocusScope {
     property <bool> holding;
     property <length> from-bottom;
     Rectangle { background: Palette.window; }
+    // The cards' clock: the chat ticks with them, so a card whose row the
+    // list dropped lapses even when no other card is drawn.
+    Timer {
+        interval: 150ms;
+        running: true;
+        triggered => { ArtifactBridge.card-shown("", 0, 0, 0, 0, 0, 0); }
+    }
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
     list := ListView {
@@ -252,6 +259,7 @@ export component Transcript inherits FocusScope {
         // whether they ended at the end (follow again) or the top (load the
         // page before) is decided once the scroll has settled.
         scrolled => {
+            ArtifactBridge.reader-moved();
             root.holding = false;
             root.follow = false;
             if (!root.settling) { root.start-y = list.content-y; }
@@ -399,6 +407,9 @@ export component Transcript inherits FocusScope {
     // After Escape the transcript has the keyboard: Up/Down, Page Up/Down,
     // Home and End scroll it.
     key-pressed(event) => {
+        if (event.text == Key.UpArrow || event.text == Key.DownArrow || event.text == Key.PageUp || event.text == Key.PageDown || event.text == Key.Home || event.text == Key.End) {
+            ArtifactBridge.reader-moved();
+        }
         if (event.text == Key.UpArrow) { root.scroll-by(-40px); return accept; }
         if (event.text == Key.DownArrow) { root.scroll-by(40px); return accept; }
         if (event.text == Key.PageUp) { root.scroll-by(-list.visible-height * 0.9); return accept; }

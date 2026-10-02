@@ -34,6 +34,8 @@ pub struct PaneState {
     focus_composer: i32,
     focus_transcript: i32,
     to_latest: i32,
+    scroll_request: i32,
+    scroll_amount: f32,
     view: PaneView,
     /// Each reply's artifact cards, updated in place: a card is never
     /// rebuilt under a click or a field that has the keyboard.
@@ -55,6 +57,8 @@ impl PaneState {
             focus_composer: 0,
             focus_transcript: 0,
             to_latest: 0,
+            scroll_request: 0,
+            scroll_amount: 0.0,
             cards: std::collections::HashMap::new(),
         }
     }
@@ -143,6 +147,13 @@ impl App {
     pub fn to_latest(&self) {
         self.bump(|p| p.to_latest += 1);
     }
+    /// Scrolls the active transcript by `delta` px (down for positive).
+    pub fn scroll_by(&self, delta: f32) {
+        self.bump(|p| {
+            p.scroll_request += 1;
+            p.scroll_amount = delta;
+        });
+    }
 
     /// A pane's report, from its transcript and composer.
     pub fn reported(&self, id: &str, report: Report) {
@@ -191,6 +202,8 @@ impl App {
         view.focus_composer = pane.focus_composer;
         view.focus_transcript = pane.focus_transcript;
         view.to_latest = pane.to_latest;
+        view.scroll_request = pane.scroll_request;
+        view.scroll_amount = pane.scroll_amount;
         view
     }
 

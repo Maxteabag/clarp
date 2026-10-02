@@ -123,8 +123,12 @@ export global ArtifactBridge {
     callback draft-edited(string, string);
     in-out property <bool> editing;
     callback editing-changed(string, bool);
-    // Where a card is (its top and height) and the chat's visible band.
-    callback card-shown(string, length, length, length, length);
+    // Where a card is (its left, top, width and height) and the chat's
+    // visible band.
+    callback card-shown(string, length, length, length, length, length, length);
+    // The reader scrolled the chat themselves: J/K stop bringing a card
+    // into view.
+    callback reader-moved();
 }
 
 // The type's tint (iOS ArtifactCard's palette, from the reading theme).
@@ -586,7 +590,7 @@ export component ArtifactCard inherits Rectangle {
     Timer {
         interval: 150ms;
         running: true;
-        triggered => { ArtifactBridge.card-shown(root.artifact.id, root.absolute-position.y, root.height, root.view-top, root.view-bottom); }
+        triggered => { ArtifactBridge.card-shown(root.artifact.id, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
     }
     property <color> tint: ArtifactLook.tint(root.artifact.kind, root.artifact.failed);
     background: touch.has-hover && root.artifact.action != "" ? root.tint.with-alpha(0.1) : root.tint.with-alpha(0.065);

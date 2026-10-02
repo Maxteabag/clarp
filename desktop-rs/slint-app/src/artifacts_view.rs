@@ -1058,9 +1058,20 @@ fn is_report(artifact: &Value) -> bool {
 /// Where a card was when it last reported.
 struct Report {
     shown: bool,
+    x: f32,
+    top: f32,
+    width: f32,
     height: f32,
+    view_top: f32,
+    view_bottom: f32,
     /// The report numbers of its last three reports, newest first.
     seqs: [u64; 3],
+}
+
+impl Report {
+    fn shown_in(top: f32, height: f32, view_top: f32, view_bottom: f32) -> bool {
+        top + height > view_top + 4.0 && top < view_bottom - 4.0
+    }
 }
 
 thread_local! {
@@ -1070,15 +1081,13 @@ thread_local! {
 /// A drawn card reports where it is every 150 ms. A row the list dropped
 /// stops: it has lapsed once another card has reported three times since
 /// (counted in reports, not time, so a busy moment lapses nothing).
-fn card_shown(id: &str, top: f32, height: f32, view_top: f32, view_bottom: f32) {
-    let shown = top + height > view_top + 4.0 && top < view_bottom - 4.0;
+fn card_shown(id: &str, x: f32, top: f32, width: f32, height: f32, view_top: f32, view_bottom: f32) {
+    let shown = Report::shown_in(top, height, view_top, view_bottom);
     SHOWN.with(|s| {
         let (seq, reports) = &mut *s.borrow_mut();
         *seq += 1;
-        let report = reports.entry(id.to_owned()).or_insert(Report { shown, height, seqs: [0; 3] });
-        report.shown = shown;
-        report.height = height;
-        report.seqs = [*seq, report.seqs[0], report.seqs[1]];
+        let report = reports.entry(id.to_owned()).or_insert(Report { shown, x, top, width, height, view_top, view_bottom, seqs: [0; 3] });
+        *report = Report { shown, x, top, width, height, view_top, view_bottom, seqs: [*seq, report.seqs[0], report.seqs[1]] };
     });
 }
 
@@ -1088,13 +1097,19 @@ pub fn card_heights(app: &App) -> Vec<(String, f32)> {
     SHOWN.with(|s| ids.into_iter().filter_map(|id| s.borrow().1.get(&id).map(|r| r.height).map(|h| (id, h))).collect())
 }
 
+/// Where a card on screen last was: its left, top, width and height (for
+/// the checks, which click its hints).
+pub fn card_rect(app: &App, id: &str) -> Option<(f32, f32, f32, f32)> {
+    on_screen(app).contains(&id.to_owned()).then(|| SHOWN.with(|s| s.borrow().1.get(id).map(|r| (r.x, r.top, r.width, r.height)))).flatten()
+}
+
 /// The open chat's cards now on screen, top to bottom.
 pub fn on_screen(app: &App) -> Vec<String> {
     SHOWN.with(|s| {
         let s = s.borrow();
         let reports = &s.1;
         let lapsed = |report: &Report| reports.values().any(|other| other.seqs[2] > report.seqs[0]);
-        card_ids(app).into_iter().filter(|id| reports.get(id).is_some_and(|r| r.shown && !lapsed(r))).collect()
+        selectables(app).into_iter().filter(|id| reports.get(id).is_some_and(|r| r.shown && !lapsed(r))).collect()
     })
 }
 
@@ -1111,7 +1126,7 @@ pub fn selectables(app: &App) -> Vec<String> {
 }
 
 pub fn has_cards(app: &App) -> bool {
-    !card_ids(app).is_empty()
+    !selectables(app).is_empty()
 }
 
 /// The card the keyboard is on, while it is on screen in the open chat.
@@ -1120,18 +1135,203 @@ pub fn selected(app: &App) -> Option<String> {
     (!cursor.is_empty() && on_screen(app).contains(&cursor)).then_some(cursor)
 }
 
-/// J/K: the next or previous card on screen; from none, J is the topmost
-/// and K the lowest. Cards off screen are out of reach (scroll to them).
+/// J/K: the next or previous card in the chat, scrolled into view when it
+/// is not (all) on screen; from none, J is the topmost card on screen and K
+/// the lowest (with none on screen, K is the latest card above and J the
+/// next one below). Only these keypresses move the reader to a card.
 pub fn step(app: &App, direction: i32) {
-    let ids = on_screen(app);
+    let ids = selectables(app);
     let Some(last) = ids.len().checked_sub(1) else { return };
-    let at = selected(app).and_then(|id| ids.iter().position(|i| *i == id));
+    let cursor = app.artifact_cursor.borrow().clone();
+    let at = ids.iter().position(|i| *i == cursor);
+    let shown = on_screen(app);
     let next = match at {
-        None if direction > 0 => 0,
-        None => last,
         Some(index) => (index as i64 + i64::from(direction)).clamp(0, last as i64) as usize,
+        None => match (direction > 0, shown.first(), shown.last()) {
+            (true, Some(first), _) => ids.iter().position(|i| i == first).unwrap_or(0),
+            (false, _, Some(lowest)) => ids.iter().position(|i| i == lowest).unwrap_or(last),
+            // Nothing on screen: what is known to be above (or below) it.
+            _ => {
+                let side = |id: &String| SHOWN.with(|s| s.borrow().1.get(id).map(|r| if r.top + r.height <= r.view_top { -1 } else { 1 }));
+                let found = if direction > 0 { ids.iter().position(|i| side(i) == Some(1)) } else { ids.iter().rposition(|i| side(i) == Some(-1)) };
+                found.unwrap_or(last)
+            }
+        },
     };
     *app.artifact_cursor.borrow_mut() = ids[next].clone();
+    let toward = match at {
+        Some(index) => (next as i64 - index as i64).signum() as i32,
+        None => direction,
+    };
+    bring_into_view(app, &ids[next], if toward == 0 { direction } else { toward });
+    app.refresh(&[Change::Updates]);
+}
+
+/// Bringing the keyboard's card into view: which, which way it lies, the
+/// report number of the last scroll (only reports after it count), and
+/// how often it has been placed. The list estimates the rows it has not
+/// drawn and corrects them as they draw, so a scroll can land elsewhere
+/// than asked: the card is placed until its own report says it is in view.
+struct Seek {
+    id: String,
+    direction: i32,
+    since_seq: u64,
+    scrolled: std::time::Instant,
+    started: std::time::Instant,
+    placements: u32,
+    /// The card's last report (number and top): the list settles for a
+    /// while after a scroll, so a place counts once it holds still.
+    seen: Option<(u64, f32)>,
+}
+
+thread_local! {
+    /// When the last seek ended: its card's own report may still be on
+    /// its way, so the selection is kept a moment longer.
+    static SEEK_ENDED: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    static SEEK: std::cell::RefCell<Option<Seek>> = const { std::cell::RefCell::new(None) };
+    static SEEK_TIMER: std::cell::RefCell<Option<slint::Timer>> = const { std::cell::RefCell::new(None) };
+    /// The report number and time of the last scroll a seek made: reports
+    /// from before it say where cards were, not where they are.
+    static LAST_SCROLL: std::cell::Cell<(u64, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) };
+}
+
+/// Whether J/K are still bringing a card into view (or just did).
+pub fn seeking() -> bool {
+    SEEK.with(|s| s.borrow().is_some()) || SEEK_ENDED.with(|e| e.get().is_some_and(|at| at.elapsed() < Duration::from_millis(500)))
+}
+
+/// Scrolls the chat so `id` is wholly in view: at once when it is drawn,
+/// else a page at a time towards it (`direction`) until it is.
+fn bring_into_view(app: &App, id: &str, direction: i32) {
+    let now = std::time::Instant::now();
+    let (since_seq, scrolled) = LAST_SCROLL.with(std::cell::Cell::get);
+    let scrolled = scrolled.unwrap_or(now - Duration::from_secs(1));
+    SEEK.with(|s| *s.borrow_mut() = Some(Seek { id: id.to_owned(), direction, since_seq, scrolled, started: now, placements: 0, seen: None }));
+    // A card on screen or near it is placed now; one further away is found
+    // over the next frames.
+    if seek_tick(app) {
+        let timer = slint::Timer::default();
+        timer.start(slint::TimerMode::Repeated, Duration::from_millis(30), || {
+            let Some(app) = crate::app() else { return };
+            if !seek_tick(&app) {
+                SEEK_TIMER.with(|t| t.borrow_mut().take());
+                if let Some(window) = crate::window() {
+                    crate::commands::show_hints(&app, &window);
+                }
+                app.refresh(&[Change::Updates]);
+            }
+        });
+        SEEK_TIMER.with(|t| *t.borrow_mut() = Some(timer));
+    } else {
+        SEEK_TIMER.with(|t| t.borrow_mut().take());
+    }
+}
+
+/// Scrolls by `delta` for the seek, from report number `seq` on.
+fn seek_scrolled(app: &App, delta: f32, direction: i32, placed: bool) {
+    app.scroll_by(delta);
+    let seq = SHOWN.with(|s| s.borrow().0);
+    LAST_SCROLL.with(|l| l.set((seq, Some(std::time::Instant::now()))));
+    SEEK.with(|s| {
+        if let Some(seek) = s.borrow_mut().as_mut() {
+            seek.since_seq = seq;
+            seek.scrolled = std::time::Instant::now();
+            seek.direction = direction;
+            seek.placements += u32::from(placed);
+            seek.seen = None;
+        }
+    });
+}
+
+/// One step of bringing the card into view; false once it is there (or
+/// out of reach).
+fn seek_tick(app: &App) -> bool {
+    const MARGIN: f32 = 12.0;
+    let Some((id, mut direction, since_seq, scrolled, started, placements, seen)) =
+        SEEK.with(|s| s.borrow().as_ref().map(|k| (k.id.clone(), k.direction, k.since_seq, k.scrolled, k.started, k.placements, k.seen)))
+    else {
+        return false;
+    };
+    let stop = || {
+        SEEK.with(|s| s.borrow_mut().take());
+        SEEK_ENDED.with(|e| e.set(Some(std::time::Instant::now())));
+        false
+    };
+    if *app.artifact_cursor.borrow() != id || started.elapsed() > Duration::from_secs(10) {
+        return stop();
+    }
+    let waited = scrolled.elapsed();
+    if since_seq > 0 && waited < Duration::from_millis(160) {
+        return true;
+    }
+    // Its latest report since the last scroll, if any (a dropped row's is
+    // stale: it has lapsed).
+    let placed = SHOWN.with(|s| {
+        let s = s.borrow();
+        let lapsed = |report: &Report| s.1.values().any(|other| other.seqs[2] > report.seqs[0]);
+        s.1.get(&id).filter(|r| r.seqs[0] > since_seq && !lapsed(r)).map(|r| (r.seqs[0], r.top, r.height, r.view_top, r.view_bottom))
+    });
+    if let Some((seq, top, height, view_top, view_bottom)) = placed {
+        let delta = if top < view_top + MARGIN || height > view_bottom - view_top - 2.0 * MARGIN {
+            top - view_top - MARGIN
+        } else if top + height > view_bottom - MARGIN {
+            top + height - view_bottom + MARGIN
+        } else {
+            0.0
+        };
+        // In view (or as near as the chat's ends let it be).
+        // In view (or as near as the chat's ends let it be), and holding
+        // still there since its last report.
+        let still = seen.is_some_and(|(last, at)| last != seq && (at - top).abs() < 1.0);
+        if (delta.abs() < 1.0 && still) || placements >= 6 {
+            return stop();
+        }
+        if delta.abs() < 1.0 {
+            SEEK.with(|s| {
+                if let Some(seek) = s.borrow_mut().as_mut() {
+                    seek.seen = Some((seq, top));
+                }
+            });
+            return true;
+        }
+        seek_scrolled(app, delta, direction, true);
+        // Where it now should be, until it reports.
+        SHOWN.with(|s| {
+            if let Some(report) = s.borrow_mut().1.get_mut(&id) {
+                report.top -= delta;
+                report.shown = Report::shown_in(report.top, report.height, report.view_top, report.view_bottom);
+            }
+        });
+        return true;
+    }
+    // Not drawn yet: a page towards it, then wait for the rows there to
+    // report (each card every 150 ms, once drawn), and page on towards it
+    // by the cards that did: past them, or back if it was passed.
+    if since_seq > 0 {
+        let ids = selectables(app);
+        let target = ids.iter().position(|i| *i == id).unwrap_or(0);
+        let fresh: Vec<usize> = SHOWN.with(|s| {
+            let s = s.borrow();
+            ids.iter().enumerate().filter(|(_, i)| s.1.get(*i).is_some_and(|r| r.shown && r.seqs[0] > since_seq)).map(|(index, _)| index).collect()
+        });
+        match (fresh.first(), fresh.last()) {
+            (Some(first), _) if target < *first => direction = -1,
+            (_, Some(last)) if target > *last => direction = 1,
+            // Among the cards drawn: its own report is on its way.
+            (Some(_), Some(_)) if waited < Duration::from_millis(900) => return true,
+            (None, None) if waited < Duration::from_millis(400) => return true,
+            _ => {}
+        }
+    }
+    let page = SHOWN.with(|s| s.borrow().1.values().map(|r| r.view_bottom - r.view_top).find(|band| *band > 0.0)).unwrap_or(400.0) * 0.8;
+    seek_scrolled(app, page * direction as f32, direction, false);
+    true
+}
+
+/// Escape on a card: the keyboard leaves it (stays on the chat).
+pub fn leave(app: &App) {
+    app.artifact_cursor.borrow_mut().clear();
+    SEEK.with(|s| s.borrow_mut().take());
     app.refresh(&[Change::Updates]);
 }
 
@@ -1201,7 +1401,10 @@ pub fn bind(window: &AppWindow) {
     });
     bridge.set_now(clock_now());
     bridge.on_link_clicked(|url| crate::open_link(&url));
-    bridge.on_card_shown(|id, top, height, view_top, view_bottom| card_shown(&id, top, height, view_top, view_bottom));
+    bridge.on_reader_moved(|| {
+        SEEK.with(|s| s.borrow_mut().take());
+    });
+    bridge.on_card_shown(|id, x, top, width, height, view_top, view_bottom| card_shown(&id, x, top, width, height, view_top, view_bottom));
     bridge.on_choose(|id, index| {
         if let Some(app) = crate::app() {
             choose(&app, &id, index);
@@ -1250,9 +1453,10 @@ pub fn bind(window: &AppWindow) {
             // A selected card scrolled away is no longer selected.
             if let Some(app) = crate::app() {
                 let cursor = app.artifact_cursor.borrow().clone();
-                if !cursor.is_empty() && selected(&app).is_none() && app.artifact_editing.borrow().is_empty() {
+                if !cursor.is_empty() && selected(&app).is_none() && app.artifact_editing.borrow().is_empty() && !seeking() {
                     app.artifact_cursor.borrow_mut().clear();
                     app.refresh(&[Change::Updates]);
+                    crate::commands::show_hints(&app, &window);
                 }
             }
         }
