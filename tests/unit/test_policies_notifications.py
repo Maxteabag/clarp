@@ -95,3 +95,23 @@ def test_muted_agent_keeps_badge_but_not_push(content):
 
 def test_origin_is_stripped():
     assert notify_decision("  agent ", turn(), CHAT, STRICT) == Suppress("not-user-facing-origin:agent")
+
+
+@pytest.mark.parametrize("content", ["speak", "text-reply"])
+def test_a_reply_to_a_desktop_message_badges_without_a_phone_push(content):
+    desktop = CompletedTurn(agent_id="a1", has_cause=True, content=content,
+                            client="desktop")
+    assert notify_decision("user", desktop, CHAT, STRICT) == Notify(
+        reason=f"{content}-desktop", kind=content, push=False, muted=False)
+    # A message from the phone (or any other client) still pushes.
+    phone = CompletedTurn(agent_id="a1", has_cause=True, content=content)
+    assert notify_decision("user", phone, CHAT, STRICT) == Notify(
+        reason=content, kind=content, push=True, muted=False)
+
+
+def test_mute_still_names_itself_for_a_desktop_message():
+    desktop = CompletedTurn(agent_id="a1", has_cause=True, content="speak",
+                            client="desktop")
+    muted = AgentCapabilities(present=True, muted=True)
+    assert notify_decision("user", desktop, muted, STRICT) == Notify(
+        reason="speak-muted", kind="speak", push=False, muted=True)
