@@ -78,6 +78,7 @@ def _shape_as_v61(con: sqlite3.Connection) -> None:
         DROP TABLE tool_explanation_releases;
         DROP TABLE tool_explanation_cache;
         ALTER TABLE artifacts DROP COLUMN archived_at;
+        ALTER TABLE artifacts DROP COLUMN pinned_at;
         ALTER TABLE artifact_decisions DROP COLUMN response_type;
         ALTER TABLE artifact_decisions DROP COLUMN options_json;
         ALTER TABLE artifact_decisions DROP COLUMN allow_custom_text;
@@ -342,6 +343,27 @@ def test_v102_names_the_client_that_admitted_a_prompt(tmp_path):
     db._migrate(upgraded)
 
     assert upgraded.execute("SELECT client FROM prompt_admissions").fetchone()[0] == ""
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+    db._migrate(upgraded)
+
+
+def test_v103_adds_artifact_pins_without_pinning_existing_rows(tmp_path):
+    path = tmp_path / "v102.sqlite"
+    con = _fresh(path)
+    con.executescript("""
+        INSERT INTO agents (agent_id, persona, voice_id, cwd, session, created_at, is_janitor)
+            VALUES ('a1', 'Ada', 'v', '/tmp', 'ada', 1, 0);
+        INSERT INTO artifacts (artifact_id, agent_id, session, type, title, created_at, updated_at)
+            VALUES ('art-1', 'a1', 'ada', 'document', 'Notes', 1, 1);
+        ALTER TABLE artifacts DROP COLUMN pinned_at;
+        PRAGMA user_version = 102;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert upgraded.execute("SELECT pinned_at FROM artifacts").fetchone()[0] is None
     assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     db._migrate(upgraded)
 

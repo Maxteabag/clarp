@@ -295,6 +295,7 @@ def sync_plan(plan_id: str) -> None:
 
 def _public(row) -> dict:
     item = dict(row)
+    item["pinned"] = item.get("pinned_at") is not None
     try: item["payload"] = json.loads(item.pop("payload_json") or "{}")
     except json.JSONDecodeError: item["payload"] = {}
     for key in ("target_at", "url", "thumbnail_url", "mime_type", "file_name", "content",
@@ -766,8 +767,12 @@ def archive(artifact_id: str, *, archived: bool, expected_updated_at: int) -> tu
             con.execute("COMMIT"); return current, False
         if current["updated_at"] != expected_updated_at: raise ValueError("artifact changed")
         now = max(db.now_ms(), current["updated_at"] + 1)
-        con.execute("UPDATE artifacts SET archived_at=?,updated_at=? WHERE artifact_id=?",
-                    (now if archived else None, now, artifact_id))
+        # Archiving takes the item out of the Pinned menu as well; restoring
+        # does not pin it again.
+        con.execute("""UPDATE artifacts SET archived_at=?,updated_at=?,
+                              pinned_at=CASE WHEN ? THEN NULL ELSE pinned_at END
+                        WHERE artifact_id=?""",
+                    (now if archived else None, now, archived, artifact_id))
         con.execute("COMMIT"); return get(artifact_id) or {}, True
     except BaseException:
         con.execute("ROLLBACK"); raise
@@ -788,12 +793,47 @@ def discard(artifact_id: str, *, expected_updated_at: int) -> tuple[dict, bool]:
             con.execute("COMMIT"); return current, False
         if current["updated_at"] != expected_updated_at: raise ValueError("artifact changed")
         now = max(db.now_ms(), current["updated_at"] + 1)
-        con.execute("UPDATE artifacts SET deleted_at=?,updated_at=? WHERE artifact_id=?",
+        con.execute("UPDATE artifacts SET deleted_at=?,updated_at=?,pinned_at=NULL WHERE artifact_id=?",
                     (now, now, artifact_id))
         con.execute("COMMIT")
-        return {**current, "deleted_at": now, "updated_at": now}, True
+        return {**current, "deleted_at": now, "updated_at": now, "pinned_at": None}, True
     except BaseException:
         con.execute("ROLLBACK"); raise
+
+
+def pin(artifact_id: str, *, pinned: bool) -> tuple[dict, bool]:
+    """Pin or unpin an artifact for the owner's Pinned menu on every device.
+
+    A pin is a preference, not an edit: ``updated_at`` is left alone so the
+    artifact keeps its place in chat and the library.  Archived artifacts are
+    not pinnable; archiving or discarding one unpins it.
+    """
+    if not isinstance(pinned, bool): raise ValueError("pinned must be a boolean")
+    con = db.conn(); con.execute("BEGIN IMMEDIATE")
+    try:
+        current = get(artifact_id)
+        if not current: raise ValueError("artifact not found")
+        if (current["pinned_at"] is not None) == pinned:
+            con.execute("COMMIT"); return current, False
+        if pinned and current["archived_at"] is not None:
+            raise ValueError("archived artifacts cannot be pinned")
+        con.execute("UPDATE artifacts SET pinned_at=? WHERE artifact_id=?",
+                    (db.now_ms() if pinned else None, artifact_id))
+        con.execute("COMMIT"); return get(artifact_id) or {}, True
+    except BaseException:
+        con.execute("ROLLBACK"); raise
+
+
+def list_pinned(*, limit: int = 100) -> list[dict]:
+    """Pinned artifacts, newest pin first."""
+    rows = db.conn().execute(
+        """SELECT a.*,g.persona AS agent_name FROM artifacts a JOIN agents g
+              ON g.agent_id=a.agent_id
+            WHERE a.pinned_at IS NOT NULL AND a.deleted_at IS NULL AND a.archived_at IS NULL
+              AND a.type NOT IN ('image','image_gallery','live_task','event')
+            ORDER BY a.pinned_at DESC,a.artifact_id DESC LIMIT ?""",
+        (max(1, min(int(limit), 500)),)).fetchall()
+    return [_public(row) for row in rows]
 
 
 def has_blocking_decision(agent_id: str) -> bool:
