@@ -444,6 +444,7 @@ class Handler(BaseHTTPRequestHandler):
         "/artifacts": "_handle_artifacts_list",
         "/attention": "_handle_attention",
         "/attention/inbox": "_handle_attention_inbox",
+        "/pinned-artifacts": "_handle_pinned_artifacts",
         "/voices": "_handle_voices",
         "/voice-catalog": "_handle_voice_catalog",
         "/voice-preview": "_handle_voice_preview",
@@ -2782,7 +2783,7 @@ class Handler(BaseHTTPRequestHandler):
             from lib import podcast_history_http
             return podcast_history_http.handle(self, "POST")
         if path.startswith("/artifacts/"):
-            for action in ("archive", "discard", "submit"):
+            for action in ("archive", "discard", "submit", "pin"):
                 suffix = "/" + action
                 if path.endswith(suffix):
                     artifact_id = unquote(path[len("/artifacts/"):-len(suffix)].strip("/"))
@@ -4534,6 +4535,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
         return self._json_ok({"artifact": row, "changed": changed})
+
+    def _handle_artifact_pin(self, artifact_id: str):
+        from lib import artifacts
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "json object required")
+        if not isinstance(data.get("pinned"), bool):
+            return self._json_error(400, "pinned must be a boolean")
+        try:
+            row, changed = artifacts.pin(artifact_id, pinned=data["pinned"])
+        except ValueError as exc:
+            status = 404 if str(exc) == "artifact not found" else 409
+            return self._json_error(status, str(exc))
+        if changed:
+            self._broadcast_artifact(row)
+        return self._json_ok({"artifact": row, "changed": changed})
+
+    def _handle_pinned_artifacts(self):
+        from lib import artifacts
+        representation = self._query().get("representation", [""])[0]
+        if representation not in ("", "flat-v1"):
+            return self._json_error(400, "unsupported artifact representation")
+        return self._json_ok({"artifacts": [
+            artifacts.response_representation(row, representation)
+            for row in artifacts.list_pinned()]})
 
     def _handle_attention_inbox(self):
         from lib import attention_index

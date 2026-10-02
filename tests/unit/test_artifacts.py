@@ -805,3 +805,29 @@ def test_text_input_request_takes_only_typed_text_and_expires_without_deletion(t
     expired = artifacts.get(expiring["artifact_id"])
     assert expired is not None and expired["deleted_at"] is None
     assert expired["status"] == "expired" and expired["decision"]["status"] == "expired"
+
+
+def test_pins_survive_reopen_and_leave_archived_or_retired_rows_out(tmp_path, monkeypatch):
+    _agent(tmp_path)
+    clock = [1_000]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    older = artifacts.create(session="mike", type="document", title="Older", payload={"content": "a"})
+    newer = artifacts.create(session="mike", type="document", title="Newer", payload={"content": "b"})
+    artifacts.pin(older["artifact_id"], pinned=True)
+    clock[0] = 2_000
+    artifacts.pin(newer["artifact_id"], pinned=True)
+    db.close_local()
+    assert [row["artifact_id"] for row in artifacts.list_pinned()] == [
+        newer["artifact_id"], older["artifact_id"]]
+
+    archived, _ = artifacts.archive(older["artifact_id"], archived=True,
+                                    expected_updated_at=older["updated_at"])
+    assert archived["pinned_at"] is None
+    restored, _ = artifacts.archive(older["artifact_id"], archived=False,
+                                    expected_updated_at=archived["updated_at"])
+    assert restored["pinned"] is False
+    with pytest.raises(ValueError, match="pinned must be a boolean"):
+        artifacts.pin(newer["artifact_id"], pinned=1)
+    unpinned, changed = artifacts.pin(newer["artifact_id"], pinned=False)
+    assert changed and unpinned["updated_at"] == newer["updated_at"]
+    assert artifacts.list_pinned() == []

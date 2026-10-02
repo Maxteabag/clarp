@@ -134,6 +134,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v101(con)
         if version < 102:
             _migrate_to_v102(con)
+        if version < 103:
+            _migrate_to_v103(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -691,6 +693,13 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+
+def _migrate_to_v103(con: sqlite3.Connection) -> None:
+    """Artifacts can be pinned (``pinned_at``) for the apps' Pinned menu."""
+    columns = {r[1] for r in con.execute("PRAGMA table_info(artifacts)")}
+    if "pinned_at" not in columns:
+        con.execute("ALTER TABLE artifacts ADD COLUMN pinned_at INTEGER")
 
 
 def _migrate_to_v102(con: sqlite3.Connection) -> None:
