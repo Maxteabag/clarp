@@ -107,13 +107,24 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
         params.append(backend_session_id)
     return db.conn().execute(
         f"""SELECT message_id, origin, sender_agent_id, updated_at,
-                   backend_session_id, text
+                   backend_session_id, text, prompt_admission_id
               FROM messages
              WHERE {where}
              ORDER BY updated_at DESC, revision DESC, seq DESC
              LIMIT 1""",
         tuple(params),
     ).fetchone()
+
+
+def _sending_client(prompt_admission_id: str) -> str:
+    """The app that sent the causing message, from its prompt admission."""
+    if not prompt_admission_id:
+        return ""
+    row = db.conn().execute(
+        "SELECT client FROM prompt_admissions WHERE admission_id = ?",
+        (prompt_admission_id,),
+    ).fetchone()
+    return str(row["client"] or "") if row else ""
 
 
 def _next_user_after(agent_id: str, backend_session_id: str, done_ts: int) -> int:
@@ -329,7 +340,9 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
     origin = ""
     cause_message_id = ""
     cause_updated_at = lower_bound
+    client = ""
     if cause is not None:
+        client = _sending_client(cause["prompt_admission_id"] or "")
         origin = (cause["origin"] or "user").strip() or "user"
         cause_message_id = cause["message_id"] or ""
         cause_updated_at = int(cause["updated_at"] or lower_bound)
@@ -366,6 +379,7 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
             has_cause=cause is not None,
             content=content_reason,
             interrupted=_turn_was_interrupted(cause_message_id),
+            client=client,
         ),
         AgentCapabilities(
             present=agent is not None,

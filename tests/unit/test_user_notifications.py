@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+import time
 
 from lib import agents as agents_db
 from lib import artifacts, db, message_store, user_notifications
@@ -609,14 +610,15 @@ def test_a_later_message_from_the_phone_pushes_again(monkeypatch):
     aid = _agent()
     first = _turn(aid, origin="user", client="desktop", assistant="From the desk.")
     assert _classify(aid, first)["push"] is False
-    # A follow-up completion with no new user message still answers the
-    # desktop message, so it stays off the phone too.
     db.conn().execute(
         "INSERT INTO state_log (agent_id, ts, kind) VALUES (?, ?, 'done')",
         (aid, first))
-    later = _turn(aid, origin="user", client="", assistant="From the phone.")
+    while db.now_ms() <= first:  # the phone message comes after that turn ended
+        time.sleep(0.001)
+    later = _turn(aid, origin="user", client="", assistant="From the phone.",
+                  backend_session_id="bs-2")
 
-    notification = _classify(aid, later)
+    notification = _classify(aid, later, backend_session_id="bs-2")
 
     assert notification["push"] is True
     assert notification["reason"] == "text-reply"

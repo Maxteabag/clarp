@@ -8,6 +8,7 @@ can be tested without a socket.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -38,6 +39,17 @@ def _resolve_sender_agent_id(sender_raw: str) -> str:
         return ""
     sender = identity.resolve(sender_raw)
     return sender.agent_id if sender else ""
+
+
+_CLIENT_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+
+
+def _client(raw: Any) -> str:
+    """The app's short self-reported name (``"desktop"``), or ""."""
+    if not isinstance(raw, str):
+        return ""
+    value = raw.strip().lower()
+    return value if _CLIENT_RE.fullmatch(value) else ""
 
 
 def _unheard_audio_sessions(raw: Any) -> tuple[str, ...]:
@@ -78,6 +90,9 @@ class SendRequest:
     sender_agent_id: str
     origin: str
     authenticated: bool
+    # The app that sent it, as it names itself (``"desktop"``). A reply to a
+    # desktop message is not pushed to the phone.
+    client: str = ""
 
     @property
     def channel(self) -> str:
@@ -143,6 +158,7 @@ class SendRequest:
             queue_if_busy=queue_if_busy, force_session=force_session,
             sender_agent_id=sender_agent_id, origin=origin,
             authenticated=bool(authenticated),
+            client=_client(data.get("client")),
         )
 
     def admit(self) -> PromptAdmission:
@@ -158,6 +174,7 @@ class SendRequest:
             client_admission_id=self.client_msg_id,
             trace_id=self.trace_id,
             original_text=self.text,
+            client=self.client,
         )
 
     def require_text(self) -> None:

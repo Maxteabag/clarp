@@ -132,6 +132,8 @@ def _migrate(con: sqlite3.Connection) -> None:
 
         if version < 101:
             _migrate_to_v101(con)
+        if version < 102:
+            _migrate_to_v102(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -689,6 +691,17 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+
+def _migrate_to_v102(con: sqlite3.Connection) -> None:
+    """Prompt admissions name the app that sent them (``client``).
+
+    A reply to a message sent from the desktop is not pushed to the phone.
+    Rows admitted before this stay ``''`` and keep pushing as before.
+    """
+    columns = {r[1] for r in con.execute("PRAGMA table_info(prompt_admissions)")}
+    if "client" not in columns:
+        con.execute("ALTER TABLE prompt_admissions ADD COLUMN client TEXT NOT NULL DEFAULT ''")
 
 
 def _migrate_to_v101(con: sqlite3.Connection) -> None:

@@ -958,7 +958,9 @@ impl Engine {
         self.with_conversation(session, |c| c.add_optimistic(&client_id, trimmed));
         self.set_sending(true);
         let mut body = json!({
-            "session": session, "text": trimmed, "client_msg_id": client_id,
+            // "client" tells the Host the desktop sent it, so the reply is
+            // not pushed to the phone.
+            "session": session, "text": trimmed, "client_msg_id": client_id, "client": "desktop",
             "synthesize_audio": !self.muted, "hands_free": hands_free, "queue_if_busy": queue_if_busy,
         });
         if !trace.is_empty() {

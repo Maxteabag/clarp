@@ -17,6 +17,15 @@ Per-agent mute is also deliberately narrow: it suppresses only the APNs push.
 The same `<speak>` turn still emits the `user-notification` event and still
 increments per-chat unread, the chat-tab total, and the app-icon badge.
 
+A message sent from the desktop app is the other narrow exception. The
+desktop names itself on `/send` (`"client": "desktop"`, kept on the prompt
+admission), and every completed turn whose causing user row came from it
+gets `push=0` with reason `speak-desktop` or `text-reply-desktop`; badge and
+unread stay as they are. The owner is at the desk, so the reply belongs on the
+desktop, even after the desktop's presence lease
+(docs/desktop-notification-presence.md) has lapsed. The next message from the
+phone pushes as usual. Mute wins and keeps its `-muted` reason.
+
 ## Server Source Of Truth
 
 The server classifies each `DONE` state into a durable `user_notifications`

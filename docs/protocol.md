@@ -397,7 +397,8 @@ means an out-of-band job is running and the agent is otherwise idle.
   "synthesize_audio": true,
   "hands_free": false,
   "queue_if_busy": false,
-  "transcription_id": "<optional; from /transcribe>"
+  "transcription_id": "<optional; from /transcribe>",
+  "client": "<optional; the app's short name, e.g. desktop>"
 }
 ```
 
@@ -414,6 +415,11 @@ Rules:
 - `hands_free: true` is for dictation: the server may route the text to a
   different agent (name routing or the orchestrator) and answers with the
   session it chose.
+- `client` names the app that sent it (lowercase letters, digits and `-`, at
+  most 32; anything else is ignored). The desktop app sends `"desktop"`: the
+  reply to that message still badges and marks the chat unread, but is not
+  pushed to the phone (reason `speak-desktop` / `text-reply-desktop`).
+  Feature `desktop_send_quiet_push`.
 
 Response `200`:
 

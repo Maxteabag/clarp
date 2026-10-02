@@ -10,6 +10,9 @@ Decisions:
 
 * ``Notify(reason, kind, push, muted)``  badge and mark unread; ``push`` is
   false for a muted agent and ``reason`` then carries the ``-muted`` suffix.
+  It is also false when the causing message was sent from the desktop app
+  (the owner is at the desk, not the phone); ``reason`` then carries
+  ``-desktop``.
 * ``Suppress(reason)``  stay silent; ``reason`` is the durable audit string.
 """
 from __future__ import annotations
@@ -24,6 +27,8 @@ SUPPRESSED_ORIGINS = origins.SUPPRESSED_ORIGINS
 # Content kinds a completion may carry, as ``_select_content_source`` names them.
 CONTENT_SPEAK = "speak"
 CONTENT_TEXT_REPLY = "text-reply"
+# The ``client`` the desktop app names on ``/send``.
+DESKTOP_CLIENT = "desktop"
 NOTIFYING_CONTENT = frozenset({CONTENT_SPEAK, CONTENT_TEXT_REPLY})
 
 
@@ -34,6 +39,7 @@ class CompletedTurn:
     has_cause: bool          # a causing user row was found
     content: str = ""        # "speak", "text-reply" or "" when nothing addressed the user
     interrupted: bool = False  # the causing message carries an interruption marker
+    client: str = ""         # the app that sent the causing message, when it said
 
 
 @dataclass(frozen=True)
@@ -87,9 +93,13 @@ def notify_decision(origin: str, completed_turn: CompletedTurn,
         return Suppress("leader-tick-non-leader")
     content = completed_turn.content
     if content in NOTIFYING_CONTENT:
-        muted = capabilities.muted
-        return Notify(reason=f"{content}-muted" if muted else content,
-                      kind=content, push=not muted, muted=muted)
+        if capabilities.muted:
+            return Notify(reason=f"{content}-muted", kind=content, push=False,
+                          muted=True)
+        if completed_turn.client == DESKTOP_CLIENT:
+            return Notify(reason=f"{content}-desktop", kind=content, push=False,
+                          muted=False)
+        return Notify(reason=content, kind=content, push=True, muted=False)
     if content:
         # An unknown content kind is recorded but never pages anyone.
         return Suppress(content)
