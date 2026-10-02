@@ -1,0 +1,78 @@
+name: Desktop build
+
+# Builds the Rust/Slint desktop client for every change to it on main and
+# publishes the binary as an asset of the rolling "desktop-builds" release,
+# named by the commit that last changed the desktop. clarpd on each machine
+# downloads it instead of compiling (it builds locally while none exists yet).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "desktop-rs/**"
+      - "static/icon.png"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# A newer push makes a running build moot: clarpd only wants the latest.
+concurrency:
+  group: desktop-build-main
+  cancel-in-progress: true
+
+env:
+  RELEASE: desktop-builds
+  KEEP: "10"
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The commit the binary is named by
+        id: source
+        # The last commit that changed what the build reads, so a server-only
+        # push on top keeps the same name (and clarpd the same binary).
+        run: echo "sha=$(git log -1 --format=%H -- desktop-rs static/icon.png)" >> "$GITHUB_OUTPUT"
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
+            libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-rs
+      - name: Build
+        working-directory: desktop-rs
+        run: cargo build --release --locked -p clarp-slint
+      - name: Package
+        run: |
+          name="clarp-slint-${{ steps.source.outputs.sha }}-x86_64-linux"
+          strip -o "$name" desktop-rs/target/release/clarp-slint
+          gzip -9 "$name"
+          sha256sum "$name.gz" > "$name.gz.sha256"
+          echo "ASSET=$name.gz" >> "$GITHUB_ENV"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE" >/dev/null 2>&1 || gh release create "$RELEASE" --prerelease \
+            --title "Desktop builds" --notes "Linux x86_64 builds of the desktop client, one per desktop change on main. clarpd installs these; not for manual download." \
+            --target "$GITHUB_SHA"
+          gh release upload "$RELEASE" "$ASSET" "$ASSET.sha256" --clobber
+      - name: Keep the latest builds only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE" --json assets \
+            --jq '.assets | map(select(.name | endswith("-x86_64-linux.gz"))) | sort_by(.createdAt) | reverse | .[(env.KEEP | tonumber):] | .[].name' |
+          while read -r old; do
+            gh release delete-asset "$RELEASE" "$old" -y
+            gh release delete-asset "$RELEASE" "$old.sha256" -y
+          done
