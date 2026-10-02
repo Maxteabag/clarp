@@ -165,6 +165,10 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             open_overlay(app, window, "keymap");
             window.invoke_open_keymap();
         }
+        // Escape first dismisses the error banner over the chats.
+        "escape" | "dismiss-error" if action == "dismiss-error" || (window.get_surface() == "chats" && !window.get_error().is_empty()) => {
+            app.engine.borrow_mut().dismiss_error();
+        }
         // Escape on another surface goes back to the chats.
         "escape" if window.get_surface() != "chats" => {
             window.set_surface("chats".into());
