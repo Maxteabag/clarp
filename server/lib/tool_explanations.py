@@ -467,6 +467,10 @@ class ToolExplanations:
                 except _Resolved:
                     outcome = "ready"
                 except Exception as error:
+                    # Keep the cause: a bare "translator_failed" hid a model the
+                    # account could not use for 150+ runs.
+                    log("toolExplanationsFail", f"model={run['configuration']['model']} "
+                        f"backend={run['configuration'].get('backend', '')} error={type(error).__name__}: {str(error)[:300]}")
                     reason = "timeout" if isinstance(error, subprocess.TimeoutExpired) else "codex_unavailable" if isinstance(error, FileNotFoundError) else "invalid_response" if isinstance(error, ValueError) else "translator_failed"
                     outcome = f"failed:{reason}"
                 values = [item.value(reason or "translator_failed", reasons) for item in items]

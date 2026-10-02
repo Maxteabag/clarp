@@ -242,3 +242,15 @@ def test_unbounded_integer_option_is_a_validation_error():
     config = seed()
     with pytest.raises(janitors.JanitorError, match="option"):
         janitors.configure(config["session"], config["revision"], options={"timeout_ms": 10**1000})
+
+
+def test_tool_explainer_can_run_on_a_non_codex_backend():
+    config = seed("tool-explainer")
+    moved = janitors.configure(config["agent_id"], config["revision"], backend="agy",
+                               model="", effort="",
+                               execution={"executor": "ephemeral", "provider": "agy"})
+    assert moved["backend"] == "agy"
+    assert moved["execution"] == {"executor": "ephemeral", "provider": "agy"}
+    with pytest.raises(janitors.JanitorError):
+        janitors.configure(moved["agent_id"], moved["revision"], backend="agy",
+                           execution={"executor": "ephemeral", "provider": "codex"})

@@ -316,9 +316,8 @@ def _execution(template_id: str, value, backend: str) -> dict:
         raise JanitorError("Unsupported demand execution provider")
     if backend != backends.for_provider(provider):
         raise JanitorError("Execution provider must match the Janitor backend")
-    if template_id == "tool-explainer" and (
-            provider != backend or not backends.by_id(backend).native_tool_explainer):
-        raise JanitorError("Tool explanation requires the codex provider")
+    if template_id == "tool-explainer" and provider != backend:
+        raise JanitorError("Tool explanation runs on the Janitor's own backend")
     return {"executor": "ephemeral", "provider": provider}
 
 
