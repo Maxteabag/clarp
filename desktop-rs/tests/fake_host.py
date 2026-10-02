@@ -874,6 +874,8 @@ class Handler(BaseHTTPRequestHandler):
             # artifacts replace that chat's, the other chats' stay.
             session = body.get("session", "rachel")
             rows, made = artifact_chat(session, body.get("types", []), int(time.time() * 1000))
+            # `turns` follow the artifacts' replies (images in messages).
+            rows += [{"timestamp": iso_at(int(time.time() * 1000) - 60_000), **turn} for turn in body.get("turns", [])]
             # `suffix` keeps one chat's artifact (and decision) ids its own.
             for artifact in made:
                 artifact["artifact_id"] += body.get("suffix", "")
