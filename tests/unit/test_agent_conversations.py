@@ -1,6 +1,8 @@
 """Agent pairs share one conversation keyed by stable identities, never by names."""
 from __future__ import annotations
 
+import pytest
+
 from lib import agent_conversations, agents as agents_db, message_store
 
 
@@ -125,6 +127,9 @@ def test_delta_and_older_paging_follow_the_shared_revision_clock(tmp_path):
     assert [t["text"] for t in tail["turns"]] == ["message 3", "message 4"] and tail["has_more"]
     older = agent_conversations.load_timeline(room, before_message_id=tail["turns"][0]["id"], limit=2)
     assert [t["text"] for t in older["turns"]] == ["message 1", "message 2"] and older["has_more"]
+    from lib.message_previews import UnknownHistoryCursor
+    with pytest.raises(UnknownHistoryCursor):
+        agent_conversations.load_timeline(room, before_message_id="live-not-stored", limit=2)
     head = tail["latest_revision"]
     _send(hugo, cpp, "new reply", client_id="m5", timestamp="2026-09-07T03:30:00Z")
     delta = agent_conversations.load_timeline(room, after_revision=head)

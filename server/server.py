@@ -2588,10 +2588,14 @@ class Handler(BaseHTTPRequestHandler):
             qs.get("include_tool_details", ["1"])[0]
         ).lower() not in {"0", "false", "no"}
         from lib import agent_conversations
+        from lib.message_previews import UnknownHistoryCursor
         if agent_conversations.is_pair_session(session):
-            body_obj = agent_conversations.load_timeline(
-                session, after_revision=after_revision,
-                before_message_id=before_message_id, limit=limit)
+            try:
+                body_obj = agent_conversations.load_timeline(
+                    session, after_revision=after_revision,
+                    before_message_id=before_message_id, limit=limit)
+            except UnknownHistoryCursor:
+                return self._json_error(409, "unknown history cursor")
             return self._json_ok(body_obj)
         try:
             body_obj = load_conversation(
@@ -2604,6 +2608,8 @@ class Handler(BaseHTTPRequestHandler):
                 interaction_id=self._interaction_id(),
                 background_import=True,
             )
+        except UnknownHistoryCursor:
+            return self._json_error(409, "unknown history cursor")
         except OSError as e:
             log_exception("logParseFail", e, detail=session)
             return self._json_error(500, str(e))

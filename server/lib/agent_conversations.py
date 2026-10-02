@@ -248,10 +248,8 @@ def load_timeline(session: str, *, after_revision: int = 0, before_message_id: s
             "SELECT COALESCE(timestamp, '') AS timestamp, seq FROM messages WHERE message_id = ?",
             (before_message_id,)).fetchone()
         if cursor is None:
-            return {"cwd": "", "file": None, "turns": [], "missing": False, "latest_ts": "",
-                    "latest_revision": 0, "replace_required": False, "conversation_id": session,
-                    "has_more": False, "includes_automated": False, "participants": participants,
-                    "title": title_for(participants)}
+            from .message_previews import UnknownHistoryCursor
+            raise UnknownHistoryCursor(before_message_id)
         extra = "AND (COALESCE(m.timestamp, '') < ? OR (COALESCE(m.timestamp, '') = ? AND m.seq < ?))"
         params.extend([cursor["timestamp"], cursor["timestamp"], int(cursor["seq"])])
     if after_revision:
