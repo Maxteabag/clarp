@@ -37,6 +37,8 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
         }
     };
     let mut depth = 0usize;
+    // After a code block lifted out of a list: the next content starts prose.
+    let mut resume = false;
     let mut events = Parser::new_ext(markdown, options()).into_offset_iter().peekable();
     while let Some((event, range)) = events.next() {
         match event {
@@ -62,7 +64,14 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 };
                 out.push(Block::Heading { level, markdown: text });
             }
-            Event::Start(Tag::CodeBlock(kind)) if depth == 0 => {
+            Event::Start(Tag::CodeBlock(kind)) => {
+                // Inside a list too: Slint's inline text has no code blocks,
+                // and one left in a list's prose fails the whole list over to
+                // plain text. The list's prose resumes after it.
+                if depth > 0 {
+                    prose_end = range.start;
+                    resume = true;
+                }
                 flush(&mut out, &mut prose_start, prose_end);
                 let language = match kind {
                     CodeBlockKind::Fenced(info) => info.split_whitespace().next().unwrap_or("").to_owned(),
@@ -130,8 +139,9 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 out.push(Block::Rule);
             }
             Event::Start(_) => {
-                if depth == 0 {
+                if depth == 0 || resume {
                     prose_start.get_or_insert(range.start);
+                    resume = false;
                 }
                 depth += 1;
             }
@@ -142,8 +152,11 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                 }
             }
             _ => {
-                if depth == 0 {
+                if depth == 0 || resume {
                     prose_start.get_or_insert(range.start);
+                    resume = false;
+                }
+                if depth == 0 {
                     prose_end = range.end;
                 }
             }
