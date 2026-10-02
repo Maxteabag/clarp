@@ -5,9 +5,9 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
 # Every artifact type and its interactions run in one long check.
-case $name in artifacts) limit=300 ;; *) limit=120 ;; esac
+case $name in artifacts|artifact-keys) limit=300 ;; *) limit=120 ;; esac
 # The null sink "plays" a clip this long, so a check can pause it.
-case $name in artifacts) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; esac
+case $name in artifacts|artifact-keys) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; esac
 scratch=$(mktemp -d /var/tmp/clarp-slint-check.XXXXXX)
 trap 'kill "$host" 2>/dev/null; wait "$host" 2>/dev/null; rm -rf "$scratch"' EXIT
 host_args=(); [ "$name" = startup ] && host_args=(--roster 100)

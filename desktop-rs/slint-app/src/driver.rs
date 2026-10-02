@@ -22,6 +22,9 @@ mod scroll_checks;
 // ---- artifacts in the chat
 #[path = "artifact_checks.rs"]
 mod artifact_checks;
+// ---- artifacts from the keyboard alone
+#[path = "artifact_key_checks.rs"]
+mod artifact_key_checks;
 // ---- the error banner
 #[path = "banner_checks.rs"]
 mod banner_checks;
@@ -344,6 +347,7 @@ pub fn start_check(name: &str, out: String) {
         "overview" => profile_checks::overview_check(out),
         "extras" => profile_checks::extras_check(out),
         "artifacts" => artifact_checks::artifacts_check(out),
+        "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
         _ => {
             check(false, &format!("no check named {name}"));

@@ -1100,6 +1100,11 @@ fn card_ids(app: &App) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// What J/K reach in the open chat, top to bottom.
+pub fn selectables(app: &App) -> Vec<String> {
+    card_ids(app)
+}
+
 pub fn has_cards(app: &App) -> bool {
     !card_ids(app).is_empty()
 }
