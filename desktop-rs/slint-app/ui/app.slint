@@ -98,6 +98,8 @@ export component AppWindow inherits Window {
     in property <string> selected-name;
     in property <string> connection;
     in property <string> error;
+    // The key that dismisses the error banner, shown on it.
+    in property <string> error-dismiss-key;
     in property <[PaneView]> panes;
     in property <[SplitView]> splits;
     in property <[WorkspaceTab]> workspaces;

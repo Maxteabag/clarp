@@ -22,6 +22,9 @@ mod scroll_checks;
 // ---- artifacts in the chat
 #[path = "artifact_checks.rs"]
 mod artifact_checks;
+// ---- the error banner
+#[path = "banner_checks.rs"]
+mod banner_checks;
 // ---- startup with a real Host's roster
 #[path = "startup_checks.rs"]
 mod startup_checks;
@@ -341,6 +344,7 @@ pub fn start_check(name: &str, out: String) {
         "overview" => profile_checks::overview_check(out),
         "extras" => profile_checks::extras_check(out),
         "artifacts" => artifact_checks::artifacts_check(out),
+        "banner" => banner_checks::banner_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();

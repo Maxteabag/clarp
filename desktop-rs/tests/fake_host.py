@@ -92,6 +92,9 @@ subscribers = []
 event_id = 0
 log_path = None
 outage_until = 0.0
+# Path -> [status, count]: the next `count` requests to `path` fail with
+# `status` (a Host behind a proxy that timed out).
+failures = {}
 # Seconds an older page (/log?before=) takes; /__control/older-delay sets it.
 older_delay = 0.0
 CLOSE = object()
@@ -496,6 +499,10 @@ class Handler(BaseHTTPRequestHandler):
                 "last_event_id": self.headers.get("Last-Event-ID", "")})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
+        failure = failures.get(url.path)
+        if failure and failure[1] > 0:
+            failure[1] -= 1
+            return self.reply(failure[0], {"error": "Gateway Timeout"})
         if url.path == "/server-info":
             return self.reply(200, {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp"})
         if url.path == "/agents/snapshot":
@@ -702,6 +709,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(500, {"error": "upload refused"})
             return self.reply(200, {"path": f"/srv/uploads/{name}", "name": name})
         body = json.loads(raw or b"{}")
+        if url.path == "/__control/fail":
+            # Test control: the next `count` GETs to `path` answer `status`.
+            failures[body["path"]] = [int(body.get("status", 504)), int(body.get("count", 1))]
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/outage":
             # Test control, outside the protocol: drop every stream and refuse
             # requests for `seconds`.
