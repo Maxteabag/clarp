@@ -34,7 +34,7 @@ def keys(monkeypatch):
 def test_status_lists_every_provider_and_marks_availability_by_credential(keys):
     value = stt_providers.status()
     rows = {row["id"]: row for row in value["providers"]}
-    assert set(rows) == {"deepgram", "elevenlabs", "cartesia"}
+    assert set(rows) == {"deepgram", "elevenlabs", "cartesia", "google"}
     assert rows["deepgram"]["available"] is True
     assert rows["cartesia"]["available"] is False
     assert value["engine"] == "local"
