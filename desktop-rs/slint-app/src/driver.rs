@@ -28,6 +28,8 @@ mod artifact_key_checks;
 // ---- the error banner
 #[path = "banner_checks.rs"]
 mod banner_checks;
+#[path = "theme_checks.rs"]
+mod theme_checks;
 // ---- startup with a real Host's roster
 #[path = "startup_checks.rs"]
 mod startup_checks;
@@ -349,6 +351,7 @@ pub fn start_check(name: &str, out: String) {
         "artifacts" => artifact_checks::artifacts_check(out),
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
+        "themes" => theme_checks::themes_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
