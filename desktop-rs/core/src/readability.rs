@@ -271,8 +271,8 @@ pub const PAIRS: &[(&str, Surface, Tier)] = &[
     ("mutedText", Role("hover"), Muted),
     ("mutedText", CURSOR, Muted),
     ("mutedText", EXPLORER_CURSOR, Muted),
-    // Selected text in a field: transient, read like secondary text.
-    ("text", FIELD_SELECTION, Muted),
+    // Selected text in a field: transient, so the faint tier (AA still).
+    ("text", FIELD_SELECTION, Faint),
     // Timestamps, counts, captions.
     ("faintText", Role("window"), Faint),
     ("faintText", Role("raised"), Faint),
@@ -311,8 +311,10 @@ pub const PAIRS: &[(&str, Surface, Tier)] = &[
 /// vision; CIEDE2000 between each pair must reach this.
 pub const STATUS: [&str; 3] = ["success", "warning", "danger"];
 pub const MIN_STATUS_DELTA_E: f64 = 12.0;
-/// Links must also stay apart from danger (a red link reads as an error).
-pub const SIGNAL_PAIRS: [(&str, &str); 4] = [("success", "warning"), ("success", "danger"), ("warning", "danger"), ("link", "danger")];
+/// Links and the accent (key hints, names, focus) must also stay apart
+/// from danger: a red link or key hint reads as an error.
+pub const SIGNAL_PAIRS: [(&str, &str); 5] =
+    [("success", "warning"), ("success", "danger"), ("warning", "danger"), ("link", "danger"), ("accent", "danger")];
 
 /// Body size bounds (px) and the measure in characters (px / (size * 0.5),
 /// the average advance of a proportional face; monospace runs ~0.6).
