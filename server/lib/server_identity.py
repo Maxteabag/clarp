@@ -40,7 +40,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 32
+HOST_CONTRACT = 33
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -95,6 +95,7 @@ FEATURES: tuple[str, ...] = (
     "text_input_requests",
     "transcription_language",
     "transcription_agent_language",
+    "transcription_session_header",
 )
 
 
@@ -129,6 +130,7 @@ FEATURE_CONTRACTS["decision_lifecycle"] = 28
 FEATURE_CONTRACTS["text_input_requests"] = 29
 FEATURE_CONTRACTS["transcription_language"] = 31
 FEATURE_CONTRACTS["transcription_agent_language"] = 32
+FEATURE_CONTRACTS["transcription_session_header"] = 33
 
 
 def capabilities() -> dict[str, object]:

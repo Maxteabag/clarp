@@ -3869,3 +3869,18 @@ def test_native_background_runtime_to_http_lifecycle(running_server, tmp_path, m
         root.rmdir()
         root.parent.rmdir()
         root.parent.parent.rmdir()
+
+
+def test_transcription_follows_the_recording_chat_not_the_shared_focus(running_server):
+    # Regression: other agents' activity moved the shared focus while Peter
+    # spoke to Mochi, so his Norwegian recording was transcribed as English.
+    base, _ctx, _srv = running_server
+    from lib import agents as agents_db
+    agents_db.set_focus(agents_db.get_by_session("claude")["agent_id"])
+    headers = {"Content-Type": "audio/webm", "X-Transcription-ID": "session-header-1",
+               "X-Transcription-Session": "rachel"}
+    assert _post_raw(base + "/transcribe", b"voice audio", headers)[0] == 200
+    rachel = agents_db.get_by_session("rachel")["agent_id"]
+    claude = agents_db.get_by_session("claude")["agent_id"]
+    assert agents_db.get_trace(rachel)
+    assert not agents_db.get_trace(claude)
