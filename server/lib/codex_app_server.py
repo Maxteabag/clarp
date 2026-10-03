@@ -792,6 +792,29 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
 
 
 
+def fork_thread(thread_id: str, *, cwd: str = "") -> str:
+    """Fork ``thread_id`` into a new thread and return its id.
+
+    A one-off app-server rather than the pool: the fork runs on the Host while
+    the source thread may be mid-turn in the runtime's process, and Codex
+    forks without taking the source's writer lock (checked on 0.159).
+    """
+    client = _Client("", "")
+    try:
+        result = client.request("thread/fork", {
+            "threadId": thread_id, **({"cwd": cwd} if cwd else {})})
+    except RuntimeError as exc:
+        if "no rollout found" in str(exc):
+            raise FileNotFoundError(f"no Codex thread {thread_id}") from exc
+        raise
+    finally:
+        client.shutdown()
+    new = str((result.get("thread") or {}).get("id") or "")
+    if not new:
+        raise RuntimeError("Codex app-server returned no forked thread id")
+    return new
+
+
 def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dict | None:
     """Start, pause, resume, clear or read a Codex agent's goal (see _Client.goal)."""
     agent = agents_db.get_by_agent_id(agent_id)

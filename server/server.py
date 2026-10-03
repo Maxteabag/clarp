@@ -2766,6 +2766,9 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/turn-queue/") and path.endswith("/send"):
             queue_id = path[len("/turn-queue/"):-len("/send")].strip("/")
             return self._handle_turn_queue_send(queue_id)
+        if path.startswith("/agents/") and path.endswith("/fork"):
+            return self._handle_agent_fork(
+                unquote(path[len("/agents/"):-len("/fork")].strip("/")))
         if path == "/turn-queue/resume":
             return self._handle_turn_queue_resume()
         if path.startswith("/teams/"):
@@ -4805,6 +4808,20 @@ class Handler(BaseHTTPRequestHandler):
         return self._json_ok({
             "ok": True, "session": result.session, "name": result.persona, "agent": agent,
         })
+
+    def _handle_agent_fork(self, session: str):
+        """Fork an agent into helper agents that start from its conversation
+        (``lib.agent_fork``); each child is sent its task from the parent."""
+        from lib import agent_fork
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        try:
+            result = agent_fork.fork(self.ctx, session, data)
+        except agent_fork.ForkError as e:
+            log("agentForkRejected", f"{session} status={e.status} code={e.code} :: {e}")
+            return self._json(e.status, e.response())
+        return self._json_ok({"ok": True, **result})
 
     def _handle_create_persona(self):
         from lib import personas

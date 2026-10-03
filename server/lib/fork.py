@@ -8,20 +8,27 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import uuid
 
 from .log import log_exception
 
 
 def encoded_project_dir(cwd: str, projects_root: pathlib.Path) -> pathlib.Path:
-    return projects_root / ("-" + str(pathlib.Path(cwd)).strip("/").replace("/", "-"))
+    """Claude Code's project dir for ``cwd``: every non-alphanumeric
+    character becomes "-" (``/home/x/.gemini`` -> ``-home-x--gemini``)."""
+    return projects_root / re.sub(r"[^A-Za-z0-9]", "-", str(pathlib.Path(cwd)))
 
 
 def fork_session(source_id: str, cwd: str,
                  projects_root: pathlib.Path | None = None,
-                 new_id: str | None = None) -> str:
+                 new_id: str | None = None, *, dest_cwd: str = "") -> str:
     """Copy `<cwd-project>/<source_id>.jsonl` to a new uuid, rewriting all
     `sessionId` fields. Returns the new uuid.
+
+    The copy goes next to the source, or into ``dest_cwd``'s project dir when
+    given: ``claude --resume`` only finds a conversation under the directory
+    it is started in, so a child running elsewhere needs its copy there.
 
     Raises FileNotFoundError if the source jsonl doesn't exist anywhere
     (saved cwd first, then global scan).
@@ -36,7 +43,9 @@ def fork_session(source_id: str, cwd: str,
         src = candidates[0]
 
     new_id = new_id or str(uuid.uuid4())
-    dst = src.parent / f"{new_id}.jsonl"
+    target = encoded_project_dir(dest_cwd, projects_root) if dest_cwd else src.parent
+    target.mkdir(parents=True, exist_ok=True)
+    dst = target / f"{new_id}.jsonl"
 
     with src.open(encoding="utf-8") as f_in, dst.open("w", encoding="utf-8") as f_out:
         for line in f_in:

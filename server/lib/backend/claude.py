@@ -691,6 +691,12 @@ class ClaudeBackend(Backend):
     def parse_transcript(self, path) -> list[dict]:
         return resolve("claude_transcript", "parse_turns")(path)
 
+    def fork_conversation(self, session_id: str, *, source_cwd: str, cwd: str) -> str:
+        """A copy of the session jsonl under a new id, in ``cwd``'s project dir."""
+        from ..fork import fork_session
+        return fork_session(session_id, source_cwd, _projects_root(pathlib.Path.home()),
+                            dest_cwd=cwd)
+
     def list_sessions(self, cwd: str, *, limit: int = 20,
                       all_projects: bool = False) -> list[dict]:
         from .. import session_catalog

@@ -3797,6 +3797,50 @@ def test_helper_agent_create_report_and_mark_over_http(running_server, monkeypat
     assert rows[helper]["parent_agent_id"] == rows["claude"]["agent_id"]
 
 
+def test_agent_forks_itself_into_helpers_over_http(running_server, monkeypatch, tmp_path):
+    base, _ctx, _srv = running_server
+    _unlink_claude_source_marker()
+    from lib import agents as agents_db
+    from lib.backend.registry import by_id
+    from lib.fork import encoded_project_dir
+    started = []
+    monkeypatch.setattr(by_id("claude"), "start_turn",
+                        lambda **kw: started.append(kw) or type("_H", (), {"pid": 99})())
+    monkeypatch.setenv("HOME", str(tmp_path))
+    parent = agents_db.get_by_session("claude")
+    agents_db.bind_backend_session(parent["agent_id"], "conv-parent")
+    project = encoded_project_dir(parent["cwd"], tmp_path / ".claude" / "projects")
+    project.mkdir(parents=True)
+    (project / "conv-parent.jsonl").write_text(json.dumps(
+        {"type": "user", "sessionId": "conv-parent", "message": {"content": "context"}}) + "\n")
+
+    status, body = _post(base + "/agents/claude/fork", {"children": [
+        {"name": "fork-a", "task": "Task A."}, {"name": "fork-b", "task": "Task B."}]})
+    out = json.loads(body)
+    assert status == 200
+    sessions = [child["session"] for child in out["children"]]
+    assert [child["fork"] for child in out["children"]] == ["native", "native"]
+    rows = {r["session"]: r for r in json.loads(_get(base + "/agents/snapshot")[1])["agents"]}
+    for session in sessions:
+        assert rows[session]["role"] == "helper"
+        assert rows[session]["parent_agent_id"] == parent["agent_id"]
+    assert rows["claude"]["child_count"] == 2
+    # Each child's turn resumes its own forked conversation with its own task.
+    by_session = {kw.get("session"): kw for kw in started}
+    for session, task in zip(sessions, ("Task A.", "Task B.")):
+        turn = by_session[session]
+        assert task in turn["text"]
+        assert turn["backend_session_id"] not in ("", "conv-parent")
+
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + "/agents/nobody/fork", {"children": [{"name": "x", "task": "y"}]})
+    assert error.value.code == 404
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + "/agents/claude/fork", {"children": []})
+    assert error.value.code == 400
+    assert json.loads(error.value.read())["error"] == "children_required"
+
+
 def test_native_background_runtime_to_http_lifecycle(running_server, tmp_path, monkeypatch):
     """Replay provider records through the actual observer and HTTP surfaces."""
     from datetime import datetime, timezone
