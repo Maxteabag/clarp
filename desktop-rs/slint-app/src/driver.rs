@@ -323,6 +323,7 @@ pub fn start_check(name: &str, out: String) {
     match name {
         "transcript" => transcript_check(out),
         "scroll" => scroll_checks::scroll_check(out),
+        "scroll-jump" => scroll_checks::scroll_jump_check(out),
         "startup" => startup_checks::startup_check(out),
         "composer" => composer_check(out),
         "panes" => panes_check(out),

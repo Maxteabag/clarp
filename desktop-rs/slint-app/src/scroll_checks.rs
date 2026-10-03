@@ -828,3 +828,299 @@ pub(super) fn scroll_check(out: String) {
     ];
     run_stages(stages);
 }
+
+// ---- the chat jumping far up (`--check scroll-jump`)
+
+/// What the reader sees: the drawn rows' indexes in the chat, the first
+/// one's id, and whether the last row is whole on screen.
+#[derive(Debug, Clone, Default)]
+struct Seen {
+    first: usize,
+    last: usize,
+    first_id: String,
+    at_end: bool,
+    offset: f32,
+    follows: bool,
+    drawn: String,
+}
+
+impl Seen {
+    fn line(&self) -> String {
+        format!("rows #{}..#{} (first {}), offset {:.0}, follows {}, last row whole {}", self.first, self.last, self.first_id, self.offset, self.follows, self.at_end)
+    }
+}
+
+/// None while more than one transcript is drawn (a split pane).
+fn seen() -> Option<Seen> {
+    let app = app_now();
+    if app.pane_state.borrow().len() != 1 {
+        return None;
+    }
+    let geo = geometry();
+    let rows = crate::window().map(|w| rows(&w)).unwrap_or_default();
+    let index = |id: &str| rows.iter().position(|r| r.id == id);
+    let shown: Vec<usize> = geo.rows.iter().filter(|r| r.2 > geo.top + 1.0 && r.1 < geo.bottom - 1.0).filter_map(|r| index(&r.0)).collect();
+    let (first, last) = (*shown.iter().min()?, *shown.iter().max()?);
+    Some(Seen {
+        first,
+        last,
+        first_id: rows[first].id.to_string(),
+        at_end: last_row_visible().0,
+        offset: report().offset,
+        follows: report().follows,
+        drawn: geo.drawn(),
+    })
+}
+
+const JUMP_ROWS: usize = 320;
+/// 2026-09-15T08:00:00Z, the rich chat's stamp: cards made then sit on its
+/// first reply, far up; the replies after it are stamped later.
+const OLD_CARD_MS: i64 = 1_789_459_200_000;
+
+#[derive(Default)]
+struct Jump {
+    before: Option<Seen>,
+    /// The lowest first row drawn since the event, and how many polls the
+    /// reader spent wholly above the rows they saw before it.
+    lowest: Option<Seen>,
+    above: usize,
+    done: usize,
+    stable: usize,
+}
+
+type Act = Box<dyn Fn(&Rc<crate::App>, &crate::AppWindow)>;
+
+/// A reader at the end and following (or, `following` false, one wheel
+/// notch up from it), `focus` on the transcript or the composer; then
+/// `steps` run at their times and the reader is watched for `watch_ms`
+/// (and until `ready`). A reader at the end must end at the end, and no
+/// poll may find them more than a viewport above where they were.
+fn jump_case(state: Rc<RefCell<Jump>>, label: &'static str, following: bool, transcript: bool, steps: Vec<(u64, Act)>, watch_ms: u64, ready: Box<dyn Fn() -> bool>) -> Vec<Stage> {
+    jump_case_from(state, label, following, transcript, steps, watch_ms, ready, None)
+}
+
+/// `jump_case`, with the reader's place taken again at `rebase` ms (after
+/// steps that moved them on purpose).
+#[allow(clippy::too_many_arguments)]
+fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool, transcript: bool, steps: Vec<(u64, Act)>, watch_ms: u64, ready: Box<dyn Fn() -> bool>, rebase: Option<u64>) -> Vec<Stage> {
+    let place = state.clone();
+    let place_label: &'static str = Box::leak(format!("place: {label}").into_boxed_str());
+    vec![
+        (place_label, Box::new(move |app, _, elapsed| {
+            let mut st = place.borrow_mut();
+            if elapsed < Duration::from_millis(100) {
+                *st = Jump::default();
+                crate::artifacts_view::leave(app);
+                app.to_latest();
+                return false;
+            }
+            if transcript && !report().transcript_focused {
+                app.focus_transcript();
+                return false;
+            }
+            if !transcript && !report().composer_focused {
+                app.focus_composer();
+                return false;
+            }
+            let Some(now) = seen() else { return false };
+            if !(now.at_end && now.follows) && st.done == 0 {
+                st.stable = 0;
+                app.to_latest();
+                return false;
+            }
+            st.stable += 1;
+            if st.stable < 6 {
+                return false;
+            }
+            if !following {
+                // One wheel notch up, then still for a moment.
+                st.done += 1;
+                if st.done == 1 {
+                    wheel(120.0);
+                    return false;
+                }
+                if st.done < 10 {
+                    return false;
+                }
+                if now.follows {
+                    check(false, &format!("{label}: one notch up stops following ({})", now.line()));
+                }
+            }
+            st.before = Some(now);
+            st.done = 0;
+            true
+        })),
+        (label, Box::new(move |_, window, elapsed| {
+            let app = app_now();
+            let mut st = state.borrow_mut();
+            let ms = elapsed.as_millis() as u64;
+            while st.done < steps.len() && ms >= steps[st.done].0 {
+                (steps[st.done].1)(&app, window);
+                st.done += 1;
+            }
+            if rebase.is_some_and(|at| ms >= at) && st.stable != usize::MAX {
+                st.stable = usize::MAX;
+                st.before = seen();
+                st.above = 0;
+                st.lowest = None;
+            }
+            let Some(before) = st.before.clone() else { return true };
+            if let Some(now) = seen() {
+                if now.last < before.first {
+                    st.above += 1;
+                }
+                if st.lowest.as_ref().is_none_or(|l| now.first < l.first) {
+                    st.lowest = Some(now);
+                }
+            }
+            if ms < watch_ms || st.done < steps.len() || (!ready() && ms < 12_000) {
+                return false;
+            }
+            let after = seen().unwrap_or_default();
+            let lowest = st.lowest.clone().unwrap_or_default();
+            if following {
+                check(after.at_end && after.follows, &format!("{label}: a reader at the end stays at the end: before {}; after {} ({})", before.line(), after.line(), after.drawn));
+            } else {
+                check(after.last >= before.first, &format!("{label}: a reader one notch up stays within a viewport: before {}; after {} ({})", before.line(), after.line(), after.drawn));
+            }
+            check(st.above == 0, &format!("{label}: never more than a viewport up meanwhile ({} polls wholly above; highest place rows #{}..#{}, before #{}..#{})", st.above, lowest.first, lowest.last, before.first, before.last));
+            true
+        })),
+    ]
+}
+
+fn act(f: impl Fn(&Rc<crate::App>, &crate::AppWindow) + 'static) -> Act {
+    Box::new(f)
+}
+
+fn always() -> Box<dyn Fn() -> bool> {
+    Box::new(|| true)
+}
+
+fn live() -> Box<dyn Fn() -> bool> {
+    Box::new(|| app_now().engine.borrow().connection_state() == "live")
+}
+
+/// The cards, as the Host lists them: two on the chat's first replies
+/// (rows 1 and 2, its rows a minute apart) and one in its middle (row 161).
+fn old_cards(summary: &str) -> serde_json::Value {
+    let made = [30_000, 90_000, 160 * 60_000 - 30_000];
+    json!(made.iter().enumerate().map(|(n, at)| json!({"artifact_id": format!("jump-card-{n}"), "type": "document", "status": "ready", "session": "jump",
+        "title": format!("Findings {n}"), "summary": summary, "content": "The **report**.", "created_at": OLD_CARD_MS + at, "updated_at": OLD_CARD_MS + at})).collect::<Vec<_>>())
+}
+
+const MID_CARD: &str = "jump-card-2";
+
+/// `--check scroll-jump --out DIR`: nothing but the reader's own scrolling
+/// moves them far up. A 320-row chat with artifact cards only near its
+/// top: a reader following at its end (and one a notch above it) goes
+/// through J and K in the chat, refreshes (also a failing one), the Host's
+/// stream dropping, a switch to another chat and back, splitting and
+/// zooming a pane, a theme change, timestamps on and off, a long streaming
+/// reply and the far cards changing.
+pub(super) fn scroll_jump_check(out: String) {
+    let state = Rc::new(RefCell::new(Jump::default()));
+    let s = || state.clone();
+    let out1 = out.clone();
+    let mut stages: Vec<Stage> = vec![
+        ("live", Box::new(|app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/add-agent", &json!({"session": "jump", "persona": "Jump"})).is_ok(), "the Host takes a new chat");
+            true
+        })),
+        ("select", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find("jump").is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select("jump");
+            crate::pump();
+            true
+        })),
+        ("fill", Box::new(|app, _, elapsed| {
+            if app.engine.borrow().conversation("jump").is_none() || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(control("/__control/rich", &json!({"session": "jump", "count": JUMP_ROWS, "stamp_step": 60})).is_ok(), &format!("the Host fills the chat with {JUMP_ROWS} varied rows"));
+            check(control("/__control/artifact-update", &json!({"session": "jump", "add": old_cards("What we found.")})).is_ok(), "the Host lists three cards made near the chat's top");
+            true
+        })),
+        ("filled", Box::new(move |app, window, elapsed| {
+            let cards = crate::artifacts_view::selectables(app);
+            if rows(window).len() < JUMP_ROWS || cards.len() < 3 || elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let rows = rows(window);
+            let at: Vec<usize> = rows.iter().enumerate().filter(|(_, r)| slint::Model::row_count(&r.artifacts) > 0).map(|(i, _)| i).collect();
+            check(at == [1, 2, 161], &format!("two cards sit near the top and one in the middle, none near the end: rows {at:?} of {}", rows.len()));
+            shot(&out1, "scroll-jump-01-opened");
+            true
+        })),
+    ];
+    let k = || act(|_, _| headless::press("k"));
+    let j = || act(|_, _| headless::press("j"));
+    let refresh = || act(|app, window| { crate::commands::run(app, window, "refresh"); });
+    // Suspect 1: J/K with no card on screen.
+    stages.extend(jump_case(s(), "K in the chat with no card on screen", true, true, vec![(0, k())], 3000, always()));
+    stages.extend(jump_case(s(), "J in the chat with no card on screen", true, true, vec![(0, j())], 3000, always()));
+    // A seek still under way after the reader went back to the latest
+    // (Ctrl+End): from the top, K selects a card there and J sets off for
+    // the one in the middle.
+    let j_to_mid = || act(|app, _| if *app.artifact_cursor.borrow() != MID_CARD { headless::press("j") });
+    stages.extend(jump_case_from(s(), "Ctrl+End while J is still bringing a card into view", true, true, vec![
+        (0, act(|_, _| headless::press(slint::platform::Key::Home))),
+        (1200, k()),
+        (1800, j_to_mid()),
+        (2400, j_to_mid()),
+        (2700, act(|_, _| headless::press_with(&[slint::platform::Key::Control], slint::platform::Key::End)))], 7000, always(), Some(3300)));
+    // The owner clicks the chat (to bring the window forward, or on a
+    // message) and types a reply: the click gave the chat the keyboard.
+    stages.extend(jump_case(s(), "a click on the chat, then typing \"ok\"", true, false, vec![
+        (0, act(|_, window| {
+            let geo = geometry();
+            super::click_at(window, geo.left + geo.width * 0.6, (geo.top + geo.bottom) / 2.0);
+        })),
+        (300, act(|_, _| headless::type_text("ok")))], 3000, always()));
+    // Suspect 3: reloads and layout.
+    stages.extend(jump_case(s(), "F5 refreshes the chat", true, true, vec![(0, refresh())], 1500, always()));
+    stages.extend(jump_case(s(), "F5 with the Host timing out (504)", true, true, vec![
+        (0, act(|_, _| { check(control("/__control/fail", &json!({"path": "/log", "status": 504, "count": 1})).is_ok(), "the next fetch fails"); })),
+        (50, refresh()),
+        (1500, refresh())], 3000, always()));
+    stages.extend(jump_case(s(), "the Host's stream drops and reconnects", true, true, vec![
+        (0, act(|_, _| { check(control("/__control/outage", &json!({"seconds": 1.5})).is_ok(), "the Host drops its streams"); }))], 4000, live()));
+    stages.extend(jump_case(s(), "another chat and back", true, true, vec![
+        (0, act(|app, _| { app.engine.borrow_mut().select("rachel"); crate::pump(); })),
+        (800, act(|app, _| { app.engine.borrow_mut().select("jump"); crate::pump(); }))], 2500, always()));
+    stages.extend(jump_case(s(), "a split, zoom and close", true, true, vec![
+        (0, act(|app, window| { crate::commands::run(app, window, "split-right"); })),
+        (700, act(|app, window| { crate::commands::run(app, window, "zoom"); })),
+        (1400, act(|app, window| { crate::commands::run(app, window, "zoom"); })),
+        (2100, act(|app, window| { crate::commands::run(app, window, "close-pane"); }))], 3500, always()));
+    stages.extend(jump_case(s(), "a reading theme change", true, true, vec![
+        (0, act(|app, window| { crate::commands::run(app, window, "setting:reading:paper"); })),
+        (1000, act(|app, window| { crate::commands::run(app, window, "setting:reading:night"); }))], 2500, always()));
+    stages.extend(jump_case(s(), "timestamps off and on", true, true, vec![
+        (0, act(|app, window| { crate::commands::run(app, window, "setting:timestampsVisible"); })),
+        (1000, act(|app, window| { crate::commands::run(app, window, "setting:timestampsVisible"); }))], 2500, always()));
+    stages.extend(jump_case(s(), "a long reply streams in", true, false, (0..10).map(|n| {
+        (n * 250, act(move |_, _| { upsert("jump", json!([{"id": "jump-live", "role": "assistant", "kind": "live", "text": streamed(n as usize)}])); }))
+    }).chain(std::iter::once((2600, act(|_, _| { upsert("jump", json!([{"id": "jump-reply", "role": "assistant", "text": streamed(10)}])); })))).collect(), 4000, always()));
+    stages.extend(jump_case(s(), "the far cards change", true, true, vec![
+        (0, act(|_, _| { check(control("/__control/artifacts", &json!({"session": "jump", "artifacts": old_cards(&"Much more was found. ".repeat(12))})).is_ok(), "the far cards grow"); }))], 2000, always()));
+    // A reader a notch above the end.
+    stages.extend(jump_case(s(), "K a notch above the end", false, true, vec![(0, k())], 3000, always()));
+    stages.extend(jump_case(s(), "J a notch above the end", false, true, vec![(0, j())], 3000, always()));
+    stages.extend(jump_case(s(), "F5 a notch above the end", false, true, vec![(0, refresh())], 1500, always()));
+    stages.extend(jump_case(s(), "the stream reconnects a notch above the end", false, true, vec![
+        (0, act(|_, _| { check(control("/__control/outage", &json!({"seconds": 1.5})).is_ok(), "the Host drops its streams"); }))], 4000, live()));
+    stages.extend(jump_case(s(), "a theme change a notch above the end", false, true, vec![
+        (0, act(|app, window| { crate::commands::run(app, window, "setting:reading:paper"); }))], 1500, always()));
+    stages.extend(jump_case(s(), "the far cards change a notch above the end", false, true, vec![
+        (0, act(|_, _| { check(control("/__control/artifacts", &json!({"session": "jump", "artifacts": old_cards("Short again.")})).is_ok(), "the far cards shrink"); }))], 2000, always()));
+    stages.extend(jump_case(s(), "a split and close a notch above the end", false, true, vec![
+        (0, act(|app, window| { crate::commands::run(app, window, "split-right"); })),
+        (1000, act(|app, window| { crate::commands::run(app, window, "close-pane"); }))], 2500, always()));
+    run_stages(stages);
+}
