@@ -617,6 +617,10 @@ class AgyBackend(StreamJsonBackend):
                             on_error=on_error)
             rc = proc.wait()
             err = stderr_text(proc).strip()
+            if st.terminal == "superseded":
+                self._settle_stopped_turn(st, agent_id=agent_id, session=session,
+                                          trace_id=trace_id, stream=stream)
+                return
             if st.terminal == "result" and rc != 0:
                 st.terminal = "error"
                 st.pending_result = None
@@ -628,6 +632,9 @@ class AgyBackend(StreamJsonBackend):
                             conv_id, st, trace_id=trace_id,
                             on_session_init=on_session_init)):
                         st.terminal = "superseded"
+                        self._settle_stopped_turn(
+                            st, agent_id=agent_id, session=session,
+                            trace_id=trace_id, stream=stream)
                         return
                 if rc != 0:
                     _finish_error(_runner_error(err or f"process exited rc={rc}"), st,
@@ -716,7 +723,8 @@ class AgyBackend(StreamJsonBackend):
             _bind_session(conv_id, st, trace_id=trace_id,
                           on_session_init=on_session_init)
             self._handle_step(update, evidence, st, agent_id=agent_id,
-                              session=session, trace_id=trace_id, stream=stream)
+                              session=session, trace_id=trace_id, stream=stream,
+                              enqueue=enqueue)
             return
         if event_type == "result":
             _handle_result(
@@ -728,7 +736,7 @@ class AgyBackend(StreamJsonBackend):
 
     def _handle_step(self, update: dict[str, Any], evidence: dict[str, Any],
                      st: _TurnState, *, agent_id: str, session: str,
-                     trace_id: str, stream: Any) -> None:
+                     trace_id: str, stream: Any, enqueue=None) -> None:
         step_type = str(update.get("step_type") or "")
         state = str(update.get("state") or "").upper()
         if state == "DONE":
@@ -741,6 +749,17 @@ class AgyBackend(StreamJsonBackend):
                 st.live_text += delta
                 self._persist_live_text(st, agent_id=agent_id, session=session,
                                         trace_id=trace_id, stream=stream)
+                self._live_message_item(st, agent_id=agent_id, trace_id=trace_id)
+                if enqueue is not None and "</speak>" in delta + st.live_text[-16:]:
+                    # An acknowledgement is spoken as soon as its block closes,
+                    # not when the whole turn (often minutes of tools) ends.
+                    self._speak(st.live_text, st, agent_id=agent_id, session=session,
+                                trace_id=trace_id, enqueue=enqueue)
+            if state == "DONE":
+                # The paced writes skip whatever arrived in the last interval;
+                # nothing else would write it until the turn ends.
+                self._persist_live_text(st, agent_id=agent_id, session=session,
+                                        trace_id=trace_id, stream=stream, force=True)
             self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
                 "dispatch": self.runner, "agy_raw_evidence": evidence,
                 "step_index": update.get("step_index"), "step_state": state,
@@ -748,6 +767,9 @@ class AgyBackend(StreamJsonBackend):
             })
             return
         if step_type == "tool":
+            # The text before a tool is on screen before the tool runs.
+            self._persist_live_text(st, agent_id=agent_id, session=session,
+                                    trace_id=trace_id, stream=stream, force=True)
             tool_info = update.get("tool_info")
             tool_info = tool_info if isinstance(tool_info, dict) else {}
             raw_name = update.get("tool_name") or tool_info.get("name") or "tool"
@@ -823,6 +845,41 @@ class AgyBackend(StreamJsonBackend):
             return
         self._retract_live_text(st, agent_id=agent_id, session=session,
                                 trace_id=trace_id, stream=stream)
+
+    def _settle_stopped_turn(self, st: _TurnState, *, agent_id: str, session: str,
+                             trace_id: str, stream: Any) -> None:
+        """A stopped or superseded turn keeps what it already said, settled.
+
+        The turn no longer owns the agent, so nothing new is written; the live
+        row it streamed stops being live instead of staying a stub forever."""
+        if not agent_id or not st.conversation_id or not st.persisted_live_text:
+            return
+        try:
+            if agents_db.mark_live_message_final(
+                    agent_id=agent_id, backend_session_id=st.conversation_id,
+                    trace_id=trace_id):
+                self._broadcast_transcript(stream, agent_id, session)
+        except Exception as error:  # noqa: BLE001
+            log_exception("agyLiveSettleFail", error, detail=trace_id or agent_id)
+
+    def _live_message_item(self, st: _TurnState, *, agent_id: str,
+                           trace_id: str) -> None:
+        """The turn's text as one live message item (docs/live-items.md).
+
+        One item per turn, like the one /log row it becomes: the final commit
+        writes the reply under the same row id."""
+        from .. import live_hub
+        from ..message_live import _live_message_id
+        hub = live_hub.current()
+        if hub is None or not agent_id or not st.conversation_id:
+            return
+        if not hub.has_open_turn(agent_id):
+            live_hub.ensure_turn(hub, agent_id)
+        live_hub.report(
+            "message_text", agent_id,
+            f"{live_hub.item_prefix(self.id)}:{trace_id or st.conversation_id}:m",
+            st.live_text,
+            row_id=_live_message_id(agent_id, st.conversation_id, trace_id))
 
     def _persist_live_text(self, st: _TurnState, *, agent_id: str, session: str,
                            trace_id: str, stream: Any, force: bool = False) -> None:
