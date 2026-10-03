@@ -968,8 +968,26 @@ class Handler(BaseHTTPRequestHandler):
             # settled before the chat opens): GET /live answers its snapshot
             # and /log holds its rows as the Host sends them, each tool row
             # with tools[].id equal to the item's tool.call_id.
+            # With `part` ("next", "done"), what the fixture records for later:
+            # rows join /log first (the Host writes a tool's row when it
+            # starts), then its live event goes out.
             session = body["session"]
             recorded = json.loads((pathlib.Path(__file__).parent / "fixtures" / body["fixture"]).read_text())
+            part = body.get("part")
+            if part:
+                later = recorded["next"]
+                with state_lock:
+                    rows = turns.setdefault(session, [])
+                    for turn in later.get("rows", []) if part == "next" else []:
+                        revision += 1
+                        rows.append({**turn, "revision": revision})
+                    for agent in agents:
+                        if agent["session"] == session:
+                            agent["head_revision"] = revision
+                    event = {**later["event" if part == "next" else part], "lseq": live_view(session).lseq + 1}
+                broadcast({"type": "transcript-updated", "session": session})
+                live_step(session, {"event": event})
+                return self.reply(200, {"ok": True})
             with state_lock:
                 view = live_truth[session] = LiveView()
                 view.apply_snapshot(recorded["live"])
