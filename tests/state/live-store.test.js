@@ -1,0 +1,159 @@
+// The web's live channel (docs/live-items.md §4, §5, §7): which chats it
+// subscribes to, GET /live on open and after a gap, events applied once per
+// frame, and the Host's tool-explanation setting.
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+vi.mock('../../web/src/lib/net.js', () => ({ clog: vi.fn() }));
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const turnFull = JSON.parse(fs.readFileSync(
+  path.join(here, '..', '..', 'contract', 'live', 'turn-full.json'), 'utf8'));
+const snapshotOf = (lseq, extra = {}) => ({ ...turnFull.steps[0].snapshot, lseq, ...extra });
+const eventsOf = turnFull.steps.slice(1).map(s => s.event);
+const event = lseq => ({ ...eventsOf.find(e => e.lseq === lseq) });
+
+let frames;
+let requests;
+let routes;
+
+function installGlobals() {
+  frames = [];
+  requests = [];
+  routes = {};
+  vi.stubGlobal('requestAnimationFrame', cb => { frames.push(cb); return frames.length; });
+  vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
+    requests.push({ url: String(url), method: init.method || 'GET', body: init.body });
+    const route = Object.keys(routes).find(r => String(url).startsWith(r));
+    const answer = route ? await routes[route](init) : { status: 404, body: {} };
+    return { ok: answer.status === 200, status: answer.status, json: async () => answer.body };
+  }));
+}
+
+const runFrames = () => { const now = frames; frames = []; now.forEach(cb => cb(0)); };
+const settle = () => new Promise(r => setTimeout(r, 0));
+const liveGets = () => requests.filter(r => r.url.startsWith('/live?'));
+
+async function freshStore() {
+  vi.resetModules();
+  return import('../../web/src/stores/live.svelte.js');
+}
+
+describe('live store', () => {
+  beforeEach(installGlobals);
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('stays off the live channel when the Host does not offer live items', async () => {
+    const store = await freshStore();
+    store.setServerFeatures(['tool_explanations']);
+    store.watchSession('rachel');
+    expect(store.liveQuery()).toBe('');
+    store.handleLiveEvent(event(1));
+    runFrames();
+    await settle();
+    expect(store.liveFor('rachel')).toBe(null);
+    expect(liveGets()).toHaveLength(0);
+  });
+
+  it('subscribes to the chats on screen and the few opened last', async () => {
+    const store = await freshStore();
+    const changed = vi.fn();
+    store.onSubscriptionsChanged(changed);
+    store.setServerFeatures(['live_items']);
+    expect(store.liveQuery()).toBe('live=');
+    for (const s of ['a', 'b', 'c', 'd', 'e']) store.watchSession(s);
+    expect(store.liveQuery()).toBe('live=b,c,d,e');
+    store.watchSession('c');
+    expect(store.liveQuery()).toBe('live=b,c,d,e');
+    expect(changed).toHaveBeenCalledTimes(6);
+  });
+
+  it('opens a chat from GET /live and applies the events after it', async () => {
+    const store = await freshStore();
+    routes['/live?'] = () => ({ status: 200, body: snapshotOf(0) });
+    store.setServerFeatures(['live_items']);
+    store.watchSession('rachel');
+    await store.openLive('rachel');
+    for (const lseq of [1, 2, 3, 4]) store.handleLiveEvent(event(lseq));
+    expect(store.liveFor('rachel').lseq).toBe(0);
+    runFrames();
+    const live = store.liveFor('rachel');
+    expect(live.lseq).toBe(4);
+    expect(live.items['cl:msg_01:0'].title).toBe('Finding the flaky test');
+    expect(store.liveTurnRunning('rachel')).toBe(true);
+    expect(liveGets()).toHaveLength(1);
+  });
+
+  it('keeps events that arrive while the snapshot is on its way', async () => {
+    const store = await freshStore();
+    let release;
+    routes['/live?'] = () => new Promise(r => { release = () => r({ status: 200, body: snapshotOf(1) }); });
+    store.setServerFeatures(['live_items']);
+    store.watchSession('rachel');
+    const opened = store.openLive('rachel');
+    for (const lseq of [1, 2, 3]) store.handleLiveEvent(event(lseq));
+    runFrames();
+    await settle();
+    release();
+    await opened;
+    runFrames();
+    expect(store.liveFor('rachel').lseq).toBe(3);
+    expect(liveGets()).toHaveLength(1);
+  });
+
+  it('asks for one snapshot after a gap and carries on from it', async () => {
+    const store = await freshStore();
+    let snap = snapshotOf(0);
+    routes['/live?'] = () => ({ status: 200, body: snap });
+    store.setServerFeatures(['live_items']);
+    store.watchSession('rachel');
+    await store.openLive('rachel');
+    store.handleLiveEvent(event(1));
+    store.handleLiveEvent(event(3));
+    store.handleLiveEvent(event(4));
+    snap = snapshotOf(4, { items: [] });
+    runFrames();
+    await settle();
+    await settle();
+    store.handleLiveEvent({ ...event(5), ops: [{ op: 'status', conv: 'conv-1', activity: { state: 'thinking' } }] });
+    runFrames();
+    expect(liveGets()).toHaveLength(2);
+    expect(store.liveFor('rachel').lseq).toBe(5);
+  });
+
+  it('tracks status alone for chats it does not subscribe to', async () => {
+    const store = await freshStore();
+    store.setServerFeatures(['live_items']);
+    store.handleLiveEvent({ ...event(13), session: 'mike' });
+    runFrames();
+    expect(store.liveFor('mike')).toBe(null);
+    expect(store.rosterActivity('mike')).toMatchObject({ state: 'tool', headline: 'Running npm test' });
+    expect(store.liveTurnRunning('mike')).toBe(true);
+    expect(liveGets()).toHaveLength(0);
+  });
+
+  it('turns tool explanations off on the Host and says so everywhere', async () => {
+    const store = await freshStore();
+    routes['/tool-explanations/settings'] = init => ({ status: 200,
+      body: { enabled: init.body ? JSON.parse(init.body).enabled : true, detail_level: 2 } });
+    store.setServerFeatures(['live_items']);
+    await store.loadExplanationSettings();
+    expect(store.live.explanations.enabled).toBe(true);
+    await store.setExplanationsEnabled(false);
+    expect(requests.at(-1)).toMatchObject({ method: 'POST', body: JSON.stringify({ enabled: false }) });
+    expect(store.live.explanations.enabled).toBe(false);
+  });
+
+  it('puts the switch back when the Host refuses it', async () => {
+    const store = await freshStore();
+    routes['/tool-explanations/settings'] = init => (init.method === 'POST'
+      ? { status: 500, body: {} } : { status: 200, body: { enabled: true, detail_level: 2 } });
+    store.setServerFeatures(['live_items']);
+    await store.loadExplanationSettings();
+    await store.setExplanationsEnabled(false);
+    expect(store.live.explanations.enabled).toBe(true);
+  });
+});
