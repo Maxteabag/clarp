@@ -246,3 +246,35 @@ fn a_queued_layout_replaces_an_older_one_while_a_write_is_in_flight() {
     assert!(panes.workspace_save_warning().is_empty());
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn dismissing_a_layout_conflict_accepts_the_newer_layout_and_saves_normally_after() {
+    let (store, dir) = temp_store();
+    let mut panes = PaneTree::persisted(&store, true);
+    panes.set_active_session("alpha");
+    panes.flush_writes(&store);
+
+    // Another window saves while this one is open (two windows for a while).
+    let external = json!({"version": 1, "active": "workspace-1", "names": {"workspace-1": "Other window"},
+        "states": {"workspace-1": {"activePaneId": "pane-1",
+            "root": {"id": "pane-1", "kind": "leaf", "session": "external"}}}}).to_string();
+    store.set_collection(&external).unwrap();
+    panes.set_active_session("beta");
+    panes.flush_writes(&store);
+    assert!(!panes.workspace_save_warning().is_empty(), "the conflict is reported");
+    panes.take_signals();
+
+    // Dismissed: the warning goes, the other window's layout stays saved.
+    panes.dismiss_workspace_save_warning();
+    assert!(panes.workspace_save_warning().is_empty(), "{}", panes.workspace_save_warning());
+    assert!(panes.take_signals().contains(&clarp_core::panes::Signal::WorkspaceSaveWarningChanged));
+    panes.flush_writes(&store);
+    assert_eq!(saved_session(&store.read_collection()), "external", "dismissing overwrites nothing");
+
+    // The other window is gone: this window's next change saves as usual.
+    panes.set_active_session("gamma");
+    panes.flush_writes(&store);
+    assert!(panes.workspace_save_warning().is_empty(), "no new conflict: {}", panes.workspace_save_warning());
+    assert_eq!(saved_session(&store.read_collection()), "gamma");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

@@ -351,6 +351,7 @@ pub fn start_check(name: &str, out: String) {
         "artifacts" => artifact_checks::artifacts_check(out),
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
+        "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         _ => {
             check(false, &format!("no check named {name}"));

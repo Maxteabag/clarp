@@ -105,6 +105,9 @@ export component AppWindow inherits Window {
     in property <[SplitView]> splits;
     in property <[WorkspaceTab]> workspaces;
     in property <string> save-warning;
+    // The keys the layout-conflict bar names: dismiss, and keep this layout.
+    in property <string> save-warning-dismiss-key;
+    in property <string> save-warning-keep-key;
     in property <bool> workspace-bar;
     in-out property <bool> sidebar-visible: true;
     in-out property <bool> shortcuts-visible: true;
