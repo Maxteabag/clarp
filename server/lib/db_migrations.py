@@ -136,6 +136,11 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v102(con)
         if version < 103:
             _migrate_to_v103(con)
+        if version < 104:
+            # The phone-issued Audio Central push grant for each device token.
+            columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
+            if "push_grant" not in columns:
+                con.execute("ALTER TABLE device_tokens ADD COLUMN push_grant TEXT NOT NULL DEFAULT ''")
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")

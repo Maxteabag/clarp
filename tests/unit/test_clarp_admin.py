@@ -810,6 +810,77 @@ def test_doctor_fails_for_missing_configured_apns_key(tmp_path, monkeypatch, cap
     assert "FAIL  APNs signing key" in capsys.readouterr().out
 
 
+def _doctor_push_output(tmp_path, monkeypatch, capsys, push_config):
+    share = tmp_path / "share"
+    current = share / "current"
+    current.mkdir(parents=True)
+    runtime = tmp_path / "environment/bin/python"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text("")
+    (current / "SERVICE_PYTHON").write_text(str(runtime) + "\n")
+    config = tmp_path / "config.toml"
+    config.write_text('[tts]\nprovider = "none"\nfallback = "none"\n\n' + push_config)
+    monkeypatch.setattr(admin, "SHARE", share)
+    monkeypatch.setattr(admin, "CONFIG_FILE", config)
+    monkeypatch.setattr(admin, "INSTALL_STATE", tmp_path / "install.json")
+    from lib import config as config_module
+    config_module.reset_cache()
+    monkeypatch.setattr(admin, "installed_command", lambda _name: "/tool")
+    monkeypatch.setattr(admin.service_manager, "is_active", lambda: True)
+    monkeypatch.setattr(admin.service_manager, "is_runtime_active", lambda: True)
+    code = admin.cmd_doctor(None)
+    return code, capsys.readouterr().out
+
+
+_RELAY_CONFIG = (
+    '[audio_central]\nurl = "https://central.test"\n'
+    'credential = "cav1.00000000-0000-4000-8000-000000000000.0123456789abcdef.'
+    + "s" * 64 + '"\n')
+
+
+def test_doctor_reports_relay_push_without_a_local_key(tmp_path, monkeypatch, capsys):
+    _, output = _doctor_push_output(tmp_path, monkeypatch, capsys, _RELAY_CONFIG)
+    assert "OK    push: relay via Audio Central (https://central.test)" in output
+    assert "APNs signing key" not in output
+    assert "s" * 64 not in output
+
+
+def test_doctor_reports_relay_over_a_stale_direct_key(tmp_path, monkeypatch, capsys):
+    key = tmp_path / "AuthKey_TEST.p8"
+    key.write_text("not read by doctor")
+    _, output = _doctor_push_output(tmp_path, monkeypatch, capsys, (
+        f'[apns]\nkey_path = "{key}"\nkey_id = "TEST"\nteam_id = "TEAM"\n\n'
+        + _RELAY_CONFIG))
+    assert "OK    push: relay via Audio Central" in output
+    assert "local .p8 kept as fallback" in output
+
+
+def test_doctor_reports_direct_and_unconfigured_push(tmp_path, monkeypatch, capsys):
+    key = tmp_path / "AuthKey_TEST.p8"
+    key.write_text("not read by doctor")
+    _, output = _doctor_push_output(tmp_path, monkeypatch, capsys, (
+        f'[apns]\nkey_path = "{key}"\nkey_id = "TEST"\nteam_id = "TEAM"\n'))
+    assert "OK    push: direct (local APNs key)" in output
+
+
+def test_doctor_reports_phone_grants_by_default(tmp_path, monkeypatch, capsys):
+    _, output = _doctor_push_output(tmp_path, monkeypatch, capsys, "")
+    assert "OK    push: phone grants via Audio Central" in output
+
+
+def test_doctor_reports_push_off(tmp_path, monkeypatch, capsys):
+    _, output = _doctor_push_output(tmp_path, monkeypatch, capsys, '[apns]\nmode = "off"\n')
+    assert "OK    push: off" in output
+
+
+def test_doctor_fails_when_relay_is_forced_over_plain_http(tmp_path, monkeypatch, capsys):
+    code, output = _doctor_push_output(
+        tmp_path, monkeypatch, capsys,
+        '[apns]\nmode = "relay"\n[audio_central]\nurl = "http://central.test"\n')
+    assert code == 1
+    assert "FAIL  push: relay selected" in output
+
+
 def test_releases_only_returns_completed_installs(tmp_path, monkeypatch):
     root = tmp_path / "share/releases"
     complete = root / "complete"; complete.mkdir(parents=True)
