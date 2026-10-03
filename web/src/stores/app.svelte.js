@@ -10,6 +10,7 @@ import { createAgentSnapshotStore } from '@core/agent-snapshot.js';
 import { resolveAvatarUrl } from '@core/avatar.js';
 import { chooseSession, visibleSessions } from '@core/session-select.js';
 import { AgentState } from '@core/protocol.js';
+import { countUnread, createJsonReader } from '@core/unread.js';
 import { clog } from '../lib/net.js';
 import { ensureLoaded, reconcileWithSnapshot } from './conversations.svelte.js';
 
@@ -114,23 +115,24 @@ function readJSON(key) {
   try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch (_) { return {}; }
 }
 
+// Read-only, parsed once per stored value: the unread checks run for every
+// agent on every status change.
+const readSeenJSON = createJsonReader(key => localStorage.getItem(key));
+
 export function isUserNotificationUnread(session) {
-  const seen = readJSON('agentSeen');
-  const notifications = readJSON('agentNotifications');
+  const seen = readSeenJSON('agentSeen');
+  const notifications = readSeenJSON('agentNotifications');
   return !!session && session !== app.session
     && (notifications[session] || 0) > (seen[session] || 0);
 }
 
 export function unreadAgentCount() {
-  const seen = readJSON('agentSeen');
-  const notifications = readJSON('agentNotifications');
-  let count = 0;
-  for (const sid of Object.keys(app.agentsBySession)) {
-    if (sid === app.session) continue;
-    if (!app.availableSessions.includes(sid)) continue;
-    if ((notifications[sid] || 0) > (seen[sid] || 0)) count++;
-  }
-  return count;
+  return countUnread(Object.keys(app.agentsBySession), {
+    available: $state.snapshot(app.availableSessions),
+    current: app.session,
+    seen: readSeenJSON('agentSeen'),
+    notifications: readSeenJSON('agentNotifications'),
+  });
 }
 
 export function rememberUserNotification(ev) {

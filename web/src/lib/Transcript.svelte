@@ -29,18 +29,22 @@
   // activity rows, and stand in for the /log rows that carry them.
   let liveState = $derived(liveFor(session));
   let liveItems = $derived(liveState ? currentTurnItems(liveState) : []);
-  let hidden = $derived(takenOverTurns(conv.turns, liveItems));
+  // Every live event replaces liveItems; the hidden set and the live block's
+  // position only change now and then. Both keep their identity (a set) or
+  // value (a number) between events, so the turn filter, the merged timeline
+  // and the keyed list below are not rebuilt per event.
+  let lastHidden = null;
+  let hidden = $derived.by(() => (lastHidden = takenOverTurns(conv.turns, liveItems, lastHidden)));
   let turns = $derived(hidden.size ? conv.turns.filter(t => !hidden.has(t.id)) : conv.turns);
   // Read both lists at the top level so the tracking sees them.
   let merged = $derived(mergeTimeline(turns, liveItems.length ? [] : conv.activity));
   // The live turn sits where its turn started, as one keyed entry, so a
   // prompt sent after it settled lands below it and the block is moved,
   // never rebuilt.
-  let timeline = $derived.by(() => {
-    if (!liveItems.length) return merged;
-    const at = liveInsertIndex(merged.map(e => e.item), liveState.turn);
-    return [...merged.slice(0, at), { type: 'live', key: 'live-turn' }, ...merged.slice(at)];
-  });
+  let liveAt = $derived(liveItems.length
+    ? liveInsertIndex(merged.map(e => e.item), liveState.turn) : -1);
+  let timeline = $derived(liveAt < 0 ? merged
+    : [...merged.slice(0, liveAt), { type: 'live', key: 'live-turn' }, ...merged.slice(liveAt)]);
 
   // Keep this chat's live items coming while it is on screen.
   $effect(() => {

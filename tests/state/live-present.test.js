@@ -348,3 +348,21 @@ describe('where the live turn sits in the transcript', () => {
     expect(liveInsertIndex(turns, null)).toBe(3);
   });
 });
+
+describe('takeover set identity', () => {
+  const items = [{ id: 'm', kind: 'message', row_id: 'live-1', text: 'a' }];
+  const turns = [{ id: 'u' }, { id: 'live-1', kind: 'live' }];
+
+  it('hands back the previous set when the same rows are taken over, so views downstream do not recompute', () => {
+    const first = takenOverTurns(turns, items);
+    const again = takenOverTurns(turns, [{ ...items[0], text: 'ab' }], first);
+    expect(again).toBe(first);
+  });
+
+  it('gives a new set when the rows change', () => {
+    const first = takenOverTurns(turns, items);
+    const next = takenOverTurns([...turns, { id: 'live-2', kind: 'live' }], items, first);
+    expect(next).not.toBe(first);
+    expect([...next].sort()).toEqual(['live-1', 'live-2']);
+  });
+});
