@@ -97,6 +97,11 @@ pub struct Presented {
     pub absorbed_rows: Vec<String>,
     /// Tool and cell ids entries show: left out of the durable rows.
     pub stripped_calls: HashSet<String>,
+    /// The open turn and when it began (Host time).
+    pub turn_id: String,
+    pub started_at_ms: Option<i64>,
+    /// The turn's own durable rows: they never push its place.
+    pub own_rows: HashSet<String>,
 }
 
 impl Presented {
@@ -104,7 +109,14 @@ impl Presented {
     /// prompt that started it and every row from before it began, before
     /// the first row written after that.
     pub fn anchor(&self, rows: &[&Message]) -> usize {
-        rows.len()
+        let Some(started) = self.started_at_ms else { return rows.len() };
+        // The prompt carries the turn's id: whatever its time, the turn
+        // goes after it.
+        let from = rows.iter().position(|r| r.role == "user" && !self.turn_id.is_empty() && r.trace_id == self.turn_id).map_or(0, |i| i + 1);
+        let own = |row: &Message| self.own_rows.contains(&row.id) || (!self.turn_id.is_empty() && row.trace_id == self.turn_id);
+        // Rows without a Host time (unsent ones) never push it up.
+        let later = |row: &Message| crate::time_format::epoch_ms(&row.timestamp).is_some_and(|ms| ms > started);
+        rows.iter().skip(from).position(|r| !own(r) && !r.pending && later(r)).map_or(rows.len(), |i| from + i)
     }
 }
 
@@ -353,6 +365,9 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
         }
     }
     presented.entries = entries;
+    presented.turn_id = turn_id;
+    presented.started_at_ms = turn.and_then(|t| int(t, "started_at_ms"));
+    presented.own_rows = presented.taken_over.values().chain(&presented.absorbed_rows).chain(&presented.hidden_rows).cloned().collect();
     presented
 }
 

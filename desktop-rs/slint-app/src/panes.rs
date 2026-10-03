@@ -428,8 +428,9 @@ impl App {
         (engine.activity_mode(), engine.show_when_ready(), self.prefs.borrow().timestamps)
     }
 
-    /// Puts the live rows after the chat's rows (before unsent messages of
-    /// one's own). A durable row that took over a message shows in that
+    /// Puts the live rows where the turn happened (`Presented::anchor`):
+    /// after its prompt, before any row written after it began, and before
+    /// unsent messages of one's own. A durable row that took over a message shows in that
     /// entry's place under the entry's key, so it is updated there, not
     /// inserted, and keeps that key while the chat is shown.
     fn splice_live(&self, pane: &mut PaneState, live: &clarp_core::live_present::Presented, fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>) {
@@ -439,7 +440,11 @@ impl App {
                 placed.insert(entry.row.clone(), (fresh.remove(index), rows.remove(index)));
             }
         }
-        let at = fresh.iter().rposition(|(row, ..)| !(row.message.pending || row.message.delivery_failed)).map_or(0, |i| i + 1);
+        // Where the turn happened: after its prompt and what came before
+        // it, before anything written once it began; unsent messages last.
+        let messages: Vec<&clarp_core::protocol::Message> = fresh.iter().map(|(row, ..)| &row.message).collect();
+        let sent = fresh.iter().rposition(|(row, ..)| !(row.message.pending || row.message.delivery_failed)).map_or(0, |i| i + 1);
+        let at = live.anchor(&messages).min(sent);
         let built: Vec<(Shown, MessageRow)> = live
             .entries
             .iter()
