@@ -125,6 +125,8 @@ enum Message {
     UpdatesDue,
     /// Portraits rounded and written (or not) off the UI thread.
     PortraitsCached(Vec<avatars::Cached>),
+    /// A chat's transcript is due to be cached.
+    CacheSaveDue(String),
 }
 
 pub struct Config {
@@ -137,6 +139,8 @@ pub struct Config {
     pub workspace_store: Option<std::path::PathBuf>,
     /// Device tokens may be read from and kept in the Secret Service.
     pub keyring: bool,
+    /// Where chats are cached between runs; None keeps nothing.
+    pub transcript_cache: Option<std::path::PathBuf>,
 }
 
 impl Config {
@@ -147,9 +151,27 @@ impl Config {
         let base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
         let token = std::env::var("CLARP_TOKEN").unwrap_or_default();
         let keyring = std::env::var("CLARP_KEYRING").map_or(true, |v| v != "off");
-        Self { base_url, token, settings, workspace_store: workspace::default_store_path(), keyring }
+        Self { base_url, token, settings, workspace_store: workspace::default_store_path(), keyring, transcript_cache: default_transcript_cache() }
     }
 }
+
+/// `CLARP_TRANSCRIPT_CACHE` (`off` for none), else the user's cache dir.
+fn default_transcript_cache() -> Option<std::path::PathBuf> {
+    match std::env::var("CLARP_TRANSCRIPT_CACHE") {
+        Ok(value) if value == "off" => None,
+        Ok(value) if !value.is_empty() => Some(value.into()),
+        _ => std::env::var_os("XDG_CACHE_HOME")
+            .filter(|dir| !dir.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache")))
+            .map(|cache| cache.join("clarp").join("transcripts")),
+    }
+}
+
+/// A chat's cache write waits this long after its last write.
+pub const TRANSCRIPT_SAVE_COOLDOWN: Duration = Duration::from_secs(2);
+/// While its agent is busy a chat's write is put off by this much.
+const TRANSCRIPT_SAVE_BUSY_RETRY: Duration = Duration::from_secs(2);
 
 pub struct Engine {
     base_url: String,
@@ -190,6 +212,10 @@ pub struct Engine {
     snapshot_last: Option<Instant>,
     log_in_flight: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
+    transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
+    /// Chats with a cache write scheduled, and when each was last written.
+    cache_save_due: HashSet<String>,
+    cache_saved_at: HashMap<String, Instant>,
     deliveries: HashMap<String, (String, u64)>,
     delivery_counter: u64,
     sending: bool,
@@ -297,6 +323,9 @@ impl Engine {
             snapshot_last: None,
             log_in_flight: HashSet::new(),
             pending_log_mode: HashMap::new(),
+            transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
+            cache_save_due: HashSet::new(),
+            cache_saved_at: HashMap::new(),
             tool_detail_requests: HashMap::new(),
             pending_drafts: HashMap::new(),
             draft_flush_token: 0,
@@ -359,6 +388,7 @@ impl Engine {
                 Message::CreatedAgentDue(session) => self.created_agent_due(&session),
                 Message::UpdatesDue => self.updates_due(),
                 Message::PortraitsCached(cached) => cached.into_iter().for_each(|c| self.portrait_cached(c)),
+                Message::CacheSaveDue(session) => self.cache_save_due(&session),
             }
         }
         let mut changes = std::mem::take(&mut self.changes);
@@ -822,15 +852,66 @@ impl Engine {
             // A pair room is a projection, not an agent: no Host focus.
             let latest = self.room(session).and_then(|r| r.get("latest_revision")).and_then(Value::as_i64).unwrap_or(0);
             self.mark_agent_conversation_seen(session, latest);
-            self.request_tail(session, false);
+            self.open_log(session);
             return;
         }
         let janitor = self.roster.find(session).is_some_and(|a| a.janitor);
         if !janitor {
             self.api.post_json(&format!("select:{session}"), "/select", json!({"session": session}), None);
         }
-        self.request_tail(session, false);
+        self.open_log(session);
         self.request_recoverable_clips(session);
+    }
+
+    /// Opening a chat: what this client holds (in memory, else its cached
+    /// copy, shown at once) and the delta after it; the tail when nothing.
+    pub(crate) fn open_log(&mut self, session: &str) {
+        self.ensure_conversation(session);
+        let empty = self.conversations.get(session).is_none_or(|c| c.is_empty() && c.latest_revision() == 0);
+        if empty && let Some(cache) = &self.transcript_cache {
+            let snapshot = cache.load(&self.base_url, session);
+            if !snapshot.is_empty() {
+                self.with_conversation(session, |c| c.restore_cache_snapshot(&snapshot));
+            }
+        }
+        if self.conversations.get(session).is_some_and(|c| c.latest_revision() > 0) {
+            self.request_delta(session);
+        } else {
+            self.request_tail(session, false);
+        }
+    }
+
+    /// A chat's rows changed from the Host: cache them a moment later, at
+    /// most once per cooldown.
+    fn schedule_cache_save(&mut self, session: &str) {
+        if self.transcript_cache.is_none() || session.is_empty() || !self.cache_save_due.insert(session.to_owned()) {
+            return;
+        }
+        let delay = Duration::from_millis(clarp_core::transcript_cache::SAVE_DELAY_MS);
+        let cooling = self.cache_saved_at.get(session).map_or(Duration::ZERO, |at| TRANSCRIPT_SAVE_COOLDOWN.saturating_sub(at.elapsed()));
+        self.after(delay.max(cooling), Message::CacheSaveDue(session.to_owned()));
+    }
+
+    /// Writes a chat's durable rows off the UI thread; not while its agent
+    /// is busy (the reply is still changing), then once it settles.
+    fn cache_save_due(&mut self, session: &str) {
+        if self.roster.find(session).is_some_and(|a| a.busy) || self.log_in_flight.contains(session) {
+            self.after(TRANSCRIPT_SAVE_BUSY_RETRY, Message::CacheSaveDue(session.to_owned()));
+            return;
+        }
+        self.cache_save_due.remove(session);
+        let (Some(cache), Some(conversation)) = (self.transcript_cache.clone(), self.conversations.get(session)) else { return };
+        if conversation.latest_revision() <= 0 {
+            return;
+        }
+        let snapshot = conversation.cache_snapshot();
+        self.cache_saved_at.insert(session.to_owned(), Instant::now());
+        let (base, session) = (self.base_url.clone(), session.to_owned());
+        self.runtime.spawn_blocking(move || {
+            if let Err(error) = cache.save(&base, &session, &snapshot) {
+                eprintln!("clarp-engine: transcript cache: {error}");
+            }
+        });
     }
 
     fn ensure_conversation(&mut self, session: &str) {
@@ -938,6 +1019,7 @@ impl Engine {
         self.log_in_flight.remove(session);
         self.ensure_conversation(session);
         self.with_conversation(session, |c| c.apply_log(object, kind));
+        self.schedule_cache_save(session);
         if kind == LoadKind::Delta && json::boolean(object, "has_more") {
             self.request_delta(session);
         }

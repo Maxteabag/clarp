@@ -95,8 +95,7 @@ impl Engine {
             .collect();
         for session in sessions {
             if !self.conversations.contains_key(&session) {
-                self.ensure_conversation(&session);
-                self.request_tail(&session, false);
+                self.open_log(&session);
             }
         }
     }

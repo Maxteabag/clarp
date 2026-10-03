@@ -105,3 +105,26 @@ fn stopping_a_turn_and_the_states_a_chat_shows() {
 fn chrono_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
+
+#[test]
+fn a_chat_opens_from_its_cached_copy_and_asks_only_for_what_is_newer() {
+    let host = Host::start("cache-open");
+    let cache = host.dir.join("transcripts");
+    let rachel_logs = |host: &Host| host.requests("GET", "/log").into_iter().filter(|r| r["query"]["session"] == "rachel").collect::<Vec<_>>();
+    let cached = {
+        let mut d = Driver::with_transcript_cache(&host.base, &cache);
+        d.connect();
+        d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2 && !e.log_pending("rachel")));
+        d.until("rachel cached", |_| std::fs::read_dir(&cache).is_ok_and(|mut files| files.any(|f| f.is_ok_and(|f| f.path().extension().is_some_and(|x| x == "json")))));
+        d.engine.conversation("rachel").unwrap().latest_revision()
+    };
+    assert!(cached > 0);
+    let before = rachel_logs(&host).len();
+    let mut d = Driver::with_transcript_cache(&host.base, &cache);
+    d.engine.start();
+    d.until("the cached rows show", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2 && c.latest_revision() == cached));
+    d.until("the Host answered", |e| !e.log_pending("rachel") && e.connected());
+    let asked = rachel_logs(&host).split_off(before);
+    assert!(!asked.is_empty());
+    assert!(asked.iter().all(|r| r["query"]["after_revision"] == cached.to_string()), "only the delta after the cached copy: {asked:?}");
+}

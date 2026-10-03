@@ -83,9 +83,24 @@ impl Driver {
     }
 
     pub fn with_settings(base: &str, settings: Settings) -> Self {
+        Self::with_config(Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None, keyring: false, transcript_cache: None })
+    }
+
+    /// Chats cached between runs in `dir`.
+    pub fn with_transcript_cache(base: &str, dir: &std::path::Path) -> Self {
+        Self::with_config(Config {
+            base_url: base.into(),
+            token: "probe-token".into(),
+            settings: Settings::in_memory(),
+            workspace_store: None,
+            keyring: false,
+            transcript_cache: Some(dir.to_owned()),
+        })
+    }
+
+    pub fn with_config(config: Config) -> Self {
         let woken = Arc::new((Mutex::new(false), Condvar::new()));
         let signal = woken.clone();
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None, keyring: false };
         let engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
             *flag.lock().unwrap() = true;
