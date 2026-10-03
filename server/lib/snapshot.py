@@ -56,6 +56,18 @@ def _compacting_check() -> Any:
     return lambda session, kind: session in compacting
 
 
+def _live_activities() -> dict[str, Any]:
+    from . import backends, live_hub
+    if backends._RUNTIME_CLIENT is not None:
+        try:
+            result = backends.runtime_status().get("live_activities")
+        except Exception:  # noqa: BLE001 - an outage is logged by runtime_status
+            return {}
+        return result if isinstance(result, dict) else {}
+    hub = live_hub.current()
+    return hub.activities() if hub is not None else {}
+
+
 def build_agent_snapshot(ctx) -> dict[str, Any]:
     """Reconcile liveness and project the dashboard from batched database reads."""
     rows = []
@@ -66,6 +78,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     goals = agent_goals.by_agent()
     active_jobs = background_jobs.active_by_agent()
     states = agents_db.dashboard_states()
+    live_activities = _live_activities()
     runtimes = agents_db.dashboard_runtimes()
     messages = message_store.dashboard_messages()
     schedules: dict[str, list] = {}
@@ -251,6 +264,9 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
                 ts=int(state.get("ts") or 0),
                 detail=state.get("detail") if isinstance(state.get("detail"), dict) else {},
             ) if state.get("kind") else None,
+            # The live-items status line (docs/live-items.md §1.3), when the
+            # hub has seen this agent since it started.
+            "live_activity":  live_activities.get(agent_id),
         })
     persona_rows = persona_store.list_all()
     roster = []

@@ -3718,13 +3718,15 @@ def test_build_server_starts_the_worker_registry_in_order(fake_ctx, monkeypatch)
         assert workers.names() == [
             "stream", "relay", "tool-explanations", "bonjour",
             "state-log-watcher", "background-job-watcher", "runtime-event-watcher",
+            "live-hub", "live-relay",
             "tts-worker", "maintenance", "usage-refresh", "resource-telemetry",
             "cache-warmup", "decision-delivery", "transcript-streamer", "team-leader", "heartbeat",
             "autonomy-janitors", "dreaming", "agent-scheduler", "janitor-runner",
             "local-https",
         ]
         # No relay settings, no LAN advertising, no runtime client, no local TLS.
-        assert workers.skipped == ["relay", "bonjour", "runtime-event-watcher", "local-https"]
+        assert workers.skipped == ["relay", "bonjour", "runtime-event-watcher", "live-relay",
+                                   "local-https"]
         assert set(workers.running) == set(workers.names()) - set(workers.skipped)
         assert isinstance(workers.get("tts-worker"), FakeTTSWorker)
         assert workers.get("tts-worker").kwargs["stream"] is fake_ctx.stream

@@ -482,3 +482,36 @@ def test_text_is_responding_and_a_finished_tool_reports_its_call(tmp_path, monke
     assert "responding" in phases
     finished = [d for e, d in seen if e == turn_lifecycle.TurnEvent.TOOL_FINISHED]
     assert [(d["call_id"], d["status"]) for d in finished] == [("call_1", "ok")]
+
+
+def test_opencode_reasoning_and_running_output_become_live_items():
+    from lib import live_hub, turn_lifecycle as lifecycle
+    from lib.backend.opencode import _TurnState
+
+    hub = live_hub.LiveHub(sink=lambda _e: None)
+    live_hub.install(hub)
+    try:
+        agent_id = agents_db.create_agent(
+            persona="Sindre", voice_id="v", cwd="/tmp", session="sindre", backend="opencode")
+        agents_db.start_runtime(agent_id, "sindre")
+        agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="tr-o")
+        lifecycle.transition(agent_id, lifecycle.TurnEvent.SPAWN_STARTED, {"trace_id": "tr-o"})
+        st = _TurnState(session_id="ses_x")
+        kw = dict(agent_id=agent_id, session="sindre", trace_id="tr-o", stream=None,
+                  enqueue=lambda **_k: 1)
+        OPENCODE._on_part({"id": "prt_r", "type": "reasoning", "text": ""}, st, **kw)
+        OPENCODE._on_delta({"partID": "prt_r", "field": "text", "delta": "Look at the build"}, st, **kw)
+        OPENCODE._on_part({"id": "prt_r", "type": "reasoning", "text": "Look at the build.",
+                           "time": {"start": 1, "end": 2}}, st, **kw)
+        running = {"id": "prt_b", "callID": "call_b", "type": "tool", "tool": "bash",
+                   "state": {"status": "running", "input": {"command": "make"},
+                             "metadata": {"output": "cc a.c\n"}}}
+        OPENCODE._on_part(running, st, **kw)
+        running["state"]["metadata"]["output"] = "cc a.c\ncc b.c\nlink\n"
+        OPENCODE._on_part(running, st, **kw)
+        items = {item["id"]: item for item in hub.snapshot(session="sindre")["items"]}
+        assert (items["oc:prt_r"]["status"], items["oc:prt_r"]["text"]) == ("completed", "Look at the build.")
+        output = items["oc:call_b"]["tool"]["output"]
+        assert (output["tail"], output["total_lines"]) == (["cc a.c", "cc b.c", "link"], 3)
+    finally:
+        live_hub.install(None)

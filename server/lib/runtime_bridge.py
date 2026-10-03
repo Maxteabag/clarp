@@ -293,6 +293,15 @@ class RuntimeClient:
         result = response.get("result") if response.get("ok") else ""
         return result if isinstance(result, str) else ""
 
+    def live_snapshot(self, *, session: str = "", agent_id: str = "") -> dict[str, Any] | None:
+        """The runtime hub's GET /live answer for one agent, or None."""
+        response = self._request("live_snapshot", {"session": session, "agent_id": agent_id})
+        if not response.get("ok"):
+            raise RuntimeProtocolError(
+                str(response.get("error") or "runtime live snapshot failed"))
+        result = response.get("result")
+        return result if isinstance(result, dict) else None
+
     def ping(self) -> bool:
         try:
             return self.status().get("protocol_version") == PROTOCOL_VERSION
@@ -311,6 +320,9 @@ class _RuntimeRequestHandler(socketserver.StreamRequestHandler):
             return
         try:
             request = decode_request(raw)
+            if request["method"] == "live_stream":
+                self._live_stream()
+                return
             response = self.server.dispatch_request(  # type: ignore[attr-defined]
                 request["method"], request["params"])
         except RuntimeProtocolError as exc:
@@ -328,6 +340,27 @@ class _RuntimeRequestHandler(socketserver.StreamRequestHandler):
     def _write(self, value: dict[str, Any]) -> None:
         self.wfile.write((json.dumps(
             _json_value(value), separators=(",", ":")) + "\n").encode())
+
+    def _live_stream(self) -> None:
+        """Push live-item events to the HTTP process until it hangs up."""
+        import queue as _queue
+        fanout = getattr(self.server, "live_fanout", None)
+        if fanout is None:
+            self._write({"ok": False, "status": 404, "error": "no live items here"})
+            return
+        q = fanout.subscribe()
+        try:
+            while not getattr(q, "dropped", False):
+                try:
+                    event = q.get(timeout=15.0)
+                except _queue.Empty:
+                    event = {"type": "ping"}
+                self.wfile.write((json.dumps(event, separators=(",", ":")) + "\n").encode())
+                self.wfile.flush()
+        except (OSError, ValueError):
+            return
+        finally:
+            fanout.unsubscribe(q)
 
 
 class RuntimeRPCServer(socketserver.ThreadingMixIn,
@@ -423,6 +456,14 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         if method == "recover_queued":
             return {"ok": True,
                     "result": int(self.dispatch_service.recover_queued())}
+        if method == "live_snapshot":
+            hub = getattr(self, "live_hub", None)
+            if hub is None:
+                return {"ok": False, "status": 404, "error": "no live items here"}
+            snapshot = hub.snapshot(
+                session=str(params.get("session") or ""),
+                agent_id=str(params.get("agent_id") or ""))
+            return {"ok": True, "result": snapshot or {"epoch": hub.epoch, "missing": True}}
         if method == "explanation_command":
             # Codex items are handled in this process; the explainer runs in
             # the HTTP server (see tool_explanation_commands).

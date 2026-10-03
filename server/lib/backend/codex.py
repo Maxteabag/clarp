@@ -591,7 +591,9 @@ class CodexBackend(StreamJsonBackend):
                 st, text=text, agent_id=agent_id, session=session,
                 trace_id=trace_id, stream=stream,
                 force=etype == "item.completed",
-                item_key=str(item.get("id") or "") or None)
+                item_key=str(item.get("id") or "") or None,
+                phase={"final_answer": "final", "commentary": "commentary"}.get(
+                    str(item.get("phase") or "")))
             if etype == "item.completed":
                 self.settle_live_text(st)
             # Only speak the completed block — item.updated may carry partials.
@@ -650,6 +652,7 @@ class CodexBackend(StreamJsonBackend):
         text: str = "",
         force: bool = False,
         item_key: str | None = None,
+        phase: str | None = None,
     ) -> None:
         """Write one mutable assistant row per agentMessage item, paced."""
         if item_key is not None and item_key != st.live_item_key:
@@ -663,7 +666,7 @@ class CodexBackend(StreamJsonBackend):
             agent_id=agent_id, session=session, trace_id=trace_id, stream=stream,
             force=force,
             interval=self.live_text_interval,
-            item_key=item_key)
+            item_key=item_key, phase=phase)
 
     def _enter_phase(self, st: TurnState, phase: str, *, agent_id: str,
                      trace_id: str) -> None:

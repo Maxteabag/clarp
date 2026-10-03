@@ -706,6 +706,103 @@ def test_claude_messages_of_one_turn_stream_into_their_own_rows(fake_clarp, tmp_
     handle.wait(timeout=5.0)
     rows = agents_db.conn().execute(
         """SELECT text, kind FROM messages WHERE agent_id = ? AND role = 'assistant'
-            ORDER BY timestamp, seq DESC""", (agent_id,)).fetchall()
+            ORDER BY timestamp, seq""", (agent_id,)).fetchall()
     assert [(r["text"], r["kind"]) for r in rows] == [
         ("Checking the logs.", None), ("Found the bug.", None)]
+
+
+def test_claude_turn_streams_messages_and_tools_as_live_items(fake_clarp, tmp_path):
+    from lib import live_hub, turn_lifecycle
+    from lib.turn_lifecycle import TurnEvent
+
+    def block_start(index, block):
+        return {"type": "stream_event", "event": {"type": "content_block_start", "index": index,
+                                                  "content_block": block}}
+
+    def delta(index, d):
+        return {"type": "stream_event", "event": {"type": "content_block_delta", "index": index,
+                                                  "delta": d}}
+
+    hub = live_hub.LiveHub(sink=lambda _e: None)
+    live_hub.install(hub)
+    try:
+        agent_id = agents_db.create_agent(
+            persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+        agents_db.start_runtime(agent_id, "rachel")
+        fake_clarp([
+            {"type": "system", "subtype": "init", "session_id": "sid-items"},
+            {"type": "stream_event", "event": {"type": "message_start", "message": {"id": "msg_1"}}},
+            block_start(0, {"type": "thinking", "thinking": ""}),
+            delta(0, {"type": "thinking_delta", "thinking": "**Check the tests**\n\nRun them."}),
+            {"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}},
+            block_start(1, {"type": "text", "text": ""}),
+            delta(1, {"type": "text_delta", "text": "Running the tests."}),
+            {"type": "stream_event", "event": {"type": "content_block_stop", "index": 1}},
+            block_start(2, {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {}}),
+            delta(2, {"type": "input_json_delta", "partial_json": '{"command": "npm'}),
+            delta(2, {"type": "input_json_delta", "partial_json": ' test"}'}),
+            {"type": "stream_event", "event": {"type": "content_block_stop", "index": 2}},
+            {"type": "stream_event", "event": {"type": "message_stop"}},
+            {"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_1", "is_error": True,
+                 "content": "FAIL a.test.ts\n1 failed"}]}},
+            {"type": "stream_event", "event": {"type": "message_start", "message": {"id": "msg_2"}}},
+            block_start(0, {"type": "text", "text": ""}),
+            delta(0, {"type": "text_delta", "text": "One test fails."}),
+            {"type": "stream_event", "event": {"type": "message_stop"}},
+            {"type": "result", "subtype": "success", "result": "ok"},
+        ])
+        agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-items")
+        turn_lifecycle.transition(agent_id, TurnEvent.SPAWN_STARTED, {"trace_id": "trace-items"})
+        handle = CLAUDE.start_turn(
+            text="hi", cwd=tmp_path, backend_session_id="sid-items", session="rachel",
+            agent_id=agent_id, trace_id="trace-items")
+        handle.wait(timeout=5.0)
+        handle.drain_thread.join(timeout=5.0)
+        items = hub.snapshot(session="rachel")["items"]
+        summary = [(i["id"], i["kind"], i["status"]) for i in items]
+        assert summary == [
+            ("cl:msg_1:0", "reasoning", "completed"),
+            ("cl:msg_1:1", "message", "completed"),
+            ("cl:toolu_1", "tool", "failed"),
+            ("cl:msg_2:0", "message", "completed"),
+        ]
+        reasoning, commentary, tool, answer = items
+        assert reasoning["title"] == "Check the tests"
+        assert commentary["phase"] == "commentary" and answer["phase"] == "final"
+        assert commentary["row_id"] and commentary["row_id"] != answer["row_id"]
+        assert (tool["tool"]["label"], tool["tool"]["command"]) == ("npm test", "npm test")
+        assert tool["tool"]["output"]["tail"] == ["FAIL a.test.ts", "1 failed"]
+        assert tool["tool"]["output"]["total_lines"] == 2
+    finally:
+        live_hub.install(None)
+
+
+def _fake_cli(bin_dir, body):
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake = bin_dir / "claude"
+    fake.write_text(f"#!{sys.executable}\nimport sys\n{body}\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+
+
+def test_claude_is_asked_for_summarized_thinking_when_its_cli_can(tmp_path, monkeypatch):
+    from lib.backend import claude as claude_backend
+    bin_dir = tmp_path / "bin"
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    _fake_cli(bin_dir, textwrap.dedent("""\
+        if "--thinking-display" in sys.argv and "nonsense" in sys.argv:
+            print("error: Allowed choices are summarized, omitted, highlights.")
+            sys.exit(1)
+        print("2.1.285 (Claude Code)")"""))
+    claude_backend._thinking_display_support.cache_clear()
+    cmd = CLAUDE.build_cmd()
+    assert cmd[cmd.index("--thinking-display") + 1] == "summarized"
+
+
+def test_an_older_claude_cli_is_not_given_the_thinking_flag(tmp_path, monkeypatch):
+    from lib.backend import claude as claude_backend
+    bin_dir = tmp_path / "bin"
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    _fake_cli(bin_dir, 'print("2.0.1 (Claude Code)")')
+    claude_backend._thinking_display_support.cache_clear()
+    assert "--thinking-display" not in CLAUDE.build_cmd()

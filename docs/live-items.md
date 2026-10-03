@@ -5,9 +5,8 @@ to clients as small ops instead of "go refetch `/log`" pings. This is how Codex,
 Claude Code and OpenCode render a live session, and what Clarp clients (iOS,
 desktop, web) build their status line, tool rows and thinking rows on.
 
-Feature flag `live_items` in `/server-info` `features`, Host contract **40**
-(the contract was published at 40; the Host lists the feature only once it
-actually sends `live` events, so gate on the feature, not the number). A client that does not see the flag keeps today's path: `transcript-updated` →
+Feature flag `live_items` in `/server-info` `features`, available from Host
+contract **42** (the contract was published at 40). Gate on the feature. A client that does not see the flag keeps today's path: `transcript-updated` →
 `GET /log?after_revision`. Nothing in `/log` or the existing events changes
 meaning; everything here is additive.
 
@@ -257,6 +256,9 @@ Apply rules (the reference reducer implements exactly these):
    the tail, keep the last 50, set `total_lines`, `truncated = total_lines >
    len(tail)`.
 5. `done`: set `status`, `started_at_ms`, `ended_at_ms`, then merge `item`.
+   `turn` with a `turn_id` different from the held turn starts a new turn: drop
+   the previous turn's items from the live state (their durable rows are in
+   `/log`).
 6. Unknown op names and unknown fields are ignored.
 
 Pacing: the Host coalesces text appends to at most one event per ~100 ms per
@@ -272,7 +274,10 @@ GET /events?live=                   status/turn ops only (the agent list)
 ```
 
 `live` accepts session names or agent ids. Without the parameter a connection
-gets no `live` events at all (old clients). Change the set by reconnecting; that
+gets no `live` events at all (old clients). For a conversation outside your
+list the event carries only its `status` and `turn` ops; its `lseq` still counts
+the ops you did not get, so do not track `lseq` (or fetch `/live`) for those: use
+them only to update the agent's status line. Change the set by reconnecting; that
 is cheap because `live` is not replayed and the other events resume from
 `Last-Event-ID` as before. Subscribe to the open chat and the few cached ones,
 not the whole fleet: a 100-agent Host must not push every token to every phone.

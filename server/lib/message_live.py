@@ -185,12 +185,14 @@ def _insert_live_message_atomic(
                   AND COALESCE(trace_id, '')<>?""",
             (agent_id, backend_session_id, msg_id, trace_id or ""),
         ).rowcount > 0
-        lowest = database.execute(
-            """SELECT MIN(seq) AS seq FROM messages
+        # Each message of a turn gets its own slot in the live band, in the
+        # order it started (display order is timestamp, then seq).
+        highest = database.execute(
+            """SELECT MAX(seq) AS seq FROM messages
                 WHERE agent_id=? AND backend_session_id=?
-                  AND seq<=-900000 AND seq>-1000000""",
+                  AND seq>=-900000 AND seq<-850000""",
             (agent_id, backend_session_id)).fetchone()
-        seq = (int(lowest["seq"]) - 1) if lowest and lowest["seq"] is not None else -900000
+        seq = (int(highest["seq"]) + 1) if highest and highest["seq"] is not None else -900000
         database.execute(
             """INSERT INTO messages (
                    message_id, agent_id, backend_session_id, source_file, seq,

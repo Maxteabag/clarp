@@ -87,7 +87,11 @@ class LiveView:
             self.activity = copy.deepcopy(op.get("activity") or {"state": "idle"})
             return True
         if name == "turn":
-            self.turn = copy.deepcopy(op.get("turn"))
+            turn = copy.deepcopy(op.get("turn")) or None
+            if self.turn and turn and turn.get("turn_id") != self.turn.get("turn_id"):
+                # A new turn: the last one's items now live in /log.
+                self._items = {}
+            self.turn = turn
             return True
         if name not in {"upsert", "append", "done"}:
             return True

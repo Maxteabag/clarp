@@ -38,6 +38,8 @@ class RuntimeEventStream:
     @staticmethod
     def _record(event: dict) -> None:
         agents_db.record_sse_event({**dict(event), _RUNTIME_MARKER: True})
+        from . import live_hub
+        live_hub.nudge()
 
     def broadcast_ephemeral(self, event: dict) -> None:
         # Runtime input edges are not useful without a connected HTTP server.
@@ -52,15 +54,27 @@ class RuntimeEventStream:
 
 
 class RuntimeEventWatcher:
-    """Relay newly persisted runtime events without recording them twice."""
+    """Relay newly persisted runtime events without recording them twice.
+
+    The runtime nudges this watcher over the live stream (``poll_now``) right
+    after it stores an event, so relaying no longer waits for the poll; the
+    poll stays as the fallback (fast until the first nudge arrives).
+    """
 
     INTERVAL_SEC = 0.1
+    NUDGED_INTERVAL_SEC = 1.0
 
     def __init__(self, stream):
         self.stream = stream
         self._last_id = 0
         self._stop = threading.Event()
+        self._wake = threading.Event()
+        self._nudged = False
         self._thread: threading.Thread | None = None
+
+    def poll_now(self) -> None:
+        self._nudged = True
+        self._wake.set()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -77,11 +91,16 @@ class RuntimeEventWatcher:
 
     def stop(self, timeout: float = 1.0) -> None:
         self._stop.set()
+        self._wake.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=timeout)
 
     def _loop(self) -> None:
-        while not self._stop.wait(self.INTERVAL_SEC):
+        while not self._stop.is_set():
+            self._wake.wait(self.NUDGED_INTERVAL_SEC if self._nudged else self.INTERVAL_SEC)
+            self._wake.clear()
+            if self._stop.is_set():
+                return
             try:
                 self._poll_once()
             except Exception as exc:  # noqa: BLE001 - watcher must self-heal

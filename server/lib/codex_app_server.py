@@ -299,6 +299,13 @@ class _Client:
             active.state.tokens_in = int(usage.get("inputTokens") or 0)
             active.state.tokens_out = int(usage.get("outputTokens") or 0)
             return
+        live_items = getattr(active.state, "live_items", None)
+        if live_items is None:
+            from .live_codex import CodexLiveItems
+            live_items = active.state.live_items = CodexLiveItems(active.agent_id)
+        if method in ("item/started", "item/completed", "item/reasoning/summaryTextDelta",
+                      "item/reasoning/summaryPartAdded", "item/commandExecution/outputDelta"):
+            live_items.on_notification(method, params)
         if method in ("item/started", "item/updated", "item/completed"):
             item = params.get("item")
             if isinstance(item, dict):
