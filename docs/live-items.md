@@ -341,7 +341,9 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
   `null`, and `POST /tool-explanations` answers every item `disabled`.
 - Rendering: the tool row's first line is always the deterministic `label` (verb +
   label + elapsed + status). With `explain.text` present it is the secondary line,
-  in a reserved one-line slot so the row never changes height when it arrives.
+  in a reserved one-line slot so the row never changes height when it arrives;
+  while it is coming (`explain.status` `pending`, or no text yet on a running
+  tool) the slot reads a faint `Explaining…`.
   With the setting off, the secondary line is the raw `tool.command`. Clients
   keep their per-device detail level for the existing `POST /tool-explanations`
   path; items use the Host level.
@@ -362,7 +364,11 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
    `tools[].id` / `display_cells[].id` equals a tool item's `tool.call_id`, the
    durable row takes over that item's place. Do not delete and re-insert.
 6. Settled turn: fold its work behind `Worked for <worked_ms>`; failed or
-   interrupted items stay visible.
+   interrupted items stay visible. The fold survives the takeover: the Host
+   lands each tool as its own `/log` row, so while the turn is held keep the
+   tool and reasoning rows (one row per tool, inside the fold or, when failed,
+   outside it) and do not show those tool rows again as activity; the answer's
+   durable row shows in the answer's place.
 7. Ignore unknown kinds, ops and fields.
 
 ## 8. Live Activity pushes (feature `live_activity_push`, Host contract 45)
