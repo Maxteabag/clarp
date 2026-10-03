@@ -49,6 +49,31 @@ purpose, status, output and cancellation.
 | Anything longer than about five minutes, or that edits code | `clarp-sub-agent` (fork or start) |
 | Fire-and-forget batch work | `clarp-sub-agent start` (systemd mode) |
 
+### Choosing Antigravity (`--backend agy`)
+
+AGY runs Claude Opus/Sonnet 5.5 and Gemini on the Antigravity account, so
+its quota is separate from your Claude and Codex accounts. Choose it when:
+
+- your Claude accounts are at their limit but the job wants an Opus-class
+  model: `--backend agy --model claude-opus-5-5-high`;
+- the job is web research. AGY has built-in web search and page fetch
+  (`search_web`, `read_url_content`), no flag needed, and they show as
+  WebSearch/WebFetch rows in the helper's chat;
+- you want cheap parallel probes: `gemini-3.8-flash-low`.
+
+Effort is part of the model id (`claude-opus-5-5-low|medium|high`,
+`claude-sonnet-5-5-*`, `gemini-3.8-flash-*`); a bare `claude-opus-5-5` or a
+separate `--effort` is rejected. `agy models` lists what your account
+offers. An AGY child of a fork is always a `seed` fork (see below), and AGY
+streams no thinking text, so its chat shows messages and tool rows only.
+
+```bash
+clarp-sub-agent start research /path/to/wt prompt.md --clarp-agent \
+  --backend agy --model claude-opus-5-5-high --title "Web research"
+clarp-sub-agent fork probe --cwd /path/to/wt --backend agy \
+  --model claude-opus-5-5-high --task "Search the web for X and report."
+```
+
 ## Fork: a helper that starts from your conversation
 
 A fork is a Clarp helper agent (role `helper`, parent = you, nested under
