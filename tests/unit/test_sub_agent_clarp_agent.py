@@ -237,3 +237,115 @@ def test_run_registers_a_worker_job_with_its_log_and_streams_output(sub, tmp_pat
     assert ("boss", "job-log", "bg1:1:job", str((sub.DIR / "w.log").resolve())) in bg
     assert bg[-1] == ("boss", "job-finish", "bg1:1:job")
     assert "Step one done" in capsys.readouterr().out
+
+
+# ---- forks -------------------------------------------------------------------
+
+def _capture(admin, monkeypatch, reply=None):
+    sent = []
+    monkeypatch.setattr(admin, "api_request", lambda method, path, body=None, **kw: (
+        sent.append((method, path, body)), reply or {"ok": True, "children": []})[1])
+    return sent
+
+
+def test_admin_agent_fork_forks_the_calling_session(admin, monkeypatch, tmp_path):
+    monkeypatch.setenv("CLARP_SESSION", "boss")
+    sent = _capture(admin, monkeypatch)
+    args = admin.parser().parse_args([
+        "agent", "fork", "stream-a", "--task", "Do A.",
+        "--worktree", f"{tmp_path}:feat/a", "--model", "claude-opus-5-5"])
+    assert args.func(args) == 0
+    assert sent == [("POST", "/agents/boss/fork", {
+        "children": [{"name": "stream-a", "task": "Do A.",
+                      "worktree": {"repo": str(tmp_path.resolve()), "branch": "feat/a"}}],
+        "model": "claude-opus-5-5"})]
+
+
+def test_admin_agent_fork_count_and_task_file(admin, monkeypatch, tmp_path):
+    monkeypatch.delenv("CLARP_SESSION", raising=False)
+    monkeypatch.setenv("CLAUDE_PWA_SESSION", "pwa-boss")
+    task = tmp_path / "task.md"
+    task.write_text("Try one approach.\n")
+    sent = _capture(admin, monkeypatch)
+    args = admin.parser().parse_args(
+        ["agent", "fork", "probe", "--task-file", str(task), "--count", "3"])
+    assert args.func(args) == 0
+    assert sent == [("POST", "/agents/pwa-boss/fork",
+                     {"count": 3, "name": "probe", "task": "Try one approach."})]
+
+
+def test_admin_agent_fork_spec_file_sends_many_children(admin, monkeypatch, tmp_path):
+    spec = tmp_path / "children.json"
+    children = [{"name": "a", "task": "A"}, {"name": "b", "task": "B", "cwd": "/x"}]
+    spec.write_text(json.dumps(children))
+    sent = _capture(admin, monkeypatch)
+    args = admin.parser().parse_args(
+        ["agent", "fork", "--spec", str(spec), "--from", "lead", "--backend", "codex"])
+    assert args.func(args) == 0
+    assert sent == [("POST", "/agents/lead/fork", {"children": children, "backend": "codex"})]
+
+
+@pytest.mark.parametrize("argv,message", [
+    (["agent", "fork", "a"], "--task"),
+    (["agent", "fork", "--task", "x"], "NAME"),
+    (["agent", "fork", "a", "--task", "x", "--worktree", "no-branch"], "REPO:BRANCH"),
+])
+def test_admin_agent_fork_refuses_incomplete_requests(admin, monkeypatch, argv, message):
+    monkeypatch.setenv("CLARP_SESSION", "boss")
+    sent = _capture(admin, monkeypatch)
+    args = admin.parser().parse_args(argv)
+    with pytest.raises(SystemExit, match=message):
+        args.func(args)
+    assert sent == []
+
+
+def test_admin_agent_fork_needs_a_parent(admin, monkeypatch):
+    monkeypatch.delenv("CLARP_SESSION", raising=False)
+    monkeypatch.delenv("CLAUDE_PWA_SESSION", raising=False)
+    args = admin.parser().parse_args(["agent", "fork", "a", "--task", "x"])
+    with pytest.raises(SystemExit, match="CLARP_SESSION"):
+        args.func(args)
+
+
+def test_admin_agent_fork_exits_nonzero_when_a_child_failed(admin, monkeypatch, capsys):
+    monkeypatch.setenv("CLARP_SESSION", "boss")
+    _capture(admin, monkeypatch, {"ok": True, "children": [
+        {"name": "a", "session": "a-1", "fork": "native", "delivered": True},
+        {"name": "b", "error": "worktree_failed", "message": "not a repo"}]})
+    args = admin.parser().parse_args(["agent", "fork", "a", "--task", "x"])
+    assert args.func(args) == 1
+    assert json.loads(capsys.readouterr().out)["children"][1]["error"] == "worktree_failed"
+
+
+def test_sub_agent_fork_forks_and_watches_each_child(sub, tmp_path, monkeypatch, capsys):
+    def admin(*args):
+        sub.calls["admin"].append(args)
+        return {"ok": True, "children": [
+            {"name": "stream-a", "session": "stream-a-3f9c", "cwd": "/wt/a",
+             "fork": "native", "delivered": True}]}
+    monkeypatch.setattr(sub, "_admin", admin)
+
+    assert sub.main(["fork", "stream-a", "--task", "Do A.",
+                     "--worktree", "/repo:feat/a", "--title", "Part A"]) == 0
+
+    [call] = sub.calls["admin"]
+    assert call == ("agent", "fork", "stream-a", "--from", "boss", "--task", "Do A.",
+                    "--worktree", "/repo:feat/a")
+    assert (sub.DIR / "stream-a.session").read_text().strip() == "stream-a-3f9c"
+    watcher = next(argv for argv in sub.calls["run"] if argv[0] == "systemd-run")
+    assert watcher[-4:] == ["__watch", "stream-a", "stream-a-3f9c", "boss"]
+    assert "stream-a-3f9c" in capsys.readouterr().out
+    sub.main(["status"])
+    assert "helper=stream-a-3f9c" in capsys.readouterr().out
+
+
+def test_sub_agent_fork_reports_failed_children(sub, monkeypatch, capsys):
+    monkeypatch.setattr(sub, "_admin", lambda *args: {"ok": True, "children": [
+        {"name": "probe-1", "session": "probe-1-aa", "cwd": "/w", "fork": "seed",
+         "delivered": True},
+        {"name": "probe-2", "error": "contact_occupied", "message": "busy"}]})
+    assert sub.main(["fork", "probe", "--task", "x", "--count", "2"]) == 1
+    out = capsys.readouterr()
+    assert "probe-1-aa" in out.out and "contact_occupied" in out.err
+    assert (sub.DIR / "probe-1.session").exists()
+    assert not (sub.DIR / "probe-2.session").exists()

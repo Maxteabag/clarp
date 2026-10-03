@@ -2,6 +2,8 @@
 """Spawn sub-agents that survive the parent Clarp session being restarted.
 
     clarp-sub-agent start NAME WORKDIR PROMPT_FILE [--model M] [--backend B] [--title T] [--clarp-agent]
+    clarp-sub-agent fork NAME --task T|--task-file F [--count N] [--worktree REPO:BRANCH] [--cwd D]
+                         [--backend B] [--model M] [--title T]
     clarp-sub-agent status [NAME]
     clarp-sub-agent stop NAME
 
@@ -13,6 +15,10 @@ Default mode: each sub-agent runs as its own systemd user unit
 the calling session, cwd = WORKDIR) that the owner can open and steer. It is
 sent the prompt as an agent-origin message and reports back the same way. A
 small watcher unit keeps the background job alive until the helper reports.
+
+fork: like --clarp-agent, but the helper starts from the calling agent's own
+conversation (``clarp-admin agent fork``), so the task can be short. With
+--count N it forks NAME-1..NAME-N with the same task.
 
 In default mode the unit registers a background job of kind "worker" on the
 parent session: a background process, with its log registered and streamed so
@@ -131,7 +137,16 @@ def _admin(*args: str) -> dict:
     exe = shutil.which("clarp-admin")
     if not exe:
         raise AdminError("clarp-admin is not on PATH")
-    out = subprocess.run([exe, *args], capture_output=True, text=True, timeout=60)
+    out = subprocess.run([exe, *args], capture_output=True, text=True,
+                         timeout=360 if args[:2] == ("agent", "fork") else 60)
+    if out.returncode != 0 and args[:2] == ("agent", "fork"):
+        # A fork where some children failed still answers with every row.
+        try:
+            partial = json.loads(out.stdout or "")
+            if isinstance(partial, dict) and isinstance(partial.get("children"), list):
+                return partial
+        except json.JSONDecodeError:
+            pass
     if out.returncode != 0:
         detail = (out.stderr.strip().splitlines() or [f"exit {out.returncode}"])[-1]
         raise AdminError(f"clarp-admin {args[0]} {args[1] if len(args) > 1 else ''}: {detail}")
@@ -197,11 +212,17 @@ def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: path
     except AdminError as exc:
         print(f"clarp-sub-agent: {exc}", file=sys.stderr)
         return 1
-    unit = f"clarp-sub-agent-{a.name}"
-    log = DIR / f"{a.name}.log"
+    _launch_watcher(a.name, helper, parent)
+    return 0
+
+
+def _launch_watcher(name: str, helper: str, parent: str) -> None:
+    """The systemd unit that holds the sub-agent job until ``helper`` reports."""
+    unit = f"clarp-sub-agent-{name}"
+    log = DIR / f"{name}.log"
     if not shutil.which("systemd-run"):
         print(f"started helper {helper} (parent={parent}); no systemd, so no background job")
-        return 0
+        return
     subprocess.run(["systemctl", "--user", "reset-failed", unit], capture_output=True)
     passthrough = [f"--setenv={k}={os.environ[k]}" for k in
                    ("PATH", "HOME", "CLARP_SHARE_DIR", "CLARP_CONFIG_DIR", "CLARP_CACHE_DIR",
@@ -209,10 +230,53 @@ def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: path
     subprocess.run(["systemd-run", "--user", "--unit", unit, "--collect",
                     "-p", f"StandardOutput=file:{log}", "-p", f"StandardError=append:{log}",
                     *passthrough, sys.executable, str(pathlib.Path(__file__).resolve()),
-                    "__watch", a.name, helper, parent], check=True)
+                    "__watch", name, helper, parent], check=True)
     print(f"started helper {helper} (parent={parent}); open it in Clarp to steer it; "
           f"watcher {unit}; log: {log}")
-    return 0
+
+
+def fork(a: argparse.Namespace) -> int:
+    """Fork the calling agent into helper(s) that start from its conversation."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", a.name):
+        sys.exit("name must be [A-Za-z0-9._-]")
+    parent = _parent()
+    if not parent:
+        sys.exit("fork needs CLARP_SESSION (the agent to fork)")
+    args = ["agent", "fork", a.name, "--from", parent]
+    if a.task_file:
+        args += ["--task-file", str(pathlib.Path(a.task_file).expanduser().resolve())]
+    elif a.task:
+        args += ["--task", a.task]
+    else:
+        sys.exit("fork needs --task or --task-file")
+    for flag, value in (("--count", a.count), ("--worktree", a.worktree), ("--cwd", a.cwd),
+                        ("--backend", a.backend), ("--model", a.model)):
+        if value:
+            args += [flag, str(value)]
+    try:
+        result = _admin(*args)
+    except AdminError as exc:
+        print(f"clarp-sub-agent: {exc}", file=sys.stderr)
+        return 1
+    DIR.mkdir(parents=True, exist_ok=True)
+    failed = 0
+    for child in result.get("children") or []:
+        name, helper = str(child.get("name") or ""), str(child.get("session") or "")
+        if not helper:
+            failed += 1
+            print(f"clarp-sub-agent: fork {name}: {child.get('error')} "
+                  f"{child.get('message') or ''}".rstrip(), file=sys.stderr)
+            continue
+        (DIR / f"{name}.session").write_text(helper + "\n")
+        # status lists sub-agents by their prompt file.
+        (DIR / f"{name}.prompt.md").write_text(
+            (pathlib.Path(a.task_file).expanduser().read_text() if a.task_file else a.task)
+            + "\n")
+        (DIR / f"{name}.title").write_text((a.title or f"Fork {name}") + "\n")
+        (DIR / f"{name}.exit").unlink(missing_ok=True)
+        print(f"forked {name} -> {helper} ({child.get('fork')}, cwd {child.get('cwd')})")
+        _launch_watcher(name, helper, parent)
+    return 1 if failed else 0
 
 
 def watch(name: str, helper: str, parent: str, *, poll_sec: float = POLL_SEC,
@@ -366,11 +430,18 @@ def main(argv: list[str]) -> int:
     s.add_argument("--title")
     s.add_argument("--clarp-agent", action="store_true",
                    help="run as a Clarp helper agent the owner can open and steer")
+    f = sub.add_parser("fork", help="fork this agent: helpers that start from its conversation")
+    f.add_argument("name"); f.add_argument("--task"); f.add_argument("--task-file")
+    f.add_argument("--count", type=int); f.add_argument("--worktree", help="REPO:BRANCH")
+    f.add_argument("--cwd"); f.add_argument("--backend", choices=CLARP_BACKENDS)
+    f.add_argument("--model"); f.add_argument("--title")
     st = sub.add_parser("status"); st.add_argument("name", nargs="?")
     sp = sub.add_parser("stop"); sp.add_argument("name")
     a = p.parse_args(argv)
     if a.cmd == "start":
         return start(a)
+    if a.cmd == "fork":
+        return fork(a)
     if a.cmd == "status":
         return status(a)
     return subprocess.run(["systemctl", "--user", "stop", f"clarp-sub-agent-{a.name}"]).returncode
