@@ -1,6 +1,6 @@
 ---
 name: clarp-sub-agents
-description: Spawn sub-agents (helper agents, parallel workers, delegated tasks) from a Clarp agent. Use this INSTEAD OF the built-in Agent/Task tool or Codex sub-agents for any sub-agent job longer than a few minutes or that edits code, because built-in sub-agents die when Clarp restarts the session after a usage limit. Each sub-agent runs detached, survives restarts, and shows in the apps as a running background job.
+description: Spawn sub-agents (helper agents, parallel workers, delegated tasks) from a Clarp agent, or fork yourself into helpers that start from your own conversation. Use this INSTEAD OF the built-in Agent/Task tool or Codex sub-agents for any sub-agent job longer than a few minutes or that edits code, because built-in sub-agents die when Clarp restarts the session after a usage limit. Each sub-agent runs detached, survives restarts, and shows in the apps as a running background job.
 ---
 
 # Clarp sub-agents
@@ -41,11 +41,63 @@ purpose, status, output and cancellation.
 | Situation | Use |
 |---|---|
 | Short read-only lookup whose answer you need in this turn | Built-in Agent/Task tool |
-| Anything longer than about five minutes | `clarp-sub-agent` |
-| Anything that edits code or runs a test gate | `clarp-sub-agent` |
-| Several parallel workstreams | `clarp-sub-agent`, one per stream |
-| The owner may want to open, watch or steer it | `clarp-sub-agent start --clarp-agent` |
+| The child needs what you already know (the plan, decisions, files read) | `clarp-sub-agent fork` |
+| Several parallel workstreams of a plan you just worked out | `clarp-sub-agent fork`, one per stream |
+| Several attempts at the same problem, compared afterwards | `clarp-sub-agent fork NAME --count N` |
+| A self-contained job a fresh agent can do from a written brief | `clarp-sub-agent start --clarp-agent` |
+| A different backend or a clean context on purpose (an unbiased review) | `clarp-sub-agent start --clarp-agent` |
+| Anything longer than about five minutes, or that edits code | `clarp-sub-agent` (fork or start) |
 | Fire-and-forget batch work | `clarp-sub-agent start` (systemd mode) |
+
+## Fork: a helper that starts from your conversation
+
+A fork is a Clarp helper agent (role `helper`, parent = you, nested under
+you in the chat list, reports back like any helper) whose conversation is a
+copy of yours up to now. It already knows the plan, the decisions and what
+you read, so its task can be one or two lines instead of a full brief. You
+keep working; the child carries on alone from its copy.
+
+```bash
+# One child in its own worktree (created beside the repo as
+# <repo>-worktrees/<branch>, or reused if that worktree exists):
+clarp-sub-agent fork stream-a --task "Do part A of the plan above; WIP-commit, do not push." \
+  --worktree ~/GIT/clarp:feat/stream-a
+
+# Three tries at one problem, probe-1..probe-3, each on branch fix/x-1..fix/x-3:
+clarp-sub-agent fork probe --count 3 --task "Try a different fix for the flake." \
+  --worktree ~/GIT/clarp:fix/x
+
+# Different tasks in one call, straight through the Host:
+clarp-admin agent fork --spec children.json     # [{"name", "task", "worktree"?: {"repo", "branch"}}, ...]
+```
+
+Both forms fork `$CLARP_SESSION` (or `$CLAUDE_PWA_SESSION`); pass `--from`
+to `clarp-admin` to fork another of your sessions. `--backend`, `--model`
+and `--effort` apply to every child. Each child is sent its task from you
+with instructions to report via `clarp-admin prompt --to <you> --from
+<child>`; `clarp-sub-agent fork` also starts the same watcher job as
+`start --clarp-agent`, and `helper-state`, `done` and re-tasking work the
+same way (see Collect below).
+
+How the copy is made (the `fork` field of each child row):
+
+- `native`: Claude Code and Codex copy the conversation itself. Claude's
+  copy goes into the child's own project directory, so it resumes from its
+  worktree. The tool call you are making while forking is not in the copy
+  (Claude Code writes it after the call returns); the child is told the
+  conversation ended with the fork.
+- `seed`: Grok, AGY, OpenCode and DeepSeek, or a child on a different
+  backend than yours. The child starts a fresh session whose first message
+  holds the most recent part of your transcript (about 60,000 characters,
+  each turn trimmed to 4,000, tool calls as one-line summaries), then the
+  task. Put anything it must not miss into the task itself.
+
+Fork when the shared context is the point. Do not fork to escape a full
+context window (the child inherits it) or for work that needs a fresh,
+unbiased view. The worktree rule below holds for forks too: one tree per
+child, never two children in one tree. A failed child (bad worktree, name
+already in use) is reported in its row and on stderr; its siblings still
+start, and the command exits 1.
 
 ## How
 
