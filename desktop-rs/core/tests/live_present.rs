@@ -323,3 +323,74 @@ fn a_running_tool_whose_log_row_landed_at_its_start_keeps_its_live_row() {
     assert_eq!(tool.lines, ["Exit code 137"], "the failed tool keeps its tail");
     assert_eq!(p.absorbed_rows, ["msg-e60c25b9161ac8b660ca"]);
 }
+
+/// A user message written at `ms` (Host time), from another turn.
+fn user_at(id: &str, ms: i64) -> Message {
+    let stamp = chrono::DateTime::from_timestamp_millis(ms).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    row(json!({"id": id, "role": "user", "text": "Next", "timestamp": stamp, "trace_id": format!("tr-{id}")}))
+}
+
+const REAL_STARTED: i64 = 1791028137185;
+
+#[test]
+fn a_message_written_after_the_turn_began_goes_below_the_settled_turn() {
+    // The real settled turn, its tool rows not landed yet: the prompt and
+    // the live answer row. A message sent once it settled goes below it.
+    let (view, rows) = real_turn();
+    let before: Vec<Message> = rows.iter().filter(|r| r.id.starts_with("u-") || r.id.starts_with("live-")).cloned().chain([user_at("u-next", REAL_STARTED + 30_000)]).collect();
+    let p = present(&view, &before, &options(&[], 0));
+    let refs: Vec<&Message> = before.iter().collect();
+    assert_eq!(p.anchor(&refs), 2, "after the prompt (and the turn's own live row), before the new message");
+    // The tool rows land after the new message (in /log order): the turn's
+    // own rows never push its place, so it stays before the new message.
+    let after: Vec<Message> = before.iter().cloned().chain(rows.iter().filter(|r| r.id.starts_with("msg-")).cloned()).collect();
+    let p = present(&view, &after, &options(&[], 0));
+    let refs: Vec<&Message> = after.iter().collect();
+    assert_eq!(p.anchor(&refs), 2);
+    // In /log order (the tool rows before the message) the same.
+    let ordered: Vec<Message> = rows.iter().cloned().chain([user_at("u-next", REAL_STARTED + 30_000)]).collect();
+    let p = present(&view, &ordered, &options(&[], 0));
+    let refs: Vec<&Message> = ordered.iter().collect();
+    assert_eq!(refs[p.anchor(&refs)].id, "u-next");
+}
+
+#[test]
+fn the_anchor_follows_the_turns_prompt_and_host_times() {
+    let (view, rows) = real_turn();
+    let p = present(&view, &rows, &options(&[], 0));
+    let earlier = user_at("u-old", REAL_STARTED - 60_000);
+    let same = user_at("u-same", REAL_STARTED);
+    let undated = row(json!({"id": "local", "role": "assistant", "text": "no time"}));
+    let later = user_at("u-later", REAL_STARTED + 1);
+    let chat = [&earlier, &rows[0], &same, &undated, &later];
+    assert_eq!(p.anchor(&chat), 4, "earlier, at the start or without a time: above; a millisecond after: below");
+    assert_eq!(p.anchor(&[&earlier, &rows[0]]), 2, "nothing after it: last");
+    // The Host wrote the prompt a few ms after the turn began: still above.
+    let mut late_prompt = rows[0].clone();
+    late_prompt.timestamp = "2026-10-03T11:48:57.200Z".into();
+    assert_eq!(p.anchor(&[&earlier, &late_prompt, &later]), 2, "the turn's prompt is always above its work");
+}
+
+#[test]
+fn a_message_queued_while_the_turn_runs_goes_below_it() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/live-real-settled-turn.json");
+    let body: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let (mut view, mut rows) = real_turn();
+    rows.extend(body["next"]["rows"].as_array().unwrap().iter().map(|r| row(r.clone())));
+    let mut event = body["next"]["event"].clone();
+    event["lseq"] = json!(42);
+    view.apply_event(event.as_object().unwrap());
+    let started = body["next"]["event"]["ops"][0]["turn"]["started_at_ms"].as_i64().unwrap();
+    // The prompt is written in the turn's first millisecond; the tool row
+    // at the tool's start (the turn's own); the queued message after both.
+    let queued = user_at("u-queued", started + 5_000);
+    let mut chat = rows.clone();
+    let tool_row = chat.pop().unwrap();
+    chat.push(queued);
+    chat.push(tool_row);
+    let p = present(&view, &chat, &options(&[], started + 6_000));
+    let refs: Vec<&Message> = chat.iter().collect();
+    let at = p.anchor(&refs);
+    assert_eq!(refs[at - 1].id, "u-clarp-admin-3c48398b85b08a09", "right after the prompt that started it");
+    assert_eq!(refs[at].id, "u-queued");
+}
