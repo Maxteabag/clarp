@@ -93,6 +93,9 @@ pub fn live_check(out: String) {
     let rows_before: Rc<RefCell<(usize, usize)>> = Rc::default();
     let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
     let (out7, out8, out9, out10) = (out.clone(), out.clone(), out.clone(), out.clone());
+    let (out11, out12, out13) = (out.clone(), out.clone(), out.clone());
+    let landing: Rc<RefCell<((usize, usize), Option<(String, f32)>)>> = Rc::default();
+    let (landing1, landing2) = (landing.clone(), landing.clone());
     let running_at: Rc<RefCell<usize>> = Rc::default();
     let (running_at1, running_at2) = (running_at.clone(), running_at.clone());
     let (before3, before4) = (rows_before.clone(), rows_before.clone());
@@ -492,10 +495,105 @@ pub fn live_check(out: String) {
             check(shown.iter().position(|r| r.live.key == REAL_RUNNING) == Some(*running_at2.borrow()), "at the same place");
             let (_, inserted_before) = *before4.borrow();
             check(crate::view::sync_stats().1 == inserted_before, "no row inserted");
+            // Another chat with the same real turn, settled, its tool rows
+            // and finalized answer not in /log yet.
+            control("/__control/live-load", &json!({"session": "anchor", "fixture": "live-real-settled-turn.json", "hold": true, "agent_id": "agent-anchor"})).is_ok()
+        })),
+        ("anchor listed", Box::new(move |app, _window, _| {
+            if app.engine.borrow().roster().find("anchor").is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select("anchor");
+            true
+        })),
+        ("anchor settled", Box::new(move |app, _window, elapsed| {
+            let open = app.engine.borrow().selected_session() == "anchor" && app.engine.borrow().conversation("anchor").is_some_and(|c| c.index_of(REAL_ANSWER_ROW).is_some());
+            if !open || live_row(REAL_FOLD).is_none() || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(titles() == ["Worked for 16s · 2 tools", "Ran sleep 60", ""], &format!("settled, before its rows land: the fold, the failed tool, the answer: {:?}", titles()));
+            // The next message, sent after the turn settled.
+            control("/__control/upsert", &json!({"session": "anchor", "turns": [{"id": ANCHOR_NEXT, "role": "user", "text": "And now the next step.", "timestamp": "2026-10-03T11:49:30.000Z", "trace_id": ANCHOR_TURN}]})).is_ok()
+        })),
+        ("anchor message", Box::new(move |app, _window, elapsed| {
+            if !app.engine.borrow().conversation("anchor").is_some_and(|c| c.index_of(ANCHOR_NEXT).is_some()) || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let order = anchor_order(&[REAL_PROMPT, REAL_FOLD, &format!("live:{REAL_FAILED}"), REAL_ANSWER, ANCHOR_NEXT]);
+            check(in_order(&order), &format!("the new message is below the settled turn: prompt, fold, failed tool, answer, message: {order:?}"));
+            shot(&out11, "live-10-anchor-message");
+            *landing1.borrow_mut() = (crate::view::sync_stats(), anchor_now());
+            control("/__control/live-load", &json!({"session": "anchor", "fixture": "live-real-settled-turn.json", "part": "held"})).is_ok()
+        })),
+        ("anchor landed", Box::new(move |app, _window, elapsed| {
+            let landed = app.engine.borrow().conversation("anchor").is_some_and(|c| c.index_of("msg-9dc44519ed4e93bcff29").is_some() && c.rows().iter().all(|r| r.kind != "live"));
+            if !landed || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            let order = anchor_order(&[REAL_PROMPT, REAL_FOLD, &format!("live:{REAL_FAILED}"), REAL_ANSWER_ROW, ANCHOR_NEXT]);
+            check(in_order(&order), &format!("the rows landing after the message move nothing: {order:?}"));
+            let shown = rows(&crate::window().expect("window"));
+            check(shown.iter().all(|r| r.id != "msg-9dc44519ed4e93bcff29" && r.id != "msg-d28c2b3f8a1150792e60"), "the tool rows are not shown again");
+            let ((_, inserted_before), place) = landing2.borrow().clone();
+            check(crate::view::sync_stats().1 == inserted_before, &format!("taken over in place: no row inserted ({inserted_before} → {})", crate::view::sync_stats().1));
+            match place {
+                Some(place) => {
+                    let (still, detail) = anchor_moved(&place);
+                    check(still, &format!("and nothing on screen moved: {detail}"));
+                }
+                None => check(false, "the place on screen was recorded"),
+            }
+            shot(&out12, "live-11-anchor-landed");
+            // The next turn starts (the message's): the settled turn retires.
+            let started = ANCHOR_STARTED;
+            control("/__control/live-event", &json!({"session": "anchor", "event": {"conv": "c-probe", "server_now_ms": started + 2_000, "ops": [
+                {"op": "turn", "conv": "c-probe", "turn": {"turn_id": ANCHOR_TURN, "status": "running", "started_at_ms": started, "ended_at_ms": null, "worked_ms": null, "tool_count": 1}},
+                {"op": "upsert", "conv": "c-probe", "id": "x:anchor-1", "kind": "tool", "rev": 1, "item": {"id": "x:anchor-1", "kind": "tool", "rev": 1, "conv": "c-probe", "turn_id": ANCHOR_TURN,
+                    "status": "running", "ordinal": 20, "started_at_ms": started + 1_000, "ended_at_ms": null,
+                    "tool": {"name": "Bash", "call_id": "anchor-1", "category": "exec", "label": "make test", "command": "make test"}}},
+            ]}}))
+            .is_ok()
+        })),
+        ("anchor next turn", Box::new(move |_, _window, elapsed| {
+            if live_row(ANCHOR_TOOL).is_none() || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(live_row(REAL_FOLD).is_none(), "the settled turn retired: its fold is gone");
+            let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_TOOL]);
+            check(in_order(&order), &format!("the earlier turn, the message, the new turn: {order:?}"));
+            // A message queued while the turn runs goes below it.
+            control("/__control/upsert", &json!({"session": "anchor", "turns": [{"id": ANCHOR_QUEUED, "role": "user", "text": "Also check the docs.", "timestamp": "2026-10-03T11:49:40.000Z", "trace_id": "tr-anchor-3"}]})).is_ok()
+        })),
+        ("anchor queued", Box::new(move |app, _window, elapsed| {
+            if !app.engine.borrow().conversation("anchor").is_some_and(|c| c.index_of(ANCHOR_QUEUED).is_some()) || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_TOOL, ANCHOR_QUEUED]);
+            check(in_order(&order), &format!("the queued message is below the running turn: {order:?}"));
+            shot(&out13, "live-12-anchor-queued");
             true
         })),
     ];
     run_stages(stages);
+}
+
+const REAL_PROMPT: &str = "u-clarp-admin-23071c64bf0fc449";
+const REAL_ANSWER: &str = "live:cl:msg_011CffFaGNXmnoVdTuwgSXcv:0";
+const ANCHOR_NEXT: &str = "u-anchor-next";
+const ANCHOR_QUEUED: &str = "u-anchor-queued";
+const ANCHOR_TURN: &str = "tr-anchor-2";
+const ANCHOR_TOOL: &str = "live:x:anchor-1";
+/// 2026-10-03T11:49:30Z, when the next message was written.
+const ANCHOR_STARTED: i64 = 1791028170000;
+
+/// Where each row (by id or live key) shows in the window.
+fn anchor_order(ids: &[&str]) -> Vec<Option<usize>> {
+    let shown = rows(&crate::window().expect("window"));
+    ids.iter().map(|id| shown.iter().position(|r| r.id == *id || r.live.key == *id)).collect()
+}
+
+fn in_order(order: &[Option<usize>]) -> bool {
+    order.iter().all(Option::is_some) && order.windows(2).all(|w| w[0] < w[1])
 }
 
 fn clarp_engine_now() -> i64 {

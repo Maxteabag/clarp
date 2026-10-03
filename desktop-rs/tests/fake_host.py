@@ -971,9 +971,28 @@ class Handler(BaseHTTPRequestHandler):
             # With `part` ("next", "done"), what the fixture records for later:
             # rows join /log first (the Host writes a tool's row when it
             # starts), then its live event goes out.
+            # With `hold`, /log first holds only the prompt and the answer's
+            # live row (kind "live", as while the turn runs); `part: "held"`
+            # then lands the rest: the answer finalized in place, the tool
+            # rows appended after whatever came since.
             session = body["session"]
             recorded = json.loads((pathlib.Path(__file__).parent / "fixtures" / body["fixture"]).read_text())
             part = body.get("part")
+            if part == "held":
+                with state_lock:
+                    rows = turns.setdefault(session, [])
+                    for turn in recorded["log"]["turns"]:
+                        revision += 1
+                        existing = next((t for t in rows if t["id"] == turn["id"]), None)
+                        if existing is None:
+                            rows.append({**turn, "revision": revision})
+                        else:
+                            existing.update({**turn, "revision": revision})
+                    for agent in agents:
+                        if agent["session"] == session:
+                            agent["head_revision"] = revision
+                broadcast({"type": "transcript-updated", "session": session})
+                return self.reply(200, {"ok": True})
             if part:
                 later = recorded["next"]
                 with state_lock:
@@ -993,11 +1012,15 @@ class Handler(BaseHTTPRequestHandler):
                 view.apply_snapshot(recorded["live"])
                 rows = turns.setdefault(session, [])
                 for turn in recorded["log"]["turns"]:
+                    if body.get("hold") and turn["role"] != "user":
+                        if not turn["id"].startswith("live-"):
+                            continue
+                        turn = {**turn, "kind": "live"}
                     revision += 1
                     rows.append({**turn, "revision": revision})
                 agent = next((a for a in agents if a["session"] == session), None)
                 if agent is None:
-                    agent = {"agent_id": recorded["live"]["agent_id"], "session": session, "persona": session.title(), "backend": "claude",
+                    agent = {"agent_id": body.get("agent_id", recorded["live"]["agent_id"]), "session": session, "persona": session.title(), "backend": "claude",
                              "latest_state": "idle", "alive": True, "last_activity": 4000,
                              "conversation_id": recorded["log"]["conversation_id"]}
                     agents.append(agent)
