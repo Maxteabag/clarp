@@ -282,6 +282,18 @@ def test_agy_model_validation_survives_restart_from_persisted_catalog(monkeypatc
     assert not capabilities.is_dispatchable_agy_model("gemini-other-flash-low")
 
 
+def test_fresh_host_accepts_agy_claude_5_5_models_before_any_probe(monkeypatch):
+    """A Host that has never run ``agy models`` still admits the Claude 5.5
+    variants agy offers, effort folded into the id, and not a bare family id."""
+    monkeypatch.setattr(capabilities, "_cache", None)
+    for model in ("claude-opus-5-5-high", "claude-opus-5-5-medium",
+                  "claude-opus-5-5-low", "claude-sonnet-5-5-high",
+                  "claude-sonnet-5-5-medium", "claude-sonnet-5-5-low",
+                  "gemini-3.8-flash-high"):
+        assert capabilities.is_dispatchable_agy_model(model), model
+    assert not capabilities.is_dispatchable_agy_model("claude-opus-5-5")
+
+
 def test_cache_reuses_one_observation_until_forced(monkeypatch):
     capabilities.clear_cache()
     calls: list[list[str]] = []
