@@ -14,7 +14,8 @@ import {
 } from './conversations.svelte.js';
 import {
   handleLiveEvent, liveFor, liveQuery, liveTurnRunning, loadExplanationSettings,
-  onSubscriptionsChanged, onTurnSettled, openLive, setServerFeatures, watchedSessions,
+  onSubscriptionsChanged, onTurnSettled, openLive, setConnectedLive, setServerFeatures,
+  watchedSessions,
 } from './live.svelte.js';
 import {
   audio, bumpLastAudioTs, lastAudioTs, PLAYER_ADAPTER_VERSION, scheduler,
@@ -105,6 +106,9 @@ onSubscriptionsChanged(() => {
 
 export function connectSSE() {
   if (!resubscribing) setConn('connecting', Timing.DEAD_OVERLAY_MS);
+  // Until this connection is open, the chats it adds are carried by none.
+  setConnectedLive([]);
+  const carries = liveQuery() ? watchedSessions() : [];
   try { es = new EventSource(withToken(eventsUrl())); }
   catch (_) { scheduleReconnect(); return; }
   lastMsgAt = Date.now();
@@ -115,7 +119,8 @@ export function connectSSE() {
     setConn('live', Timing.DEAD_OVERLAY_MS);
     const planned = resubscribing;
     resubscribing = false;
-    for (const session of watchedSessions()) openLive(session);
+    setConnectedLive(carries);
+    for (const session of carries) openLive(session);
     if (planned) return;
     refreshServerInfo();
     refreshAgentSnapshot().catch(() => {});

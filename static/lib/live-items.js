@@ -89,7 +89,12 @@ export function liveSnapshotFailed(state) {
 function applyOp(state, op) {
   const name = op.op;
   if (name === 'status') return { ...state, activity: op.activity || IDLE };
-  if (name === 'turn') return { ...state, turn: op.turn || null };
+  if (name === 'turn') {
+    const turn = op.turn || null;
+    // A new turn: the last one's items now live in /log.
+    const fresh = state.turn && turn && turn.turn_id !== state.turn.turn_id;
+    return { ...state, turn, items: fresh ? {} : state.items };
+  }
   if (name !== 'upsert' && name !== 'append' && name !== 'done') return state;
   const id = op.id;
   const rev = op.rev;
