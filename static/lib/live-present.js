@@ -240,6 +240,12 @@ export function currentTurnItems(state) {
     .sort((a, b) => (a.ordinal || 0) - (b.ordinal || 0));
 }
 
+function sameSet(a, b) {
+  if (!a || a.size !== b.size) return false;
+  for (const x of b) if (!a.has(x)) return false;
+  return true;
+}
+
 /**
  * The /log rows the live turn stands in for (docs/live-items.md §7.5): the
  * row a message item names as `row_id`, rows whose every tool or display
@@ -247,9 +253,9 @@ export function currentTurnItems(state) {
  * while the live turn is shown, so nothing renders twice and nothing is
  * deleted and re-inserted when the durable copy lands.
  */
-export function takenOverTurns(turns, items) {
+export function takenOverTurns(turns, items, previous = null) {
   const hidden = new Set();
-  if (!items || !items.length) return hidden;
+  if (!items || !items.length) return sameSet(previous, hidden) ? previous : hidden;
   const rowIds = new Set();
   const callIds = new Set();
   for (const item of items) {
@@ -262,7 +268,8 @@ export function takenOverTurns(turns, items) {
     const text = String(turn.text || '').trim();
     if (!text && parts.length && parts.every(p => p && callIds.has(p.id))) hidden.add(turn.id);
   }
-  return hidden;
+  // The same rows as last time: keep the old set, so views keyed on it stay put.
+  return sameSet(previous, hidden) ? previous : hidden;
 }
 
 const FALLBACK_STATES = new Set(['thinking', 'responding', 'tool', 'compacting']);

@@ -3312,12 +3312,13 @@ html.desktop .speaking { bottom: calc(var(--dock-h) + 16px); }
 .lv-members .lv-verb { color: var(--washi-dim); font-weight: 400; }
 .lv-reasoning .lv-head { color: var(--washi-low); font-style: italic; }
 .lv-glyph { flex: none; color: var(--washi-low); }
+/* Thinking breathes with opacity only: the compositor runs it, so it costs
+   no style recalc or repaint per step (a background-position shimmer did). */
 .lv-reasoning.running .lv-label {
-  background: linear-gradient(90deg, var(--washi-low) 0 40%, var(--washi) 50%, var(--washi-low) 60% 100%);
-  background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
-  animation: lv-shimmer 2.2s steps(30) infinite;
+  color: var(--washi-dim);
+  animation: lv-breathe 2.2s ease-in-out infinite;
 }
-@keyframes lv-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@keyframes lv-breathe { 50% { opacity: .45; } }
 .lv-thought {
   margin: 2px 0 4px 13px; padding-left: 8px; border-left: 2px solid var(--ink-edge);
   color: var(--washi-low); font-family: var(--font-body); font-size: 13px; max-height: 40vh; overflow: auto;
