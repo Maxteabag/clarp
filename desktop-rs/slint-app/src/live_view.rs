@@ -61,7 +61,21 @@ pub(crate) fn ticking(engine: &Engine, session: &str) -> bool {
 
 /// What a live row is built from: an equal signature builds an equal row.
 pub(crate) fn signature(entry: &Entry) -> String {
-    format!("{}|{}|{}|{}|{}|{}|{}|{}|{}|{}", entry.rev, entry.status, entry.title, entry.meta, entry.secondary, entry.expanded, entry.more, entry.lines.len(), entry.text.len(), entry.items.len())
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        entry.rev,
+        entry.status,
+        entry.title,
+        entry.meta,
+        entry.secondary,
+        entry.expanded,
+        entry.more,
+        entry.lines.len(),
+        entry.text.len(),
+        entry.items.len(),
+        entry.explaining,
+        entry.row
+    )
 }
 
 pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow {
@@ -89,6 +103,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
             meta: entry.meta.clone().into(),
             secondary: entry.secondary.clone().into(),
             reserve: entry.reserve_secondary,
+            explaining: entry.explaining,
             lines: ModelRc::new(VecModel::from(entry.lines.iter().map(|l| SharedString::from(l.as_str())).collect::<Vec<_>>())),
             more: entry.more.clone().into(),
             text: entry.text.clone().into(),
