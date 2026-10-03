@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Focus } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
@@ -232,7 +232,8 @@ export component Block inherits VerticalLayout {
                 mouse-cursor: pointer;
                 clicked => { ArtifactBridge.image-clicked(root.block.key, index); }
             }
-            if self.on-tile: Rectangle {
+            // Its keys only while they work: the chat has the keyboard.
+            if self.on-tile && Focus.mode == "pane": Rectangle {
                 x: 6px;
                 y: parent.height - self.height - 6px;
                 width: hint-row.preferred-width + 8px;
@@ -243,7 +244,7 @@ export component Block inherits VerticalLayout {
                     padding-left: 4px;
                     spacing: 6px;
                     // A tile is narrow: its keys, briefly.
-                    KeyHint { key: "Enter"; label: root.block.gallery ? "Open" : "Enlarge"; emphasised: true; clicked => { ArtifactBridge.image-clicked(root.block.key, index); } }
+                    KeyHint { key: "O"; label: root.block.gallery ? "Open" : "Enlarge"; emphasised: true; clicked => { ArtifactBridge.image-clicked(root.block.key, index); } }
                     if root.block.gallery: KeyHint { key: "←/→"; label: ""; emphasised: true; }
                 }
             }

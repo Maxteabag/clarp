@@ -137,7 +137,9 @@ fn state(name: &str) -> Vec<Binding> {
             // The chat's artifact cards: K from the chat is the lowest card on screen.
             b("artifact-previous", &["K"], "Cards", true, Artifacts, false),
             b("artifact-next", &["J"], "Next card", false, Artifacts, false),
-            b("artifact-open", &["Return"], "Open", true, Artifact, false),
+            // O, not Enter: Enter belongs to the composer, where a card's
+            // keys never reach.
+            b("artifact-open", &["O"], "Open", true, Artifact, false),
             b("artifact-choose", &["1", "2", "3", "4", "5", "6", "7", "8", "9"], "Choose", false, Artifact, false),
             b("artifact-discard", &["Delete"], "Discard", false, Artifact, false),
             // A gallery's tiles, an audio clip's position; S stops a clip.

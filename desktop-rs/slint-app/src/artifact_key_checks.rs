@@ -284,7 +284,7 @@ fn reach_stages(out: &str) -> Vec<Stage> {
 
 /// A card's hints as "key label".
 fn hints(id: &str) -> Vec<String> {
-    card(id).map(|c| c.hints.iter().map(|h| format!("{} {}", h.key, h.label)).collect()).unwrap_or_default()
+    card(id).map(|c| c.hints.iter().map(|h| format!("{} {}", h.key, h.label).trim().to_owned()).collect()).unwrap_or_default()
 }
 
 /// The fake Host's last request body to `path`.
@@ -371,18 +371,18 @@ fn honest_stages(out: &str) -> Vec<Stage> {
             }
             let shown = crate::artifacts_view::on_screen(app);
             let numbered: Vec<String> = shown.iter().filter(|id| card_badge(id).is_some()).cloned().collect();
-            check(card_badge("form-report-k").is_some(), &format!("the cards on screen get numbers: {numbered:?} of {shown:?}"));
+            check(card_badge(IMAGE).is_some(), &format!("the cards on screen get numbers: {numbered:?} of {shown:?}"));
             shot(&out2, "keys-01-cards-in-hint-mode");
-            if let Some(label) = card_badge("form-report-k") {
+            if let Some(label) = card_badge(IMAGE) {
                 headless::type_text(&label);
             }
             true
         })),
         ("card opened from the composer", Box::new(|_, window, elapsed| {
-            if window.get_overlay() != "report" {
-                return elapsed > Duration::from_secs(3) && { check(false, &format!("a card's number opens its viewer, from the composer: overlay {:?}", window.get_overlay())); true };
+            if window.get_overlay() != "image" {
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("a card's number opens its viewer (an image enlarged), from the composer: overlay {:?}", window.get_overlay())); true };
             }
-            check(true, "a card's number opens its viewer, from the composer");
+            check(true, "a card's number opens its viewer (an image enlarged), from the composer");
             headless::press(Key::Escape);
             true
         })),
@@ -392,11 +392,11 @@ fn honest_stages(out: &str) -> Vec<Stage> {
             }
             // On the card now, with the chat's keyboard: its keys show, on it alone.
             let keys = drawn_key_hints();
-            let rect = crate::artifacts_view::card_rect(app, "form-report-k");
+            let rect = crate::artifacts_view::card_rect(app, IMAGE);
             let inside = rect.is_some_and(|(x, y, w, h)| keys.iter().all(|(_, kx, ky)| *kx >= x && *kx < x + w && *ky >= y && *ky < y + h));
-            check(on(app) == "form-report-k" && report().transcript_focused, &format!("closing it leaves the keyboard on the card in the chat: on {:?}", on(app)));
+            check(on(app) == IMAGE && report().transcript_focused, &format!("closing it leaves the keyboard on the card in the chat: on {:?}", on(app)));
             check(!keys.is_empty() && inside, &format!("only the selected card draws its key hints: {keys:?} in {rect:?}"));
-            check(bar(window).iter().any(|h| h == "O Open report"), &format!("and the bar shows them: {:?}", bar(window)));
+            check(bar(window).iter().any(|h| h == "O Enlarge"), &format!("and the bar shows them: {:?}", bar(window)));
             shot(&out3, "keys-02-selected-card");
             headless::press("i");
             true
@@ -406,7 +406,7 @@ fn honest_stages(out: &str) -> Vec<Stage> {
             if !report().composer_focused {
                 return elapsed > Duration::from_secs(2) && { check(false, "I puts the keyboard in the composer"); true };
             }
-            check(cursor(app) == "form-report-k" && drawn_key_hints().is_empty(), &format!("a selected card draws no key hints while the composer has the keyboard: {:?}", drawn_key_hints()));
+            check(cursor(app) == IMAGE && drawn_key_hints().is_empty(), &format!("a selected card draws no key hints while the composer has the keyboard: {:?}", drawn_key_hints()));
             check(!bar(window).iter().any(|h| h.starts_with("O ")), &format!("nor does the bar offer them: {:?}", bar(window)));
             sent.set(posts("/send").len());
             seen.set(opened().len());
@@ -760,8 +760,8 @@ fn hint_stages(out: &str) -> Vec<Stage> {
         let ids: Vec<String> = reachable(app).into_iter().filter(|i| !i.starts_with("img:")).collect();
         let bare: Vec<String> = ids.iter().filter(|id| card(id).is_some_and(|c| !c.action.is_empty() && c.hints.row_count() == 0)).cloned().collect();
         check(!ids.is_empty() && bare.is_empty(), &format!("every card with an action shows its keys as hints: without {bare:?}"));
-        check(hints("dec-click-k") == ["1 Turn on", "2 Not now", "Del Discard"], &format!("an approval: {:?}", hints("dec-click-k")));
-        check(hints("q-click-k") == ["Del Discard"], &format!("a question (its options are numbered): {:?}", hints("q-click-k")));
+        check(hints("dec-click-k") == ["1 Turn on", "2 Not now", "Send", "Del Discard"], &format!("an approval (Send has no key before a choice): {:?}", hints("dec-click-k")));
+        check(hints("q-click-k") == ["Send", "Del Discard"], &format!("a question (its options are numbered): {:?}", hints("q-click-k")));
         check(hints("plan-ship-k") == ["O Open plan"], &format!("a plan: {:?}", hints("plan-ship-k")));
         check(hints("aud-gone-k") == ["O Play", "←/→ Seek", "S Stop"], &format!("audio: {:?}", hints("aud-gone-k")));
         check(hints("vid-none-k").is_empty() && hints("cd-past-k").is_empty(), "a card with nothing to do has none");

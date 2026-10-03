@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Focus } from "theme.slint";
 
 // One answer a decision or question offers.
 export struct ArtifactOption {
@@ -218,17 +218,23 @@ export component KeyHint inherits Rectangle {
     area := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
 
-// A card's hints, left to right; a narrow card elides their labels.
+// A card's hints, left to right; a narrow card elides their labels. Keys
+// show only where they work: on the selected card while the chat has the
+// keyboard. Another card draws nothing in their place (its height stays),
+// except a decision, whose answers stay as buttons without their keys.
 component HintRow inherits Rectangle {
     in property <ArtifactItem> artifact;
+    property <bool> live: root.artifact.selected && Focus.mode == "pane";
+    property <bool> decision: root.artifact.kind == "decision" || root.artifact.kind == "question";
+    property <[CardHint]> none;
     min-width: 0px;
     clip: true;
     height: 20px;
     HorizontalLayout {
         alignment: start;
         spacing: 8px;
-        for hint in root.artifact.hints: KeyHint {
-            key: hint.key;
+        for hint in root.live || root.decision ? root.artifact.hints : root.none: KeyHint {
+            key: root.live ? hint.key : "";
             label: hint.label;
             chosen: hint.chosen;
             emphasised: root.artifact.selected;
@@ -311,7 +317,7 @@ component OptionRow inherits Rectangle {
             HorizontalLayout {
                 alignment: start;
                 spacing: 8px;
-                // Its key, as a hint.
+                // Its key, only while it works.
                 if root.show-number: Text { text: root.number; color: root.emphasised ? Palette.accent : Palette.accent.with-alpha(0.6); font-size: 11px; font-weight: 700; vertical-alignment: center; }
                 Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: 12px; font-weight: root.chosen ? 600 : 400; overflow: elide; }
                 if root.recommended: Text { text: "Recommended"; color: Palette.success; font-size: 10px; vertical-alignment: center; }
@@ -337,7 +343,8 @@ component OwnAnswer inherits HorizontalLayout {
         font-size: 12px;
         vertical-alignment: center;
     }
-    if root.artifact.pending: Text { text: root.number; color: root.artifact.selected ? Palette.accent : Palette.accent.with-alpha(0.6); font-size: 11px; font-weight: 700; vertical-alignment: center; }
+    // Its key, only while it works.
+    if root.artifact.pending && root.artifact.selected && Focus.mode == "pane": Text { text: root.number; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
     // Asked once, after the row is in the window (focus during its
     // creation is ignored); Escape gives the keyboard back for good.
     property <bool> asked;
@@ -413,6 +420,8 @@ component OwnAnswer inherits HorizontalLayout {
 component DecisionBody inherits VerticalLayout {
     in property <ArtifactItem> artifact;
     property <bool> question: !root.artifact.approval;
+    // Its digits work while it is selected and the chat has the keyboard.
+    property <bool> live: root.artifact.selected && Focus.mode == "pane";
     spacing: 5px;
     if root.artifact.question != "": Text { text: root.artifact.question; color: Palette.text; font-size: 13px; font-weight: 600; wrap: word-wrap; }
     if root.artifact.context != "": Text { text: root.artifact.context; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
@@ -434,7 +443,7 @@ component DecisionBody inherits VerticalLayout {
             recommended: option.recommended;
             chosen: root.artifact.chosen == index;
             enabled: root.artifact.pending;
-            show-number: root.artifact.pending;
+            show-number: root.artifact.pending && root.live;
             emphasised: root.artifact.selected;
             clicked => { ArtifactBridge.choose(root.artifact.id, index); }
         }
