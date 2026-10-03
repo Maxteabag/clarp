@@ -410,6 +410,18 @@ class Backend:
         """
         return ""
 
+    # --- conversation forks -----------------------------------------------
+
+    def fork_conversation(self, session_id: str, *, source_cwd: str, cwd: str) -> str:
+        """Copy conversation ``session_id`` (bound in ``source_cwd``) into a
+        new native conversation a child resumes from ``cwd``; returns its id.
+
+        The source keeps running untouched. Raises ``Unsupported`` when the
+        CLI has no native fork (the default; ``supports_fork`` says which)
+        and ``FileNotFoundError`` when the source conversation is missing.
+        """
+        raise Unsupported(f"conversation forks unsupported for {self.id}")
+
     # --- compaction -------------------------------------------------------
 
     def compaction(self, session: str) -> CompactionStrategy:

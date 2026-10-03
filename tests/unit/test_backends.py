@@ -51,7 +51,7 @@ def test_capabilities_are_explicit_per_backend():
     assert backends.capabilities("claude").supports_fork is True
     assert backends.capabilities("claude").supports_transcript_streaming is True
     assert backends.capabilities("claude").required_binary == "claude"
-    assert backends.capabilities("codex").supports_fork is False
+    assert backends.capabilities("codex").supports_fork is True
     assert backends.capabilities("codex").supports_transcript_streaming is False
     assert backends.capabilities("agy").supports_fork is False
     assert backends.capabilities("agy").supports_transcript_streaming is False

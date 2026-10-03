@@ -75,7 +75,7 @@ def test_create_refuses_bad_lineage(tmp_path, extra, status, code):
 def test_fork_records_its_source_as_parent(tmp_path, monkeypatch):
     source = _create(tmp_path, "Source", session="source")
     agents_db.bind_backend_session(source["agent_id"], "conv-source")
-    monkeypatch.setattr(agent_lifecycle, "fork_session", lambda sid, cwd: "conv-forked")
+    monkeypatch.setattr(agent_lifecycle, "fork_session", lambda sid, cwd, **_: "conv-forked")
     fork = _create(tmp_path, "Forky", session="forky", fork_session_id="conv-source")
     assert fork["parent_agent_id"] == source["agent_id"]
     assert fork["role"] == "agent"

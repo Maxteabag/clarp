@@ -16,7 +16,6 @@ from dataclasses import dataclass, replace
 from . import agents as agents_db
 from . import backends, events, identity
 from .agent_store import AGENT_ROSTER, load_agents, save_agents
-from .fork import fork_session
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
 from .policies.agent_spec import AgentSpec, RosterView, SpecError
@@ -127,13 +126,13 @@ class AgentLifecycleService:
         if not spec.fork_id:
             return spec.resume_session_id
         try:
-            resumed = fork_session(spec.fork_id, spec.cwd)
+            resumed = fork_session(spec.fork_id, spec.cwd, backend=spec.backend)
             log("forkOk", f"{spec.fork_id} -> {resumed} in {spec.cwd}")
             return resumed
         except FileNotFoundError as e:
             log_exception("forkSourceMissing", e, detail=spec.fork_id)
             raise AgentLifecycleError(404, "fork source not found") from e
-        except OSError as e:
+        except (OSError, RuntimeError) as e:
             log_exception("forkIoFail", e, detail=spec.fork_id)
             raise AgentLifecycleError(500, "fork io failed") from e
 
@@ -276,6 +275,11 @@ class AgentLifecycleService:
                      f"{owner['session']}."),
             extra={"owner": owner["session"]},
         )
+
+
+def fork_session(source_id: str, cwd: str, *, backend: str = "claude") -> str:
+    """Fork conversation ``source_id`` natively for a new agent in ``cwd``."""
+    return backends.get(backend).fork_conversation(source_id, source_cwd=cwd, cwd=cwd)
 
 
 def _existing_cwd(raw) -> str:
