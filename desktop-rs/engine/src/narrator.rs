@@ -4,6 +4,7 @@
 //! presenting, and asks for those it shows.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use clarp_core::json::Object;
@@ -88,8 +89,25 @@ impl Engine {
 
     /// Presents `session` with the narrator's cached explanations (never
     /// asking the Host: presenting must not create demand).
-    pub(crate) fn present_with_explanations(&mut self, session: &str) -> Vec<clarp_core::presentation::PresentedRow> {
+    pub(crate) fn present_with_explanations(&mut self, session: &str, hide: &HashSet<String>, strip: &HashSet<String>) -> Vec<clarp_core::presentation::PresentedRow> {
         let Some(conversation) = self.conversations.get(session) else { return Vec::new() };
+        // Rows live items show instead are left out before grouping, and the
+        // tools they show are left out of the rows that stay.
+        let filtered: Option<Vec<clarp_core::protocol::Message>> = (!hide.is_empty() || !strip.is_empty()).then(|| {
+            let shown = |value: &Value| value.get("id").and_then(Value::as_str).is_none_or(|id| !strip.contains(id));
+            conversation
+                .rows()
+                .iter()
+                .filter(|m| !hide.contains(&m.id))
+                .map(|m| {
+                    let mut m = m.clone();
+                    m.tools.retain(shown);
+                    m.display_cells.retain(shown);
+                    m
+                })
+                .collect()
+        });
+        let rows = filtered.as_deref().unwrap_or(conversation.rows());
         let explaining = {
             let narrator = self.narrator.borrow();
             narrator.enabled() && !narrator.unavailable()
@@ -97,7 +115,7 @@ impl Engine {
         let narrator = &self.narrator;
         let lookup = |activity: &Object| -> String { narrator.borrow_mut().explanation(&with_session(session, activity)) };
         let lookup = explaining.then_some(&lookup as &dyn Fn(&Object) -> String);
-        clarp_core::presentation::present(conversation.rows(), &mut self.presentation, lookup).rows
+        clarp_core::presentation::present(rows, &mut self.presentation, lookup).rows
     }
 
     pub(crate) fn narrator_json(&mut self, tag: &str, object: &Object) -> bool {

@@ -45,8 +45,6 @@ pub struct PaneState {
     /// Each reply's artifact cards, updated in place: a card is never
     /// rebuilt under a click or a field that has the keyboard.
     cards: std::collections::HashMap<String, Rc<VecModel<crate::ArtifactItem>>>,
-    /// Live rows last shown: key → the items each stood for.
-    live_items: std::collections::HashMap<String, Vec<String>>,
     /// Durable rows that took over live rows: row id → the place (key)
     /// they took, kept while the chat is shown so the row never moves.
     slots: std::collections::HashMap<String, String>,
@@ -72,7 +70,6 @@ impl PaneState {
             scroll_request: 0,
             scroll_amount: 0.0,
             cards: std::collections::HashMap::new(),
-            live_items: std::collections::HashMap::new(),
             slots: std::collections::HashMap::new(),
         }
     }
@@ -115,7 +112,6 @@ impl App {
             pane.rows.clear();
             pane.presented_with = None;
             pane.cards.clear();
-            pane.live_items.clear();
             pane.slots.clear();
             pane.messages.set_vec(Vec::new());
             pane.to_latest += 1;
@@ -293,13 +289,20 @@ impl App {
 
     fn messages(&self, pane: &mut PaneState) {
         crate::artifacts_view::settle_downloads(self, &pane.session);
-        let mut presented = self.engine.borrow_mut().presented(&pane.session);
         // Live items (§7): the open turn's rows, over the /log rows. A live
-        // /log row an item shows is not shown twice.
+        // /log row an item shows is not shown twice, nor a durable row (or
+        // its tools) the item rows show instead.
         let live = {
             let engine = self.engine.borrow();
             let rows = engine.conversation(&pane.session).map(|c| c.rows().to_vec()).unwrap_or_default();
             crate::live_view::present(&engine, &pane.session, &rows, &self.expanded.borrow())
+        };
+        let mut presented = match &live {
+            Some(live) => {
+                let hide: std::collections::HashSet<String> = live.absorbed_rows.iter().chain(&live.hidden_rows).cloned().collect();
+                self.engine.borrow_mut().presented_except(&pane.session, &hide, &live.stripped_calls)
+            }
+            None => self.engine.borrow_mut().presented(&pane.session),
         };
         if let Some(live) = &live {
             presented.retain(|row| !live.hidden_rows.contains(&row.message.id));
@@ -426,14 +429,26 @@ impl App {
     }
 
     /// Puts the live rows after the chat's rows (before unsent messages of
-    /// one's own), and gives a durable row that took over live rows the
-    /// place of the first of them, so it is updated there, not inserted.
+    /// one's own). A durable row that took over a message shows in that
+    /// entry's place under the entry's key, so it is updated there, not
+    /// inserted, and keeps that key while the chat is shown.
     fn splice_live(&self, pane: &mut PaneState, live: &clarp_core::live_present::Presented, fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>) {
+        let mut placed: std::collections::HashMap<String, (Shown, MessageRow)> = std::collections::HashMap::new();
+        for entry in live.entries.iter().filter(|e| !e.row.is_empty()) {
+            if let Some(index) = fresh.iter().position(|(row, ..)| row.message.id == entry.row) {
+                placed.insert(entry.row.clone(), (fresh.remove(index), rows.remove(index)));
+            }
+        }
         let at = fresh.iter().rposition(|(row, ..)| !(row.message.pending || row.message.delivery_failed)).map_or(0, |i| i + 1);
         let built: Vec<(Shown, MessageRow)> = live
             .entries
             .iter()
             .map(|entry| {
+                if let Some((mut shown, row)) = placed.remove(&entry.row) {
+                    pane.slots.insert(entry.row.clone(), entry.key.clone());
+                    shown.3 = entry.key.clone();
+                    return (shown, row);
+                }
                 let row = pane.rows.live_row(entry);
                 let source = clarp_core::presentation::PresentedRow {
                     source_row: usize::MAX,
@@ -453,32 +468,14 @@ impl App {
                 ((source, entry.expanded, crate::live_view::signature(entry), entry.key.clone()), row)
             })
             .collect();
-        // Durable rows new since the last refresh that took over live rows
-        // shown then: the first such row's place is theirs.
-        let shown_before: Vec<String> = pane.shown.iter().map(|s| s.3.clone()).collect();
-        let still: std::collections::HashSet<&str> = live.entries.iter().map(|e| e.key.as_str()).collect();
+        // A durable row that held an entry's place keeps it once the turn
+        // is gone from the live state, so it never moves.
         for shown in fresh.iter_mut() {
-            let id = shown.0.message.id.clone();
-            if let Some(slot) = pane.slots.get(&id) {
+            if let Some(slot) = pane.slots.get(&shown.0.message.id) {
                 shown.3 = slot.clone();
-                continue;
-            }
-            if shown_before.contains(&id) {
-                continue;
-            }
-            let taken: Vec<&String> = live.taken_over.iter().filter(|(_, row)| **row == id).map(|(item, _)| item).collect();
-            if taken.is_empty() {
-                continue;
-            }
-            let place = shown_before.iter().find(|key| {
-                !still.contains(key.as_str()) && !pane.slots.values().any(|s| s == *key) && pane.live_items.get(*key).is_some_and(|items| items.iter().any(|i| taken.contains(&i)))
-            });
-            if let Some(place) = place {
-                pane.slots.insert(id, place.clone());
-                shown.3 = place.clone();
             }
         }
-        pane.live_items = live.entries.iter().map(|e| (e.key.clone(), e.items.clone())).collect();
+        let still: std::collections::HashSet<&str> = live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.as_str()).collect();
         pane.rows.keep_live(&still);
         let at = at.min(fresh.len());
         let (sources, live_rows): (Vec<Shown>, Vec<MessageRow>) = built.into_iter().unzip();
@@ -499,7 +496,8 @@ impl App {
             let (status, busy, key) = crate::live_view::status(&engine, &session);
             let rows = engine.conversation(&session).map(|c| c.rows().to_vec()).unwrap_or_default();
             if let Some(live) = crate::live_view::present(&engine, &session, &rows, &self.expanded.borrow()) {
-                for entry in &live.entries {
+                // A durable row in an entry's place is the chat's, not the clock's.
+                for entry in live.entries.iter().filter(|e| e.row.is_empty()) {
                     let Some(at) = pane.shown.iter().position(|s| s.3 == entry.key) else { continue };
                     let signature = crate::live_view::signature(entry);
                     if pane.shown[at].2 == signature {
@@ -550,8 +548,7 @@ impl App {
                     pane.rows.clear();
                     pane.presented_with = None;
                     pane.cards.clear();
-                    pane.live_items.clear();
-                    pane.slots.clear();
+                            pane.slots.clear();
                     pane.messages.set_vec(Vec::new());
                     pane.draft = self.engine.borrow().draft(&session);
                     pane.draft_set += 1;
