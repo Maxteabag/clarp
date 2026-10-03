@@ -87,6 +87,26 @@ fn text(row: &serde_json::Map<String, serde_json::Value>, key: &str) -> String {
     row.get(key).and_then(serde_json::Value::as_str).unwrap_or_default().to_owned()
 }
 
+/// What a live row stands for among the transcript's rows: its key.
+fn live_source(entry: &clarp_core::live_present::Entry) -> Shown {
+    let source = clarp_core::presentation::PresentedRow {
+        source_row: usize::MAX,
+        message: clarp_core::protocol::Message { id: entry.key.clone(), ..Default::default() },
+        body: entry.text.clone(),
+        activity: false,
+        tools: Vec::new(),
+        display_cells: Vec::new(),
+        activity_count: 0,
+        group_ids: Vec::new(),
+        group_label: String::new(),
+        group_expanded: false,
+        activity_inline: false,
+        activity_label: String::new(),
+        explanation_repeat: 0,
+    };
+    (source, entry.expanded, crate::live_view::signature(entry), entry.key.clone())
+}
+
 impl App {
     /// Index of the active pane in `pane_state`.
     pub fn active_index(&self) -> Option<usize> {
@@ -292,18 +312,23 @@ impl App {
         // Live items (§7): the open turn's rows, over the /log rows. A live
         // /log row an item shows is not shown twice, nor a durable row (or
         // its tools) the item rows show instead.
-        let live = {
+        // Finished turns fold the same way (§7.6): their rows show as the
+        // fold, their tools as its rows.
+        let (live, history) = {
             let engine = self.engine.borrow();
             let rows = engine.conversation(&pane.session).map(|c| c.rows().to_vec()).unwrap_or_default();
-            crate::live_view::present(&engine, &pane.session, &rows, &self.expanded.borrow())
+            let expanded = self.expanded.borrow();
+            let live = crate::live_view::present(&engine, &pane.session, &rows, &expanded);
+            let history = crate::live_view::history(&engine, &pane.session, &rows, &expanded, live.as_ref());
+            (live, history)
         };
-        let mut presented = match &live {
-            Some(live) => {
-                let hide: std::collections::HashSet<String> = live.absorbed_rows.iter().chain(&live.hidden_rows).cloned().collect();
-                self.engine.borrow_mut().presented_except(&pane.session, &hide, &live.stripped_calls)
-            }
-            None => self.engine.borrow_mut().presented(&pane.session),
-        };
+        let mut hide = history.hidden_rows.clone();
+        let mut strip = history.stripped_calls.clone();
+        if let Some(live) = &live {
+            hide.extend(live.absorbed_rows.iter().chain(&live.hidden_rows).cloned());
+            strip.extend(live.stripped_calls.iter().cloned());
+        }
+        let mut presented = self.engine.borrow_mut().presented_except(&pane.session, &hide, &strip);
         if let Some(live) = &live {
             presented.retain(|row| !live.hidden_rows.contains(&row.message.id));
         }
@@ -368,8 +393,18 @@ impl App {
                 }
             }
         }
+        for id in &history.details_wanted {
+            engine.load_tool_details(&pane.session, id);
+        }
         // Plain-English tools: the latest open rows' calls, explained.
         let narrating = engine.narrator_enabled() && !engine.narrator_unavailable();
+        if narrating {
+            for tool in &history.unexplained {
+                if !engine.explanation_failed(&pane.session, tool) {
+                    engine.request_explanation(&pane.session, tool);
+                }
+            }
+        }
         let mut rows = rows;
         let recent = rows.len().saturating_sub(NARRATED_ROWS);
         for (index, (row, shown)) in presented.iter().zip(rows.iter_mut()).enumerate() {
@@ -416,9 +451,13 @@ impl App {
             })
             .collect();
         let mut rows = rows;
+        let mut kept: std::collections::HashSet<String> = std::collections::HashSet::new();
+        self.splice_history(pane, &history, &mut fresh, &mut rows, &mut kept);
         if let Some(live) = live {
             self.splice_live(pane, &live, &mut fresh, &mut rows);
+            kept.extend(live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.clone()));
         }
+        pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
     }
 
@@ -454,23 +493,7 @@ impl App {
                     shown.3 = entry.key.clone();
                     return (shown, row);
                 }
-                let row = pane.rows.live_row(entry);
-                let source = clarp_core::presentation::PresentedRow {
-                    source_row: usize::MAX,
-                    message: clarp_core::protocol::Message { id: entry.key.clone(), ..Default::default() },
-                    body: entry.text.clone(),
-                    activity: false,
-                    tools: Vec::new(),
-                    display_cells: Vec::new(),
-                    activity_count: 0,
-                    group_ids: Vec::new(),
-                    group_label: String::new(),
-                    group_expanded: false,
-                    activity_inline: false,
-                    activity_label: String::new(),
-                    explanation_repeat: 0,
-                };
-                ((source, entry.expanded, crate::live_view::signature(entry), entry.key.clone()), row)
+                (live_source(entry), pane.rows.live_row(entry))
             })
             .collect();
         // A durable row that held an entry's place keeps it once the turn
@@ -480,12 +503,51 @@ impl App {
                 shown.3 = slot.clone();
             }
         }
-        let still: std::collections::HashSet<&str> = live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.as_str()).collect();
-        pane.rows.keep_live(&still);
         let at = at.min(fresh.len());
         let (sources, live_rows): (Vec<Shown>, Vec<MessageRow>) = built.into_iter().unzip();
         fresh.splice(at..at, sources);
         rows.splice(at..at, live_rows);
+    }
+
+    /// Puts each finished turn's fold where the turn is: its entries after
+    /// its prompt, among the rows it keeps (commentary when open, the
+    /// answer), in the turn's order. `kept` gathers the entries' keys.
+    fn splice_history(
+        &self,
+        pane: &mut PaneState,
+        history: &clarp_core::history_fold::Folded,
+        fresh: &mut Vec<Shown>,
+        rows: &mut Vec<MessageRow>,
+        kept: &mut std::collections::HashSet<String>,
+    ) {
+        use clarp_core::history_fold::Piece;
+        for fold in &history.folds {
+            let position = |fresh: &Vec<Shown>, id: &str| fresh.iter().position(|(row, ..)| row.message.id == id);
+            let first_row = fold.pieces.iter().find_map(|p| if let Piece::Row(id) = p { position(fresh, id) } else { None });
+            let mut at = fold
+                .prompt
+                .as_deref()
+                .and_then(|id| position(fresh, id))
+                .map(|i| i + 1)
+                .or(first_row)
+                .or_else(|| fold.next.as_deref().and_then(|id| position(fresh, id)))
+                .unwrap_or(fresh.len());
+            for piece in &fold.pieces {
+                match piece {
+                    Piece::Row(id) => {
+                        if let Some(index) = position(fresh, id) {
+                            at = index + 1;
+                        }
+                    }
+                    Piece::Entry(entry) => {
+                        kept.insert(entry.key.clone());
+                        fresh.insert(at, live_source(entry));
+                        rows.insert(at, pane.rows.live_row(entry));
+                        at += 1;
+                    }
+                }
+            }
+        }
     }
 
     /// The half-second clock: live rows whose text changed (elapsed times)

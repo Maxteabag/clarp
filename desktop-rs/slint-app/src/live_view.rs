@@ -34,6 +34,26 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
     Some(presented)
 }
 
+/// The chat's finished turns folded (`clarp_core::history_fold`): every
+/// settled turn but the one live items show, from its retired live items
+/// when the view kept them, else from `/log`.
+pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded: &HashSet<String>, live: Option<&Presented>) -> clarp_core::history_fold::Folded {
+    let view = engine.live_view(session).filter(|_| engine.live_active(session));
+    let running = view.and_then(|v| v.turn()).is_some_and(|t| matches!(t.get("status").and_then(|s| s.as_str()), Some("running") | None));
+    let busy = running || engine.roster().find(session).is_some_and(|a| a.busy);
+    let narrating = engine.narrator_enabled() && !engine.narrator_unavailable();
+    let explain = |tool: &clarp_core::json::Object| engine.explanation_for(session, tool);
+    let options = clarp_core::history_fold::Options {
+        explanations: explanations(engine, session),
+        expanded: expanded.clone(),
+        open_turn: live.map(|l| l.turn_id.clone()).unwrap_or_default(),
+        held_rows: live.map(|l| l.own_rows.clone()).unwrap_or_default(),
+        busy,
+        explain: narrating.then_some(&explain as &dyn Fn(&clarp_core::json::Object) -> String),
+    };
+    clarp_core::history_fold::present(rows, view, &options)
+}
+
 /// The status line: its text, whether the agent works, the interrupt key.
 pub(crate) fn status(engine: &Engine, session: &str) -> (String, bool, String) {
     let Some(view) = engine.live_view(session).filter(|_| engine.live_active(session)) else { return Default::default() };
