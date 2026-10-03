@@ -98,14 +98,16 @@ impl Engine {
 
     /// `/server-info` answered: whether the Host sends live items.
     pub(crate) fn live_server_info(&mut self, info: &Object) {
-        let enabled = info
-            .get("features")
-            .and_then(Value::as_array)
-            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some("live_items")));
-        self.live.explanation_setting = info
-            .get("features")
-            .and_then(Value::as_array)
-            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some("tool_explanation_setting")));
+        // Feature flags live under capabilities.features
+        // (contract/schemas/server-info.json).
+        let has = |name: &str| {
+            info.get("capabilities")
+                .and_then(|c| c.get("features"))
+                .and_then(Value::as_array)
+                .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(name)))
+        };
+        let enabled = has("live_items");
+        self.live.explanation_setting = has("tool_explanation_setting");
         if enabled != self.live.enabled {
             self.live.enabled = enabled;
             self.live.views.clear();
