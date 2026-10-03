@@ -21,6 +21,9 @@ pub enum SseSignal {
     Connected(bool),
     Event(Object),
     Error(String),
+    /// A stream reopened by `resubscribe` is answering with its new query
+    /// (events between the old stream and this one were not delivered).
+    Resubscribed,
 }
 
 #[derive(Default)]
@@ -29,6 +32,8 @@ struct State {
     token: String,
     /// Extra query on `/events` (`live=…`), none when empty.
     query: Vec<(String, String)>,
+    /// The next connection answers a `resubscribe`: say so once it does.
+    resubscribing: bool,
     cursor: SseCursor,
     connected: bool,
     /// Bumped by stop() and start(); a stream task from an older run may
@@ -83,6 +88,7 @@ impl SseClient {
         let run = {
             let mut state = self.state.lock().expect("sse state");
             state.run += 1;
+            state.resubscribing = true;
             state.run
         };
         let (state, http, timing, sink) = (self.state.clone(), self.http.clone(), self.timing, self.sink.clone());
@@ -192,6 +198,9 @@ async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: Ss
             }
             Ok(Ok(mut response)) => {
                 if !set_connected(&state, &sink, run, true) {
+                    return;
+                }
+                if !emit(&state, &sink, run, |s| std::mem::take(&mut s.resubscribing).then_some(SseSignal::Resubscribed)) {
                     return;
                 }
                 attempt = 0;

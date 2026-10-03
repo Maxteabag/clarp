@@ -45,8 +45,10 @@ fn an_open_chat_subscribes_fetches_its_snapshot_and_follows_the_stream() {
     assert!(events_queries(&host).iter().all(|q| q.get("live").is_some()), "every stream asks for live ops: {:?}", events_queries(&host));
     d.engine.select("rachel");
     d.until("the snapshot", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(0)));
-    assert_eq!(host.requests("GET", "/live").len(), 1, "{:?}", host.requests("GET", "/live"));
-    assert_eq!(host.requests("GET", "/live")[0]["query"]["session"], "rachel");
+    // Once on opening, once more when the stream reopened listing the chat
+    // (what happened between the two was not sent).
+    d.until("the snapshot after the stream reopened", |_| host.requests("GET", "/live").len() == 2);
+    assert!(host.requests("GET", "/live").iter().all(|r| r["query"]["session"] == "rachel"));
     d.until("the stream asks for rachel", |_| events_queries(&host).iter().any(|q| q.get("live") == Some(&json!("rachel"))));
     d.settle(std::time::Duration::from_millis(300));
     host.control("/__control/live-replay", json!({"fixture": "turn-full"}));
@@ -57,7 +59,7 @@ fn an_open_chat_subscribes_fetches_its_snapshot_and_follows_the_stream() {
     assert_eq!(view.turn().unwrap()["worked_ms"], 12000);
     assert_eq!(view.items().len(), 8);
     assert_eq!(item_text(&d, "rachel", "cl:msg_01:1"), "Let me look at the parser and its tests.");
-    assert_eq!(host.requests("GET", "/live").len(), 1, "a whole stream in order needs no second snapshot");
+    assert_eq!(host.requests("GET", "/live").len(), 2, "a whole stream in order needs no further snapshot");
     // Live items replace the old activity rows for this chat.
     host.control("/__control/event", json!({"type": "agent-activity", "session": "rachel", "activity_status": "ok",
         "activity_action": "Bash", "activity_summary": "npm test", "state": "tool"}));
@@ -115,6 +117,8 @@ fn a_dropped_stream_asks_for_the_snapshot_again() {
     d.connect();
     d.engine.select("rachel");
     d.until("the snapshot", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(0)));
+    d.until("the snapshot after the stream reopened", |_| host.requests("GET", "/live").len() >= 2);
+    d.settle(std::time::Duration::from_millis(300));
     let fetched = host.requests("GET", "/live").len();
     // The turn moves on while the stream is down: nothing arrives as events.
     host.control("/__control/outage", json!({"seconds": 0.5}));
@@ -124,4 +128,20 @@ fn a_dropped_stream_asks_for_the_snapshot_again() {
     d.until("the turn so far", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(5)));
     assert_eq!(host.requests("GET", "/live").len(), fetched + 1);
     assert_eq!(d.engine.live_view("rachel").unwrap().item("cl:msg_01:0").unwrap()["status"], "completed");
+}
+
+#[test]
+fn turning_the_feature_on_and_reconnecting_follows_the_open_chat() {
+    let host = Host::start("live-later");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.engine.select("rachel");
+    d.until("rachel's log", |e| e.conversation("rachel").is_some_and(|c| c.len() == 2));
+    host.control("/__control/live", json!({"on": true}));
+    d.engine.reconnect();
+    d.until("the snapshot", |e| e.live_items() && e.live_view("rachel").is_some_and(|v| v.lseq() == Some(0)));
+    d.until("the stream asks for rachel", |_| events_queries(&host).iter().any(|q| q.get("live") == Some(&json!("rachel"))));
+    d.settle(std::time::Duration::from_millis(300));
+    host.control("/__control/live-replay", json!({"fixture": "turn-full", "through": 5}));
+    d.until("the thinking title", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(4)));
 }

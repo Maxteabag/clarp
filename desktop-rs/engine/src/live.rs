@@ -24,6 +24,9 @@ pub(crate) struct Live {
     pub subscribed: Option<String>,
     /// The stream dropped since it last connected: events were missed.
     pub dropped: bool,
+    /// Chats added to the stream by the last resubscribe: their events
+    /// before it reopened were not sent, so they fetch once it has.
+    pub joining: std::collections::HashSet<String>,
     /// The Host has the tool-explanation setting (`tool_explanation_setting`).
     pub explanation_setting: bool,
     /// The Host's tool-explanation setting (§6), once it said.
@@ -126,6 +129,11 @@ impl Engine {
         if let Some(view) = self.live.views.get_mut(session) {
             view.expect_snapshot();
         }
+        // Asked before the stream is up: events until it is are not sent,
+        // so ask again once it connects.
+        if !self.connected {
+            self.live.joining.insert(session.to_owned());
+        }
         self.api.get(&format!("live:{session}"), "/live", &[("session", session)]);
     }
 
@@ -145,8 +153,11 @@ impl Engine {
             return;
         }
         self.sse.set_query(wanted.iter().map(|s| ("live".to_owned(), s.clone())).collect());
+        let before: std::collections::HashSet<String> = self.live.subscribed.iter().flat_map(|s| s.split(',')).map(str::to_owned).collect();
         self.live.subscribed = wanted;
         if reopen && self.sse.running() {
+            let added = self.live.views.keys().filter(|s| !before.contains(*s)).cloned();
+            self.live.joining.extend(added);
             self.sse.resubscribe();
         }
     }
@@ -161,6 +172,17 @@ impl Engine {
         let sessions: Vec<String> = self.live.views.iter().filter(|(_, v)| v.lseq().is_some()).map(|(s, _)| s.clone()).collect();
         for session in sessions {
             self.request_live(&session);
+        }
+    }
+
+    /// The reopened stream answers: chats that joined it fetch their
+    /// snapshot again, so what happened before it reopened is not lost.
+    pub(crate) fn live_resubscribed(&mut self) {
+        let joining: Vec<String> = std::mem::take(&mut self.live.joining).into_iter().collect();
+        for session in joining {
+            if self.live.views.contains_key(&session) {
+                self.request_live(&session);
+            }
         }
     }
 
