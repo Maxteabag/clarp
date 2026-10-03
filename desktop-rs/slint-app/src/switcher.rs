@@ -89,6 +89,8 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         command("Jump to latest", "jump-latest", "Ctrl+End", "view", "bottom newest scroll follow"),
         command("Retry latest failed message", "retry-message", "Ctrl+Alt+R", "view", "resend send delivery not delivered"),
         command("Dismiss conversation error", "dismiss-error", "Esc", "view", "clear close error warning banner voice synthesis failed"),
+        command("Dismiss layout warning", "dismiss-layout-warning", "Esc", "view", "another window saved newer layout conflict recovery"),
+        command("Keep this window's layout", "keep-layout", "Ctrl+Shift+S", "view", "another window saved newer layout conflict recovery save instead"),
         command("Change directory", "change-directory", "Ctrl+Alt+D", "agent", "folder workspace cwd new chat"),
         command("Recent agents", "recent-agents", "Ctrl+R", "agent", "last previous switch back mru history"),
         command("Refresh conversation", "refresh", "F5", "view", ""),

@@ -800,12 +800,12 @@ fn main() {
             pump_now(&app);
         }
     });
-    window.on_save_layout_instead(|| {
-        if let Some(app) = app() {
-            app.engine.borrow_mut().with_panes(|p| p.save_workspace_layout_instead());
-            pump_now(&app);
-        }
-    });
+    window.on_save_layout_instead(|| with_window(|app, window| {
+        commands::run(app, window, "keep-layout");
+    }));
+    window.on_dismiss_save_warning(|| with_window(|app, window| {
+        commands::run(app, window, "dismiss-layout-warning");
+    }));
     window.on_resize_split(|id, ratio| {
         if let Some(app) = app() {
             app.engine.borrow_mut().with_panes(|p| p.set_split_ratio(&id, f64::from(ratio)));
@@ -883,6 +883,8 @@ fn main() {
     voice_view::wire(&window);
     orchestrator_view::wire(&window);
     window.set_error_dismiss_key("Esc".into());
+    window.set_save_warning_dismiss_key("Esc".into());
+    window.set_save_warning_keep_key("Ctrl+Shift+S".into());
     window.on_dismiss_error(|| with_window(|app, window| {
         commands::run(app, window, "dismiss-error");
     }));
