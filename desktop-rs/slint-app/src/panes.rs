@@ -242,7 +242,7 @@ impl App {
         view.busy = agent.is_some_and(|a| a.busy);
         view.working = crate::cells_view::working(engine, session);
         let (status, busy, key) = crate::live_view::status(engine, session);
-        if engine.live_view(session).is_some() {
+        if engine.live_active(session) {
             // The status line stands in for the typing dots.
             view.working = false;
         }

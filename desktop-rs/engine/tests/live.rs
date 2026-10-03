@@ -160,13 +160,14 @@ fn a_flag_without_live_events_keeps_the_old_activity() {
     d.engine.select("rachel");
     d.until("the empty snapshot", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(0)));
     assert!(!d.engine.live_active("rachel"), "an idle, empty snapshot does not take the chat over");
+    // Events sent while the stream reopens to list the chat are not sent.
+    d.until("the stream asks for rachel", |_| events_queries(&host).iter().any(|q| q.get("live") == Some(&json!("rachel"))));
+    d.settle(std::time::Duration::from_millis(300));
     host.control("/__control/event", json!({"type": "agent-activity", "session": "rachel", "activity_status": "ok",
         "activity_action": "Bash", "activity_summary": "npm test", "state": "tool"}));
     d.until("the old activity row", |e| e.conversation("rachel").is_some_and(|c| c.rows().iter().any(|m| m.activity)));
 
     // The first live event for the chat hands it to live items.
-    d.until("the stream asks for rachel", |_| events_queries(&host).iter().any(|q| q.get("live") == Some(&json!("rachel"))));
-    d.settle(std::time::Duration::from_millis(300));
     host.control("/__control/live-replay", json!({"fixture": "turn-full"}));
     d.until("live takes over", |e| e.live_active("rachel"));
 }

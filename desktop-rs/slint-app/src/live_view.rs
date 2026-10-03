@@ -24,6 +24,9 @@ pub(crate) fn explanations(engine: &Engine, session: &str) -> bool {
 
 /// The chat's live entries over its `/log` rows, or none without live items.
 pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded: &HashSet<String>) -> Option<Presented> {
+    if !engine.live_active(session) {
+        return None;
+    }
     let view = engine.live_view(session)?;
     let options = Options { explanations: explanations(engine, session), expanded: expanded.clone(), host_now_ms: view.host_now_ms(now_ms()) };
     let mut presented = clarp_core::live_present::present(view, rows, &options);
@@ -33,7 +36,7 @@ pub(crate) fn present(engine: &Engine, session: &str, rows: &[Message], expanded
 
 /// The status line: its text, whether the agent works, the interrupt key.
 pub(crate) fn status(engine: &Engine, session: &str) -> (String, bool, String) {
-    let Some(view) = engine.live_view(session) else { return Default::default() };
+    let Some(view) = engine.live_view(session).filter(|_| engine.live_active(session)) else { return Default::default() };
     match clarp_core::live_present::status_line(view, view.host_now_ms(now_ms())) {
         Some(line) => (line.text, line.busy, if line.busy { stop_key() } else { String::new() }),
         None => Default::default(),
@@ -51,7 +54,7 @@ pub(crate) fn stop_key() -> String {
 
 /// Whether anything shown ticks (a running item, a busy status line).
 pub(crate) fn ticking(engine: &Engine, session: &str) -> bool {
-    let Some(view) = engine.live_view(session) else { return false };
+    let Some(view) = engine.live_view(session).filter(|_| engine.live_active(session)) else { return false };
     let busy = clarp_core::live_present::status_line(view, 0).is_some_and(|l| l.busy);
     busy || view.items().iter().any(|i| i.get("status").and_then(|s| s.as_str()) == Some("running"))
 }
