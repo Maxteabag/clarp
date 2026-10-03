@@ -291,3 +291,10 @@ def test_one_child_failing_does_not_stop_its_siblings(tmp_path, home):
     assert good["session"] and good["delivered"]
     assert not bad.get("session") and bad["error"]
     assert not any(row["persona"] == "bad" for row in agents_db.list_agents())
+
+
+def test_count_with_a_worktree_gives_each_sibling_its_own_branch():
+    children = agent_fork.parse({"count": 2, "name": "probe", "task": "Fix it.",
+                                 "worktree": {"repo": "/r", "branch": "fix/x"}})
+    assert [(c.name, c.repo, c.branch) for c in children] == [
+        ("probe-1", "/r", "fix/x-1"), ("probe-2", "/r", "fix/x-2")]
