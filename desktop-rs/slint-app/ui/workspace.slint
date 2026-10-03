@@ -162,6 +162,9 @@ export component Pane inherits Rectangle {
         Rectangle {
           vertical-stretch: 1;
           transcript := Transcript {
+            // The pane's chat, found by link hints and the checks.
+            accessible-role: list;
+            accessible-id: "chat:" + root.pane.id;
             x: Frame.side;
             y: Frame.top;
             width: parent.width - 2 * Frame.side;
