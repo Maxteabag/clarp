@@ -1,0 +1,183 @@
+{
+ "title": "a turn op with a new turn_id drops the last turn's items (their rows are in /log); the same turn_id again keeps them",
+ "area": "live",
+ "steps": [
+  {
+   "snapshot": {
+    "conv": "conv-1",
+    "session": "rachel",
+    "agent_id": "agent-1",
+    "epoch": "boot-a",
+    "lseq": 7,
+    "server_now_ms": 1759480001000,
+    "activity": {
+     "state": "idle",
+     "tool": null,
+     "running_tools": 0,
+     "headline": null,
+     "item_id": null,
+     "since_ms": 1759480000900,
+     "turn_id": null,
+     "turn_started_ms": null
+    },
+    "turn": {
+     "turn_id": "tr-1",
+     "status": "completed",
+     "started_at_ms": 1759480000000,
+     "ended_at_ms": 1759480000900,
+     "worked_ms": 900,
+     "tool_count": 0
+    },
+    "items": [
+     {
+      "id": "cl:msg_1:0",
+      "conv": "conv-1",
+      "turn_id": "tr-1",
+      "kind": "message",
+      "status": "completed",
+      "ordinal": 1,
+      "started_at_ms": 1759480000100,
+      "ended_at_ms": 1759480000900,
+      "rev": 3,
+      "text": "First answer.",
+      "phase": "final",
+      "row_id": "live-1"
+     }
+    ],
+    "tool_explanations": {
+     "enabled": true,
+     "detail_level": 2
+    }
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 8,
+    "server_now_ms": 1759480005000,
+    "ops": [
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-2",
+       "status": "running",
+       "started_at_ms": 1759480005000,
+       "ended_at_ms": null,
+       "worked_ms": null,
+       "tool_count": 0
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "thinking",
+       "tool": null,
+       "running_tools": 0,
+       "headline": null,
+       "item_id": null,
+       "since_ms": 1759480005000,
+       "turn_id": "tr-2",
+       "turn_started_ms": 1759480005000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 9,
+    "server_now_ms": 1759480005200,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:msg_2:0",
+      "kind": "message",
+      "rev": 1,
+      "item": {
+       "id": "cl:msg_2:0",
+       "conv": "conv-1",
+       "turn_id": "tr-2",
+       "kind": "message",
+       "status": "running",
+       "ordinal": 1,
+       "started_at_ms": 1759480005200,
+       "ended_at_ms": null,
+       "text": "Second",
+       "phase": "final",
+       "row_id": "live-2"
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "responding",
+       "tool": null,
+       "running_tools": 0,
+       "headline": null,
+       "item_id": null,
+       "since_ms": 1759480005200,
+       "turn_id": "tr-2",
+       "turn_started_ms": 1759480005000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 10,
+    "server_now_ms": 1759480005300,
+    "ops": [
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-2",
+       "status": "running",
+       "started_at_ms": 1759480005000,
+       "ended_at_ms": null,
+       "worked_ms": null,
+       "tool_count": 0
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "expect": {
+  "effects": [],
+  "lseq": 10,
+  "activity": {
+   "state": "responding"
+  },
+  "turn": {
+   "turn_id": "tr-2",
+   "status": "running"
+  },
+  "items": [
+   {
+    "id": "cl:msg_2:0",
+    "text": "Second",
+    "turn_id": "tr-2"
+   }
+  ]
+ }
+}

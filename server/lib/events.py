@@ -98,6 +98,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "confidence", "reason",
     ),
     SSEType.ORACLE_HANDOFF: _ORACLE_HANDOFF_FIELDS,
+    SSEType.HEARTBEAT: ("ts",),
     SSEType.LIVE: (
         "agent_id", "session", "conv", "epoch", "lseq", "server_now_ms", "ops",
     ),
@@ -231,6 +232,11 @@ def live(*, agent_id: str, session: str, conv: str, epoch: str, lseq: int,
         ("server_now_ms", server_now_ms),
         ("ops", ops),
     ])
+
+
+def heartbeat(*, ts: int) -> Event:
+    """The stream is alive (sent when it has been quiet). Never stored."""
+    return _build(SSEType.HEARTBEAT, [("ts", ts)])
 
 
 def agent_roster(kind: Any = OMIT, *, session: Any = OMIT,
@@ -438,6 +444,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.ORCHESTRATOR_DECISION: orchestrator_decision,
     SSEType.ORACLE_HANDOFF: oracle_handoff,
     SSEType.LIVE: live,
+    SSEType.HEARTBEAT: heartbeat,
 }
 
 

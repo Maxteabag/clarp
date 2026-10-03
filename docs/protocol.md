@@ -334,7 +334,7 @@ Connection rules:
   minutes.
 - After the replay the server always sends `{"type": "agent-roster"}`. Treat
   it as "call `/agents/snapshot` now".
-- The server writes `: ping` comments every few seconds. If nothing arrives
+- The server sends a `heartbeat` event (`event: heartbeat`) every few seconds when nothing else happens. If nothing arrives
   for 25 s, reconnect with exponential backoff (250 ms to 5 s).
 - The server closes the stream when a client falls too far behind. Reconnect;
   the replay fills the gap.
@@ -362,6 +362,7 @@ Event types and payloads:
 | `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
 | `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
+| `heartbeat` | `ts` | Sent as `event: heartbeat` (no `id:`) after about 10 s without other events. The stream is alive; nothing to do. EventSource clients listen with `addEventListener("heartbeat", …)`; others ignore it as an unknown type. |
 | `live` | `agent_id`, `session`, `conv`, `epoch`, `lseq`, `server_now_ms`, `ops` | Only with `GET /events?live=…` and feature `live_items`: item ops for the open turn. Never replayed, no `id:`; recover a gap with `GET /live?session=`. See [live-items.md](live-items.md). |
 | `orchestrator-decision` | `decision_id`, `trace_id`, `action`, `kind`, `target_session`, `confidence`, `reason` | Hands-free routing picked (or declined to pick) an agent for an utterance. Informational. |
 

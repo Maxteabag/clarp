@@ -111,3 +111,24 @@ def test_tool_explanation_setting_turns_the_explainer_off(core_server):
     assert len(calls) == 1
     assert _get(base, "/live?session=rachel")[1]["tool_explanations"]["enabled"] is False
     assert _get(base, "/agents/snapshot")[1]["tool_explanations"]["enabled"] is False
+
+
+def test_a_quiet_stream_sends_a_heartbeat_event_clients_can_see(core_server, monkeypatch):
+    import dataclasses
+
+    from conftest import _srv_mod as server_module
+    monkeypatch.setattr(server_module, "SERVER_TIMING", dataclasses.replace(
+        server_module.SERVER_TIMING, sse_queue_timeout_sec=0.2))
+    lines = []
+    with urllib.request.urlopen(core_server["base"] + "/events", timeout=5) as response:
+        deadline = time.monotonic() + 3
+        for raw in response:
+            lines.append(raw.decode().rstrip("\n"))
+            if any(line.startswith("data: ") and '"heartbeat"' in line for line in lines) \
+                    or time.monotonic() > deadline:
+                break
+    index = lines.index("event: heartbeat")
+    beat = json.loads(lines[index + 1][len("data: "):])
+    assert beat["type"] == "heartbeat" and isinstance(beat["ts"], int)
+    # Not durable: no id line, so it never moves a client's resume cursor.
+    assert not lines[index - 1].startswith("id: ")

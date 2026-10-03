@@ -45,6 +45,10 @@ class SSEType:
     # Item ops for a conversation's open turn, only to connections that asked
     # with GET /events?live=… (docs/live-items.md). Ephemeral, never replayed.
     LIVE = "live"
+    # Sent (as `event: heartbeat`, no id) when a stream has been quiet for
+    # the SSE queue timeout, so EventSource clients can see it is alive; a
+    # `: ping` comment never reaches their code.
+    HEARTBEAT = "heartbeat"
 
     @classmethod
     def valid(cls) -> set[str]:

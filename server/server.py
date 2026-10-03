@@ -2782,7 +2782,11 @@ class Handler(BaseHTTPRequestHandler):
                         except Exception:
                             pass
                         break
-                    self.wfile.write(b": ping\n\n")
+                    # A data event, not a `: ping` comment: EventSource
+                    # never surfaces comments, so a quiet stream looked dead
+                    # to the web's stale check and was reconnected.
+                    beat = json.dumps(events.heartbeat(ts=int(time.time() * 1000)))
+                    self.wfile.write(f"event: heartbeat\ndata: {beat}\n\n".encode())
                     self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             try:
