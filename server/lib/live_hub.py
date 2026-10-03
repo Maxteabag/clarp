@@ -525,6 +525,8 @@ class LiveRelay:
         self.stream = stream
         self.on_nudge = on_nudge
         self.on_event = on_event
+        # True only while connected to a runtime that serves live events.
+        self.serving = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._sock = None
@@ -581,6 +583,8 @@ class LiveRelay:
                 except ValueError:
                     continue
                 kind = event.get("type")
+                if kind in ("hello", "live", "ping"):
+                    self.serving = True
                 if kind == "live":
                     self.stream.broadcast_live(event)
                     if self.on_event is not None:
@@ -594,6 +598,7 @@ class LiveRelay:
                     return True       # an older runtime without live_stream
             return False
         finally:
+            self.serving = False
             self._sock = None
             try:
                 sock.close()

@@ -77,4 +77,6 @@ def test_server_identity_advertises_product_features(monkeypatch, tmp_path):
     block = info["capabilities"]
     assert block["version"] == server_identity.CAPABILITIES_VERSION
     assert {"teams", "oracle", "dreaming", "orchestrator"} <= set(block["features"])
-    assert block["features"] == list(server_identity.FEATURES)
+    # Live features are advertised only while live events flow.
+    assert block["features"] == [f for f in server_identity.FEATURES
+                                 if f not in server_identity.LIVE_FEATURES]

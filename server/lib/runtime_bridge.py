@@ -354,11 +354,22 @@ class _RuntimeRequestHandler(socketserver.StreamRequestHandler):
             self._write({"ok": False, "status": 404, "error": "no live items here"})
             return
         q = fanout.subscribe()
+        hub = getattr(self.server, "live_hub", None)
         try:
-            while not getattr(q, "dropped", False):
+            # First line: this runtime serves live events (the HTTP process
+            # advertises `live_items` only after it).
+            self._write({"type": "hello", "epoch": getattr(hub, "epoch", "")})
+            self.wfile.flush()
+            idle = 0.0
+            while not getattr(q, "dropped", False) and not getattr(self.server, "live_closed", False):
                 try:
-                    event = q.get(timeout=15.0)
+                    event = q.get(timeout=1.0)
+                    idle = 0.0
                 except _queue.Empty:
+                    idle += 1.0
+                    if idle < 15.0:
+                        continue
+                    idle = 0.0
                     event = {"type": "ping"}
                 self.wfile.write((json.dumps(event, separators=(",", ":")) + "\n").encode())
                 self.wfile.flush()
@@ -657,6 +668,8 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 pass
 
     def server_close(self) -> None:
+        # Open live streams end with the server, so the HTTP side notices.
+        self.live_closed = True
         super().server_close()
         try:
             if self.socket_path.is_socket():
