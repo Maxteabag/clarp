@@ -5,7 +5,7 @@
 // about 200 ms instead of landing in jumps.
 
 import { describe, expect, it } from 'vitest';
-import { createBlockCache, revealStep, splitCommitted } from '@core/markdown-stream.js';
+import { createBlockCache, revealStep, revealTick, splitCommitted } from '@core/markdown-stream.js';
 
 describe('splitCommitted', () => {
   it('commits paragraphs closed by a blank line and keeps the open one as the tail', () => {
@@ -79,5 +79,41 @@ describe('revealStep', () => {
   it('never goes backwards and is done when everything is shown', () => {
     expect(revealStep(text, text.length, 16)).toBe(text.length);
     expect(revealStep('abc', 10, 16)).toBe(3);
+  });
+});
+
+describe('revealTick', () => {
+  // A stream as the Host paces it: a chunk every 100 ms, frames every 16 ms.
+  function simulate({ chunks = 20, chunk = 'word '.repeat(8), tail = 400 } = {}) {
+    let text = '';
+    let shown = 0;
+    let since = 0;
+    let renders = 0;
+    let drainedAt = null;
+    const end = chunks * 100;
+    for (let t = 0; t <= end + tail; t += 16) {
+      while (text.length < Math.min(chunks, Math.floor(t / 100) + 1) * chunk.length) text += chunk;
+      since += 16;
+      const next = revealTick(text, shown, since);
+      if (next !== shown) { shown = next; since = 0; renders++; }
+      if (t >= end && drainedAt === null && shown === text.length) drainedAt = t - end;
+    }
+    return { renders, seconds: (end + tail) / 1000, drainedAt };
+  }
+
+  it('re-renders the streaming text at most about 20 times a second, not every frame', () => {
+    const { renders, seconds } = simulate();
+    expect(renders / seconds).toBeLessThanOrEqual(21);
+  });
+
+  it('still shows everything within about a quarter second of the last chunk', () => {
+    const { drainedAt } = simulate();
+    expect(drainedAt).not.toBe(null);
+    expect(drainedAt).toBeLessThanOrEqual(250);
+  });
+
+  it('waits for the interval before showing more', () => {
+    expect(revealTick('hello world, again', 0, 16)).toBe(0);
+    expect(revealTick('hello world, again', 0, 60)).toBeGreaterThan(0);
   });
 });

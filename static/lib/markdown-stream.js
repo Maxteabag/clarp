@@ -78,3 +78,19 @@ export function revealStep(text, shown, dtMs = 16, drainMs = REVEAL_DRAIN_MS) {
   while (next < limit && !/\s/.test(text[next])) next++;
   return next;
 }
+
+/** The streaming text is re-rendered at most this often. */
+export const REVEAL_INTERVAL_MS = 50;
+
+/**
+ * One animation frame of the paced reveal. Returns `shown` unchanged until
+ * REVEAL_INTERVAL_MS has passed since the last render, so the text (and its
+ * markdown parse, sanitising and DOM replace) changes about 20 times a second
+ * instead of every frame, while a burst still drains within ~200 ms.
+ */
+export function revealTick(text, shown, sinceRenderMs, intervalMs = REVEAL_INTERVAL_MS) {
+  const len = String(text || '').length;
+  if (shown >= len) return len;
+  if (sinceRenderMs < intervalMs) return shown;
+  return revealStep(text, shown, sinceRenderMs);
+}

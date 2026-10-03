@@ -312,3 +312,26 @@ export function cellRow(cell) {
       label: l.label || '', text: String(l.text), kind: l.kind || '' })),
   };
 }
+
+function rowTime(row) {
+  const raw = row && (row.timestamp != null ? row.timestamp : row.ts);
+  if (raw == null || raw === '') return null;
+  const ms = typeof raw === 'number' ? raw : Date.parse(raw);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Where the live turn goes among the transcript's rows: after the rows from
+ * before its turn started, and above anything newer (a prompt sent once the
+ * turn settled must not end up under the last answer).
+ */
+export function liveInsertIndex(rows, turn) {
+  const list = rows || [];
+  const started = turn && Number(turn.started_at_ms);
+  if (!started) return list.length;
+  for (let i = 0; i < list.length; i++) {
+    const t = rowTime(list[i]);
+    if (t != null && t > started) return i;
+  }
+  return list.length;
+}

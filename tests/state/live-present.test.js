@@ -11,7 +11,7 @@ import {
   applyLiveEvent, applyLiveSnapshot, blankLive, liveItems,
 } from '@core/live-items.js';
 import {
-  activityFromStatus, cellRow, clock, currentTurnItems, formatDuration, liveRows, settledFold, statusLine, takenOverTurns,
+  activityFromStatus, cellRow, clock, currentTurnItems, liveInsertIndex, formatDuration, liveRows, settledFold, statusLine, takenOverTurns,
 } from '@core/live-present.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -324,5 +324,27 @@ describe('status line from agent-activity on Hosts without live items', () => {
     const a = activityFromStatus(row({ state: 'thinking', phase: 'tool_finished', summary: 'npm test',
       turn_started_ms: T0 }));
     expect(statusLine(a, { now: T0 + 9000 })).toMatchObject({ state: 'thinking', text: 'Thinking', time: '0:09' });
+  });
+});
+
+describe('where the live turn sits in the transcript', () => {
+  const at = iso => new Date(iso).getTime();
+  const turns = [
+    { id: 'u1', role: 'user', timestamp: '2026-10-03T10:00:00Z' },
+    { id: 'a1', role: 'assistant', timestamp: '2026-10-03T10:00:05Z' },
+    { id: 'u2', role: 'user', timestamp: '2026-10-03T10:01:00Z' },
+  ];
+
+  it('goes after the rows from before its turn started', () => {
+    expect(liveInsertIndex(turns, { started_at_ms: at('2026-10-03T10:00:01Z') })).toBe(1);
+  });
+
+  it('stays above a message sent after its turn, so a new prompt is never under the last answer', () => {
+    expect(liveInsertIndex(turns, { started_at_ms: at('2026-10-03T10:00:30Z') })).toBe(2);
+  });
+
+  it('goes last when its turn is the newest thing', () => {
+    expect(liveInsertIndex(turns, { started_at_ms: at('2026-10-03T10:02:00Z') })).toBe(3);
+    expect(liveInsertIndex(turns, null)).toBe(3);
   });
 });
