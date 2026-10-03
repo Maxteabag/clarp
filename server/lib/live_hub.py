@@ -517,11 +517,13 @@ class LiveRelay:
     runtime socket and hands each event to the SSE hub. Reconnects with
     backoff; an older runtime that does not know the call is retried slowly."""
 
-    def __init__(self, socket_path, stream, *, on_nudge: Callable[[], Any] | None = None):
+    def __init__(self, socket_path, stream, *, on_nudge: Callable[[], Any] | None = None,
+                 on_event: Callable[[dict[str, Any]], Any] | None = None):
         import pathlib
         self.socket_path = pathlib.Path(socket_path)
         self.stream = stream
         self.on_nudge = on_nudge
+        self.on_event = on_event
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._sock = None
@@ -580,6 +582,11 @@ class LiveRelay:
                 kind = event.get("type")
                 if kind == "live":
                     self.stream.broadcast_live(event)
+                    if self.on_event is not None:
+                        try:
+                            self.on_event(event)
+                        except Exception:  # noqa: BLE001 - an extra, never the relay
+                            pass
                 elif kind == "sse" and self.on_nudge is not None:
                     self.on_nudge()
                 elif "ok" in event and not event.get("ok"):

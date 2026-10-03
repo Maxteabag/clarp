@@ -47,6 +47,16 @@ def get(key: str) -> str | None:
     return str(row["value"]) if row is not None else None
 
 
+def get_many(keys: list[str]) -> dict[str, str]:
+    """The stored values of several keys in one read (absent keys omitted)."""
+    if not keys:
+        return {}
+    rows = conn().execute(
+        f"SELECT key, value FROM settings WHERE key IN ({','.join('?' * len(keys))})",
+        tuple(keys)).fetchall()
+    return {str(row["key"]): str(row["value"]) for row in rows}
+
+
 def get_text(key: str, *, default: str = "") -> str:
     value = get(key)
     return default if value is None else value

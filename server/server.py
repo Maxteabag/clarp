@@ -460,6 +460,7 @@ class Handler(BaseHTTPRequestHandler):
         "/judgments/settings": "_handle_judgments_settings_get",
         "/judgments/decisions": "_handle_judgments_decisions_get",
         "/tool-explanations/stats": "_handle_tool_explanations_stats",
+        "/tool-explanations/settings": "_handle_tool_explanation_settings_get",
         "/personalities/settings": "_handle_personalities_settings_get",
         "/automation-settings": "_handle_automation_settings_get",
         "/avatar-settings": "_handle_avatar_settings_get",
@@ -497,6 +498,7 @@ class Handler(BaseHTTPRequestHandler):
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
         "/tool-explanations": "_handle_tool_explanations",
+        "/tool-explanations/settings": "_handle_tool_explanation_settings_post",
         "/desktop-presence": "_handle_desktop_presence",
         "/application-activity": "_handle_application_activity",
         "/viz/supersede": "_handle_viz_supersede",
@@ -1252,9 +1254,8 @@ class Handler(BaseHTTPRequestHandler):
                                out_path=temporary, api_key=cfg.deepgram_key())
                 elif provider == "gemini":
                     from lib.gemini_tts import synthesize
-                    synthesize(text=prompt, voice=cfg.gemini_tts_voice(voice_id),
-                               out_path=temporary, api_key=cfg.gemini_tts_key(),
-                               backend=cfg.gemini_backend, model=cfg.gemini_model)
+                    synthesize(text=prompt, voice=voice_id, out_path=temporary,
+                               api_key=cfg.gemini_key(), model=cfg.gemini_model)
 
                 else:
                     from lib.custom_tts_adapters import preview as custom_preview
@@ -2330,6 +2331,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, str(error))
         self._json_ok(result)
 
+    def _handle_tool_explanation_settings_get(self):
+        from lib import tool_explanation_settings
+        self._json_ok(tool_explanation_settings.get())
+
+    def _handle_tool_explanation_settings_post(self):
+        from lib import tool_explanation_settings
+        data = self._read_json()
+        try:
+            result = tool_explanation_settings.update(data)
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        self._json_ok(result)
+
     def _handle_tool_explanations(self):
         data = self._read_json()
         if not isinstance(data, dict):
@@ -2337,6 +2351,14 @@ class Handler(BaseHTTPRequestHandler):
         session = data.get("session")
         if not isinstance(session, str) or not (agent := identity.lookup(session)):
             return self._json_error(404, "agent not found")
+        from lib import tool_explanation_settings
+        if not tool_explanation_settings.enabled():
+            # Turned off on this Host: the explainer is not asked at all.
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            return self._json_ok({
+                "detail_level": data.get("detail_level"), "model": "",
+                "items": [{"id": item.get("id"), "status": "disabled"}
+                          for item in items[:8] if isinstance(item, dict)]})
         try:
             result = self.ctx.tool_explanations.request(
                 data.get("detail_level"), data.get("items"), cwd=agent.get("cwd"),
@@ -2675,6 +2697,8 @@ class Handler(BaseHTTPRequestHandler):
             snapshot = live_hub.empty_snapshot(
                 conv=agents_db.live_backend_session(agent_id) or "", session=session,
                 agent_id=agent_id, epoch=str(snapshot.get("epoch") or ""))
+        from lib import tool_explanation_settings
+        snapshot["tool_explanations"] = tool_explanation_settings.get()
         self._json_ok(snapshot)
 
     def _sse(self):
@@ -5731,10 +5755,21 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         srv.runtime_event_watcher = watcher
         return watcher
 
+    def live_explainer(patch):
+        from lib.live_explain import LiveExplainer
+        return LiveExplainer(lambda: ctx.tool_explanations, patch)
+
     def start_live_hub():
         # No separate runtime: the agents run here, so does the hub.
         from lib import live_hub
-        hub = live_hub.LiveHub(sink=ctx.stream.broadcast_live)
+        holder = {}
+
+        def sink(event):
+            ctx.stream.broadcast_live(event)
+            holder["explainer"].observe(event)
+
+        hub = live_hub.LiveHub(sink=sink)
+        holder["explainer"] = live_explainer(hub.patch)
         live_hub.install(hub)
         return hub
 
@@ -5748,8 +5783,9 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         if socket_path is None:
             return None
         watcher = getattr(srv, "runtime_event_watcher", None)
+        explainer = live_explainer(ctx.runtime_client.live_patch)
         return live_hub.LiveRelay(
-            socket_path, ctx.stream,
+            socket_path, ctx.stream, on_event=explainer.observe,
             on_nudge=watcher.poll_now if watcher is not None else None).start()
 
     def start_tts_worker():

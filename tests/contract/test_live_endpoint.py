@@ -71,3 +71,43 @@ def test_live_snapshot_and_subscription(core_server):
     status, snapshot = _get(base, "/live?session=rachel")
     validate(snapshot, SCHEMA["$defs"]["snapshot"], SCHEMA)
     assert snapshot["lseq"] == 2 and snapshot["items"][0]["text"] == "Hello"
+
+
+def _post(base, path, body):
+    request = urllib.request.Request(base + path, data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}")
+
+
+def test_tool_explanation_setting_turns_the_explainer_off(core_server):
+    base, ctx = core_server["base"], core_server["ctx"]
+    calls = []
+
+    class Recording:
+        def request(self, level, items, **_kw):
+            calls.append(items)
+            return {"detail_level": level, "model": "m",
+                    "items": [{"id": i["id"], "status": "ready", "text": "x"} for i in items]}
+
+        def close(self):
+            pass
+
+    ctx.install_tool_explanations(Recording())
+    assert _get(base, "/tool-explanations/settings") == (200, {"enabled": True, "detail_level": 2})
+    assert _get(base, "/agents/snapshot")[1]["tool_explanations"] == {"enabled": True, "detail_level": 2}
+    item = {"id": "1", "activity": {"name": "Bash", "command": "ls"}}
+    status, body = _post(base, "/tool-explanations", {"session": "rachel", "detail_level": 3, "items": [item]})
+    assert status == 200 and body["items"][0]["status"] == "ready" and len(calls) == 1
+
+    assert _post(base, "/tool-explanations/settings", {"enabled": False}) == (
+        200, {"enabled": False, "detail_level": 2})
+    assert _post(base, "/tool-explanations/settings", {"detail_level": 7})[0] == 400
+    status, body = _post(base, "/tool-explanations", {"session": "rachel", "detail_level": 3, "items": [item]})
+    assert status == 200 and [i["status"] for i in body["items"]] == ["disabled"]
+    assert len(calls) == 1
+    assert _get(base, "/live?session=rachel")[1]["tool_explanations"]["enabled"] is False
+    assert _get(base, "/agents/snapshot")[1]["tool_explanations"]["enabled"] is False

@@ -47,13 +47,6 @@ voice = "Kore"
 # Per-contact Gemini voices; the contact's other provider voices are kept.
 # [gemini_tts.voices]
 # Arnold = "voice_..."
-# backend = "vertex" speaks through Vertex AI (no fixed daily request cap)
-# with a Vertex express key. Designed voices exist per API surface, so Vertex
-# uses the same contact's id from [gemini_tts.vertex_voices].
-# backend = "gemini_api"
-# vertex_api_key = ""            # or GOOGLE_VERTEX_API_KEY
-# [gemini_tts.vertex_voices]
-# Arnold = "voice_<uuid>"
 
 
 [cartesia]

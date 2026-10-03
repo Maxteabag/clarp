@@ -304,9 +304,8 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 raise GeminiTTSError(f"no Gemini voice configured for {persona!r}")
             return gemini_synthesize(
                 text=text,
-                voice=cfg.gemini_tts_voice(gemini_voice),
-                out_path=out_path, api_key=cfg.gemini_tts_key(),
-                backend=cfg.gemini_backend,
+                voice=gemini_voice,
+                out_path=out_path, api_key=cfg.gemini_key(),
                 model=cfg.gemini_model, on_chunk=on_chunk,
                 trace_id=trace_id)
         if selected == DEEPGRAM:

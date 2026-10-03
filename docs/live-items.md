@@ -301,7 +301,8 @@ continue with events whose `lseq` is greater. 404 for an unknown session.
 
 ## 6. Tool explanations on items
 
-A Host setting decides whether tool rows carry a plain-language explanation:
+A Host setting (feature `tool_explanation_setting`, Host contract 43) decides
+whether tool rows carry a plain-language explanation:
 
 ```
 GET  /tool-explanations/settings  → {"enabled": true, "detail_level": 2}
