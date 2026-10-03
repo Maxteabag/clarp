@@ -46,6 +46,8 @@ class RosterEntry {
 const chats = new SvelteMap();     // session → LiveChat
 const roster = new SvelteMap();    // session → RosterEntry
 const watched = [];          // most recent last
+/** Sessions the open /events connection carries item ops for; null = all watched. */
+let connected = null;
 const queued = new Map();    // session → events waiting for the next frame
 const buffered = new Map();  // session → events that arrived during GET /live
 const fetching = new Set();
@@ -110,6 +112,18 @@ export function watchedSessions() {
   return [...watched];
 }
 
+/**
+ * The sessions the open connection subscribed to. Until a connection that
+ * asked for a chat is open, the Host sends that chat only status and turn
+ * ops, under the same lseq numbers: applying those as full events would
+ * skip its item ops.
+ */
+export function setConnectedLive(sessions) {
+  connected = new Set(sessions || []);
+}
+
+const carried = session => (connected ? connected.has(session) : watched.includes(session));
+
 /** The `/events` query for the live channel, '' when it is off. */
 export function liveQuery() {
   if (!live.enabled) return '';
@@ -127,8 +141,8 @@ export function liveFor(session) {
 /** The newest status of any agent, subscribed or not. */
 export function rosterActivity(session) {
   const own = liveFor(session);
-  if (own) return own.activity;
-  return roster.get(session)?.activity || null;
+  if (own && carried(session)) return own.activity;
+  return roster.get(session)?.activity || (own && own.activity) || null;
 }
 
 const BUSY = new Set(['thinking', 'responding', 'tool', 'compacting', 'limited']);
@@ -224,7 +238,7 @@ function noteRoster(session, activity, turn, wasRunning = liveTurnRunning(sessio
 export function handleLiveEvent(ev) {
   if (!live.enabled || !ev || !ev.session) return;
   const session = ev.session;
-  if (watched.includes(session) && chats.get(session)?.state) {
+  if (watched.includes(session) && carried(session) && chats.get(session)?.state) {
     enqueue(session, [ev]);
     return;
   }

@@ -179,3 +179,27 @@ describe('turn end', () => {
     expect(settled).toHaveBeenCalledWith('rachel');
   });
 });
+
+describe('the connection that carries a chat', () => {
+  beforeEach(installGlobals);
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('takes a chat’s events as status only until a connection subscribed to it is open', async () => {
+    const store = await freshStore();
+    routes['/live?'] = () => ({ status: 200, body: snapshotOf(1) });
+    store.setServerFeatures(['live_items']);
+    store.setConnectedLive([]);
+    store.watchSession('rachel');
+    await store.openLive('rachel');
+    // The old connection only carries the summary of lseq 2: status and turn ops.
+    store.handleLiveEvent({ ...event(2), ops: [{ op: 'status', conv: 'conv-1', activity: { state: 'thinking', headline: 'Thinking' } }] });
+    runFrames();
+    expect(store.liveFor('rachel').lseq).toBe(1);
+    expect(store.rosterActivity('rachel')).toMatchObject({ state: 'thinking' });
+    store.setConnectedLive(['rachel']);
+    store.handleLiveEvent(event(2));
+    runFrames();
+    expect(store.liveFor('rachel').lseq).toBe(2);
+    expect(store.liveFor('rachel').items['cl:msg_01:0']).toBeTruthy();
+  });
+});

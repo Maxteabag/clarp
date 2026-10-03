@@ -26,6 +26,19 @@
   $effect(() => { delayed.set(target); });
   $effect(() => () => delayed.dispose());
 
+  // The line names an item (docs/live-items.md §1.3 item_id): tapping it
+  // brings that row into view.
+  function reveal() {
+    const id = shown && shown.itemId;
+    if (!id || typeof CSS === 'undefined') return;
+    const el = document.querySelector(`[data-item-id="${CSS.escape(id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    el.classList.remove('lv-pulse');
+    void el.offsetWidth;
+    el.classList.add('lv-pulse');
+  }
+
   let timeEl = $state(null);
   $effect(() => {
     const since = shown && shown.since;
@@ -40,7 +53,11 @@
 {#if shown}
   <div class="status-line {shown.state}" role="status" aria-live="polite">
     <span class="sl-glyph" aria-hidden="true">{shown.state === 'tool' ? '●' : '◌'}</span>
-    <span class="sl-text">{shown.text}</span>
+    {#if shown.itemId}
+      <button class="sl-text sl-link" type="button" title="Show it" onclick={reveal}>{shown.text}</button>
+    {:else}
+      <span class="sl-text">{shown.text}</span>
+    {/if}
     {#if shown.since}<span class="sl-time" bind:this={timeEl}></span>{/if}
     {#if shown.more}<span class="sl-more">{shown.more}</span>{/if}
     {#if shown.interrupt}

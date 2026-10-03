@@ -3371,3 +3371,7 @@ html:not(.desktop) .history:has(.status-line) .history-jump {
 /* The transcript anchors its own prepends (Transcript.svelte); the browser's
    scroll anchoring would compensate a second time where it exists. */
 .history-body { overflow-anchor: none; }
+.sl-link { padding: 0; border: 0; background: none; font: inherit; cursor: pointer; text-align: left; }
+.sl-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.lv-pulse { animation: lv-flash 900ms var(--ease) 1; }
+@keyframes lv-flash { 0%, 40% { background: rgba(125, 207, 255, .12); } 100% { background: transparent; } }
