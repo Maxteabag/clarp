@@ -78,6 +78,8 @@ export component Pane inherits Rectangle {
     callback remove-attachment(string);
     callback link-clicked(string);
     callback load-older();
+    // The transcript's scroll journal (Transcript.journal).
+    callback scroll-journal(string, length, length, float, float, length, length, bool, bool, int);
     callback toggle-activity(string, string);
     callback copy-message(string);
     callback silence();
@@ -119,7 +121,7 @@ export component Pane inherits Rectangle {
         }
         if (root.scroll-request-seen != root.pane.scroll-request) {
             root.scroll-request-seen = root.pane.scroll-request;
-            transcript.scroll-by(root.pane.scroll-amount * 1px);
+            transcript.scroll-by(root.pane.scroll-amount * 1px, "seek");
         }
     }
     // Focus moves once the pane is live: a new pane's composer, or one just
@@ -169,6 +171,7 @@ export component Pane inherits Rectangle {
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }
             reached-top => { root.load-older(); }
+            journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
           }
           // In the composer letters type: Ctrl+H is the way back to the chat.
           // The agent's name, folder and runtime sit on the right of the
@@ -291,6 +294,7 @@ export component Workspace inherits Rectangle {
     callback remove-attachment(string, string);
     callback link-clicked(string);
     callback load-older(string);
+    callback scroll-journal(string, string, length, length, float, float, length, length, bool, bool, int);
     callback toggle-activity(string, string, string);
     callback copy-message(string, string);
     callback silence();
@@ -386,6 +390,7 @@ export component Workspace inherits Rectangle {
         remove-attachment(id) => { root.remove-attachment(pane.id, id); }
         link-clicked(url) => { root.link-clicked(url); }
         load-older => { root.load-older(pane.id); }
+        scroll-journal(cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(pane.id, cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
         toggle-activity(id, group) => { root.toggle-activity(pane.id, id, group); }
         copy-message(id) => { root.copy-message(pane.id, id); }
         silence => { root.silence(); }

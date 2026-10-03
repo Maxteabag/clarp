@@ -13,6 +13,7 @@ mod keymap;
 mod launch;
 mod panes;
 mod perf;
+mod scroll_journal;
 mod preview_view;
 mod platform;
 mod settings_view;
@@ -712,6 +713,9 @@ fn main() {
         let session = app.session_of(&pane);
         platform::audio::with(|audio| audio.cancel_transcriptions_for_session(&session));
     }));
+    window.on_scroll_journal(|pane, cause, old, new, old_place, new_place, content, viewport, at_end, follow, rows| {
+        scroll_journal::record(scroll_journal::Move { pane: pane.into(), cause: cause.into(), old, new, old_place, new_place, content, viewport, at_end, follow, rows });
+    });
     window.on_pane_reported(|pane, follows, at_end, offset, transcript, composer| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             let report = panes::Report { follows, at_end, offset, transcript_focused: transcript, composer_focused: composer };

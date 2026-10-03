@@ -1311,37 +1311,33 @@ pub fn selected(app: &App) -> Option<String> {
 }
 
 /// J/K: the next or previous card in the chat, scrolled into view when it
-/// is not (all) on screen; from none, J is the topmost card on screen and K
-/// the lowest (with none on screen, K is the latest card above and J the
-/// next one below). Only these keypresses move the reader to a card.
+/// is not (all) on screen. Only a card on screen is stepped from (a cursor
+/// left on a card the reader scrolled away from is not), and there is no
+/// step past the first or last card. From none, J is the topmost card on
+/// screen and K the lowest; with none on screen nothing happens, so K at
+/// the latest message never sends the reader to a card far up. Only these
+/// keypresses move the reader to a card.
 pub fn step(app: &App, direction: i32) {
     let ids = selectables(app);
-    let Some(last) = ids.len().checked_sub(1) else { return };
     let cursor = app.artifact_cursor.borrow().clone();
-    let at = ids.iter().position(|i| *i == cursor);
+    let at = selected(app).and_then(|selected| ids.iter().position(|i| *i == selected));
     let shown = on_screen(app);
     let next = match at {
-        Some(index) => (index as i64 + i64::from(direction)).clamp(0, last as i64) as usize,
-        None => match (direction > 0, shown.first(), shown.last()) {
-            (true, Some(first), _) => ids.iter().position(|i| i == first).unwrap_or(0),
-            (false, _, Some(lowest)) => ids.iter().position(|i| i == lowest).unwrap_or(last),
-            // Nothing on screen: what is known to be above (or below) it.
-            _ => {
-                let side = |id: &String| SHOWN.with(|s| s.borrow().1.get(id).map(|r| if r.top + r.height <= r.view_top { -1 } else { 1 }));
-                let found = if direction > 0 { ids.iter().position(|i| side(i) == Some(1)) } else { ids.iter().rposition(|i| side(i) == Some(-1)) };
-                found.unwrap_or(last)
-            }
+        Some(index) => match index.checked_add_signed(direction as isize).filter(|next| *next < ids.len()) {
+            Some(next) => next,
+            None => return,
         },
+        None => {
+            let Some(pick) = (if direction > 0 { shown.first() } else { shown.last() }) else { return };
+            let Some(index) = ids.iter().position(|i| i == pick) else { return };
+            index
+        }
     };
     if ids[next] != cursor {
         TILE.with(|t| t.set(0));
     }
     *app.artifact_cursor.borrow_mut() = ids[next].clone();
-    let toward = match at {
-        Some(index) => (next as i64 - index as i64).signum() as i32,
-        None => direction,
-    };
-    bring_into_view(app, &ids[next], if toward == 0 { direction } else { toward });
+    bring_into_view(app, &ids[next], direction);
     app.refresh(&[Change::Updates]);
 }
 
