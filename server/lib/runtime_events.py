@@ -2,19 +2,41 @@
 from __future__ import annotations
 
 import threading
+import time
 
 from . import agents as agents_db
 from . import events
+from .live_pacing import TrailingThrottle
 from .log import log_exception
+from .protocol import SSEType
 
 
 _RUNTIME_MARKER = "_clarp_runtime_event"
 
 
 class RuntimeEventStream:
-    """Stream-compatible writer used by the runtime, with no local clients."""
+    """Stream-compatible writer used by the runtime, with no local clients.
+
+    ``transcript-updated`` is throttled here, before it is stored: a streaming
+    reply would otherwise write one relay row per live-row update. The first
+    wake-up of a burst goes at once and the last when the window closes.
+    """
+
+    TRANSCRIPT_MIN_INTERVAL_SEC = 0.25
+
+    def __init__(self, *, clock=time.monotonic, schedule=None):
+        self._transcript_throttle = TrailingThrottle(
+            self.TRANSCRIPT_MIN_INTERVAL_SEC, clock=clock, schedule=schedule)
 
     def broadcast(self, event: dict) -> None:
+        if dict(event).get("type") == SSEType.TRANSCRIPT_UPDATED:
+            key = str(event.get("session") or event.get("agent_id") or "")
+            self._transcript_throttle.submit(key, dict(event), self._record)
+            return
+        self._record(event)
+
+    @staticmethod
+    def _record(event: dict) -> None:
         agents_db.record_sse_event({**dict(event), _RUNTIME_MARKER: True})
 
     def broadcast_ephemeral(self, event: dict) -> None:

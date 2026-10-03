@@ -21,6 +21,7 @@ import threading
 import time
 
 from .log import log_exception
+from .live_pacing import TrailingThrottle
 from . import events, health
 from .protocol import ClipStatus, SSEType
 from .timing import SERVER_TIMING
@@ -76,7 +77,7 @@ class AudioStream:
 
     def __init__(self, audio_dir: pathlib.Path, *,
                  transcript_event_min_interval_sec: float = 0.25,
-                 monotonic=time.monotonic):
+                 monotonic=time.monotonic, schedule=None):
         self.audio_dir = audio_dir
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         self._subs: list[queue.Queue] = []
@@ -87,8 +88,8 @@ class AudioStream:
         self._threads: list[threading.Thread] = []
         self._transcript_event_min_interval = transcript_event_min_interval_sec
         self._monotonic = monotonic
-        self._last_transcript_event: dict[str, float] = {}
-        self._transcript_event_lock = threading.Lock()
+        self._transcript_throttle = TrailingThrottle(
+            transcript_event_min_interval_sec, clock=monotonic, schedule=schedule)
 
     # --- subscriber API ---------------------------------------------------
 
@@ -135,16 +136,15 @@ class AudioStream:
         if event_dict.get("type") == SSEType.TRANSCRIPT_UPDATED:
             # Transcript writers can emit dozens of partial rows in one model
             # turn. SSE is only a wake-up hint—the canonical /log cursor is the
-            # delivery mechanism—so cap identical session wake-ups instead of
-            # making every token/tool delta launch work on the phone.
+            # delivery mechanism—so a burst becomes its first wake-up and,
+            # when the window closes, its last one: the final change of a
+            # burst is never left unannounced.
             key = str(session or event_dict.get("agent_id") or "")
-            now = self._monotonic()
-            with self._transcript_event_lock:
-                previous = self._last_transcript_event.get(key)
-                if (previous is not None
-                        and now - previous < self._transcript_event_min_interval):
-                    return
-                self._last_transcript_event[key] = now
+            self._transcript_throttle.submit(key, event_dict, self._broadcast_now)
+            return
+        self._broadcast_now(event_dict)
+
+    def _broadcast_now(self, event_dict: dict) -> None:
         if event_dict.get("type") == SSEType.AUDIO:
             try:
                 from . import agents as _agents

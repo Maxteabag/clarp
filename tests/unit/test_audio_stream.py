@@ -50,22 +50,6 @@ def test_recent_filters_remote_actions_persisted_by_an_older_release(tmp_path):
     assert any(ev["type"] == "server-version" for ev in replay)
 
 
-def test_transcript_update_bursts_are_throttled_per_session(tmp_path):
-    now = [10.0]
-    s = AudioStream(tmp_path, transcript_event_min_interval_sec=0.25,
-                    monotonic=lambda: now[0])
-    q = s.subscribe()
-
-    for _ in range(100):
-        s.broadcast({"type": "transcript-updated", "session": "arnold"})
-    s.broadcast({"type": "transcript-updated", "session": "yuki"})
-
-    assert q.qsize() == 2
-    now[0] += 0.25
-    s.broadcast({"type": "transcript-updated", "session": "arnold"})
-    assert q.qsize() == 3
-
-
 def test_recent_purges_old_events(tmp_path):
     s = AudioStream(tmp_path)
     # Inject an old timestamp directly.

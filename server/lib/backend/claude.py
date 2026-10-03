@@ -45,6 +45,7 @@ from .. import events
 from .. import provider_capabilities
 from .. import turn_lifecycle
 from ..turn_lifecycle import TurnEvent
+from ..live_pacing import LivePacer
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
@@ -484,6 +485,12 @@ class ClaudeBackend(Backend):
         saw_usage_limit = False
         live_text = ""
         phase = ""
+        bound = {"backend_session_id": backend_session_id}
+        # The live row grows at markdown-stable boundaries at most every
+        # 250 ms, with a trailing write; the final text is written at once.
+        pacer = LivePacer(lambda text: _store_live_partial(
+            agent_id=agent_id, backend_session_id=bound["backend_session_id"],
+            trace_id=trace_id, text=text, session=session, stream=stream))
         isolated_texts: list[str] = []
         live_backend_session_id = backend_session_id
         try:
@@ -514,6 +521,7 @@ class ClaudeBackend(Backend):
                     if sid:
                         saw_init = True
                         live_backend_session_id = sid
+                        bound["backend_session_id"] = sid
                         log("clarpSessionInit", f"sid={sid} trace={trace_id or '∅'}")
                         if on_session_init is not None:
                             try:
@@ -551,16 +559,11 @@ class ClaudeBackend(Backend):
                         else:
                             live_text = text
                         if not isolated:
-                            _store_live_partial(
-                                agent_id=agent_id,
-                                backend_session_id=live_backend_session_id,
-                                trace_id=trace_id,
-                                text=live_text,
-                                session=session,
-                                stream=stream,
-                            )
+                            pacer.offer(live_text)
                 elif typ == "result":
                     saw_result = True
+                    if not isolated and live_text:
+                        pacer.offer(live_text, final=True)
                     if on_result is not None:
                         try:
                             assistant_text = (
@@ -602,6 +605,9 @@ class ClaudeBackend(Backend):
         except Exception as e:                            # noqa: BLE001
             log_exception("clarpRunnerDrainFail", e, detail=trace_id)
         finally:
+            if not isolated and not saw_result and live_text:
+                pacer.offer(live_text, final=True)
+            pacer.cancel()
             if agent_id and handle is not None and not isolated:
                 self.unregister_handle(agent_id, handle)
 
