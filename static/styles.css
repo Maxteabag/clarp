@@ -3259,3 +3259,110 @@ html.desktop .speaking { bottom: calc(var(--dock-h) + 16px); }
   .contact-card { grid-template-columns: auto minmax(0, 1fr); }
   .contact-card > button { grid-column: 2; justify-self: start; min-width: 74px; }
 }
+
+/* ---- live turn (docs/live-items.md §7) -----------------------------------
+   Rows that appear, grow and settle in place. Chrome rows have fixed line
+   heights so a status change never moves the transcript; only message text
+   and an expanded row change height. */
+.live-turn { max-width: 65ch; margin: 2px 0 6px; }
+.live-turn .live-msg { content-visibility: visible; }
+.live-turn .live-msg.commentary { color: var(--washi-dim); }
+.lv-tool, .lv-reasoning { margin: 0; padding: 1px 12px; font-family: var(--font-ui); font-size: 12.5px; }
+.lv-head {
+  display: flex; align-items: baseline; gap: 6px; width: 100%;
+  min-height: 22px; line-height: 22px; padding: 0; margin: 0;
+  background: none; border: 0; color: var(--washi-dim); font: inherit; text-align: left;
+  cursor: pointer; white-space: nowrap; overflow: hidden;
+}
+.lv-head:disabled { cursor: default; }
+.lv-dot {
+  flex: none; width: 7px; height: 7px; border-radius: 50%; align-self: center;
+  background: var(--washi-low);
+}
+.lv-tool.running > .lv-head .lv-dot, .lv-tool.pending > .lv-head .lv-dot {
+  background: var(--accent-cyan); animation: lv-pulse 1.2s steps(12) infinite;
+}
+.lv-tool.completed > .lv-head .lv-dot { background: var(--moss); }
+.lv-tool.failed > .lv-head .lv-dot { background: var(--vermillion); }
+.lv-tool.interrupted > .lv-head .lv-dot { background: var(--ochre); }
+@keyframes lv-pulse { 50% { opacity: .35; transform: scale(.8); } }
+.lv-verb { flex: none; color: var(--washi); font-weight: 600; }
+.lv-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--washi-dim); }
+.lv-time, .lv-exit { flex: none; color: var(--washi-low); font-variant-numeric: tabular-nums; }
+.lv-exit { color: var(--vermillion); }
+.lv-tool.interrupted .lv-exit { color: var(--ochre); }
+.lv-diff { flex: none; display: inline-flex; gap: 4px; }
+.lv-diff .add, .lv-diffview .add { color: var(--moss); }
+.lv-diff .del, .lv-diffview .del { color: var(--vermillion); }
+.lv-diffview .hunk { color: var(--accent-purple); }
+.lv-sub {
+  height: 18px; line-height: 18px; margin-left: 13px;
+  color: var(--washi-low); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lv-out {
+  margin: 2px 0 2px 13px; padding: 4px 8px; max-height: 240px; overflow: auto;
+  border-left: 2px solid var(--ink-edge); background: transparent;
+  color: var(--washi-low); font-family: var(--font-mono); font-size: 11.5px; line-height: 1.45;
+  white-space: pre; tab-size: 2;
+}
+.lv-out.lv-full, .lv-out.lv-diffview { color: var(--washi-dim); }
+.lv-more { margin-left: 23px; color: var(--washi-low); font-size: 11.5px; }
+.lv-members { margin: 0 0 2px 13px; padding: 0; list-style: none; color: var(--washi-low); }
+.lv-members li { line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lv-members .lv-verb { color: var(--washi-dim); font-weight: 400; }
+.lv-reasoning .lv-head { color: var(--washi-low); font-style: italic; }
+.lv-glyph { flex: none; color: var(--washi-low); }
+.lv-reasoning.running .lv-label {
+  background: linear-gradient(90deg, var(--washi-low) 0 40%, var(--washi) 50%, var(--washi-low) 60% 100%);
+  background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: lv-shimmer 2.2s steps(30) infinite;
+}
+@keyframes lv-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.lv-thought {
+  margin: 2px 0 4px 13px; padding-left: 8px; border-left: 2px solid var(--ink-edge);
+  color: var(--washi-low); font-family: var(--font-body); font-size: 13px; max-height: 40vh; overflow: auto;
+}
+.lv-fold {
+  display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 12px; margin: 2px 0;
+  background: none; border: 0; color: var(--washi-low); font: 12.5px var(--font-ui); cursor: pointer;
+}
+.lv-fold:hover, .lv-head:not(:disabled):hover .lv-label { color: var(--washi); }
+.lv-caret { display: inline-block; transition: transform var(--t-snap) var(--ease); }
+.lv-caret.open { transform: rotate(90deg); }
+.lv-plan { margin: 4px 12px; padding: 6px 10px; border: 1px solid var(--ink-edge); border-radius: 6px; font: 12.5px var(--font-ui); }
+.lv-step { line-height: 20px; color: var(--washi-dim); }
+.lv-step.completed { color: var(--washi-low); text-decoration: line-through; }
+.lv-step.in_progress { color: var(--washi); }
+.lv-divider { margin: 6px 12px; color: var(--washi-low); font: 12px var(--font-ui); text-align: center; }
+
+.status-line {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  height: 28px; padding: 0 12px; border-top: 1px solid var(--ink-edge);
+  font: 12.5px var(--font-ui); color: var(--washi-dim); white-space: nowrap; overflow: hidden;
+}
+.sl-glyph { color: var(--accent-cyan); animation: lv-pulse 1.2s steps(12) infinite; }
+.status-line.thinking .sl-glyph, .status-line.responding .sl-glyph { color: var(--washi-low); }
+.sl-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--washi); }
+.sl-time, .sl-more { flex: none; color: var(--washi-low); font-variant-numeric: tabular-nums; }
+.sl-stop {
+  margin-left: auto; flex: none; width: 24px; height: 22px; padding: 0;
+  border: 1px solid var(--ink-edge); border-radius: 4px; background: none;
+  color: var(--washi-low); font-size: 10px; cursor: pointer;
+}
+.sl-stop:hover { color: var(--vermillion); border-color: var(--vermillion); }
+@media (prefers-reduced-motion: reduce) {
+  .lv-tool .lv-dot, .sl-glyph, .lv-reasoning.running .lv-label { animation: none; }
+}
+/* Phone: the dock floats over the bottom of the pane, so the status line
+   sits just above it and the transcript keeps clear of both. */
+html:not(.desktop) .status-line {
+  position: absolute; left: 0; right: 0; z-index: 3;
+  bottom: calc(env(safe-area-inset-bottom) + 57px);
+  background: var(--ink); border-top-color: var(--ink-edge);
+}
+html:not(.desktop) .history:has(.status-line) .history-body {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 112px);
+}
+html:not(.desktop) .history:has(.status-line) .history-jump {
+  bottom: calc(env(safe-area-inset-bottom) + 118px);
+}

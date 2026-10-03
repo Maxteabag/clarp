@@ -18,6 +18,7 @@ import {
   applyLiveEvent, applyLiveSnapshot, blankLive, LiveEffects, liveSnapshotFailed,
   requestLiveSnapshot,
 } from '@core/live-items.js';
+import { SvelteMap } from 'svelte/reactivity';
 import { clog } from '../lib/net.js';
 
 export const LIVE_FEATURE = 'live_items';
@@ -41,14 +42,16 @@ class RosterEntry {
   turn = $state.raw(null);
 }
 
-const chats = new Map();     // session → LiveChat
-const roster = new Map();    // session → RosterEntry
+// Reactive maps: a pane that asked before a chat existed re-reads when it appears.
+const chats = new SvelteMap();     // session → LiveChat
+const roster = new SvelteMap();    // session → RosterEntry
 const watched = [];          // most recent last
 const queued = new Map();    // session → events waiting for the next frame
 const buffered = new Map();  // session → events that arrived during GET /live
 const fetching = new Set();
 let frameRequested = false;
 let subscriptionsChanged = () => {};
+let turnSettled = () => {};
 
 function chatOf(session) {
   let chat = chats.get(session);
@@ -73,6 +76,11 @@ export function setServerFeatures(features = []) {
     for (const chat of chats.values()) chat.state = null;
   }
   subscriptionsChanged();
+}
+
+/** Called with a session whose running turn just ended. */
+export function onTurnSettled(fn) {
+  turnSettled = fn || (() => {});
 }
 
 export function onSubscriptionsChanged(fn) {
@@ -192,6 +200,7 @@ function applyQueued(session, events) {
     buffered.set(session, held.slice(-MAX_BUFFERED));
     return;
   }
+  const wasRunning = liveTurnRunning(session);
   let state = chat.state;
   let needSnapshot = false;
   for (const ev of events) {
@@ -200,14 +209,15 @@ function applyQueued(session, events) {
     if (r.effects.includes(LiveEffects.FETCH_LIVE)) { needSnapshot = true; break; }
   }
   if (state !== chat.state) chat.state = state;
-  noteRoster(session, state.activity, state.turn);
+  noteRoster(session, state.activity, state.turn, wasRunning);
   if (needSnapshot) openLive(session);
 }
 
-function noteRoster(session, activity, turn) {
+function noteRoster(session, activity, turn, wasRunning = liveTurnRunning(session)) {
   const entry = rosterOf(session);
   if (activity && activity !== entry.activity) entry.activity = activity;
   if (turn !== undefined && turn !== entry.turn) entry.turn = turn;
+  if (wasRunning && !liveTurnRunning(session)) turnSettled(session);
 }
 
 /** A `live` SSE event. */

@@ -14,7 +14,7 @@ import {
 } from './conversations.svelte.js';
 import {
   handleLiveEvent, liveFor, liveQuery, liveTurnRunning, loadExplanationSettings,
-  onSubscriptionsChanged, openLive, setServerFeatures, watchedSessions,
+  onSubscriptionsChanged, onTurnSettled, openLive, setServerFeatures, watchedSessions,
 } from './live.svelte.js';
 import {
   audio, bumpLastAudioTs, lastAudioTs, PLAYER_ADAPTER_VERSION, scheduler,
@@ -79,6 +79,11 @@ export async function refreshServerInfo() {
     if (features.includes('live_items')) loadExplanationSettings();
   } catch (_) {}
 }
+
+// A turn ended: the snapshot refresh its transcript pings held back is due.
+onTurnSettled(session => {
+  if (snapshotOwed.delete(session)) transcriptSnapshotRefresh.schedule();
+});
 
 // The live subscription is part of the URL, so a changed set of chats means
 // reopening the stream. Other events resume from the last id, and live
@@ -191,12 +196,7 @@ function handleEvent(ev) {
     }
 
   } else if (ev.type === SSEType.LIVE) {
-    const wasRunning = liveTurnRunning(ev.session);
     handleLiveEvent(ev);
-    // The turn ended: the snapshot refresh it held back is due now.
-    if (wasRunning && !liveTurnRunning(ev.session) && snapshotOwed.delete(ev.session)) {
-      transcriptSnapshotRefresh.schedule();
-    }
 
   } else if (ev.type === SSEType.AGENT_STATE) {
     agentSnapshot.patchState(ev);
