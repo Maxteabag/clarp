@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 105
+_SCHEMA_VERSION = 106
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -204,6 +204,10 @@ CREATE INDEX idx_messages_agent_revision ON messages(agent_id, backend_session_i
 -- order (message_previews.list_messages). Pinned by test_message_log_index.
 CREATE INDEX idx_messages_log_order
     ON messages(agent_id, backend_session_id, COALESCE(timestamp, ''), seq);
+-- Finalized replies (`final:<trace>` rows) a transcript import adopts; read
+-- once per import batch inside the writer lock (message_writes._FinalRows).
+CREATE INDEX idx_messages_final_rows
+    ON messages(agent_id, backend_session_id) WHERE source_file LIKE 'final:%';
 CREATE INDEX idx_messages_dashboard_activity
     ON messages(agent_id,
                 COALESCE(CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER), updated_at) DESC,

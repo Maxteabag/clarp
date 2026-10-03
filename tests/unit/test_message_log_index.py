@@ -68,3 +68,27 @@ def test_log_pages_read_the_newest_rows_from_the_index(page, include_automated):
     assert any("USING INDEX idx_messages_log_order" in d for d in inner_plan), plan
     # Only the outer re-sort of the page itself may use a temporary B-tree.
     assert not any("TEMP B-TREE" in d for d in inner_plan), plan
+
+
+def test_finalized_reply_lookups_read_only_the_final_rows():
+    """Each transcript import reads a conversation's `final:` rows (adoption
+    of finalized replies); without a partial index that scanned the whole
+    conversation inside the writer lock (perf-profile report, fix 4)."""
+    from lib.message_writes import _FinalRows
+
+    _seed()
+    con = db.conn()
+    con.execute(
+        "INSERT INTO messages (message_id, agent_id, backend_session_id, seq, role, timestamp,"
+        " text, updated_at, revision, source_file) VALUES ('f1', ?, ?, -799999, 'assistant',"
+        " '2026-09-01T11:00:00.000Z', 'final reply', 1, 1, 'final:tr-1')", (AGENT, BSID))
+    statements: list[str] = []
+    con.set_trace_callback(statements.append)
+    try:
+        rows = _FinalRows(con, AGENT, BSID).rows()
+    finally:
+        con.set_trace_callback(None)
+    assert [row[0] for row in rows] == ["f1"]
+    query = [s for s in statements if "final:%" in s][-1]
+    plan = " ".join(row[3] for row in con.execute("EXPLAIN QUERY PLAN " + query))
+    assert "idx_messages_final_rows" in plan, plan
