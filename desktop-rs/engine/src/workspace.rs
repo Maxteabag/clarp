@@ -97,6 +97,7 @@ impl Engine {
             if !self.conversations.contains_key(&session) {
                 self.open_log(&session);
             }
+            self.live_chat_opened(&session);
         }
     }
 

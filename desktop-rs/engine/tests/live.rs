@@ -42,16 +42,12 @@ fn an_open_chat_subscribes_fetches_its_snapshot_and_follows_the_stream() {
     let mut d = Driver::new(&host.base);
     d.connect();
     assert!(d.engine.live_items());
-    assert!(events_queries(&host).iter().any(|q| q.get("live") == Some(&json!(""))), "status ops only before a chat opens: {:?}", events_queries(&host));
+    assert!(events_queries(&host).iter().all(|q| q.get("live").is_some()), "every stream asks for live ops: {:?}", events_queries(&host));
     d.engine.select("rachel");
     d.until("the snapshot", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(0)));
-    assert_eq!(host.requests("GET", "/live").len(), 1);
+    assert_eq!(host.requests("GET", "/live").len(), 1, "{:?}", host.requests("GET", "/live"));
     assert_eq!(host.requests("GET", "/live")[0]["query"]["session"], "rachel");
     d.until("the stream asks for rachel", |_| events_queries(&host).iter().any(|q| q.get("live") == Some(&json!("rachel"))));
-    // The stream reconnects for the new set, resuming the other events.
-    let resumed = host.requests("GET", "/events").last().cloned().unwrap();
-    assert!(!resumed["last_event_id"].as_str().unwrap_or_default().is_empty() || host.requests("GET", "/events").len() >= 2);
-
     d.settle(std::time::Duration::from_millis(300));
     host.control("/__control/live-replay", json!({"fixture": "turn-full"}));
     d.until("the whole turn", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(23)));
@@ -68,9 +64,19 @@ fn an_open_chat_subscribes_fetches_its_snapshot_and_follows_the_stream() {
     d.settle(std::time::Duration::from_millis(300));
     assert!(!d.engine.conversation("rachel").unwrap().rows().iter().any(|m| m.activity), "no activity rows beside live items");
 
-    // A second chat joins the subscription.
+    // A second chat joins the subscription: the stream reopens for the new
+    // set, resuming the other events where it was, with no disconnect.
+    let snapshots = host.requests("GET", "/agents/snapshot").len();
+    host.control("/__control/event", json!({"type": "agent-roster", "session": "rachel"}));
+    d.until("the event", |_| host.requests("GET", "/agents/snapshot").len() > snapshots);
+    let connection_changes = d.changes.iter().filter(|c| **c == Change::Connection).count();
     d.engine.select("mike");
     d.until("the stream asks for both", |_| events_queries(&host).iter().any(|q| q.get("live") == Some(&json!("mike,rachel"))));
+    let reopened = host.requests("GET", "/events").last().cloned().unwrap();
+    assert!(!reopened["last_event_id"].as_str().unwrap_or_default().is_empty(), "resumed by event id: {reopened}");
+    d.settle(std::time::Duration::from_millis(300));
+    assert_eq!(d.changes.iter().filter(|c| **c == Change::Connection).count(), connection_changes, "no disconnect for a new set");
+    assert_eq!(d.engine.connection_state(), "live");
 }
 
 #[test]
@@ -99,4 +105,23 @@ fn a_gap_recovers_from_get_live() {
 
 fn item_text_of(engine: &clarp_engine::Engine, id: &str) -> String {
     engine.live_view("rachel").and_then(|v| v.item(id)).and_then(|i| i.get("text")).and_then(Value::as_str).unwrap_or_default().to_owned()
+}
+
+#[test]
+fn a_dropped_stream_asks_for_the_snapshot_again() {
+    let host = Host::start("live-drop");
+    host.control("/__control/live", json!({"on": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.engine.select("rachel");
+    d.until("the snapshot", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(0)));
+    let fetched = host.requests("GET", "/live").len();
+    // The turn moves on while the stream is down: nothing arrives as events.
+    host.control("/__control/outage", json!({"seconds": 0.5}));
+    d.until("the drop", |e| e.connection_state() == "reconnecting");
+    host.control("/__control/live-replay", json!({"fixture": "turn-full", "through": 6}));
+    d.until("live again", |e| e.connection_state() == "live");
+    d.until("the turn so far", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(5)));
+    assert_eq!(host.requests("GET", "/live").len(), fetched + 1);
+    assert_eq!(d.engine.live_view("rachel").unwrap().item("cl:msg_01:0").unwrap()["status"], "completed");
 }

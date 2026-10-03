@@ -27,6 +27,8 @@ pub enum SseSignal {
 struct State {
     base: Option<Url>,
     token: String,
+    /// Extra query on `/events` (`live=…`), none when empty.
+    query: Vec<(String, String)>,
     cursor: SseCursor,
     connected: bool,
     /// Bumped by stop() and start(); a stream task from an older run may
@@ -60,6 +62,31 @@ impl SseClient {
         state.cursor.set_endpoint(&base);
         state.base = Some(base);
         state.token = token.to_owned();
+    }
+
+    /// The query `/events` is opened with from the next connection on
+    /// (`[("live", "rachel,mike")]`); empty for none.
+    pub fn set_query(&self, query: Vec<(String, String)>) {
+        self.state.lock().expect("sse state").query = query;
+    }
+
+    pub fn query(&self) -> Vec<(String, String)> {
+        self.state.lock().expect("sse state").query.clone()
+    }
+
+    /// Reopens a running stream with the current query, resuming from the
+    /// last event id. Unlike stop and start it reports no disconnect: the
+    /// stream is only changing what it asks for.
+    pub fn resubscribe(&mut self) {
+        let Some(task) = self.task.take() else { return };
+        task.abort();
+        let run = {
+            let mut state = self.state.lock().expect("sse state");
+            state.run += 1;
+            state.run
+        };
+        let (state, http, timing, sink) = (self.state.clone(), self.http.clone(), self.timing, self.sink.clone());
+        self.task = Some(self.runtime.spawn(stream_loop(state, http, timing, sink, run)));
     }
 
     pub fn connected(&self) -> bool {
@@ -142,9 +169,12 @@ async fn stream_loop(state: Arc<Mutex<State>>, http: reqwest::Client, timing: Ss
             if guard.run != run {
                 return;
             }
-            let Some(url) = guard.base.as_ref().and_then(|base| base.join("events").ok()) else {
+            let Some(mut url) = guard.base.as_ref().and_then(|base| base.join("events").ok()) else {
                 return;
             };
+            if !guard.query.is_empty() {
+                url.query_pairs_mut().extend_pairs(guard.query.iter());
+            }
             let mut headers = auth_headers(&guard.token, "text/event-stream");
             headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
             let last = guard.cursor.last_event_id();
