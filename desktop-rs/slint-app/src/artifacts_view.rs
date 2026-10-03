@@ -615,8 +615,16 @@ fn card_hints(item: &ArtifactItem) -> Vec<CardHint> {
                 hints.push(CardHint { chosen: item.chosen == index as i32, ..hint(&(index + 1).to_string(), &option.label, &format!("answer:{index}")) });
             }
         }
-        if answers > 0 {
+        // The chosen answer's digit again sends it (Enter is the
+        // composer's); a written answer's field sends on its own Enter.
+        // Before a choice Send is a button with no key (a click says to
+        // choose first).
+        if item.editing {
             hints.push(hint("Enter", "Send", "send"));
+        } else if (0..answers as i32).contains(&item.chosen) {
+            hints.push(hint(&format!("{} again", item.chosen + 1), "Send", "send"));
+        } else if answers > 0 {
+            hints.push(hint("", "Send", "send"));
         }
         if item.editing {
             hints.push(hint("Esc", "Keep draft", "keep-draft"));
@@ -628,7 +636,7 @@ fn card_hints(item: &ArtifactItem) -> Vec<CardHint> {
     if item.action.is_empty() {
         return hints;
     }
-    hints.push(hint("Enter", &item.action, "open"));
+    hints.push(hint("O", &item.action, "open"));
     if item.kind == "audio" {
         hints.push(hint("←/→", "Seek", "seek"));
         hints.push(hint("S", "Stop", "stop"));
@@ -765,7 +773,7 @@ pub fn choose(app: &App, id: &str, index: i32) {
 }
 
 /// The card as the open chat shows it.
-fn card_item(app: &App, id: &str) -> Option<ArtifactItem> {
+pub fn card_item(app: &App, id: &str) -> Option<ArtifactItem> {
     app.active_messages()?.iter().flat_map(|row| row.artifacts.iter().collect::<Vec<_>>()).find(|a| a.id == id)
 }
 
@@ -1195,7 +1203,8 @@ pub fn take_return() -> bool {
     RETURN_TO_CHAT.with(|r| r.replace(false))
 }
 
-/// Enter on what the keyboard is on: a card's action, or an image enlarged.
+/// O on what the keyboard is on (or its link hint's number): a card's
+/// action, or an image enlarged.
 pub fn activate(app: &App, window: &AppWindow, id: &str) {
     if id.starts_with("img:") {
         open_image(app, window, id, tile());
@@ -1290,14 +1299,15 @@ pub fn selected_hints(app: &App) -> Option<Vec<(String, String)>> {
     let id = selected(app)?;
     if id.starts_with("img:") {
         let gallery = image_block(app, &id).is_some_and(|i| i.len() > 1);
-        let mut hints = vec![("Enter".to_owned(), "Enlarge".to_owned())];
+        let mut hints = vec![("O".to_owned(), "Enlarge".to_owned())];
         if gallery {
             hints.push(("←/→".into(), "Tile".into()));
         }
         return Some(hints);
     }
     let card = card_item(app, &id)?;
-    Some(card.hints.iter().map(|h| (h.key.to_string(), h.label.to_string())).collect())
+    // A button with no key is no key hint.
+    Some(card.hints.iter().filter(|h| !h.key.is_empty()).map(|h| (h.key.to_string(), h.label.to_string())).collect())
 }
 
 pub fn has_cards(app: &App) -> bool {
@@ -1524,7 +1534,9 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                 }
             }
         }
-        "decision" | "question" => return send(app, id),
+        // A decision is answered with its digits: opening it puts the
+        // chat's keyboard on it.
+        "decision" | "question" => app.focus_transcript(),
         "video" => download(app, &artifact, "video"),
         "file" => download(app, &artifact, "file"),
         "directory" => open_directory(app, &artifact),

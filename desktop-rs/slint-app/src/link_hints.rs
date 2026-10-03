@@ -1,6 +1,7 @@
 //! Link hints (Vimium's): F in the chat, or Ctrl+L anywhere in it, numbers
-//! every link in the active pane's viewport, top to bottom; typing the
-//! number opens it the way a click does.
+//! every link and artifact card in the active pane's viewport, top to
+//! bottom; typing the number opens a link the way a click does, and does a
+//! card's primary action (O on it).
 //!
 //! Slint's rich text has no public link geometry, so the links are found
 //! the way a pointer finds them: each rich text drawn in the viewport is
@@ -38,18 +39,28 @@ const MOST: usize = 99;
 /// How far a badge sits above its link's top.
 const RAISE: f32 = 5.0;
 
-/// One piece of a link on screen (window coordinates).
+/// One piece of a link, or an artifact card, on screen (window
+/// coordinates).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Piece {
     pub url: String,
+    /// An artifact card's (or image block's) id; then `url` is empty.
+    pub card: String,
     pub x: f32,
     pub y: f32,
     pub bottom: f32,
 }
 
+impl Piece {
+    /// What its number opens: the link, or the card.
+    fn target(&self) -> String {
+        if self.card.is_empty() { self.url.clone() } else { format!("\u{1}card:{}", self.card) }
+    }
+}
+
 #[derive(Default)]
 struct State {
-    /// The numbered links: number n is `links[n - 1]`.
+    /// The numbered targets (`Piece::target`): number n is `links[n - 1]`.
     links: Vec<String>,
     pieces: Vec<Piece>,
     typed: String,
@@ -182,7 +193,7 @@ fn probe(item: &ItemRc, text: Pin<&StyledTextItem>, viewport: (f32, f32, f32, f3
             while start_y - 1.0 >= top && hit(start_x, start_y - 1.0).as_deref() == Some(url.as_str()) && y0 - start_y < STEP_Y {
                 start_y -= 1.0;
             }
-            Piece { url, x: x + start_x, y: y + start_y, bottom: y + y1 }
+            Piece { url, card: String::new(), x: x + start_x, y: y + start_y, bottom: y + y1 }
         })
         .collect()
 }
@@ -203,7 +214,7 @@ pub fn order(mut pieces: Vec<Piece>) -> Vec<Piece> {
     for mut line in lines {
         line.sort_by(|a, b| a.x.total_cmp(&b.x));
         for piece in line {
-            let continued = kept.iter_mut().rev().find(|k| k.url == piece.url && piece.y > k.y && piece.y - k.bottom < 2.0 * STEP_Y + 2.0);
+            let continued = kept.iter_mut().rev().find(|k| k.target() == piece.target() && piece.y > k.y && piece.y - k.bottom < 2.0 * STEP_Y + 2.0);
             match continued {
                 Some(first) => first.bottom = first.bottom.max(piece.bottom),
                 None => kept.push(piece),
@@ -213,15 +224,33 @@ pub fn order(mut pieces: Vec<Piece>) -> Vec<Piece> {
     kept
 }
 
-/// The numbers for `pieces`: each link once, in the order it first shows.
+/// The numbers for `pieces`: each link or card once, in the order it
+/// first shows.
 pub fn number(pieces: &[Piece]) -> Vec<String> {
     let mut links: Vec<String> = Vec::new();
     for piece in pieces {
-        if !links.contains(&piece.url) && links.len() < MOST {
-            links.push(piece.url.clone());
+        let target = piece.target();
+        if !links.contains(&target) && links.len() < MOST {
+            links.push(target);
         }
     }
     links
+}
+
+/// The artifact cards and images on screen in the open chat that a number
+/// can act on, as pieces at their top-left corner (inside the chat's
+/// viewport from `top`).
+fn cards_on_screen(app: &App, top: f32) -> Vec<Piece> {
+    crate::artifacts_view::on_screen(app)
+        .into_iter()
+        .filter(|id| id.starts_with("img:") || crate::artifacts_view::card_item(app, id).is_some_and(|c| !c.action.is_empty() || c.pending))
+        .filter_map(|id| {
+            let (x, y, _, height) = crate::artifacts_view::card_rect(app, &id)?;
+            // Over the card's corner (its glyph), where it shows.
+            let shown = y.max(top);
+            (shown < y + height).then(|| Piece { url: String::new(), card: id, x: x + 6.0, y: shown + 4.0 + RAISE, bottom: shown + 24.0 })
+        })
+        .collect()
 }
 
 /// What `typed` does with `count` numbered links.
@@ -251,12 +280,12 @@ fn show(window: &AppWindow, state: &State) {
         .pieces
         .iter()
         .filter_map(|piece| {
-            let n = state.links.iter().position(|u| *u == piece.url)? + 1;
+            let n = state.links.iter().position(|u| *u == piece.target())? + 1;
             let label = n.to_string();
             // Raised over the line's top so the link's letters still show
             // below it.
             let y = (piece.y - RAISE).max(state.top);
-            Some(LinkBadge { dim: !label.starts_with(&state.typed), label: label.into(), url: piece.url.clone().into(), card: Default::default(), x: piece.x, y })
+            Some(LinkBadge { dim: !label.starts_with(&state.typed), label: label.into(), url: piece.url.clone().into(), card: piece.card.clone().into(), x: piece.x, y })
         })
         .collect();
     hints.set_badges(ModelRc::new(VecModel::from(badges)));
@@ -268,7 +297,9 @@ fn show(window: &AppWindow, state: &State) {
 /// none (the bar says so briefly).
 pub fn start(app: &App, window: &AppWindow) -> bool {
     let pane = app.active_id().to_string();
-    let (pieces, top) = links_on_screen(window, &pane);
+    let (mut pieces, top) = links_on_screen(window, &pane);
+    pieces.extend(cards_on_screen(app, top));
+    let pieces = order(pieces);
     let links = number(&pieces);
     let empty = links.is_empty();
     let state = State { links, pieces, typed: String::new(), offset: app.active_report().offset, pane, top };
@@ -322,10 +353,19 @@ pub fn key(window: &AppWindow, action: Option<&str>, chord: &str) -> bool {
     };
     match resolve(&typed, count, enter) {
         Typed::Open(n) => {
-            let url = STATE.with(|s| s.borrow().as_ref().and_then(|s| s.links.get(n - 1).cloned()));
+            let target = STATE.with(|s| s.borrow().as_ref().and_then(|s| s.links.get(n - 1).cloned()));
             cancel(window);
-            if let Some(url) = url {
-                crate::open_link(&url);
+            match target.as_deref().map(|t| t.strip_prefix("\u{1}card:").ok_or(t)) {
+                // A card does what O does on it; a decision takes the chat's
+                // keyboard so its digits answer it.
+                Some(Ok(card)) => {
+                    if let Some(app) = crate::app() {
+                        crate::artifacts_view::activate(&app, window, card);
+                        crate::commands::show_hints(&app, window);
+                    }
+                }
+                Some(Err(url)) => crate::open_link(url),
+                None => {}
             }
         }
         Typed::Wait => STATE.with(|s| {
@@ -363,7 +403,7 @@ mod tests {
     use super::*;
 
     fn piece(url: &str, x: f32, y: f32) -> Piece {
-        Piece { url: url.into(), x, y, bottom: y + 18.0 }
+        Piece { url: url.into(), card: String::new(), x, y, bottom: y + 18.0 }
     }
 
     #[test]
