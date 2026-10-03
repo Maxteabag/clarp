@@ -18,6 +18,7 @@ pub mod instance;
 pub mod launch;
 pub mod links;
 pub mod list_ops;
+pub mod live;
 pub mod markdown_style;
 pub mod media;
 pub mod narrator;
