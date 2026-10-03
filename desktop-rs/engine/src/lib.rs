@@ -459,6 +459,10 @@ impl Engine {
     pub fn sending(&self) -> bool {
         self.sending
     }
+    /// Whether a `/log` request for this chat is still out (tests, benchmarks).
+    pub fn log_pending(&self, session: &str) -> bool {
+        self.log_in_flight.contains(session)
+    }
     pub fn muted(&self) -> bool {
         self.muted
     }
