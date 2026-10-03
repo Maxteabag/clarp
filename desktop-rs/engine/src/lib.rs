@@ -250,6 +250,7 @@ pub struct Engine {
     teams: teams::Teams,
     profile: profile::Profile,
     avatars: avatars::Avatars,
+    live: live::Live,
 }
 
 impl Engine {
@@ -353,6 +354,7 @@ impl Engine {
             teams: Default::default(),
             profile: Default::default(),
             avatars: Default::default(),
+            live: Default::default(),
         })
     }
 
@@ -592,6 +594,8 @@ impl Engine {
         self.sse.stop();
         self.sse.set_endpoint(endpoint.clone(), &self.token);
         self.reset_transient_state();
+        // The features are read again from /server-info.
+        self.reset_live();
         self.api.set_endpoint(endpoint, &self.token);
         self.changes.push(Change::Endpoint);
         self.set_error("");
@@ -855,6 +859,7 @@ impl Engine {
                 self.with_panes(|panes| panes.set_active_session(session));
             }
         }
+        self.live_chat_opened(session);
         if session.starts_with("pair:") {
             // A pair room is a projection, not an agent: no Host focus.
             let latest = self.room(session).and_then(|r| r.get("latest_revision")).and_then(Value::as_i64).unwrap_or(0);
@@ -1150,6 +1155,9 @@ impl Engine {
             self.handle_pairing(object);
             return;
         }
+        if self.live_json(tag, object) {
+            return;
+        }
         if tag == "server-info" {
             self.keep_working_token();
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
@@ -1157,6 +1165,11 @@ impl Engine {
             self.changes.push(Change::ServerInfo);
             self.set_connecting(false);
             self.request_snapshot();
+            self.live_server_info(object);
+            let open: Vec<String> = self.conversations.keys().cloned().collect();
+            for session in open {
+                self.live_chat_opened(&session);
+            }
             self.sse.start();
         } else if let Some(generation) = tag.strip_prefix("snapshot:") {
             if generation.parse::<u64>().ok() != Some(self.snapshot_generation) {
@@ -1182,7 +1195,7 @@ impl Engine {
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
-        if self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) {
+        if self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" {
@@ -1271,7 +1284,9 @@ impl Engine {
                         self.set_error("");
                     }
                     self.request_snapshot();
+                    self.live_reconnected();
                 } else {
+                    self.live_stream_dropped();
                     self.mutate_roster(Roster::mark_transport_unavailable);
                     let sessions: Vec<String> = self.conversations.keys().cloned().collect();
                     for session in sessions {
@@ -1316,9 +1331,14 @@ impl Engine {
                 }
                 self.refresh_pair_conversations_for(&session);
             }
+            "live" => self.live_event(event),
             "agent-state" => {
                 self.mutate_roster(|r| r.apply_state_event(event));
                 let state = json::string(event, "kind");
+                // Live items show what the agent does: no placeholder rows.
+                if self.live_owns(&session) {
+                    return;
+                }
                 let persona = self.roster.find(&session).map(|a| display_name(a).to_owned()).unwrap_or(session.clone());
                 if state == "thinking" {
                     self.with_conversation(&session, |c| c.show_transient_thinking(&persona));
@@ -1333,7 +1353,9 @@ impl Engine {
                     status = "running".into();
                 }
                 let busy = self.roster.find(&session).map(|a| a.busy);
-                if status != "running" || busy.is_none_or(|b| b) {
+                if self.live_owns(&session) {
+                    // The live items and the status line replace activity rows.
+                } else if status != "running" || busy.is_none_or(|b| b) {
                     self.with_conversation(&session, |c| c.apply_activity_event(event));
                 }
             }

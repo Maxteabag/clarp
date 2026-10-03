@@ -23,6 +23,7 @@ impl Engine {
         self.reset_transient_state();
         self.reset_narrator();
         self.sse.stop();
+        self.reset_live();
         self.base_url = normalized.clone();
         self.server_name.clear();
         self.server_version.clear();
