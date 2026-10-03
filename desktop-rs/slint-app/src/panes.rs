@@ -45,6 +45,11 @@ pub struct PaneState {
     /// Each reply's artifact cards, updated in place: a card is never
     /// rebuilt under a click or a field that has the keyboard.
     cards: std::collections::HashMap<String, Rc<VecModel<crate::ArtifactItem>>>,
+    /// Live rows last shown: key → the items each stood for.
+    live_items: std::collections::HashMap<String, Vec<String>>,
+    /// Durable rows that took over live rows: row id → the place (key)
+    /// they took, kept while the chat is shown so the row never moves.
+    slots: std::collections::HashMap<String, String>,
 }
 
 impl PaneState {
@@ -67,6 +72,8 @@ impl PaneState {
             scroll_request: 0,
             scroll_amount: 0.0,
             cards: std::collections::HashMap::new(),
+            live_items: std::collections::HashMap::new(),
+            slots: std::collections::HashMap::new(),
         }
     }
 }
@@ -108,6 +115,8 @@ impl App {
             pane.rows.clear();
             pane.presented_with = None;
             pane.cards.clear();
+            pane.live_items.clear();
+            pane.slots.clear();
             pane.messages.set_vec(Vec::new());
             pane.to_latest += 1;
         }
@@ -127,6 +136,11 @@ impl App {
     /// What the active pane's composer holds.
     pub fn active_draft(&self) -> String {
         self.active_index().map(|i| self.pane_state.borrow()[i].draft.clone()).unwrap_or_default()
+    }
+
+    /// The active pane's chat.
+    pub fn active_session(&self) -> String {
+        self.active_index().map(|i| self.pane_state.borrow()[i].session.clone()).unwrap_or_default()
     }
 
     pub fn active_id(&self) -> SharedString {
@@ -227,6 +241,14 @@ impl App {
         view.default_effort = agent.map(|a| engine.default_effort_for_model(&a.backend, &a.model)).unwrap_or_default().into();
         view.busy = agent.is_some_and(|a| a.busy);
         view.working = crate::cells_view::working(engine, session);
+        let (status, busy, key) = crate::live_view::status(engine, session);
+        if engine.live_view(session).is_some() {
+            // The status line stands in for the typing dots.
+            view.working = false;
+        }
+        view.live_status = status.into();
+        view.live_busy = busy;
+        view.live_stop_key = key.into();
         let path = agent.map(|a| a.working_directory.clone()).unwrap_or_default();
         if path.is_empty() {
             view.workspace_kind = SharedString::new();
@@ -271,7 +293,17 @@ impl App {
 
     fn messages(&self, pane: &mut PaneState) {
         crate::artifacts_view::settle_downloads(self, &pane.session);
-        let presented = self.engine.borrow_mut().presented(&pane.session);
+        let mut presented = self.engine.borrow_mut().presented(&pane.session);
+        // Live items (§7): the open turn's rows, over the /log rows. A live
+        // /log row an item shows is not shown twice.
+        let live = {
+            let engine = self.engine.borrow();
+            let rows = engine.conversation(&pane.session).map(|c| c.rows().to_vec()).unwrap_or_default();
+            crate::live_view::present(&engine, &pane.session, &rows, &self.expanded.borrow())
+        };
+        if let Some(live) = &live {
+            presented.retain(|row| !live.hidden_rows.contains(&row.message.id));
+        }
         let always = self.engine.borrow().activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE;
         let expanded = self.expanded.borrow();
         let stamps = self.prefs.borrow().timestamps;
@@ -371,8 +403,19 @@ impl App {
             format!("{cards}|{}|{pictures}", explained.join(","))
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
-        let fresh: Vec<Shown> =
-            presented.into_iter().zip(rows.iter().map(|r| r.expanded)).zip(signatures).map(|((row, open), s)| (row, open, s)).collect();
+        let mut fresh: Vec<Shown> = presented
+            .into_iter()
+            .zip(rows.iter().map(|r| r.expanded))
+            .zip(signatures)
+            .map(|((row, open), s)| {
+                let key = row.message.id.clone();
+                (row, open, s, key)
+            })
+            .collect();
+        let mut rows = rows;
+        if let Some(live) = live {
+            self.splice_live(pane, &live, &mut fresh, &mut rows);
+        }
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
     }
 
@@ -380,6 +423,105 @@ impl App {
     fn presentation_key(&self) -> (i32, bool, bool) {
         let engine = self.engine.borrow();
         (engine.activity_mode(), engine.show_when_ready(), self.prefs.borrow().timestamps)
+    }
+
+    /// Puts the live rows after the chat's rows (before unsent messages of
+    /// one's own), and gives a durable row that took over live rows the
+    /// place of the first of them, so it is updated there, not inserted.
+    fn splice_live(&self, pane: &mut PaneState, live: &clarp_core::live_present::Presented, fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>) {
+        let at = fresh.iter().rposition(|(row, ..)| !(row.message.pending || row.message.delivery_failed)).map_or(0, |i| i + 1);
+        let built: Vec<(Shown, MessageRow)> = live
+            .entries
+            .iter()
+            .map(|entry| {
+                let blocks = if entry.kind == clarp_core::live_present::Kind::Message { crate::live_view::message_blocks(&entry.text) } else { Vec::new() };
+                let row = crate::live_view::row(entry, blocks);
+                let source = clarp_core::presentation::PresentedRow {
+                    source_row: usize::MAX,
+                    message: clarp_core::protocol::Message { id: entry.key.clone(), ..Default::default() },
+                    body: entry.text.clone(),
+                    activity: false,
+                    tools: Vec::new(),
+                    display_cells: Vec::new(),
+                    activity_count: 0,
+                    group_ids: Vec::new(),
+                    group_label: String::new(),
+                    group_expanded: false,
+                    activity_inline: false,
+                    activity_label: String::new(),
+                    explanation_repeat: 0,
+                };
+                ((source, entry.expanded, crate::live_view::signature(entry), entry.key.clone()), row)
+            })
+            .collect();
+        // Durable rows new since the last refresh that took over live rows
+        // shown then: the first such row's place is theirs.
+        let shown_before: Vec<String> = pane.shown.iter().map(|s| s.3.clone()).collect();
+        let still: std::collections::HashSet<&str> = live.entries.iter().map(|e| e.key.as_str()).collect();
+        for shown in fresh.iter_mut() {
+            let id = shown.0.message.id.clone();
+            if let Some(slot) = pane.slots.get(&id) {
+                shown.3 = slot.clone();
+                continue;
+            }
+            if shown_before.contains(&id) {
+                continue;
+            }
+            let taken: Vec<&String> = live.taken_over.iter().filter(|(_, row)| **row == id).map(|(item, _)| item).collect();
+            if taken.is_empty() {
+                continue;
+            }
+            let place = shown_before.iter().find(|key| {
+                !still.contains(key.as_str()) && !pane.slots.values().any(|s| s == *key) && pane.live_items.get(*key).is_some_and(|items| items.iter().any(|i| taken.contains(&i)))
+            });
+            if let Some(place) = place {
+                pane.slots.insert(id, place.clone());
+                shown.3 = place.clone();
+            }
+        }
+        pane.live_items = live.entries.iter().map(|e| (e.key.clone(), e.items.clone())).collect();
+        let at = at.min(fresh.len());
+        let (sources, live_rows): (Vec<Shown>, Vec<MessageRow>) = built.into_iter().unzip();
+        fresh.splice(at..at, sources);
+        rows.splice(at..at, live_rows);
+    }
+
+    /// The half-second clock: live rows whose text changed (elapsed times)
+    /// and the status lines, without presenting the chats again.
+    pub fn tick_live(&self) {
+        let mut running = false;
+        let mut panes = self.pane_state.borrow_mut();
+        for index in 0..panes.len() {
+            let pane = &mut panes[index];
+            let session = pane.session.clone();
+            let engine = self.engine.borrow();
+            running |= crate::live_view::ticking(&engine, &session);
+            let (status, busy, key) = crate::live_view::status(&engine, &session);
+            let rows = engine.conversation(&session).map(|c| c.rows().to_vec()).unwrap_or_default();
+            if let Some(live) = crate::live_view::present(&engine, &session, &rows, &self.expanded.borrow()) {
+                for entry in &live.entries {
+                    let Some(at) = pane.shown.iter().position(|s| s.3 == entry.key) else { continue };
+                    let signature = crate::live_view::signature(entry);
+                    if pane.shown[at].2 == signature {
+                        continue;
+                    }
+                    pane.shown[at].2 = signature;
+                    let blocks = if entry.kind == clarp_core::live_present::Kind::Message { crate::live_view::message_blocks(&entry.text) } else { Vec::new() };
+                    pane.messages.set_row_data(at, crate::live_view::row(entry, blocks));
+                }
+            }
+            drop(engine);
+            if pane.view.live_status != status.as_str() || pane.view.live_busy != busy {
+                pane.view.live_status = status.into();
+                pane.view.live_busy = busy;
+                pane.view.live_stop_key = key.into();
+                let view = self.pane_view(pane);
+                pane.view = view.clone();
+                self.panes.set_row_data(index, view);
+            }
+        }
+        drop(panes);
+        crate::live_view::keep_ticking(running);
     }
 
     /// Brings the panes up to date with the engine after `changes`.
@@ -408,6 +550,8 @@ impl App {
                     pane.rows.clear();
                     pane.presented_with = None;
                     pane.cards.clear();
+                    pane.live_items.clear();
+                    pane.slots.clear();
                     pane.messages.set_vec(Vec::new());
                     pane.draft = self.engine.borrow().draft(&session);
                     pane.draft_set += 1;
@@ -463,11 +607,11 @@ impl App {
             let preference = changes.contains(&Change::Preferences) && pane.presented_with != Some(presentation);
             let conversation = fresh
                 || preference
-                || changes.iter().any(|c| matches!(c, Change::Narrator | Change::Updates) || matches!(c, Change::Conversation(s) if *s == session));
+                || changes.iter().any(|c| matches!(c, Change::Narrator | Change::Updates) || matches!(c, Change::Conversation(s) | Change::Live(s) if *s == session));
             if conversation {
                 self.messages(pane);
             }
-            let composer = fresh || everything || changes.iter().any(|c| matches!(c, Change::Composer(s) if *s == session));
+            let composer = fresh || everything || changes.iter().any(|c| matches!(c, Change::Composer(s) | Change::Live(s) if *s == session));
             if composer || everything {
                 let engine = self.engine.borrow();
                 let mut view = pane.view.clone();
@@ -477,6 +621,8 @@ impl App {
             }
             pane.view = self.pane_view(pane);
         }
+        let running = panes.iter().any(|p| crate::live_view::ticking(&self.engine.borrow(), &p.session));
+        crate::live_view::keep_ticking(running);
         let views: Vec<PaneView> = panes.iter().map(|p| p.view.clone()).collect();
         *self.pane_state.borrow_mut() = panes;
         // Panes that stay keep their elements (and the keyboard): drop the

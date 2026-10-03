@@ -226,6 +226,16 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
             None => shown.push(*item),
         }
     }
+    // A settled turn whose messages and tools all landed in /log has
+    // landed: what no row carries (reasoning, plan, diff) goes with it.
+    let settled_turn = turn.is_some_and(|t| !matches!(text(t, "status"), "running" | ""));
+    let takes_over = |i: &&Object| matches!(text(i, "kind"), "message" | "tool");
+    if settled_turn && !presented.taken_over.is_empty() && !shown.iter().any(takes_over) {
+        let owner = items.iter().find_map(|i| presented.taken_over.get(text(i, "id")).cloned()).unwrap_or_default();
+        for item in shown.drain(..) {
+            presented.taken_over.insert(text(item, "id").to_owned(), owner.clone());
+        }
+    }
     // A live /log row an item shows (its row_id) is hidden.
     let claimed: HashSet<&str> = shown.iter().filter(|i| text(i, "kind") == "message").map(|i| text(i, "row_id")).filter(|r| !r.is_empty()).collect();
     presented.hidden_rows = rows.iter().filter(|m| m.kind == "live" && claimed.contains(m.id.as_str())).map(|m| m.id.clone()).collect();
@@ -438,7 +448,9 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
     let explain = object(tool, "explain").map(|e| text(e, "text")).unwrap_or_default();
     if options.explanations {
         entry.secondary = explain.to_owned();
-        entry.reserve_secondary = true;
+        // A line is kept while an explanation may still come, so it lands
+        // without moving the chat; a settled tool without one needs none.
+        entry.reserve_secondary = !is_terminal(&status) || object(tool, "explain").is_some_and(|e| text(e, "status") == "pending");
     } else {
         entry.secondary = tool.get("command").and_then(Value::as_str).filter(|c| *c != label).unwrap_or_default().to_owned();
     }

@@ -11,6 +11,7 @@ mod driver;
 mod headless;
 mod keymap;
 mod link_hints;
+mod live_view;
 mod launch;
 mod panes;
 mod perf;

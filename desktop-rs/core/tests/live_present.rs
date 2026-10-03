@@ -172,6 +172,16 @@ fn durable_rows_take_over_their_items() {
 }
 
 #[test]
+fn a_settled_turn_that_landed_in_the_log_leaves_nothing_behind() {
+    let view = turn_full(after(23));
+    let tools: Vec<Value> = ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"].iter().map(|id| json!({"id": id})).collect();
+    let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
+    let p = present(&view, &[durable], &options(&[], 0));
+    assert!(p.entries.is_empty(), "{:?}", titles(&p));
+    assert_eq!(p.taken_over.get("cl:msg_01:0").map(String::as_str), Some("live-abc"), "the reasoning goes with its turn");
+}
+
+#[test]
 fn unknown_kinds_are_not_shown_and_only_the_open_turn_is() {
     let mut view = turn_full(after(5));
     let event = json!({"type": "live", "conv": "conv-1", "epoch": "boot-a", "lseq": 6, "ops": [
