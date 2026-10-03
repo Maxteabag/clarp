@@ -267,6 +267,8 @@ pub struct WriteResult {
     pub saved_collection: bool,
     pub conflict: bool,
     pub settings_error: bool,
+    /// On a conflict: the newer collection another window saved.
+    pub latest: String,
 }
 
 /// Where the workspace collection lives. Writes are compare-and-swap: a
@@ -290,6 +292,8 @@ pub struct PaneTree {
     last_collection: String,
     recovery_id: String,
     save_warning: String,
+    /// The newer collection a conflict found, accepted when dismissed.
+    conflict_latest: String,
     pending_write: Option<WriteRequest>,
     write_in_flight: bool,
     signals: Vec<Signal>,
@@ -316,6 +320,7 @@ impl PaneTree {
             last_collection: String::new(),
             recovery_id: uuid::Uuid::new_v4().to_string(),
             save_warning: String::new(),
+            conflict_latest: String::new(),
             pending_write: None,
             write_in_flight: false,
             signals: Vec::new(),
@@ -493,8 +498,23 @@ impl PaneTree {
     }
 
     /// Dismiss the conflict warning, accepting the newer layout another
-    /// window saved (stub: not implemented yet).
-    pub fn dismiss_workspace_save_warning(&mut self) {}
+    /// window saved as this window's base: nothing is overwritten now, and
+    /// this window's next change saves normally instead of conflicting
+    /// again. Its own layout stays in recovery.
+    pub fn dismiss_workspace_save_warning(&mut self) {
+        if self.save_warning.is_empty() {
+            return;
+        }
+        if !self.conflict_latest.is_empty() {
+            self.last_collection = std::mem::take(&mut self.conflict_latest);
+            let base = self.last_collection.clone();
+            if let Some(pending) = self.pending_write.as_mut().filter(|p| !p.force) {
+                pending.expected_collection = base;
+            }
+        }
+        self.save_warning.clear();
+        self.signals.push(Signal::WorkspaceSaveWarningChanged);
+    }
 
     /// Keep this window's layout even though another window saved newer.
     pub fn save_workspace_layout_instead(&mut self) {
@@ -519,6 +539,9 @@ impl PaneTree {
             if let Some(pending) = self.pending_write.as_mut().filter(|p| !p.force) {
                 pending.expected_collection = result.encoded.clone();
             }
+        }
+        if result.conflict {
+            self.conflict_latest = result.latest.clone();
         }
         let warning = if result.settings_error {
             "Workspace layout could not be saved. Check available storage."
@@ -944,6 +967,7 @@ impl WorkspaceStore for FileWorkspaceStore {
             // Preserve the unsaved window independently; never overwrite a
             // newer writer.
             result.conflict = true;
+            result.latest = latest.clone();
             let path = self.recovery_path(&request.recovery_id);
             let saved = std::fs::create_dir_all(self.recovery_dir()).and_then(|()| std::fs::write(&path, &request.encoded));
             if let Err(error) = saved {

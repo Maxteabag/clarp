@@ -155,6 +155,7 @@ export component AppWindow inherits Window {
     callback switch-workspace(string);
     callback create-workspace();
     callback save-layout-instead();
+    callback dismiss-save-warning();
     callback resize-split(string, float);
     callback balance();
     in property <[SettingRow]> setting-rows;
@@ -385,6 +386,8 @@ export component AppWindow inherits Window {
                     splits: root.splits;
                     workspaces: root.workspaces;
                     save-warning: root.save-warning;
+                    save-warning-dismiss-key: root.save-warning-dismiss-key;
+                    save-warning-keep-key: root.save-warning-keep-key;
                     bar-visible: root.workspace-bar;
                     activate(id) => { root.pane-activated(id); }
                     send(id, text, queue) => { root.send(id, text, queue); }
@@ -405,6 +408,7 @@ export component AppWindow inherits Window {
                     switch-workspace(id) => { root.switch-workspace(id); }
                     create-workspace => { root.create-workspace(); }
                     save-layout-instead => { root.save-layout-instead(); }
+                    dismiss-save-warning => { root.dismiss-save-warning(); }
                     resize-split(id, ratio) => { root.resize-split(id, ratio); }
                     balance => { root.balance(); }
                 }

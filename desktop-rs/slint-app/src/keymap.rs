@@ -31,6 +31,8 @@ pub enum Guard {
     Artifacts,
     /// The keyboard is on an artifact card.
     Artifact,
+    /// Another window saved a newer layout (the conflict bar shows).
+    LayoutWarning,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +68,7 @@ fn parent(state: &str) -> Option<&'static str> {
 }
 
 fn state(name: &str) -> Vec<Binding> {
-    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, None as Always, Playing, Rows, Send};
+    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, LayoutWarning, None as Always, Playing, Rows, Send};
     let b = binding;
     match name {
         "main" => vec![
@@ -104,6 +106,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("jump-latest", &["Ctrl+End"], "Latest", true, Behind, false),
             b("auto-assign-agent", &["Ctrl+Shift+A"], "Auto assign", false, Agent, false),
             b("escape", &["Escape"], "Navigate", false, Always, false),
+            b("keep-layout", &["Ctrl+Shift+S"], "Keep this layout", true, LayoutWarning, false),
             b("move-left", &["Ctrl+Alt+Left"], "Left pane", false, Always, false),
             b("move-right", &["Ctrl+Alt+Right"], "Right pane", false, Always, false),
             b("move-up", &["Ctrl+Alt+Up"], "Upper pane", false, Always, false),
@@ -216,6 +219,7 @@ pub struct Facts {
     pub folds: bool,
     pub artifacts: bool,
     pub artifact: bool,
+    pub layout_warning: bool,
 }
 
 impl Facts {
@@ -232,6 +236,7 @@ impl Facts {
             Guard::Folds => self.folds,
             Guard::Artifacts => self.artifacts,
             Guard::Artifact => self.artifact,
+            Guard::LayoutWarning => self.layout_warning,
         }
     }
 }
@@ -392,7 +397,7 @@ mod tests {
     use super::*;
 
     fn all() -> Facts {
-        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true }
+        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true, layout_warning: true }
     }
 
     #[test]

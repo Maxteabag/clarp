@@ -50,6 +50,7 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         folds: window.get_chats().iter().any(|c| c.fold_count > 0),
         artifacts: crate::artifacts_view::has_cards(app),
         artifact: crate::artifacts_view::selected(app).is_some(),
+        layout_warning: !window.get_save_warning().is_empty(),
     }
 }
 
@@ -184,6 +185,13 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "escape" | "dismiss-error" if action == "dismiss-error" || (window.get_surface() == "chats" && !window.get_error().is_empty()) => {
             app.engine.borrow_mut().dismiss_error();
         }
+        // Then the layout-conflict bar (another window saved a newer layout).
+        "escape" | "dismiss-layout-warning"
+            if action == "dismiss-layout-warning" || (window.get_surface() == "chats" && !window.get_save_warning().is_empty()) =>
+        {
+            app.engine.borrow_mut().with_panes(|p| p.dismiss_workspace_save_warning());
+        }
+        "keep-layout" => app.engine.borrow_mut().with_panes(|p| p.save_workspace_layout_instead()),
         // Then it leaves the card the keyboard is on (in the chat).
         "escape" if window.get_surface() == "chats" && context(app, window) == "pane" && !app.artifact_cursor.borrow().is_empty() => {
             crate::artifacts_view::leave(app);

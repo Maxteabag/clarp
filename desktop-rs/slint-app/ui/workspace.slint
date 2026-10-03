@@ -280,6 +280,8 @@ export component Workspace inherits Rectangle {
     in property <[SplitView]> splits;
     in property <[WorkspaceTab]> workspaces;
     in property <string> save-warning;
+    in property <string> save-warning-dismiss-key;
+    in property <string> save-warning-keep-key;
     in property <bool> bar-visible;
     callback activate(string);
     callback send(string, string, bool);
@@ -298,6 +300,7 @@ export component Workspace inherits Rectangle {
     callback switch-workspace(string);
     callback create-workspace();
     callback save-layout-instead();
+    callback dismiss-save-warning();
     callback resize-split(string, float);
     callback balance();
     property <length> gap: 4px;
@@ -353,12 +356,19 @@ export component Workspace inherits Rectangle {
             vertical-alignment: center;
             horizontal-stretch: 1;
         }
-        Rectangle {
-            width: save-label.preferred-width + 20px;
-            border-radius: 3px;
-            background: Palette.control;
-            save-label := Text { text: "Save this layout instead"; color: Palette.text; font-size: 12px; }
+        // Key hints, as the shortcut bar spells keys; a click does the same.
+        HorizontalLayout {
+            spacing: 4px;
+            Text { text: root.save-warning-keep-key; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+            Text { text: "Keep this layout"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
             TouchArea { clicked => { root.save-layout-instead(); } }
+        }
+        HorizontalLayout {
+            spacing: 4px;
+            padding-left: 8px;
+            Text { text: root.save-warning-dismiss-key; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+            Text { text: "Dismiss"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+            TouchArea { clicked => { root.dismiss-save-warning(); } }
         }
     }
     for pane in root.panes: Pane {
