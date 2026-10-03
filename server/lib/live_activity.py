@@ -88,12 +88,14 @@ def _row(agent_id: str, info: dict[str, Any]) -> dict[str, Any]:
             "turn_started_ms": activity.get("turn_started_ms")}
 
 
-def content_state(agents: dict[str, dict[str, Any]], now_ms: int) -> dict[str, Any]:
+def content_state(agents: dict[str, dict[str, Any]], now_ms: int,
+                  decisions: int = 0) -> dict[str, Any]:
     rows = [_row(agent_id, info) for agent_id, info in agents.items()]
     working = [r for r in rows if r["state"] in WORKING]
     needing = [r for r in rows if r["state"] in NEEDS_YOU]
     working.sort(key=lambda r: r["turn_started_ms"] or r["started_at_ms"] or 0, reverse=True)
-    return {"working": len(working), "needs_you": len(needing),
+    return {"working": len(working), "needs_you": len(needing) + decisions,
+            "decisions": decisions,
             "lead": working[0] if working else None,
             "agents": (needing + working)[:MAX_ROWS], "updated_at_ms": now_ms}
 
@@ -110,7 +112,8 @@ class LiveActivityPusher:
 
     def __init__(self, send: Callable[[dict[str, Any], str], Any], *,
                  clock: Callable[[], float] = time.time, schedule=None,
-                 min_interval: float = 15.0):
+                 min_interval: float = 15.0,
+                 pending_decisions: Callable[[], int] | None = None):
         from .live_pacing import _thread_timer
         self._send = send
         self._clock = clock
@@ -122,6 +125,23 @@ class LiveActivityPusher:
         self._sent_needs = 0
         self._last_sent = 0.0
         self._timer = None
+        self._pending_decisions = pending_decisions
+        self._decisions: int | None = None
+
+    def set_pending_decisions(self, count: int) -> None:
+        """Pending decisions and questions changed (the Host's attention count)."""
+        with self._lock:
+            self._decisions = max(0, int(count))
+            if self._agents or self._sent_key is not None:
+                self._consider()
+
+    def _decision_count(self) -> int:
+        if self._decisions is None:
+            try:
+                self._decisions = int(self._pending_decisions()) if self._pending_decisions else 0
+            except Exception:  # noqa: BLE001 - a count, never a failure
+                self._decisions = 0
+        return self._decisions
 
     def observe(self, event: dict[str, Any]) -> None:
         if event.get("type") != "live":
@@ -146,7 +166,7 @@ class LiveActivityPusher:
         return {"session": event.get("session") or "", "persona": persona}
 
     def _consider(self) -> None:
-        state = content_state(self._agents, int(self._clock() * 1000))
+        state = content_state(self._agents, int(self._clock() * 1000), self._decision_count())
         lead = state["lead"] or {}
         shape = (state["working"], state["needs_you"], lead.get("agent_id"))
         detail = shape + (lead.get("headline"), lead.get("tool"),

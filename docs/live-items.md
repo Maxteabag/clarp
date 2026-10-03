@@ -374,7 +374,8 @@ Each push: `apns-push-type: liveactivity`, topic `<bundle>.push-type.liveactivit
 {"aps": {"timestamp": 1759480000, "event": "update", "stale-date": 1759480900,
          "content-state": {
            "working": 2,            // agents thinking, responding, in a tool, compacting or limited
-           "needs_you": 1,          // agents waiting for the owner
+           "needs_you": 3,          // agents waiting for the owner + pending decisions and questions
+           "decisions": 2,          // pending decisions and questions (part of needs_you)
            "lead": ROW | null,      // the working agent whose turn started last
            "agents": [ROW, …],      // at most 5: needing you first, then newest work
            "updated_at_ms": 1759480000123}}}
