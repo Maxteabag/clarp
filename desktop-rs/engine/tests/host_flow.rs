@@ -63,7 +63,7 @@ impl Driver {
     fn new(base: &str) -> Self {
         let woken = Arc::new((Mutex::new(false), Condvar::new()));
         let signal = woken.clone();
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: None, keyring: false };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: None, keyring: false, transcript_cache: None };
         let engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
             *flag.lock().unwrap() = true;
@@ -170,7 +170,7 @@ fn drafts_and_attachments_belong_to_the_chat_and_survive_a_restart() {
     let driver = |base: &str| {
         let mut d = Driver::new(base);
         let settings = Settings::at(file.clone());
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None, keyring: false };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None, keyring: false, transcript_cache: None };
         let signal = d.woken.clone();
         d.engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
@@ -229,7 +229,7 @@ fn panes_follow_the_selection_and_their_layout_is_restored() {
     let store = host.dir.join("workspaces.json");
     let driver = |base: &str| {
         let mut d = Driver::new(base);
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: Some(store.clone()), keyring: false };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: Some(store.clone()), keyring: false, transcript_cache: None };
         let signal = d.woken.clone();
         d.engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
