@@ -91,13 +91,23 @@ def _user_turn(origin: str = "user", *, updated_at: int | None = None,
 # --------------------------------------------------------------------------
 # config
 # --------------------------------------------------------------------------
-def test_apns_disabled_by_default():
+def test_apns_without_key_or_credential_reaches_only_granted_phones():
     config.reset_cache()
     cfg = config.load()
-    assert cfg.apns_enabled() is False
-    # With no key configured, a send is a cheap no-op (never raises).
+    # No local key and no Audio Central credential: only phones that issued
+    # a push grant can be reached, through the relay.
+    assert cfg.apns_transport() == "grant"
+    assert cfg.apns_direct_ready() is False
+    # With no registered device, a send is a cheap no-op (never raises).
     assert apns.send_turn_done("sess", "Mike") == {
-        "enabled": False, "sent": 0, "failed": 0, "disabled": 0}
+        "enabled": True, "sent": 0, "failed": 0, "disabled": 0}
+
+
+def test_apns_off_disables_push(tmp_path):
+    cfgfile = tmp_path / "config.toml"
+    cfgfile.write_text('[apns]\nmode = "off"\n')
+    config.reset_cache()
+    assert config.load(cfgfile).apns_enabled() is False
 
 
 def test_apns_config_parses(tmp_path):
@@ -170,7 +180,7 @@ def test_apns_unrelated_legacy_named_directory_does_not_redirect(tmp_path):
     cfg = config.load(cfgfile)
 
     assert cfg.apns_key_file() == str(configured)
-    assert cfg.apns_enabled() is False
+    assert cfg.apns_direct_ready() is False
 
 
 def test_apns_missing_key_file_is_disabled(tmp_path):
@@ -183,7 +193,7 @@ def test_apns_missing_key_file_is_disabled(tmp_path):
     )
     config.reset_cache()
 
-    assert config.load(cfgfile).apns_enabled() is False
+    assert config.load(cfgfile).apns_direct_ready() is False
 
 
 # --------------------------------------------------------------------------

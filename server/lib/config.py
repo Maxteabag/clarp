@@ -43,6 +43,11 @@ CONFIG_PATH = pathlib.Path(os.environ.get(
     str(xdg.config_dir() / "config.toml"),
 ))
 
+# The production Clarp Audio Central Worker. It relays APNs pushes so no
+# self-hosted Computer needs the developer's APNs key.
+DEFAULT_AUDIO_CENTRAL_URL = "https://clarp-audio-central.peter-w-adams96.workers.dev"
+APNS_MODES = ("auto", "relay", "direct", "off")
+
 
 DEFAULT_ROSTER: dict[str, str] = {
     "Mike":   "nPczCjzI2devNBz1zQrb",
@@ -527,6 +532,15 @@ class Config:
     # remote-notification background mode (networking build #2); iOS drops
     # background pushes for apps without it.
     apns_background_sync: bool = False
+    # How pushes reach Apple: "auto" (default) relays through Audio Central
+    # when this Computer holds an Audio Central credential and otherwise
+    # signs directly with the .p8 above; "relay" and "direct" force one path;
+    # "off" disables push.
+    apns_mode: str = "auto"
+    # Clarp Audio Central: the developer-run service that holds the APNs key
+    # (and managed voice), reached with this Computer's cav1.… credential.
+    audio_central_url: str = DEFAULT_AUDIO_CENTRAL_URL
+    audio_central_credential: str = field(default="", repr=False)
 
     def eleven_key(self) -> str:
         """Resolved ElevenLabs key: config first, env fallback."""
@@ -573,6 +587,35 @@ class Config:
         return self.auth_token_or_env(self.typesafe_api_key, "TYPESAFE_API_KEY")
 
     def apns_enabled(self) -> bool:
+        """True when pushes have a delivery path (relay or direct)."""
+        return bool(self.apns_transport())
+
+    def apns_transport(self) -> str:
+        """The push path for devices without a phone grant: "relay",
+        "direct", or "grant" when only phone-granted devices can be reached
+        (through Audio Central, with no credential here); "" when off."""
+        mode = self.apns_mode if self.apns_mode in APNS_MODES else "auto"
+        if mode == "off":
+            return ""
+        if mode in ("auto", "relay") and self.apns_relay_ready():
+            return "relay"
+        if mode in ("auto", "direct") and self.apns_direct_ready():
+            return "direct"
+        if mode in ("auto", "relay") and self.apns_relay_url_ok():
+            return "grant"
+        return ""
+
+    def apns_relay_url_ok(self) -> bool:
+        return self.audio_central_url.startswith("https://")
+
+    def apns_relay_ready(self) -> bool:
+        """True when Audio Central can relay pushes with this Computer's
+        own credential (phone grants need no credential)."""
+        parts = self.audio_central_credential.split(".")
+        return (len(parts) == 4 and parts[0] == "cav1" and all(parts)
+                and self.apns_relay_url_ok())
+
+    def apns_direct_ready(self) -> bool:
         """True when configured APNs credentials include a readable key file."""
         key_file = self.apns_key_file()
         return bool(
@@ -782,6 +825,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     mcp     = data.get("mcp", {}) or {}
     network = data.get("network", {}) or {}
     apns    = data.get("apns", {}) or {}
+    audio_central = data.get("audio_central", {}) or {}
     if (str(network.get("mode", "off")).strip().lower() != "off"
             or network.get("relay_enabled", False) or network.get("local_enabled", False)) and not str(server.get("auth_token", "")).strip():
         raise ConfigError("remote networking requires configured authentication")
@@ -922,6 +966,10 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         apns_team_id    = str(apns.get("team_id", "")),
         apns_bundle_id  = str(apns.get("bundle_id", "com.maxteabag.clarp")),
         apns_environment = str(apns.get("environment", "production")).strip().lower(),
+        apns_mode       = str(apns.get("mode", "auto")).strip().lower(),
+        audio_central_url = (str(audio_central.get("url", "")).strip().rstrip("/")
+                             or DEFAULT_AUDIO_CENTRAL_URL),
+        audio_central_credential = str(audio_central.get("credential", "")).strip(),
     )
     _CACHED_PATH = path
     _CACHED_STAT = signature

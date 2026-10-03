@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 103
+_SCHEMA_VERSION = 104
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -316,7 +316,8 @@ CREATE TABLE device_tokens (
     updated_at INTEGER NOT NULL,
     last_push_at INTEGER,
     disabled_at INTEGER,
-    base_url TEXT NOT NULL DEFAULT ''
+    base_url TEXT NOT NULL DEFAULT '',
+    push_grant TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_device_tokens_active ON device_tokens(updated_at) WHERE disabled_at IS NULL;
 

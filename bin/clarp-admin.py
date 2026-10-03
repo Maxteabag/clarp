@@ -911,17 +911,43 @@ def cmd_doctor(_args) -> int:
         cfg = config_module.load(CONFIG_FILE)
         raw_key = cfg.apns_key_path or os.environ.get("APNS_KEY_PATH", "")
         credential_parts = (raw_key, cfg.apns_key_id, cfg.apns_team_id)
-        if not any(credential_parts):
-            print("OK    APNs push: not configured (optional)")
-        elif not all(credential_parts):
+        transport = cfg.apns_transport()
+        mode = cfg.apns_mode
+        direct_wanted = mode == "direct" or (
+            mode == "auto" and transport != "relay" and any(credential_parts))
+        if mode not in config_module.APNS_MODES:
+            failures += 1
+            print(f"FAIL  push: unknown [apns] mode {mode!r} "
+                  f"(use {', '.join(config_module.APNS_MODES)})")
+        elif transport == "relay":
+            fallback = (" (local .p8 kept as fallback; remove it once relayed "
+                        "pushes arrive)" if mode == "auto" and cfg.apns_direct_ready()
+                        else "")
+            print(f"OK    push: relay via Audio Central "
+                  f"({cfg.audio_central_url}){fallback}; phone grants are "
+                  "used where a phone issued one")
+        elif transport == "grant" and not any(credential_parts):
+            print(f"OK    push: phone grants via Audio Central "
+                  f"({cfg.audio_central_url}); phones that grant this Host "
+                  "receive pushes, no key or account needed here")
+        elif mode == "relay":
+            failures += 1
+            print("FAIL  push: relay selected but [audio_central] url is not https")
+        elif mode == "off":
+            print("OK    push: off")
+        elif direct_wanted and not all(credential_parts):
             failures += 1
             print("FAIL  APNs push: incomplete key path, key id, or team id")
-        else:
+        elif direct_wanted:
             key_file = Path(cfg.apns_key_file())
-            ok = cfg.apns_enabled()
+            ok = transport == "direct"
             failures += not ok
             suffix = "" if ok else " (missing or unreadable)"
             print(f"{'OK' if ok else 'FAIL':<5} APNs signing key: {key_file}{suffix}")
+            if ok:
+                print("OK    push: direct (local APNs key)")
+        else:
+            print("OK    push: not configured (optional)")
     except Exception as exc:  # noqa: BLE001 - doctor reports rather than crashes
         failures += 1
         print(f"FAIL  APNs push: {exc}")
