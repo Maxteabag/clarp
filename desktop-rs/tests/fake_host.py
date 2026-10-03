@@ -569,9 +569,11 @@ class Handler(BaseHTTPRequestHandler):
             failure[1] -= 1
             return self.reply(failure[0], {"error": "Gateway Timeout"})
         if url.path == "/server-info":
-            info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp"}
-            if live_features:
-                info["features"] = ["live_items", "tool_explanation_setting"]
+            # As the real Host and contract/schemas/server-info.json have it:
+            # feature flags under capabilities.features.
+            features = ["live_items", "tool_explanation_setting"] if live_features else []
+            info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp",
+                    "capabilities": {"version": 1, "features": features}}
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
             with state_lock:
