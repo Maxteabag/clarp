@@ -888,6 +888,7 @@ struct Jump {
     above: usize,
     done: usize,
     stable: usize,
+    begun: bool,
 }
 
 type Act = Box<dyn Fn(&Rc<crate::App>, &crate::AppWindow)>;
@@ -910,12 +911,13 @@ fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool
     vec![
         (place_label, Box::new(move |app, _, elapsed| {
             let mut st = place.borrow_mut();
-            if elapsed < Duration::from_millis(100) {
-                *st = Jump::default();
+            if !st.begun {
+                *st = Jump { begun: true, ..Jump::default() };
                 crate::artifacts_view::leave(app);
                 app.to_latest();
                 return false;
             }
+            let _ = elapsed;
             if transcript && !report().transcript_focused {
                 app.focus_transcript();
                 return false;
@@ -987,6 +989,7 @@ fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool
                 check(after.last >= before.first, &format!("{label}: a reader one notch up stays within a viewport: before {}; after {} ({})", before.line(), after.line(), after.drawn));
             }
             check(st.above == 0, &format!("{label}: never more than a viewport up meanwhile ({} polls wholly above; highest place rows #{}..#{}, before #{}..#{})", st.above, lowest.first, lowest.last, before.first, before.last));
+            *st = Jump::default();
             true
         })),
     ]
@@ -1110,6 +1113,7 @@ pub(super) fn scroll_jump_check(out: String) {
                 let (before, after, furthest) = (st.before.clone().unwrap_or_default(), seen().unwrap_or_default(), st.lowest.clone().unwrap_or_default());
                 check(before.first == 0 && after.first == 0 && furthest.first <= before.last, &format!(
                     "Home reaches the top of a chat with no older page, and the reader stays there: at the top {}; furthest rows #{}..#{}; after 3 s {}", before.line(), furthest.first, furthest.last, after.line()));
+                *st = Jump::default();
                 true
             }
         })),
