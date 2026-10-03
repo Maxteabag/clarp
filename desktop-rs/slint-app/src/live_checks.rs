@@ -16,11 +16,12 @@ use slint::Model;
 use slint::platform::Key;
 
 use super::scroll_checks::{anchor_now, anchor_moved, last_row_visible, row_height, wheel_up};
-use super::{Stage, app_now, check, control, report, requests, rows, run_stages, shot, view};
+use super::{Stage, app_now, check, control, posts, report, requests, rows, run_stages, shot, view};
 use crate::headless;
 
 /// Step indices in turn-full.json: replay up to (not including) them.
 const AFTER_THINKING_TITLE: usize = 5; // lseq 4
+const AFTER_FIRST_CHUNK: usize = 8; // lseq 7
 const AFTER_SEARCH: usize = 11; // lseq 10
 const AFTER_COMMAND_START: usize = 14; // lseq 13
 const AFTER_EXPLAIN: usize = 15; // lseq 14
@@ -121,6 +122,13 @@ pub fn live_check(out: String) {
             check(view().live_stop_key == "Ctrl+.", &format!("it names the interrupt key: {:?}", view().live_stop_key));
             check(titles() == ["Thinking: Finding the flaky test"], &format!("one reasoning row: {:?}", titles()));
             shot(&out1, "live-01-thinking");
+            replay(AFTER_FIRST_CHUNK)
+        })),
+        ("streaming", Box::new(move |_, _window, elapsed| {
+            if lseq() != Some(7) || elapsed < Duration::from_millis(700) {
+                return false;
+            }
+            check(status().starts_with("◌ Responding · 0:0"), &format!("responding: {:?}", status()));
             replay(AFTER_SEARCH)
         })),
         ("exploring", Box::new(move |_, _window, _| {
@@ -155,6 +163,29 @@ pub fn live_check(out: String) {
             }
             let now = row_height("live:cl:toolu_03");
             check((now - *height2.borrow()).abs() < 0.5, &format!("the explanation lands in its reserved line: {} → {now}", height2.borrow()));
+            check(crate::settings_view::rows(app_now().as_ref()).iter().any(|r| r.id == "tool-explanations" && r.on), "Settings show the Host's tool explanations, on");
+            // Ctrl+Shift+X turns the Host's explanations off.
+            headless::press_with(&[Key::Control, Key::Shift], "x");
+            true
+        })),
+        ("explanations off", Box::new(move |_, _window, _| {
+            let command = live_row("live:cl:toolu_03").is_some_and(|r| r.live.secondary == "npm test -- parser");
+            let posted = posts("/tool-explanations/settings").iter().any(|p| p["body"]["enabled"] == false);
+            if !command || !posted {
+                return false;
+            }
+            check(true, "off: the Host is told, and the row's second line is the raw command under its label");
+            check(live_row("live:cl:toolu_03").is_some_and(|r| r.live.title == "Running npm test"), "the first line stays the label");
+            check(crate::settings_view::rows(app_now().as_ref()).iter().any(|r| r.id == "tool-explanations" && !r.on), "Settings show it off");
+            let window = crate::window().expect("window");
+            check(crate::commands::run(&app_now(), &window, "toggle-explanations"), "the Ctrl+K command turns it on again");
+            true
+        })),
+        ("explanations on", Box::new(move |_, _window, _| {
+            if !live_row("live:cl:toolu_03").is_some_and(|r| r.live.secondary == "Runs the parser tests") {
+                return false;
+            }
+            check(posts("/tool-explanations/settings").last().is_some_and(|p| p["body"]["enabled"] == true), "on again at the Host");
             // The reader scrolls up into the history: what follows must not move them.
             app_now().focus_transcript();
             wheel_up(900.0);

@@ -698,6 +698,9 @@ impl Engine {
     }
 
     fn apply_snapshot(&mut self, object: &Object) {
+        if self.live.enabled {
+            self.live_explanations(object.get("tool_explanations").and_then(Value::as_object));
+        }
         self.mutate_roster(|r| r.apply_snapshot(object));
         self.changes.push(Change::Roster);
         self.archived.apply_snapshot(object);

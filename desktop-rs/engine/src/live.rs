@@ -24,6 +24,8 @@ pub(crate) struct Live {
     pub subscribed: Option<String>,
     /// The stream dropped since it last connected: events were missed.
     pub dropped: bool,
+    /// The Host's tool-explanation setting (§6), once it said.
+    pub explanations: Option<Object>,
 }
 
 impl Engine {
@@ -41,12 +43,31 @@ impl Engine {
     /// said (on by default, as on the Host).
     pub fn tool_explanations_enabled(&self, session: &str) -> bool {
         self.live
-            .views
-            .get(session)
-            .and_then(|v| v.tool_explanations())
+            .explanations
+            .as_ref()
+            .or_else(|| self.live.views.get(session).and_then(|v| v.tool_explanations()))
             .and_then(|s| s.get("enabled"))
             .and_then(Value::as_bool)
             .unwrap_or(true)
+    }
+
+    /// Turns the Host's tool explanations on or off (§6): no explainer runs
+    /// while off, and tool rows show the command under their label.
+    pub fn set_tool_explanations_enabled(&mut self, enabled: bool) {
+        let mut settings = self.live.explanations.clone().unwrap_or_default();
+        settings.insert("enabled".into(), Value::Bool(enabled));
+        self.live.explanations = Some(settings);
+        self.changes.push(Change::Narrator);
+        self.api.post_json("tool-explanations-settings", "/tool-explanations/settings", serde_json::json!({"enabled": enabled}), None);
+    }
+
+    /// The Host's setting, from the snapshot or its own route.
+    pub(crate) fn live_explanations(&mut self, settings: Option<&Object>) {
+        let Some(settings) = settings else { return };
+        if self.live.explanations.as_ref() != Some(settings) {
+            self.live.explanations = Some(settings.clone());
+            self.changes.push(Change::Narrator);
+        }
     }
 
     /// Live items stand in for the old activity rows in this chat.
@@ -63,6 +84,9 @@ impl Engine {
         if enabled != self.live.enabled {
             self.live.enabled = enabled;
             self.live.views.clear();
+        }
+        if enabled {
+            self.api.get("tool-explanations-settings", "/tool-explanations/settings", &[]);
         }
         self.sync_live_subscription(false);
     }
@@ -154,6 +178,10 @@ impl Engine {
 
     /// Replies for `live:` tags; true when it was one.
     pub(crate) fn live_json(&mut self, tag: &str, object: &Object) -> bool {
+        if tag == "tool-explanations-settings" {
+            self.live_explanations(Some(object));
+            return true;
+        }
         let Some(session) = tag.strip_prefix("live:") else { return false };
         if let Some(view) = self.live.views.get_mut(session) {
             view.apply_snapshot(object);
@@ -166,6 +194,14 @@ impl Engine {
     /// A failed `GET /live`: the chat keeps what it shows and the next event
     /// may ask again. Never a chat error (an older Host may lack the route).
     pub(crate) fn live_failure(&mut self, tag: &str, detail: &str) -> bool {
+        if tag == "tool-explanations-settings" {
+            // The Host kept its setting: show what it has, and say why.
+            eprintln!("Engine: tool explanations setting failed: {detail}");
+            self.live.explanations = None;
+            self.api.get("tool-explanations-settings", "/tool-explanations/settings", &[]);
+            self.set_error(&format!("Could not change tool explanations: {detail}"));
+            return true;
+        }
         let Some(session) = tag.strip_prefix("live:") else { return false };
         eprintln!("Engine: GET /live for {session} failed: {detail}");
         if let Some(view) = self.live.views.get_mut(session) {

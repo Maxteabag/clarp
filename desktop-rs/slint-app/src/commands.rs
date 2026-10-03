@@ -402,6 +402,12 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             crate::preview_view::open(app, window);
         }
         "update-preview" => return crate::preview_view::update_or_open(app, window),
+        "toggle-explanations" => {
+            if !app.engine.borrow().live_items() {
+                return false;
+            }
+            toggle_explanations(app);
+        }
         "tool-narration" => {
             let enabled = app.engine.borrow().narrator_enabled();
             app.engine.borrow_mut().set_narrator_enabled(!enabled);
@@ -489,6 +495,20 @@ fn toggles(app: &App, window: &AppWindow) -> switcher::Toggles {
         narration: engine.narrator_enabled(),
         preview_versions: crate::preview_view::enabled(),
         detail_level: engine.narrator_detail_level(),
+        tool_explanations: engine.live_items().then(|| engine.tool_explanations_enabled(engine.selected_session())),
+    }
+}
+
+/// Ctrl+Shift+X, its command and its setting: the Host's tool explanations
+/// on or off; the transcripts present again.
+pub fn toggle_explanations(app: &App) {
+    let on = {
+        let engine = app.engine.borrow();
+        engine.tool_explanations_enabled(engine.selected_session())
+    };
+    app.engine.borrow_mut().set_tool_explanations_enabled(!on);
+    if let Some(app) = crate::app() {
+        crate::pump_now(&app);
     }
 }
 
