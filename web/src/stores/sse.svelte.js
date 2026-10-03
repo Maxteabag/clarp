@@ -33,7 +33,7 @@ let resubscribing = false;
 const snapshotOwed = new Set();
 let staleTimer = null;
 let reconnectMs = Timing.SSE_RECONNECT_BASE_MS;
-const transcriptSnapshotRefresh = createCoalescedRefresh(
+const snapshotRefresh = createCoalescedRefresh(
   () => refreshAgentSnapshot(),
 );
 
@@ -83,7 +83,7 @@ export async function refreshServerInfo() {
 
 // A turn ended: the snapshot refresh its transcript pings held back is due.
 onTurnSettled(session => {
-  if (snapshotOwed.delete(session)) transcriptSnapshotRefresh.schedule();
+  if (snapshotOwed.delete(session)) snapshotRefresh.schedule();
 });
 
 // The live subscription is part of the URL, so a changed set of chats means
@@ -222,7 +222,7 @@ function handleEvent(ev) {
     else if (ev.kind === AgentState.THINKING) appendThinking(ev.session, chipLabel(ev.session));
     else removeLiveThinking(ev.session);
     if (!AgentState.BUSY.has(ev.kind) && snapshotOwed.delete(ev.session)) {
-      transcriptSnapshotRefresh.schedule();
+      snapshotRefresh.schedule();
     }
 
   } else if (ev.type === SSEType.AGENT_ACTIVITY) {
@@ -239,7 +239,10 @@ function handleEvent(ev) {
   } else if (ev.type === SSEType.AGENT_ROSTER) {
     clog('agentRoster', `${ev.kind}:${ev.session || ''}`);
     if (ev.kind === 'deleted' && ev.session) agentSnapshot.remove(ev.session);
-    refreshAgentSnapshot().catch(() => {});
+    // Coalesced: a reconnect replays minutes of events, and a burst of
+    // roster changes (helper agents coming and going) must cost one
+    // snapshot, not one ~140 ms Host request each.
+    snapshotRefresh.schedule();
     // Relaunch / fork keeps the session id but the conversation is new; the
     // conversation store's reducer decides what that means for the cache.
     handleSseEvent(ev);
@@ -258,7 +261,7 @@ function handleEvent(ev) {
     // second; the agent list learns what it needs from status ops, so the
     // refresh waits until the turn ends.
     if (liveTurnRunning(ev.session)) snapshotOwed.add(ev.session);
-    else transcriptSnapshotRefresh.schedule();
+    else snapshotRefresh.schedule();
     handleSseEvent(ev);
 
   } else if (ev.type === SSEType.USER_NOTIFICATION) {
