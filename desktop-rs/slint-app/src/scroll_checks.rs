@@ -835,6 +835,7 @@ pub(super) fn scroll_check(out: String) {
 /// one's id, and whether the last row is whole on screen.
 #[derive(Debug, Clone, Default)]
 struct Seen {
+    session: String,
     first: usize,
     last: usize,
     first_id: String,
@@ -862,6 +863,7 @@ fn seen() -> Option<Seen> {
     let shown: Vec<usize> = geo.rows.iter().filter(|r| r.2 > geo.top + 1.0 && r.1 < geo.bottom - 1.0).filter_map(|r| index(&r.0)).collect();
     let (first, last) = (*shown.iter().min()?, *shown.iter().max()?);
     Some(Seen {
+        session: app.engine.borrow().selected_session().to_owned(),
         first,
         last,
         first_id: rows[first].id.to_string(),
@@ -966,10 +968,11 @@ fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool
             }
             let Some(before) = st.before.clone() else { return true };
             if let Some(now) = seen() {
-                if now.last < before.first {
+                if std::env::var_os("CLARP_JUMP_TRACE").is_some() { eprintln!("trace {label} {ms}ms: {} ({})", now.line(), now.drawn); }
+                if now.session == before.session && now.last < before.first {
                     st.above += 1;
                 }
-                if st.lowest.as_ref().is_none_or(|l| now.first < l.first) {
+                if now.session == before.session && st.lowest.as_ref().is_none_or(|l| now.first < l.first) {
                     st.lowest = Some(now);
                 }
             }
@@ -1064,6 +1067,53 @@ pub(super) fn scroll_jump_check(out: String) {
     // Suspect 1: J/K with no card on screen.
     stages.extend(jump_case(s(), "K in the chat with no card on screen", true, true, vec![(0, k())], 3000, always()));
     stages.extend(jump_case(s(), "J in the chat with no card on screen", true, true, vec![(0, j())], 3000, always()));
+    // Suspect 2: a reader who reached the top of a chat with no older page
+    // waits there; the list re-estimating its rows' heights must not move them.
+    stages.extend::<Vec<Stage>>(vec![
+        ("home", Box::new(|app, _, elapsed| {
+            if elapsed < Duration::from_millis(100) {
+                app.to_latest();
+                app.focus_transcript();
+                return false;
+            }
+            if !report().transcript_focused || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            headless::press(slint::platform::Key::Home);
+            true
+        })),
+        ("at the top", Box::new({
+            let state = s();
+            move |_, _, elapsed| {
+                if elapsed < Duration::from_millis(800) {
+                    return false;
+                }
+                let mut st = state.borrow_mut();
+                st.before = seen();
+                st.lowest = st.before.clone();
+                st.above = 0;
+                true
+            }
+        })),
+        ("waits at the top", Box::new({
+            let state = s();
+            move |_, _, elapsed| {
+                let mut st = state.borrow_mut();
+                if let Some(now) = seen() {
+                    if st.lowest.as_ref().is_none_or(|l| now.first > l.first) {
+                        st.lowest = Some(now);
+                    }
+                }
+                if elapsed < Duration::from_secs(3) {
+                    return false;
+                }
+                let (before, after, furthest) = (st.before.clone().unwrap_or_default(), seen().unwrap_or_default(), st.lowest.clone().unwrap_or_default());
+                check(before.first == 0 && after.first == 0 && furthest.first <= before.last, &format!(
+                    "Home reaches the top of a chat with no older page, and the reader stays there: at the top {}; furthest rows #{}..#{}; after 3 s {}", before.line(), furthest.first, furthest.last, after.line()));
+                true
+            }
+        })),
+    ]);
     // A seek still under way after the reader went back to the latest
     // (Ctrl+End): from the top, K selects a card there and J sets off for
     // the one in the middle.
@@ -1090,9 +1140,11 @@ pub(super) fn scroll_jump_check(out: String) {
         (1500, refresh())], 3000, always()));
     stages.extend(jump_case(s(), "the Host's stream drops and reconnects", true, true, vec![
         (0, act(|_, _| { check(control("/__control/outage", &json!({"seconds": 1.5})).is_ok(), "the Host drops its streams"); }))], 4000, live()));
-    stages.extend(jump_case(s(), "another chat and back", true, true, vec![
+    // (Opening a chat empties the list and fills it again: the probe can
+    // find its top laid out once before the end, between frames.)
+    stages.extend(jump_case_from(s(), "another chat and back", true, true, vec![
         (0, act(|app, _| { app.engine.borrow_mut().select("rachel"); crate::pump(); })),
-        (800, act(|app, _| { app.engine.borrow_mut().select("jump"); crate::pump(); }))], 2500, always()));
+        (800, act(|app, _| { app.engine.borrow_mut().select("jump"); crate::pump(); }))], 2500, always(), Some(1300)));
     stages.extend(jump_case(s(), "a split, zoom and close", true, true, vec![
         (0, act(|app, window| { crate::commands::run(app, window, "split-right"); })),
         (700, act(|app, window| { crate::commands::run(app, window, "zoom"); })),
