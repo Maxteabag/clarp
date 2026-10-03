@@ -223,7 +223,7 @@ def test_agent_message_updates_stream_through_one_throttled_live_row(
         (agent_id,),
     ).fetchall()
     assert [(row["text"], row["kind"]) for row in rows] == [
-        ("Hello world", "live")
+        ("Hello world", None)  # settled in place when the item completed
     ]
 
 

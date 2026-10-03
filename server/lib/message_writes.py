@@ -529,6 +529,26 @@ class _FinalRows:
         return self._rows
 
 
+def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
+                   *, exclude: set[str]) -> str:
+    """The oldest still-live streamed row whose text this reply completes."""
+    visible = _strip_voice_markup(text)
+    if not visible:
+        return ""
+    for row in database.execute(
+            """SELECT message_id, text FROM messages
+                WHERE agent_id=? AND backend_session_id=? AND role='assistant'
+                  AND source_file LIKE 'live:%'
+                ORDER BY timestamp, seq DESC""",
+            (agent_id, backend_session_id)).fetchall():
+        if row["message_id"] in exclude:
+            continue
+        streamed = _strip_voice_markup(row["text"])
+        if streamed and (visible.startswith(streamed) or streamed.startswith(visible)):
+            return str(row["message_id"])
+    return ""
+
+
 def _final_twins(final_rows: _FinalRows, *, text: str, timestamp: Any,
                  exclude: set[str]) -> list[str]:
     """Finalized live rows showing `text`, written near `timestamp`."""
@@ -744,6 +764,14 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                             and row_visible == visible]
                 if len(matching) == 1:
                     msg_id = matching[0]
+                    adopted_final_ids.add(msg_id)
+            if not slot and msg_id not in adopted_final_ids:
+                # The row this reply streamed into becomes its durable row,
+                # in place: same id, so no client sees it vanish and return.
+                streamed = _streamed_twin(database, agent_id, backend_session_id,
+                                          text, exclude=adopted_final_ids)
+                if streamed:
+                    msg_id = streamed
                     adopted_final_ids.add(msg_id)
             if msg_id not in adopted_final_ids:
                 # Without a request trace (the user turn could not be linked

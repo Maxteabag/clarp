@@ -362,7 +362,7 @@ def test_recorded_user_message_survives_and_links_to_transcript(tmp_path):
     assert sum(1 for m in visible if m["text"] == "long dictated message") == 1
 
 
-def test_live_assistant_message_updates_and_final_transcript_replaces_it(tmp_path):
+def test_live_assistant_message_updates_and_final_transcript_adopts_it(tmp_path):
     agent_id = agents_db.create_agent(
         persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel"
     )
@@ -415,7 +415,10 @@ def test_live_assistant_message_updates_and_final_transcript_replaces_it(tmp_pat
         "old question", "old answer", "new question", "streaming hello world",
     ]
     assert all(m["kind"] != "live" for m in visible)
-    assert agents_db.conversation_requires_replace(
+    # The durable reply is the streamed row, adopted in place: same id, and a
+    # client holding the live row only needs a delta, not a tail reload.
+    assert visible[-1]["id"] == live["id"]
+    assert not agents_db.conversation_requires_replace(
         agent_id=agent_id, backend_session_id=bsid,
         after_revision=live["revision"],
     )
