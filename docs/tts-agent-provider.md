@@ -58,19 +58,6 @@ ffmpeg into MP3. `gemini_voice` takes a prebuilt name (`Kore`, `Charon`, ...)
 or a Voice Design id (`voice_...`). First audio takes about 1-2.5 s, against
 about 130 ms for Cartesia.
 
-`[gemini_tts] backend` picks the API surface. `gemini_api` (default) calls
-generativelanguage with `api_key`; on Tier 1 that project allows only 100
-requests a day per model. `vertex` calls the Vertex AI global endpoint
-(`aiplatform.googleapis.com`; regional endpoints 404 for the 3.8 TTS models)
-with `vertex_api_key`, a Vertex express key, and has no fixed daily cap. First
-audio on Vertex measured about 1.1 s.
-
-Voice Design ids belong to the surface that created them. Agents and clients
-keep seeing the Gemini API ids; on Vertex the worker swaps each for the same
-contact's id in `[gemini_tts.vertex_voices]`. Vertex voices are created with
-the Voices API (`v1beta1/projects/<p>/locations/global/voices`, OAuth only,
-API keys are refused) and expire a year after last use.
-
 ## Delivery
 
 Raw PCM delivery only exists for Cartesia. A clip from any other provider is

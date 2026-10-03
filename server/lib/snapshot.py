@@ -56,6 +56,9 @@ def _compacting_check() -> Any:
     return lambda session, kind: session in compacting
 
 
+from . import tool_explanation_settings  # noqa: E402
+
+
 def _live_activities() -> dict[str, Any]:
     from . import backends, live_hub
     if backends._RUNTIME_CLIENT is not None:
@@ -292,6 +295,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         "model_avatars": avatar_settings.get()["model_avatars"],
         # The menu of MCP servers an agent can be granted (from ~/.claude.json).
         "available_mcp_servers": sorted(config.read_global_mcp_servers().keys()),
+        # Whether tool rows carry plain-language explanations (Host setting).
+        "tool_explanations": tool_explanation_settings.get(),
     }
 
 

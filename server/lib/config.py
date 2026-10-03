@@ -404,14 +404,6 @@ class Config:
     # Persona -> Gemini voice ([gemini_tts.voices]). Voice Design ids live in
     # the user's Google project, so there are no built-in defaults.
     gemini_voices: dict[str, str] = field(default_factory=dict)
-    # [gemini_tts] backend: "gemini_api" (generativelanguage, api_key) or
-    # "vertex" (aiplatform global endpoint, vertex_api_key = a Vertex express
-    # key). Designed voices exist per surface, so Vertex speaks the contact's
-    # voice from [gemini_tts.vertex_voices]; the Gemini API ids stay the ones
-    # agents and clients see.
-    gemini_backend: str = "gemini_api"
-    gemini_vertex_api_key: str = ""      # [gemini_tts] vertex_api_key or env GOOGLE_VERTEX_API_KEY
-    gemini_vertex_voices: dict[str, str] = field(default_factory=dict)
     cartesia_api_key: str = ""           # [cartesia] api_key or env CARTESIA_API_KEY
     deepgram_api_key: str = ""            # [deepgram] api_key or env DEEPGRAM_API_KEY
     deepgram_model: str = "flux-haley-en"
@@ -557,26 +549,6 @@ class Config:
     def gemini_key(self) -> str:
         """Resolved Gemini API key: config first, env fallback."""
         return self.auth_token_or_env(self.gemini_api_key, "GEMINI_API_KEY")
-
-    def gemini_tts_key(self) -> str:
-        """Key for the configured Gemini TTS backend."""
-        if self.gemini_backend == "vertex":
-            return self.auth_token_or_env(self.gemini_vertex_api_key,
-                                          "GOOGLE_VERTEX_API_KEY")
-        return self.gemini_key()
-
-    def gemini_tts_voice(self, voice: str) -> str:
-        """`voice` as the configured backend knows it.
-
-        On Vertex a Gemini API Voice Design id becomes the same contact's
-        Vertex voice; prebuilt names and unmapped ids pass through.
-        """
-        if self.gemini_backend != "vertex" or voice in self.gemini_vertex_voices.values():
-            return voice
-        for persona, gemini_api_voice in self.gemini_voices.items():
-            if gemini_api_voice == voice and self.gemini_vertex_voices.get(persona):
-                return self.gemini_vertex_voices[persona]
-        return voice
 
     def tts_override_for(self, agent: dict | None) -> dict:
         """[tts.agents.*] entry for this agent, matched by name then session."""
@@ -906,12 +878,6 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         gemini_voices   = {str(k): str(v).strip()
                            for k, v in (gemini.get("voices") or {}).items()
                            if str(v).strip()},
-        gemini_backend  = ("vertex" if str(gemini.get("backend", "")).strip().lower() == "vertex"
-                           else "gemini_api"),
-        gemini_vertex_api_key = str(gemini.get("vertex_api_key", "")),
-        gemini_vertex_voices = {str(k): str(v).strip()
-                                for k, v in (gemini.get("vertex_voices") or {}).items()
-                                if str(v).strip()},
         cartesia_api_key = str(cartesia.get("api_key", "")),
         deepgram_api_key = str(deepgram.get("api_key", "")),
         deepgram_model  = str(deepgram.get("model", "flux-haley-en")),
