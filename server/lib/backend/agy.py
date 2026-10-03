@@ -374,12 +374,16 @@ def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
             "command": clean(raw.get("command") or raw.get("CommandLine")),
             "description": clean(raw.get("description"), 120),
         }
+    # agy spells its arguments AbsolutePath, TargetFile, Query, SearchPath...
     if name in {"Read", "Write", "Edit"}:
         return {"file_path": clean(
-            raw.get("file_path") or raw.get("FilePath") or raw.get("path"), 240)}
+            raw.get("file_path") or raw.get("FilePath") or raw.get("AbsolutePath")
+            or raw.get("TargetFile") or raw.get("path"), 240)}
     if name in {"Grep", "Glob"}:
-        return {"pattern": clean(raw.get("pattern"), 100),
-                "path": clean(raw.get("path"), 240)}
+        return {"pattern": clean(raw.get("pattern") or raw.get("Query"), 100),
+                "path": clean(raw.get("path") or raw.get("SearchPath"), 240)}
+    if name == "LS":
+        return {"path": clean(raw.get("path") or raw.get("DirectoryPath"), 240)}
     if name in {"WebSearch", "WebFetch"}:
         return {"query": clean(raw.get("query") or raw.get("Query"), 130),
                 "url": clean(raw.get("url") or raw.get("Url"), 180)}
