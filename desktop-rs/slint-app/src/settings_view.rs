@@ -70,7 +70,7 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         choice("activity", "Tool activity", ACTIVITY[engine.activity_mode().clamp(0, 2) as usize]),
     ];
     // The Host's setting, on Hosts that send live items (§6).
-    if engine.live_items() {
+    if engine.tool_explanation_setting() {
         rows.push(toggle("tool-explanations", "Tool explanations (Host · Ctrl+Shift+X)", engine.tool_explanations_enabled(engine.selected_session())));
     }
     rows.extend(vec![

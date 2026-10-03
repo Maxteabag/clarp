@@ -24,6 +24,8 @@ pub(crate) struct Live {
     pub subscribed: Option<String>,
     /// The stream dropped since it last connected: events were missed.
     pub dropped: bool,
+    /// The Host has the tool-explanation setting (`tool_explanation_setting`).
+    pub explanation_setting: bool,
     /// The Host's tool-explanation setting (§6), once it said.
     pub explanations: Option<Object>,
 }
@@ -70,6 +72,11 @@ impl Engine {
         }
     }
 
+    /// The Host offers its tool-explanation setting (Host contract 43).
+    pub fn tool_explanation_setting(&self) -> bool {
+        self.live.explanation_setting
+    }
+
     /// Live items stand in for the old activity rows in this chat.
     pub(crate) fn live_owns(&self, session: &str) -> bool {
         self.live.enabled && self.live.views.contains_key(session)
@@ -81,11 +88,15 @@ impl Engine {
             .get("features")
             .and_then(Value::as_array)
             .is_some_and(|features| features.iter().any(|f| f.as_str() == Some("live_items")));
+        self.live.explanation_setting = info
+            .get("features")
+            .and_then(Value::as_array)
+            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some("tool_explanation_setting")));
         if enabled != self.live.enabled {
             self.live.enabled = enabled;
             self.live.views.clear();
         }
-        if enabled {
+        if enabled && self.live.explanation_setting {
             self.api.get("tool-explanations-settings", "/tool-explanations/settings", &[]);
         }
         self.sync_live_subscription(false);
@@ -163,6 +174,12 @@ impl Engine {
             return;
         }
         let session = json::string(event, "session");
+        // Item ops (and lseq) count only from a stream that lists the chat:
+        // a summary copy (status and turn ops) must not advance it (§4).
+        let listed = self.live.subscribed.as_deref().is_some_and(|s| s.split(',').any(|n| n == session));
+        if !listed {
+            return;
+        }
         let Some(view) = self.live.views.get_mut(&session) else { return };
         let server_now = event.get("server_now_ms").and_then(Value::as_i64).unwrap_or(0);
         let before = view.generation();

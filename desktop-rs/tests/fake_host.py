@@ -571,7 +571,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/server-info":
             info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp"}
             if live_features:
-                info["features"] = ["live_items"]
+                info["features"] = ["live_items", "tool_explanation_setting"]
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
             with state_lock:
