@@ -23,7 +23,7 @@ names the phone, so no device token or credential of the Host's is involved.
   phone registers a new one on its next launch, so the row is kept.
 - Re-registering without `push_grant` keeps the stored grant, so older app
   builds and phones without App Attest keep working through the other paths.
-- The Host advertises feature `push_grants` (Host contract 26); the app only
+- The Host advertises feature `push_grants` (Host contract 39); the app only
   mints grants for Hosts that do.
 
 ### Threat model (Host side)
