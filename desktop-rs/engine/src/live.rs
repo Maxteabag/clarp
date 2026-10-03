@@ -31,6 +31,11 @@ pub(crate) struct Live {
     pub explanation_setting: bool,
     /// The Host's tool-explanation setting (§6), once it said.
     pub explanations: Option<Object>,
+    /// Chats a live event (or a snapshot with something in it) has reached:
+    /// only these are shown from live items. A Host listing the feature
+    /// before its live hub serves sends neither, and those chats keep the
+    /// old activity rows and typing indicator.
+    pub heard: std::collections::HashSet<String>,
 }
 
 impl Engine {
@@ -39,7 +44,8 @@ impl Engine {
         self.live.enabled
     }
 
-    /// Whether live items show this chat (not implemented yet).
+    /// Whether live items show this chat: the feature is on and the Host
+    /// has actually sent it something live.
     pub fn live_active(&self, session: &str) -> bool {
         self.live_owns(session)
     }
@@ -87,7 +93,7 @@ impl Engine {
 
     /// Live items stand in for the old activity rows in this chat.
     pub(crate) fn live_owns(&self, session: &str) -> bool {
-        self.live.enabled && self.live.views.contains_key(session)
+        self.live.enabled && self.live.views.contains_key(session) && self.live.heard.contains(session)
     }
 
     /// `/server-info` answered: whether the Host sends live items.
@@ -213,6 +219,7 @@ impl Engine {
         let effects = view.apply_event(event);
         if view.generation() != before {
             view.observe_clock(server_now, now_ms());
+            self.live.heard.insert(session.clone());
             self.changes.push(Change::Live(session.clone()));
         }
         if effects.contains(&FETCH_LIVE) {
@@ -230,6 +237,11 @@ impl Engine {
         if let Some(view) = self.live.views.get_mut(session) {
             view.apply_snapshot(object);
             view.observe_clock(object.get("server_now_ms").and_then(Value::as_i64).unwrap_or(0), now_ms());
+            // An idle, empty snapshot is what a silent Host answers too.
+            let state = view.activity().get("state").and_then(Value::as_str).unwrap_or("idle");
+            if !view.items().is_empty() || !matches!(state, "idle" | "") {
+                self.live.heard.insert(session.to_owned());
+            }
             self.changes.push(Change::Live(session.to_owned()));
         }
         true
