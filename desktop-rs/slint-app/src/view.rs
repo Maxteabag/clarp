@@ -387,6 +387,58 @@ pub(crate) fn message_row(
     }
 }
 
+/// What a cached row was built from: an equal source builds an equal row.
+#[derive(PartialEq)]
+struct RowSource {
+    row: PresentedRow,
+    always: bool,
+    open: bool,
+    /// Rows with images are built again when a picture lands.
+    pictures: Option<u64>,
+}
+
+/// Each transcript row as `message_row` built it (Markdown blocks, styled
+/// text, tools and cells), kept per message id while its presented source
+/// is unchanged, so an update re-parses only the rows that changed: a
+/// streamed reply's tick rebuilds one row, not the whole chat.
+#[derive(Default)]
+pub(crate) struct RowCache {
+    rows: std::collections::HashMap<String, (RowSource, MessageRow)>,
+    /// Rows built (not reused) so far.
+    pub(crate) built: u64,
+}
+
+impl RowCache {
+    pub(crate) fn clear(&mut self) {
+        self.rows.clear();
+    }
+
+    pub(crate) fn rows(&mut self, presented: &[PresentedRow], always: bool, expanded: &std::collections::HashSet<String>) -> Vec<MessageRow> {
+        let pictures = crate::artifacts_view::pictures_landed();
+        let mut kept = std::collections::HashMap::with_capacity(presented.len());
+        let rows = presented
+            .iter()
+            .map(|row| {
+                let id = row.message.id.clone();
+                let open = expanded.contains(&id);
+                let reused = self.rows.remove(&id).filter(|(source, _)| {
+                    source.always == always && source.open == open && source.pictures.is_none_or(|p| p == pictures) && source.row == *row
+                });
+                let (source, shown) = reused.unwrap_or_else(|| {
+                    self.built += 1;
+                    let shown = message_row(row, always, expanded);
+                    let images = slint::Model::iter(&shown.blocks).any(|b| b.kind == "images");
+                    (RowSource { row: row.clone(), always, open, pictures: images.then_some(pictures) }, shown)
+                });
+                let copy = shown.clone();
+                kept.insert(id, (source, shown));
+                copy
+            })
+            .collect();
+        self.rows = kept;
+        rows
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -422,5 +474,34 @@ mod tests {
         let literal = clarp_engine::blocks::literal_with_links("Check https://user.example/page *now*\n\n  1. [x](y) <b> # `c`\n> q").expect("a link");
         let parsed = slint::StyledText::from_markdown(&literal);
         assert!(parsed.is_ok(), "{literal:?}: {:?}", parsed.err().map(|e| e.to_string()));
+    }
+
+    /// A streamed reply's tick re-parses its own row only; the rest of a
+    /// long chat is reused as it was.
+    #[test]
+    fn an_update_rebuilds_only_the_rows_that_changed() {
+        let message = |id: &str, role: &str, text: &str, revision: i64| {
+            Message::from_json(serde_json::json!({"id": id, "role": role, "text": text, "revision": revision}).as_object().expect("an object"))
+        };
+        let mut messages: Vec<Message> = (0..30)
+            .map(|i| message(&format!("m{i}"), if i % 2 == 0 { "user" } else { "assistant" }, &format!("Row {i} with **bold** and `code`"), i))
+            .collect();
+        messages.push(message("live", "assistant", "Partial", 31));
+        let present = |messages: &[Message]| {
+            clarp_core::presentation::present(messages, &mut clarp_core::presentation::Settings::default(), None).rows
+        };
+        let expanded = std::collections::HashSet::new();
+        let mut cache = super::RowCache::default();
+        let first = cache.rows(&present(&messages), false, &expanded);
+        assert_eq!(cache.built, 31);
+        messages[30] = message("live", "assistant", "Partial answer, growing", 32);
+        let second = cache.rows(&present(&messages), false, &expanded);
+        assert_eq!(cache.built, 32, "one row changed, one row built");
+        assert_eq!(second.len(), first.len());
+        assert!(first.iter().zip(&second).take(30).all(|(a, b)| a.id == b.id && slint::Model::row_count(&a.blocks) == slint::Model::row_count(&b.blocks)));
+        let text = |row: &crate::MessageRow| slint::Model::row_data(&row.blocks, 0).map(|b| b.styled).unwrap_or_default();
+        assert_eq!(text(&second[30]), super::styled("Partial answer, growing", false), "the changed row shows its new text");
+        cache.rows(&present(&messages), true, &expanded);
+        assert_eq!(cache.built, 63, "a presentation setting builds every row again");
     }
 }
