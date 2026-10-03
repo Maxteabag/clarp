@@ -38,6 +38,10 @@ const EXPLAIN_START = arg('explanations', 'on') !== 'off';
 // a growing `live` /log row with transcript-updated pings, and agent-state /
 // agent-activity events for the status line.
 const NO_LIVE = process.argv.includes('--no-live');
+// --silent-hub: lists live_items but its hub never sends anything (GET /live
+// answers an empty view with no epoch); the turns arrive the pre-live way.
+const SILENT_HUB = process.argv.includes('--silent-hub');
+const LEGACY = NO_LIVE || SILENT_HUB;
 
 // --recording <file>: replay {snapshot0, events} recorded from a real Host
 // hub instead of turn-full (turn B is then left out).
@@ -221,7 +225,7 @@ setInterval(() => {
     if (step.event) {
       const r = applyLiveEvent(liveState, step.event, step.event.server_now_ms);
       liveState = r.state;
-      if (NO_LIVE) legacyBroadcast(step.event);
+      if (LEGACY) legacyBroadcast(step.event);
       else broadcast(step.event, false);
     } else if (step.log) {
       logRevision += 1;
@@ -281,7 +285,7 @@ const server = http.createServer((req, res) => {
   if (p.startsWith('/static/')) return sendFile(res, path.join(repo, p.slice(1)));
   if (p === '/server-info') {
     return sendJson(res, { name: 'fake', capabilities: { version: 1,
-      features: NO_LIVE ? ['tool_explanations'] : ['live_items', 'tool_explanations'] },
+      features: NO_LIVE ? ['tool_explanations'] : ['live_items', 'tool_explanations', 'tool_explanation_setting'] },
       contract: { host: 40, min_ios: 1, features: { live_items: 40 } } });
   }
   if (p === '/agents/snapshot') {
@@ -316,6 +320,10 @@ const server = http.createServer((req, res) => {
   }
   if (p === '/live') {
     if (url.searchParams.get('session') !== 'rachel') return sendJson(res, { error: 'unknown session' }, 404);
+    if (SILENT_HUB) {
+      return sendJson(res, { conv, session: 'rachel', agent_id: 'agent-1', epoch: '', lseq: 0,
+        server_now_ms: Date.now(), activity: { state: 'idle' }, turn: null, items: [] });
+    }
     return sendJson(res, { conv, session: 'rachel', agent_id: 'agent-1', epoch: liveState.epoch,
       lseq: liveState.lseq, server_now_ms: Date.now(), activity: liveState.activity, turn: liveState.turn,
       items: liveItems(liveState), tool_explanations: { enabled: EXPLAIN, detail_level: 2 } });

@@ -29,7 +29,7 @@
         title="Show/hide tool calls"
         onclick={toggleTools}
       >⚙</button>
-      {#if live.enabled}
+      {#if live.explanationSetting}
         <!-- Host setting (docs/live-items.md §6): tool rows show a plain-language
              explanation under the command, or the raw command when off. -->
         <button

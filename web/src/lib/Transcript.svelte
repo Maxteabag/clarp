@@ -8,7 +8,7 @@
   import Turn from './Turn.svelte';
   import LiveTurn from './live/LiveTurn.svelte';
   import { conversation, loadOlder, placeholderFor } from '../stores/conversations.svelte.js';
-  import { live, liveFor, openLive, watchSession } from '../stores/live.svelte.js';
+  import { live, liveFor, liveRequested, openLive, watchSession } from '../stores/live.svelte.js';
   import { prefs } from '../stores/prefs.svelte.js';
 
   let { session, active = true } = $props();
@@ -38,7 +38,7 @@
   $effect(() => {
     if (!session || !live.enabled) return;
     watchSession(session);
-    if (!liveFor(session)) openLive(session);
+    if (!liveRequested(session)) openLive(session);
   });
 
   function nearBottom() {
