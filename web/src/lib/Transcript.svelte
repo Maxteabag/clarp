@@ -5,6 +5,7 @@
   import { tick } from 'svelte';
   import { mergeTimeline } from '@core/timeline.js';
   import { currentTurnItems, liveInsertIndex, takenOverTurns } from '@core/live-present.js';
+  import { withLiveEntry } from '@core/live-timeline.js';
   import Turn from './Turn.svelte';
   import LiveTurn from './live/LiveTurn.svelte';
   import { conversation, loadOlder, placeholderFor } from '../stores/conversations.svelte.js';
@@ -43,8 +44,9 @@
   // never rebuilt.
   let liveAt = $derived(liveItems.length
     ? liveInsertIndex(merged.map(e => e.item), liveState.turn) : -1);
-  let timeline = $derived(liveAt < 0 ? merged
-    : [...merged.slice(0, liveAt), { type: 'live', key: 'live-turn' }, ...merged.slice(liveAt)]);
+  // These deriveds are composeTimeline (@core/live-timeline.js) in steps,
+  // split so a live event that changes nothing structural rebuilds nothing.
+  let timeline = $derived(withLiveEntry(merged, liveAt));
 
   // Keep this chat's live items coming while it is on screen.
   $effect(() => {
