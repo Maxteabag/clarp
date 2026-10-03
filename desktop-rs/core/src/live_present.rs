@@ -218,31 +218,58 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     let items: Vec<&Object> =
         view.items().into_iter().filter(|i| text(i, "turn_id") == turn_id && known_kind(text(i, "kind"))).collect();
     let durable = durable(rows);
+    let settled = turn.is_some_and(|t| !matches!(text(t, "status"), "running" | ""));
     // Taken over (§7.5): a durable row with the message's row_id, or a
-    // tool or cell with the tool's call_id.
-    let mut shown = Vec::new();
-    for item in &items {
-        let id = text(item, "id").to_owned();
-        let owner = match text(item, "kind") {
+    // tool or cell with the tool's call_id. A message that stays in view
+    // (a settled turn folds commentary) is shown by its row, in its place;
+    // everything else keeps its item row, so a turn reads the same before
+    // and after it lands: one row per tool, the reasoning, the fold.
+    let owner_of = |item: &Object| -> Option<&str> {
+        match text(item, "kind") {
             "message" => durable.by_row.get(text(item, "row_id")).copied(),
             "tool" => object(item, "tool").and_then(|t| durable.by_call.get(text(t, "call_id"))).copied(),
             _ => None,
-        };
-        match owner {
-            Some(row) => {
-                presented.taken_over.insert(id, row.to_owned());
-            }
-            None => shown.push(*item),
         }
+    };
+    let stays = |item: &Object| !settled || text(item, "phase") != "commentary" || text(item, "status") != "completed";
+    // Rows that carry a message staying in view: they show, at its place.
+    let giving: HashSet<&str> = items.iter().filter(|i| text(i, "kind") == "message" && stays(i)).filter_map(|i| owner_of(i)).collect();
+    let mut placed: HashSet<&str> = HashSet::new();
+    let mut rows_of: HashMap<&str, Entry> = HashMap::new();
+    let mut shown = Vec::new();
+    let mut owned_rows: Vec<&str> = Vec::new();
+    for item in &items {
+        let Some(row) = owner_of(item) else {
+            shown.push(*item);
+            continue;
+        };
+        presented.taken_over.insert(text(item, "id").to_owned(), row.to_owned());
+        if !owned_rows.contains(&row) {
+            owned_rows.push(row);
+        }
+        if let Some(tool) = object(item, "tool") {
+            presented.stripped_calls.insert(text(tool, "call_id").to_owned());
+        }
+        if text(item, "kind") == "message" && giving.contains(row) {
+            // The row's text holds every message it carries: it shows once.
+            if stays(item) && placed.insert(row) {
+                let mut entry = item_entry(item, options);
+                entry.row = row.to_owned();
+                rows_of.insert(text(item, "id"), entry);
+                shown.push(*item);
+            }
+            continue;
+        }
+        shown.push(*item);
     }
-    // A settled turn whose messages and tools all landed in /log has
-    // landed: what no row carries (reasoning, plan, diff) goes with it.
-    let settled_turn = turn.is_some_and(|t| !matches!(text(t, "status"), "running" | ""));
-    let takes_over = |i: &&Object| matches!(text(i, "kind"), "message" | "tool");
-    if settled_turn && !presented.taken_over.is_empty() && !shown.iter().any(takes_over) {
-        let owner = items.iter().find_map(|i| presented.taken_over.get(text(i, "id")).cloned()).unwrap_or_default();
-        for item in shown.drain(..) {
-            presented.taken_over.insert(text(item, "id").to_owned(), owner.clone());
+    // A row whose every part an item row shows is not shown again.
+    let calls: HashSet<&str> = items.iter().filter_map(|i| object(i, "tool")).map(|t| text(t, "call_id")).collect();
+    for id in owned_rows.into_iter().filter(|r| !giving.contains(r)) {
+        let Some(row) = rows.iter().find(|m| m.id == id) else { continue };
+        let carries_message = items.iter().any(|i| text(i, "kind") == "message" && text(i, "row_id") == id);
+        let every_call = row.tools.iter().chain(&row.display_cells).all(|v| v.get("id").and_then(Value::as_str).is_some_and(|c| calls.contains(c)));
+        if every_call && (carries_message || row.display_text.trim().is_empty()) {
+            presented.absorbed_rows.push(id.to_owned());
         }
     }
     // A live /log row an item shows (its row_id) is hidden.
@@ -268,13 +295,12 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
             entries.push(explore_entry(group, &members, options));
             continue;
         }
-        entries.push(item_entry(item, options));
+        entries.push(rows_of.remove(text(item, "id")).unwrap_or_else(|| item_entry(item, options)));
         index += 1;
     }
 
     // A settled turn folds its work (§7.6): what failed or stopped and the
     // final answer stay out of the fold.
-    let settled = turn.is_some_and(|t| text(t, "status") != "running" && !text(t, "status").is_empty());
     if settled {
         let stays = |entry: &Entry| {
             matches!(entry.status.as_str(), "failed" | "interrupted" | "running" | "pending") || (entry.kind == Kind::Message && entry.phase != "commentary")
@@ -454,12 +480,16 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
     };
     // Second line (§6): the explanation when explained, else with
     // explanations off the raw command.
-    let explain = object(tool, "explain").map(|e| text(e, "text")).unwrap_or_default();
+    let explain = object(tool, "explain");
     if options.explanations {
-        entry.secondary = explain.to_owned();
+        entry.secondary = explain.map(|e| text(e, "text")).unwrap_or_default().to_owned();
         // A line is kept while an explanation may still come, so it lands
         // without moving the chat; a settled tool without one needs none.
-        entry.reserve_secondary = !is_terminal(&status) || object(tool, "explain").is_some_and(|e| text(e, "status") == "pending");
+        // Until it lands the line says it is coming.
+        let state = explain.map(|e| text(e, "status")).unwrap_or_default();
+        let coming = state == "pending" || (explain.is_some() && !matches!(state, "ready" | "failed")) || (!is_terminal(&status) && state != "failed");
+        entry.explaining = entry.secondary.is_empty() && coming;
+        entry.reserve_secondary = entry.explaining || !is_terminal(&status);
     } else {
         entry.secondary = tool.get("command").and_then(Value::as_str).filter(|c| *c != label).unwrap_or_default().to_owned();
     }
