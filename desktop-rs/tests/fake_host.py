@@ -110,6 +110,8 @@ sys.path.insert(0, str(REPO / "server"))
 from lib.live_items import LiveView  # noqa: E402
 
 live_features = False
+# /log rows carry turn summaries (feature log_turn_summary, Host contract 47).
+turn_summaries = False
 live_truth = {}      # session -> LiveView: what GET /live answers
 live_cursor = {}     # session -> (fixture name, next step index, time shift)
 live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without ?live=
@@ -582,6 +584,8 @@ class Handler(BaseHTTPRequestHandler):
             # As the real Host and contract/schemas/server-info.json have it:
             # feature flags under capabilities.features.
             features = ["live_items", "tool_explanation_setting"] if live_features else []
+            if turn_summaries:
+                features.append("log_turn_summary")
             info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp",
                     "capabilities": {"version": 1, "features": features}}
             return self.reply(200, info)
@@ -954,6 +958,13 @@ class Handler(BaseHTTPRequestHandler):
             global live_features
             live_features = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/turn-summary":
+            # Test control: the log_turn_summary feature on or off (read from
+            # /server-info on connecting). Rows carry trace_id, phase and turn
+            # as their fixtures give them (docs/live-items.md §9).
+            global turn_summaries
+            turn_summaries = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/live-replay":
             # Test control: replay a recorded stream (contract/live/NAME.json)
             # for `session` up to step `through` (exclusive; all by default),
@@ -1031,7 +1042,8 @@ class Handler(BaseHTTPRequestHandler):
                     if body.get("hold") and turn["role"] != "user":
                         if not turn["id"].startswith("live-"):
                             continue
-                        turn = {**turn, "kind": "live"}
+                        # Still running: no summary yet.
+                        turn = {k: v for k, v in turn.items() if k != "turn"} | {"kind": "live"}
                     revision += 1
                     rows.append({**turn, "revision": revision})
                 agent = next((a for a in agents if a["session"] == session), None)

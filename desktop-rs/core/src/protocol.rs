@@ -261,6 +261,10 @@ pub struct Message {
     pub reply_to_session: String,
     pub delivery: String,
     pub trace_id: String,
+    /// An assistant text row's `commentary` or `final` (`log_turn_summary`).
+    pub phase: String,
+    /// On a settled turn's last row: its summary, as `GET /live`'s turn.
+    pub turn: Option<Object>,
     pub category: String,
     pub activity_status: String,
     pub activity_match_key: String,
@@ -301,6 +305,8 @@ impl Message {
             reply_to_session: s("reply_to_session"),
             delivery: s("delivery"),
             trace_id: s("trace_id"),
+            phase: s("phase"),
+            turn: object.get("turn").and_then(Value::as_object).cloned(),
             category,
             revision: json::integer(object, "revision"),
             activity_count: json::integer(object, "activity_count") as i32,

@@ -1,5 +1,5 @@
 {
- "title": "A real Claude helper turn as the Host recorded it (2026-10-03): GET /live after the turn settled and the GET /log rows of that turn. Each tool landed in /log as its own row whose tools[].id is the item's tool.call_id; the answer row's id is the message item's row_id.",
+ "title": "A real Claude helper turn as the Host recorded it (2026-10-03): GET /live after the turn settled and the GET /log rows of that turn. Each tool landed in /log as its own row whose tools[].id is the item's tool.call_id; the answer row's id is the message item's row_id. The /log rows carry the fields the Host adds since contract 47 (log_turn_summary, docs/live-items.md §9): the turn's trace_id on every row, phase on assistant text rows, and on the turn's last row its summary as GET /live had it.",
  "live": {
   "conv": "c-probe",
   "session": "probe",
@@ -169,7 +169,8 @@
     "reply_to_session": "",
     "revision": 1305413,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    },
    {
     "id": "msg-9dc44519ed4e93bcff29",
@@ -193,7 +194,7 @@
     ],
     "display_cells": [],
     "origin": "agent",
-    "trace_id": "",
+    "trace_id": "537555728357bf76",
     "sender_agent_id": "",
     "sender_name": "",
     "sender_session": "",
@@ -202,7 +203,8 @@
     "reply_to_session": "tester",
     "revision": 1305433,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    },
    {
     "id": "msg-d28c2b3f8a1150792e60",
@@ -226,7 +228,7 @@
     ],
     "display_cells": [],
     "origin": "agent",
-    "trace_id": "",
+    "trace_id": "537555728357bf76",
     "sender_agent_id": "",
     "sender_name": "",
     "sender_session": "",
@@ -235,7 +237,8 @@
     "reply_to_session": "tester",
     "revision": 1305438,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    },
    {
     "id": "live-783d39d132789c798a9a",
@@ -256,12 +259,21 @@
     "reply_to_session": "tester",
     "revision": 1305441,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": "final",
+    "turn": {
+     "turn_id": "537555728357bf76",
+     "status": "completed",
+     "started_at_ms": 1791028137185,
+     "ended_at_ms": 1791028153522,
+     "worked_ms": 16337,
+     "tool_count": 2
+    }
    }
   ]
  },
  "next": {
-  "title": "Later on the same chat: the turn in between (history only), then a new prompt whose tool's /log row exists from the moment the tool starts (status running, the item's call_id), while the live item runs.",
+  "title": "Later on the same chat: the turn in between (history only), then a new prompt whose tool's /log row exists from the moment the tool starts (status running, the item's call_id), while the live item runs. The turn in between ended before the Host summed turns up: its rows carry trace_id and phase but no turn summary.",
   "rows": [
    {
     "id": "u-clarp-admin-477782a990382837",
@@ -282,7 +294,8 @@
     "reply_to_session": "",
     "revision": 1306077,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    },
    {
     "id": "msg-a0355546f14ad26dcc81",
@@ -306,7 +319,7 @@
     ],
     "display_cells": [],
     "origin": "agent",
-    "trace_id": "",
+    "trace_id": "8b701eb0b9fe4f19",
     "sender_agent_id": "",
     "sender_name": "",
     "sender_session": "",
@@ -315,7 +328,8 @@
     "reply_to_session": "tester",
     "revision": 1306080,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    },
    {
     "id": "msg-877ab9cccf7042a620db",
@@ -339,7 +353,7 @@
     ],
     "display_cells": [],
     "origin": "agent",
-    "trace_id": "",
+    "trace_id": "8b701eb0b9fe4f19",
     "sender_agent_id": "",
     "sender_name": "",
     "sender_session": "",
@@ -348,7 +362,8 @@
     "reply_to_session": "tester",
     "revision": 1306082,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    },
    {
     "id": "msg-89a8098175134011fbc3",
@@ -372,7 +387,7 @@
     ],
     "display_cells": [],
     "origin": "agent",
-    "trace_id": "",
+    "trace_id": "8b701eb0b9fe4f19",
     "sender_agent_id": "",
     "sender_name": "",
     "sender_session": "",
@@ -381,7 +396,8 @@
     "reply_to_session": "tester",
     "revision": 1306085,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    },
    {
     "id": "live-567165763b2310817088",
@@ -402,7 +418,8 @@
     "reply_to_session": "tester",
     "revision": 1306088,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": "final"
    },
    {
     "id": "u-clarp-admin-3c48398b85b08a09",
@@ -423,7 +440,8 @@
     "reply_to_session": "",
     "revision": 1306106,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    },
    {
     "id": "msg-e60c25b9161ac8b660ca",
@@ -446,7 +464,7 @@
     ],
     "display_cells": [],
     "origin": "agent",
-    "trace_id": "",
+    "trace_id": "2b2b466e35457fb0",
     "sender_agent_id": "",
     "sender_name": "",
     "sender_session": "",
@@ -455,7 +473,8 @@
     "reply_to_session": "tester",
     "revision": 1306110,
     "automated": false,
-    "automation_kind": ""
+    "automation_kind": "",
+    "phase": null
    }
   ],
   "event": {

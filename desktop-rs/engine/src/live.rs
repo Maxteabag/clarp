@@ -29,6 +29,8 @@ pub(crate) struct Live {
     pub joining: std::collections::HashSet<String>,
     /// The Host has the tool-explanation setting (`tool_explanation_setting`).
     pub explanation_setting: bool,
+    /// `/log` rows carry turn summaries (`log_turn_summary`).
+    pub turn_summaries: bool,
     /// The Host's tool-explanation setting (§6), once it said.
     pub explanations: Option<Object>,
     /// Chats a live event (or a snapshot with something in it) has reached:
@@ -42,6 +44,12 @@ impl Engine {
     /// The Host sends live items (`live_items` in `/server-info`).
     pub fn live_items(&self) -> bool {
         self.live.enabled
+    }
+
+    /// Whether `/log` rows carry the turn summaries finished turns fold by
+    /// (`log_turn_summary`, docs/live-items.md §9).
+    pub fn log_turn_summary(&self) -> bool {
+        self.live.turn_summaries
     }
 
     /// Whether live items show this chat: the feature is on and the Host
@@ -108,6 +116,7 @@ impl Engine {
         };
         let enabled = has("live_items");
         self.live.explanation_setting = has("tool_explanation_setting");
+        self.live.turn_summaries = has("log_turn_summary");
         if enabled != self.live.enabled {
             self.live.enabled = enabled;
             self.live.views.clear();
