@@ -239,3 +239,20 @@ fn a_reply_carrying_text_and_tools_shows_its_text_and_folds_its_tools() {
     assert_eq!(read(&open.folds[0]), ["Worked for 6s · 1 tool", "row a1", "Ran make build", "row a2"]);
     assert!(open.stripped_calls.contains("c1") && !open.hidden_rows.contains("a1"), "its text shows, its tool as the tool row");
 }
+
+/// The real Host lands a turn's tool rows once the turn is over, after a
+/// message sent meanwhile: they still belong to the turn they were written
+/// in (by time), not to the message's.
+#[test]
+fn tool_rows_landing_after_the_next_prompt_fold_with_their_turn() {
+    let body = recorded();
+    let log: Vec<&Value> = body["log"]["turns"].as_array().unwrap().iter().collect();
+    let next = json!({"id": "u-next", "role": "user", "text": "And now the next step.", "timestamp": "2026-10-03T11:49:30.000Z", "trace_id": "t-next"});
+    let rows: Vec<Message> = [log[0], log[3], &next, log[1], log[2]].into_iter().map(row).collect();
+    let folded = present(&rows, None, &Options { open_turn: "t-next".to_owned(), busy: true, ..options(&[]) });
+    assert_eq!(folded.folds.len(), 1, "{:?}", folded.folds);
+    let fold = &folded.folds[0];
+    assert_eq!(fold.next.as_deref(), Some("u-next"));
+    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 11s · 2 tools", &format!("row {T1_ANSWER}")]);
+    assert_eq!(sorted(&folded.hidden_rows), T1_TOOLS);
+}

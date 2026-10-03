@@ -53,6 +53,10 @@ pub struct Folded {
     pub hidden_rows: HashSet<String>,
     /// Tool and cell ids entries show: left out of the rows that stay.
     pub stripped_calls: HashSet<String>,
+    /// `/log` tool calls shown as rows without an explanation yet.
+    pub unexplained: Vec<Object>,
+    /// Rows the Host sent without their tool calls, in an open fold.
+    pub details_wanted: Vec<String>,
 }
 
 /// The settled turns of `rows` as folds. A turn is the agent's rows after
@@ -63,15 +67,30 @@ pub struct Folded {
 pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> Folded {
     let mut folded = Folded::default();
     let prompts: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].role == "user").collect();
-    let starts = std::iter::once(None).chain(prompts.iter().copied().map(Some));
-    for (n, prompt) in starts.enumerate() {
-        let next = prompts.get(n).copied();
-        let from = prompt.map_or(0, |p| p + 1);
-        let to = next.unwrap_or(rows.len());
-        if from >= to {
+    // Each agent row's turn: the prompt carrying its trace id, else the
+    // last prompt written before it (the Host lands a turn's tool rows once
+    // it is over, after a message sent meanwhile), else the one above it.
+    let mut members: Vec<Vec<usize>> = vec![Vec::new(); prompts.len() + 1];
+    for (index, row) in rows.iter().enumerate() {
+        if row.role == "user" || row.activity {
             continue;
         }
-        if let Some(fold) = turn(rows, prompt, from..to, next, live, options, &mut folded) {
+        let traced = (!row.trace_id.is_empty()).then(|| prompts.iter().position(|&p| rows[p].trace_id == row.trace_id)).flatten();
+        let timed = || {
+            let at = ms(row)?;
+            Some(prompts.iter().rposition(|&p| ms(&rows[p]).is_some_and(|t| t <= at)))
+        };
+        let above = || prompts.iter().rposition(|&p| p < index);
+        let turn = match traced {
+            Some(turn) => Some(turn),
+            None => timed().unwrap_or_else(above),
+        };
+        members[turn.map_or(0, |t| t + 1)].push(index);
+    }
+    for (slot, members) in members.into_iter().enumerate() {
+        let prompt = slot.checked_sub(1).map(|t| prompts[t]);
+        let next = prompts.get(slot).copied();
+        if let Some(fold) = turn(rows, prompt, &members, next, live, options, &mut folded) {
             folded.folds.push(fold);
         }
     }
@@ -160,14 +179,20 @@ fn ms(row: &Message) -> Option<i64> {
 fn turn(
     rows: &[Message],
     prompt: Option<usize>,
-    span: std::ops::Range<usize>,
+    members: &[usize],
     next: Option<usize>,
     live: Option<&LiveView>,
     options: &Options,
     folded: &mut Folded,
 ) -> Option<Fold> {
-    // Local placeholders (thinking, compacting) stay as they are.
-    let members: Vec<&Message> = rows[span].iter().filter(|m| !m.activity).collect();
+    // In the order they were written (a row without a time keeps its place
+    // after the one above it).
+    let mut members: Vec<&Message> = members.iter().map(|&i| &rows[i]).collect();
+    let mut last = i64::MIN;
+    let times: Vec<i64> = members.iter().map(|m| { last = ms(m).unwrap_or(last); last }).collect();
+    let mut order: Vec<usize> = (0..members.len()).collect();
+    order.sort_by_key(|&i| times[i]);
+    members = order.into_iter().map(|i| members[i]).collect();
     // A streaming row: the turn is not over.
     if members.is_empty() || members.iter().any(|m| m.kind == "live" || m.pending) {
         return None;
@@ -178,7 +203,10 @@ fn turn(
     }
     let over = next.is_some_and(|n| !rows[n].pending) || !options.busy;
     let mut seen = HashSet::new();
-    let tool_count = members.iter().flat_map(|m| calls(m)).filter(|(v, _)| seen.insert(text(v, "id").to_owned())).count();
+    let listed = members.iter().flat_map(|m| calls(m)).filter(|(v, _)| seen.insert(text(v, "id").to_owned())).count();
+    // A row sent without its tool calls lists one and counts them all.
+    let unlisted: usize = members.iter().map(|m| (m.activity_count.max(0) as usize).saturating_sub(calls(m).count())).sum();
+    let tool_count = listed + unlisted;
     if !over || tool_count == 0 {
         return None;
     }
@@ -196,6 +224,7 @@ fn turn(
     let mut items: Vec<Object> = Vec::new();
     let mut rows_of: HashMap<String, Entry> = HashMap::new();
     let mut emitted = HashSet::new();
+    let mut unexplained: Vec<(String, Object)> = Vec::new();
     let live_options = live_present::Options { explanations: options.explanations, expanded: options.expanded.clone(), host_now_ms: 0 };
     let mut message = |items: &mut Vec<Object>, row: &Message, phase: &str| {
         let item = json!({"id": format!("log:{}", row.id), "kind": "message", "status": "completed", "phase": phase, "text": row.display_text, "row_id": row.id});
@@ -231,7 +260,14 @@ fn turn(
                     flush(&mut items, &mut reasoning, Some(ordinal(item)));
                     items.push((*item).clone());
                 }
-                None => items.push(tool_item(value, cell, options)),
+                None => {
+                    let item = tool_item(value, cell, options);
+                    let explained = item.get("tool").and_then(|t| t.get("explain")).is_some();
+                    if options.explanations && !cell && !explained && let Some(tool) = value.as_object() {
+                        unexplained.push((format!("live:log:{call}"), tool.clone()));
+                    }
+                    items.push(item);
+                }
             }
         }
         if is_answer {
@@ -254,9 +290,15 @@ fn turn(
         }
     };
     let id = if turn_id.is_empty() { format!("row:{}", members[0].id) } else { turn_id.to_owned() };
+    if options.expanded.contains(&format!("live:fold:{id}")) {
+        folded.details_wanted.extend(members.iter().filter(|m| m.tool_details_available).map(|m| m.id.clone()));
+    }
     let shown: Vec<&Object> = items.iter().collect();
     let entries = live_present::arrange(&id, &summary, true, &shown, rows_of, &live_options);
     let pieces: Vec<Piece> = entries.into_iter().map(|e| if e.row.is_empty() { Piece::Entry(e) } else { Piece::Row(e.row) }).collect();
+    // Only rows in view ask for an explanation.
+    let visible: HashSet<&str> = pieces.iter().filter_map(|p| if let Piece::Entry(e) = p { Some(e.key.as_str()) } else { None }).collect();
+    folded.unexplained.extend(unexplained.into_iter().filter(|(key, _)| visible.contains(key.as_str())).map(|(_, tool)| tool));
     let placed: HashSet<&str> = pieces.iter().filter_map(|p| if let Piece::Row(id) = p { Some(id.as_str()) } else { None }).collect();
     for row in &members {
         let shown_here = !row.display_text.trim().is_empty() || calls(row).next().is_some();
