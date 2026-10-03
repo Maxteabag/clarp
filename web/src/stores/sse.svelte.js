@@ -122,8 +122,9 @@ export function connectSSE() {
     setConn('live', Timing.DEAD_OVERLAY_MS);
     const planned = resubscribing;
     resubscribing = false;
+    // The store fetches GET /live again for every chat this stream now
+    // carries, including one fetched while the stream was reconnecting.
     setConnectedLive(carries);
-    for (const session of carries) openLive(session);
     if (planned) return;
     refreshServerInfo();
     refreshAgentSnapshot().catch(() => {});
