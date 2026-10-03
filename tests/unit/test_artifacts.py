@@ -807,7 +807,7 @@ def test_text_input_request_takes_only_typed_text_and_expires_without_deletion(t
     assert expired["status"] == "expired" and expired["decision"]["status"] == "expired"
 
 
-def test_pins_survive_reopen_and_leave_archived_or_retired_rows_out(tmp_path, monkeypatch):
+def test_pins_survive_reopen_and_are_independent_of_inbox_archiving(tmp_path, monkeypatch):
     _agent(tmp_path)
     clock = [1_000]
     monkeypatch.setattr(db, "now_ms", lambda: clock[0])
@@ -820,14 +820,17 @@ def test_pins_survive_reopen_and_leave_archived_or_retired_rows_out(tmp_path, mo
     assert [row["artifact_id"] for row in artifacts.list_pinned()] == [
         newer["artifact_id"], older["artifact_id"]]
 
+    # Archiving only hides an item from Updates (opening its chat does it too);
+    # it must not take the item out of the Pinned menu.
     archived, _ = artifacts.archive(older["artifact_id"], archived=True,
                                     expected_updated_at=older["updated_at"])
-    assert archived["pinned_at"] is None
-    restored, _ = artifacts.archive(older["artifact_id"], archived=False,
-                                    expected_updated_at=archived["updated_at"])
-    assert restored["pinned"] is False
+    assert archived["pinned"] is True
+    assert older["artifact_id"] in [row["artifact_id"] for row in artifacts.list_pinned()]
+    artifacts.pin(older["artifact_id"], pinned=False)
+    repinned, changed = artifacts.pin(older["artifact_id"], pinned=True)
+    assert changed and repinned["pinned"] is True and repinned["archived_at"] is not None
     with pytest.raises(ValueError, match="pinned must be a boolean"):
         artifacts.pin(newer["artifact_id"], pinned=1)
     unpinned, changed = artifacts.pin(newer["artifact_id"], pinned=False)
     assert changed and unpinned["updated_at"] == newer["updated_at"]
-    assert artifacts.list_pinned() == []
+    assert [row["artifact_id"] for row in artifacts.list_pinned()] == [older["artifact_id"]]

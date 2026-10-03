@@ -100,18 +100,23 @@ def test_pin_rejects_bad_requests(host):
     assert _request(host, "/pinned-artifacts?representation=v9")[0] == 400
 
 
-def test_archiving_or_discarding_removes_the_pin(host):
+def test_archiving_keeps_the_pin_but_discarding_removes_it(host):
+    """Archive only hides an item from Updates (opening its chat archives what
+    it delivered), so a pin survives it; discard retires the record."""
     archived, discarded = _document("Archive me"), _document("Discard me")
     for row in (archived, discarded):
         _request(host, f"/artifacts/{row['artifact_id']}/pin", {"pinned": True})
 
     status, result = _request(host, f"/artifacts/{archived['artifact_id']}/archive",
                               {"archived": True, "expected_updated_at": archived["updated_at"]})
-    assert status == 200 and result["artifact"]["pinned"] is False
+    assert status == 200 and result["artifact"]["pinned"] is True
     status, _ = _request(host, f"/artifacts/{discarded['artifact_id']}/discard",
                          {"expected_updated_at": discarded["updated_at"]})
     assert status == 200
-    assert _pinned_ids(host) == []
+    assert _pinned_ids(host) == [archived["artifact_id"]]
 
+    _request(host, f"/artifacts/{archived['artifact_id']}/pin", {"pinned": False})
     status, result = _request(host, f"/artifacts/{archived['artifact_id']}/pin", {"pinned": True})
-    assert status == 409 and "archived" in result["error"]
+    assert status == 200 and result["artifact"]["pinned"] is True
+    status, _ = _request(host, f"/artifacts/{discarded['artifact_id']}/pin", {"pinned": True})
+    assert status in (404, 409) and _pinned_ids(host) == [archived["artifact_id"]]
