@@ -2173,6 +2173,50 @@ def agent_create_payload(args) -> dict:
     return payload
 
 
+def agent_fork_request(args) -> tuple[str, dict]:
+    """The forking session and the ``POST /agents/{session}/fork`` body for
+    ``clarp-admin agent fork``."""
+    parent = (args.from_session or os.environ.get("CLARP_SESSION")
+              or os.environ.get("CLAUDE_PWA_SESSION") or "")
+    if not parent:
+        raise SystemExit("agent fork needs --from SESSION or $CLARP_SESSION")
+    shared = {key: getattr(args, key) for key in ("backend", "model", "effort")
+              if getattr(args, key)}
+    if args.spec:
+        raw = sys.stdin.read() if args.spec == "-" else Path(args.spec).expanduser().read_text()
+        children = json.loads(raw)
+        if isinstance(children, dict):
+            children = children.get("children")
+        if not isinstance(children, list) or not children:
+            raise SystemExit("--spec must hold a JSON list of {name, task, ...} children")
+        return parent, {"children": children, **shared}
+    task = (Path(args.task_file).expanduser().read_text().strip() if args.task_file
+            else (args.task or "").strip())
+    if not task:
+        raise SystemExit("agent fork needs --task TEXT, --task-file FILE or --spec FILE")
+    if not args.name:
+        raise SystemExit("agent fork needs a NAME (or --spec FILE)")
+    worktree = None
+    if args.worktree:
+        repo, sep, branch = args.worktree.rpartition(":")
+        if not sep or not repo or not branch:
+            raise SystemExit("--worktree must be REPO:BRANCH")
+        worktree = {"repo": str(Path(repo).expanduser().resolve()), "branch": branch}
+    if args.count:
+        body = {"count": args.count, "name": args.name, "task": task}
+        if args.cwd:
+            body["cwd"] = str(Path(args.cwd).expanduser().resolve())
+        if worktree:
+            body["worktree"] = worktree
+        return parent, {**body, **shared}
+    child = {"name": args.name, "task": task}
+    if args.cwd:
+        child["cwd"] = str(Path(args.cwd).expanduser().resolve())
+    if worktree:
+        child["worktree"] = worktree
+    return parent, {"children": [child], **shared}
+
+
 def cmd_agent(args) -> int:
     try:
         return _cmd_agent(args)
@@ -2187,6 +2231,14 @@ def _cmd_agent(args) -> int:
         if args.role == "helper" and not args.parent:
             raise SystemExit("--role helper needs --parent SESSION")
         result = api_request("POST", "/agents", agent_create_payload(args))
+    elif args.agent_command == "fork":
+        parent, body = agent_fork_request(args)
+        # Worktrees and native forks take a moment per child; never retried,
+        # since a retry after a slow success would fork every child twice.
+        result = api_request("POST", f"/agents/{urllib.parse.quote(parent, safe='')}/fork",
+                             body, timeout=300)
+        print(json.dumps(result, indent=2))
+        return 1 if any("error" in child for child in result.get("children") or []) else 0
     elif args.state is None:
         query = urllib.parse.urlencode({"session": args.session})
         result = api_request("GET", f"/agent-helper-state?{query}")
@@ -2472,6 +2524,23 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     agent_create.add_argument("--session", help="explicit session id; minted when omitted")
     agent_create.add_argument("--voice-id", dest="voice_id")
     agent_create.set_defaults(func=cmd_agent)
+    agent_fork = agent.add_parser(
+        "fork", help="fork the calling agent into helper agents that start from its "
+                     "conversation and each get a task")
+    agent_fork.add_argument("name", nargs="?", help="child name (with --count, the prefix)")
+    agent_fork.add_argument("--task", help="what the child does")
+    agent_fork.add_argument("--task-file", help="read the task from a file")
+    agent_fork.add_argument("--count", type=int, help="fork N children NAME-1..NAME-N, same task")
+    agent_fork.add_argument("--spec", help="JSON list of {name, task, cwd?, worktree?: "
+                                           "{repo, branch}} children ('-' for stdin)")
+    agent_fork.add_argument("--worktree", help="REPO:BRANCH, a new git worktree per child")
+    agent_fork.add_argument("--cwd")
+    agent_fork.add_argument("--from", dest="from_session",
+                            help="the session to fork (default $CLARP_SESSION)")
+    agent_fork.add_argument("--backend")
+    agent_fork.add_argument("--model")
+    agent_fork.add_argument("--effort")
+    agent_fork.set_defaults(func=cmd_agent)
     helper_state = agent.add_parser(
         "helper-state",
         help="show an agent's helper state, or mark a helper done, failed or running again")
