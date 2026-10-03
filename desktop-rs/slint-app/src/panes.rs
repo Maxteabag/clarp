@@ -434,7 +434,7 @@ impl App {
             .entries
             .iter()
             .map(|entry| {
-                let row = crate::live_view::row(entry, crate::live_view::cached_blocks(entry));
+                let row = pane.rows.live_row(entry);
                 let source = clarp_core::presentation::PresentedRow {
                     source_row: usize::MAX,
                     message: clarp_core::protocol::Message { id: entry.key.clone(), ..Default::default() },
@@ -479,6 +479,7 @@ impl App {
             }
         }
         pane.live_items = live.entries.iter().map(|e| (e.key.clone(), e.items.clone())).collect();
+        pane.rows.keep_live(&still);
         let at = at.min(fresh.len());
         let (sources, live_rows): (Vec<Shown>, Vec<MessageRow>) = built.into_iter().unzip();
         fresh.splice(at..at, sources);
@@ -505,7 +506,8 @@ impl App {
                         continue;
                     }
                     pane.shown[at].2 = signature;
-                    pane.messages.set_row_data(at, crate::live_view::row(entry, crate::live_view::cached_blocks(entry)));
+                    let row = pane.rows.live_row(entry);
+                    pane.messages.set_row_data(at, row);
                 }
             }
             drop(engine);

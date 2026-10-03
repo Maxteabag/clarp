@@ -419,6 +419,9 @@ struct RowSource {
 #[derive(Default)]
 pub(crate) struct RowCache {
     rows: std::collections::HashMap<String, (RowSource, MessageRow)>,
+    /// Live item rows (docs/live-items.md): key → the entry's signature
+    /// (revision, status, revealed text, …) and the row built from it.
+    live: std::collections::HashMap<String, (String, MessageRow)>,
     /// Rows built (not reused) so far.
     pub(crate) built: u64,
 }
@@ -426,6 +429,28 @@ pub(crate) struct RowCache {
 impl RowCache {
     pub(crate) fn clear(&mut self) {
         self.rows.clear();
+        self.live.clear();
+    }
+
+    /// A live item's row, built again only when its signature changed (a
+    /// streaming message's blocks then come from the committed-block cache,
+    /// so only its tail is parsed).
+    pub(crate) fn live_row(&mut self, entry: &clarp_core::live_present::Entry) -> MessageRow {
+        let signature = crate::live_view::signature(entry);
+        if let Some((seen, row)) = self.live.get(&entry.key)
+            && *seen == signature
+        {
+            return row.clone();
+        }
+        self.built += 1;
+        let row = crate::live_view::row(entry, crate::live_view::cached_blocks(entry));
+        self.live.insert(entry.key.clone(), (signature, row.clone()));
+        row
+    }
+
+    /// Drops live rows no longer shown.
+    pub(crate) fn keep_live(&mut self, keys: &std::collections::HashSet<&str>) {
+        self.live.retain(|key, _| keys.contains(key.as_str()));
     }
 
     pub(crate) fn rows(&mut self, presented: &[PresentedRow], always: bool, expanded: &std::collections::HashSet<String>) -> Vec<MessageRow> {
@@ -518,5 +543,26 @@ mod tests {
         assert_eq!(text(&second[30]), super::styled("Partial answer, growing", false), "the changed row shows its new text");
         cache.rows(&present(&messages), true, &expanded);
         assert_eq!(cache.built, 63, "a presentation setting builds every row again");
+    }
+
+    /// A live item's row is reused until its entry changes; a streaming
+    /// message is built again per revealed step, each from the block cache.
+    #[test]
+    fn live_rows_are_built_again_only_when_their_entry_changes() {
+        use clarp_core::live_present::{Entry, Kind};
+        let mut cache = super::RowCache::default();
+        let tool = Entry { key: "live:cl:t1".into(), kind: Kind::Tool, status: "running".into(), title: "Running npm test".into(), meta: "0:01".into(), rev: 1, ..Entry::default() };
+        cache.live_row(&tool);
+        cache.live_row(&tool);
+        assert_eq!(cache.built, 1, "an unchanged entry reuses its row");
+        let ticked = Entry { meta: "0:02".into(), ..tool.clone() };
+        assert_eq!(cache.live_row(&ticked).live.meta, "0:02");
+        assert_eq!(cache.built, 2, "a ticking elapsed time builds it again");
+        let message = Entry { key: "live:cl:m".into(), kind: Kind::Message, text: "First.\n\nSecond".into(), rev: 3, ..Entry::default() };
+        let row = cache.live_row(&message);
+        assert_eq!(slint::Model::row_count(&row.blocks), 2);
+        cache.keep_live(&["live:cl:m"].into_iter().collect());
+        cache.live_row(&ticked);
+        assert_eq!(cache.built, 4, "a dropped row is built afresh");
     }
 }
