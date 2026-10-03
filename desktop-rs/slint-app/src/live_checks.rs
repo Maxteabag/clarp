@@ -50,6 +50,18 @@ fn live_row(key: &str) -> Option<crate::MessageRow> {
     live_rows().into_iter().find(|r| r.live.key == key)
 }
 
+const REAL_FAILED: &str = "cl:toolu_01RL4aA1EqQJ43Y7Ay7wuYXt";
+const REAL_ANSWER_ROW: &str = "live-783d39d132789c798a9a";
+const REAL_FOLD: &str = "live:fold:537555728357bf76";
+
+/// The live rows of the real turn (the probe chat's, once it shows).
+fn probe_titles() -> Vec<String> {
+    if crate::app().is_none_or(|app| app.engine.borrow().selected_session() != "probe") {
+        return Vec::new();
+    }
+    titles()
+}
+
 fn titles() -> Vec<String> {
     live_rows().iter().map(|r| r.live.title.to_string()).collect()
 }
@@ -76,6 +88,7 @@ pub fn live_check(out: String) {
     let height: Rc<RefCell<f32>> = Rc::default();
     let rows_before: Rc<RefCell<(usize, usize)>> = Rc::default();
     let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
+    let (out7, out8, out9) = (out.clone(), out.clone(), out.clone());
     let (anchor1, anchor2) = (anchor.clone(), anchor.clone());
     let (height1, height2) = (height.clone(), height.clone());
     let (before1, before2) = (rows_before.clone(), rows_before.clone());
@@ -154,6 +167,9 @@ pub fn live_check(out: String) {
             check(*height1.borrow() > 0.0, "the command's row is drawn at the end");
             check(titles().last().map(String::as_str) == Some("Running npm test"), &format!("the command's row: {:?}", titles()));
             check(titles().contains(&"Explored 1 file, 1 search".to_owned()), &format!("the group settled: {:?}", titles()));
+            let command = live_row("live:cl:toolu_03").unwrap_or_default();
+            check(command.live.explaining && command.live.secondary.is_empty(), "the explanation line says Explaining… until it lands");
+            shot(&out7, "live-00-explaining");
             replay(AFTER_EXPLAIN)
         })),
         ("explained", Box::new(move |_, _window, elapsed| {
@@ -175,6 +191,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             check(true, "off: the Host is told, and the row's second line is the raw command under its label");
+            check(live_rows().iter().all(|r| !r.live.explaining), "off: nothing says Explaining…");
             check(live_row("live:cl:toolu_03").is_some_and(|r| r.live.title == "Running npm test"), "the first line stays the label");
             check(crate::settings_view::rows(app_now().as_ref()).iter().any(|r| r.id == "tool-explanations" && !r.on), "Settings show it off");
             let window = crate::window().expect("window");
@@ -299,21 +316,24 @@ pub fn live_check(out: String) {
             shot(&out5, "live-05-fold-open");
             headless::press("o");
             *before1.borrow_mut() = crate::view::sync_stats();
-            // The Host imports the turn: one durable row with the text and the tools.
-            let tools: Vec<_> = ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"].iter().map(|id| json!({"id": id, "name": "Bash", "status": "ok"})).collect();
-            control("/__control/upsert", &json!({"session": "rachel", "turns": [
-                {"id": "live-abc", "role": "assistant", "text": "Let me look at the parser and its tests.\n\nThe failure came from an off-by-one", "tools": tools}
-            ]}))
-            .is_ok()
+            // The Host imports the turn as it does: the answer's row (the
+            // items' row_id) and one row per tool, its tools[].id the call id.
+            let mut turns = vec![json!({"id": "live-abc", "role": "assistant", "text": "Let me look at the parser and its tests.\n\nThe failure came from an off-by-one"})];
+            for id in ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"] {
+                turns.push(json!({"id": format!("row-{id}"), "role": "assistant", "text": "", "tools": [{"id": id, "name": "Bash", "status": "ok"}]}));
+            }
+            control("/__control/upsert", &json!({"session": "rachel", "turns": turns})).is_ok()
         })),
         ("taken over", Box::new(move |app, _window, elapsed| {
-            let landed = app.engine.borrow().conversation("rachel").is_some_and(|c| c.index_of("live-abc").is_some());
+            let landed = app.engine.borrow().conversation("rachel").is_some_and(|c| c.index_of("live-abc").is_some() && c.index_of("row-toolu_05").is_some());
             if !landed || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            check(live_rows().is_empty(), &format!("every item gave its place to the durable row: {:?}", titles()));
+            check(titles() == ["Worked for 12s · 5 tools", "Ran npm test", "Stopped npm test"], &format!("the turn keeps its fold and what failed or stopped: {:?}", titles()));
             let shown = rows(&crate::window().expect("window"));
-            check(shown.last().is_some_and(|r| r.id == "live-abc"), "the durable row is where the turn was");
+            let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);
+            check(at("live-abc").is_some_and(|i| at("live:cl:toolu_03") == Some(i - 1) && at("live:cl:toolu_05") == Some(i + 1)), "the durable answer is where the answer was");
+            check(shown.iter().all(|r| !r.id.starts_with("row-toolu")), "the tool rows show as the item rows, not again as activity");
             let (_, inserted_before) = *before2.borrow();
             let (_, inserted) = crate::view::sync_stats();
             check(inserted == inserted_before, &format!("taken over in place: no row inserted ({inserted_before} → {inserted})"));
@@ -360,6 +380,76 @@ pub fn live_check(out: String) {
                 return false;
             }
             check(line.starts_with("● Running sleep 99 · 1:1"), &format!("elapsed from tool.started_at_ms: {line:?}"));
+            // A turn the real Host settled before the chat opened: its
+            // snapshot, then its /log rows with the tool ids.
+            control("/__control/live-load", &json!({"session": "probe", "fixture": "live-real-settled-turn.json"})).is_ok()
+        })),
+        ("probe listed", Box::new(move |app, _window, _| {
+            if app.engine.borrow().roster().find("probe").is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select("probe");
+            true
+        })),
+        ("real turn", Box::new(move |app, _window, elapsed| {
+            let landed = app.engine.borrow().conversation("probe").is_some_and(|c| c.index_of(REAL_ANSWER_ROW).is_some());
+            if !landed || probe_titles().is_empty() || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(probe_titles() == ["Worked for 16s · 2 tools", "Ran sleep 60"], &format!("the real settled turn folds after its rows took the tools over: {:?}", probe_titles()));
+            let failed = live_row(&format!("live:{REAL_FAILED}")).unwrap_or_default();
+            check(failed.live.status == "failed" && failed.live.meta == "exit 1 · 0.0s", &format!("the failed tool stays in view: {:?} {:?}", failed.live.status, failed.live.meta));
+            check(failed.live.secondary == "Pause execution for 60 seconds.", &format!("with its explanation: {:?}", failed.live.secondary));
+            let shown = rows(&crate::window().expect("window"));
+            check(shown.last().is_some_and(|r| r.id == REAL_ANSWER_ROW), "the answer, its durable row, closes the turn");
+            check(shown.iter().all(|r| r.id != "msg-9dc44519ed4e93bcff29" && r.id != "msg-d28c2b3f8a1150792e60"), "the tool rows are not shown again as activity");
+            let fold = live_row(REAL_FOLD).unwrap_or_default();
+            check(fold.live.expandable && !fold.live.expanded, "the fold is closed");
+            shot(&out8, "live-07-real-folded");
+            app_now().focus_transcript();
+            *app.artifact_cursor.borrow_mut() = format!("live:{REAL_FAILED}");
+            true
+        })),
+        ("real on the failed tool", Box::new(move |app, _window, elapsed| {
+            if crate::artifacts_view::selected(app).as_deref() != Some(&format!("live:{REAL_FAILED}")) || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            headless::press("k");
+            true
+        })),
+        ("real to the fold", Box::new(move |app, _window, _| {
+            if app.artifact_cursor.borrow().as_str() != REAL_FOLD {
+                return false;
+            }
+            check(true, "K from the failed tool reaches the fold");
+            headless::press("o");
+            true
+        })),
+        ("real fold open", Box::new(move |_, _window, _| {
+            if !live_row(REAL_FOLD).is_some_and(|r| r.live.expanded) {
+                return false;
+            }
+            let titles = probe_titles();
+            check(
+                titles
+                    == [
+                        "Worked for 16s · 2 tools",
+                        "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th",
+                        "Ran sleep 60",
+                        "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa",
+                        "Ran sleep 60",
+                    ],
+                &format!("open: the reasoning and one row per tool: {titles:?}"),
+            );
+            shot(&out9, "live-08-real-fold-open");
+            headless::press("o");
+            true
+        })),
+        ("real fold closed", Box::new(move |_, _window, _| {
+            if live_row(REAL_FOLD).is_none_or(|r| r.live.expanded) {
+                return false;
+            }
+            check(probe_titles().len() == 2, &format!("O folds it again: {:?}", probe_titles()));
             true
         })),
     ];

@@ -58,6 +58,8 @@ export struct LiveRow {
     secondary: string,
     // Keep the second line even while it is empty (an explanation coming).
     reserve: bool,
+    // The explanation is on its way: the reserved line says Explaining….
+    explaining: bool,
     lines: [string],
     more: string,
     // A message's text as revealed so far.
@@ -138,8 +140,8 @@ component ToolCard inherits Rectangle {
 // One live item row (docs/live-items.md §7.3): a status mark, the label
 // (verb + label, "Thought for 4s: …", "Explored 2 files", "Worked for 12s"),
 // its time or diff stats on the right, an explanation or command under it
-// (a reserved line while an explanation comes, so landing never moves the
-// chat), and an output tail, diff, plan or members in monospace. J/K reach
+// (a reserved line while an explanation comes, saying Explaining…, so
+// landing never moves the chat), and an output tail, diff, plan or members in monospace. J/K reach
 // it like a card; O (or a click) opens and folds it.
 component LiveItem inherits Rectangle {
     in property <LiveRow> live;
@@ -221,9 +223,10 @@ component LiveItem inherits Rectangle {
             spacing: 2px;
             if root.live.secondary != "" || root.live.reserve: Text {
                 height: 17px;
-                text: root.live.secondary;
-                color: Palette.muted;
+                text: root.live.secondary != "" ? root.live.secondary : root.live.explaining ? "Explaining…" : "";
+                color: root.live.secondary != "" ? Palette.muted : Palette.faint;
                 font-size: 12px;
+                font-italic: root.live.secondary == "";
                 overflow: elide;
             }
             if root.live.lines.length > 0: Rectangle {

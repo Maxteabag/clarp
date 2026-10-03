@@ -963,6 +963,29 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(body["delay_ms"] / 1000)
             live_cursor[session] = (name, max(start, through))
             return self.reply(200, {"ok": True, "next": max(start, through), "steps": len(steps)})
+        if url.path == "/__control/live-load":
+            # Test control: a turn the real Host recorded (tests/fixtures/NAME,
+            # settled before the chat opens): GET /live answers its snapshot
+            # and /log holds its rows as the Host sends them, each tool row
+            # with tools[].id equal to the item's tool.call_id.
+            session = body["session"]
+            recorded = json.loads((pathlib.Path(__file__).parent / "fixtures" / body["fixture"]).read_text())
+            with state_lock:
+                view = live_truth[session] = LiveView()
+                view.apply_snapshot(recorded["live"])
+                rows = turns.setdefault(session, [])
+                for turn in recorded["log"]["turns"]:
+                    revision += 1
+                    rows.append({**turn, "revision": revision})
+                agent = next((a for a in agents if a["session"] == session), None)
+                if agent is None:
+                    agent = {"agent_id": recorded["live"]["agent_id"], "session": session, "persona": session.title(), "backend": "claude",
+                             "latest_state": "idle", "alive": True, "last_activity": 4000,
+                             "conversation_id": recorded["log"]["conversation_id"]}
+                    agents.append(agent)
+                agent["head_revision"] = revision
+            broadcast({"type": "agent-roster", "session": session, "kind": "created"})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/live-event":
             # Test control: one `live` event as given (its lseq follows the
             # session's truth unless set), sent and applied.
