@@ -34,6 +34,7 @@ pub mod roster;
 pub mod settings;
 pub mod sidebar;
 pub mod sse;
+pub mod stream_text;
 pub mod sync;
 pub mod text;
 pub mod transcript_cache;
