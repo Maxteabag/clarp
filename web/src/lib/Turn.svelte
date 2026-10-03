@@ -1,8 +1,17 @@
 <script>
   import { renderTurnBodyCached } from './render.js';
   import { lazyHighlight } from './highlight.js';
+  import { cellRow } from '@core/live-present.js';
+  import CellRow from './live/CellRow.svelte';
 
   let { turn } = $props();
+
+  // Backend-neutral activity rows the Host already rendered (Codex commands,
+  // explorations, patches). Keyed on the revision like the body.
+  let cells = $derived.by(() => {
+    turn.revision;
+    return (turn.display_cells || []).map(cellRow).filter(Boolean);
+  });
 
   // Markdown parsing is the expensive part of a turn. Keying it on the
   // revision means a turn that did not change is not re-parsed when its
@@ -22,6 +31,8 @@
   class:failed={!!turn.failed}
   use:lazyHighlight={html}
 >
+  <!-- The work comes before the words it led to, as in the live turn. -->
+  {#each cells as cell (cell.id)}<CellRow row={cell} />{/each}
   {@html html}
   {#if turn.failed}
     <!-- The whole point of the delivery log: a message that did not arrive

@@ -3366,3 +3366,8 @@ html:not(.desktop) .history:has(.status-line) .history-body {
 html:not(.desktop) .history:has(.status-line) .history-jump {
   bottom: calc(env(safe-area-inset-bottom) + 118px);
 }
+.history-body.hide-tools .tool-cell { display: none; }
+.turn .tool-cell { padding-left: 0; }
+/* The transcript anchors its own prepends (Transcript.svelte); the browser's
+   scroll anchoring would compensate a second time where it exists. */
+.history-body { overflow-anchor: none; }

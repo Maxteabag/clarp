@@ -146,7 +146,8 @@ export function applyLog(state, response, mode) {
       next.turns[t.id] = t;
     }
   }
-  next.hasMore = !!d.has_more;
+  // A delta's has_more means more changes after this page (the effect
+  // below); whether older history exists is the tail's and older pages' to say.
   next.cursor = Math.max(next.cursor, Number(d.latest_revision) || 0);
   if (incomingId) next.conversationId = incomingId;
   if (d.latest_ts) next.latestTs = d.latest_ts;
