@@ -141,6 +141,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
             if "push_grant" not in columns:
                 con.execute("ALTER TABLE device_tokens ADD COLUMN push_grant TEXT NOT NULL DEFAULT ''")
+        if version < 105:
+            _migrate_to_v105(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -698,6 +700,16 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+
+def _migrate_to_v105(con: sqlite3.Connection) -> None:
+    """/log tail and older-history pages read the newest rows from an index.
+
+    They order by ``COALESCE(timestamp, ''), seq`` within one conversation;
+    without a matching index every page sorted the whole conversation.
+    """
+    con.execute("""CREATE INDEX IF NOT EXISTS idx_messages_log_order
+        ON messages(agent_id, backend_session_id, COALESCE(timestamp, ''), seq)""")
 
 
 def _migrate_to_v103(con: sqlite3.Connection) -> None:
