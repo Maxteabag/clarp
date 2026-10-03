@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 
 from .clock import now_ms as _now_ms
 from .eleven_http import synthesize_to_file
+from .voice_markup import strip_emotion_tags
 
 
 def make_clip_filename(session: str | None = None, *, now_ms: int | None = None) -> str:
@@ -139,12 +140,13 @@ class ElevenLabsEngine(TTSEngine):
                     agent=agent or {}, out_path=tmp_path,
                     on_chunk=None, trace_id="",
                     delivery_fields={"delivery": "chunked-file"})
-            elif not self._synthesize_cartesia(text, voice_id, tmp_path, session):
+            elif not self._synthesize_cartesia(
+                    strip_emotion_tags(text), voice_id, tmp_path, session):
                 # A stored voice may be a {provider: id} map; ElevenLabs
                 # needs its own id, not the whole map.
                 from .voice import ELEVENLABS, resolve_voice
                 synthesize_to_file(
-                    text, resolve_voice(voice_id, ELEVENLABS) or voice_id, tmp_path,
+                    strip_emotion_tags(text), resolve_voice(voice_id, ELEVENLABS) or voice_id, tmp_path,
                     api_key=self.api_key,
                     model=self.model,
                     speed=self.speed,

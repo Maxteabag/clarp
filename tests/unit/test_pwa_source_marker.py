@@ -90,6 +90,43 @@ def test_spoken_hook_context_requests_conversational_delivery_for_all_speech():
     assert "few or no fillers" not in spoken
 
 
+def test_spoken_hook_context_follows_the_agents_humanness_and_voice(monkeypatch):
+    from lib import config, voice_humanness
+    monkeypatch.setattr(config, "_CACHED", config.Config(
+        tts_provider="gemini", tts_fallback="cartesia",
+        tts_agent_overrides={"theo": {"provider": "cartesia"}}))
+    voice_humanness.update({"default": 10, "agents": {"quiet": 0, "mid": 5}})
+
+    def spoken(name):
+        return pwa_source_flag._build_additional_context(
+            app_dispatched=True, voiced=True, agent={"name": name, "session": name})
+
+    ten = spoken("rachel")
+    assert "Humanness: 10/10." in ten and "frequent natural fillers" in ten
+    assert "<vox>[laughing]</vox>" in ten and "Never write pause tags" in ten
+    assert "first output" in ten.lower() or "VERY FIRST output" in ten
+    assert "[laughing]" not in spoken("theo")             # Cartesia voice
+    assert "occasional fillers" in spoken("mid")
+    zero = spoken("quiet")
+    assert "Humanness: 0/10." in zero and "<vox>" not in zero and "[laughing]" not in zero
+
+
+def test_voiced_hook_run_emits_the_level_ten_guidance(tmp_path, monkeypatch):
+    import json
+    from lib import agents as agents_db, voice_humanness
+    agents_db.create_agent(persona="Rachel", voice_id="V", cwd=str(tmp_path),
+                           session="rachel")
+    voice_humanness.update({"agents": {"rachel": 10}})
+    marker = pwa_source_flag.PATHS.source_marker("rachel")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(f"{TurnSource.PWA_VOICE_MARKER} rachel {time.time():.3f}\n")
+
+    _run_hook(monkeypatch, "rachel", "claude-uuid")
+
+    context = json.loads(sys.stdout.getvalue())["hookSpecificOutput"]["additionalContext"]
+    assert "<speak>" in context and "Humanness: 10/10." in context
+
+
 def test_non_app_turn_emits_no_context():
     """A turn the app didn't dispatch (e.g. third-party local terminal) and
     isn't voiced gets no injected context at all."""

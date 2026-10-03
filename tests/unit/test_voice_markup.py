@@ -145,3 +145,21 @@ def test_long_spoken_reply_never_splits_inside_break_markup():
     assert all("<break" not in chunk or '<break time="350ms"/>' in chunk
                for chunk in chunks)
     assert " ".join(chunks) == spoken_for_tts(text)
+
+
+def test_emotion_tags_inside_speak_never_reach_the_screen():
+    raw = ("<speak>Oh <vox>[laughing]</vox> that worked. [sigh] Finally.</speak>\n"
+           "See [the docs](https://x.y) and [x] done [1].")
+    assert clean_for_display(raw) == (
+        "Oh that worked. Finally.\nSee [the docs](https://x.y) and [x] done [1].")
+    assert clean_for_display("<speak>Still [curious] going") == "Still going"
+
+
+def test_emotion_tags_are_spoken_for_gemini_and_stripped_for_other_engines():
+    from lib.voice_markup import strip_emotion_tags
+    spoken = spoken_for_tts("Oh, <vox>[laughing]</vox> that worked.")
+    assert spoken == "Oh, [laughing] that worked."
+    assert strip_emotion_tags(spoken) == "Oh, that worked."
+    assert strip_emotion_tags('Done [sigh]. <break time="300ms"/> Next') == (
+        'Done. <break time="300ms"/> Next')
+    assert strip_emotion_tags("keep [x] and [1]") == "keep [x] and [1]"

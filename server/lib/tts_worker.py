@@ -30,6 +30,7 @@ from .config import load as load_config
 from .eleven_ws import ElevenWSError, synthesize_streaming
 from .log import log_exception
 from .paths import RuntimePaths
+from .voice_markup import strip_emotion_tags
 from . import tts_mode
 from .voice import (
     CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, resolve_voice,
@@ -244,7 +245,10 @@ def _synthesize(*, cfg, row: dict, agent: dict,
     """
     raw_voice = row["voice_id"]
     persona = (agent or {}).get("persona", "")
-    text = row["text"]
+    spoken = row["text"]
+    # [laughing]-style tags are acted out by Gemini and read aloud by every
+    # other engine, so only Gemini receives them (a fallback included).
+    plain = strip_emotion_tags(spoken)
 
     if clip_route is None:
         clip_route = tts_mode.Route(
@@ -268,7 +272,7 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 "raw-pcm delivery requires Cartesia provider, key, and voice"
             )
         return cartesia_synthesize_raw_pcm(
-            text=text,
+            text=plain,
             voice_id=cartesia_voice,
             out_path=out_path,
             api_key=cfg.cartesia_key(),
@@ -280,6 +284,7 @@ def _synthesize(*, cfg, row: dict, agent: dict,
         )
 
     def run(selected: str) -> int:
+        text = spoken if selected == GEMINI else plain
         if selected == CARTESIA:
             if not (cartesia_voice and cfg.cartesia_key()):
                 raise CartesiaError("Cartesia key or voice is not configured")
