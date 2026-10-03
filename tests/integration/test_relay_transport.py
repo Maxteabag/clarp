@@ -237,3 +237,88 @@ def test_lost_relay_session_is_logged_with_its_close_code_and_redialed_fast():
     opened = [detail for event, detail in rows if event == 'relayConnectionOpened']
     assert [d['session'] for d in opened] == [1, 2]
     assert states[:4] == ['connecting', 'connected', 'reconnecting', 'connecting']
+
+
+def test_gzip_passes_through_a_relay_that_asks_for_it_and_sse_still_streams():
+    """Phone-over-relay JSON is compressed when the relay passes encoded bodies
+    through; the event stream is still delivered event by event."""
+    import gzip
+    release_second = threading.Event()
+    captured = []
+    payload = json.dumps({'turns': [{'id': f'm{i}', 'text': 'same words ' * 20} for i in range(50)]}).encode()
+    class HTTP(BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+        def do_GET(self):
+            captured.append(dict(self.headers))
+            if self.path == '/events':
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/event-stream')
+                self.end_headers()
+                self.wfile.write(b'data: {"n":1}\n\n'); self.wfile.flush()
+                release_second.wait(3)
+                self.wfile.write(b'data: {"n":2}\n\n'); self.wfile.flush()
+                return
+            body, encoding = payload, None
+            if 'gzip' in self.headers.get('Accept-Encoding', ''):
+                body, encoding = gzip.compress(payload), 'gzip'
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            if encoding:
+                self.send_header('Content-Encoding', encoding)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers(); self.wfile.write(body)
+    http = ThreadingHTTPServer(('127.0.0.1', 0), HTTP)
+    thread = threading.Thread(target=http.serve_forever, daemon=True); thread.start()
+
+    async def scenario():
+        complete = asyncio.get_running_loop().create_future()
+        async def fetch(ws, sid, meta):
+            await ws.send(jframe(1, sid, meta))
+            await ws.send(frame(3, sid))
+            head, body = None, b''
+            while True:
+                kind, got, data = unpack(await asyncio.wait_for(ws.recv(), 3))
+                assert got == sid
+                if kind == 0x11: head = json.loads(data)
+                if kind == 0x12: body += data
+                if kind == 0x13: return head, body
+        async def relay(ws):
+            try:
+                phone = {'Accept-Encoding': 'gzip, br'}
+                head, body = await fetch(ws, 1, {'method': 'GET', 'path': '/log', 'headers': phone,
+                                                 'passthrough_encoding': True})
+                assert head['headers'].get('Content-Encoding') == 'gzip'
+                assert gzip.decompress(body) == payload and len(body) < len(payload) / 4
+                head, body = await fetch(ws, 2, {'method': 'GET', 'path': '/log', 'headers': phone})
+                assert 'Content-Encoding' not in head['headers'] and body == payload
+                assert [c['Accept-Encoding'] for c in captured] == ['gzip', 'identity']
+
+                await ws.send(jframe(1, 3, {'method': 'GET', 'path': '/events', 'headers': phone,
+                                            'passthrough_encoding': True}))
+                await ws.send(frame(3, 3))
+                streamed = b''
+                while b'"n":1' not in streamed:
+                    kind, _, data = unpack(await asyncio.wait_for(ws.recv(), 3))
+                    if kind == 0x12: streamed += data
+                # The first event arrived while the Host still holds the second.
+                assert not release_second.is_set()
+                release_second.set()
+                while b'"n":2' not in streamed:
+                    kind, _, data = unpack(await asyncio.wait_for(ws.recv(), 3))
+                    if kind == 0x12: streamed += data
+                complete.set_result(True)
+            except BaseException as error:
+                if not complete.done(): complete.set_exception(error)
+        async with serve(relay, '127.0.0.1', 0) as public:
+            c = Connector(f'ws://127.0.0.1:{public.sockets[0].getsockname()[1]}', 'host-test', 'test-secret',
+                          f'http://127.0.0.1:{http.server_port}')
+            task = asyncio.create_task(c.start())
+            try:
+                await asyncio.wait_for(complete, 8)
+            finally:
+                task.cancel(); await asyncio.gather(task, return_exceptions=True)
+    try:
+        asyncio.run(scenario())
+    finally:
+        release_second.set()
+        http.shutdown(); http.server_close(); thread.join(timeout=2)

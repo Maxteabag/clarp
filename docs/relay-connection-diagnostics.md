@@ -116,6 +116,15 @@ Two small changes would make the phone side cleaner, independent of the cause:
 2. Wrap `p.clientWs?.send(...)` in `WS_MSG` in `try { } catch { this.pending.delete(id); ws.send(frame(K.ABORT, id)); }`
    so a phone socket that is already closing fails only its own stream.
 
+3. Compress phone traffic. The connector relays response bodies byte for
+   byte with their `Content-Encoding`, and asks the Host for gzip only when
+   the `REQ` frame's JSON carries `"passthrough_encoding": true`
+   (`relay_connector.response_encoding`); otherwise it keeps asking for
+   `identity`. A Worker that sets that flag must build the phone's Response
+   with `encodeBody: "manual"`, or the runtime gzips the already-gzipped body
+   a second time. The Host never gzips `text/event-stream`, so SSE keeps
+   streaming event by event.
+
 Deploy from the owner's machine only, after confirming the telemetry above
 shows Worker-originated closes: `npx wrangler deploy` in a directory holding
 `index.js` and a `wrangler.toml` with `name = "clarp-relay"`, the
