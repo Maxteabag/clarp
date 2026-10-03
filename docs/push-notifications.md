@@ -1,5 +1,9 @@
 # Push notifications (tracked — not yet built)
 
+> APNs push for the native app is built (`server/lib/apns.py`); delivery goes
+> through the Audio Central relay described in [push-relay.md](push-relay.md).
+> The notes below predate it; Web Push for the PWA is still unbuilt.
+
 Follow-up to the auto-reconnect / `interrupted` work. Today, when a turn is
 cut short and not recovered, the agent flips to `AgentState.INTERRUPTED` and
 the PWA + native app show a badge. That only notifies you **if the app is
