@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 46
+HOST_CONTRACT = 47
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -109,6 +109,7 @@ FEATURES: tuple[str, ...] = (
     "sse_heartbeat",
     "live_activity_push",
     "voice_humanness",
+    "log_turn_summary",
 )
 
 
@@ -152,6 +153,7 @@ FEATURE_CONTRACTS["live_items"] = 42
 FEATURE_CONTRACTS["tool_explanation_setting"] = 43
 FEATURE_CONTRACTS["sse_heartbeat"] = 44
 FEATURE_CONTRACTS["live_activity_push"] = 45
+FEATURE_CONTRACTS["log_turn_summary"] = 47
 FEATURE_CONTRACTS["voice_humanness"] = 46
 FEATURE_CONTRACTS["oracle_gemini_voice"] = 36
 FEATURE_CONTRACTS["push_grants"] = 39

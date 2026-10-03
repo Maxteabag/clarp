@@ -146,6 +146,50 @@ _ORIGIN_ENRICHED_KINDS = frozenset({
 _ORIGIN_CARRY_WINDOW_MS = 120_000
 
 
+def _record_outcome(agent_id: str, event: str, kind: str, detail: dict[str, Any] | None,
+                ts: int) -> str | None:
+    """Record how the agent's current turn ended; the first terminal change
+    wins. Returns the settled trace id (then its rows are re-stamped)."""
+    from .message_turns import outcome_for
+    outcome = outcome_for(event, kind)
+    if outcome is None:
+        return None
+    database = conn()
+    trace = str((detail or {}).get("trace_id") or "")
+    row = None
+    if trace:
+        row = database.execute(
+            """SELECT turn_id, trace_id FROM turns WHERE agent_id = ? AND trace_id = ?
+                  AND settled_at IS NULL ORDER BY started_at DESC LIMIT 1""",
+            (agent_id, trace)).fetchone()
+    if row is None:
+        row = database.execute(
+            """SELECT turn_id, trace_id FROM turns WHERE agent_id = ? AND started_at <= ?
+                ORDER BY started_at DESC LIMIT 1""", (agent_id, ts)).fetchone()
+        if row is None or database.execute(
+                "SELECT settled_at FROM turns WHERE turn_id = ?",
+                (row["turn_id"],)).fetchone()["settled_at"] is not None:
+            return None
+    database.execute("UPDATE turns SET settled_at = ?, outcome = ? WHERE turn_id = ? AND settled_at IS NULL",
+                     (ts, outcome, row["turn_id"]))
+    return str(row["trace_id"] or "")
+
+
+def _settle_turn(agent_id: str, event: str, target: str,
+                 detail: dict[str, Any] | None, stamp: int) -> None:
+    """A terminal change records the turn's outcome and re-stamps its /log
+    rows (lib.message_turns); bookkeeping never fails a transition."""
+    if target not in TERMINAL:
+        return
+    try:
+        trace = _record_outcome(agent_id, event, target, detail, stamp)
+        if trace:
+            from . import message_writes
+            message_writes.restamp_turn(agent_id, trace)
+    except Exception as exc:  # noqa: BLE001
+        log("turnSettleFail", f"agent={agent_id} event={event} error={exc}")
+
+
 class IllegalTransition(Exception):
     """The table has no edge for (current state, event); nothing was written."""
 
@@ -255,6 +299,7 @@ class TurnStateMachine:
                VALUES (?, ?, ?, ?, ?)""",
             (agent_id, runtime_id, stamp, target,
              json.dumps(detail) if detail else None))
+        _settle_turn(agent_id, event, target, detail, stamp)
         from . import live_hub
         live_hub.observe_transition(agent_id, event, target,
                                     {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})

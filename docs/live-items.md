@@ -426,3 +426,23 @@ with a system timer. The Host never sends `end`: when nothing works it sends
 `working: 0`, and the app decides whether to end the activity. Cadence:
 routine changes at most every 15 s at priority 5; a rising `needs_you` at once
 at priority 10; a turn starting or ending or a new lead at once (≥ 2 s apart).
+
+## 9. Settled turns in `/log` (feature `log_turn_summary`)
+
+So a client can fold a finished turn (`Worked for 1m 12s · 6 tools`) from
+history alone:
+
+- Every row a turn writes carries the turn's `trace_id` (= `turn_id`): the
+  prompt, commentary, tool rows and the answer. Imports backfill it for Claude,
+  Codex, OpenCode and AGY from the prompt the rows answer, else by time from
+  the Host's turn record. Rows no known turn wrote keep `trace_id: ""`.
+- Assistant text rows carry `phase`: `commentary` when tool work follows it in
+  the same turn, else `final` (Codex reports its own phase). Other rows have
+  `phase: null`.
+- Once the turn has ended, its last row carries `turn`, shaped like
+  `GET /live`'s: `{turn_id, status: completed|failed|interrupted,
+  started_at_ms, ended_at_ms, worked_ms, tool_count}`. A running turn has no
+  `turn` on any row. The summary moves if later rows of the turn are imported.
+- Tools (`tools[].status`) and display cells an interrupted turn left
+  `running` or `recorded` read `interrupted`.
+- All of this bumps row revisions, so a delta (`after_revision`) brings it.

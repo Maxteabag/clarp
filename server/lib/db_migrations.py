@@ -145,6 +145,8 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v105(con)
         if version < 106:
             _migrate_to_v106(con)
+        if version < 107:
+            _migrate_to_v107(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -702,6 +704,20 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+
+def _migrate_to_v107(con: sqlite3.Connection) -> None:
+    """Turn outcomes, and turn summaries and phases on /log rows."""
+    turn_columns = {r[1] for r in con.execute("PRAGMA table_info(turns)")}
+    if "settled_at" not in turn_columns:
+        con.execute("ALTER TABLE turns ADD COLUMN settled_at INTEGER")
+    if "outcome" not in turn_columns:
+        con.execute("ALTER TABLE turns ADD COLUMN outcome TEXT")
+    message_columns = {r[1] for r in con.execute("PRAGMA table_info(messages)")}
+    if "phase" not in message_columns:
+        con.execute("ALTER TABLE messages ADD COLUMN phase TEXT")
+    if "turn_json" not in message_columns:
+        con.execute("ALTER TABLE messages ADD COLUMN turn_json TEXT")
 
 
 def _migrate_to_v106(con: sqlite3.Connection) -> None:

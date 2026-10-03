@@ -92,6 +92,7 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
+                           m.phase, m.turn_json,
                            sender.persona AS sender_name,
                            sender.session AS sender_session
                       FROM messages m
@@ -104,12 +105,14 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
         query = f"""SELECT m.message_id, m.role, m.timestamp, m.text, m.kind,
                            m.tool_name, m.tools_json, m.display_cells_json,
                            m.revision, m.origin, m.sender_agent_id, m.trace_id,
+                           m.phase, m.turn_json,
                            sender.persona AS sender_name,
                            sender.session AS sender_session
                       FROM (
                             SELECT message_id, role, timestamp, text, kind,
                                    tool_name, tools_json, display_cells_json,
-                                   seq, revision, origin, sender_agent_id, trace_id
+                                   seq, revision, origin, sender_agent_id, trace_id,
+                                   phase, turn_json
                               FROM messages m
                              WHERE {where}
                              ORDER BY COALESCE(timestamp, '') DESC, seq DESC
@@ -152,8 +155,22 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             "revision": int(row["revision"]),
             "automated": bool(automation_kind),
             "automation_kind": automation_kind,
+            "phase": row["phase"],
+            # The settled turn's summary, on its last row only
+            # (docs/live-items.md §9).
+            **_turn_field(row["turn_json"]),
         })
     return out
+
+
+def _turn_field(raw: Any) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        turn = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return {"turn": turn} if isinstance(turn, dict) else {}
 
 
 def provenance_fields(row) -> dict[str, str]:
