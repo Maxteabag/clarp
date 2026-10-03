@@ -50,6 +50,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/backend_auth.py", "_validation_cache"): CACHE,
     ("lib/backends.py", "_RUNTIME_CLIENT"): CLIENT,
     ("lib/live_hub.py", "_HUB"): CLIENT,
+    ("lib/server_identity.py", "_live_probe"): CLIENT,
     ("lib/static_assets.py", "_hashes"): CACHE,
     ("lib/transcript_import_cache.py", "_last_started"): THROTTLE,
     ("lib/transcript_import_cache.py", "_deferred"): THROTTLE,

@@ -6,6 +6,7 @@ import pathlib
 import re
 import socket
 import uuid
+from typing import Callable
 from . import xdg
 
 from .settings_store import get_text, set_text
@@ -157,15 +158,43 @@ FEATURE_CONTRACTS["push_grants"] = 39
 FEATURE_CONTRACTS["agent_fork"] = 41
 
 
+# Features that exist only while live events actually flow: the hub runs in
+# the agent runtime, which can be an older release than this HTTP server
+# until it hands over. Advertising them without events makes clients wait
+# for a status line that never comes (working agents look idle).
+LIVE_FEATURES = frozenset({"live_items", "live_activity_push"})
+_live_probe: Callable[[], bool] | None = None
+
+
+def set_live_probe(probe: Callable[[], bool] | None) -> None:
+    """Install the check for "live events flow now"; None: they do not."""
+    global _live_probe
+    _live_probe = probe
+
+
+def live_serving() -> bool:
+    probe = _live_probe
+    try:
+        return bool(probe and probe())
+    except Exception:  # noqa: BLE001 - unknown means not advertised
+        return False
+
+
+def _features() -> list[str]:
+    serving = live_serving()
+    return [f for f in FEATURES if serving or f not in LIVE_FEATURES]
+
+
 def capabilities() -> dict[str, object]:
-    return {"version": CAPABILITIES_VERSION, "features": list(FEATURES)}
+    return {"version": CAPABILITIES_VERSION, "features": _features()}
 
 
 def contract() -> dict[str, object]:
+    features = set(_features())
     return {
         "host": HOST_CONTRACT,
         "min_ios": MIN_IOS_CONTRACT,
-        "features": dict(FEATURE_CONTRACTS),
+        "features": {k: v for k, v in FEATURE_CONTRACTS.items() if k in features},
     }
 
 

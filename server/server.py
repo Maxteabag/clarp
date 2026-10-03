@@ -5883,11 +5883,14 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         hub = live_hub.LiveHub(sink=sink)
         holder["explainer"] = live_explainer(hub.patch)
         live_hub.install(hub)
+        from lib import server_identity
+        server_identity.set_live_probe(lambda: live_hub.current() is hub)
         return hub
 
     def stop_live_hub(_hub):
-        from lib import live_hub
+        from lib import live_hub, server_identity
         live_hub.install(None)
+        server_identity.set_live_probe(None)
 
     def start_live_relay():
         from lib import live_hub
@@ -5896,9 +5899,19 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
             return None
         watcher = getattr(srv, "runtime_event_watcher", None)
         explainer = live_explainer(ctx.runtime_client.live_patch)
-        return live_hub.LiveRelay(
+        relay = live_hub.LiveRelay(
             socket_path, ctx.stream, on_event=explainer.observe,
             on_nudge=watcher.poll_now if watcher is not None else None).start()
+        from lib import server_identity
+        # Advertised only while the runtime's hub is connected and serving.
+        server_identity.set_live_probe(lambda: relay.serving)
+        return relay
+
+    def stop_live_relay(relay):
+        from lib import server_identity
+        server_identity.set_live_probe(None)
+        if relay:
+            relay.stop()
 
     def start_tts_worker():
         from lib.clip_delivery import build_from_config, DeliveryDeps
@@ -5957,7 +5970,7 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         Worker("runtime-event-watcher", start_runtime_events, enabled=has_runtime_client),
         Worker("live-hub", start_live_hub, stop=stop_live_hub,
                enabled=lambda: not has_runtime_client()),
-        Worker("live-relay", start_live_relay, stop=lambda relay: relay and relay.stop(),
+        Worker("live-relay", start_live_relay, stop=stop_live_relay,
                enabled=has_runtime_client),
         # TTS worker: drains tts_queue, does the provider call from the
         # server process (not from short-lived hook subprocesses). The hooks

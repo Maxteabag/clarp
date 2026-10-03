@@ -6,7 +6,13 @@ Claude Code and OpenCode render a live session, and what Clarp clients (iOS,
 desktop, web) build their status line, tool rows and thinking rows on.
 
 Feature flag `live_items` in `/server-info` `features`, available from Host
-contract **42** (the contract was published at 40). Gate on the feature. A client that does not see the flag keeps today's path: `transcript-updated` →
+contract **42** (the contract was published at 40). Gate on the feature, and
+read it again on every `/server-info`: the Host lists `live_items` (and
+`live_activity_push`) only while its live hub is actually serving events. The
+hub runs in the agent runtime, which can still be an older release after the
+HTTP server was updated, or be restarting; then the flag is absent (also from
+`contract.features`) and clients must use the `/log` path and their own
+working placeholder. A client that does not see the flag keeps today's path: `transcript-updated` →
 `GET /log?after_revision`. Nothing in `/log` or the existing events changes
 meaning; everything here is additive.
 

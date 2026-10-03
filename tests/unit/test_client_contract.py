@@ -14,7 +14,10 @@ def test_contract_block_is_advertised_and_monotonic():
     assert contract["host"] == server_identity.HOST_CONTRACT >= 1
     assert contract["min_ios"] == server_identity.MIN_IOS_CONTRACT >= 1
     assert contract["min_ios"] <= contract["host"]
-    assert set(contract["features"]) == set(server_identity.FEATURES)
+    # What is advertised has a contract number; live features appear only
+    # while live events flow (test_live_capability).
+    assert set(contract["features"]) == set(info["capabilities"]["features"])
+    assert set(server_identity.FEATURE_CONTRACTS) == set(server_identity.FEATURES)
     assert all(1 <= value <= contract["host"] for value in contract["features"].values())
 
 
