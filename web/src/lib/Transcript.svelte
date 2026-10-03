@@ -4,7 +4,7 @@
   // position or a set of turns.
   import { tick } from 'svelte';
   import { mergeTimeline } from '@core/timeline.js';
-  import { currentTurnItems, takenOverTurns } from '@core/live-present.js';
+  import { currentTurnItems, liveInsertIndex, takenOverTurns } from '@core/live-present.js';
   import Turn from './Turn.svelte';
   import LiveTurn from './live/LiveTurn.svelte';
   import { conversation, loadOlder, placeholderFor } from '../stores/conversations.svelte.js';
@@ -32,7 +32,15 @@
   let hidden = $derived(takenOverTurns(conv.turns, liveItems));
   let turns = $derived(hidden.size ? conv.turns.filter(t => !hidden.has(t.id)) : conv.turns);
   // Read both lists at the top level so the tracking sees them.
-  let timeline = $derived(mergeTimeline(turns, liveItems.length ? [] : conv.activity));
+  let merged = $derived(mergeTimeline(turns, liveItems.length ? [] : conv.activity));
+  // The live turn sits where its turn started, as one keyed entry, so a
+  // prompt sent after it settled lands below it and the block is moved,
+  // never rebuilt.
+  let timeline = $derived.by(() => {
+    if (!liveItems.length) return merged;
+    const at = liveInsertIndex(merged.map(e => e.item), liveState.turn);
+    return [...merged.slice(0, at), { type: 'live', key: 'live-turn' }, ...merged.slice(at)];
+  });
 
   // Keep this chat's live items coming while it is on screen.
   $effect(() => {
@@ -176,6 +184,8 @@
   {#each timeline as entry (entry.key)}
     {#if entry.type === 'turn'}
       <Turn turn={entry.item} />
+    {:else if entry.type === 'live'}
+      <LiveTurn {liveState} items={liveItems} explanations={live.explanations.enabled} />
     {:else}
       <div class="turn activity {entry.item.cls}" class:thinking-live={entry.item.thinkingLive}>
         <span class="activity-log-dot"></span>
@@ -184,9 +194,6 @@
       </div>
     {/if}
   {/each}
-  {#if liveItems.length}
-    <LiveTurn {liveState} items={liveItems} explanations={live.explanations.enabled} />
-  {/if}
   </div>
 </div>
 

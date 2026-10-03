@@ -3,7 +3,7 @@
   // (selection, highlighted code); only the open tail is re-rendered, and
   // new text is revealed at a pace that drains a burst in about 200 ms.
   import { untrack } from "svelte";
-  import { createBlockCache, revealStep, splitCommitted } from '@core/markdown-stream.js';
+  import { REVEAL_INTERVAL_MS, createBlockCache, revealTick, splitCommitted } from '@core/markdown-stream.js';
   import { stripVoiceMarkup } from '@core/voice-markup.js';
   import { renderText } from '../render.js';
   import { lazyHighlight } from '../highlight.js';
@@ -17,10 +17,13 @@
   let frame = 0;
   let last = 0;
 
+  // Frames come at 60 Hz but the text only changes every REVEAL_INTERVAL_MS
+  // (revealTick), so each step's parse and DOM replace happen ~20 times a
+  // second, not every frame. `last` is the time of the last render.
   function tickReveal(at) {
-    const dt = last ? Math.min(64, at - last) : 16;
-    last = at;
-    shown = revealStep(text, shown, dt);
+    if (!last) last = at - REVEAL_INTERVAL_MS;
+    const next = revealTick(text, shown, Math.min(250, at - last));
+    if (next !== shown) { shown = next; last = at; }
     frame = shown < text.length ? requestAnimationFrame(tickReveal) : 0;
     if (!frame) last = 0;
   }
