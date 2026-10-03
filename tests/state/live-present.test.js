@@ -11,7 +11,7 @@ import {
   applyLiveEvent, applyLiveSnapshot, blankLive, liveItems,
 } from '@core/live-items.js';
 import {
-  clock, formatDuration, liveRows, settledFold, statusLine,
+  activityFromStatus, clock, currentTurnItems, formatDuration, liveRows, settledFold, statusLine, takenOverTurns,
 } from '@core/live-present.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -226,5 +226,61 @@ describe('status line', () => {
   it('is gone when nothing runs', () => {
     expect(statusLine(replay('turn-full').activity, { now: T0 })).toBe(null);
     expect(statusLine({ state: 'idle' }, { now: T0 })).toBe(null);
+  });
+});
+
+describe('durable rows and the live turn', () => {
+  const items = [
+    { id: 'cl:m:0', kind: 'message', turn_id: 'tr-2', ordinal: 1, row_id: 'live-abc', text: 'Hi' },
+    { id: 'cl:toolu_9', kind: 'tool', turn_id: 'tr-2', ordinal: 2, tool: { call_id: 'toolu_9' } },
+    { id: 'cl:old', kind: 'message', turn_id: 'tr-1', ordinal: 0, row_id: 'msg-old', text: 'Old' },
+  ];
+  const state = { turn: { turn_id: 'tr-2', status: 'running' },
+    items: Object.fromEntries(items.map(i => [i.id, i])) };
+
+  it('shows only the items of the turn the Host calls current', () => {
+    expect(currentTurnItems(state).map(i => i.id)).toEqual(['cl:m:0', 'cl:toolu_9']);
+    expect(currentTurnItems({ turn: null, items: state.items })).toEqual([]);
+  });
+
+  it('lets the live turn stand in for the rows that carry the same message or tool', () => {
+    const turns = [
+      { id: 'u-1', role: 'user', text: 'Go' },
+      { id: 'live-abc', role: 'assistant', kind: 'live', text: 'H' },
+      { id: 'msg-tools', role: 'assistant', text: '', tools: [{ id: 'toolu_9', name: 'Bash' }] },
+      { id: 'msg-old', role: 'assistant', text: 'Old' },
+      { id: 'live-other', role: 'assistant', kind: 'live', text: 'stale live row' },
+    ];
+    const hidden = takenOverTurns(turns, currentTurnItems(state));
+    expect([...hidden].sort()).toEqual(['live-abc', 'live-other', 'msg-tools']);
+  });
+
+  it('keeps a durable row that carries more than the live turn shows', () => {
+    const turns = [{ id: 'm', role: 'assistant', text: 'Words',
+      tools: [{ id: 'toolu_9' }, { id: 'toolu_other' }] }];
+    expect(takenOverTurns(turns, currentTurnItems(state)).size).toBe(0);
+  });
+
+  it('takes nothing over without live items', () => {
+    expect(takenOverTurns([{ id: 'live-abc', kind: 'live' }], []).size).toBe(0);
+  });
+});
+
+describe('status line without the live channel', () => {
+  it('names the tool from the agent row and ticks from the turn start', () => {
+    const activity = activityFromStatus({ latest_state: 'tool', busy: true,
+      activity_summary: 'npm test', activity_action: 'Running', turn_started_at: 1759480000 });
+    expect(statusLine(activity, { now: T0 + 12000 })).toMatchObject({
+      state: 'tool', text: 'Running npm test', time: '0:12', interrupt: true });
+  });
+
+  it('says thinking while the agent works without a tool', () => {
+    const activity = activityFromStatus({ latest_state: 'thinking', turn_started_at: 1759480000 });
+    expect(statusLine(activity, { now: T0 + 3000 })).toMatchObject({ text: 'Thinking', time: '0:03' });
+  });
+
+  it('is gone for an idle agent', () => {
+    expect(statusLine(activityFromStatus({ latest_state: 'done' }), { now: T0 })).toBe(null);
+    expect(statusLine(activityFromStatus(undefined), { now: T0 })).toBe(null);
   });
 });

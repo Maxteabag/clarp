@@ -13,6 +13,10 @@ import {
   appendActivity, appendThinking, handleSseEvent, refreshAll, removeLiveThinking, wake,
 } from './conversations.svelte.js';
 import {
+  handleLiveEvent, liveFor, liveQuery, liveTurnRunning, loadExplanationSettings,
+  onSubscriptionsChanged, openLive, setServerFeatures, watchedSessions,
+} from './live.svelte.js';
+import {
   audio, bumpLastAudioTs, lastAudioTs, PLAYER_ADAPTER_VERSION, scheduler,
   unlockAudio,
   addConditionSource,
@@ -20,6 +24,12 @@ import {
 
 let es = null;
 let lastMsgAt = 0;
+/** The newest SSE id seen, so a reconnect resumes instead of replaying a window. */
+let lastEventId = '';
+/** Set while we reopen on purpose (the live subscription changed). */
+let resubscribing = false;
+/** Agents whose transcript changed mid-turn; their snapshot refresh waits for the turn to end. */
+const snapshotOwed = new Set();
 let staleTimer = null;
 let reconnectMs = Timing.SSE_RECONNECT_BASE_MS;
 const transcriptSnapshotRefresh = createCoalescedRefresh(
@@ -46,9 +56,44 @@ export function scheduleReconnect() {
   reconnectMs = Math.min(reconnectMs * 2, Timing.SSE_RECONNECT_MAX_MS);
 }
 
+function eventsUrl() {
+  const params = [];
+  const live = liveQuery();
+  if (live) params.push(live);
+  if (lastEventId) params.push('last_event_id=' + encodeURIComponent(lastEventId));
+  return '/events' + (params.length ? '?' + params.join('&') : '');
+}
+
+/**
+ * /server-info decides whether the live channel exists (docs/live-items.md
+ * §7). Asked at boot and after every reconnect, since a Host restart can
+ * bring the feature with it.
+ */
+export async function refreshServerInfo() {
+  try {
+    const r = await fetch('/server-info');
+    if (!r.ok) return;
+    const info = await r.json();
+    const features = (info && info.capabilities && info.capabilities.features) || [];
+    setServerFeatures(features);
+    if (features.includes('live_items')) loadExplanationSettings();
+  } catch (_) {}
+}
+
+// The live subscription is part of the URL, so a changed set of chats means
+// reopening the stream. Other events resume from the last id, and live
+// events are never replayed: each watched chat takes a fresh GET /live.
+onSubscriptionsChanged(() => {
+  if (!es) return;
+  resubscribing = true;
+  try { es.close(); } catch (_) {}
+  es = null;
+  connectSSE();
+});
+
 export function connectSSE() {
-  setConn('connecting', Timing.DEAD_OVERLAY_MS);
-  try { es = new EventSource(withToken('/events')); }
+  if (!resubscribing) setConn('connecting', Timing.DEAD_OVERLAY_MS);
+  try { es = new EventSource(withToken(eventsUrl())); }
   catch (_) { scheduleReconnect(); return; }
   lastMsgAt = Date.now();
 
@@ -56,6 +101,11 @@ export function connectSSE() {
     reconnectMs = Timing.SSE_RECONNECT_BASE_MS;
     lastMsgAt = Date.now();
     setConn('live', Timing.DEAD_OVERLAY_MS);
+    const planned = resubscribing;
+    resubscribing = false;
+    for (const session of watchedSessions()) openLive(session);
+    if (planned) return;
+    refreshServerInfo();
     refreshAgentSnapshot().catch(() => {});
     // Last-Event-ID replays what we missed, but a long gap can outlive the
     // replay window; a delta per loaded chat is cheap and closes it for sure.
@@ -65,6 +115,7 @@ export function connectSSE() {
 
   es.onmessage = e => {
     lastMsgAt = Date.now();
+    if (e.lastEventId) lastEventId = e.lastEventId;
     try {
       const ev = JSON.parse(e.data);
       noteSseEvent(ev && ev.type);
@@ -139,16 +190,29 @@ function handleEvent(ev) {
       hooks.stopAgent();
     }
 
+  } else if (ev.type === SSEType.LIVE) {
+    const wasRunning = liveTurnRunning(ev.session);
+    handleLiveEvent(ev);
+    // The turn ended: the snapshot refresh it held back is due now.
+    if (wasRunning && !liveTurnRunning(ev.session) && snapshotOwed.delete(ev.session)) {
+      transcriptSnapshotRefresh.schedule();
+    }
+
   } else if (ev.type === SSEType.AGENT_STATE) {
     agentSnapshot.patchState(ev);
     syncStatus();
-    if (ev.kind === AgentState.THINKING) appendThinking(ev.session, chipLabel(ev.session));
+    // Live items already show thinking and tools in place for this chat.
+    if (liveFor(ev.session)) removeLiveThinking(ev.session);
+    else if (ev.kind === AgentState.THINKING) appendThinking(ev.session, chipLabel(ev.session));
     else removeLiveThinking(ev.session);
+    if (!AgentState.BUSY.has(ev.kind) && snapshotOwed.delete(ev.session)) {
+      transcriptSnapshotRefresh.schedule();
+    }
 
   } else if (ev.type === SSEType.AGENT_ACTIVITY) {
     agentSnapshot.patchActivity(ev);
     syncStatus();
-    appendActivity(ev.session, ev);
+    if (!liveFor(ev.session)) appendActivity(ev.session, ev);
 
   } else if (ev.type === SSEType.TTS_ERROR) {
     // Synthesis failed (e.g. quota) — say so rather than leaving silence
@@ -174,7 +238,11 @@ function handleEvent(ev) {
     // automation imports. Re-read the canonical snapshot so chat ordering is
     // driven by the server's provenance-aware message clock; agent-state and
     // activity events never mutate last_activity locally.
-    transcriptSnapshotRefresh.schedule();
+    // With the live channel a streaming turn pings this many times a
+    // second; the agent list learns what it needs from status ops, so the
+    // refresh waits until the turn ends.
+    if (liveTurnRunning(ev.session)) snapshotOwed.add(ev.session);
+    else transcriptSnapshotRefresh.schedule();
     handleSseEvent(ev);
 
   } else if (ev.type === SSEType.USER_NOTIFICATION) {

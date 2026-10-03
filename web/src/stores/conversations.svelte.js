@@ -25,6 +25,7 @@ import { AgentState, SSEType } from '@core/protocol.js';
 import { registerModule } from '@core/client-health.js';
 import { clog, instanceId } from '../lib/net.js';
 import { delivery } from './delivery.svelte.js';
+import { liveFor, liveTurnRunning } from './live.svelte.js';
 import { confirmFromTurns } from '@core/delivery.js';
 
 registerModule(globalThis, 'conversations', instanceId('conversations'));
@@ -33,6 +34,11 @@ const PAGE = 100;
 /** Activity rows past this are dropped; the server caps a fetch at 100 turns. */
 const MAX_ACTIVITY_ROWS = 80;
 const WAKE_DEBOUNCE_MS = 100;
+/**
+ * While live items stream a turn, /log is only the anti-entropy path: the
+ * live row would be refetched whole on every ping, so wakes coalesce longer.
+ */
+const LIVE_WAKE_DEBOUNCE_MS = 2000;
 
 export const conversations = $state({
   /** session → ConversationState (the view the panes render) */
@@ -304,12 +310,14 @@ export function reconcileWithSnapshot(agents = []) {
 export function wake(session) {
   if (!session || !conversations.bySession[session]) return;
   if (wakeTimers.has(session)) return;
+  const delay = liveFor(session) && liveTurnRunning(session)
+    ? LIVE_WAKE_DEBOUNCE_MS : WAKE_DEBOUNCE_MS;
   wakeTimers.set(session, setTimeout(() => {
     wakeTimers.delete(session);
     const r = onEvent(syncOf(session), { type: SSEType.TRANSCRIPT_UPDATED, session });
     setSync(session, r.state);
     runEffects(session, r.effects);
-  }, WAKE_DEBOUNCE_MS));
+  }, delay));
 }
 
 /**
