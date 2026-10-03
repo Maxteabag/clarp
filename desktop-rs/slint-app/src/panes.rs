@@ -7,7 +7,7 @@ use std::rc::Rc;
 use clarp_engine::{Change, Engine};
 use slint::{Model, ModelRc, SharedString, VecModel};
 
-use crate::view::{Shown, attachment, message_row, sync_rows};
+use crate::view::{RowCache, Shown, attachment, sync_rows};
 use crate::{App, AppWindow, Attachment, MessageRow, PaneView, SplitView, WorkspaceTab};
 
 /// What a pane last told the window.
@@ -28,6 +28,11 @@ pub struct PaneState {
     pub session: String,
     pub messages: Rc<VecModel<MessageRow>>,
     shown: Vec<Shown>,
+    /// Built rows reused while their source is unchanged.
+    rows: RowCache,
+    /// The presentation settings the rows were last presented with; a
+    /// preference change re-presents only when these moved.
+    presented_with: Option<(i32, bool, bool)>,
     pub report: Report,
     draft: String,
     draft_set: i32,
@@ -51,6 +56,8 @@ impl PaneState {
             view: PaneView { id: id.into(), messages: ModelRc::from(messages.clone()), ..PaneView::default() },
             messages,
             shown: Vec::new(),
+            rows: RowCache::default(),
+            presented_with: None,
             report: Report { follows: true, at_end: true, ..Report::default() },
             draft: String::new(),
             draft_set: 0,
@@ -98,6 +105,8 @@ impl App {
         for pane in self.pane_state.borrow_mut().iter_mut() {
             crate::scroll_journal::reset(&pane.id, "rebuild", pane.messages.row_count());
             pane.shown.clear();
+            pane.rows.clear();
+            pane.presented_with = None;
             pane.cards.clear();
             pane.messages.set_vec(Vec::new());
             pane.to_latest += 1;
@@ -287,12 +296,14 @@ impl App {
         }
         let seen_pending = self.artifact_seen_pending.borrow().clone();
         let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
+        pane.presented_with = Some(self.presentation_key());
+        let built = pane.rows.rows(&presented, always, &expanded);
         let mut kept = std::collections::HashMap::new();
         let rows: Vec<MessageRow> = presented
             .iter()
             .zip(&artifacts)
-            .map(|(row, artifacts)| {
-                let mut shown = message_row(row, always, &expanded);
+            .zip(built)
+            .map(|((row, artifacts), mut shown)| {
                 if !stamps {
                     shown.stamp = SharedString::new();
                 }
@@ -365,6 +376,12 @@ impl App {
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
     }
 
+    /// What a transcript's rows depend on among the preferences.
+    fn presentation_key(&self) -> (i32, bool, bool) {
+        let engine = self.engine.borrow();
+        (engine.activity_mode(), engine.show_when_ready(), self.prefs.borrow().timestamps)
+    }
+
     /// Brings the panes up to date with the engine after `changes`.
     pub fn refresh_panes(&self, window: &AppWindow, changes: &[Change]) {
         let layout_changed = changes.iter().any(|c| matches!(c, Change::Panes | Change::Selection));
@@ -388,6 +405,8 @@ impl App {
                     pane.session = session.clone();
                     crate::scroll_journal::reset(&pane.id, "chat", pane.messages.row_count());
                     pane.shown.clear();
+                    pane.rows.clear();
+                    pane.presented_with = None;
                     pane.cards.clear();
                     pane.messages.set_vec(Vec::new());
                     pane.draft = self.engine.borrow().draft(&session);
@@ -434,12 +453,17 @@ impl App {
             window.set_save_warning(engine.panes().workspace_save_warning().into());
         }
         let everything = changes.iter().any(|c| matches!(c, Change::Preferences | Change::Roster | Change::Selection | Change::Panes));
+        let presentation = self.presentation_key();
         let mut panes = std::mem::take(&mut *self.pane_state.borrow_mut());
         for pane in &mut panes {
             let session = pane.session.clone();
             let fresh = rebound.contains(&pane.id);
+            // A preference re-presents a transcript only when one its rows
+            // depend on changed (the theme, voice and the rest do not).
+            let preference = changes.contains(&Change::Preferences) && pane.presented_with != Some(presentation);
             let conversation = fresh
-                || changes.iter().any(|c| matches!(c, Change::Preferences | Change::Narrator | Change::Updates) || matches!(c, Change::Conversation(s) if *s == session));
+                || preference
+                || changes.iter().any(|c| matches!(c, Change::Narrator | Change::Updates) || matches!(c, Change::Conversation(s) if *s == session));
             if conversation {
                 self.messages(pane);
             }

@@ -396,3 +396,38 @@ fn a_delta_never_hides_older_history() {
     h.log(json!({"conversation_id": "c", "turns": older, "latest_revision": 250, "has_more": false}), LoadKind::Older);
     assert!(!h.model.has_more(), "the last older page ends it");
 }
+
+#[test]
+fn rows_are_found_by_id_after_inserts_and_removals_in_the_middle() {
+    let mut h = Harness::new("rachel");
+    let indexed = |h: &Harness| {
+        for (row, message) in h.model.rows().iter().enumerate() {
+            assert_eq!(h.model.index_of(&message.id), Some(row), "{} is at {row}: {:?}", message.id, h.ids());
+        }
+    };
+    h.log(json!({"conversation_id": "c1", "latest_revision": 3, "turns": [
+        {"id": "a", "role": "user", "text": "one", "revision": 1},
+        {"id": "b", "role": "assistant", "text": "two", "revision": 3},
+    ]}), LoadKind::Tail);
+    h.optimistic("p1", "pending one");
+    h.optimistic("p2", "pending two");
+    // A reply lands before the unconfirmed sends: an insert in the middle.
+    h.log(json!({"conversation_id": "c1", "latest_revision": 4, "turns": [
+        {"id": "c", "role": "assistant", "text": "three", "revision": 4},
+    ]}), LoadKind::Delta);
+    assert_eq!(h.ids(), ["a", "b", "c", "u-p1", "u-p2"]);
+    indexed(&h);
+    // The first send fails and is taken back: a removal in the middle.
+    h.model.mark_delivery_failed("p1");
+    h.sync();
+    assert!(h.model.take_failed_message_for_retry("u-p1").is_some());
+    h.sync();
+    assert_eq!(h.ids(), ["a", "b", "c", "u-p2"]);
+    indexed(&h);
+    assert_eq!(h.model.index_of("u-p1"), None);
+    h.log(json!({"conversation_id": "c1", "latest_revision": 2, "turns": [
+        {"id": "z", "role": "user", "text": "older", "revision": 0},
+    ]}), LoadKind::Older);
+    assert_eq!(h.ids(), ["z", "a", "b", "c", "u-p2"]);
+    indexed(&h);
+}

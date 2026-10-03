@@ -162,16 +162,34 @@ impl Conversation {
             .collect();
     }
 
+    /// Rows from `at` on moved by `by`: shift their index entries instead of
+    /// rebuilding the whole map (a streamed reply inserts and removes often).
+    fn shift_index(&mut self, at: usize, by: isize) {
+        for row in self.by_id.values_mut() {
+            if *row >= at {
+                *row = row.wrapping_add_signed(by);
+            }
+        }
+    }
+
     fn insert(&mut self, at: usize, rows: Vec<Message>) {
         self.ops.push(Op::Insert { at, rows: rows.clone() });
+        if at < self.messages.len() {
+            self.shift_index(at, rows.len() as isize);
+        }
+        for (offset, message) in rows.iter().enumerate().filter(|(_, m)| !m.id.is_empty()) {
+            self.by_id.insert(message.id.clone(), at + offset);
+        }
         self.messages.splice(at..at, rows);
-        self.rebuild_index();
     }
 
     fn remove(&mut self, at: usize) {
         self.ops.push(Op::Remove { at, count: 1 });
-        self.messages.remove(at);
-        self.rebuild_index();
+        let removed = self.messages.remove(at);
+        if self.by_id.get(&removed.id) == Some(&at) {
+            self.by_id.remove(&removed.id);
+        }
+        self.shift_index(at + 1, -1);
     }
 
     fn update(&mut self, row: usize, message: Message, roles: Vec<Role>) {
