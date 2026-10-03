@@ -57,10 +57,14 @@ fn geometry() -> Geo {
     let mut geo = Geo::default();
     for element in found {
         let (position, size) = (element.absolute_position(), element.size());
+        // The transcript's own id is its pane's ("chat:…").
         match element.accessible_id() {
-            Some(id) if size.height > 0.0 => geo.rows.push((id.trim_start_matches("row:").to_owned(), position.y, position.y + size.height)),
-            Some(_) => {}
-            None => (geo.left, geo.width, geo.top, geo.bottom) = (position.x, size.width, position.y, position.y + size.height),
+            Some(id) if id.starts_with("row:") => {
+                if size.height > 0.0 {
+                    geo.rows.push((id.trim_start_matches("row:").to_owned(), position.y, position.y + size.height));
+                }
+            }
+            _ => (geo.left, geo.width, geo.top, geo.bottom) = (position.x, size.width, position.y, position.y + size.height),
         }
     }
     geo.rows.sort_by(|a, b| a.1.total_cmp(&b.1));

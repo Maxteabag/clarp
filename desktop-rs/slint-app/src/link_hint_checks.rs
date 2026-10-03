@@ -275,6 +275,12 @@ pub fn link_hints_check(out: String) {
                 check(hints.contains(&("1-6".into(), "Open".into())) && hints.contains(&("Esc".into(), "Cancel".into())), &format!("the shortcut bar shows the hint keys: {hints:?}"));
                 check(window.get_keyboard_mode() == "HINTS", &format!("the bar's mode says HINTS: {}", window.get_keyboard_mode()));
                 reader_held(&state.borrow(), "showing hints");
+                // A screen of prose is probed in well under a second (a
+                // debug build; release is several times faster).
+                let started = std::time::Instant::now();
+                let found = crate::link_hints::links_on_screen(window, &app_now().active_id()).0.len();
+                let took = started.elapsed();
+                check(found == SHOWN.len() && took < Duration::from_millis(1500), &format!("finding the {found} links on a full screen took {} ms", took.as_millis()));
                 shot(&out1, "link-hints-01-shown");
                 headless::press("3");
                 true
