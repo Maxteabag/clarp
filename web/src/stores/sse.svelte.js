@@ -77,7 +77,7 @@ export async function refreshServerInfo() {
     const info = await r.json();
     const features = (info && info.capabilities && info.capabilities.features) || [];
     setServerFeatures(features);
-    if (features.includes('live_items')) loadExplanationSettings();
+    loadExplanationSettings();
   } catch (_) {}
 }
 

@@ -253,3 +253,66 @@ describe('a snapshot taken before the stream carried the chat', () => {
     expect(liveGets()).toHaveLength(1);
   });
 });
+
+describe('a Host that lists live_items but sends nothing', () => {
+  beforeEach(installGlobals);
+  afterEach(() => vi.unstubAllGlobals());
+
+  const noHub = { conv: 'conv-1', session: 'rachel', agent_id: 'agent-1', epoch: '', lseq: 0,
+    server_now_ms: 1, activity: { state: 'idle' }, turn: null, items: [] };
+
+  async function openedWithoutHub() {
+    const store = await freshStore();
+    routes['/live?'] = () => ({ status: 200, body: noHub });
+    store.setServerFeatures(['live_items']);
+    store.setConnectedLive(['rachel']);
+    store.watchSession('rachel');
+    await store.openLive('rachel');
+    await settle();
+    return store;
+  }
+
+  it('looks like the pre-live client: no live view, status or turn of its own', async () => {
+    const store = await openedWithoutHub();
+    expect(store.liveFor('rachel')).toBe(null);
+    expect(store.rosterActivity('rachel')).toBe(null);
+    expect(store.liveTurnRunning('rachel')).toBe(false);
+  });
+
+  it('does not ask for the snapshot again and again while nothing comes', async () => {
+    const store = await openedWithoutHub();
+    expect(store.liveRequested('rachel')).toBe(true);
+    expect(liveGets()).toHaveLength(1);
+  });
+
+  it('takes the chat over once a live event for it arrives', async () => {
+    const store = await openedWithoutHub();
+    // The event's new epoch sends the client back to GET /live.
+    routes['/live?'] = () => ({ status: 200,
+      body: snapshotOf(1, { turn: { turn_id: 'tr-1', status: 'running', started_at_ms: 1 } }) });
+    store.handleLiveEvent(event(1));
+    runFrames();
+    await settle(); await settle();
+    runFrames();
+    expect(store.liveFor('rachel')).not.toBe(null);
+    expect(store.liveTurnRunning('rachel')).toBe(true);
+  });
+
+  it('takes the chat over from a snapshot that names a hub epoch', async () => {
+    const store = await freshStore();
+    routes['/live?'] = () => ({ status: 200, body: snapshotOf(0) });
+    store.setServerFeatures(['live_items']);
+    store.setConnectedLive(['rachel']);
+    store.watchSession('rachel');
+    await store.openLive('rachel');
+    expect(store.liveFor('rachel')).not.toBe(null);
+  });
+
+  it('offers the explanation switch only when the Host has the setting', async () => {
+    const store = await freshStore();
+    store.setServerFeatures(['live_items']);
+    expect(store.live.explanationSetting).toBe(false);
+    store.setServerFeatures(['live_items', 'tool_explanation_setting']);
+    expect(store.live.explanationSetting).toBe(true);
+  });
+});

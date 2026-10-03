@@ -18,10 +18,11 @@ import {
   applyLiveEvent, applyLiveSnapshot, blankLive, LiveEffects, liveSnapshotFailed,
   requestLiveSnapshot,
 } from '@core/live-items.js';
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { clog } from '../lib/net.js';
 
 export const LIVE_FEATURE = 'live_items';
+export const EXPLANATION_SETTING_FEATURE = 'tool_explanation_setting';
 /** Chats kept subscribed besides the ones on screen. */
 const MAX_WATCHED = 4;
 /** Events held while a snapshot is on its way. */
@@ -29,6 +30,8 @@ const MAX_BUFFERED = 1000;
 
 export const live = $state({
   enabled: false,
+  /** The Host lets clients switch tool explanations (Host contract 43). */
+  explanationSetting: false,
   /** The Host's tool-explanation setting (§6). */
   explanations: { enabled: true, detail_level: 2, loaded: false },
 });
@@ -44,6 +47,11 @@ class RosterEntry {
 
 // Reactive maps: a pane that asked before a chat existed re-reads when it appears.
 const chats = new SvelteMap();     // session → LiveChat
+// Chats the Host has shown it really streams: a live event for them arrived,
+// or GET /live answered with a hub epoch. A Host can list live_items while its
+// hub sends nothing; until a chat is proven here it keeps the pre-live
+// behaviour (Thinking placeholder, agent-activity status line, /log).
+const proven = new SvelteSet();
 const roster = new SvelteMap();    // session → RosterEntry
 const watched = [];          // most recent last
 /** Sessions the open /events connection carries item ops for; null = all watched. */
@@ -73,7 +81,9 @@ function rosterOf(session) {
 
 /** From /server-info `capabilities.features`. */
 export function setServerFeatures(features = []) {
-  const on = Array.isArray(features) && features.includes(LIVE_FEATURE);
+  const list = Array.isArray(features) ? features : [];
+  const on = list.includes(LIVE_FEATURE);
+  live.explanationSetting = list.includes(EXPLANATION_SETTING_FEATURE);
   if (on === live.enabled) return;
   live.enabled = on;
   if (!on) {
@@ -144,14 +154,23 @@ export function liveQuery() {
 
 // ---- reads ----------------------------------------------------------------
 
-/** The live state of a subscribed chat, null before its first snapshot. */
+/**
+ * The live state of a subscribed chat: null before its first snapshot, and
+ * null until the Host has proven it streams this chat (see `proven`).
+ */
 export function liveFor(session) {
-  if (!live.enabled || !session) return null;
+  if (!live.enabled || !session || !proven.has(session)) return null;
   return chats.get(session)?.state || null;
 }
 
-/** The newest status of any agent, subscribed or not. */
+/** GET /live has been asked for this chat (whether or not it proved live). */
+export function liveRequested(session) {
+  return !!(live.enabled && session && chats.get(session)?.state);
+}
+
+/** The newest status of any agent, subscribed or not; null until proven live. */
 export function rosterActivity(session) {
+  if (!live.enabled || !proven.has(session)) return null;
   const own = liveFor(session);
   if (own && carried(session)) return own.activity;
   return roster.get(session)?.activity || (own && own.activity) || null;
@@ -161,6 +180,7 @@ const BUSY = new Set(['thinking', 'responding', 'tool', 'compacting', 'limited']
 
 /** A turn is open: its turn says running, or its status line is busy. */
 export function liveTurnRunning(session) {
+  if (!live.enabled || !proven.has(session)) return false;
   const own = liveFor(session);
   const turn = own ? own.turn : roster.get(session)?.turn;
   if (turn && turn.status === 'running') return true;
@@ -184,6 +204,7 @@ export async function openLive(session) {
     const snapshot = await r.json();
     let next = applyLiveSnapshot(chat.state || blankLive(), snapshot);
     fetching.delete(session);
+    if (snapshot.epoch) proven.add(session);
     if (snapshot.tool_explanations) setExplanationState(snapshot.tool_explanations);
     if (staleFetch.delete(session)) {
       // Taken before the stream carried the chat: show it, keep the events
@@ -258,6 +279,7 @@ function noteRoster(session, activity, turn, wasRunning = liveTurnRunning(sessio
 export function handleLiveEvent(ev) {
   if (!live.enabled || !ev || !ev.session) return;
   const session = ev.session;
+  proven.add(session);
   if (watched.includes(session) && carried(session) && chats.get(session)?.state) {
     enqueue(session, [ev]);
     return;
@@ -281,7 +303,7 @@ function setExplanationState(s) {
 }
 
 export async function loadExplanationSettings() {
-  if (!live.enabled) return;
+  if (!live.explanationSetting) return;
   try {
     const r = await fetch('/tool-explanations/settings');
     if (r.ok) setExplanationState(await r.json());
