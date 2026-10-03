@@ -197,8 +197,40 @@ def _content_text(content) -> str:
     return ""
 
 
+def _event_message_id(ev: dict) -> str:
+    """The Anthropic message id an assistant event belongs to, if it says."""
+    inner = ev.get("event")
+    if isinstance(inner, dict) and inner.get("type") == "message_start":
+        msg = inner.get("message")
+        return str(msg.get("id") or "") if isinstance(msg, dict) else ""
+    if ev.get("type") == "assistant":
+        msg = ev.get("message")
+        return str(msg.get("id") or "") if isinstance(msg, dict) else ""
+    return ""
+
+
+def _is_message_stop(ev: dict) -> bool:
+    inner = ev.get("event")
+    return isinstance(inner, dict) and inner.get("type") == "message_stop"
+
+
+def _settle_live_message(*, agent_id: str, backend_session_id: str, trace_id: str,
+                         item_key: str, session: str, stream) -> None:
+    if not agent_id or not backend_session_id:
+        return
+    try:
+        if agents_db.mark_live_message_final(
+                agent_id=agent_id, backend_session_id=backend_session_id,
+                trace_id=trace_id, item_key=item_key) and stream is not None:
+            events.broadcast(stream, events.transcript_updated(
+                agent_id=agent_id, session=session,
+                backend_session_id=backend_session_id))
+    except Exception as e:                            # noqa: BLE001
+        log_exception("clarpLiveSettleFail", e, detail=trace_id or agent_id)
+
+
 def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str,
-                        text: str, session: str, stream) -> None:
+                        text: str, session: str, stream, item_key: str = "") -> None:
     if not agent_id or not backend_session_id:
         return
     try:
@@ -207,6 +239,7 @@ def _store_live_partial(*, agent_id: str, backend_session_id: str, trace_id: str
             backend_session_id=backend_session_id,
             trace_id=trace_id,
             text=text,
+            item_key=item_key,
         )
         if not row or not row.get("changed"):
             return
@@ -486,11 +519,29 @@ class ClaudeBackend(Backend):
         live_text = ""
         phase = ""
         bound = {"backend_session_id": backend_session_id}
-        # The live row grows at markdown-stable boundaries at most every
-        # 250 ms, with a trailing write; the final text is written at once.
-        pacer = LivePacer(lambda text: _store_live_partial(
-            agent_id=agent_id, backend_session_id=bound["backend_session_id"],
-            trace_id=trace_id, text=text, session=session, stream=stream))
+        # One live row per provider message (message.id), so a turn of
+        # several messages never shows them run together. Each row grows at
+        # markdown-stable boundaries at most every 250 ms, with a trailing
+        # write; the message's final text is written at once and the row is
+        # marked final in place.
+        message = {"key": "", "text": ""}
+
+        def new_pacer(key: str) -> LivePacer:
+            return LivePacer(lambda text: _store_live_partial(
+                agent_id=agent_id, backend_session_id=bound["backend_session_id"],
+                trace_id=trace_id, text=text, session=session, stream=stream,
+                item_key=key))
+
+        pacer = new_pacer("")
+
+        def settle_message() -> None:
+            if message["text"]:
+                pacer.offer(message["text"], final=True)
+                _settle_live_message(
+                    agent_id=agent_id, backend_session_id=bound["backend_session_id"],
+                    trace_id=trace_id, item_key=message["key"], session=session,
+                    stream=stream)
+            pacer.cancel()
         isolated_texts: list[str] = []
         live_backend_session_id = backend_session_id
         try:
@@ -541,6 +592,13 @@ class ClaudeBackend(Backend):
                         phase = current
                         if current != "tool":   # tools are reported by the hooks
                             _report_phase(agent_id, trace_id, current, self.id)
+                    message_id = "" if isolated else _event_message_id(ev)
+                    if message_id and message_id != message["key"]:
+                        settle_message()
+                        message["key"], message["text"] = message_id, ""
+                        pacer = new_pacer(message_id)
+                    if not isolated and _is_message_stop(ev):
+                        settle_message()
                     text, is_delta = _assistant_event_text(ev)
                     if text:
                         if isolated and not is_delta:
@@ -558,12 +616,22 @@ class ClaudeBackend(Backend):
                             live_text += text
                         else:
                             live_text = text
+                        current_text = message["text"]
+                        if is_delta:
+                            current_text += text
+                        elif text.startswith(current_text):
+                            current_text = text
+                        elif current_text and not current_text.endswith(text):
+                            current_text += text
+                        else:
+                            current_text = text
+                        message["text"] = current_text
                         if not isolated:
-                            pacer.offer(live_text)
+                            pacer.offer(current_text)
                 elif typ == "result":
                     saw_result = True
-                    if not isolated and live_text:
-                        pacer.offer(live_text, final=True)
+                    if not isolated:
+                        settle_message()
                     if on_result is not None:
                         try:
                             assistant_text = (
@@ -605,8 +673,8 @@ class ClaudeBackend(Backend):
         except Exception as e:                            # noqa: BLE001
             log_exception("clarpRunnerDrainFail", e, detail=trace_id)
         finally:
-            if not isolated and not saw_result and live_text:
-                pacer.offer(live_text, final=True)
+            if not isolated and not saw_result and message["text"]:
+                pacer.offer(message["text"], final=True)
             pacer.cancel()
             if agent_id and handle is not None and not isolated:
                 self.unregister_handle(agent_id, handle)

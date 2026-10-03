@@ -292,7 +292,8 @@ class StreamJsonBackend(Backend):
 
     def persist_live_text(self, st: Any, *, text: str, backend_session_id: str,
                           agent_id: str, session: str, trace_id: str, stream: Any,
-                          force: bool, interval: float | None = None) -> None:
+                          force: bool, interval: float | None = None,
+                          item_key: str | None = None) -> None:
         """Write one mutable assistant row at a bounded visual cadence.
 
         The row is keyed by the turn's trace, so a later transcript import
@@ -304,17 +305,46 @@ class StreamJsonBackend(Backend):
         if not agent_id or not text.strip():
             return
         pacer = getattr(st, "_live_pacer", None)
+        if item_key is not None and pacer is not None and item_key != st._live_key:
+            # A new provider message: the previous one settles in its own row.
+            pacer.flush()
+            pacer.cancel()
+            self.settle_live_text(st)
+            pacer = None
         if pacer is None:
-            target: dict[str, Any] = {}
+            key = item_key or ""
+            target: dict[str, Any] = {"item_key": key}
             pacer = LivePacer(
                 lambda paced: self._write_live_text(st, paced, **target),
                 interval=self.live_text_interval if interval is None else interval)
             st._live_pacer = pacer
             st._live_target = target
+            st._live_key = key
+            st.persisted_live_text = ""
         st._live_target.update(
             backend_session_id=backend_session_id, agent_id=agent_id,
             session=session, trace_id=trace_id, stream=stream)
         pacer.offer(text, final=force)
+
+    def settle_live_text(self, st: Any) -> None:
+        """The current provider message finished: its row stops being live."""
+        target = getattr(st, "_live_target", None)
+        if not target or not target.get("agent_id"):
+            return
+        backend_session_id = target.get("backend_session_id") or \
+            agents_db.live_backend_session(target["agent_id"])
+        if not backend_session_id:
+            return
+        try:
+            if agents_db.mark_live_message_final(
+                    agent_id=target["agent_id"], backend_session_id=backend_session_id,
+                    trace_id=target.get("trace_id") or "",
+                    item_key=target.get("item_key") or ""):
+                self.broadcast_transcript(target.get("stream"), target["agent_id"],
+                                          target.get("session") or "")
+        except Exception as error:  # noqa: BLE001
+            log_exception(f"{self.runner}LiveSettleFail", error,
+                          detail=target.get("trace_id") or target["agent_id"])
 
     @staticmethod
     def flush_live_text(st: Any) -> None:
@@ -325,7 +355,7 @@ class StreamJsonBackend(Backend):
 
     def _write_live_text(self, st: Any, text: str, *, backend_session_id: str,
                          agent_id: str, session: str, trace_id: str,
-                         stream: Any) -> None:
+                         stream: Any, item_key: str = "") -> None:
         if not text.strip() or text == st.persisted_live_text:
             return
         backend_session_id = backend_session_id or agents_db.live_backend_session(agent_id)
@@ -334,7 +364,7 @@ class StreamJsonBackend(Backend):
         try:
             row = agents_db.upsert_live_assistant_message(
                 agent_id=agent_id, backend_session_id=backend_session_id,
-                trace_id=trace_id, text=text,
+                trace_id=trace_id, text=text, item_key=item_key,
             )
             st.persisted_live_text = text
             st.last_live_write_at = time.monotonic()

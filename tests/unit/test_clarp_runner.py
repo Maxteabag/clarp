@@ -289,7 +289,9 @@ def test_spawn_turn_streams_assistant_partials_to_message_store(fake_clarp, tmp_
     visible = agents_db.list_messages(
         agent_id=agent_id, backend_session_id="sid-live")
     assert [m["text"] for m in visible] == ["hello"]
-    assert visible[0]["kind"] == "live"
+    # The finished reply is settled in place: same row, no longer live.
+    assert visible[0]["kind"] is None
+    assert visible[0]["id"].startswith("live-")
     assert any(e.get("type") == SSEType.TRANSCRIPT_UPDATED for e in stream.events)
 
 
@@ -677,3 +679,33 @@ def test_claude_token_bursts_are_paced_and_the_final_text_lands(fake_clarp, tmp_
     handle.wait(timeout=5.0)
     assert 1 <= len(writes) <= 3, writes
     assert writes[-1] == "".join(words).strip() or writes[-1] == "".join(words)
+
+
+def test_claude_messages_of_one_turn_stream_into_their_own_rows(fake_clarp, tmp_path):
+    agent_id = agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+
+    def text_delta(text):
+        return {"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
+                                                  "delta": {"type": "text_delta", "text": text}}}
+
+    fake_clarp([
+        {"type": "system", "subtype": "init", "session_id": "sid-msgs"},
+        {"type": "stream_event", "event": {"type": "message_start", "message": {"id": "msg_1"}}},
+        text_delta("Checking the logs."),
+        {"type": "stream_event", "event": {"type": "message_stop"}},
+        {"type": "stream_event", "event": {"type": "message_start", "message": {"id": "msg_2"}}},
+        text_delta("Found the bug."),
+        {"type": "stream_event", "event": {"type": "message_stop"}},
+        {"type": "result", "subtype": "success", "result": "ok"},
+    ])
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-msgs")
+    handle = CLAUDE.start_turn(
+        text="hi", cwd=tmp_path, backend_session_id="sid-msgs", session="rachel",
+        agent_id=agent_id, trace_id="trace-msgs")
+    handle.wait(timeout=5.0)
+    rows = agents_db.conn().execute(
+        """SELECT text, kind FROM messages WHERE agent_id = ? AND role = 'assistant'
+            ORDER BY timestamp, seq DESC""", (agent_id,)).fetchall()
+    assert [(r["text"], r["kind"]) for r in rows] == [
+        ("Checking the logs.", None), ("Found the bug.", None)]

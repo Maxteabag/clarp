@@ -16,9 +16,39 @@ from .voice_markup import strip_hidden_blocks
 from .message_writes import _facade, _latest_user_provenance, _next_revision
 
 
-def _live_message_id(agent_id: str, backend_session_id: str, trace_id: str) -> str:
+def _live_message_id(agent_id: str, backend_session_id: str, trace_id: str,
+                     item_key: str = "") -> str:
     raw = f"{agent_id}\0{backend_session_id}\0{trace_id or 'live'}"
+    if item_key:
+        raw += f"\0{item_key}"
     return "live-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
+
+
+# How many un-keyed segments one turn may roll over to (see _live_target).
+_MAX_SEGMENTS = 64
+
+
+def _live_target(database, agent_id: str, backend_session_id: str,
+                 trace_id: str, item_key: str) -> str | None:
+    """The row this live text belongs in, or None when it must not be written.
+
+    A row stays the live row of its provider message until the message is
+    marked final or the transcript import adopts it. A keyed message that has
+    settled never reopens (a late duplicate delta). An un-keyed stream rolls
+    over to the next segment, so the next message of the turn gets a row of
+    its own instead of rewriting the settled one.
+    """
+    keys = [item_key] if item_key else [""] + [f"seg{n}" for n in range(1, _MAX_SEGMENTS)]
+    for key in keys:
+        msg_id = _live_message_id(agent_id, backend_session_id, trace_id, key)
+        row = database.execute(
+            "SELECT kind, source_file FROM messages WHERE message_id = ?",
+            (msg_id,)).fetchone()
+        if row is None or (
+                (row["kind"] or "") == "live"
+                and str(row["source_file"] or "").startswith("live:")):
+            return msg_id
+    return None
 
 
 # Claude Code's reply to its own isMeta "Continue from where you left off."
@@ -26,13 +56,15 @@ def _live_message_id(agent_id: str, backend_session_id: str, trace_id: str) -> s
 CLAUDE_META_REPLY = "No response requested."
 
 def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
-                                  trace_id: str = "", text: str
+                                  trace_id: str = "", text: str,
+                                  item_key: str = "",
                                   ) -> dict[str, Any] | None:
-    """Store the current streamed assistant text for an in-flight Claude turn.
+    """Store the current streamed assistant text of one provider message.
 
-    It is one mutable row per active turn, not one row per token. When the
-    durable transcript later catches up, store_transcript_turns removes this
-    live row if the final assistant text covers it.
+    One mutable row per message of the turn (``item_key``: Claude
+    ``message.id``, Codex item id), not one row per token. The row keeps its
+    id for good: ``mark_live_message_final`` settles it, and the transcript
+    import adopts it in place (store_transcript_turns) instead of deleting it.
     """
     if not agent_id or not backend_session_id:
         return None
@@ -59,7 +91,9 @@ def upsert_live_assistant_message(*, agent_id: str, backend_session_id: str,
         ).fetchone()
         if active is None or (active["trace_id"] or "") != trace_id:
             return None
-    msg_id = _live_message_id(agent_id, backend_session_id, trace_id)
+    msg_id = _live_target(database, agent_id, backend_session_id, trace_id, item_key)
+    if msg_id is None:
+        return None
     if skip:
         _user_key, origin, _sender_agent_id = _latest_user_provenance(
             database, agent_id, backend_session_id)
@@ -142,12 +176,21 @@ def _insert_live_message_atomic(
                 database.execute("ROLLBACK")
                 return False, 0, False
         revision = _next_revision(database)
+        # A live row left behind by an earlier turn (interrupted before its
+        # transcript landed) goes; this turn's earlier messages stay.
         replaced = database.execute(
             """DELETE FROM messages
                 WHERE agent_id=? AND backend_session_id=?
-                  AND source_file LIKE 'live:%' AND message_id<>?""",
-            (agent_id, backend_session_id, msg_id),
+                  AND source_file LIKE 'live:%' AND message_id<>?
+                  AND COALESCE(trace_id, '')<>?""",
+            (agent_id, backend_session_id, msg_id, trace_id or ""),
         ).rowcount > 0
+        lowest = database.execute(
+            """SELECT MIN(seq) AS seq FROM messages
+                WHERE agent_id=? AND backend_session_id=?
+                  AND seq<=-900000 AND seq>-1000000""",
+            (agent_id, backend_session_id)).fetchone()
+        seq = (int(lowest["seq"]) - 1) if lowest and lowest["seq"] is not None else -900000
         database.execute(
             """INSERT INTO messages (
                    message_id, agent_id, backend_session_id, source_file, seq,
@@ -159,7 +202,7 @@ def _insert_live_message_atomic(
             # column NULL on every live row, so nothing could tell the agent's
             # own reply apart from the one this trace had just delivered.
             (msg_id, agent_id, backend_session_id, f"live:{trace_id or msg_id}",
-             -900000, "assistant", timestamp, text, "live", None, "[]", "[]",
+             seq, "assistant", timestamp, text, "live", None, "[]", "[]",
              timestamp_ms, revision, origin, sender_agent_id, trace_id or None),
         )
         database.execute(
@@ -202,7 +245,8 @@ def _update_live_message_atomic(
             """UPDATE messages
                   SET text=?, updated_at=?, revision=?, origin=?, sender_agent_id=?,
                       trace_id=COALESCE(?, trace_id)
-                WHERE message_id=? AND agent_id=? AND backend_session_id=?""",
+                WHERE message_id=? AND agent_id=? AND backend_session_id=?
+                  AND kind='live' AND source_file LIKE 'live:%'""",
             (text, timestamp_ms, revision, origin, sender_agent_id,
              trace_id or None, msg_id, agent_id, backend_session_id),
         ).rowcount > 0
@@ -224,17 +268,73 @@ def _update_live_message_atomic(
         raise
 
 
+def mark_live_message_final(*, agent_id: str, backend_session_id: str,
+                            trace_id: str = "", item_key: str = "") -> bool:
+    """The provider message finished: the row stops being live, in place.
+
+    It keeps its id and position; the transcript import later fills in the
+    durable copy under the same id.
+    """
+    database = conn()
+    msg_id = _live_message_id(agent_id, backend_session_id, trace_id, item_key)
+    database.execute("BEGIN IMMEDIATE")
+    try:
+        revision = _next_revision(database)
+        changed = database.execute(
+            """UPDATE messages SET kind=NULL, revision=?, updated_at=?
+                WHERE message_id=? AND kind='live'""",
+            (revision, now_ms(), msg_id)).rowcount > 0
+        if not changed:
+            database.execute("ROLLBACK")
+            return False
+        database.execute(
+            """INSERT INTO conversation_heads (
+                   agent_id, backend_session_id, revision, replace_revision
+               ) VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision)""",
+            (agent_id, backend_session_id, revision))
+        database.execute("COMMIT")
+        return True
+    except Exception:
+        database.execute("ROLLBACK")
+        raise
+
+
+def _streamed_row_key(database, agent_id: str, backend_session_id: str,
+                      trace_id: str, text: str) -> str:
+    """The item key of the turn's streamed row that ``text`` completes."""
+    from .message_context import _strip_voice_markup
+    visible = _strip_voice_markup(text)
+    rows = database.execute(
+        """SELECT message_id, text FROM messages
+            WHERE agent_id=? AND backend_session_id=? AND trace_id=?
+              AND source_file LIKE 'live:%' AND role='assistant'
+            ORDER BY seq DESC""",
+        (agent_id, backend_session_id, trace_id)).fetchall()
+    for row in rows:
+        streamed = _strip_voice_markup(row["text"])
+        if streamed and (visible.startswith(streamed) or streamed.startswith(visible)):
+            return row["message_id"]
+    return ""
+
+
 def delete_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                   trace_id: str = "") -> bool:
     """Retract a provisional assistant row after authoritative empty output."""
     database = conn()
     msg_id = _live_message_id(agent_id, backend_session_id, trace_id)
-    exists = database.execute(
-        "SELECT 1 FROM messages WHERE message_id = ?", (msg_id,),
-    ).fetchone()
-    if exists is None:
+    # Every row this turn streamed (one per provider message), still live.
+    ids = [msg_id] + [row["message_id"] for row in database.execute(
+        """SELECT message_id FROM messages
+            WHERE agent_id=? AND backend_session_id=? AND source_file=?
+              AND message_id<>?""",
+        (agent_id, backend_session_id, f"live:{trace_id or msg_id}", msg_id)).fetchall()]
+    deleted = database.execute(
+        f"DELETE FROM messages WHERE message_id IN ({','.join('?' * len(ids))})"
+        " AND source_file LIKE 'live:%'", ids).rowcount
+    if not deleted:
         return False
-    database.execute("DELETE FROM messages WHERE message_id = ?", (msg_id,))
     revision = _next_revision(database)
     database.execute(
         """INSERT INTO conversation_heads (
@@ -254,10 +354,18 @@ def delete_live_assistant_message(*, agent_id: str, backend_session_id: str,
 def finalize_live_assistant_message(*, agent_id: str, backend_session_id: str,
                                     trace_id: str, text: str
                                     ) -> dict[str, Any] | None:
-    """Finalize one bounded live row and run canonical durable side effects."""
-    row = upsert_live_assistant_message(
-        agent_id=agent_id, backend_session_id=backend_session_id,
-        trace_id=trace_id, text=text)
+    """Finalize one bounded live row and run canonical durable side effects.
+
+    When the turn streamed a row this text completes, that row is the one
+    settled, so the reply keeps the identity it streamed under.
+    """
+    streamed = _streamed_row_key(conn(), agent_id, backend_session_id, trace_id, text)
+    if streamed:
+        row = _rewrite_streamed_row(agent_id, backend_session_id, trace_id, streamed, text)
+    else:
+        row = upsert_live_assistant_message(
+            agent_id=agent_id, backend_session_id=backend_session_id,
+            trace_id=trace_id, text=text)
     if row is None:
         return None
     database = conn()
@@ -312,6 +420,36 @@ def finalize_live_assistant_message(*, agent_id: str, backend_session_id: str,
     oracle_delegations.complete_for_trace(
         trace_id=trace_id, message_id=str(row["id"]), text=final_text)
     return row
+
+
+def _rewrite_streamed_row(agent_id: str, backend_session_id: str, trace_id: str,
+                          msg_id: str, text: str) -> dict[str, Any] | None:
+    text = strip_hidden_blocks(str(text or ""))
+    if not text.strip():
+        return None
+    database = conn()
+    _user_key, origin, sender_agent_id = _latest_user_provenance(
+        database, agent_id, backend_session_id)
+    database.execute("BEGIN IMMEDIATE")
+    try:
+        revision = _next_revision(database)
+        changed = database.execute(
+            """UPDATE messages SET text=?, updated_at=?, revision=?
+                WHERE message_id=? AND source_file LIKE 'live:%'""",
+            (text, now_ms(), revision, msg_id)).rowcount > 0
+        if not changed:
+            database.execute("ROLLBACK")
+            return None
+        database.execute("COMMIT")
+    except Exception:
+        database.execute("ROLLBACK")
+        raise
+    row = database.execute(
+        "SELECT timestamp FROM messages WHERE message_id=?", (msg_id,)).fetchone()
+    return {"id": msg_id, "role": "assistant", "timestamp": row["timestamp"] if row else "",
+            "text": text, "kind": "live", "tool_name": None, "tools": [],
+            "display_cells": [], "origin": origin, "sender_agent_id": sender_agent_id,
+            "revision": revision, "changed": True}
 
 
 def capture_assistant_state(*, agent_id: str,

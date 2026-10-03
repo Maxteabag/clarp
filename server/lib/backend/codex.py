@@ -74,6 +74,8 @@ class TurnState:
     # thinking | responding: what the turn's text stream is doing now, so a
     # phase is reported once per switch rather than once per delta.
     live_phase: str = ""
+    # The agentMessage item the live text belongs to (one row per item).
+    live_item_key: str = ""
 
 
 def _tool_item_status(item: dict) -> str:
@@ -588,7 +590,10 @@ class CodexBackend(StreamJsonBackend):
             self.update_live_text(
                 st, text=text, agent_id=agent_id, session=session,
                 trace_id=trace_id, stream=stream,
-                force=etype == "item.completed")
+                force=etype == "item.completed",
+                item_key=str(item.get("id") or "") or None)
+            if etype == "item.completed":
+                self.settle_live_text(st)
             # Only speak the completed block — item.updated may carry partials.
             if etype == "item.completed":
                 self._speak(text, st, agent_id=agent_id, session=session,
@@ -644,8 +649,11 @@ class CodexBackend(StreamJsonBackend):
         stream: Any,
         text: str = "",
         force: bool = False,
+        item_key: str | None = None,
     ) -> None:
-        """Write one mutable assistant row at a bounded visual cadence."""
+        """Write one mutable assistant row per agentMessage item, paced."""
+        if item_key is not None and item_key != st.live_item_key:
+            st.live_item_key = item_key
         if text.strip():
             st.pending_live_text = text.strip()
             self._enter_phase(st, "responding", agent_id=agent_id, trace_id=trace_id)
@@ -654,7 +662,8 @@ class CodexBackend(StreamJsonBackend):
             backend_session_id=st.live_backend_session_id,
             agent_id=agent_id, session=session, trace_id=trace_id, stream=stream,
             force=force,
-            interval=self.live_text_interval)
+            interval=self.live_text_interval,
+            item_key=item_key)
 
     def _enter_phase(self, st: TurnState, phase: str, *, agent_id: str,
                      trace_id: str) -> None:

@@ -316,7 +316,11 @@ class _Client:
                 delta = delta.get("text") or ""
             if isinstance(delta, str) and delta:
                 active.produced_output = True
+                item_key = str(params.get("itemId") or "")
                 current = active.state.pending_live_text
+                if item_key and item_key != active.state.live_item_key:
+                    # A new agentMessage item: its text starts its own row.
+                    current = ""
                 # Protocol deltas are normally incremental chunks, but tolerate
                 # servers that send a progressively complete snapshot.
                 merged = delta if delta.startswith(current) else current + delta
@@ -324,7 +328,7 @@ class _Client:
                 _backend().update_live_text(
                     active.state, text=merged, agent_id=active.agent_id,
                     session=active.session, trace_id=active.trace_id,
-                    stream=active.stream)
+                    stream=active.stream, item_key=item_key or None)
             return
         if method == "turn/completed":
             turn = params.get("turn") or {}

@@ -43,6 +43,7 @@ from .message_writes import (  # noqa: F401
 )
 from .message_live import (  # noqa: F401
     upsert_live_assistant_message,
+    mark_live_message_final,
     delete_live_assistant_message,
     finalize_live_assistant_message,
     capture_assistant_state,

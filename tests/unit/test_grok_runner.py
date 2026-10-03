@@ -102,7 +102,7 @@ def test_text_deltas_stream_into_live_row_and_speak(monkeypatch):
     states: list[tuple[str, str]] = []
     spoken: list[str] = []
 
-    def fake_upsert(*, agent_id, backend_session_id, trace_id, text):
+    def fake_upsert(*, agent_id, backend_session_id, trace_id, text, item_key=""):
         live_writes.append(text)
         return {"changed": True}
 
