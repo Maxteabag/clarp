@@ -92,14 +92,15 @@ export async function sendText(text, opts = {}) {
   } catch (_) {}
 }
 
-export function stopAgentTurn() {
+export function stopAgentTurn(session = app.session) {
   // No busy-guard: the snapshot can be stale or focused elsewhere, and an
   // Escape into an idle pane is a harmless no-op. Always send.
-  clog('stopPressed', app.session);
+  if (typeof session !== 'string') session = app.session;
+  clog('stopPressed', session);
   fetch('/stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session: app.session }),
+    body: JSON.stringify({ session }),
   }).then(r => {
     if (!r.ok) flash('Stop failed: ' + r.status, 2000);
   }).catch(e => flash('Stop network error: ' + (e && e.message), 2000));

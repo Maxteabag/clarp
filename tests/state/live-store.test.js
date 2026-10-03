@@ -157,3 +157,25 @@ describe('live store', () => {
     expect(store.live.explanations.enabled).toBe(true);
   });
 });
+
+describe('turn end', () => {
+  beforeEach(installGlobals);
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('tells the app once when a running turn settles', async () => {
+    const store = await freshStore();
+    const settled = vi.fn();
+    store.onTurnSettled(settled);
+    routes['/live?'] = () => ({ status: 200, body: snapshotOf(22) });
+    store.setServerFeatures(['live_items']);
+    store.watchSession('rachel');
+    await store.openLive('rachel');
+    store.handleLiveEvent({ ...event(13), lseq: 23, ops: event(13).ops.filter(o => o.op === 'status') });
+    runFrames();
+    expect(settled).not.toHaveBeenCalled();
+    store.handleLiveEvent({ ...event(23), lseq: 24, ops: event(23).ops.filter(o => o.op === 'status' || o.op === 'turn') });
+    runFrames();
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(settled).toHaveBeenCalledWith('rachel');
+  });
+});

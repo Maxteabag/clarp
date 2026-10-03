@@ -4,8 +4,11 @@
   // position or a set of turns.
   import { tick } from 'svelte';
   import { mergeTimeline } from '@core/timeline.js';
+  import { currentTurnItems, takenOverTurns } from '@core/live-present.js';
   import Turn from './Turn.svelte';
+  import LiveTurn from './live/LiveTurn.svelte';
   import { conversation, loadOlder, placeholderFor } from '../stores/conversations.svelte.js';
+  import { live, liveFor, openLive, watchSession } from '../stores/live.svelte.js';
   import { prefs } from '../stores/prefs.svelte.js';
 
   let { session } = $props();
@@ -21,8 +24,21 @@
 
   let conv = $derived(conversation(session));
   let placeholder = $derived(placeholderFor(conv));
+  // The live turn (docs/live-items.md): its items replace the transient
+  // activity rows, and stand in for the /log rows that carry them.
+  let liveState = $derived(liveFor(session));
+  let liveItems = $derived(liveState ? currentTurnItems(liveState) : []);
+  let hidden = $derived(takenOverTurns(conv.turns, liveItems));
+  let turns = $derived(hidden.size ? conv.turns.filter(t => !hidden.has(t.id)) : conv.turns);
   // Read both lists at the top level so the tracking sees them.
-  let timeline = $derived(mergeTimeline(conv.turns, conv.activity));
+  let timeline = $derived(mergeTimeline(turns, liveItems.length ? [] : conv.activity));
+
+  // Keep this chat's live items coming while it is on screen.
+  $effect(() => {
+    if (!session || !live.enabled) return;
+    watchSession(session);
+    if (!liveFor(session)) openLive(session);
+  });
 
   function nearBottom() {
     if (!bodyEl) return true;
@@ -69,6 +85,16 @@
     });
   });
 
+  // Streaming text, a growing output tail or an image sizing itself changes
+  // the height without adding a turn: follow it while pinned.
+  let contentEl = $state(null);
+  $effect(() => {
+    if (!contentEl || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => { if (pinned) scrollToBottom(); });
+    ro.observe(contentEl);
+    return () => ro.disconnect();
+  });
+
   // A different session in this pane starts pinned to its bottom.
   $effect(() => {
     session;
@@ -84,6 +110,7 @@
   bind:this={bodyEl}
   onscroll={onScroll}
 >
+  <div class="history-content" bind:this={contentEl}>
   {#if placeholder}
     <div class="turn assistant has-body"><span class="meta">{placeholder}</span></div>
   {/if}
@@ -102,6 +129,10 @@
       </div>
     {/if}
   {/each}
+  {#if liveItems.length}
+    <LiveTurn {liveState} items={liveItems} explanations={live.explanations.enabled} />
+  {/if}
+  </div>
 </div>
 
 {#if showJump}
