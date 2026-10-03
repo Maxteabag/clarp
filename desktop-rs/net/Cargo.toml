@@ -6,7 +6,7 @@ description = "Qt-free HTTP and SSE clients for the Clarp Rust desktop client"
 
 [dependencies]
 clarp-core = { path = "../core" }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "gzip"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
 url = "2"

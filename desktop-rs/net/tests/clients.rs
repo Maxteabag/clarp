@@ -313,3 +313,34 @@ async fn refused_connections_back_off_and_report_errors() {
     assert!(!client.connected());
     client.stop();
 }
+
+/// The Host gzips JSON for clients that accept it (a `/log` page shrinks
+/// about 4x); the API client asks for gzip and reads the compressed reply.
+#[tokio::test]
+async fn api_client_asks_for_gzip_and_reads_a_compressed_reply() {
+    let (listener, url) = listen().await;
+    let (client, mut replies) = api_client();
+    client.set_endpoint(url, "token");
+    client.get("log", "/log", &[("session", "rachel")]);
+    let (mut socket, _) = listener.accept().await.unwrap();
+    let request = read_request(&mut socket).await;
+    assert!(
+        header(&request, "accept-encoding").is_some_and(|v| v.contains("gzip")),
+        "the request accepts gzip: {request}"
+    );
+    let body = include_bytes!("fixtures/log.json.gz");
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    socket.write_all(head.as_bytes()).await.unwrap();
+    socket.write_all(body).await.unwrap();
+    match next(&mut replies).await {
+        ApiReply::Json { tag, object } => {
+            assert_eq!(tag, "log");
+            assert_eq!(object["latest_revision"], 7);
+            assert_eq!(object["turns"].as_array().map(Vec::len), Some(20));
+        }
+        other => panic!("expected the decompressed JSON, got {other:?}"),
+    }
+}
