@@ -214,7 +214,9 @@ def test_agent_message_updates_stream_through_one_throttled_live_row(
     assert not handle.drain_thread.is_alive()
 
     assert _wait_for(lambda: calls and calls[-1] == "Hello world")
-    assert calls == ["Hel", "Hello world"]
+    # No markdown-stable boundary before the end: the completed text is the
+    # first and only write.
+    assert calls == ["Hello world"]
     rows = agents_db.conn().execute(
         """SELECT text, kind FROM messages
              WHERE agent_id = ? AND source_file LIKE 'live:%'""",

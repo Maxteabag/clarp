@@ -27,6 +27,7 @@ from typing import Any, Callable, Iterator, Optional
 from .. import agents as agents_db
 from .. import turn_lifecycle
 from .. import events
+from ..live_pacing import LivePacer
 from ..log import log, log_exception
 from ..proc_util import attach_stderr_drain
 from ..process_registry import TurnHandle
@@ -294,21 +295,38 @@ class StreamJsonBackend(Backend):
                           force: bool, interval: float | None = None) -> None:
         """Write one mutable assistant row at a bounded visual cadence.
 
-        ``st`` needs ``persisted_live_text`` and ``last_live_write_at``. The
-        row is keyed by the turn's trace, so a later transcript import
-        replaces it with the durable assistant text. Unchanged text and writes
-        inside ``interval`` (default ``live_text_interval``) of the last one
-        (unless ``force``) are skipped.
+        The row is keyed by the turn's trace, so a later transcript import
+        replaces it with the durable assistant text. While streaming it grows
+        at markdown-stable boundaries at most every ``interval`` (default
+        ``live_text_interval``), and a burst always ends with a trailing
+        write (``lib.live_pacing``). ``force`` writes the text as it is now.
         """
-        if interval is None:
-            interval = self.live_text_interval
         if not agent_id or not text.strip():
             return
-        if text == st.persisted_live_text:
-            return
-        now = time.monotonic()
-        if not force and st.last_live_write_at and (
-                now - st.last_live_write_at < interval):
+        pacer = getattr(st, "_live_pacer", None)
+        if pacer is None:
+            target: dict[str, Any] = {}
+            pacer = LivePacer(
+                lambda paced: self._write_live_text(st, paced, **target),
+                interval=self.live_text_interval if interval is None else interval)
+            st._live_pacer = pacer
+            st._live_target = target
+        st._live_target.update(
+            backend_session_id=backend_session_id, agent_id=agent_id,
+            session=session, trace_id=trace_id, stream=stream)
+        pacer.offer(text, final=force)
+
+    @staticmethod
+    def flush_live_text(st: Any) -> None:
+        """Write any paced-back live text now (a tool or a new step starts)."""
+        pacer = getattr(st, "_live_pacer", None)
+        if pacer is not None:
+            pacer.flush()
+
+    def _write_live_text(self, st: Any, text: str, *, backend_session_id: str,
+                         agent_id: str, session: str, trace_id: str,
+                         stream: Any) -> None:
+        if not text.strip() or text == st.persisted_live_text:
             return
         backend_session_id = backend_session_id or agents_db.live_backend_session(agent_id)
         if not backend_session_id:
@@ -319,7 +337,7 @@ class StreamJsonBackend(Backend):
                 trace_id=trace_id, text=text,
             )
             st.persisted_live_text = text
-            st.last_live_write_at = now
+            st.last_live_write_at = time.monotonic()
             if row and row.get("changed"):
                 self.broadcast_transcript(stream, agent_id, session)
         except Exception as error:  # noqa: BLE001

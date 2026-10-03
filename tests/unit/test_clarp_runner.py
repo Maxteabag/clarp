@@ -649,3 +649,31 @@ def test_claude_thinking_then_text_reports_thinking_then_responding(fake_clarp, 
     phases = [json.loads(r["detail"] or "{}").get("phase") for r in rows if r["kind"] == "thinking"]
     assert phases[-2:] == ["thinking", "responding"]
     assert phases.count("responding") == 1
+
+
+def test_claude_token_bursts_are_paced_and_the_final_text_lands(fake_clarp, tmp_path, monkeypatch):
+    writes: list[str] = []
+    original_write = agents_db.upsert_live_assistant_message
+
+    def counting_write(**kwargs):
+        writes.append(kwargs["text"])
+        return original_write(**kwargs)
+
+    monkeypatch.setattr(agents_db, "upsert_live_assistant_message", counting_write)
+    agent_id = agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    words = [f"word{n} " for n in range(40)]
+    fake_clarp([
+        {"type": "system", "subtype": "init", "session_id": "sid-paced"},
+        *({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
+                                             "delta": {"type": "text_delta", "text": w}}}
+          for w in words),
+        {"type": "result", "subtype": "success", "result": "ok"},
+    ])
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-paced")
+    handle = CLAUDE.start_turn(
+        text="hi", cwd=tmp_path, backend_session_id="sid-paced", session="rachel",
+        agent_id=agent_id, trace_id="trace-paced")
+    handle.wait(timeout=5.0)
+    assert 1 <= len(writes) <= 3, writes
+    assert writes[-1] == "".join(words).strip() or writes[-1] == "".join(words)

@@ -123,7 +123,6 @@ def test_text_deltas_stream_into_live_row_and_speak(monkeypatch):
 
     # Text accumulates per model call; the tool call starts a new segment so
     # the durable assistant row imported from chat_history covers the first.
-    assert live_writes[0] == "<speak>Hi from Grok.</speak> I'll"
     assert "<speak>Hi from Grok.</speak> I'll run it now." in live_writes
     assert live_writes[-1] == "The directory holds one file."
     assert st.last_agent_message == "The directory holds one file."
@@ -165,7 +164,8 @@ def test_live_text_cadence_is_bounded(monkeypatch):
     monkeypatch.setattr(turn_lifecycle, "transition", lambda *a, **k: None)
     monkeypatch.setattr(GROK, "live_text_interval", 60.0)
     st = _run_events([{"type": "text", "data": f"w{i} "} for i in range(20)])
-    assert live_writes == ["w0 "]
+    # One unfinished paragraph: nothing is stored until it settles or is forced.
+    assert live_writes == []
     GROK._persist_live_text(
         st, agent_id="agent-1", session="sess-1", trace_id="trace-1",
         stream=None, force=True)

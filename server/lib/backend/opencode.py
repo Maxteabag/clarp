@@ -569,6 +569,7 @@ class OpenCodeBackend(StreamJsonBackend):
             st.part_types[part_id] = ptype
         st.busy = True
         if ptype == "step-start":
+            self.flush_live_text(st)
             st.step_parts = []
             self._phase(st, "thinking", agent_id, trace_id)
             self._broadcast(stream, agent_id, session)
@@ -583,6 +584,7 @@ class OpenCodeBackend(StreamJsonBackend):
             status = str(state.get("status") or "")
             if status in {"running", "completed", "error"} and part_id not in st.started_tools:
                 st.started_tools.add(part_id)
+                self.flush_live_text(st)
                 name, tool_input = _tool_detail(agent_id, part)
                 st.phase = "tool"
                 self._transition(agent_id, TurnEvent.TOOL_STARTED, {

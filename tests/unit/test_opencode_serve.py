@@ -241,7 +241,7 @@ def test_live_turn_streams_tools_text_and_speech_then_stops_the_server(fake):
     }]
     # The acknowledgement was spoken from the first delta, not the prompt.
     assert spoken == ["On it."]
-    assert fake.live[0] == "<speak>On it.</speak>"
+    assert any(text.startswith("<speak>On it.</speak>") for text in fake.live)
     assert "the prompt" not in json.dumps(fake.live)
     tool = [d for e, d in fake.states if e == TurnEvent.TOOL_STARTED]
     assert [(d["tool"], d["input"]) for d in tool] == [("Bash", {"command": "make test"})]
