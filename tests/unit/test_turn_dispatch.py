@@ -2047,3 +2047,95 @@ def test_rpc_runs_the_janitor_demand_authority_check_once(tmp_path, monkeypatch)
         runtime.server_close()
     assert error.value.status == 409
     assert checks == [("mike", "janitor-demand-1")]
+
+
+class _Process:
+    def __init__(self):
+        self.alive = True
+
+    def is_alive(self):
+        return self.alive
+
+
+class _ProcessBackends(_Backends):
+    """Every spawned turn is a process that runs until the test ends it."""
+
+    def __init__(self):
+        super().__init__()
+        self.processes = []
+
+    def spawn_turn(self, backend, **kwargs):
+        super().spawn_turn(backend, **kwargs)
+        self.processes.append(_Process())
+
+    def active_handles(self, backend, agent_id):
+        return [p for p in self.processes if p.alive]
+
+
+def _process_service(tmp_path):
+    service, _, agent_id = _make_service(tmp_path)
+    backends = _ProcessBackends()
+    service.backends = backends
+    return service, backends, agent_id
+
+
+def _wait_until(predicate, timeout=3.0):
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
+
+
+def test_a_peer_message_to_a_busy_agent_waits_for_its_turn_instead_of_killing_it(tmp_path):
+    service, backends, agent_id = _process_service(tmp_path)
+    service.dispatch(text="build the chip", requested_session="mike",
+                     trace_id="t-work", synthesize_audio=False)
+
+    sent = service.dispatch(
+        text="host shapes are on main", requested_session="mike",
+        trace_id="t-peer", client_msg_id="clarp-admin-1",
+        synthesize_audio=False, origin="agent", sender_agent_id="parent-1")
+
+    assert sent.queued is True
+    assert backends.interrupted == []
+    assert [call["text"] for _, call in backends.spawned] == ["build the chip"]
+
+    backends.processes[0].alive = False
+    backends.spawned[0][1]["on_result"]({"duration_ms": 5})
+    assert [call["text"] for _, call in backends.spawned] == [
+        "build the chip", "host shapes are on main"]
+
+
+def test_no_second_process_starts_while_the_agents_last_turn_process_still_runs(tmp_path):
+    """Recorded 2026-10-03: the Host took a turn for finished while its Claude
+    process went on working, and the next message started a second Claude on
+    the same session. Whatever the Host believes, a live process for the agent
+    keeps the next turn waiting until it exits."""
+    service, backends, agent_id = _process_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     synthesize_audio=False)
+    backends.spawned[0][1]["on_result"]({"duration_ms": 94})
+    assert backends.processes[0].alive
+
+    queued = service.dispatch(
+        text="queued follow-up", requested_session="mike", trace_id="t2",
+        client_msg_id="q-2", synthesize_audio=False, queue_if_busy=True)
+    direct = service.dispatch(text="direct follow-up", requested_session="mike",
+                              trace_id="t3", synthesize_audio=False)
+
+    assert queued.queued is True and direct.queued is True
+    assert len(backends.spawned) == 1
+    assert backends.interrupted == []
+    assert agents_db.is_busy(agent_id) or _td._INFLIGHT.get(agent_id)
+
+    backends.processes[0].alive = False
+    assert _wait_until(lambda: len(backends.spawned) == 2)
+    assert backends.spawned[1][1]["text"] == "queued follow-up"
+    assert backends.processes[1].alive
+    backends.processes[1].alive = False
+    backends.spawned[1][1]["on_result"]({"duration_ms": 5})
+    assert [call["text"] for _, call in backends.spawned] == [
+        "first", "queued follow-up", "direct follow-up"]

@@ -806,3 +806,56 @@ def test_an_older_claude_cli_is_not_given_the_thinking_flag(tmp_path, monkeypatc
     _fake_cli(bin_dir, 'print("2.0.1 (Claude Code)")')
     claude_backend._thinking_display_support.cache_clear()
     assert "--thinking-display" not in CLAUDE.build_cmd()
+
+
+def test_a_resumed_session_that_runs_queued_notifications_first_ends_its_turn_only_when_the_process_exits(
+        tmp_path, monkeypatch):
+    """Recorded 2026-10-03 (live-ios-41de): resuming a session whose previous
+    process left background shells behind made Claude Code answer the queued
+    <task-notification> first, with its own `result` (0 tokens, 94 ms), and
+    only then run the prompt Clarp sent, in the same process. The first
+    result ended the turn, so the next message spawned a second Claude on the
+    same session while the first was still working."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake = bin_dir / "claude"
+    release = tmp_path / "release"
+    fake.write_text(textwrap.dedent(f"""\
+        #!{sys.executable}
+        import sys, json, time, pathlib
+        def emit(event):
+            sys.stdout.write(json.dumps(event) + "\\n")
+            sys.stdout.flush()
+        emit({{"type": "system", "subtype": "init", "session_id": "sid"}})
+        emit({{"type": "assistant", "message": {{"id": "m1", "content": [
+            {{"type": "text", "text": "No response requested."}}]}}}})
+        emit({{"type": "result", "subtype": "success", "duration_ms": 94,
+              "usage": {{"input_tokens": 0, "output_tokens": 0}}}})
+        release = pathlib.Path({str(release)!r})
+        while not release.exists():
+            time.sleep(0.02)
+        emit({{"type": "assistant", "message": {{"id": "m2", "content": [
+            {{"type": "text", "text": "the real answer"}}]}}}})
+        emit({{"type": "result", "subtype": "success", "duration_ms": 9000,
+              "usage": {{"input_tokens": 50, "output_tokens": 7}}}})
+    """))
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+
+    results: list[dict] = []
+    errs: list[str] = []
+    handle = CLAUDE.start_turn(
+        text="hi", cwd=tmp_path, backend_session_id="sid",
+        on_result=results.append, on_error=errs.append)
+    time.sleep(0.5)
+    assert handle.is_alive()
+    assert results == [], "the turn ended while its process was still working"
+
+    release.write_text("go")
+    handle.wait(timeout=10.0)
+    assert _wait_for(lambda: len(results) == 1)
+    time.sleep(0.1)
+    assert len(results) == 1
+    assert results[0]["duration_ms"] == 9000
+    assert results[0]["_assistant_text"] == "the real answer"
+    assert errs == []
