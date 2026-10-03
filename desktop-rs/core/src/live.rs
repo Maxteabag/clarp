@@ -69,7 +69,13 @@ pub struct LiveView {
     clock_offset_ms: i64,
     /// Bumped on every applied snapshot or event (what the views compare).
     generation: u64,
+    /// Turns a newer one replaced, with their items (oldest first): history
+    /// folds them as they read live.
+    retired: Vec<(Object, Vec<Object>)>,
 }
+
+/// How many replaced turns a view keeps.
+const RETIRED_TURNS: usize = 32;
 
 impl Default for LiveView {
     fn default() -> Self {
@@ -83,6 +89,7 @@ impl Default for LiveView {
             tool_explanations: None,
             clock_offset_ms: 0,
             generation: 0,
+            retired: Vec::new(),
         }
     }
 }
@@ -127,6 +134,26 @@ impl LiveView {
     pub fn item(&self, id: &str) -> Option<&Object> {
         self.items.get(id)
     }
+    /// A turn a newer one replaced and its items, sorted by `ordinal`.
+    pub fn retired(&self, turn_id: &str) -> Option<(&Object, Vec<&Object>)> {
+        let (turn, items) = self.retired.iter().rev().find(|(turn, _)| turn.get("turn_id").and_then(Value::as_str) == Some(turn_id))?;
+        Some((turn, items.iter().collect()))
+    }
+
+    /// Keeps the held turn and its items when `next` is another turn.
+    fn retire(&mut self, next: Option<&Object>) {
+        let id = |t: &Object| t.get("turn_id").and_then(Value::as_str).map(str::to_owned);
+        let Some(held) = self.turn.as_ref() else { return };
+        if id(held).is_none() || next.is_none_or(|n| id(n) == id(held)) {
+            return;
+        }
+        let items = self.items().into_iter().cloned().collect();
+        self.retired.retain(|(turn, _)| id(turn) != id(held));
+        self.retired.push((held.clone(), items));
+        if self.retired.len() > RETIRED_TURNS {
+            self.retired.remove(0);
+        }
+    }
 
     /// Host time now, by this machine's clock corrected with the last
     /// `server_now_ms` (what a running item's elapsed time ticks from).
@@ -155,6 +182,7 @@ impl LiveView {
         self.epoch = snapshot.get("epoch").and_then(Value::as_str).map(str::to_owned);
         self.lseq = snapshot.get("lseq").and_then(Value::as_i64);
         self.activity = snapshot.get("activity").and_then(Value::as_object).cloned().unwrap_or_else(idle);
+        self.retire(snapshot.get("turn").and_then(Value::as_object));
         self.turn = snapshot.get("turn").and_then(Value::as_object).cloned();
         self.items = snapshot
             .get("items")
@@ -196,6 +224,7 @@ impl LiveView {
                 return self.need_snapshot();
             }
         }
+        self.retire(staged.1.as_ref());
         (self.activity, self.turn, self.items) = staged;
         self.lseq = Some(lseq);
         self.generation += 1;

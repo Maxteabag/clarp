@@ -297,6 +297,20 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     let claimed: HashSet<&str> = shown.iter().filter(|i| text(i, "kind") == "message").map(|i| text(i, "row_id")).filter(|r| !r.is_empty()).collect();
     presented.hidden_rows = rows.iter().filter(|m| m.kind == "live" && claimed.contains(m.id.as_str())).map(|m| m.id.clone()).collect();
 
+    let rows_of = rows_of.into_iter().map(|(id, entry)| (id.to_owned(), entry)).collect();
+    let entries = arrange(&turn_id, turn.expect("a turn"), settled, &shown, rows_of, options);
+    presented.entries = entries;
+    presented.turn_id = turn_id;
+    presented.started_at_ms = turn.and_then(|t| int(t, "started_at_ms"));
+    presented.own_rows = presented.taken_over.values().chain(&presented.absorbed_rows).chain(&presented.hidden_rows).cloned().collect();
+    presented
+}
+
+/// A turn's item rows: one entry per item (an entry in `rows_of` stands
+/// for its item), consecutive explore members as one, and when the turn
+/// has settled its work folded (§7.6). The live turn and history's
+/// settled turns (`history_fold`) read the same through this.
+pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Object], mut rows_of: HashMap<String, Entry>, options: &Options) -> Vec<Entry> {
     // One entry per item, consecutive explore members as one.
     let mut entries: Vec<Entry> = Vec::new();
     let mut index = 0;
@@ -330,7 +344,6 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
         if let Some(&first) = folded.first() {
             let key = format!("live:fold:{turn_id}");
             let open = options.expanded.contains(&key);
-            let turn = turn.expect("settled");
             let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?)).unwrap_or(0);
             let tools = int(turn, "tool_count").unwrap_or(0).max(0) as usize;
             let mut title = format!("Worked for {}", worked(worked_ms));
@@ -364,11 +377,7 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
             }
         }
     }
-    presented.entries = entries;
-    presented.turn_id = turn_id;
-    presented.started_at_ms = turn.and_then(|t| int(t, "started_at_ms"));
-    presented.own_rows = presented.taken_over.values().chain(&presented.absorbed_rows).chain(&presented.hidden_rows).cloned().collect();
-    presented
+    entries
 }
 
 fn verb(category: &str, status: &str) -> &'static str {
@@ -403,7 +412,7 @@ fn join_meta(parts: &[String]) -> String {
     parts.iter().filter(|p| !p.is_empty()).cloned().collect::<Vec<_>>().join(" · ")
 }
 
-fn item_entry(item: &Object, options: &Options) -> Entry {
+pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
     let id = text(item, "id");
     let key = format!("live:{id}");
     let status = text(item, "status").to_owned();
