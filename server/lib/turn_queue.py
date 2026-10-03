@@ -164,6 +164,34 @@ def remove(queue_id: str) -> bool:
     return bool(cursor.rowcount)
 
 
+def cancel(queue_id: str) -> bool:
+    """Retire fenced work once, preserving a payload-free retry receipt."""
+    con = db.conn()
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        original = con.execute(
+            "SELECT prompt_admission_id FROM queued_turns WHERE queue_id=?",
+            (queue_id,),
+        ).fetchone()
+        row = con.execute(
+            """UPDATE queued_turns
+                  SET status='cancelled', text='', sender_agent_id='',
+                      prompt_admission_id='', claimed_at=NULL
+                WHERE queue_id=? AND status IN ('queued','claimed','parked')
+                RETURNING agent_id""",
+            (queue_id,),
+        ).fetchone()
+        if row:
+            prompt_admissions.delete_unmaterialized(
+                str(original["prompt_admission_id"] or ""))
+            _bump_revision(str(row["agent_id"]))
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    return row is not None
+
+
 def get(queue_id: str) -> dict | None:
     row = db.conn().execute(
         "SELECT * FROM queued_turns WHERE queue_id = ? AND status = 'queued'",

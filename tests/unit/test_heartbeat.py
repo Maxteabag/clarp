@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from lib import agents as agents_db
 from lib import db
-from lib import heartbeat, leader_memory, message_store, task_plans, team_store
+from lib import heartbeat, leader_memory, message_store, task_plans, team_store, turn_queue
 from lib.protocol import AgentState
 
 
@@ -200,7 +200,7 @@ def test_scheduler_doubles_noop_interval_until_cap(monkeypatch):
     assert scheduler.run_once() == 1
 
 
-def test_restart_recovery_wakes_every_active_runtime_once(monkeypatch):
+def test_restart_recovery_wakes_only_interrupted_work_once(monkeypatch):
     _heartbeat_test_env(monkeypatch)
     enabled = _agent("enabled", enabled=True)
     disabled = _agent("disabled", enabled=False)
@@ -209,6 +209,14 @@ def test_restart_recovery_wakes_every_active_runtime_once(monkeypatch):
     agents_db.start_runtime(enabled, "enabled")
     agents_db.start_runtime(disabled, "disabled")
     agents_db.start_runtime(archived, "archived")
+    idle = _agent("idle")
+    agents_db.start_runtime(idle, "idle")
+    completed = _agent("completed")
+    agents_db.start_runtime(completed, "completed")
+    agents_db.record_state(completed, AgentState.DONE)
+    for aid in (enabled, disabled, archived):
+        agents_db.record_state(aid, AgentState.INTERRUPTED,
+                               {"source": "server_restart", "origin": "user"})
     agents_db.set_archived(archived, True)
     # A created Agent without a live runtime is stopped/inactive.
     assert agents_db.current_runtime_id(stopped) is None
@@ -228,6 +236,8 @@ def test_restart_recovery_bypasses_cadence_dormancy_and_recent_activity(monkeypa
     _heartbeat_test_env(monkeypatch, dormant_after=1)
     aid = _agent("resume", enabled=False)
     agents_db.start_runtime(aid, "resume")
+    agents_db.record_state(aid, AgentState.INTERRUPTED,
+                           {"source": "server_restart", "origin": "user"})
     state = heartbeat._state_for(aid)  # noqa: SLF001
     state.last_started = 999.0
     state.dormant = True
@@ -238,6 +248,34 @@ def test_restart_recovery_bypasses_cadence_dormancy_and_recent_activity(monkeypa
     assert scheduler.run_restart_recovery_once() == 1
     assert sent[0][0] == "resume"
     assert heartbeat._state_for(aid).last_started == 1_000.0  # noqa: SLF001
+
+
+def test_restart_recovery_preserves_stops_queued_work_and_routine_checks(monkeypatch):
+    _heartbeat_test_env(monkeypatch)
+    for session, detail in (
+        ("stopped", {"source": "user_stop"}),
+        ("capacity", {"account_recovery": "waiting"}),
+        ("heartbeat", {"source": "server_restart", "origin": "heartbeat"}),
+        ("dreaming", {"source": "server_restart", "origin": "dreaming"}),
+        ("paused", {"source": "server_restart", "origin": "user"}),
+        ("queued", {"source": "server_restart", "origin": "user"}),
+    ):
+        aid = _agent(session)
+        agents_db.start_runtime(aid, session)
+        agents_db.record_state(aid, AgentState.INTERRUPTED, detail)
+        if session == "paused":
+            turn_queue.set_paused(aid, True)
+        if session == "queued":
+            turn_queue.enqueue(queue_id="already-waiting", agent_id=aid,
+                               session=session, text="Continue the original request",
+                               trace_id="queued-trace", client_msg_id="queued-message",
+                               synthesize_audio=False, origin="user", sender_agent_id="")
+
+    sent = []
+    scheduler = _scheduler({"now": 1_000.0}, sent)
+    assert scheduler.run_restart_recovery_once() == 0
+    assert sent == []
+    assert turn_queue.get("already-waiting")["text"] == "Continue the original request"
 
 
 def test_scheduler_flood_guard_still_applies(monkeypatch):
@@ -741,5 +779,4 @@ def test_record_heartbeat_noop_with_explicit_is_interrupted_prevents_dormancy(mo
     state = heartbeat._state_for(aid)  # noqa: SLF001
     assert state.noop_streak == 10
     assert state.dormant is False
-
 

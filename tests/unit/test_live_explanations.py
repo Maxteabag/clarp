@@ -4,6 +4,7 @@ explainer is never asked and items carry only the raw command."""
 from __future__ import annotations
 
 import pytest
+import threading
 
 from lib import tool_explanation_settings as settings
 from lib.live_explain import LiveExplainer
@@ -74,3 +75,28 @@ def test_an_item_is_explained_once_per_command():
     explainer.observe(_tool_event())
     explainer.observe(_tool_event("npm run lint"))
     assert len(service.calls) == 2
+
+
+def test_later_tools_show_pending_while_an_earlier_explanation_is_waiting():
+    entered, release = threading.Event(), threading.Event()
+    patches = []
+
+    class WaitingService(FakeService):
+        def request(self, *args, **kwargs):
+            entered.set()
+            release.wait(2)
+            return super().request(*args, **kwargs)
+
+    service = WaitingService([])
+    explainer = LiveExplainer(lambda: service,
+                             lambda aid, iid, fields: patches.append((aid, iid, fields)))
+    try:
+        explainer.observe(_tool_event())
+        assert entered.wait(1)
+        second = _tool_event("rg -n needle file.py")
+        second["ops"][0]["id"] = "cl:toolu_2"
+        explainer.observe(second)
+        assert any(iid == "cl:toolu_2" and fields["tool"]["explain"]["status"] == "pending"
+                   for _, iid, fields in patches)
+    finally:
+        release.set()

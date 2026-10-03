@@ -693,6 +693,152 @@ def test_durable_queue_recovers_after_dispatch_state_loss(tmp_path):
     assert turn_queue.status("u-recover") == "started"
 
 
+def _queued_goal_wake(tmp_path):
+    from lib import db, task_plans, task_goal_recovery
+
+    _td.reset_for_tests()
+    retries = []
+    service, backends, agent_id = _make_service(
+        tmp_path, retry_scheduler=lambda delay, fn: retries.append((delay, fn)))
+    backends.live = False
+    spawn = backends.spawn_turn
+
+    def spawned(*args, **kwargs):
+        spawn(*args, **kwargs)
+        backends.live = True
+
+    backends.spawn_turn = spawned
+    agents_db.bind_backend_session(agent_id, "native-goal-test")
+    transcript = tmp_path / ".claude" / "projects" / "-goal"
+    transcript.mkdir(parents=True)
+    (transcript / "native-goal-test.jsonl").write_text("{}\n")
+    plan = task_plans.create(
+        session="mike", title="Finish the outcome", items=[{"id": "probe", "title": "Probe"}],
+        goal={"criteria": ["Verified result"], "limits": "No deployment", "enroll": True})
+    sent = []
+
+    def dispatch(session, text, request):
+        # Real claim/admission race: user work arrives after the scheduler's
+        # idle check, so canonical dispatch must durably queue the wake.
+        service.dispatch(text="user active", requested_session=session,
+                         trace_id="user-active", synthesize_audio=False)
+        backends.live = True
+        result = service.dispatch(
+            text=text, requested_session=session, trace_id=request,
+            client_msg_id=request, origin="automation", queue_if_busy=True,
+            synthesize_audio=False)
+        assert result.queued
+        sent.append((request, text))
+        return result
+
+    assert task_goal_recovery.tick(dispatch, now=db.now_ms() + 130000) == 1
+    return service, backends, plan, sent[0], retries
+
+
+@pytest.mark.parametrize("change", ["checkpoint", "revision", "native", "archived"])
+@pytest.mark.parametrize("path", ["restart", "drain", "paused_busy", "manual"])
+def test_stale_goal_queue_is_retired_once_without_losing_user_or_peer_work(
+        tmp_path, change, path):
+    from lib import db, task_plans, task_goal_state
+
+    service, backends, plan, (request, text), retries = _queued_goal_wake(tmp_path)
+    peer_id = agents_db.create_agent(
+        persona="Peer", session="peer", voice_id="", cwd=str(tmp_path))
+    for client, origin in (("user-later", "user"), ("peer-later", "agent")):
+        service.dispatch(text=client, requested_session="mike", trace_id=client,
+                         forced_session="mike",
+                         client_msg_id=client, origin=origin, queue_if_busy=True,
+                         sender_agent_id=peer_id if origin == "agent" else "",
+                         synthesize_audio=False)
+    if change == "checkpoint":
+        task_goal_state.mutate(plan["plan_id"], revision=plan["revision"],
+            action="checkpoint", data={"progress": "New result", "next_work": "Reassess"})
+    elif change == "revision":
+        task_plans.update_item(plan["items"][0]["item_id"], "in_progress",
+                               revision=plan["revision"])
+    elif change == "native":
+        agents_db.bind_backend_session(plan["agent_id"], "replacement-native")
+    else:
+        agents_db.set_archived(plan["agent_id"], True)
+    if path == "restart":
+        _td.reset_for_tests()
+        backends.live = False
+        service.recover_queued()
+    elif path == "drain":
+        backends.live = False
+        backends.spawned[0][1]["on_result"]({"duration_ms": 5})
+    elif path == "manual":
+        with pytest.raises(DispatchError):
+            service.dispatch_queued(request)
+    else:
+        backends.live = True
+        turn_queue.set_paused(plan["agent_id"], True)
+        service.recover_queued()
+
+    assert turn_queue.status(request) == "cancelled"
+    tombstone = db.conn().execute(
+        "SELECT text,sender_agent_id FROM queued_turns WHERE queue_id=?", (request,)).fetchone()
+    assert tuple(tombstone) == ("", "")
+    assert not any(call["text"] == text for _, call in backends.spawned)
+    assert not any(row["text"] == text for row in agents_db.list_messages(agent_id=plan["agent_id"]))
+    assert turn_queue.status("user-later") in {"queued", "started"}
+    assert turn_queue.status("peer-later") == "queued"
+    revision = turn_queue.revision(plan["agent_id"])
+    backends.live = True
+    service.recover_queued()
+    assert turn_queue.revision(plan["agent_id"]) == revision
+    with pytest.raises(DispatchError):
+        service.dispatch(text=text, requested_session="mike", trace_id=request,
+                         client_msg_id=request, origin="automation", queue_if_busy=True,
+                         synthesize_audio=False)
+    assert turn_queue.status(request) == "cancelled"
+
+
+@pytest.mark.parametrize("blocker", ["capacity", "approval", "busy", "paused", "native_owned", "host_paused"])
+def test_current_goal_queue_survives_temporary_recovery_blockers(tmp_path, monkeypatch, blocker):
+    from lib import artifacts, agent_goals
+
+    service, backends, plan, (request, _text), retries = _queued_goal_wake(tmp_path)
+    _td.reset_for_tests()
+    backends.live = False
+    if blocker == "capacity":
+        agents_db.record_state(plan["agent_id"], "idle", {"account_recovery": "waiting"})
+    elif blocker == "approval":
+        artifacts.create_decision(session="mike", title="Permission", question="Publish?")
+    elif blocker == "busy":
+        backends.live = True
+    elif blocker == "paused":
+        turn_queue.set_paused(plan["agent_id"], True)
+    elif blocker == "native_owned":
+        agent_goals.upsert(plan["agent_id"], session="mike", backend="codex",
+                           goal={"objective": "Native work", "status": "active"})
+    else:
+        monkeypatch.setenv("CLARP_HEARTBEATS_DISABLED", "1")
+    revision = turn_queue.revision(plan["agent_id"])
+    for _ in range(2):
+        assert service.recover_queued() == 0
+    assert turn_queue.status(request) == "queued"
+    assert turn_queue.revision(plan["agent_id"]) == revision
+    assert len(backends.spawned) == 1
+
+
+def test_scheduler_ticks_do_not_duplicate_a_current_durable_wake_after_restart(tmp_path):
+    from lib import db, task_goal_recovery, task_plans
+
+    service, backends, plan, (request, _text), _retries = _queued_goal_wake(tmp_path)
+    _td.reset_for_tests()
+    backends.live = False
+    revision = turn_queue.revision(plan["agent_id"])
+    for offset in (999999, 1999999):
+        assert task_goal_recovery.tick(
+            lambda *args: pytest.fail("already queued wake must not re-enqueue"),
+            now=db.now_ms() + offset) == 0
+    assert [row["queue_id"] for row in turn_queue.pending(plan["agent_id"])] == [request]
+    wake = task_plans.get(plan["plan_id"])["goal"]["continuation"]
+    assert wake["request_id"] == request and wake["attempts"] == 1
+    assert turn_queue.revision(plan["agent_id"]) == revision
+
+
 def test_queue_during_claim_to_spawn_window_stays_serial(tmp_path):
     import threading
     service, backends, _agent_id = _make_service(tmp_path)

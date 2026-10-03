@@ -238,6 +238,23 @@ class JanitorDispatchError(DispatchError):
     """A maintenance run lost authorization; retrying cannot restore it."""
 
 
+class GoalWakeDispatchError(DispatchError):
+    def __init__(self, rejection):
+        self.permanent = rejection.permanent
+        self.code = rejection.code
+        super().__init__(409, str(rejection))
+
+
+def _validate_goal_dispatch(agent, request_id, *, native_session_id=None):
+    from . import task_goal_recovery
+
+    try:
+        task_goal_recovery.validate_dispatch(
+            agent, request_id, native_session_id=native_session_id)
+    except task_goal_recovery.WakeRejected as exc:
+        raise GoalWakeDispatchError(exc) from exc
+
+
 def _janitor_run_active(agent: dict, run_id: str, trace_id: str) -> bool | None:
     """The one lookup the Janitor rules need; None when they do not apply."""
     if not run_id or admission_policy.can_chat(agent):
@@ -531,9 +548,20 @@ class TurnDispatchService:
         recovered = 0
         deferred = False
         for row in turn_queue.pending():
+            agent = agents_db.get_by_agent_id(row["agent_id"])
+            # Permanent fences are independent of paused/busy execution. Retire
+            # obsolete automatic work before those gates can hide it forever.
+            try:
+                _validate_goal_dispatch(agent or {}, row["client_msg_id"])
+            except GoalWakeDispatchError as exc:
+                if exc.permanent:
+                    self._retire_goal_queue(row, exc)
+                continue
+            except Exception as exc:
+                log_exception("queuedRecoveryFail", exc, detail=row["session"])
+                continue
             if turn_queue.is_paused(row["agent_id"]):
                 continue
-            agent = agents_db.get_by_agent_id(row["agent_id"])
             if agent and self.backends.active_handles(
                     self.backends.normalize(agent.get("backend")), row["agent_id"]):
                 deferred = True
@@ -560,11 +588,26 @@ class TurnDispatchService:
             except JanitorDispatchError as exc:
                 _remove_queued_run(str(row["queue_id"]))
                 log("janitorQueueRejected", str(exc))
+            except GoalWakeDispatchError as exc:
+                if exc.permanent:
+                    self._retire_goal_queue(row, exc)
             except Exception as exc:  # keep ledger row for the next retry/restart
                 log_exception("queuedRecoveryFail", exc, detail=row["session"])
         if deferred or turn_queue.claimed_count() > 0:
             self.retry_scheduler(1.0, self.recover_queued)
         return recovered
+
+    def _retire_goal_queue(self, row, rejection) -> None:
+        if not turn_queue.cancel(str(row["queue_id"])):
+            return
+        log("goalQueueRetired", f"session={row['session']} queue={row['queue_id']} reason={rejection.code}")
+        if getattr(self.ctx, "stream", None) is not None:
+            state = turn_queue.state(row["agent_id"])
+            events.broadcast(self.ctx.stream, events.queue_updated(
+                session=row["session"], agent_id=row["agent_id"],
+                client_msg_id=row["client_msg_id"], queue_depth=state["count"],
+                queue_paused=state["paused"], queue_started=False,
+                queue_revision=state["revision"]))
 
     def dispatch(self, *, text: str, requested_session: str,
                  trace_id: str, synthesize_audio: bool = True,
@@ -687,10 +730,7 @@ class TurnDispatchService:
         from . import task_goal_recovery, task_plans
         if origin == "heartbeat" and task_plans.recovery_owns_agent(agent["agent_id"]):
             raise DispatchError(409, "Durable goal owns continuation")
-        try:
-            task_goal_recovery.validate_dispatch(agent, client_msg_id)
-        except ValueError as exc:
-            raise DispatchError(409, str(exc)) from exc
+        _validate_goal_dispatch(agent, client_msg_id)
         agent_id = agent["agent_id"]
         request = admission_policy.LiveWork(
             client_msg_id=client_msg_id, durable_queue_id=durable_queue_id,
@@ -938,6 +978,10 @@ class TurnDispatchService:
             except DispatchError as exc:
                 if not self._has_live_turn(spec):
                     self._abandon_unlaunched(spec, turn_id, exc)
+                if isinstance(exc, GoalWakeDispatchError) and exc.permanent:
+                    self._retire_goal_queue({
+                        "queue_id": spec.queue_id, "agent_id": spec.agent_id,
+                        "session": spec.session, "client_msg_id": spec.client_msg_id}, exc)
                 # Spawn never started: release the in-flight slot (and drain any
                 # message that queued behind it) so the agent isn't wedged.
                 if turn_queue.contains(spec.queue_id):
@@ -1019,9 +1063,17 @@ class TurnDispatchService:
         if not row:
             raise DispatchError(404, "queued message not found")
         agent_id = str(row["agent_id"])
+        agent = agents_db.get_by_agent_id(agent_id)
+        try:
+            _validate_goal_dispatch(agent or {}, row["client_msg_id"])
+        except GoalWakeDispatchError as exc:
+            if exc.permanent:
+                self._retire_goal_queue(row, exc)
+            else:
+                turn_queue.release_claim(queue_id)
+            raise
         with _TURN_LOCK:
             busy = agent_id in _INFLIGHT
-        agent = agents_db.get_by_agent_id(agent_id)
         if agent and not agents_db.interaction_capabilities(agent)["can_chat"]:
             turn_queue.release_claim(queue_id)
             raise JanitorDispatchError(409, "Janitor queues are managed by their configuration")
@@ -1042,6 +1094,12 @@ class TurnDispatchService:
                 queue_if_busy=True, skip_admission=True,
                 durable_queue_id=queue_id, allow_paused_queue=True,
             ))
+        except GoalWakeDispatchError as exc:
+            if exc.permanent:
+                self._retire_goal_queue(row, exc)
+            else:
+                turn_queue.release_claim(queue_id)
+            raise
         except BaseException:
             turn_queue.release_claim(queue_id)
             raise
@@ -1342,6 +1400,17 @@ class TurnDispatchService:
                 or next_spec.backend_session_id)
         next_spec = replace(next_spec, backend_session_id=bsid,
                             is_new_session=not bsid)
+        try:
+            _validate_goal_dispatch(agent, next_spec.client_msg_id, native_session_id=bsid)
+        except GoalWakeDispatchError as exc:
+            if exc.permanent:
+                if next_spec.queue_id:
+                    self._retire_goal_queue(durable, exc)
+                self._finish_turn(next_spec)
+            else:
+                _SLOTS.release(agent_id, next_spec.trace_id)
+                self.retry_scheduler(1.0, self.recover_queued)
+            return
         agents_db.set_trace_for_session(next_spec.session, next_spec.trace_id)
         try:
             if next_spec.queue_id:
@@ -1357,6 +1426,14 @@ class TurnDispatchService:
             self._mark_spawned(next_spec)
         except JanitorDispatchError:
             self._discard_fenced_janitor(next_spec)
+        except GoalWakeDispatchError as exc:
+            if exc.permanent:
+                if next_spec.queue_id:
+                    self._retire_goal_queue(durable, exc)
+                self._finish_turn(next_spec)
+            else:
+                _SLOTS.release(agent_id, next_spec.trace_id)
+                self.retry_scheduler(1.0, self.recover_queued)
         except DispatchError as e:
             log_exception("queuedSpawnFail", e, detail=next_spec.session)
             if not next_spec.queue_id:
@@ -1561,12 +1638,9 @@ class TurnDispatchService:
         from . import task_goal_recovery, task_plans
         if spec.origin == "heartbeat" and task_plans.recovery_owns_agent(spec.agent_id):
             raise DispatchError(409, "Durable goal owns continuation")
-        try:
-            task_goal_recovery.validate_dispatch(
-                agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
-                native_session_id=spec.backend_session_id)
-        except ValueError as exc:
-            raise DispatchError(409, str(exc)) from exc
+        _validate_goal_dispatch(
+            agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
+            native_session_id=spec.backend_session_id)
         _validate_janitor_target(
             agents_db.get_by_agent_id(spec.agent_id) or {},
             spec.janitor_run_id, spec.trace_id)
