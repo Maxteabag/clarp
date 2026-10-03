@@ -119,3 +119,16 @@ def test_a_codex_turn_streams_reasoning_command_output_diffs_and_messages():
         assert (message["text"], message["phase"], message["status"]) == ("Fixed.", "final", "completed")
     finally:
         live_hub.install(None)
+
+
+def test_a_semicolon_chain_of_reads_labels_each_file_once_without_separator_debris():
+    command = "sed -n '1,80p' engine/src/lifecycle.rs; sed -n '1,60p' net/src/api.rs"
+    category, label, _ = classify_tool("Bash", {"command": command})
+    assert category == "read"
+    assert label == "engine/src/lifecycle.rs, net/src/api.rs"
+    assert ";" not in label
+
+
+def test_a_chain_mixing_reads_and_other_work_falls_back_to_the_last_explorer():
+    category, label, _ = classify_tool("Bash", {"command": "cat a.md && rg needle src/lib"})
+    assert category == "search" and label == "needle in src/lib"
