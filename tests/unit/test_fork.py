@@ -75,3 +75,16 @@ def test_fork_skips_malformed_lines(tmp_path, capsys):
     written = (d / f"{new_id}.jsonl").read_text().strip().splitlines()
     assert len(written) == 2  # malformed line skipped
     assert "forkLineSkip" in capsys.readouterr().err
+
+
+def test_fork_into_another_directory_lands_where_claude_code_resumes_it(tmp_path):
+    projects = tmp_path / "projects"
+    _seed_jsonl(projects, "/home/example", "abc",
+                [{"sessionId": "abc", "type": "user", "cwd": "/home/example"}])
+    new_id = fork_session("abc", "/home/example", projects_root=projects,
+                          new_id="kid", dest_cwd="/home/example/my.repo-worktrees/feat_a")
+    # Claude Code names a project dir by replacing every non-alphanumeric
+    # character of the cwd with "-" (~/.gemini -> "--gemini").
+    dst = projects / "-home-example-my-repo-worktrees-feat-a" / "kid.jsonl"
+    assert new_id == "kid" and dst.is_file()
+    assert json.loads(dst.read_text())["sessionId"] == "kid"

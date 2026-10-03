@@ -176,6 +176,19 @@ def app_server():
             persist(thread_id, "session_meta", {
                 "id": thread_id, "cwd": params.get("cwd", "")})
             result = {"thread": {"id": thread_id}}
+        elif method == "thread/fork":
+            # Real Codex forks a thread another process is writing (checked
+            # against codex-cli 0.159): no writer lock, a copy under a new id.
+            source = str(params.get("threadId") or "")
+            root = Path(os.environ.get("CLARP_QA_PROVIDER_ROOT", "/nonexistent")) / "sessions"
+            rollout = root / f"rollout-{source}.jsonl"
+            if not source or not rollout.is_file():
+                emit({"id": request["id"], "error": {
+                    "code": -32600, "message": f"no rollout found for thread id {source}"}})
+                continue
+            thread_id = str(uuid.uuid4())
+            (root / f"rollout-{thread_id}.jsonl").write_text(rollout.read_text())
+            result = {"thread": {"id": thread_id, "forkedFromId": source}}
         elif method == "turn/start":
             thread_id = params.get("threadId") or current_thread
             cancelled = threading.Event()
