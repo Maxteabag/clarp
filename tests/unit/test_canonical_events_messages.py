@@ -571,6 +571,56 @@ def test_reimport_sheds_a_finalized_twin_of_an_imported_reply(tmp_path):
     assert [m["text"] for m in visible] == ["summarize", "Here is the table."]
 
 
+def test_reply_adopts_a_finalized_row_committed_while_the_import_yielded(
+        tmp_path, monkeypatch):
+    # A long import commits in chunks and lets other writers in between. The
+    # live turn finalizing its reply in such a gap must still be recognised
+    # by the rest of the import, not shown beside it as a second bubble.
+    from lib import message_store
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike"
+    )
+    bsid = "backend-1"
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-1")
+    now = "2026-10-03T10:00:05Z"
+    monkeypatch.setattr(message_store, "IMPORT_COMMIT_EVERY", 1)
+    inner = agents_db.conn()
+    finalized = {}
+    begins = []
+
+    class LiveWriterInTheGap:
+        def execute(self, sql, *args):
+            if sql == "BEGIN IMMEDIATE":
+                begins.append(sql)
+            if len(begins) == 2 and not finalized:  # the first chunk's gap
+                finalized.update(agents_db.finalize_live_assistant_message(
+                    agent_id=agent_id, backend_session_id=bsid,
+                    trace_id="trace-1", text="Here is the table.") or {})
+                inner.execute("UPDATE messages SET timestamp=? WHERE message_id=?",
+                              (now, finalized["id"]))
+            return inner.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(inner, name)
+
+    wrapper = LiveWriterInTheGap()
+    monkeypatch.setattr(message_store, "conn", lambda: wrapper)
+    turns = [
+        {"role": "assistant", "text": "Earlier answer.", "timestamp": "2026-10-03T09:00:00Z"},
+        {"role": "user", "text": "summarize", "timestamp": now},
+        {"role": "assistant", "text": "Here is the table.", "timestamp": now},
+    ]
+    agents_db.store_transcript_turns(
+        agent_id=agent_id, backend_session_id=bsid,
+        source_file="/tmp/rollout.jsonl", turns=turns)
+
+    visible = agents_db.list_messages(agent_id=agent_id, backend_session_id=bsid)
+    assert finalized and len(begins) >= 3
+    assert [m["text"] for m in visible] == [
+        "Earlier answer.", "summarize", "Here is the table."]
+    assert visible[-1]["id"] == finalized["id"]
+
+
 def test_equal_reply_to_a_later_request_is_not_mistaken_for_a_twin(tmp_path):
     agent_id = agents_db.create_agent(
         persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike"

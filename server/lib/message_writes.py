@@ -489,8 +489,48 @@ def _is_retry_echo(native_timestamp: Any, next_client_timestamp: Any) -> bool:
             and (next_at - native_at).total_seconds() > _RETRY_ECHO_SLACK_S)
 
 
-def _final_twins(database, *, agent_id: str, backend_session_id: str, text: str,
-                 timestamp: Any, exclude: set[str]) -> list[str]:
+class _FinalRows:
+    """Finalized live rows of one conversation, read once per write batch.
+
+    Every assistant turn of an import looks for its request's final row or a
+    twin among them. Asking SQLite each time scanned the whole conversation
+    per turn (no index covers ``source_file``): ~33 s of a 45 s import of a
+    13k-row transcript, all of it holding the writer lock. Within a batch nothing else can write
+    (BEGIN IMMEDIATE), so the rows only change through this import's own
+    deletes and upserts, which ``discard`` follows.
+    """
+
+    def __init__(self, database, agent_id: str, backend_session_id: str):
+        self._database = database
+        self._key = (agent_id, backend_session_id)
+        self._rows: list[tuple[str, str, str, Any]] | None = None
+
+    def invalidate(self) -> None:
+        self._rows = None
+
+    def discard(self, message_ids) -> None:
+        if self._rows is not None:
+            gone = set(message_ids)
+            self._rows = [row for row in self._rows if row[0] not in gone]
+
+    def rows(self) -> list[tuple[str, str, str, Any]]:
+        """(message_id, source_file, visible text, timestamp) per row."""
+        if self._rows is None:
+            self._rows = [
+                (row["message_id"], row["source_file"],
+                 _strip_voice_markup(row["text"]), row["timestamp"])
+                for row in self._database.execute(
+                    """SELECT message_id, source_file, text, timestamp FROM messages
+                        WHERE agent_id = ? AND backend_session_id = ? AND role = 'assistant'
+                          AND source_file LIKE 'final:%'""",
+                    self._key,
+                ).fetchall()
+            ]
+        return self._rows
+
+
+def _final_twins(final_rows: _FinalRows, *, text: str, timestamp: Any,
+                 exclude: set[str]) -> list[str]:
     """Finalized live rows showing `text`, written near `timestamp`."""
     visible = _strip_voice_markup(text)
     if not visible:
@@ -499,19 +539,14 @@ def _final_twins(database, *, agent_id: str, backend_session_id: str, text: str,
     if reply_at is None:
         return []
     twins = []
-    for row in database.execute(
-        """SELECT message_id, text, timestamp FROM messages
-            WHERE agent_id = ? AND backend_session_id = ? AND role = 'assistant'
-              AND source_file LIKE 'final:%'""",
-        (agent_id, backend_session_id),
-    ).fetchall():
-        if row["message_id"] in exclude or _strip_voice_markup(row["text"]) != visible:
+    for message_id, _source, row_visible, row_timestamp in final_rows.rows():
+        if message_id in exclude or row_visible != visible:
             continue
-        written = _parse_timestamp(row["timestamp"])
+        written = _parse_timestamp(row_timestamp)
         if written is None:
             continue
         if abs((written - reply_at).total_seconds()) <= _FINAL_TWIN_WINDOW_S:
-            twins.append(row["message_id"])
+            twins.append(message_id)
     return twins
 
 
@@ -556,6 +591,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     current_request_trace = ""
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
+    final_rows = _FinalRows(database, agent_id, backend_session_id)
     batch_started = time.monotonic()
     for seq, turn in enumerate(turns):
         if seq and _facade().IMPORT_COMMIT_EVERY > 0 and (
@@ -580,6 +616,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             # Yield outside the transaction so admissions can take the writer.
             time.sleep(_facade().IMPORT_WRITER_YIELD_SECONDS)
             database.execute("BEGIN IMMEDIATE")
+            final_rows.invalidate()
             batch_started = time.monotonic()
         role = turn.get("role")
         if role == "assistant" and not turn.get("failed"):
@@ -700,12 +737,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             if slot:
                 msg_id = slot["message_id"]
             elif current_request_trace:
-                candidates = database.execute("SELECT message_id,text FROM messages WHERE agent_id=? AND backend_session_id=? AND source_file=? AND role='assistant'",
-                    (agent_id, backend_session_id, "final:"+current_request_trace)).fetchall()
-                matching = [r for r in candidates if r["message_id"] not in adopted_final_ids
-                            and _strip_voice_markup(r["text"]) == _strip_voice_markup(text)]
+                request_source = "final:" + current_request_trace
+                visible = _strip_voice_markup(text)
+                matching = [message_id for message_id, source, row_visible, _ts in final_rows.rows()
+                            if source == request_source and message_id not in adopted_final_ids
+                            and row_visible == visible]
                 if len(matching) == 1:
-                    msg_id = matching[0]["message_id"]
+                    msg_id = matching[0]
                     adopted_final_ids.add(msg_id)
             if msg_id not in adopted_final_ids:
                 # Without a request trace (the user turn could not be linked
@@ -713,8 +751,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # and stayed beside this reply as a second, identical bubble.
                 # Match it by visible text within the same few minutes; a
                 # reply already imported sheds an earlier import's twin.
-                twins = _final_twins(database, agent_id=agent_id,
-                                     backend_session_id=backend_session_id,
+                twins = _final_twins(final_rows,
                                      text=text, timestamp=turn.get("timestamp"),
                                      exclude=adopted_final_ids | {msg_id})
                 if len(twins) == 1 and not slot and not current_request_trace:
@@ -724,6 +761,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                     removed = database.execute(
                         f"DELETE FROM messages WHERE message_id IN ({','.join('?' * len(twins))})",
                         twins).rowcount
+                    final_rows.discard(twins)
                     skipped_slot_removed = skipped_slot_removed or removed > 0
         timestamp = turn.get("timestamp")
         kind = turn.get("kind")
@@ -777,6 +815,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
              display_cells_json, updated_at,
              revision, origin, sender_agent_id),
         )
+        if source_file.lower().startswith("final:"):
+            final_rows.invalidate()
+        else:
+            # The row now carries this transcript's source_file, not final:.
+            final_rows.discard((msg_id,))
         if role == "assistant" and not unchanged:
             if heartbeat_accounting == "noop":
                 heartbeat.record_heartbeat_noop_once(agent_id, current_heartbeat_key)
