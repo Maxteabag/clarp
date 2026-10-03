@@ -302,6 +302,13 @@ class RuntimeClient:
         result = response.get("result")
         return result if isinstance(result, dict) else None
 
+    def live_observe(self, agent_id: str, event: str, to_state: str,
+                     detail: dict[str, Any]) -> None:
+        """A state transition recorded in this process, for the runtime's hub."""
+        RuntimeClient(self.socket_path, timeout=min(self.timeout, 2.0))._request(
+            "live_observe", {"agent_id": agent_id, "event": event, "to_state": to_state,
+                             "detail": detail})
+
     def live_patch(self, agent_id: str, item_id: str, fields: dict[str, Any]) -> None:
         """Merge fields (a tool explanation) into a live item in the runtime hub."""
         self._request("live_patch", {"agent_id": agent_id, "item_id": item_id,
@@ -480,6 +487,15 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 session=str(params.get("session") or ""),
                 agent_id=str(params.get("agent_id") or ""))
             return {"ok": True, "result": snapshot or {"epoch": hub.epoch, "missing": True}}
+        if method == "live_observe":
+            hub = getattr(self, "live_hub", None)
+            if hub is None:
+                return {"ok": False, "status": 404, "error": "no live items here"}
+            from . import live_hub as _live_hub
+            detail = params.get("detail") if isinstance(params.get("detail"), dict) else {}
+            _live_hub._observe(hub, str(params.get("agent_id") or ""), str(params.get("event") or ""),
+                               str(params.get("to_state") or ""), detail)
+            return {"ok": True}
         if method == "live_patch":
             hub = getattr(self, "live_hub", None)
             fields = params.get("fields")

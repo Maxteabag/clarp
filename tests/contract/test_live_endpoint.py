@@ -168,3 +168,29 @@ def test_live_activity_tokens_register_and_receive_the_fleet_status(core_server,
 
     assert _delete(base, "/devices/live-activity", {"activity_id": "act-1"}) == (
         200, {"ok": True, "removed": 1})
+
+
+def test_post_stop_settles_the_live_turn(core_server):
+    from lib import turn_lifecycle
+
+    base = core_server["base"]
+    hub = live_hub.current()
+    agent_id = agents_db.get_by_session("rachel")["agent_id"]
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="tr-stop")
+    turn_lifecycle.record(agent_id, "tool")
+    hub.begin_turn(agent_id=agent_id, session="rachel", conv="conv-r", turn_id="tr-stop")
+    hub.tool_start(agent_id, "cx:call_1", name="sleep 30", call_id="call_1", category="exec",
+                   label="sleep 30")
+    status, body = _post(base, "/stop", {"session": "rachel"})
+    assert status == 200, body
+    deadline = time.monotonic() + 3
+    snapshot = {}
+    while time.monotonic() < deadline:
+        snapshot = _get(base, "/live?session=rachel")[1]
+        if snapshot["turn"] and snapshot["turn"]["status"] == "interrupted":
+            break
+        time.sleep(0.05)
+    validate(snapshot, SCHEMA["$defs"]["snapshot"], SCHEMA)
+    assert snapshot["turn"]["status"] == "interrupted" and snapshot["turn"]["worked_ms"] is not None
+    assert snapshot["activity"]["state"] == "interrupted"
+    assert [item["status"] for item in snapshot["items"]] == ["interrupted"]

@@ -1,0 +1,320 @@
+{
+ "title": "a turn stopped while a tool runs: the tool is interrupted, the turn ends interrupted with worked_ms, and an explicit interrupted status op follows",
+ "area": "live",
+ "steps": [
+  {
+   "snapshot": {
+    "conv": "conv-1",
+    "session": "rachel",
+    "agent_id": "agent-1",
+    "epoch": "boot-a",
+    "lseq": 0,
+    "server_now_ms": 1759479999000,
+    "activity": {
+     "state": "idle",
+     "tool": null,
+     "running_tools": 0,
+     "headline": null,
+     "item_id": null,
+     "since_ms": null,
+     "turn_id": null,
+     "turn_started_ms": null
+    },
+    "turn": null,
+    "items": [],
+    "tool_explanations": {
+     "enabled": true,
+     "detail_level": 2
+    }
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 1,
+    "server_now_ms": 1759480000000,
+    "ops": [
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-1",
+       "status": "running",
+       "started_at_ms": 1759480000000,
+       "ended_at_ms": null,
+       "worked_ms": null,
+       "tool_count": 0
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Thinking",
+       "item_id": null,
+       "since_ms": 1759480000000,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000,
+       "state": "thinking"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 2,
+    "server_now_ms": 1759480000400,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:msg_1:0",
+      "kind": "message",
+      "rev": 1,
+      "item": {
+       "id": "cl:msg_1:0",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "message",
+       "status": "running",
+       "ordinal": 1,
+       "started_at_ms": 1759480000400,
+       "ended_at_ms": null,
+       "phase": "final",
+       "row_id": "live-1",
+       "text": "Running the tests."
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Responding",
+       "item_id": "cl:msg_1:0",
+       "since_ms": 1759480000400,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000,
+       "state": "responding"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 3,
+    "server_now_ms": 1759480000600,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:msg_1:0",
+      "kind": "message",
+      "rev": 2,
+      "status": "completed",
+      "started_at_ms": 1759480000400,
+      "ended_at_ms": 1759480000600
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Thinking",
+       "item_id": null,
+       "since_ms": 1759480000600,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000,
+       "state": "thinking"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 4,
+    "server_now_ms": 1759480000700,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:msg_1:0",
+      "kind": "message",
+      "rev": 3,
+      "item": {
+       "phase": "commentary"
+      }
+     },
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:toolu_1",
+      "kind": "tool",
+      "rev": 1,
+      "item": {
+       "id": "cl:toolu_1",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "tool",
+       "status": "running",
+       "ordinal": 2,
+       "started_at_ms": 1759480000700,
+       "ended_at_ms": null,
+       "tool": {
+        "name": "Bash",
+        "call_id": "toolu_1",
+        "category": "exec",
+        "group": null,
+        "label": "sleep 30",
+        "command": "sleep 30",
+        "input_preview": {},
+        "explain": null,
+        "output": null,
+        "diff": null
+       }
+      }
+     },
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-1",
+       "status": "running",
+       "started_at_ms": 1759480000000,
+       "ended_at_ms": null,
+       "worked_ms": null,
+       "tool_count": 1
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "tool": {
+        "name": "Bash",
+        "call_id": "toolu_1",
+        "label": "sleep 30",
+        "category": "exec",
+        "item_id": "cl:toolu_1",
+        "started_at_ms": 1759480000700
+       },
+       "running_tools": 1,
+       "headline": "Running sleep 30",
+       "item_id": "cl:toolu_1",
+       "since_ms": 1759480000700,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000,
+       "state": "tool"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 5,
+    "server_now_ms": 1759480009700,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:toolu_1",
+      "kind": "tool",
+      "rev": 2,
+      "status": "interrupted",
+      "started_at_ms": 1759480000700,
+      "ended_at_ms": 1759480009700
+     },
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-1",
+       "status": "interrupted",
+       "started_at_ms": 1759480000000,
+       "ended_at_ms": 1759480009700,
+       "worked_ms": 9700,
+       "tool_count": 1
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Interrupted",
+       "item_id": null,
+       "since_ms": 1759480009700,
+       "turn_id": "tr-1",
+       "turn_started_ms": null,
+       "state": "interrupted"
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "expect": {
+  "effects": [],
+  "lseq": 5,
+  "activity": {
+   "state": "interrupted",
+   "headline": "Interrupted",
+   "tool": null
+  },
+  "turn": {
+   "turn_id": "tr-1",
+   "status": "interrupted",
+   "worked_ms": 9700,
+   "ended_at_ms": 1759480009700
+  },
+  "items": [
+   {
+    "id": "cl:msg_1:0",
+    "status": "completed",
+    "text": "Running the tests."
+   },
+   {
+    "id": "cl:toolu_1",
+    "kind": "tool",
+    "status": "interrupted",
+    "ended_at_ms": 1759480009700,
+    "tool": {
+     "label": "sleep 30"
+    }
+   }
+  ]
+ }
+}
