@@ -40,7 +40,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 40
+HOST_CONTRACT = 41
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -102,6 +102,7 @@ FEATURES: tuple[str, ...] = (
     "oracle_gemini_voice",
     "artifact_pins",
     "push_grants",
+    "agent_fork",
 )
 
 
@@ -143,6 +144,7 @@ FEATURE_CONTRACTS["transcription_google_chirp"] = 35
 FEATURE_CONTRACTS["artifact_pins"] = 38
 FEATURE_CONTRACTS["oracle_gemini_voice"] = 36
 FEATURE_CONTRACTS["push_grants"] = 39
+FEATURE_CONTRACTS["agent_fork"] = 41
 
 
 def capabilities() -> dict[str, object]:
