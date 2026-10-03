@@ -482,6 +482,23 @@ impl RowCache {
 
 #[cfg(test)]
 mod tests {
+    /// The explorer's preview and activity lines are one line each: a helper
+    /// running a multi-line command must not spill over the next chat.
+    #[test]
+    fn explorer_lines_stay_on_one_line() {
+        let row = clarp_core::roster::AgentRow {
+            session: "jasper".into(),
+            name: "Jasper".into(),
+            busy: true,
+            status_text: "helper: python3 - <<'EOF'\np = 'core/tests/x.rs'\n\tassert_eq!(a, b)".into(),
+            last_message: "First line\n\nsecond line".into(),
+            ..Default::default()
+        };
+        let chat = super::chat_row(&row, 0, "");
+        assert_eq!(chat.activity.as_str(), "helper: python3 - <<'EOF' p = 'core/tests/x.rs' assert_eq!(a, b)");
+        assert_eq!(chat.preview.as_str(), "First line second line");
+    }
+
     use clarp_core::protocol::Message;
 
     /// An agent's reply with code blocks inside a numbered list (a real one,
