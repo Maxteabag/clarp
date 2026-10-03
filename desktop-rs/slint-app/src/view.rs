@@ -116,9 +116,15 @@ pub(crate) fn initial(name: &str) -> SharedString {
     name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into()
 }
 
+/// Text for a one-line slot: runs of whitespace (newlines and tabs too)
+/// become one space, since `overflow: elide` still draws every line.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str) -> ChatRow {
-    let preview = if !row.last_message.is_empty() { row.last_message.clone() } else { row.working_directory.clone() };
-    let activity = if row.busy && !row.status_text.is_empty() { row.status_text.clone() } else { String::new() };
+    let preview = one_line(if !row.last_message.is_empty() { &row.last_message } else { &row.working_directory });
+    let activity = if row.busy && !row.status_text.is_empty() { one_line(&row.status_text) } else { String::new() };
     ChatRow {
         session: row.session.clone().into(),
         initial: initial(&row.name),
