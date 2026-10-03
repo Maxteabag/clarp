@@ -134,6 +134,8 @@ pub fn live_check(out: String) {
             let line = status();
             check(line.starts_with("● Searching tokenize · 0:0") && line.ends_with(" +1"), &format!("a running tool with its elapsed time and +1 for the parallel one: {line:?}"));
             check(titles() == ["Thought for 4s: Finding the flaky test", "", "Exploring"], &format!("Thought for 4s, the commentary, one explore row: {:?}", titles()));
+            let frames = crate::live_view::PACER.with(|p| p.borrow().frames("live:cl:msg_01:1"));
+            check(frames >= 3, &format!("the commentary was revealed in word steps, not dropped in whole: {frames} frames"));
             replay(AFTER_COMMAND_START)
         })),
         ("command", Box::new(move |_, _window, elapsed| {
