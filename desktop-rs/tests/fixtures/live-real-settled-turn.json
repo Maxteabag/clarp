@@ -1,9 +1,9 @@
 {
  "title": "A real Claude helper turn as the Host recorded it (2026-10-03): GET /live after the turn settled and the GET /log rows of that turn. Each tool landed in /log as its own row whose tools[].id is the item's tool.call_id; the answer row's id is the message item's row_id.",
  "live": {
-  "conv": "c-mike",
-  "session": "mike",
-  "agent_id": "agent-mike",
+  "conv": "c-probe",
+  "session": "probe",
+  "agent_id": "agent-probe",
   "epoch": "26f356fdabe6",
   "lseq": 41,
   "server_now_ms": 1791028191878,
@@ -30,7 +30,7 @@
     "id": "cl:msg_011CffFZdevXjFVDAZK9REsx:0",
     "kind": "reasoning",
     "rev": 11,
-    "conv": "c-mike",
+    "conv": "c-probe",
     "turn_id": "537555728357bf76",
     "status": "completed",
     "ordinal": 1,
@@ -43,7 +43,7 @@
     "id": "cl:toolu_01RL4aA1EqQJ43Y7Ay7wuYXt",
     "kind": "tool",
     "rev": 6,
-    "conv": "c-mike",
+    "conv": "c-probe",
     "turn_id": "537555728357bf76",
     "status": "failed",
     "ordinal": 2,
@@ -80,7 +80,7 @@
     "id": "cl:msg_011CffFZyy46uzmYZ4oPGgfd:0",
     "kind": "reasoning",
     "rev": 13,
-    "conv": "c-mike",
+    "conv": "c-probe",
     "turn_id": "537555728357bf76",
     "status": "completed",
     "ordinal": 3,
@@ -93,7 +93,7 @@
     "id": "cl:toolu_01NHjm6d6UD9Xncd1t3gSZKG",
     "kind": "tool",
     "rev": 6,
-    "conv": "c-mike",
+    "conv": "c-probe",
     "turn_id": "537555728357bf76",
     "status": "completed",
     "ordinal": 4,
@@ -131,7 +131,7 @@
     "id": "cl:msg_011CffFaGNXmnoVdTuwgSXcv:0",
     "kind": "message",
     "rev": 3,
-    "conv": "c-mike",
+    "conv": "c-probe",
     "turn_id": "537555728357bf76",
     "status": "completed",
     "ordinal": 5,
@@ -148,7 +148,7 @@
   }
  },
  "log": {
-  "conversation_id": "c-mike",
+  "conversation_id": "c-probe",
   "turns": [
    {
     "id": "u-clarp-admin-23071c64bf0fc449",
