@@ -1,0 +1,232 @@
+// How a live turn reads on screen (docs/live-items.md §7): rows built from
+// the reducer's items, the settled-turn fold and the status line. Pure, so
+// the timing rules (600 ms output delay, quick-command collapse, Host-clock
+// timers) are tested without a browser.
+
+/** A running command shows its output only after this long. */
+export const TAIL_DELAY_MS = 600;
+/** A successful command quicker than this collapses to one line. */
+export const QUICK_COMMAND_MS = 1200;
+export const RUNNING_TAIL_LINES = 5;
+export const SETTLED_TAIL_LINES = 3;
+
+const pad2 = n => String(n).padStart(2, '0');
+
+/** `4s`, `1m 05s`, `1h 02m`: a settled duration. */
+export function formatDuration(ms) {
+  const s = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${pad2(s % 60)}s`;
+  return `${Math.floor(m / 60)}h ${pad2(m % 60)}m`;
+}
+
+/** `0:12`, `1:02:03`: a ticking timer. */
+export function clock(ms) {
+  const s = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h ? `${h}:${pad2(m)}:${pad2(s % 60)}` : `${m}:${pad2(s % 60)}`;
+}
+
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+const VERBS = {
+  exec: ['Running', 'Ran'],
+  read: ['Reading', 'Read'],
+  list: ['Listing', 'Listed'],
+  search: ['Searching', 'Searched'],
+  edit: ['Editing', 'Edited'],
+  write: ['Writing', 'Wrote'],
+  fetch: ['Fetching', 'Fetched'],
+  todo: ['Updating plan', 'Updated plan'],
+  mcp: ['Calling', 'Called'],
+  agent: ['Delegating', 'Delegated'],
+  other: ['Calling', 'Called'],
+};
+
+const isRunning = item => item.status === 'running' || item.status === 'pending';
+
+function elapsedMs(item, hostNow) {
+  if (!item.started_at_ms) return 0;
+  const end = item.ended_at_ms || (isRunning(item) ? hostNow : item.started_at_ms);
+  return Math.max(0, end - item.started_at_ms);
+}
+
+function secondaryLine(tool, explanations) {
+  const command = tool.command && tool.command !== tool.label ? String(tool.command) : '';
+  if (explanations && tool.explain && tool.explain.status === 'ready' && tool.explain.text) {
+    return String(tool.explain.text);
+  }
+  return command;
+}
+
+function outputTail(item, ms) {
+  const out = item.tool && item.tool.output;
+  if (!out || !Array.isArray(out.tail) || !out.tail.length) return { tail: [], more: 0 };
+  let n;
+  if (isRunning(item)) {
+    if (ms < TAIL_DELAY_MS) return { tail: [], more: 0 };
+    n = RUNNING_TAIL_LINES;
+  } else {
+    const clean = item.status === 'completed' && (out.exit_code === 0 || out.exit_code == null);
+    if (clean && ms < QUICK_COMMAND_MS) return { tail: [], more: 0 };
+    n = SETTLED_TAIL_LINES;
+  }
+  const tail = out.tail.slice(-n);
+  return { tail, more: Math.max(0, (Number(out.total_lines) || out.tail.length) - tail.length) };
+}
+
+function toolRow(item, { explanations, hostNow }) {
+  const tool = item.tool || {};
+  const running = isRunning(item);
+  const [live, done] = VERBS[tool.category] || VERBS.other;
+  const ms = elapsedMs(item, hostNow);
+  const exitCode = tool.output && tool.output.exit_code;
+  const diff = tool.diff && (tool.diff.added || tool.diff.removed)
+    ? `+${tool.diff.added || 0} −${tool.diff.removed || 0}` : '';
+  return {
+    type: 'tool',
+    id: item.id,
+    status: item.status,
+    running,
+    category: tool.category || 'other',
+    name: tool.name || '',
+    verb: running ? live : done,
+    label: tool.label || tool.name || '',
+    secondary: secondaryLine(tool, explanations),
+    elapsed: item.started_at_ms ? formatDuration(ms) : '',
+    exit: item.status === 'failed' && exitCode != null && exitCode !== 0 ? `exit ${exitCode}` : '',
+    diff,
+    diffPreview: (tool.diff && tool.diff.preview) || '',
+    ...outputTail(item, ms),
+    item,
+  };
+}
+
+function reasoningRow(item, hostNow) {
+  const running = isRunning(item);
+  const title = item.title ? `: ${item.title}` : '';
+  const label = running
+    ? `Thinking${title}`
+    : `Thought for ${formatDuration(elapsedMs(item, hostNow))}${title}`;
+  return { type: 'reasoning', id: item.id, status: item.status, running, label,
+    text: String(item.text || ''), item };
+}
+
+function exploreSummary(members) {
+  const counts = { read: 0, search: 0, list: 0 };
+  for (const m of members) counts[m.category] = (counts[m.category] || 0) + 1;
+  const parts = [];
+  if (counts.read) parts.push(plural(counts.read, 'file'));
+  if (counts.search) parts.push(plural(counts.search, 'search', 'searches'));
+  if (counts.list) parts.push(plural(counts.list, 'listing'));
+  return parts.length ? `Explored ${parts.join(', ')}` : 'Explored';
+}
+
+function worstStatus(members) {
+  if (members.some(m => m.running)) return 'running';
+  if (members.some(m => m.status === 'failed')) return 'failed';
+  if (members.some(m => m.status === 'interrupted')) return 'interrupted';
+  return 'completed';
+}
+
+/**
+ * The rows of a live turn, in ordinal order. Consecutive tools sharing a
+ * `group` become one explore row whose id is the group id, so it keeps its
+ * place (and its expand state) while it grows.
+ */
+export function liveRows(items, { explanations = true, now = Date.now(), skewMs = 0 } = {}) {
+  const hostNow = now + skewMs;
+  const rows = [];
+  for (const item of items) {
+    if (item.kind === 'tool') {
+      const row = toolRow(item, { explanations, hostNow });
+      const group = item.tool && item.tool.group;
+      const last = rows[rows.length - 1];
+      if (group && last && last.type === 'explore' && last.id === group) {
+        last.members.push(row);
+      } else if (group) {
+        rows.push({ type: 'explore', id: group, members: [row] });
+      } else {
+        rows.push(row);
+      }
+    } else if (item.kind === 'reasoning') {
+      rows.push(reasoningRow(item, hostNow));
+    } else if (item.kind === 'message') {
+      rows.push({ type: 'message', id: item.id, status: item.status, phase: item.phase || '',
+        streaming: isRunning(item), text: String(item.text || ''), rowId: item.row_id || '', item });
+    } else if (item.kind === 'plan' || item.kind === 'diff' || item.kind === 'compaction') {
+      rows.push({ type: item.kind, id: item.id, status: item.status, running: isRunning(item), item });
+    }
+  }
+  for (const row of rows) {
+    if (row.type !== 'explore') continue;
+    row.status = worstStatus(row.members);
+    row.running = row.status === 'running';
+    row.label = row.running ? 'Exploring' : exploreSummary(row.members);
+  }
+  return rows;
+}
+
+const SETTLED_TURN = new Set(['completed', 'failed', 'interrupted']);
+
+/**
+ * Fold a settled turn's work behind `Worked for …`: everything before the
+ * final answer, except failed or interrupted work, which stays in view.
+ * Null while the turn runs.
+ */
+export function settledFold(turn, rows) {
+  if (!turn || !SETTLED_TURN.has(turn.status)) return null;
+  let answer = -1;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].type === 'message') { answer = i; break; }
+  }
+  const folded = [];
+  const visible = [];
+  rows.forEach((row, i) => {
+    const keep = i >= answer || row.status === 'failed' || row.status === 'interrupted';
+    (keep ? visible : folded).push(row);
+  });
+  const worked = turn.worked_ms != null ? turn.worked_ms
+    : (turn.ended_at_ms && turn.started_at_ms ? turn.ended_at_ms - turn.started_at_ms : 0);
+  const tools = turn.tool_count != null ? turn.tool_count
+    : rows.reduce((n, r) => n + (r.type === 'explore' ? r.members.length : r.type === 'tool' ? 1 : 0), 0);
+  const lead = turn.status === 'interrupted' ? 'Stopped after' : 'Worked for';
+  const label = `${lead} ${formatDuration(worked)}${tools ? ` · ${plural(tools, 'tool')}` : ''}`;
+  return { label, folded, visible };
+}
+
+const STATUS_TEXT = {
+  thinking: 'Thinking',
+  responding: 'Responding',
+  tool: 'Working',
+  compacting: 'Compacting',
+  waiting: 'Needs your attention',
+  background: 'Background work',
+  limited: 'Waiting for the usage limit',
+};
+const INTERRUPTIBLE = new Set(['thinking', 'responding', 'tool', 'compacting']);
+
+/**
+ * The one status line: what is happening now, a timer from the Host clock
+ * and whether it can be interrupted. Null when nothing runs.
+ */
+export function statusLine(activity, { now = Date.now(), skewMs = 0 } = {}) {
+  const state = activity && activity.state;
+  if (!state || !STATUS_TEXT[state]) return null;
+  const hostNow = now + skewMs;
+  const tool = state === 'tool' ? activity.tool : null;
+  const since = (tool && tool.started_at_ms) || activity.turn_started_ms || activity.since_ms || 0;
+  const running = Number(activity.running_tools) || 0;
+  return {
+    state,
+    key: `${state}:${(tool && tool.item_id) || ''}`,
+    text: activity.headline || STATUS_TEXT[state],
+    since,
+    time: since ? clock(hostNow - since) : '',
+    more: tool && running > 1 ? `+${running - 1}` : '',
+    itemId: activity.item_id || '',
+    interrupt: INTERRUPTIBLE.has(state),
+  };
+}
