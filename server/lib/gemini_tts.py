@@ -1,4 +1,4 @@
-"""Gemini TTS (Gemini API `streamGenerateContent`) as an MP3 byte stream.
+"""Gemini TTS (`streamGenerateContent`, Gemini API or Vertex AI) as an MP3 byte stream.
 
 Gemini streams headerless 16-bit mono PCM at 24 kHz over SSE. The clip
 pipeline speaks MP3 (chunked-file delivery, `/audio/<name>.mp3` replay), so
@@ -12,6 +12,13 @@ gemini-3.8-flash-tts, slower than Cartesia; agents opt in through
     body: contents[].parts[].text, generationConfig.responseModalities=["AUDIO"],
           generationConfig.speechConfig.voiceConfig = prebuiltVoiceConfig.voiceName
           (or `voice` for a Voice Design id, `voice_...`)
+
+`backend="vertex"` sends the same body to the Vertex AI global endpoint with a
+Vertex express key. Its SSE stream carries the same PCM parts. Vertex has no
+fixed daily request cap for the model (the Gemini API Tier 1 allows 100 a
+day), but Voice Design ids exist only on the surface that created them.
+
+    POST https://aiplatform.googleapis.com/v1/publishers/google/models/<model>:streamGenerateContent?alt=sse
 """
 from __future__ import annotations
 
@@ -28,8 +35,13 @@ from typing import Callable, Iterator
 
 from .log import log_exception
 
-_URL = ("https://generativelanguage.googleapis.com/v1beta/models/"
-        "{model}:streamGenerateContent?alt=sse")
+_URLS = {
+    "gemini_api": ("https://generativelanguage.googleapis.com/v1beta/models/"
+                   "{model}:streamGenerateContent?alt=sse"),
+    # Regional endpoints (europe-west4) answer 404 for gemini-3.8-flash-tts.
+    "vertex": ("https://aiplatform.googleapis.com/v1/publishers/google/models/"
+               "{model}:streamGenerateContent?alt=sse"),
+}
 _SAMPLE_RATE = 24000
 _READ_BYTES = 16 * 1024
 # Gemini answers 429/500/503 under load ("high demand"). Nothing has been
@@ -79,6 +91,7 @@ def synthesize(*,
                out_path: pathlib.Path | None,
                api_key: str,
                model: str = "gemini-3.8-flash-tts",
+               backend: str = "gemini_api",
                timeout: float = 60.0,
                on_chunk: Callable[[int, bytes], None] | None = None,
                trace_id: str | None = None,
@@ -94,6 +107,8 @@ def synthesize(*,
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise GeminiTTSError("ffmpeg is required for Gemini TTS")
+    if backend not in _URLS:
+        raise GeminiTTSError(f"unknown Gemini TTS backend {backend!r}")
 
     body = json.dumps({
         "contents": [{"role": "user", "parts": [{"text": text}]}],
@@ -103,7 +118,7 @@ def synthesize(*,
         },
     }).encode("utf-8")
     req = urllib.request.Request(
-        _URL.format(model=model), data=body, method="POST",
+        _URLS[backend].format(model=model), data=body, method="POST",
         headers={"x-goog-api-key": api_key, "Content-Type": "application/json"})
 
     encoder = subprocess.Popen(
@@ -153,7 +168,8 @@ def synthesize(*,
                     if delay is None or e.code not in _RETRY_STATUS:
                         raise
                     _emit("gemini_tts", "retry", level="warn", trace_id=trace_id,
-                          detail={"status": e.code, "attempt": attempt + 1})
+                          detail={"status": e.code, "attempt": attempt + 1,
+                                  "backend": backend})
                     e.close()
                     time.sleep(delay)
             with resp:
@@ -162,6 +178,7 @@ def synthesize(*,
                         t_first_pcm.append(time.perf_counter())
                         _emit("gemini_tts", "firstChunk", trace_id=trace_id,
                               detail={"voice": voice, "model": model,
+                                      "backend": backend,
                                       "ttfb_ms": int((t_first_pcm[0] - t_start) * 1000)})
                     encoder.stdin.write(pcm)
         finally:
@@ -170,7 +187,7 @@ def synthesize(*,
         reader.join(timeout=30)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:300]
-        raise GeminiTTSError(f"Gemini HTTP {e.code}: {detail}") from e
+        raise GeminiTTSError(f"Gemini ({backend}) HTTP {e.code}: {detail}") from e
     except GeminiTTSError:
         raise
     except Exception as e:  # noqa: BLE001
@@ -188,6 +205,7 @@ def synthesize(*,
     if not t_first_pcm or produced["bytes"] == 0:
         raise GeminiTTSError("Gemini returned no audio")
     _emit("gemini_tts", "complete", trace_id=trace_id,
-          detail={"voice": voice, "model": model, "bytes": produced["bytes"],
+          detail={"voice": voice, "model": model, "backend": backend,
+                  "bytes": produced["bytes"],
                   "elapsed_ms": int((time.perf_counter() - t_start) * 1000)})
     return produced["bytes"]

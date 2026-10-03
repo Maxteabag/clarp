@@ -87,6 +87,29 @@ def test_gemini_provider_uses_contact_voice_map(env, providers, monkeypatch):
     assert providers == [{"provider": "gemini", "voice": "voice_mike"}]
 
 
+def test_vertex_backend_speaks_the_contacts_vertex_voice(env, monkeypatch):
+    from lib import config, gemini_tts
+    monkeypatch.setattr(config, "_CACHED", config.Config(
+        tts_provider="gemini", gemini_api_key="gemini-key",
+        gemini_backend="vertex", gemini_vertex_api_key="vertex-key",
+        gemini_voices={"Mike": "voice_mike", "Jax": "voice_jax"},
+        gemini_vertex_voices={"Mike": "voice_mike-vertex"},
+        tts_agent_overrides={"jax": {"provider": "gemini", "gemini_voice": "Charon"}}))
+    calls = []
+
+    def synth(*, text, out_path, on_chunk=None, **kw):
+        calls.append((kw["voice"], kw["api_key"], kw["backend"]))
+        pathlib.Path(out_path).write_bytes(b"\xff\xfb\x90\x00")
+        return 4
+
+    monkeypatch.setattr(gemini_tts, "synthesize", synth)
+    _speak(env, "mike", "mike-1")
+    _speak(env, "jax", "jax-1")
+    # The Gemini API id maps to Mike's Vertex voice; a prebuilt name passes.
+    assert calls == [("voice_mike-vertex", "vertex-key", "vertex"),
+                     ("Charon", "vertex-key", "vertex")]
+
+
 def test_gemini_voice_follows_cartesia_voice_or_stays_silent(env, providers, monkeypatch):
     from lib import config
     monkeypatch.setattr(config, "_CACHED", config.Config(
@@ -135,6 +158,30 @@ Arnold = "voice_arnold"
     assert cfg.tts_override_for({"persona": "jax"}) == {
         "provider": "gemini", "gemini_voice": "voice_abc"}
     assert cfg.tts_override_for({"persona": "Mike", "session": "mike-1"}) == {}
+    assert cfg.gemini_backend == "gemini_api"
+    assert cfg.gemini_tts_voice("voice_arnold") == "voice_arnold"
+
+
+def test_config_reads_the_vertex_backend(tmp_path):
+    from lib import config
+    path = tmp_path / "config.toml"
+    path.write_text('''
+[gemini_tts]
+api_key = "k"
+backend = "vertex"
+vertex_api_key = "vk"
+
+[gemini_tts.voices]
+Arnold = "voice_arnold"
+
+[gemini_tts.vertex_voices]
+Arnold = "voice_arnold-vertex"
+''')
+    cfg = config.load(path)
+    assert (cfg.gemini_backend, cfg.gemini_tts_key()) == ("vertex", "vk")
+    assert cfg.gemini_tts_voice("voice_arnold") == "voice_arnold-vertex"
+    # Gemini Live (Oracle) keeps the Gemini API id.
+    assert cfg.gemini_voice_for("Arnold") == "voice_arnold"
 
 
 def test_gemini_sse_stream_yields_pcm_and_surfaces_errors():
@@ -173,3 +220,30 @@ def test_gemini_retries_a_busy_response_before_any_audio(monkeypatch, tmp_path):
     out = tmp_path / "clip.mp3"
     assert gemini_tts.synthesize(text="hi", voice="Kore", out_path=out, api_key="k") > 0
     assert len(calls) == 2 and out.stat().st_size > 0
+
+
+def test_gemini_vertex_backend_posts_to_the_global_vertex_endpoint(monkeypatch, tmp_path):
+    import io, shutil
+    from lib import gemini_tts
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    chunk = {"candidates": [{"content": {"parts": [{"inlineData": {
+        "data": base64.b64encode(b"\x00\x00" * 2400).decode()}}]}}]}
+    seen = []
+
+    class Body(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_urlopen(req, timeout):
+        seen.append((req.full_url, req.get_header("X-goog-api-key"),
+                     json.loads(req.data)["generationConfig"]["speechConfig"]))
+        return Body(("data: " + json.dumps(chunk) + "\n").encode())
+
+    monkeypatch.setattr(gemini_tts.urllib.request, "urlopen", fake_urlopen)
+    assert gemini_tts.synthesize(text="hi", voice="voice_abc-123", out_path=tmp_path / "c.mp3",
+                                 api_key="vk", backend="vertex") > 0
+    assert seen == [(
+        "https://aiplatform.googleapis.com/v1/publishers/google/models/"
+        "gemini-3.8-flash-tts:streamGenerateContent?alt=sse",
+        "vk", {"voiceConfig": {"voice": "voice_abc-123"}})]
