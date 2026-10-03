@@ -150,11 +150,11 @@ export default ({ command }) => ({
     emptyOutDir: false,
     assetsDir: 'app',
     target: 'es2022',
-    // One chunk, and no content hash in the filename. Hashing would buy
-    // nothing here — the server sends Cache-Control: no-store on every file
-    // and the service worker's cache name is already derived from the newest
-    // static mtime — while a hashed name cannot be listed in sw.js's offline
-    // shell, which has to be a literal path.
+    // One chunk, and no content hash in the filename: the checked-in
+    // static/index.html and the Tauri shell (frontendDist) load it by this
+    // literal path. The Host puts the content hash in the URL instead — it
+    // serves index.html with every /static reference rewritten to
+    // `?v=<hash>` and those URLs as immutable (server/lib/static_assets.py).
     rollupOptions: {
       output: {
         inlineDynamicImports: true,
