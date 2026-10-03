@@ -256,7 +256,7 @@ fn show(window: &AppWindow, state: &State) {
             // Raised over the line's top so the link's letters still show
             // below it.
             let y = (piece.y - RAISE).max(state.top);
-            Some(LinkBadge { dim: !label.starts_with(&state.typed), label: label.into(), url: piece.url.clone().into(), x: piece.x, y })
+            Some(LinkBadge { dim: !label.starts_with(&state.typed), label: label.into(), url: piece.url.clone().into(), card: Default::default(), x: piece.x, y })
         })
         .collect();
     hints.set_badges(ModelRc::new(VecModel::from(badges)));

@@ -191,6 +191,7 @@ export component KeyHint inherits Rectangle {
     border-radius: 4px;
     background: area.has-hover ? Palette.hover : root.chosen ? Palette.accent.with-alpha(0.16) : transparent;
     accessible-role: button;
+    accessible-id: "key-hint";
     accessible-label: root.key + " " + root.label;
     accessible-action-default => { root.clicked(); }
     row := HorizontalLayout {

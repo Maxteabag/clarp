@@ -233,18 +233,18 @@ fn html_form_stages(out: &str) -> Vec<Stage> {
             check(true, "K again moves up the cards, one at a time");
             headless::press("j");
             headless::press("k");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("form opens in the browser", Box::new(move |_, _, elapsed| {
             let Some(url) = opened().into_iter().find(|u| u.contains("/form/")) else {
                 if elapsed > Duration::from_secs(3) {
-                    check(false, &format!("Enter opens the form in the browser: {:?}", opened()));
+                    check(false, &format!("O opens the form in the browser: {:?}", opened()));
                     return true;
                 }
                 return false;
             };
-            check(url.starts_with("http://127.0.0.1:"), &format!("Enter opens the form from a loopback page: {url}"));
+            check(url.starts_with("http://127.0.0.1:"), &format!("O opens the form from a loopback page: {url}"));
             let page = fetch("GET", &url, "", None);
             let page_ok = page.as_ref().is_ok_and(|(status, body)| {
                 *status == 200 && body.contains("name=\"destination\"") && body.contains("window.clarpForm") && body.contains("Content-Security-Policy")
@@ -437,7 +437,7 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             let ship = card(window, "dec-deploy").map(|c| c.chosen).unwrap_or(-2);
             check(hold == 1 && ship == 0, &format!("2 chooses Hold, 1 Ship it: {hold} {ship}"));
             check(posts("/decisions/d-deploy/resolve").is_empty(), "choosing sends nothing yet");
-            headless::press(slint::platform::Key::Return);
+            headless::press("1");
             true
         })),
         ("decision sent", Box::new(|_, window, elapsed| {
@@ -447,7 +447,7 @@ fn decision_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             let body = sent.last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
-            check(body == json!({"choice": "accepted", "expected_revision": 4}), &format!("Enter approves against the revision seen: {body}"));
+            check(body == json!({"choice": "accepted", "expected_revision": 4}), &format!("1 again approves against the revision seen: {body}"));
             check(shown, &format!("the card shows it approved: {:?}", card(window, "dec-deploy").map(|c| c.resolved)));
             // The other ways in: a refused answer, and discarding.
             let bridge = window.global::<ArtifactBridge>();
@@ -565,7 +565,7 @@ fn question_stages(out: &str) -> Vec<Stage> {
             headless::press("2");
             let chosen = card(window, "q-trip").map(|c| c.chosen).unwrap_or(-2);
             check(chosen == 1 && posts("/decisions/q-trip/resolve").is_empty(), &format!("2 chooses Tromsø and sends nothing yet: {chosen}"));
-            headless::press(slint::platform::Key::Return);
+            headless::press("2");
             true
         })),
         ("question answered", Box::new(|_, window, elapsed| {
@@ -575,7 +575,7 @@ fn question_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             let body = sent.last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
-            check(body == json!({"answer": {"option_id": "tromso"}, "expected_revision": 7}), &format!("Enter sends the chosen option: {body}"));
+            check(body == json!({"answer": {"option_id": "tromso"}, "expected_revision": 7}), &format!("2 again sends the chosen option: {body}"));
             check(shown, "the card shows the answer saved");
             headless::press("j");
             true
@@ -752,12 +752,12 @@ fn plan_stages(out: &str) -> Vec<Stage> {
             }
             shot(&out, "artifacts-05-plan");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("plan opens", Box::new(move |_, window, elapsed| {
             if window.get_overlay() != "report" {
-                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the plan: overlay {:?}", window.get_overlay())); true };
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("O opens the plan: overlay {:?}", window.get_overlay())); true };
             }
             check(window.get_report_title() == "Ship the Slint desktop client to the beta group before the end of the quarter", "the plan opens in the report viewer, under its title");
             check(window.get_report_summary() == "Ship 2.0 · Beta testers on the Slint app · 2/5 done", &format!("with its plan, goal and progress: {:?}", window.get_report_summary()));
@@ -837,12 +837,12 @@ fn document_stages(out: &str) -> Vec<Stage> {
             }
             shot(&out, "artifacts-06-document");
             headless::press("k");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("document opens", Box::new(move |_, window, elapsed| {
             if window.get_overlay() != "report" {
-                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the document: overlay {:?}", window.get_overlay())); true };
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("O opens the document: overlay {:?}", window.get_overlay())); true };
             }
             let blocks = window.get_report_blocks().row_count();
             check(window.get_report_title() == "A very long report" && blocks >= 200, &format!("the whole document in the report viewer: {:?}, {blocks} blocks", window.get_report_title()));
@@ -904,12 +904,12 @@ fn research_stages(out: &str) -> Vec<Stage> {
             }
             shot(&out, "artifacts-07-research");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("research opens", Box::new(move |_, window, elapsed| {
             if window.get_overlay() != "report" {
-                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the research: overlay {:?}", window.get_overlay())); true };
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("O opens the research: overlay {:?}", window.get_overlay())); true };
             }
             check(window.get_report_title().starts_with("Desktop agent clients in 2026") && window.get_report_kind() == "RESEARCH", &format!("in the report viewer, as research: {:?}", window.get_report_kind()));
             shot(&out2, "artifacts-07b-research-open");
@@ -965,12 +965,12 @@ fn code_change_stages(out: &str) -> Vec<Stage> {
             }
             shot(&out, "artifacts-08-code-change");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("code opens", Box::new(move |_, window, elapsed| {
             if window.get_overlay() != "report" {
-                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the change: overlay {:?}", window.get_overlay())); true };
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("O opens the change: overlay {:?}", window.get_overlay())); true };
             }
             let blocks: Vec<crate::MessageBlock> = window.get_report_blocks().iter().collect();
             let diff = blocks.iter().find(|b| b.kind == "code").map(|b| b.text.to_string()).unwrap_or_default();
@@ -1036,12 +1036,12 @@ fn data_stages(out: &str) -> Vec<Stage> {
             }
             shot(&out, "artifacts-09-data");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("data opens", Box::new(move |_, window, elapsed| {
             if window.get_overlay() != "report" {
-                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the table: overlay {:?}", window.get_overlay())); true };
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("O opens the table: overlay {:?}", window.get_overlay())); true };
             }
             let tables: Vec<usize> = window.get_report_blocks().iter().filter(|b| b.kind == "table").map(|b| b.rows.row_count()).collect();
             // The chart (bar: a row per category) and the grid (header and 120 rows).
@@ -1105,13 +1105,13 @@ fn audio_stages(out: &str) -> Vec<Stage> {
             idle.set(height_of(app, "aud-brief"));
             shot(&out_idle, "artifacts-10a-audio-idle");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("audio plays", Box::new(move |app, window, elapsed| {
             let brief = card(window, "aud-brief").expect("brief");
             if brief.media_state != "playing" || elapsed < Duration::from_millis(1600) {
-                return elapsed > Duration::from_secs(4) && { check(false, &format!("Enter plays it: {:?} {:?}", brief.media_state, brief.media_text)); true };
+                return elapsed > Duration::from_secs(4) && { check(false, &format!("O plays it: {:?} {:?}", brief.media_state, brief.media_text)); true };
             }
             let fetched = super::requests("GET", "/media/aud1");
             check(fetched.last().is_some_and(|r| r["authorization"] == "Bearer probe-token"), "the clip comes from the Host with the app's token");
@@ -1122,18 +1122,18 @@ fn audio_stages(out: &str) -> Vec<Stage> {
             let (before, now) = (idle2.get(), height_of(app, "aud-brief"));
             check(before > 0.0 && (before - now).abs() < 0.5, &format!("playing keeps the card's height: {before} then {now}"));
             shot(&out, "artifacts-10-audio");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("audio paused", Box::new(move |app, window, elapsed| {
             let brief = card(window, "aud-brief").expect("brief");
             if brief.media_state != "paused" {
-                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter again pauses it: {:?}", brief.media_state)); true };
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("O again pauses it: {:?}", brief.media_state)); true };
             }
             check(brief.media_text == "Paused" && brief.action == "Play" && brief.media_played >= 1, &format!("paused where it was: {:?} {}s", brief.media_text, brief.media_played));
             let (before, now) = (idle3.get(), height_of(app, "aud-brief"));
             check((before - now).abs() < 0.5, &format!("pausing keeps it: {before} then {now}"));
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("audio resumes", Box::new(|_, window, elapsed| {
@@ -1220,13 +1220,13 @@ fn video_stages(out: &str) -> Vec<Stage> {
             check(card(window, "vid-plain").is_some_and(|c| !c.has_poster), "a video without a poster keeps its placeholder");
             shot(&out, "artifacts-11-video");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("video opens", Box::new(|_, window, elapsed| {
             let found = opened().into_iter().find(|u| u.starts_with("file://") && u.ends_with("cards-demo.mp4"));
             let Some(url) = found else {
-                return elapsed > Duration::from_secs(4) && { check(false, &format!("Enter opens the video in the system's player: {:?}", opened())); true };
+                return elapsed > Duration::from_secs(4) && { check(false, &format!("O opens the video in the system's player: {:?}", opened())); true };
             };
             let fetched = super::requests("GET", "/media/vid1");
             check(fetched.last().is_some_and(|r| r["authorization"] == "Bearer probe-token"), "the video comes from the Host with the app's token");
@@ -1241,7 +1241,7 @@ fn video_stages(out: &str) -> Vec<Stage> {
             if !gone.starts_with("Couldn't download") {
                 return elapsed > Duration::from_secs(3) && { check(false, &format!("an expired video says so: {gone:?}")); true };
             }
-            check(gone.contains("404"), &format!("an expired video says why, and Enter tries again: {gone:?}"));
+            check(gone.contains("404"), &format!("an expired video says why, and O tries again: {gone:?}"));
             true
         })),
     ]);
@@ -1284,13 +1284,13 @@ fn file_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("file opens", Box::new(move |_, window, elapsed| {
             let found = opened().into_iter().find(|u| u.starts_with("file://") && u.ends_with("contract-2026-signed.pdf"));
             let Some(url) = found else {
-                return elapsed > Duration::from_secs(4) && { check(false, &format!("Enter opens the file with the desktop's app: {:?}", opened())); true };
+                return elapsed > Duration::from_secs(4) && { check(false, &format!("O opens the file with the desktop's app: {:?}", opened())); true };
             };
             let fetched = super::requests("GET", "/media/pdf1");
             check(fetched.last().is_some_and(|r| r["authorization"] == "Bearer probe-token"), "the file comes from the Host with the app's token");
@@ -1305,7 +1305,7 @@ fn file_stages(out: &str) -> Vec<Stage> {
             if !gone.starts_with("Couldn't download") {
                 return elapsed > Duration::from_secs(3) && { check(false, &format!("an expired file says so: {gone:?}")); true };
             }
-            check(gone.contains("404"), &format!("an expired file says why, and Enter tries again: {gone:?}"));
+            check(gone.contains("404"), &format!("an expired file says why, and O tries again: {gone:?}"));
             true
         })),
     ]);
@@ -1349,12 +1349,12 @@ fn release_stages(out: &str) -> Vec<Stage> {
             }
             shot(&out, "artifacts-13-release");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("release opens", Box::new(move |_, window, elapsed| {
             if window.get_overlay() != "report" {
-                return elapsed > Duration::from_secs(2) && { check(false, &format!("Enter opens the release: overlay {:?}", window.get_overlay())); true };
+                return elapsed > Duration::from_secs(2) && { check(false, &format!("O opens the release: overlay {:?}", window.get_overlay())); true };
             }
             let blocks: Vec<crate::MessageBlock> = window.get_report_blocks().iter().collect();
             // iOS's detail: version, build, revision, repository, then the notes and a link.
@@ -1441,15 +1441,15 @@ fn directory_stages(out: &str) -> Vec<Stage> {
             }
             shot(&out, "artifacts-14-directory");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("directory opens", Box::new(move |app, window, elapsed| {
             let expected = std::fs::canonicalize(std::path::Path::new(&workspace2).join("build/out")).map(|p| format!("file://{}", p.display())).unwrap_or_default();
             if !opened().contains(&expected) {
-                return elapsed > Duration::from_secs(3) && { check(false, &format!("Enter opens the folder in the file manager: want {expected}, got {:?}", opened())); true };
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("O opens the folder in the file manager: want {expected}, got {:?}", opened())); true };
             }
-            check(true, "Enter opens the folder in the file manager");
+            check(true, "O opens the folder in the file manager");
             // A link that leads out of the agent's folder is not followed.
             let before = opened().len();
             window.global::<ArtifactBridge>().invoke_open("dir-link".into());
@@ -1509,15 +1509,15 @@ fn workflow_stages(out: &str) -> Vec<Stage> {
             }
             shot(&out, "artifacts-15-workflow");
             headless::press("j");
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             true
         })),
         ("workflow opens", Box::new(|_, _, elapsed| {
             let url = "https://github.com/example/clarp/actions/runs/901".to_owned();
             if !opened().contains(&url) {
-                return elapsed > Duration::from_secs(3) && { check(false, &format!("Enter opens the run on GitHub: {:?}", opened())); true };
+                return elapsed > Duration::from_secs(3) && { check(false, &format!("O opens the run on GitHub: {:?}", opened())); true };
             }
-            check(true, "Enter opens the run on GitHub");
+            check(true, "O opens the run on GitHub");
             true
         })),
     ]);
@@ -1721,7 +1721,7 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
             }
             let before = (opened().len(), window.get_overlay().to_string());
             let gone = !crate::artifacts_view::on_screen(app).contains(&app.artifact_cursor.borrow());
-            headless::press(slint::platform::Key::Return);
+            headless::press("o");
             let after = (opened().len(), window.get_overlay().to_string());
             check(gone && crate::artifacts_view::selected(app).is_none() && before == after, &format!("a selected card scrolled off screen is not acted on: off {gone}, {before:?} then {after:?}"));
             check(selected(window).is_empty(), "and shows no selection");
