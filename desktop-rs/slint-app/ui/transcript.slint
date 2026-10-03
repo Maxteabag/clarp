@@ -187,6 +187,7 @@ export component Block inherits VerticalLayout {
                             default-font-size: root.body-size * 0.95;
                             default-font-family: Palette.body-family;
                             link-color: Palette.link;
+                            link-clicked(url) => { root.link-clicked(url); }
                         }
                     }
                 }

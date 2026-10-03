@@ -62,7 +62,7 @@ fn parent(state: &str) -> Option<&'static str> {
         "workspace" | "settings" | "updates" | "teams" => "main",
         "navigation" | "composer" | "search" => "workspace",
         "pane" | "sidebar" => "navigation",
-        "modal" | "launch" | "blocked" => "root",
+        "modal" | "launch" | "blocked" | "hints" => "root",
         _ => return None,
     })
 }
@@ -120,6 +120,8 @@ fn state(name: &str) -> Vec<Binding> {
             b("release-agent", &["Ctrl+Shift+R"], "Release", false, Agent, false),
             b("stop-agent", &["Ctrl+.", "Ctrl+C"], "Stop", false, Agent, false),
             b("talk", &["Ctrl+Shift+Space"], "Talk", false, Agent, false),
+            // Link hints, from the composer too.
+            b("link-hints", &["Ctrl+L"], "Open a link", false, Always, false),
         ],
         "navigation" => vec![
             b("next-attention", &["N", "Ctrl+J"], "Next attention", true, Attention, false),
@@ -128,6 +130,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("focus-composer", &["I"], "Insert", false, Agent, false),
             b("toggle-focus", &["Tab", "Shift+Tab"], "Switch focus", false, Always, false),
             b("switcher", &["Space", "Ctrl+K"], "Commands", true, Always, false),
+            b("link-hints", &["F", "Ctrl+L"], "Open a link", false, Always, false),
             b("escape", &["Escape"], "Chat", false, Always, false),
         ],
         "pane" => vec![
@@ -200,11 +203,20 @@ fn state(name: &str) -> Vec<Binding> {
             b("escape", &["Escape"], "Back", true, Always, false),
         ],
         "modal" => vec![b("escape", &["Escape"], "Close", true, Always, false)],
+        // Link hints show: digits pick a link (the bar says which), Enter
+        // opens a number that also starts a longer one; any other key
+        // cancels.
+        "hints" => vec![
+            b("hint-digit", &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"], "Open", true, Always, false),
+            b("hint-open", &["Return"], "Open", false, Always, false),
+            b("hint-back", &["Backspace"], "Undo digit", false, Always, false),
+            b("hint-cancel", &["Escape"], "Cancel", true, Always, false),
+        ],
         _ => Vec::new(),
     }
 }
 
-pub const STATES: &[&str] = &["root", "main", "workspace", "navigation", "pane", "sidebar", "composer", "search", "settings", "updates", "teams", "launch", "modal", "blocked"];
+pub const STATES: &[&str] = &["root", "main", "workspace", "navigation", "pane", "sidebar", "composer", "search", "settings", "updates", "teams", "launch", "modal", "blocked", "hints"];
 
 /// What the guards test.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -420,6 +432,12 @@ mod tests {
         assert_eq!(action_for("composer", "Return", &none, all()), None, "the composer sends by itself");
         assert_eq!(action_for("composer", "Ctrl+Alt+V", &none, all()), Some("split-right"));
         assert!(resolve("blocked", &none, Some(all())).is_empty());
+        assert_eq!(action_for("pane", "F", &none, all()), Some("link-hints"));
+        assert_eq!(action_for("composer", "Ctrl+L", &none, all()), Some("link-hints"), "the chord works while typing");
+        assert_eq!(action_for("composer", "F", &none, all()), None, "F types in the composer");
+        assert_eq!(action_for("hints", "7", &none, all()), Some("hint-digit"));
+        assert_eq!(action_for("hints", "Escape", &none, all()), Some("hint-cancel"));
+        assert_eq!(action_for("hints", "Ctrl+K", &none, all()), None, "hints own the keyboard");
     }
 
     #[test]

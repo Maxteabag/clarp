@@ -140,11 +140,14 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
 }
 
 /// Inline Markdown as Slint styled text; plain text if Slint cannot parse it.
+/// Bare web addresses are links, in literal text too (the user's own
+/// words), so a click or a link hint opens them.
 pub(crate) fn styled(markdown: &str, literal: bool) -> slint::StyledText {
+    let plain = || slint::StyledText::from_plain_text(markdown);
     if literal {
-        return slint::StyledText::from_plain_text(markdown);
+        return clarp_engine::blocks::literal_with_links(markdown).and_then(|m| slint::StyledText::from_markdown(&m).ok()).unwrap_or_else(plain);
     }
-    slint::StyledText::from_markdown(markdown).unwrap_or_else(|_| slint::StyledText::from_plain_text(markdown))
+    slint::StyledText::from_markdown(&clarp_engine::blocks::linkify(markdown)).or_else(|_| slint::StyledText::from_markdown(markdown)).unwrap_or_else(|_| plain())
 }
 
 pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) -> MessageBlock {
@@ -408,5 +411,16 @@ mod tests {
                 assert!(parsed.is_ok(), "Slint parses this prose as Markdown ({:?}):\n{markdown}", parsed.err().map(|e| e.to_string()));
             }
         }
+    }
+
+    /// Bare web addresses become links Slint can parse, in replies and in
+    /// the user's literal text (escaped punctuation, kept blank lines).
+    #[test]
+    fn bare_addresses_parse_as_links() {
+        let reply = clarp_engine::blocks::linkify("Raw: https://bare.example/path?x=1. and [guide](https://example.com/guide)");
+        assert!(slint::StyledText::from_markdown(&reply).is_ok(), "{reply}");
+        let literal = clarp_engine::blocks::literal_with_links("Check https://user.example/page *now*\n\n  1. [x](y) <b> # `c`\n> q").expect("a link");
+        let parsed = slint::StyledText::from_markdown(&literal);
+        assert!(parsed.is_ok(), "{literal:?}: {:?}", parsed.err().map(|e| e.to_string()));
     }
 }

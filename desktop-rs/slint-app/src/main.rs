@@ -10,6 +10,7 @@ mod commands;
 mod driver;
 mod headless;
 mod keymap;
+mod link_hints;
 mod launch;
 mod panes;
 mod perf;
@@ -720,6 +721,7 @@ fn main() {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             let report = panes::Report { follows, at_end, offset, transcript_focused: transcript, composer_focused: composer };
             app.reported(&pane, report);
+            link_hints::reported(&window, &pane, offset, &app.active_id());
             commands::show_hints(&app, &window);
         }
     });

@@ -86,6 +86,7 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         command("Agents: unread only", "list-unread", "", "view", "sidebar list scope filter new"),
         command("Agent conversations (agent to agent)", "list-rooms", "", "view", "pairs rooms sidebar"),
         command("Archived agents", "list-archive", "", "view", "archive restore old sidebar"),
+        command("Open a link", "link-hints", "F", "view", "links hints url urls browser follow number numbers vimium web"),
         command("Jump to latest", "jump-latest", "Ctrl+End", "view", "bottom newest scroll follow"),
         command("Retry latest failed message", "retry-message", "Ctrl+Alt+R", "view", "resend send delivery not delivered"),
         command("Dismiss conversation error", "dismiss-error", "Esc", "view", "clear close error warning banner voice synthesis failed"),

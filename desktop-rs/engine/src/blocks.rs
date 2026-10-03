@@ -166,6 +166,126 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
     out
 }
 
+/// Where a bare web address in `text` starting at `start` ends: up to the
+/// first space or angle bracket, without the sentence's closing punctuation
+/// (a `)` stays when the address opened one).
+fn url_end(text: &str, start: usize) -> usize {
+    let rest = &text[start..];
+    let mut end = start + rest.find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`')).unwrap_or(rest.len());
+    loop {
+        let url = &text[start..end];
+        let Some(last) = url.chars().last() else { return end };
+        let unbalanced = |open: char, close: char| last == close && url.matches(open).count() < url.matches(close).count();
+        if matches!(last, '.' | ',' | ';' | ':' | '!' | '?' | '\'' | '*' | '_' | '~') || unbalanced('(', ')') || unbalanced('[', ']') {
+            end -= last.len_utf8();
+        } else {
+            return end;
+        }
+    }
+}
+
+/// The bare web addresses in `text` as byte ranges, skipping `skip`ped ones.
+fn bare_urls(text: &str, skip: &[std::ops::Range<usize>]) -> Vec<std::ops::Range<usize>> {
+    let mut found = Vec::new();
+    let mut from = 0;
+    while let Some(at) = text[from..].find("http").map(|i| i + from) {
+        let scheme = ["https://", "http://"].iter().find(|s| text[at..].starts_with(*s)).map(|s| s.len());
+        let boundary = text[..at].chars().last().is_none_or(|c| !c.is_alphanumeric());
+        match scheme {
+            Some(length) if boundary && !skip.iter().any(|r| r.contains(&at)) => {
+                let end = url_end(text, at);
+                if end > at + length {
+                    found.push(at..end);
+                }
+                from = end.max(at + length);
+            }
+            _ => from = at + 4,
+        }
+    }
+    found
+}
+
+/// `markdown` with its bare web addresses made links (`<https://…>`), as
+/// GitHub shows them; addresses already in a link or code are left alone.
+pub fn linkify(markdown: &str) -> String {
+    let mut skip = Vec::new();
+    let mut link_start = None;
+    for (event, range) in Parser::new_ext(markdown, options()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Link { .. } | Tag::Image { .. }) => {
+                link_start.get_or_insert(range.start);
+            }
+            Event::End(TagEnd::Link | TagEnd::Image) => {
+                if let Some(start) = link_start.take() {
+                    skip.push(start..range.end);
+                }
+            }
+            Event::Code(_) | Event::Html(_) | Event::InlineHtml(_) => skip.push(range),
+            Event::Start(Tag::CodeBlock(_)) => skip.push(range),
+            _ => {}
+        }
+    }
+    let mut out = String::with_capacity(markdown.len() + 16);
+    let mut copied = 0;
+    for url in bare_urls(markdown, &skip) {
+        out.push_str(&markdown[copied..url.start]);
+        out.push('<');
+        out.push_str(&markdown[url.clone()]);
+        out.push('>');
+        copied = url.end;
+    }
+    out.push_str(&markdown[copied..]);
+    out
+}
+
+/// Literal text (the user's own words) as Markdown whose only formatting is
+/// its web addresses as links, or None when it has none. Every other
+/// punctuation mark is escaped, so nothing else becomes Markdown; blank
+/// lines and leading spaces are kept with no-break spaces.
+pub fn literal_with_links(text: &str) -> Option<String> {
+    let urls = bare_urls(text, &[]);
+    if urls.is_empty() {
+        return None;
+    }
+    let escape = |plain: &str, out: &mut String| {
+        let mut line_start = out.is_empty() || out.ends_with('\n');
+        for c in plain.chars() {
+            match c {
+                '\n' => {
+                    // An empty line would end the paragraph and vanish.
+                    if line_start {
+                        out.push('\u{a0}');
+                    }
+                    out.push('\n');
+                    line_start = true;
+                    continue;
+                }
+                ' ' | '\t' if line_start => {
+                    out.push('\u{a0}');
+                    continue;
+                }
+                c if c.is_ascii_punctuation() => {
+                    out.push('\\');
+                    out.push(c);
+                }
+                c => out.push(c),
+            }
+            line_start = false;
+        }
+    };
+    let mut out = String::with_capacity(text.len() * 2);
+    let mut copied = 0;
+    for url in urls {
+        escape(&text[copied..url.start], &mut out);
+        out.push('<');
+        out.push_str(&text[url.clone()]);
+        out.push('>');
+        copied = url.end;
+    }
+    escape(&text[copied..], &mut out);
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +333,24 @@ mod tests {
         assert_eq!(blocks("Hello there"), vec![Block::Prose("Hello there".into())]);
         assert_eq!(blocks(""), vec![]);
         assert_eq!(blocks("One\n\nTwo"), vec![Block::Prose("One\n\nTwo".into())]);
+    }
+
+    #[test]
+    fn bare_web_addresses_become_links() {
+        assert_eq!(linkify("Raw: https://bare.example/path?x=1."), "Raw: <https://bare.example/path?x=1>.");
+        assert_eq!(linkify("See (https://example.com/a_(b)) now"), "See (<https://example.com/a_(b)>) now");
+        assert_eq!(linkify("**https://example.com/x**"), "**<https://example.com/x>**");
+        // Already links, or code: untouched.
+        let kept = "[guide](https://example.com/guide), <https://example.com/a>, `https://example.com/code` and [https://x.example](https://x.example)";
+        assert_eq!(linkify(kept), kept);
+        assert_eq!(linkify("no links here, just http talk"), "no links here, just http talk");
+        assert_eq!(linkify("xhttps://example.com"), "xhttps://example.com", "only at a word's start");
+    }
+
+    #[test]
+    fn literal_text_keeps_its_characters_and_gets_links() {
+        assert_eq!(literal_with_links("no address *here*"), None);
+        let markdown = literal_with_links("Also check https://user.example/page please, **now**\n\n  - ok").expect("has a link");
+        assert_eq!(markdown, "Also check <https://user.example/page> please\\, \\*\\*now\\*\\*\n\u{a0}\n\u{a0}\u{a0}\\- ok");
     }
 }
