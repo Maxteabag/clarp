@@ -22,7 +22,7 @@
   import {
     audio, initAudio, PLAYER_ADAPTER_VERSION, unlockAudio,
   } from './stores/audio.svelte.js';
-  import { ensureLoaded, markTurnFailed } from './stores/conversations.svelte.js';
+  import { ensureLoaded, markTurnFailed, setBusyProbe } from './stores/conversations.svelte.js';
   import { bindDeliveryFailure } from './stores/delivery.svelte.js';
   import {
     resumeAudioContext, teardownMic, toggleRecord,
@@ -91,6 +91,10 @@
       stopAgent: stopAgentTurn,
       closeOverview: () => { overviewOpen = false; },
     });
+
+    // No transcript cache writes while an agent works (a streaming turn
+    // changes the chat many times a second).
+    setBusyProbe(session => !!(app.status[session] && app.status[session].busy));
 
     // Bootstrap per docs/protocol.md: snapshot, then the open chat, then the
     // event stream (which itself refetches the snapshot on connect).

@@ -10,16 +10,19 @@
   import { live, setExplanationsEnabled } from '../stores/live.svelte.js';
   import { prefs, toggleTools } from '../stores/prefs.svelte.js';
 
-  let { session, showConnDot = false, onTapAgent, onHoldAgent } = $props();
+  // `active` is false for a chat kept mounted behind the open one: it keeps
+  // its DOM and scroll position but is hidden and gives up the element ids.
+  let { session, showConnDot = false, onTapAgent, onHoldAgent, active = true } = $props();
 </script>
 
-<section id="history" class="history" aria-label="Conversation">
+<section id={active ? 'history' : undefined} class="history" class:hidden={!active}
+         aria-label="Conversation" aria-hidden={active ? undefined : 'true'}>
   <header class="history-head">
     <AgentIdentity {session} onTap={onTapAgent} onHold={onHoldAgent} />
     {#if showConnDot}<ConnDot />{/if}
     <div class="history-actions">
       <button
-        id="historyToolsToggle"
+        id={active ? 'historyToolsToggle' : undefined}
         class="history-btn"
         class:active={!prefs.hideTools}
         aria-label="Toggle tools"
@@ -30,7 +33,7 @@
         <!-- Host setting (docs/live-items.md §6): tool rows show a plain-language
              explanation under the command, or the raw command when off. -->
         <button
-          id="historyExplainToggle"
+          id={active ? 'historyExplainToggle' : undefined}
           class="history-btn"
           class:active={live.explanations.enabled}
           aria-pressed={live.explanations.enabled}
@@ -39,11 +42,11 @@
           onclick={() => setExplanationsEnabled(!live.explanations.enabled)}
         >ⓘ</button>
       {/if}
-      <button id="historyRefresh" class="history-btn" aria-label="Refresh"
+      <button id={active ? 'historyRefresh' : undefined} class="history-btn" aria-label="Refresh"
               onclick={() => reload(session)}>↻</button>
     </div>
   </header>
   <AgentBanner {session} />
-  <Transcript {session} />
+  <Transcript {session} {active} />
   <StatusLine {session} />
 </section>
