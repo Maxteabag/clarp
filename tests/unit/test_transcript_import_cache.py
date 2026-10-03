@@ -77,9 +77,10 @@ def test_same_file_is_imported_again_for_a_different_agent(tmp_path):
     assert calls == ["a", "b"]
 
 
-def test_background_coalesces_growth_without_losing_new_version(tmp_path):
+def test_background_coalesces_growth_without_losing_new_version(tmp_path, monkeypatch):
     import threading
     cache = transcript_import_cache
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
     path = tmp_path / 'growing'
     path.write_text('first')
     entered, release = threading.Event(), threading.Event()
@@ -161,3 +162,30 @@ def test_a_locked_database_retries_instead_of_dropping_the_import(tmp_path, monk
 
     assert transcript_import_cache.import_if_changed(path, importer)
     assert attempts == [1, 1]
+
+
+def test_background_imports_of_a_growing_file_are_coalesced_with_a_trailing_import(tmp_path, monkeypatch):
+    import time
+
+    transcript_import_cache.reset_for_tests()
+    monkeypatch.setattr(transcript_import_cache, "_BACKGROUND_MIN_INTERVAL", 0.4)
+    path = tmp_path / "rollout.jsonl"
+    path.write_text("1\n")
+    imported: list[int] = []
+
+    def importer():
+        imported.append(len(path.read_text().splitlines()))
+
+    assert transcript_import_cache.schedule_import(path, importer, owner="a1")
+    assert transcript_import_cache.wait_for_background(2)
+    for n in range(2, 6):            # the file keeps growing; /log keeps asking
+        path.write_text("".join(f"{i}\n" for i in range(1, n + 1)))
+        _bump_mtime(path)
+        transcript_import_cache.schedule_import(path, importer, owner="a1")
+        time.sleep(0.02)
+    assert imported == [1]           # no import inside the window
+    deadline = time.monotonic() + 3
+    while len(imported) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    transcript_import_cache.wait_for_background(2)
+    assert imported == [1, 5]        # one trailing import sees the latest file

@@ -143,6 +143,8 @@ def _migrate(con: sqlite3.Connection) -> None:
                 con.execute("ALTER TABLE device_tokens ADD COLUMN push_grant TEXT NOT NULL DEFAULT ''")
         if version < 105:
             _migrate_to_v105(con)
+        if version < 106:
+            _migrate_to_v106(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -700,6 +702,12 @@ def _migrate_to_v76(con: sqlite3.Connection) -> None:
             con.execute(statement)
             statement = ""
     assert not statement.strip()
+
+
+def _migrate_to_v106(con: sqlite3.Connection) -> None:
+    """Imports read a conversation's `final:` rows from a partial index."""
+    con.execute("""CREATE INDEX IF NOT EXISTS idx_messages_final_rows
+        ON messages(agent_id, backend_session_id) WHERE source_file LIKE 'final:%'""")
 
 
 def _migrate_to_v105(con: sqlite3.Connection) -> None:

@@ -51,6 +51,8 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/backends.py", "_RUNTIME_CLIENT"): CLIENT,
     ("lib/live_hub.py", "_HUB"): CLIENT,
     ("lib/static_assets.py", "_hashes"): CACHE,
+    ("lib/transcript_import_cache.py", "_last_started"): THROTTLE,
+    ("lib/transcript_import_cache.py", "_deferred"): THROTTLE,
     ("lib/live_hub.py", "_FANOUT"): CLIENT,
     ("lib/backends.py", "_STATUS_CACHE"): CACHE,
     ("lib/cartesia_voices.py", "_cache"): CACHE,

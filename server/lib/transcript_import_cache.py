@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pathlib
 import threading
+import time
 from collections.abc import Callable
 
 _guard = threading.Lock()
@@ -88,6 +89,8 @@ def reset_for_tests() -> None:
     with _guard:
         _path_locks.clear()
         _imported.clear()
+        _last_started.clear()
+        _deferred.clear()
 
 
 # One fallback importer per process; coalesce callers by owner/path. Watcher
@@ -95,6 +98,13 @@ def reset_for_tests() -> None:
 _pending: dict[str, tuple[pathlib.Path, Callable[[], None], str]] = {}
 _worker: threading.Thread | None = None
 _BACKGROUND_LIMIT = 64
+# A file that keeps growing (a busy Codex rollout polled through /log) is
+# re-imported at most once per window, then once more when the window
+# closes, instead of a full re-parse per poll. Live text and tools reach
+# clients through live items meanwhile (docs/live-items.md).
+_BACKGROUND_MIN_INTERVAL = 5.0
+_last_started: dict[str, float] = {}
+_deferred: set[str] = set()
 
 
 def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: str = '') -> bool:
@@ -104,6 +114,15 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
     with _guard:
         if _imported.get(key) == signature:
             return False
+        last = _last_started.get(key)
+        wait = _BACKGROUND_MIN_INTERVAL - (time.monotonic() - last) if last is not None else 0.0
+        if wait > 0 and key not in _pending:
+            if key not in _deferred:
+                _deferred.add(key)
+                timer = threading.Timer(wait, _schedule_deferred, args=(key, path, importer, owner))
+                timer.daemon = True
+                timer.start()
+            return True
         if key not in _pending and len(_pending) >= _BACKGROUND_LIMIT:
             # The next request/watcher can retry; never create unbounded threads.
             return False
@@ -112,6 +131,14 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
             _worker = threading.Thread(target=_drain_background, name='transcript-import', daemon=True)
             _worker.start()
     return True
+
+
+def _schedule_deferred(key: str, path: pathlib.Path, importer: Callable[[], None],
+                       owner: str) -> None:
+    with _guard:
+        _deferred.discard(key)
+        _last_started.pop(key, None)
+    schedule_import(path, importer, owner=owner)
 
 
 def _drain_background():
@@ -126,8 +153,15 @@ def _drain_background():
                     return
                 key = next(iter(_pending))
                 path, importer, owner = _pending.pop(key)
+            started = time.monotonic()
             try:
                 import_if_changed(path, importer, owner=owner)
+                with _guard:
+                    # Only a completed import opens the window: a failed one
+                    # stays retryable at once.
+                    _last_started[key] = started
+                    if len(_last_started) > 4 * _BACKGROUND_LIMIT:
+                        _last_started.pop(next(iter(_last_started)))
             except Exception as exc:
                 log_exception('backgroundTranscriptImportFail', exc, detail=owner)
             finally:
