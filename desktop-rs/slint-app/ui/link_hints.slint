@@ -5,7 +5,9 @@ import { Palette } from "theme.slint";
 // each place.
 export struct LinkBadge {
     label: string,
+    // A link's address, or "" for an artifact card (then `card` is its id).
     url: string,
+    card: string,
     x: length,
     y: length,
     // The digits typed so far rule it out: hidden.
