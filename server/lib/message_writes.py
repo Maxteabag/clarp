@@ -89,6 +89,29 @@ def _next_revision(database) -> int:
     return int(row["revision"])
 
 
+_PHASE_BY_KIND = {"final_answer": "final", "final": "final", "commentary": "commentary"}
+
+
+def _row_phases(turns: list[dict[str, Any]]) -> list[str | None]:
+    """commentary | final per assistant text row: text followed by tool work
+    in the same turn is commentary (Codex says so itself), the rest final."""
+    phases: list[str | None] = [None] * len(turns)
+    work_after = False
+    for index in range(len(turns) - 1, -1, -1):
+        turn = turns[index]
+        if turn.get("role") == "user":
+            work_after = False
+            continue
+        if turn.get("role") != "assistant":
+            continue
+        if str(turn.get("text") or "").strip():
+            phases[index] = _PHASE_BY_KIND.get(str(turn.get("kind") or "")) or (
+                "commentary" if work_after else "final")
+        if turn.get("tools") or turn.get("display_cells"):
+            work_after = True
+    return phases
+
+
 def _row_payload(row) -> tuple:
     return (
         row["role"], row["timestamp"], row["text"], row["kind"],
@@ -577,6 +600,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                                 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     latest_revision = 0
+    from . import message_turns
+    # Which turn wrote each row, how that turn ended, and each text row's
+    # phase (docs/live-items.md §9).
+    turn_index = message_turns.TurnIndex(database, agent_id)
+    phases = _row_phases(turns)
+    touched_traces: set[str] = set()
+    newest_trace = ""
     # User turns the client already recorded durably (keyed by client_msg_id).
     # Claude's transcript carries its own copy of each; we link those back to
     # the client rows by text in send order rather than inserting a duplicate.
@@ -800,20 +830,32 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             if isinstance(turn.get("display_cells"), list)
             else []
         )
-        tools_json = json.dumps(tools, separators=(",", ":"))
-        display_cells_json = json.dumps(display_cells, separators=(",", ":"))
         existing = database.execute(
             """SELECT role, timestamp, text, kind, tool_name, tools_json,
                       display_cells_json, updated_at, revision,
-                      origin, sender_agent_id
+                      origin, sender_agent_id, trace_id, phase
                  FROM messages WHERE message_id = ?""",
             (msg_id,),
         ).fetchone()
+        row_trace = (current_request_trace if role == "assistant" else str(turn.get("trace_id") or "")) \
+            or turn_index.trace_at(timestamp) or ((existing["trace_id"] or "") if existing else "")
+        outcome = turn_index.outcomes.get(row_trace)
+        tools = message_turns.settle_statuses(tools, outcome)
+        display_cells = message_turns.settle_statuses(display_cells, outcome)
+        phase = phases[seq] if role == "assistant" else None
+        newest_trace = row_trace or newest_trace
+        tools_json = json.dumps(tools, separators=(",", ":"))
+        display_cells_json = json.dumps(display_cells, separators=(",", ":"))
         payload = (
             role, timestamp, text, kind, tool_name,
             tools_json, display_cells_json, origin, sender_agent_id,
         )
-        unchanged = existing is not None and _row_payload(existing) == payload
+        unchanged = existing is not None and _row_payload(existing) == payload \
+            and (existing["trace_id"] or "") == row_trace and existing["phase"] == phase
+        if row_trace and not unchanged:
+            # Only turns whose rows changed are re-stamped: an import re-reads
+            # the whole transcript, and an untouched turn's summary stands.
+            touched_traces.add(row_trace)
         revision = int(existing["revision"]) if unchanged else _next_revision(database)
         updated_at = int(existing["updated_at"]) if unchanged else now_ms()
         latest_revision = max(latest_revision, revision)
@@ -822,9 +864,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                message_id, agent_id, backend_session_id, source_file, seq,
                role, timestamp, text, kind, tool_name, tools_json,
                display_cells_json, updated_at, revision, origin,
-               sender_agent_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               sender_agent_id, trace_id, phase
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(message_id) DO UPDATE SET
+               trace_id = COALESCE(excluded.trace_id, messages.trace_id),
+               phase = excluded.phase,
                source_file = excluded.source_file,
                seq = excluded.seq,
                role = excluded.role,
@@ -841,7 +885,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         (msg_id, agent_id, backend_session_id, source_file, seq,
              role, timestamp, text, kind, tool_name, tools_json,
              display_cells_json, updated_at,
-             revision, origin, sender_agent_id),
+             revision, origin, sender_agent_id, row_trace or None, phase),
         )
         if source_file.lower().startswith("final:"):
             final_rows.invalidate()
@@ -877,6 +921,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             "sender_agent_id": sender_agent_id,
             "revision": revision,
         })
+    # The turns this import touched: their last row carries the summary.
+    for trace in sorted(touched_traces | ({newest_trace} if newest_trace else set())):
+        latest_revision = max(latest_revision, stamp_turn(
+            database, agent_id, trace, _next_revision))
     # Compare markup-normalized so a streamed live row (with <speak>/<vox>/…)
     # still matches its durable copy (markup stripped); raw startswith missed it.
     live_replace_revision = 0
@@ -933,3 +981,75 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         (agent_id, backend_session_id, latest_revision, replace_revision),
     )
     return out
+
+
+# --- turn summaries (docs/live-items.md §9; helpers in lib.message_turns) ---
+
+def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
+    from . import message_turns
+    """Re-stamp one turn's rows (inside the caller's write transaction).
+    Returns the highest revision written, 0 when nothing changed."""
+    if not trace_id:
+        return 0
+    turn = database.execute(
+        """SELECT started_at, settled_at, outcome FROM turns WHERE agent_id = ? AND trace_id = ?
+            ORDER BY started_at DESC LIMIT 1""", (agent_id, trace_id)).fetchone()
+    rows = database.execute(
+        """SELECT message_id, backend_session_id, tools_json, display_cells_json, turn_json
+             FROM messages WHERE agent_id = ? AND trace_id = ?
+            ORDER BY COALESCE(timestamp, ''), seq""", (agent_id, trace_id)).fetchall()
+    if not rows:
+        return 0
+    summary = None
+    if turn is not None and turn["settled_at"] is not None:
+        started = int(turn["started_at"])
+        ended = max(int(turn["settled_at"]), started)
+        summary = json.dumps({"turn_id": trace_id, "status": turn["outcome"],
+                              "started_at_ms": started, "ended_at_ms": ended,
+                              "worked_ms": ended - started, "tool_count": message_turns.tool_count(rows)},
+                             separators=(",", ":"))
+    outcome = turn["outcome"] if turn is not None else None
+    highest = 0
+    last = rows[-1]["message_id"]
+    for row in rows:
+        tools = message_turns.settle_statuses(json.loads(row["tools_json"] or "[]"), outcome)
+        cells = message_turns.settle_statuses(json.loads(row["display_cells_json"] or "[]"), outcome)
+        tools_json = json.dumps(tools, separators=(",", ":"))
+        cells_json = json.dumps(cells, separators=(",", ":"))
+        turn_json = summary if row["message_id"] == last else None
+        if (tools_json, cells_json, turn_json) == (
+                json.dumps(json.loads(row["tools_json"] or "[]"), separators=(",", ":")),
+                json.dumps(json.loads(row["display_cells_json"] or "[]"), separators=(",", ":")),
+                row["turn_json"]):
+            continue
+        revision = next_revision(database)
+        database.execute(
+            """UPDATE messages SET tools_json = ?, display_cells_json = ?, turn_json = ?,
+                      revision = ?, updated_at = ? WHERE message_id = ?""",
+            (tools_json, cells_json, turn_json, revision, now_ms(), row["message_id"]))
+        database.execute(
+            """INSERT INTO conversation_heads (agent_id, backend_session_id, revision, replace_revision)
+               VALUES (?, ?, ?, 0)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision)""",
+            (agent_id, row["backend_session_id"], revision))
+        highest = max(highest, revision)
+    return highest
+
+
+def restamp_turn(agent_id: str, trace_id: str) -> None:
+    """Stamp a turn's rows in a write transaction of its own (a turn settled)."""
+    from .db import conn
+    from .message_writes import _next_revision
+    database = conn()
+    own = not database.in_transaction
+    if own:
+        database.execute("BEGIN IMMEDIATE")
+    try:
+        stamp_turn(database, agent_id, trace_id, _next_revision)
+        if own:
+            database.execute("COMMIT")
+    except Exception:
+        if own and database.in_transaction:
+            database.execute("ROLLBACK")
+        raise

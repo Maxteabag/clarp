@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 106
+_SCHEMA_VERSION = 107
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -79,7 +79,11 @@ CREATE TABLE turns (
     trace_id TEXT NOT NULL,
     started_at INTEGER NOT NULL,
     ended_at INTEGER,
-    synthesize_audio INTEGER NOT NULL DEFAULT 1
+    synthesize_audio INTEGER NOT NULL DEFAULT 1,
+    -- How the turn ended (completed | failed | interrupted) and when, from
+    -- the first terminal state change; /log turn summaries read it.
+    settled_at INTEGER,
+    outcome TEXT
 );
 CREATE INDEX idx_turns_agent_ts ON turns(agent_id, started_at);
 
@@ -194,6 +198,10 @@ CREATE TABLE messages (
     sender_agent_id TEXT,
     prompt_admission_id TEXT,
     trace_id TEXT,
+    -- commentary | final on assistant text rows; the settled turn's summary
+    -- on its last row (docs/live-items.md §9).
+    phase TEXT,
+    turn_json TEXT,
     UNIQUE(agent_id, backend_session_id, seq)
 );
 CREATE INDEX idx_messages_agent_seq ON messages(agent_id, backend_session_id, seq);
