@@ -39,6 +39,11 @@ impl Engine {
         self.live.enabled
     }
 
+    /// Whether live items show this chat (not implemented yet).
+    pub fn live_active(&self, session: &str) -> bool {
+        self.live_owns(session)
+    }
+
     /// The chat's live state, once the feature is on and it was opened.
     pub fn live_view(&self, session: &str) -> Option<&LiveView> {
         self.live.views.get(session)
