@@ -1167,6 +1167,10 @@ pub fn selectables(app: &App) -> Vec<String> {
     for row in rows.iter() {
         ids.extend(row.blocks.iter().filter(|b| !b.key.is_empty()).map(|b| b.key.to_string()));
         ids.extend(row.artifacts.iter().map(|a| a.id.to_string()));
+        // A live item row that opens (a tool, a group, the fold).
+        if row.live.expandable && !row.live.key.is_empty() {
+            ids.push(row.live.key.to_string());
+        }
     }
     ids
 }
@@ -1203,9 +1207,30 @@ pub fn take_return() -> bool {
     RETURN_TO_CHAT.with(|r| r.replace(false))
 }
 
+/// O on a live item row (or a click): opens or folds it, kept by its key.
+pub fn toggle_live(app: &App, key: &str) {
+    *app.artifact_cursor.borrow_mut() = key.to_owned();
+    {
+        let mut expanded = app.expanded.borrow_mut();
+        if !expanded.remove(key) {
+            expanded.insert(key.to_owned());
+        }
+    }
+    let session = app.active_session();
+    app.refresh(&[Change::Live(session), Change::Updates]);
+}
+
+fn live_row(app: &App, key: &str) -> Option<crate::MessageRow> {
+    app.active_messages()?.iter().find(|r| r.live.key == key)
+}
+
 /// O on what the keyboard is on (or its link hint's number): a card's
 /// action, or an image enlarged.
 pub fn activate(app: &App, window: &AppWindow, id: &str) {
+    if id.starts_with("live:") {
+        toggle_live(app, id);
+        return;
+    }
     if id.starts_with("img:") {
         open_image(app, window, id, tile());
     } else {
@@ -1297,6 +1322,10 @@ fn hint_clicked(app: &App, window: &AppWindow, id: &str, action: &str) {
 /// The keys of what the keyboard is on, for the shortcut bar.
 pub fn selected_hints(app: &App) -> Option<Vec<(String, String)>> {
     let id = selected(app)?;
+    if id.starts_with("live:") {
+        let open = live_row(app, &id).is_some_and(|r| r.live.expanded);
+        return Some(vec![("O".to_owned(), if open { "Collapse" } else { "Expand" }.to_owned())]);
+    }
     if id.starts_with("img:") {
         let gallery = image_block(app, &id).is_some_and(|i| i.len() > 1);
         let mut hints = vec![("O".to_owned(), "Enlarge".to_owned())];
@@ -1521,6 +1550,10 @@ pub fn leave(app: &App) {
 
 /// A card's action (Enter on the selected card, or a click).
 pub fn open(app: &App, window: &AppWindow, id: &str) {
+    if id.starts_with("live:") {
+        toggle_live(app, id);
+        return;
+    }
     let Some(artifact) = artifact(app, id) else { return };
     *app.artifact_cursor.borrow_mut() = id.to_owned();
     match text(&artifact, "type").as_str() {

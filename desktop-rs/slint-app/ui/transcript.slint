@@ -45,6 +45,27 @@ export struct ToolRow {
     explanation: string,
 }
 
+// A row of the open turn's live items (docs/live-items.md §7.3): its
+// kind (message, reasoning, tool, explore, plan, diff, compaction, fold),
+// the key the keyboard selects it by ("" for an ordinary row), its status
+// and its lines.
+export struct LiveRow {
+    kind: string,
+    key: string,
+    status: string,
+    title: string,
+    meta: string,
+    secondary: string,
+    // Keep the second line even while it is empty (an explanation coming).
+    reserve: bool,
+    lines: [string],
+    more: string,
+    // A message's text as revealed so far.
+    text: string,
+    expandable: bool,
+    expanded: bool,
+}
+
 export struct MessageRow {
     id: string,
     // user, assistant, activity
@@ -64,6 +85,8 @@ export struct MessageRow {
     cells: [DisplayCell],
     // Artifacts the agent made while writing this reply.
     artifacts: [ArtifactItem],
+    // A live item row (author "live", or an assistant message item).
+    live: LiveRow,
 }
 
 // One tool call (ToolCard.qml): name, summary, status; details on request.
@@ -108,6 +131,122 @@ component ToolCard inherits Rectangle {
             font-size: 11px;
             color: Palette.text;
             wrap: word-wrap;
+        }
+    }
+}
+
+// One live item row (docs/live-items.md §7.3): a status mark, the label
+// (verb + label, "Thought for 4s: …", "Explored 2 files", "Worked for 12s"),
+// its time or diff stats on the right, an explanation or command under it
+// (a reserved line while an explanation comes, so landing never moves the
+// chat), and an output tail, diff, plan or members in monospace. J/K reach
+// it like a card; O (or a click) opens and folds it.
+component LiveItem inherits Rectangle {
+    in property <LiveRow> live;
+    in property <length> view-top;
+    in property <length> view-bottom;
+    property <bool> selected: root.live.expandable && ArtifactBridge.cursor == root.live.key;
+    property <bool> running: root.live.status == "running" || root.live.status == "pending";
+    property <color> mark: root.live.status == "failed" ? Palette.danger
+        : root.live.status == "interrupted" ? Palette.warning
+        : root.running ? Palette.accent : Palette.success;
+    border-radius: 3px;
+    border-width: root.selected ? 1px : 0px;
+    border-color: Palette.accent;
+    background: root.live.kind == "plan" || root.live.kind == "diff" ? Palette.raised : transparent;
+    accessible-role: list-item;
+    accessible-label: root.live.title + (root.live.meta != "" ? " " + root.live.meta : "");
+    // Reports where it is, as a card does, so J/K reach it.
+    Timer {
+        interval: 150ms;
+        running: root.live.expandable;
+        triggered => { ArtifactBridge.card-shown(root.live.key, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
+    }
+    if root.live.expandable: TouchArea {
+        mouse-cursor: pointer;
+        clicked => { ArtifactBridge.open(root.live.key); }
+    }
+    VerticalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 8px;
+            height: 20px;
+            Rectangle {
+                width: 7px;
+                height: 7px;
+                y: (parent.height - self.height) / 2;
+                border-radius: root.live.kind == "fold" ? 1px : 3.5px;
+                background: root.running ? root.mark : transparent;
+                border-width: 1px;
+                border-color: root.live.kind == "fold" ? Palette.faint : root.mark;
+            }
+            Text {
+                text: root.live.title;
+                color: root.live.kind == "reasoning" || root.live.kind == "fold" ? Palette.muted : Palette.chrome-text;
+                font-size: 13px;
+                font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
+                font-italic: root.live.kind == "reasoning";
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            if root.live.meta != "": Text {
+                text: root.live.meta;
+                color: root.live.status == "failed" ? Palette.danger : Palette.faint;
+                font-size: 12px;
+                font-family: "JetBrains Mono";
+                vertical-alignment: center;
+            }
+            if root.live.expandable: Text {
+                text: root.live.expanded ? "▾" : "▸";
+                color: Palette.faint;
+                font-size: 12px;
+                vertical-alignment: center;
+            }
+            // Its key only while it works: selected, in the focused chat.
+            if root.selected && Focus.mode == "pane": KeyHint {
+                key: "O";
+                label: root.live.expanded ? "Collapse" : "Expand";
+                emphasised: true;
+                clicked => { ArtifactBridge.open(root.live.key); }
+            }
+        }
+        // Under the label, indented past the mark.
+        VerticalLayout {
+            padding-left: 15px;
+            spacing: 2px;
+            if root.live.secondary != "" || root.live.reserve: Text {
+                height: 17px;
+                text: root.live.secondary;
+                color: Palette.muted;
+                font-size: 12px;
+                overflow: elide;
+            }
+            if root.live.lines.length > 0: Rectangle {
+                background: root.live.kind == "plan" || root.live.kind == "reasoning" ? transparent : Palette.sunken;
+                border-radius: 2px;
+                VerticalLayout {
+                    padding: root.live.kind == "plan" || root.live.kind == "reasoning" ? 0px : 6px;
+                    spacing: 0px;
+                    for line in root.live.lines: Text {
+                        text: line;
+                        font-family: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.body-family : "JetBrains Mono";
+                        font-size: root.live.kind == "plan" || root.live.kind == "reasoning" ? 13px : 11px;
+                        color: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.muted : Palette.text;
+                        wrap: root.live.kind == "plan" || root.live.kind == "reasoning" ? word-wrap : no-wrap;
+                        overflow: elide;
+                    }
+                }
+            }
+            if root.live.more != "": Text {
+                text: root.live.more;
+                color: Palette.faint;
+                font-size: 11px;
+            }
         }
     }
 }
@@ -331,7 +470,7 @@ export component Transcript inherits FocusScope {
                 // Hovering a message offers its copy button (Slint's rich text
                 // cannot be selected: the message's text is copied whole).
                 hover := TouchArea { }
-                if row.author != "activity": Rectangle {
+                if row.author != "activity" && row.author != "live": Rectangle {
                     x: parent.width - 20px;
                     y: 2px;
                     width: 18px;
@@ -346,6 +485,11 @@ export component Transcript inherits FocusScope {
                     padding: row.author == "user" ? 10px : 2px;
                     spacing: 8px;
                     if row.sender != "": Text { text: row.sender; color: Palette.accent; font-size: 12px; font-weight: 600; }
+                    if row.author == "live": LiveItem {
+                        live: row.live;
+                        view-top: root.absolute-position.y;
+                        view-bottom: root.absolute-position.y + root.height;
+                    }
                     for block in row.blocks: Block {
                         block: block;
                         view-top: root.absolute-position.y;
@@ -353,6 +497,12 @@ export component Transcript inherits FocusScope {
                         body-size: row.author == "activity" ? 13px : Palette.body-size;
                         body-color: row.author == "activity" ? Palette.muted : Palette.text;
                         link-clicked(url) => { root.link-clicked(url); }
+                    }
+                    // A stopped answer says so under its text.
+                    if row.live.kind == "message" && row.live.meta != "": Text {
+                        text: "■ " + row.live.meta;
+                        color: Palette.warning;
+                        font-size: 11px;
                     }
                     if row.activity-label != "": TouchArea {
                         height: 20px;

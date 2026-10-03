@@ -4,6 +4,7 @@ import { Transcript, MessageRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
 import { TypingIndicator } from "cells.slint";
 import { ProfileBridge } from "profile.slint";
+import { KeyHint } from "artifacts.slint";
 
 // One pane of the workspace: where it sits (fractions of the workspace),
 // the chat it shows, and that chat's composer state. The counters ask the
@@ -23,6 +24,11 @@ export struct PaneView {
     busy: bool,
     // "Working…" under the transcript (Show when ready, agent working).
     working: bool,
+    // Live items' status line ("" when idle), whether the agent works (the
+    // interrupt key works) and that key.
+    live-status: string,
+    live-busy: bool,
+    live-stop-key: string,
     pair: bool,
     x: float,
     y: float,
@@ -190,6 +196,35 @@ export component Pane inherits Rectangle {
                 + (root.pane.busy ? "  ·  working" : "");
             info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
             key: root.pane.active && Focus.mode == "composer" ? "ctrl+h" : "h"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
+        }
+        // Live items' one status line (docs/live-items.md §7.4): what runs
+        // and for how long by the Host's clock, and the key that stops it
+        // while the agent works.
+        if root.pane.live-status != "": Rectangle {
+            background: Palette.window;
+            height: 26px;
+            accessible-role: text;
+            accessible-id: "live-status:" + root.pane.id;
+            accessible-label: root.pane.live-status;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 10px;
+                spacing: 10px;
+                Text {
+                    text: root.pane.live-status;
+                    color: root.pane.live-busy ? Palette.chrome-text : root.pane.live-status == "■ Interrupted" ? Palette.warning : Palette.muted;
+                    font-size: 12px;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                if root.pane.live-busy && root.pane.live-stop-key != "" && root.pane.active: KeyHint {
+                    y: 3px;
+                    key: root.pane.live-stop-key;
+                    label: "Stop";
+                    clicked => { root.stop(); }
+                }
+            }
         }
         // The transcript's footer (ConversationPane.qml).
         if root.pane.working: Rectangle {

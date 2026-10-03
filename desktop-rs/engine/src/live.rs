@@ -37,6 +37,18 @@ impl Engine {
         self.live.views.get(session)
     }
 
+    /// Whether the Host explains tool items, as the chat's last snapshot
+    /// said (on by default, as on the Host).
+    pub fn tool_explanations_enabled(&self, session: &str) -> bool {
+        self.live
+            .views
+            .get(session)
+            .and_then(|v| v.tool_explanations())
+            .and_then(|s| s.get("enabled"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    }
+
     /// Live items stand in for the old activity rows in this chat.
     pub(crate) fn live_owns(&self, session: &str) -> bool {
         self.live.enabled && self.live.views.contains_key(session)

@@ -270,13 +270,25 @@ pub(crate) fn choose_attachment(session: String) {
 /// rows kept at the start and end are updated in place (and only when their
 /// source differs), so streaming does not rebuild the list and an older page
 /// is inserted above rather than replacing everything.
-/// A shown row's source: the presented row, whether it is open, and its
-/// artifacts' ids and revisions.
-pub(crate) type Shown = (PresentedRow, bool, String);
+/// A shown row's source: the presented row, whether it is open, its
+/// artifacts' ids and revisions, and its place: the key the list keeps it
+/// by (its id, a live item's key, or for a durable row that took over
+/// live items the key of the row whose place it took).
+pub(crate) type Shown = (PresentedRow, bool, String, String);
+
+thread_local! {
+    /// Rows the transcripts updated in place and inserted, since start.
+    static SYNC_STATS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// (updated in place, inserted) rows across the transcripts so far.
+pub(crate) fn sync_stats() -> (usize, usize) {
+    SYNC_STATS.with(std::cell::Cell::get)
+}
 
 pub(crate) fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<Shown>, fresh: Vec<Shown>, rows: Vec<MessageRow>) {
     use slint::Model;
-    let id = |row: &Shown| row.0.message.id.clone();
+    let id = |row: &Shown| row.3.clone();
     let prefix = shown.iter().zip(&fresh).take_while(|(a, b)| id(a) == id(b)).count();
     let most = shown.len().min(fresh.len()) - prefix;
     let suffix = shown.iter().rev().zip(fresh.iter().rev()).take(most).take_while(|(a, b)| id(a) == id(b)).count();
@@ -285,6 +297,7 @@ pub(crate) fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<Shown>, fr
         let old = if index < prefix { index } else { index + shown.len() - fresh.len() };
         if shown[old] != fresh[index] {
             model.set_row_data(old, rows[index].take().expect("each row is used once"));
+            SYNC_STATS.with(|s| s.set((s.get().0 + 1, s.get().1)));
         }
     }
     let (old_middle, new_middle) = (shown.len() - prefix - suffix, fresh.len() - prefix - suffix);
@@ -293,6 +306,7 @@ pub(crate) fn sync_rows(model: &VecModel<MessageRow>, shown: &mut Vec<Shown>, fr
     }
     for (offset, row) in rows[prefix..prefix + new_middle].iter_mut().enumerate() {
         model.insert(prefix + offset, row.take().expect("each row is used once"));
+        SYNC_STATS.with(|s| s.set((s.get().0, s.get().1 + 1)));
     }
     *shown = fresh;
 }
@@ -384,6 +398,7 @@ pub(crate) fn message_row(
         )),
         cells: ModelRc::new(VecModel::from(crate::cells_view::cells(row))),
         artifacts: ModelRc::new(VecModel::<crate::ArtifactItem>::default()),
+        live: crate::LiveRow::default(),
     }
 }
 

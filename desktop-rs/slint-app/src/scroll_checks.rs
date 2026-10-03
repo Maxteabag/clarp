@@ -80,7 +80,7 @@ fn last_id() -> String {
 
 /// Whether the chat's last row is drawn with its bottom edge inside the
 /// viewport, and the numbers either way.
-fn last_row_visible() -> (bool, String) {
+pub(super) fn last_row_visible() -> (bool, String) {
     let geo = geometry();
     let id = last_id();
     match geo.find(&id) {
@@ -92,8 +92,23 @@ fn last_row_visible() -> (bool, String) {
     }
 }
 
+/// The topmost row on screen and its distance from the viewport's top.
+pub(super) fn anchor_now() -> Option<(String, f32)> {
+    geometry().anchor()
+}
+
+/// The drawn height of row `id` (0 when it is not drawn).
+pub(super) fn row_height(id: &str) -> f32 {
+    geometry().find(id).map_or(0.0, |(top, bottom)| bottom - top)
+}
+
+/// The reader's wheel, `px` up the chat.
+pub(super) fn wheel_up(px: f32) {
+    wheel(px);
+}
+
 /// How far the anchor row moved on screen since it was recorded.
-fn anchor_moved(anchor: &(String, f32)) -> (bool, String) {
+pub(super) fn anchor_moved(anchor: &(String, f32)) -> (bool, String) {
     let geo = geometry();
     match geo.find(&anchor.0) {
         Some((top, _)) => {
