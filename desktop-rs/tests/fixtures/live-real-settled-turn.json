@@ -259,5 +259,308 @@
     "automation_kind": ""
    }
   ]
+ },
+ "next": {
+  "title": "Later on the same chat: the turn in between (history only), then a new prompt whose tool's /log row exists from the moment the tool starts (status running, the item's call_id), while the live item runs.",
+  "rows": [
+   {
+    "id": "u-clarp-admin-477782a990382837",
+    "role": "user",
+    "timestamp": "2026-10-03T11:52:12.389Z",
+    "text": "Continue now without waiting for the background sleep: do steps 2, 3 and 4 (ls /var/tmp/probe, read /etc/hostname, date), then reply 'Probe turn done.'",
+    "kind": null,
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "8b701eb0b9fe4f19",
+    "sender_agent_id": "agent-tester",
+    "sender_name": "Tester",
+    "sender_session": "tester",
+    "reply_to_agent_id": "",
+    "reply_to_name": "",
+    "reply_to_session": "",
+    "revision": 1306077,
+    "automated": false,
+    "automation_kind": ""
+   },
+   {
+    "id": "msg-a0355546f14ad26dcc81",
+    "role": "assistant",
+    "timestamp": "2026-10-03T11:52:15.507Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "List probe directory",
+      "action": "running command",
+      "file_path": "",
+      "status": "ok",
+      "id": "toolu_01V7Zidd8SdV5oP48aP1BDqM",
+      "command": "ls /var/tmp/probe",
+      "description": "List probe directory",
+      "result": "(Bash completed with no output)"
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "",
+    "sender_agent_id": "",
+    "sender_name": "",
+    "sender_session": "",
+    "reply_to_agent_id": "agent-tester",
+    "reply_to_name": "Tester",
+    "reply_to_session": "tester",
+    "revision": 1306080,
+    "automated": false,
+    "automation_kind": ""
+   },
+   {
+    "id": "msg-877ab9cccf7042a620db",
+    "role": "assistant",
+    "timestamp": "2026-10-03T11:52:16.994Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Read",
+      "summary": "etc/hostname",
+      "action": "reading file",
+      "file_path": "/etc/hostname",
+      "status": "ok",
+      "id": "toolu_012z8NDCJ4Kxi5JpvLCLsBjk",
+      "offset": null,
+      "limit": null,
+      "result": "1\thost\n2\t"
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "",
+    "sender_agent_id": "",
+    "sender_name": "",
+    "sender_session": "",
+    "reply_to_agent_id": "agent-tester",
+    "reply_to_name": "Tester",
+    "reply_to_session": "tester",
+    "revision": 1306082,
+    "automated": false,
+    "automation_kind": ""
+   },
+   {
+    "id": "msg-89a8098175134011fbc3",
+    "role": "assistant",
+    "timestamp": "2026-10-03T11:52:18.869Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "Show current date",
+      "action": "running command",
+      "file_path": "",
+      "status": "ok",
+      "id": "toolu_01526cYex2wYSBsUKKetsdms",
+      "command": "date",
+      "description": "Show current date",
+      "result": "Sat Oct  3 01:52:18 PM CEST 2026"
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "",
+    "sender_agent_id": "",
+    "sender_name": "",
+    "sender_session": "",
+    "reply_to_agent_id": "agent-tester",
+    "reply_to_name": "Tester",
+    "reply_to_session": "tester",
+    "revision": 1306085,
+    "automated": false,
+    "automation_kind": ""
+   },
+   {
+    "id": "live-567165763b2310817088",
+    "role": "assistant",
+    "timestamp": "2026-10-03T11:52:22.707Z",
+    "text": "Probe turn done.",
+    "kind": null,
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "8b701eb0b9fe4f19",
+    "sender_agent_id": "",
+    "sender_name": "",
+    "sender_session": "",
+    "reply_to_agent_id": "agent-tester",
+    "reply_to_name": "Tester",
+    "reply_to_session": "tester",
+    "revision": 1306088,
+    "automated": false,
+    "automation_kind": ""
+   },
+   {
+    "id": "u-clarp-admin-3c48398b85b08a09",
+    "role": "user",
+    "timestamp": "2026-10-03T11:53:23.856Z",
+    "text": "Run this in the foreground (one Bash call, not in the background): python3 -c 'import time; time.sleep(120)'  then reply 'slept'.",
+    "kind": null,
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "2b2b466e35457fb0",
+    "sender_agent_id": "agent-tester",
+    "sender_name": "Tester",
+    "sender_session": "tester",
+    "reply_to_agent_id": "",
+    "reply_to_name": "",
+    "reply_to_session": "",
+    "revision": 1306106,
+    "automated": false,
+    "automation_kind": ""
+   },
+   {
+    "id": "msg-e60c25b9161ac8b660ca",
+    "role": "assistant",
+    "timestamp": "2026-10-03T11:53:27.493Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "Wait 120 seconds in Python",
+      "action": "running command",
+      "file_path": "",
+      "status": "running",
+      "id": "toolu_017NGGuPh5DkHZyPKu7aJyz5",
+      "command": "python3 -c 'import time; time.sleep(120)'",
+      "description": "Wait 120 seconds in Python"
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "",
+    "sender_agent_id": "",
+    "sender_name": "",
+    "sender_session": "",
+    "reply_to_agent_id": "agent-tester",
+    "reply_to_name": "Tester",
+    "reply_to_session": "tester",
+    "revision": 1306110,
+    "automated": false,
+    "automation_kind": ""
+   }
+  ],
+  "event": {
+   "type": "live",
+   "conv": "c-probe",
+   "epoch": "26f356fdabe6",
+   "server_now_ms": 1791028419058,
+   "ops": [
+    {
+     "op": "turn",
+     "conv": "c-probe",
+     "turn": {
+      "turn_id": "2b2b466e35457fb0",
+      "status": "running",
+      "started_at_ms": 1791028403856,
+      "ended_at_ms": null,
+      "worked_ms": null,
+      "tool_count": 1
+     }
+    },
+    {
+     "op": "upsert",
+     "conv": "c-probe",
+     "id": "cl:toolu_017NGGuPh5DkHZyPKu7aJyz5",
+     "kind": "tool",
+     "rev": 1,
+     "item": {
+      "id": "cl:toolu_017NGGuPh5DkHZyPKu7aJyz5",
+      "kind": "tool",
+      "rev": 1,
+      "conv": "c-probe",
+      "turn_id": "2b2b466e35457fb0",
+      "status": "running",
+      "ordinal": 11,
+      "started_at_ms": 1791028406058,
+      "ended_at_ms": null,
+      "tool": {
+       "name": "Bash",
+       "call_id": "toolu_017NGGuPh5DkHZyPKu7aJyz5",
+       "category": "exec",
+       "group": null,
+       "label": "python3 -c 'import time; time.sleep(120)'",
+       "command": "python3 -c 'import time; time.sleep(120)'",
+       "input_preview": {
+        "command": "python3 -c 'import time; time.sleep(120)'",
+        "description": "Wait 120 seconds in Python",
+        "timeout": 180000
+       },
+       "explain": null,
+       "output": null,
+       "diff": null
+      }
+     }
+    },
+    {
+     "op": "status",
+     "conv": "c-probe",
+     "activity": {
+      "tool": {
+       "name": "Bash",
+       "call_id": "toolu_017NGGuPh5DkHZyPKu7aJyz5",
+       "label": "python3 -c 'import time; time.sleep(120)'",
+       "item_id": "cl:toolu_017NGGuPh5DkHZyPKu7aJyz5",
+       "started_at_ms": 1791028406058
+      },
+      "running_tools": 1,
+      "headline": "Running python3 -c 'import time; time.sleep(120)'",
+      "item_id": "cl:toolu_017NGGuPh5DkHZyPKu7aJyz5",
+      "since_ms": 1791028406058,
+      "turn_id": "2b2b466e35457fb0",
+      "turn_started_ms": 1791028403856,
+      "state": "tool"
+     }
+    }
+   ]
+  },
+  "done": {
+   "type": "live",
+   "conv": "c-probe",
+   "epoch": "26f356fdabe6",
+   "server_now_ms": 1791028425958,
+   "ops": [
+    {
+     "op": "done",
+     "conv": "c-probe",
+     "id": "cl:toolu_017NGGuPh5DkHZyPKu7aJyz5",
+     "kind": "tool",
+     "rev": 2,
+     "status": "failed",
+     "started_at_ms": 1791028406058,
+     "ended_at_ms": 1791028425952,
+     "item": {
+      "tool": {
+       "output": {
+        "tail": [
+         "Exit code 137"
+        ],
+        "total_lines": 1,
+        "truncated": false,
+        "exit_code": 1
+       }
+      }
+     }
+    }
+   ]
+  }
  }
 }

@@ -294,3 +294,32 @@ fn unknown_kinds_are_not_shown_and_only_the_open_turn_is() {
     let p = present(&view, &[], &options(&[], 0));
     assert_eq!(p.entries.len(), 1, "{:?}", titles(&p));
 }
+
+#[test]
+fn a_running_tool_whose_log_row_landed_at_its_start_keeps_its_live_row() {
+    // The real Host writes a tool's /log row (same call_id) when the tool
+    // starts: the item row keeps its look, label, timer and tail, and the
+    // row is not shown again.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/live-real-settled-turn.json");
+    let body: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let (mut view, mut rows) = real_turn();
+    rows.extend(body["next"]["rows"].as_array().unwrap().iter().map(|r| row(r.clone())));
+    let mut event = body["next"]["event"].clone();
+    event["lseq"] = json!(42);
+    view.apply_event(event.as_object().unwrap());
+    let started = body["next"]["event"]["ops"][1]["item"]["started_at_ms"].as_i64().unwrap();
+    let p = present(&view, &rows, &options(&[], started + 13_000));
+    assert_eq!(titles(&p), ["Running python3 -c 'import time; time.sleep(120)'"]);
+    let tool = &p.entries[0];
+    assert_eq!((tool.status.as_str(), tool.meta.as_str()), ("running", "0:13"), "the running tool ticks");
+    assert!(tool.explaining);
+    assert_eq!(p.absorbed_rows, ["msg-e60c25b9161ac8b660ca"], "its /log row is shown by the item row");
+    let mut done = body["next"]["done"].clone();
+    done["lseq"] = json!(43);
+    view.apply_event(done.as_object().unwrap());
+    let p = present(&view, &rows, &options(&[], started + 20_000));
+    let tool = &p.entries[0];
+    assert_eq!((tool.title.as_str(), tool.status.as_str(), tool.meta.as_str()), ("Ran python3 -c 'import time; time.sleep(120)'", "failed", "exit 1 · 19.9s"));
+    assert_eq!(tool.lines, ["Exit code 137"], "the failed tool keeps its tail");
+    assert_eq!(p.absorbed_rows, ["msg-e60c25b9161ac8b660ca"]);
+}

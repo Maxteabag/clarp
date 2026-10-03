@@ -53,6 +53,10 @@ fn live_row(key: &str) -> Option<crate::MessageRow> {
 const REAL_FAILED: &str = "cl:toolu_01RL4aA1EqQJ43Y7Ay7wuYXt";
 const REAL_ANSWER_ROW: &str = "live-783d39d132789c798a9a";
 const REAL_FOLD: &str = "live:fold:537555728357bf76";
+const REAL_RUNNING: &str = "live:cl:toolu_017NGGuPh5DkHZyPKu7aJyz5";
+const REAL_RUNNING_ROW: &str = "msg-e60c25b9161ac8b660ca";
+const REAL_PREVIOUS_ANSWER: &str = "live-567165763b2310817088";
+const REAL_NEXT_PROMPT: &str = "u-clarp-admin-3c48398b85b08a09";
 
 /// The live rows of the real turn (the probe chat's, once it shows).
 fn probe_titles() -> Vec<String> {
@@ -88,7 +92,10 @@ pub fn live_check(out: String) {
     let height: Rc<RefCell<f32>> = Rc::default();
     let rows_before: Rc<RefCell<(usize, usize)>> = Rc::default();
     let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
-    let (out7, out8, out9) = (out.clone(), out.clone(), out.clone());
+    let (out7, out8, out9, out10) = (out.clone(), out.clone(), out.clone(), out.clone());
+    let running_at: Rc<RefCell<usize>> = Rc::default();
+    let (running_at1, running_at2) = (running_at.clone(), running_at.clone());
+    let (before3, before4) = (rows_before.clone(), rows_before.clone());
     let (anchor1, anchor2) = (anchor.clone(), anchor.clone());
     let (height1, height2) = (height.clone(), height.clone());
     let (before1, before2) = (rows_before.clone(), rows_before.clone());
@@ -450,6 +457,41 @@ pub fn live_check(out: String) {
                 return false;
             }
             check(probe_titles().len() == 2, &format!("O folds it again: {:?}", probe_titles()));
+            // Later: the turn in between, then a prompt whose tool's /log
+            // row lands the moment the tool starts, as on the real Host.
+            control("/__control/live-load", &json!({"session": "probe", "fixture": "live-real-settled-turn.json", "part": "next"})).is_ok()
+        })),
+        ("real running", Box::new(move |app, _window, elapsed| {
+            let landed = app.engine.borrow().conversation("probe").is_some_and(|c| c.index_of(REAL_RUNNING_ROW).is_some());
+            let running = live_row(REAL_RUNNING).is_some_and(|r| r.live.status == "running");
+            if !landed || !running || elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            let tool = live_row(REAL_RUNNING).unwrap_or_default();
+            check(tool.live.title == "Running python3 -c 'import time; time.sleep(120)'", &format!("the running tool keeps its live row after its /log row landed: {:?}", tool.live.title));
+            check(tool.live.meta.starts_with("0:1"), &format!("with its timer from the Host's clock: {:?}", tool.live.meta));
+            check(tool.live.explaining, "and Explaining… while its explanation comes");
+            let shown = rows(&crate::window().expect("window"));
+            check(shown.iter().all(|r| r.id != REAL_RUNNING_ROW), "its /log row is not shown again as a 'Show · 1 tool call' row");
+            let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);
+            let order = [at(REAL_ANSWER_ROW), at(REAL_PREVIOUS_ANSWER), at(REAL_NEXT_PROMPT), at(REAL_RUNNING)];
+            check(order.iter().all(Option::is_some) && order.windows(2).all(|w| w[0] < w[1]), &format!("strict order: earlier turns, then the prompt, then the new turn: {order:?}"));
+            *running_at1.borrow_mut() = at(REAL_RUNNING).unwrap_or(usize::MAX);
+            *before3.borrow_mut() = crate::view::sync_stats();
+            shot(&out10, "live-09-real-running");
+            control("/__control/live-load", &json!({"session": "probe", "fixture": "live-real-settled-turn.json", "part": "done"})).is_ok()
+        })),
+        ("real failed", Box::new(move |_, _window, elapsed| {
+            let tool = live_row(REAL_RUNNING).unwrap_or_default();
+            if tool.live.status != "failed" || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(tool.live.title == "Ran python3 -c 'import time; time.sleep(120)'" && tool.live.meta == "exit 1 · 19.9s", &format!("it settles in place: {:?} {:?}", tool.live.title, tool.live.meta));
+            check(lines(&tool) == ["Exit code 137"], &format!("with its tail: {:?}", lines(&tool)));
+            let shown = rows(&crate::window().expect("window"));
+            check(shown.iter().position(|r| r.live.key == REAL_RUNNING) == Some(*running_at2.borrow()), "at the same place");
+            let (_, inserted_before) = *before4.borrow();
+            check(crate::view::sync_stats().1 == inserted_before, "no row inserted");
             true
         })),
     ];
