@@ -157,28 +157,129 @@ fn durable_rows_take_over_their_items() {
     let p = present(&view, &[live_row], &options(&[], 0));
     assert_eq!(p.hidden_rows, ["live-abc"]);
     assert_eq!(p.entries.len(), 4);
-    // The durable row with the same id and the tools takes the items' place.
+    // The durable row with the message's id shows in the message's place;
+    // its tools stay one row per tool (the explore group), not in the row.
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "Let me look at the parser and its tests.", "revision": 6,
         "tools": [{"id": "toolu_01", "name": "Read"}, {"id": "toolu_02", "name": "Grep"}]}));
     let p = present(&view, &[durable], &options(&[], 0));
     assert!(p.hidden_rows.is_empty());
-    assert_eq!(titles(&p), ["Thought for 4s: Finding the flaky test", "Ran npm test"]);
+    assert_eq!(titles(&p), ["Thought for 4s: Finding the flaky test", "", "Explored 1 file, 1 search", "Ran npm test"]);
+    assert_eq!(p.entries[1].row, "live-abc", "the durable row takes the message's place, in order");
+    assert!(p.absorbed_rows.is_empty(), "a row with its own text stays: {:?}", p.absorbed_rows);
+    assert_eq!(p.stripped_calls, ["toolu_01".to_owned(), "toolu_02".to_owned()].into_iter().collect::<HashSet<_>>(), "the tools the item rows show");
     assert_eq!(p.taken_over.get("cl:msg_01:1").map(String::as_str), Some("live-abc"));
     assert_eq!(p.taken_over.get("cl:toolu_02").map(String::as_str), Some("live-abc"));
-    // A display cell's id takes over a tool too.
+    // A display cell's id takes over a tool too; a row that is only that
+    // cell is shown by the tool's row.
     let cells = row(json!({"id": "d9", "role": "assistant", "text": "", "revision": 7, "display_cells": [{"id": "toolu_03", "kind": "command"}]}));
     let p = present(&view, &[cells], &options(&[], 0));
     assert_eq!(p.taken_over.get("cl:toolu_03").map(String::as_str), Some("d9"));
+    assert_eq!(p.absorbed_rows, ["d9"]);
+    assert_eq!(p.entries.last().unwrap().title, "Ran npm test");
 }
 
 #[test]
-fn a_settled_turn_that_landed_in_the_log_leaves_nothing_behind() {
+fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let view = turn_full(after(23));
     let tools: Vec<Value> = ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"].iter().map(|id| json!({"id": id})).collect();
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
     let p = present(&view, &[durable], &options(&[], 0));
-    assert!(p.entries.is_empty(), "{:?}", titles(&p));
-    assert_eq!(p.taken_over.get("cl:msg_01:0").map(String::as_str), Some("live-abc"), "the reasoning goes with its turn");
+    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "Ran npm test", "", "Stopped npm test"]);
+    assert_eq!(p.entries[2].row, "live-abc", "the row shows where the answer that stays was");
+    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold; the row carries the commentary");
+    assert_eq!(p.stripped_calls.len(), 5);
+}
+
+/// The real Host's settled turn (tests/fixtures/live-real-settled-turn.json):
+/// GET /live and the /log rows of that turn.
+fn real_turn() -> (LiveView, Vec<Message>) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/live-real-settled-turn.json");
+    let body: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut view = LiveView::new();
+    view.apply_snapshot(body["live"].as_object().unwrap());
+    let rows = body["log"]["turns"].as_array().unwrap().iter().map(|r| row(r.clone())).collect();
+    (view, rows)
+}
+
+const REAL_FAILED: &str = "cl:toolu_01RL4aA1EqQJ43Y7Ay7wuYXt";
+const REAL_ANSWER_ROW: &str = "live-783d39d132789c798a9a";
+
+#[test]
+fn the_real_hosts_settled_turn_folds_after_its_rows_take_over() {
+    let (view, rows) = real_turn();
+    let p = present(&view, &rows, &options(&[], 0));
+    assert_eq!(titles(&p), ["Worked for 16s · 2 tools", "Ran sleep 60", ""]);
+    let kinds: Vec<Kind> = p.entries.iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, [Kind::Fold, Kind::Tool, Kind::Message]);
+    let fold = &p.entries[0];
+    assert_eq!(fold.key, "live:fold:537555728357bf76");
+    assert_eq!(
+        fold.items,
+        ["cl:msg_011CffFZdevXjFVDAZK9REsx:0", "cl:msg_011CffFZyy46uzmYZ4oPGgfd:0", "cl:toolu_01NHjm6d6UD9Xncd1t3gSZKG"],
+        "both reasonings and the tool that worked fold"
+    );
+    let failed = &p.entries[1];
+    assert_eq!(failed.key, format!("live:{REAL_FAILED}"));
+    assert_eq!(failed.status, "failed", "the failed tool stays in view");
+    assert_eq!(failed.meta, "exit 1 · 0.0s");
+    assert_eq!(p.entries[2].row, REAL_ANSWER_ROW, "the answer is its durable row, outside the fold");
+    // The tool rows are shown by the item rows, so they are not shown again.
+    let mut absorbed = p.absorbed_rows.clone();
+    absorbed.sort();
+    assert_eq!(absorbed, ["msg-9dc44519ed4e93bcff29", "msg-d28c2b3f8a1150792e60"]);
+    assert_eq!(p.taken_over.get(REAL_FAILED).map(String::as_str), Some("msg-9dc44519ed4e93bcff29"));
+    // Open: one row per item, the reasoning among them.
+    let open = present(&view, &rows, &options(&["live:fold:537555728357bf76"], 0));
+    assert_eq!(
+        titles(&open),
+        [
+            "Worked for 16s · 2 tools",
+            "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th",
+            "Ran sleep 60",
+            "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa",
+            "Ran sleep 60",
+            "",
+        ]
+    );
+    assert!(open.entries[0].expanded);
+}
+
+#[test]
+fn a_turn_that_settled_before_the_chat_opened_folds_the_same_way() {
+    let (view, rows) = real_turn();
+    // The snapshot alone (the /log page not here yet), then with it.
+    let before = present(&view, &[], &options(&[], 0));
+    let after = present(&view, &rows, &options(&[], 0));
+    let keys = |p: &Presented| p.entries.iter().map(|e| e.key.clone()).collect::<Vec<_>>();
+    assert_eq!(keys(&before), keys(&after), "the rows landing changes no place");
+    assert_eq!(before.entries[2].text, "Sleep is running in the background; I'll continue with step 2 once it finishes.");
+    assert!(before.entries[2].row.is_empty());
+}
+
+#[test]
+fn a_tool_waiting_for_its_explanation_says_explaining() {
+    let mut view = turn_full(after(13));
+    let p = present(&view, &[], &options(&[], 1759480005000));
+    let tool = p.entries.last().unwrap();
+    assert_eq!(tool.secondary, "");
+    assert!(tool.explaining && tool.reserve_secondary, "running, nothing explained yet: Explaining… in the reserved line");
+    let pending = json!({"type": "live", "conv": "conv-1", "epoch": "boot-a", "lseq": 14, "ops": [
+        {"op": "upsert", "conv": "conv-1", "id": "cl:toolu_03", "kind": "tool", "rev": 2, "item": {"tool": {"explain": {"level": 2, "status": "pending"}}}},
+    ]});
+    view.apply_event(pending.as_object().unwrap());
+    assert!(present(&view, &[], &options(&[], 1759480005000)).entries.last().unwrap().explaining, "pending");
+    let explained = present(&turn_full(after(15)), &[], &options(&[], 1759480005300));
+    let tool = explained.entries.last().unwrap();
+    assert_eq!(tool.secondary, "Runs the parser tests");
+    assert!(!tool.explaining);
+    let mut off = options(&[], 1759480005000);
+    off.explanations = false;
+    let tool = present(&view, &[], &off).entries.last().unwrap().clone();
+    assert!(!tool.explaining && !tool.reserve_secondary, "explanations off: no placeholder");
+    // A settled tool the Host never explained needs no line.
+    let (real, rows) = real_turn();
+    let p = present(&real, &rows, &options(&["live:fold:537555728357bf76"], 0));
+    assert!(p.entries.iter().all(|e| !e.explaining), "explained or settled: nothing pending");
 }
 
 #[test]
