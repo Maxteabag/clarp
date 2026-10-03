@@ -431,3 +431,29 @@ fn rows_are_found_by_id_after_inserts_and_removals_in_the_middle() {
     assert_eq!(h.ids(), ["z", "a", "b", "c", "u-p2"]);
     indexed(&h);
 }
+
+#[test]
+fn a_row_written_after_a_live_row_goes_below_it() {
+    // The settled turn's answer is still a live row when the next message
+    // is written: the message goes below it (it came later), and stays
+    // there when the answer is finalized and the tool rows land.
+    let mut h = Harness::new("s");
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "u-1", "role": "user", "text": "Run it", "revision": 1, "timestamp": "2026-10-03T11:48:57.181Z"},
+        {"id": "live-1", "role": "assistant", "kind": "live", "text": "Done.", "revision": 2, "timestamp": "2026-10-03T11:49:07.816Z"}]}), LoadKind::Tail);
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "u-2", "role": "user", "text": "Next", "revision": 3, "timestamp": "2026-10-03T11:49:30.000Z"}]}), LoadKind::Delta);
+    assert_eq!(h.ids(), ["u-1", "live-1", "u-2"]);
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "tool-1", "role": "assistant", "text": "", "revision": 4, "timestamp": "2026-10-03T11:49:02.753Z", "tools": [{"id": "t1"}]},
+        {"id": "live-1", "role": "assistant", "text": "Done.", "revision": 5, "timestamp": "2026-10-03T11:49:07.816Z"}]}), LoadKind::Delta);
+    assert_eq!(h.ids()[..2], ["u-1", "tool-1"]);
+    assert_eq!(h.ids()[2..], ["live-1", "u-2"], "the answer above the message written after it");
+    // A row without a time (or written before the live row began) still
+    // goes above the live tail, as a streaming answer is the newest row.
+    let mut tail = Harness::new("s");
+    tail.log(json!({"conversation_id": "c", "turns": [
+        {"id": "live-1", "role": "assistant", "kind": "live", "text": "Strea", "revision": 2, "timestamp": "2026-10-03T11:49:07.816Z"}]}), LoadKind::Tail);
+    tail.log(json!({"conversation_id": "c", "turns": [{"id": "u-0", "role": "user", "text": "earlier", "revision": 3, "timestamp": "2026-10-03T11:49:00.000Z"}]}), LoadKind::Delta);
+    assert_eq!(tail.ids(), ["u-0", "live-1"]);
+}
