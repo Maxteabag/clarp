@@ -626,6 +626,12 @@ class CodexBackend(StreamJsonBackend):
             st.live_phase = ""
             detail = {"dispatch": self.runner, "tool": name[:80],
                       "trace_id": trace_id, "call_id": str(item.get("id") or "") or None}
+            if item.get("command"):
+                from ..tool_explanation_shapes import redact
+                # The short tool label is presentation, not the input. The
+                # live hub/explainer needs the actual command to classify it;
+                # keep inline script bodies withheld from that presentation.
+                detail["input"] = {"command": redact(str(item["command"]))}
             if etype == "item.completed":
                 detail.update(phase="tool_finished", status=_tool_item_status(item))
                 self.transition(agent_id, TurnEvent.TOOL_FINISHED, detail)

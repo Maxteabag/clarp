@@ -34,6 +34,10 @@ class LiveExplainer:
     def observe(self, event: dict[str, Any]) -> None:
         if event.get("type") != "live":
             return
+        setting = tool_explanation_settings.get()
+        level = int(setting["detail_level"])
+        if not setting["enabled"] or level == 0:
+            return
         for op in event.get("ops") or []:
             if op.get("op") != "upsert" or op.get("kind") != "tool":
                 continue
@@ -49,6 +53,11 @@ class LiveExplainer:
                 if len(self._seen) > 4096:
                     self._seen.pop(next(iter(self._seen)))
             job = (str(event.get("agent_id") or ""), item_id, tool)
+            # Announce at admission, not after an earlier tool's 45-second
+            # polling window. Clients can show an honest explanation wait
+            # rather than silently falling back to raw command text.
+            self._patch(job[0], item_id, {"tool": {"explain": {
+                "text": None, "level": level, "status": "pending"}}})
             if self._synchronous:
                 self._explain(*job)
             else:
@@ -56,7 +65,8 @@ class LiveExplainer:
                 try:
                     self._queue.put_nowait(job)
                 except queue.Full:
-                    pass
+                    self._patch(job[0], item_id, {"tool": {"explain": {
+                        "text": None, "level": level, "status": "failed"}}})
 
     def _start(self) -> None:
         if self._thread is None or not self._thread.is_alive():
@@ -80,6 +90,8 @@ class LiveExplainer:
             return
         service = self._service()
         if service is None:
+            self._patch(agent_id, item_id, {"tool": {"explain": {
+                "text": None, "level": level, "status": "failed"}}})
             return
         preview = tool.get("input_preview") if isinstance(tool.get("input_preview"), dict) else {}
         activity = {"name": tool.get("name") or "", "command": tool.get("command") or "",
@@ -91,7 +103,6 @@ class LiveExplainer:
         agent = agents_db.get_by_agent_id(agent_id) or {}
         request_id = item_id[-128:]
         deadline = time.monotonic() + MAX_WAIT_SEC
-        announced = False
         while True:
             result = service.request(level, [{"id": request_id, "activity": activity}],
                                      cwd=agent.get("cwd"), target_agent_id=agent_id)
@@ -103,13 +114,8 @@ class LiveExplainer:
                     "text": answer["text"], "level": level, "status": "ready"}}})
                 return
             if status not in {"pending", "busy"} or time.monotonic() >= deadline:
-                if status == "failed" or (announced and status in {"pending", "busy"}):
-                    self._patch(agent_id, item_id, {"tool": {"explain": {
-                        "text": None, "level": level, "status": "failed"}}})
-                return
-            if not announced:
-                announced = True
                 self._patch(agent_id, item_id, {"tool": {"explain": {
-                    "text": None, "level": level, "status": "pending"}}})
+                    "text": None, "level": level, "status": "failed"}}})
+                return
             if self._poll:
                 time.sleep(self._poll)

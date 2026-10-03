@@ -238,6 +238,57 @@ def test_lost_worker_timeout_replans_and_stale_wake_is_rejected(host):
     assert p["counts"]["removed"] == 1 and p["completed_count"] == 0
 
 
+def test_queued_goal_checkpoint_then_restart_retires_old_wake_and_runs_user_work(host):
+    p = create(host)
+    # Drive the production scheduler against the actual Host. User work lands
+    # between its idle check and dispatch, creating a genuinely admitted wake
+    # in the durable queue rather than fabricating a SQLite receipt.
+    worker = """
+import json, os, sys, urllib.request
+sys.path.insert(0, os.environ['CLARP_CODE_ROOT'])
+from lib import db, task_goal_recovery
+def send(payload):
+    request = urllib.request.Request(sys.argv[1] + '/send',
+        data=json.dumps(payload).encode(), headers={
+            'Authorization':'Bearer qa-host-test', 'Content-Type':'application/json'})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.load(response)
+def dispatch(session, text, request):
+    send(dict(session=session, text='[qa-slow] user before checkpoint',
+        client_msg_id='checkpoint-active', synthesize_audio=False))
+    result = send(dict(session=session, text=text, client_msg_id=request,
+        queue_if_busy=True, synthesize_audio=False))
+    assert result['queued']
+    return result
+assert task_goal_recovery.tick(dispatch, now=db.now_ms()+130000) == 1
+"""
+    subprocess.run([sys.executable, "-c", worker, host.url], check=True, env={
+        **os.environ, "CLAUDE_PWA_DB": str(host.root / "state.sqlite"),
+        "CLARP_CODE_ROOT": str(ROOT / "server")})
+    old = host.request("/turn-queue?session=rachel")["items"]
+    assert len(old) == 1
+    old_id = old[0]["id"]
+    current = host.request("/task-plans?session=rachel")["plans"][0]
+    arm(host, current, due_at=int(time.time() * 1000) + 600000)
+    queued = host.request("/send", {
+        "session": "rachel", "text": "User work after stale wake",
+        "client_msg_id": "user-after-stale", "queue_if_busy": True,
+        "synthesize_audio": False})
+    assert queued["queued"]
+    host.stop()
+    host.start()
+    host.wait_reply("rachel", "User work after stale wake")
+    with sqlite3.connect(host.root / "state.sqlite") as con:
+        assert con.execute(
+            "SELECT status,text,sender_agent_id FROM queued_turns WHERE queue_id=?",
+            (old_id,)).fetchone() == ("cancelled", "", "")
+        assert con.execute(
+            "SELECT count(*) FROM messages WHERE message_id=?", ("u-" + old_id,)).fetchone()[0] == 0
+        assert con.execute(
+            "SELECT count(*) FROM messages WHERE message_id='u-user-after-stale'").fetchone()[0] == 1
+    assert host.request("/turn-queue?session=rachel")["items"] == []
+
+
 def test_named_context_checkpoint_is_atomic_and_retrievable_over_http(host):
     p = create(host)
     p = action(

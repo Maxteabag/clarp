@@ -175,21 +175,38 @@ def restart_heartbeat_prompt_text(agent: dict) -> str:
 
 
 def restart_heartbeat_agents() -> list[dict]:
-    """Agents whose persisted runtime was active when the server restarted.
+    """Work actually interrupted by this runtime's restart.
 
-    This is deliberately independent of the periodic heartbeat opt-in. A
-    restart interrupts every server-owned backend process, so all active,
-    non-archived sessions need one continuity turn even when periodic autonomy
-    is disabled. Stopped/deleted/archived sessions remain untouched.
+    A persisted runtime is a conversation binding, not an in-flight turn.
+    Waking every binding reloads idle conversations (and their full provider
+    context) just to answer HEARTBEAT_OK. Boot has already marked genuinely
+    interrupted turns, so that marker is the recovery authority. Durable goals
+    and explicit queued requests retain their own recovery paths.
     """
     if globally_disabled():
         return []
-    return [
-        agent for agent in agents_db.list_agents()
-        if not agent.get("archived_at")
-        and agents_db.current_runtime_id(agent["agent_id"]) is not None
-        and not _goal_recovery_owns(agent["agent_id"])
-    ]
+    from . import origins, turn_dispatch, turn_queue
+
+    interrupted = []
+    for agent in agents_db.list_agents():
+        agent_id = agent["agent_id"]
+        if (agent.get("archived_at")
+                or agents_db.current_runtime_id(agent_id) is None
+                or _goal_recovery_owns(agent_id)):
+            continue
+        latest = agents_db.latest_state(agent_id) or {}
+        if (latest.get("kind") != AgentState.INTERRUPTED
+                or not _is_restart_interrupted(latest)):
+            continue
+        if (latest.get("detail") or {}).get("origin") in origins.ROUTINE_AUTOMATION_ORIGINS:
+            continue
+        queue = turn_queue.state(agent_id)
+        live = turn_dispatch.live_work(agent_id, session=agent.get("session") or "")
+        if (queue["paused"] or queue["count"] or live.queued or live.terminal
+                or live.compacting or backends.active_handles(agent.get("backend"), agent_id)):
+            continue
+        interrupted.append(agent)
+    return interrupted
 
 
 def _goal_recovery_owns(agent_id: str) -> bool:

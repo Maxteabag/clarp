@@ -204,6 +204,24 @@ def test_duplicate_claim_and_restart_reuse_same_receipt(tmp_path):
     assert third[1]["continuation"]["request_id"] != request
 
 
+def test_wake_prompt_bounds_large_working_context_and_preserves_goal_checkpoint(tmp_path):
+    p = make_goal(tmp_path)
+    p = act(p, "checkpoint", {
+        "progress": "Probe already passed. " + "Detailed evidence. " * 4000,
+        "next_work": "Inspect replacement. " + "Provisional context. " * 4000,
+        "continuation": {"due_at": db.now_ms() + 1000}})
+    sent = []
+    assert recovery.tick(lambda *args: sent.append(args) or {"queued": False},
+                         now=db.now_ms() + 2000) == 1
+    _session, prompt, _request = sent[0]
+    assert len(prompt) < 8500
+    assert p["plan_id"] in prompt and str(p["revision"]) in prompt
+    assert "clarp-goal get" in prompt
+    assert "Probe already passed." in prompt and "Inspect replacement." in prompt
+    assert "truncated" in prompt
+    assert task_plans.get(p["plan_id"])["goal"]["checkpoint"] == p["goal"]["checkpoint"]
+
+
 def test_wrong_native_owner_suppresses_wake(tmp_path):
     p = make_goal(tmp_path)
     agents.bind_backend_session(p["agent_id"], "different-native")

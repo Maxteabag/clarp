@@ -57,6 +57,32 @@ def test_state_transitions_feed_the_hub_for_any_backend():
         live_hub.install(None)
 
 
+def test_account_recovery_is_limited_in_snapshot_and_live_events():
+    events = []
+    hub = LiveHub(sink=events.append)
+    live_hub.install(hub)
+    try:
+        aid = agents_db.create_agent(persona="Dagger", voice_id="v", cwd="/tmp",
+                                     session="dagger", backend="claude")
+        agents_db.start_runtime(aid, "dagger")
+        agents_db.open_turn(agent_id=aid, source="pwa", trace_id="waiting-trace")
+        turn_lifecycle.transition(aid, TurnEvent.SPAWN_STARTED, {"trace_id": "waiting-trace"})
+        turn_lifecycle.transition(aid, TurnEvent.ACCOUNT_RECOVERY_WAIT, {
+            "account_recovery": "waiting", "message": "Waiting for Claude quota"})
+        waiting = hub.snapshot(session="dagger")
+        assert waiting["activity"]["state"] == "limited"
+        assert waiting["activity"]["headline"] == "Waiting for Claude quota"
+        assert waiting["turn"]["status"] == "running"
+        assert any(op.get("activity", {}).get("state") == "limited"
+                   for event in events for op in event["ops"])
+        turn_lifecycle.transition(aid, TurnEvent.SPAWN_STARTED, {"trace_id": "waiting-trace"})
+        assert hub.snapshot(session="dagger")["activity"]["state"] == "thinking"
+        turn_lifecycle.transition(aid, TurnEvent.STOP_REQUESTED)
+        assert hub.snapshot(session="dagger")["activity"]["state"] == "interrupted"
+    finally:
+        live_hub.install(None)
+
+
 def test_a_codex_turn_streams_reasoning_command_output_diffs_and_messages():
     import threading
 

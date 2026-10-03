@@ -26,6 +26,17 @@ validates stdin without switching accounts or making provider requests.
 
 ## Runtime behavior
 
+- A persisted runtime row identifies a conversation; it does not establish
+  unfinished work. At runtime restart, continuity turns are limited to work
+  marked interrupted by that restart. Idle/completed conversations and routine
+  heartbeat checks are not woken. User stops, valid queued work and enrolled
+  goals retain their own authority and recovery paths. This prevents restarting
+  dozens of cold, long conversations merely to obtain `HEARTBEAT_OK`.
+- A queued goal wake is fenced by its exact request, plan revision, owner and
+  native conversation. Permanently superseded packets are retired once with
+  payload-free cancellation receipts; temporary capacity/approval/pause waits
+  stay queued. The goal scheduler checks durable pending rows before deciding
+  an owner is idle, including before restart rehydration.
 - Claude's rejected/blocked structured limit event and classified terminal usage
   errors trigger recovery. Allowed/warning events and temporary 429s do not.
 - One recovery coordinates all Claude turns owned by the runtime. New turns wait
@@ -45,6 +56,10 @@ validates stdin without switching accounts or making provider requests.
   that releases the original turn's ownership prevents automatic continuation.
 - New requests parked before their first spawn retain their normal native user
   boundary, even when they resume an agent's older conversation.
+- Parked live turns retain their place and report `limited` with the account
+  wait reason, rather than `thinking`. HTTP-to-runtime status delivery carries
+  the durable state-log sequence so a delayed busy update cannot reopen a
+  newer stopped turn.
 - If no account is verified, the runtime keeps the work paused and checks again
   after 60 seconds. Rapid repeated exhaustion also enforces this cooldown. A
   newly arriving model must be verified before the group resumes.

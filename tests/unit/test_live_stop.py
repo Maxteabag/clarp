@@ -94,3 +94,34 @@ def test_a_runtime_restart_settles_the_turn_it_interrupted():
         assert snapshot["activity"]["state"] == "interrupted"
     finally:
         live_hub.install(None)
+
+
+def test_delayed_busy_event_cannot_reopen_a_stopped_turn(split_host, monkeypatch):
+    """Two RPCs may arrive out of order; the persisted newer stop wins."""
+    client = backends._RUNTIME_CLIENT
+    original = client.live_observe
+    waiting, release, delivered = threading.Event(), threading.Event(), threading.Event()
+
+    def delayed(agent_id, event, to_state, detail):
+        if event == TurnEvent.RECORDED:
+            waiting.set()
+            assert release.wait(3)
+            try:
+                return original(agent_id, event, to_state, detail)
+            finally:
+                delivered.set()
+        result = original(agent_id, event, to_state, detail)
+        if event == TurnEvent.STOP_REQUESTED:
+            release.set()
+        return result
+
+    monkeypatch.setattr(client, "live_observe", delayed)
+    aid = _running_turn(split_host, "claude", tool_running=False)
+    try:
+        assert waiting.wait(1)
+        turn_lifecycle.transition(aid, TurnEvent.STOP_REQUESTED, {"source": "user_stop"})
+        assert delivered.wait(3)
+        assert split_host.snapshot(agent_id=aid)["turn"]["status"] == "interrupted"
+        assert split_host.snapshot(agent_id=aid)["activity"]["state"] == "interrupted"
+    finally:
+        release.set()

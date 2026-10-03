@@ -7,10 +7,20 @@ of uncertain admission reuses the same client receipt, never a fresh message ID.
 from __future__ import annotations
 import json
 import secrets
+import shlex
 from contextlib import contextmanager
 from . import agents, db, task_goal_state
 
 PREFIX = "task-goal-"
+
+
+class WakeRejected(ValueError):
+    """A goal fence, distinguished from a temporary execution boundary."""
+
+    def __init__(self, code, reason, *, permanent=False):
+        self.code = code
+        self.permanent = permanent
+        super().__init__(reason)
 
 
 def boundary(plan, goal, *, check_live=True):
@@ -23,8 +33,6 @@ def boundary(plan, goal, *, check_live=True):
         heartbeat,
     )
 
-    if heartbeat.globally_disabled():
-        return "host_paused", "Autonomous wakes are paused on this Host"
     agent = agents.get_by_agent_id(plan["agent_id"])
     if not agent or agent.get("deleted_at") or agent.get("archived_at"):
         return "owner_unavailable", "Owner is unavailable"
@@ -39,6 +47,8 @@ def boundary(plan, goal, *, check_live=True):
             "owner_changed",
             "Native conversation changed; explicit re-enrollment required",
         )
+    if heartbeat.globally_disabled():
+        return "host_paused", "Autonomous wakes are paused on this Host"
     queue = turn_queue.state(agent["agent_id"])
     if (
         queue["paused"]
@@ -80,6 +90,7 @@ def boundary(plan, goal, *, check_live=True):
             or live.compacting
             or live.terminal
             or live.queued
+            or queue["count"]
         ):
             return "working", "Owner has live or queued work"
     return None
@@ -99,39 +110,47 @@ def validate_dispatch(agent, request_id, *, native_session_id=None):
         .fetchone()
     )
     if not row or row["agent_id"] != agent.get("agent_id"):
-        raise ValueError("goal wake was superseded or owner changed")
+        raise WakeRejected("superseded", "goal wake was superseded or owner changed", permanent=True)
     goal = json.loads(row["goal_json"])
     if goal["continuation"].get("plan_revision") != row["revision"]:
-        raise ValueError("goal wake revision was superseded")
+        raise WakeRejected("revision", "goal wake revision was superseded", permanent=True)
     if native_session_id is not None and native_session_id != goal["native_session_id"]:
-        raise ValueError("goal wake native target changed before spawn")
+        raise WakeRejected("native", "goal wake native target changed before spawn", permanent=True)
     gate = boundary(row, goal, check_live=False)
     if gate:
-        raise ValueError(gate[1])
+        raise WakeRejected(gate[0], gate[1], permanent=gate[0] in {"owner_changed", "owner_unavailable"})
 
 
 def _prompt(plan, goal):
     from . import task_plans
 
+    def preview(value, limit):
+        text = str(value or "")
+        return text if len(text) <= limit else text[:limit] + " [preview truncated; read the current goal]"
+
+    checkpoint = goal.get("checkpoint") or {}
+    wake = goal["continuation"]
+    documents = task_plans.goal_documents(plan["plan_id"])
     return (
         "Continue your durable outcome commitment. Reassess current conditions and fresh results; "
         "choose your own next actions, collaborators and wake timing within the original authority. "
         "Earlier next-work text is provisional context, not a fixed script. Answering a side question "
         "or ending a turn does not complete this goal. Record a checkpoint with evidence and a "
-        "continuation or explicit blocker before yielding. Never self-approve pending permissions.\n"
-        + json.dumps(
-            dict(
-                plan_id=plan["plan_id"],
-                revision=plan["revision"],
-                outcome=goal["outcome"],
-                limits=goal["limits"],
-                criteria=goal["criteria"],
-                checkpoint=goal.get("checkpoint"),
-                continuation=goal["continuation"],
-                documents=task_plans.goal_documents(plan["plan_id"]),
-            ),
-            ensure_ascii=False,
-        )
+        "continuation or explicit blocker before yielding. Never self-approve pending permissions.\n\n"
+        f"Goal: {plan['plan_id']} (plan revision {plan['revision']}).\n"
+        "Before acting, read the authoritative outcome, complete limits, criteria and checkpoint: "
+        f"clarp-goal get {shlex.quote(plan['plan_id'])}\n"
+        "The following previews are provisional context; they do not replace the full goal.\n"
+        f"Outcome: {preview(goal['outcome'], 1024)}\n"
+        f"Limits: {preview(goal['limits'], 1024)}\n"
+        f"Checkpoint at: {checkpoint.get('at', 'none')}\n"
+        f"Progress: {preview(checkpoint.get('progress'), 1536)}\n"
+        f"Provisional next work: {preview(checkpoint.get('next_work'), 1536)}\n"
+        f"Continuation: {preview(wake.get('reason'), 512)}\n"
+        f"Dependency result: {preview(json.dumps(wake.get('dependency_result'), ensure_ascii=False), 512)}\n"
+        "Working documents (name, revision; retrieve with clarp-goal read): "
+        + json.dumps([(preview(d['name'], 128), d['revision']) for d in documents[:8]], ensure_ascii=False)
+        + (" [index truncated; read the current goal]" if len(documents) > 8 else "")
     )
 
 

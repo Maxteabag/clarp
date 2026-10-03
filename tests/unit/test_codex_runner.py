@@ -309,6 +309,30 @@ def test_command_execution_item_flips_to_tool_state(fake_codex, tmp_path):
     assert AgentState.TOOL in kinds
 
 
+def test_command_execution_keeps_input_beyond_display_label(fake_codex, tmp_path):
+    """Classification/explanations need the command tail, not the 80-char label."""
+    agent_id = _make_codex_agent(persona="Domi", session="command-input")
+    command = "rg -n 'needle' " + "/long/path/" * 10 + "file.py"
+    fake_codex([
+        {"type": "thread.started", "thread_id": "s-command-input"},
+        {"type": "turn.started"},
+        {"type": "item.started", "item": {
+            "id": "command-1", "type": "command_execution", "command": command}},
+        {"type": "item.completed", "item": {
+            "id": "command-1", "type": "command_execution", "command": command}},
+        {"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 1}},
+    ])
+    handle = CODEX.start_turn(text="search", cwd=tmp_path,
+                             agent_id=agent_id, session="command-input")
+    handle.wait(timeout=5.0)
+    rows = agents_db.conn().execute(
+        "SELECT detail FROM state_log WHERE agent_id=? AND kind='tool'", (agent_id,)
+    ).fetchall()
+    assert rows
+    detail = json.loads(rows[0]["detail"])
+    assert detail["input"]["command"] == command
+
+
 def test_spawn_turn_expands_tilde_cwd(fake_codex):
     """An agent whose cwd is the literal "~" must still spawn — Popen won't
     expand the tilde, so the runner must. Regression for the /send 500 that

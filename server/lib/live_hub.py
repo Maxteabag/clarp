@@ -78,6 +78,7 @@ class _Conv:
     timer: Any = None
     ordinal: int = 0
     explore_group: str | None = None
+    account_wait: str | None = None
 
 
 class LiveHub:
@@ -93,6 +94,7 @@ class LiveHub:
         self._output_interval = output_interval
         self._lock = threading.RLock()
         self._by_agent: dict[str, _Conv] = {}
+        self._state_ids: dict[str, int] = {}
 
     # --- turns -------------------------------------------------------------
 
@@ -112,6 +114,7 @@ class LiveHub:
                 return
             self._flush(state)
             state.explore_group = None
+            state.account_wait = None
             started = int(started_at_ms or self._clock_ms())
             self._emit(state, [{"op": "turn", "conv": conv, "turn": {
                 "turn_id": turn_id, "status": "running", "started_at_ms": started,
@@ -137,6 +140,16 @@ class LiveHub:
             self._emit(state, ops, status_after=True, ended=status)
 
     # --- items -------------------------------------------------------------
+
+    def account_recovery(self, agent_id: str, message: str | None) -> None:
+        """Keep a parked turn's position while exposing its real wait state."""
+        with self._lock:
+            state = self._open(agent_id)
+            if state is None or state.account_wait == message:
+                return
+            self._flush(state)
+            state.account_wait = message
+            self._emit(state, [], status_after=True)
 
     def message_text(self, agent_id: str, item_id: str, text: str, *,
                      phase: str | None = None, row_id: str | None = None) -> None:
@@ -427,6 +440,9 @@ class LiveHub:
             state_name = "interrupted" if final == "interrupted" else "idle"
             return {**base, "state": state_name, "turn_started_ms": None,
                     "headline": "Interrupted" if state_name == "interrupted" else None}
+        if state.account_wait:
+            return {**base, "state": "limited", "headline": state.account_wait,
+                    "since_ms": _previous_since(state.view.activity, "limited", now)}
         running = [item for item in view.items() if item.get("status") in {"pending", "running"}]
         tools = [item for item in running if item.get("kind") == "tool"]
         if tools:
@@ -672,6 +688,20 @@ def observe_transition(agent_id: str, event: str, to_state: str,
 
 def _observe(hub: LiveHub, agent_id: str, event: str, to_state: str,
              detail: dict[str, Any]) -> None:
+    # HTTP->runtime RPCs run off the caller's thread. A delayed earlier busy
+    # transition must not reopen a turn after its newer Stop has settled it.
+    # The writer supplies SQLite's durable order, independent of clocks.
+    with hub._lock:
+        state_id = int(detail.get("_state_id") or 0)
+        if state_id:
+            if state_id <= hub._state_ids.get(agent_id, 0):
+                return
+            hub._state_ids[agent_id] = state_id
+        _observe_state(hub, agent_id, event, to_state, detail)
+
+
+def _observe_state(hub: LiveHub, agent_id: str, event: str, to_state: str,
+                   detail: dict[str, Any]) -> None:
     from .protocol import AgentState
     from .turn_lifecycle import BUSY, TERMINAL, TurnEvent
     if to_state in TERMINAL:
@@ -689,6 +719,12 @@ def _observe(hub: LiveHub, agent_id: str, event: str, to_state: str,
     agent = ensure_turn(hub, agent_id)
     if agent is None:
         return
+    if event == TurnEvent.ACCOUNT_RECOVERY_WAIT:
+        hub.account_recovery(agent_id, str(detail.get("message") or
+                                          "Waiting for an account with available usage")[:140])
+        return
+    if event in (TurnEvent.SPAWN_STARTED, TurnEvent.TEXT_STREAMED, TurnEvent.TOOL_STARTED):
+        hub.account_recovery(agent_id, None)
     prefix = item_prefix(agent.get("backend") or "")
     call_id = str(detail.get("call_id") or "")
     if event in (TurnEvent.TOOL_STARTED, TurnEvent.TOOL_FINISHED) and call_id:
@@ -745,7 +781,8 @@ def _forward_to_runtime(agent_id: str, event: str, to_state: str,
     forward = getattr(client, "live_observe", None)
     if forward is None:
         return
-    keep = {key: detail.get(key) for key in ("trace_id", "call_id", "tool", "input", "status")
+    keep = {key: detail.get(key) for key in ("trace_id", "call_id", "tool", "input", "status",
+                                           "account_recovery", "message", "_state_id")
             if detail.get(key) is not None}
 
     def send() -> None:

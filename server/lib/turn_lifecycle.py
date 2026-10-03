@@ -256,7 +256,8 @@ class TurnStateMachine:
             (agent_id, runtime_id, stamp, target,
              json.dumps(detail) if detail else None))
         from . import live_hub
-        live_hub.observe_transition(agent_id, event, target, detail)
+        live_hub.observe_transition(agent_id, event, target,
+                                    {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
         return Transition(
             agent_id=agent_id, event=event, from_state=from_state,
             to_state=target, ts=stamp, detail=detail, forced=force,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from lib import agents as agents_db
 from lib import prompt_admissions, turn_queue
 
@@ -48,7 +50,8 @@ def test_remove_for_agent_drops_only_that_agents_queue():
     }
 
 
-def test_queue_edit_and_delete_update_unmaterialized_admission(tmp_path):
+@pytest.mark.parametrize("retire", ["remove", "cancel"])
+def test_queue_edit_and_retirement_update_unmaterialized_admission(tmp_path, retire):
     agent_id = agents_db.create_agent(
         persona="Mike", voice_id="voice", cwd=str(tmp_path), session="mike",
     )
@@ -78,11 +81,21 @@ def test_queue_edit_and_delete_update_unmaterialized_admission(tmp_path):
         (admission_id,),
     ).fetchone()
     assert row["original_text"] == "edited"
-    assert turn_queue.remove("u-edit") is True
+    assert getattr(turn_queue, retire)("u-edit") is True
     assert turn_queue.db.conn().execute(
         "SELECT 1 FROM prompt_admissions WHERE admission_id = ?",
         (admission_id,),
     ).fetchone() is None
+    if retire == "cancel":
+        state = turn_queue.state(agent_id)
+        assert turn_queue.status("u-edit") == "cancelled"
+        assert turn_queue.cancel("u-edit") is False
+        assert turn_queue.state(agent_id) == state
+        assert turn_queue.enqueue(
+            queue_id="u-edit", agent_id=agent_id, session="mike", text="old retry",
+            trace_id="trace-edit", client_msg_id="u-edit", synthesize_audio=False,
+            origin="user", sender_agent_id="") is False
+        assert turn_queue.pending(agent_id) == []
 
 
 def test_queue_edit_updates_materialized_admission_and_message(tmp_path):
