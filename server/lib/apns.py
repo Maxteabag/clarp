@@ -150,6 +150,17 @@ def register_token(token: str, session: str | None = None,
         )
     # An app that sends no grant (older build, or attestation unavailable)
     # keeps any grant this token already has.
+    if grant_key:
+        # A grant follows the phone, not the token: after iOS rotates the
+        # token, the old row would push to the same phone a second time.
+        database.execute(
+            """UPDATE device_tokens
+                  SET disabled_at = ?
+                WHERE push_grant = ?
+                  AND token != ?
+                  AND disabled_at IS NULL""",
+            (now, grant_key, token),
+        )
     database.execute(
         """INSERT INTO device_tokens
                 (token, session, platform, environment, base_url, push_grant,
@@ -189,6 +200,14 @@ def disable_token(token: str, reason: str = "") -> None:
         (db.now_ms(), token),
     )
     log("apnsTokenDisabled", f"{reason or 'unknown'} {token[:12]}…")
+
+
+def _clear_grant(token: str) -> None:
+    """Forget a grant the phone revoked; the row may still have another path."""
+    from . import db
+    db.conn().execute(
+        "UPDATE device_tokens SET push_grant = '' WHERE token = ?", (token,))
+    log("apnsGrantRevoked", f"{token[:12]}…")
 
 
 def _mark_pushed(token: str) -> None:
@@ -718,7 +737,14 @@ class _Router:
         if grant and self._grant and self._cfg.apns_mode in ("auto", "relay"):
             self.name = "grant"
             try:
-                return self._grant.send(grant, payload, **kwargs)
+                result = self._grant.send(grant, payload, **kwargs)
+                if result[1] != "GrantRevoked":
+                    return result
+                # The phone revoked this Host's grant. Forget it; disable the
+                # token only when this Host has no other way to reach it.
+                _clear_grant(token)
+                if self._base is None:
+                    return result
             except _RelayUnavailable as e:
                 if self._cfg.apns_mode != "auto" or not self._cfg.apns_direct_ready():
                     raise
