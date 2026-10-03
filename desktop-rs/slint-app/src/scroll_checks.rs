@@ -889,6 +889,8 @@ struct Jump {
     done: usize,
     stable: usize,
     begun: bool,
+    /// The scroll journal's lines before the event.
+    journal: usize,
 }
 
 type Act = Box<dyn Fn(&Rc<crate::App>, &crate::AppWindow)>;
@@ -952,6 +954,7 @@ fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool
             }
             st.before = Some(now);
             st.done = 0;
+            st.journal = crate::scroll_journal::logged().len();
             true
         })),
         (label, Box::new(move |_, window, elapsed| {
@@ -989,6 +992,10 @@ fn jump_case_from(state: Rc<RefCell<Jump>>, label: &'static str, following: bool
                 check(after.last >= before.first, &format!("{label}: a reader one notch up stays within a viewport: before {}; after {} ({})", before.line(), after.line(), after.drawn));
             }
             check(st.above == 0, &format!("{label}: never more than a viewport up meanwhile ({} polls wholly above; highest place rows #{}..#{}, before #{}..#{})", st.above, lowest.first, lowest.last, before.first, before.last));
+            let journal: Vec<String> = crate::scroll_journal::logged().split_off(st.journal);
+            if following {
+                check(!journal.iter().any(|c| c == "follow"), &format!("{label}: following, the scroll journal logs no pins (logged {journal:?})"));
+            }
             *st = Jump::default();
             true
         })),
@@ -1095,6 +1102,9 @@ pub(super) fn scroll_jump_check(out: String) {
                 st.before = seen();
                 st.lowest = st.before.clone();
                 st.above = 0;
+                let journal = crate::scroll_journal::logged();
+                let recent = &journal[journal.len().saturating_sub(3)..];
+                check(recent.iter().any(|c| c == "key:Home"), &format!("the scroll journal logs Home's move (last causes {recent:?})"));
                 true
             }
         })),
