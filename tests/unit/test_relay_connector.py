@@ -17,6 +17,16 @@ def test_relay_always_marks_both_authenticated_and_anonymous_requests_remote():
         assert headers['Accept-Encoding'] == 'identity'
 
 
+def test_relay_asks_for_gzip_only_when_the_relay_passes_encoded_bodies_through():
+    phone = {'Accept-Encoding': 'gzip, deflate, br'}
+    # A Worker that re-encodes per Content-Encoding would double-gzip.
+    assert forward_request_headers(phone, 'h', 0)['Accept-Encoding'] == 'identity'
+    assert forward_request_headers(phone, 'h', 0, passthrough_encoding=True)['Accept-Encoding'] == 'gzip'
+    for accept in ['br', '', 'gzip;q=0, br', 'identity']:
+        headers = forward_request_headers({'accept-encoding': accept}, 'h', 0, passthrough_encoding=True)
+        assert headers['Accept-Encoding'] == 'identity', accept
+
+
 def test_relay_preserves_verified_client_address_for_failure_throttling():
     headers = forward_request_headers({'x-forwarded-for': '192.0.2.10'}, '127.0.0.1:7682', 0)
     assert headers['X-Forwarded-For'] == '192.0.2.10'

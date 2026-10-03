@@ -91,13 +91,39 @@ def _emit_event(event: str, level: str, detail: dict) -> None:
         pass
 
 
-def forward_request_headers(meta_headers: dict, local_netloc: str, body_len: int) -> dict:
+def response_encoding(meta_headers: dict, *, passthrough: bool) -> str:
+    """The Accept-Encoding the connector asks the local Host for.
+
+    Response bodies are relayed byte for byte with their Content-Encoding
+    header. A Cloudflare Worker that builds its client Response from those
+    headers with the default ``encodeBody: "automatic"`` compresses the body
+    itself, so an already-gzipped body would arrive double-encoded. Gzip is
+    therefore requested only when the relay says it passes encoded bodies
+    through untouched (``"passthrough_encoding": true`` in the request frame,
+    i.e. ``encodeBody: "manual"``) and the phone accepts gzip. Event streams
+    are never gzipped by the Host, so SSE framing is unaffected either way.
+    """
+    if not passthrough:
+        return 'identity'
+    accept = ''
+    for k, v in meta_headers.items():
+        if k.lower() == 'accept-encoding':
+            accept = str(v)
+    offered = {p.split(';', 1)[0].strip().lower() for p in accept.split(',')
+               if p.replace(' ', '').lower().partition(';q=')[2] not in {'0', '0.0', '0.00', '0.000'}}
+    return 'gzip' if 'gzip' in offered else 'identity'
+
+
+def forward_request_headers(meta_headers: dict, local_netloc: str, body_len: int,
+                            *, passthrough_encoding: bool = False) -> dict:
     lower = {k.lower(): v for k, v in meta_headers.items()}
     connection_headers = {s.strip().lower() for s in lower.get('connection', '').split(',')}
     headers = {k: v for k, v in meta_headers.items()
                if k.lower() not in HOP | connection_headers | {'accept-encoding', 'forwarded', 'x-real-ip'}
                and not k.lower().startswith(('x-forwarded-', 'x-clarp-', 'tailscale-', 'cf-', 'sec-websocket'))}
-    headers.update({'Host': local_netloc, 'Accept-Encoding': 'identity', 'X-Clarp-Transport': 'relay'})
+    headers.update({'Host': local_netloc,
+                    'Accept-Encoding': response_encoding(meta_headers, passthrough=passthrough_encoding),
+                    'X-Clarp-Transport': 'relay'})
     try:
         headers['X-Forwarded-For'] = str(ipaddress.ip_address(lower.get('x-forwarded-for', '')))
     except ValueError:
@@ -376,7 +402,9 @@ class Connector:
         try:
             if stream.cancelled.is_set():
                 return
-            headers = forward_request_headers(meta['headers'], self.local.netloc, len(body))
+            headers = forward_request_headers(
+                meta['headers'], self.local.netloc, len(body),
+                passthrough_encoding=meta.get('passthrough_encoding') is True)
             connection.request(meta.get('method', 'GET'), meta['path'], body=body or None, headers=headers)
             if stream.cancelled.is_set():
                 return
