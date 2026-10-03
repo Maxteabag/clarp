@@ -1091,3 +1091,39 @@ def test_long_turn_shows_and_speaks_its_ack_while_tools_run_and_a_stop_keeps_it(
         assert [r["text"] for r in assistant_rows()] == [row["text"]]
     finally:
         live_hub.install(None)
+
+
+def test_file_tool_rows_name_the_file_agy_touched(fake_agy, tmp_path):
+    """agy names its file arguments AbsolutePath, TargetFile, SearchPath and
+    DirectoryPath; the tool rows still say which file or folder it used."""
+    calls = [
+        ("view_file", {"AbsolutePath": "/w/src/app.py"}),
+        ("write_to_file", {"TargetFile": "/w/notes.md", "CodeContent": "x"}),
+        ("replace_file_content", {"TargetFile": "/w/src/app.py"}),
+        ("grep_search", {"Query": "def main", "SearchPath": "/w/src"}),
+        ("list_dir", {"DirectoryPath": "/w/docs"}),
+    ]
+    rows = [{"event": "init", "conversation_id": _FAKE_CONV,
+             "init": {"model": "claude-opus-5-5-high", "tools": []}}]
+    for index, (name, params) in enumerate(calls, start=1):
+        for state in ("ACTIVE", "DONE"):
+            rows.append(_step(index, state, "tool", tool_name=name,
+                              tool_info={"name": name, "parameters": params}))
+    rows.append({"event": "result", "result": {
+        "conversation_id": _FAKE_CONV, "status": "SUCCESS", "response": "done"}})
+    agent_id = _make_agy_agent(persona="Files", session="files")
+    trace_id = _open_owned_turn(agent_id, "files")
+    fake_agy("\n".join(json.dumps(row) for row in rows) + "\n")
+    results = []
+    AGY.start_turn(text="go", cwd=tmp_path, agent_id=agent_id, session="files",
+                   on_result=results.append, trace_id=trace_id).wait(timeout=8)
+    assert _wait_for(lambda: len(results) == 1)
+    tools = [json.loads(row["detail"]) for row in agents_db.conn().execute(
+        "SELECT detail FROM state_log WHERE agent_id=? AND kind=? ORDER BY state_id",
+        (agent_id, AgentState.TOOL)).fetchall()]
+    shown = [(t["tool"], t["input"]) for t in tools]
+    assert ("Read", {"file_path": "/w/src/app.py"}) in shown
+    assert ("Write", {"file_path": "/w/notes.md"}) in shown
+    assert ("Edit", {"file_path": "/w/src/app.py"}) in shown
+    assert ("Grep", {"pattern": "def main", "path": "/w/src"}) in shown
+    assert ("LS", {"path": "/w/docs"}) in shown
