@@ -32,6 +32,12 @@ fn parse_iso<Tz: TimeZone>(timestamp: &str, zone: &Tz) -> Option<DateTime<Tz>> {
         .and_then(|naive| zone.from_local_datetime(&naive).earliest())
 }
 
+/// An ISO-8601 instant as milliseconds since the epoch (UTC without an
+/// offset, as the Host writes them).
+pub fn epoch_ms(timestamp: &str) -> Option<i64> {
+    parse_iso(timestamp, &chrono::Utc).map(|t| t.timestamp_millis())
+}
+
 fn previous_day(day: NaiveDate) -> NaiveDate {
     day.checked_sub_days(Days::new(1)).unwrap_or(day)
 }
