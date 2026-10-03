@@ -505,7 +505,7 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             return false;
         }
         check(report().transcript_focused && cursor(app) == "q-escape-k" && card("q-escape-k").is_some_and(|c| c.pending && c.draft == "Somewhere warm"),
-            &format!("Escape keeps the draft and the keyboard on the question: cursor {:?}", cursor(app)));
+            &format!("Escape keeps the draft and the keyboard on the question: cursor {:?}, chat focused {}, card {:?}", cursor(app), report().transcript_focused, card("q-escape-k").map(|c| (c.pending, c.draft.to_string(), c.editing))));
         headless::press(Key::Delete);
         true
     })));
