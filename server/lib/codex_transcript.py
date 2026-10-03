@@ -16,6 +16,7 @@ counterparts matched back by call_id.
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import pathlib
@@ -108,10 +109,18 @@ def _display_cell(
 
 
 def _shell_words(command: str) -> list[str]:
+    return list(_split_command(command))
+
+
+# A transcript is reparsed whole each time it grows, and every command is
+# classified several times per parse. shlex reads one character at a time in
+# Python, so splitting the same commands again was most of a long import.
+@functools.lru_cache(maxsize=8192)
+def _split_command(command: str) -> tuple[str, ...]:
     try:
-        return shlex.split(command)
+        return tuple(shlex.split(command))
     except ValueError:
-        return command.split()
+        return tuple(command.split())
 
 
 def _strip_shell_wrapper(command: str) -> str:
