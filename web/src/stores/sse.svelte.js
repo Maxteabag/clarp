@@ -88,12 +88,19 @@ onTurnSettled(session => {
 // The live subscription is part of the URL, so a changed set of chats means
 // reopening the stream. Other events resume from the last id, and live
 // events are never replayed: each watched chat takes a fresh GET /live.
+// Changes in one burst (the feature arriving, then the open chat) share one
+// reconnect.
+let resubscribeTimer = null;
 onSubscriptionsChanged(() => {
-  if (!es) return;
-  resubscribing = true;
-  try { es.close(); } catch (_) {}
-  es = null;
-  connectSSE();
+  if (resubscribeTimer) return;
+  resubscribeTimer = setTimeout(() => {
+    resubscribeTimer = null;
+    if (!es) return;
+    resubscribing = true;
+    try { es.close(); } catch (_) {}
+    es = null;
+    connectSSE();
+  }, 50);
 });
 
 export function connectSSE() {

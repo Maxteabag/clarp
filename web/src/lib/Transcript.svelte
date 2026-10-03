@@ -11,7 +11,7 @@
   import { live, liveFor, openLive, watchSession } from '../stores/live.svelte.js';
   import { prefs } from '../stores/prefs.svelte.js';
 
-  let { session } = $props();
+  let { session, active = true } = $props();
 
   const BOTTOM_STICKY_PX = 96;
 
@@ -21,6 +21,7 @@
   let pinned = $state(true);
   let showJump = $state(false);
   let programmatic = false;
+  let savedTop = 0;
 
   let conv = $derived(conversation(session));
   let placeholder = $derived(placeholderFor(conv));
@@ -62,6 +63,7 @@
   }
 
   function onScroll() {
+    if (active && bodyEl) savedTop = bodyEl.scrollTop;
     if (programmatic) return;
     pinned = nearBottom();
     showJump = !pinned;
@@ -95,6 +97,17 @@
     return () => ro.disconnect();
   });
 
+  // Hidden behind another chat (phone): onScroll remembers where the reader
+  // was; coming back returns there, or to the newest content when following.
+  $effect(() => {
+    if (!bodyEl) return;
+    if (!active) return;
+    tick().then(() => {
+      if (pinned) pinSoon();
+      else { programmatic = true; bodyEl.scrollTop = savedTop; setTimeout(() => { programmatic = false; }, 0); }
+    });
+  });
+
   // A different session in this pane starts pinned to its bottom.
   $effect(() => {
     session;
@@ -104,7 +117,7 @@
 </script>
 
 <div
-  id="historyBody"
+  id={active ? 'historyBody' : undefined}
   class="history-body"
   class:hide-tools={prefs.hideTools}
   bind:this={bodyEl}

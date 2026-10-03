@@ -219,6 +219,11 @@ function agentRow() {
     conversation_id: conv, head_revision: logRevision, live_activity: a, cwd: '/home/demo/parser' };
 }
 
+// A second, idle agent with a short history, for agent switching.
+const mikeTurns = Array.from({ length: 30 }, (_, i) => ({ id: `mike-${i}`, role: i % 2 ? 'assistant' : 'user',
+  text: i % 2 ? `Answer ${i}: the **deploy** finished.\n\n\`\`\`sh\nmake deploy-${i}\n\`\`\`` : `Question ${i}?`,
+  timestamp: new Date(start - (60 - i) * 60000).toISOString(), revision: i + 1 }));
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
   const p = url.pathname;
@@ -232,8 +237,19 @@ const server = http.createServer((req, res) => {
       contract: { host: 40, min_ios: 1, features: { live_items: 40 } } });
   }
   if (p === '/agents/snapshot') {
-    return sendJson(res, { agents: [agentRow()], focused: 'rachel',
+    return sendJson(res, { agents: [agentRow(), { session: 'mike', name: 'Mike', persona: 'Mike', agent_id: 'agent-2',
+      alive: true, backend: 'codex', latest_state: 'done', busy: false, conversation_id: 'conv-m', head_revision: 30 }],
+      focused: 'rachel',
       tool_explanations: { enabled: EXPLAIN, detail_level: 2 } });
+  }
+  if (p === '/log' && url.searchParams.get('session') === 'mike') {
+    const after = Number(url.searchParams.get('after_revision') || 0);
+    return sendJson(res, { session: 'mike', conversation_id: 'conv-m', turns: mikeTurns.filter(t => t.revision > after),
+      latest_revision: 30, has_more: false, cwd: '/home/demo/deploy' });
+  }
+  if (p === '/live' && url.searchParams.get('session') === 'mike') {
+    return sendJson(res, { conv: 'conv-m', session: 'mike', agent_id: 'agent-2', epoch: 'boot-a', lseq: 0,
+      server_now_ms: Date.now(), activity: { state: 'idle' }, turn: null, items: [] });
   }
   if (p === '/log') {
     const after = Number(url.searchParams.get('after_revision') || 0);

@@ -26,6 +26,8 @@ import { registerModule } from '@core/client-health.js';
 import { clog, instanceId } from '../lib/net.js';
 import { delivery } from './delivery.svelte.js';
 import { liveFor, liveTurnRunning } from './live.svelte.js';
+import { createTranscriptCache } from '@core/transcript-cache.js';
+import { idbTranscriptStorage } from '../lib/idb-transcripts.js';
 import { confirmFromTurns } from '@core/delivery.js';
 
 registerModule(globalThis, 'conversations', instanceId('conversations'));
@@ -39,6 +41,27 @@ const WAKE_DEBOUNCE_MS = 100;
  * live row would be refetched whole on every ping, so wakes coalesce longer.
  */
 const LIVE_WAKE_DEBOUNCE_MS = 2000;
+
+/** Set by the app store: whether an agent is mid-turn (no cache writes then). */
+let busyProbe = () => false;
+export function setBusyProbe(fn) { busyProbe = fn || (() => false); }
+
+const cache = createTranscriptCache({
+  storage: idbTranscriptStorage(),
+  isBusy: session => liveTurnRunning(session) || busyProbe(session),
+});
+
+function cacheState(session) {
+  const sync = syncOf(session);
+  return {
+    conversationId: sync.conversationId,
+    cursor: sync.cursor,
+    latestTs: sync.latestTs,
+    hasMore: sync.hasMore,
+    cwd: entry(session).cwd,
+    turns: sync.order.map(id => sync.turns[id]),
+  };
+}
 
 export const conversations = $state({
   /** session → ConversationState (the view the panes render) */
@@ -140,6 +163,7 @@ function project(session, { bump = 'appended', resetActivity = false } = {}) {
     conv.appendSeq++;
   }
   confirmFromTurns(delivery, conv.turns);
+  cache.changed(session, () => cacheState(session));
 }
 
 /** Effects the reducer asked for, outside a running request. */
@@ -160,6 +184,7 @@ function dropCache(session) {
   next.wakeWhileFetching = cur.wakeWhileFetching;
   setSync(session, next);
   conversations.bySession[session] = blank(session);
+  cache.forget(session);
 }
 
 // ---- fetching -------------------------------------------------------------
@@ -234,13 +259,53 @@ export function reload(session) {
   });
 }
 
+/**
+ * Cache-first open: paint the chat from the device's copy, then ask /log
+ * only for what changed after its cursor. A replaced conversation comes back
+ * as replace_required or a new conversation_id, and the reducer turns that
+ * into a fresh tail as usual. Without a copy this is a plain tail load.
+ */
+function openFromCache(session) {
+  return run(session, 'tail', async () => {
+    const conv = entry(session);
+    conv.status = 'loading';
+    const t0 = performance.now();
+    const rec = await cache.load(session);
+    if (!rec || !rec.turns.length) {
+      try {
+        await loadTail(session);
+      } catch (err) {
+        conv.status = 'error';
+        conv.error = err && err.message ? err.message : 'failed to load';
+      }
+      return;
+    }
+    setSync(session, applyLog(syncOf(session), rec, 'tail').state);
+    conv.cwd = rec.cwd || '';
+    project(session, { bump: 'always', resetActivity: true });
+    clog('conversationCacheOpen', `${session} turns=${rec.turns.length} rev=${rec.latest_revision} dur=${Math.round(performance.now() - t0)}ms`);
+    try {
+      const d = await fetchLog(session, { after_revision: String(rec.latest_revision || 0) });
+      const r = applyLog(syncOf(session), d, 'delta');
+      setSync(session, r.state);
+      if (r.effects.includes(Effects.DROP_CACHE)) { await loadTail(session); return; }
+      if (d.cwd) conv.cwd = d.cwd;
+      project(session);
+      if (r.effects.includes(Effects.FETCH_DELTA)) setSync(session, requestDelta(syncOf(session)).state);
+    } catch (_) {
+      // Offline: the cached copy stays on screen and the next wake retries.
+    }
+  });
+}
+
 /** Load once; a cached conversation is refreshed with a delta instead. */
 export function ensureLoaded(session) {
   if (!session) return Promise.resolve();
   const conv = entry(session);
   if (conv.status === 'error') return reload(session);
   const r = onOpen(syncOf(session));
-  return r.effects.includes(Effects.FETCH_TAIL) ? reload(session) : refresh(session);
+  if (!r.effects.includes(Effects.FETCH_TAIL)) return refresh(session);
+  return conv.status === 'empty' ? openFromCache(session) : reload(session);
 }
 
 /** Pull every change after the cursor. */

@@ -57,10 +57,15 @@ function renderMediaMarkdownExtensions(text) {
 // <speak>...</speak> is the voice-channel marker the server uses to pick what
 // gets synthesised. The transcript should show the inner text but not the
 // markup, so strip the tags before any markdown processing.
+let markedConfigured = false;
+
 export function renderText(s, streaming = false) {
   const text = renderMediaMarkdownExtensions(stripVoiceMarkup(s, { streaming }));
   if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
-    marked.setOptions({ breaks: true, gfm: true });
+    if (!markedConfigured) {
+      marked.setOptions({ breaks: true, gfm: true });
+      markedConfigured = true;
+    }
     return DOMPurify.sanitize(marked.parse(text));
   }
   return renderTextFallback(text);
@@ -212,6 +217,25 @@ export function renderTurnBody(t) {
     ? `<div class="body">${renderText(t.text, t.kind === 'live')}</div>`
     : '';
   return body + (t.tools || []).map(renderTool).join('');
+}
+
+// Rendered bodies by turn id, outside component state: switching agents or
+// remounting a transcript inserts the cached string instead of re-parsing
+// markdown. A turn's revision moves whenever its text or tools change.
+const TURN_CACHE_MAX = 800;
+const turnHtml = new Map();
+
+export function renderTurnBodyCached(t) {
+  if (!t || !t.id || t.revision == null) return renderTurnBody(t);
+  const hit = turnHtml.get(t.id);
+  if (hit && hit.revision === t.revision && hit.text === t.text && hit.tools === (t.tools || []).length) {
+    return hit.html;
+  }
+  const html = renderTurnBody(t);
+  turnHtml.delete(t.id);
+  turnHtml.set(t.id, { revision: t.revision, text: t.text, tools: (t.tools || []).length, html });
+  if (turnHtml.size > TURN_CACHE_MAX) turnHtml.delete(turnHtml.keys().next().value);
+  return html;
 }
 
 // ---- formatting ---------------------------------------------------------

@@ -1,5 +1,5 @@
 <script>
-  import { renderTurnBody } from './render.js';
+  import { renderTurnBodyCached } from './render.js';
   import { lazyHighlight } from './highlight.js';
 
   let { turn } = $props();
@@ -9,7 +9,7 @@
   // neighbours do — which, in a keyed each, is every turn but one.
   let html = $derived.by(() => {
     turn.revision;      // tracked: a growing assistant row bumps this
-    return renderTurnBody(turn);
+    return renderTurnBodyCached(turn);
   });
 </script>
 
