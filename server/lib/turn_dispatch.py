@@ -91,6 +91,10 @@ _JANITOR_SPAWN_LOCKS: "weakref.WeakValueDictionary[str, Any]" = weakref.WeakValu
 # drains via drain_after_terminal() when the terminal closes.
 _TERMINAL_SENTINEL = turn_slots.TERMINAL_SENTINEL
 _STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
+# Slot owner while a turn process the Host already finished is still running;
+# sends wait behind it (see _claim_or_queue).
+_PROCESS_OWNER_PREFIX = "process:"
+_PROCESS_EXIT_POLL_S = 0.25
 
 
 def configure_runtime_client(client: Any | None) -> None:
@@ -1126,7 +1130,7 @@ class TurnDispatchService:
                 # turn finishes; nothing is dropped.
                 _SLOTS.claim(agent_id, spec.trace_id)
                 return False, False
-            if queue_if_busy:
+            if queue_if_busy or current.startswith(_PROCESS_OWNER_PREFIX):
                 depth = _SLOTS.enqueue(agent_id, spec)
                 defer_on(_TURN_LOCK, lambda: (
                     eventlog.emit("server", "turnQueued", context=spec.context,
@@ -1140,8 +1144,50 @@ class TurnDispatchService:
             _SLOTS.claim(agent_id, spec.trace_id)
             defer_on(_TURN_LOCK, lambda: self._preempt_for(spec, current))
             return False, False
+        if self._running_processes(spec):
+            # The slot is free but a turn process of this agent still runs
+            # (the Host took its turn for finished too early). Two processes
+            # on one native session interleave and corrupt it, so the slot
+            # goes to that process until it exits and this send waits.
+            owner = f"{_PROCESS_OWNER_PREFIX}{spec.trace_id}"
+            _SLOTS.claim(agent_id, owner)
+            _SLOTS.mark_spawned(agent_id, owner)
+            depth = _SLOTS.enqueue(agent_id, spec)
+            defer_on(_TURN_LOCK, lambda: self._wait_for_process_exit(spec, owner, depth))
+            return False, True
         _SLOTS.claim(agent_id, spec.trace_id)
         return False, False
+
+    def _running_processes(self, spec: _TurnSpec) -> list:
+        """The agent's turn processes that are positively still running."""
+        try:
+            handles = self.backends.active_handles(spec.backend, spec.agent_id)
+        except Exception:  # noqa: BLE001
+            return []
+        running = []
+        for handle in handles or ():
+            try:
+                if getattr(handle, "is_alive", lambda: False)():
+                    running.append(handle)
+            except Exception:  # noqa: BLE001
+                continue
+        return running
+
+    def _wait_for_process_exit(self, spec: _TurnSpec, owner: str, depth: int) -> None:
+        eventlog.emit("server", "turnQueuedBehindProcess", context=spec.context,
+                      detail={"depth": depth})
+        log("turnQueuedBehindProcess",
+            f"agent={spec.agent_id} depth={depth} trace={spec.trace_id or '∅'} "
+            f"— a turn process is still running; waiting for it to exit")
+        holder = replace(spec, trace_id=owner)
+
+        def wait() -> None:
+            while _SLOTS.get(spec.agent_id) == owner and self._running_processes(spec):
+                time.sleep(_PROCESS_EXIT_POLL_S)
+            self._finish_turn(holder)
+
+        threading.Thread(target=wait, daemon=True,
+                         name=f"turn-wait-{spec.agent_id}").start()
 
     def _preempt_for(self, spec: _TurnSpec, killed: str) -> None:
         try:
@@ -1169,13 +1215,11 @@ class TurnDispatchService:
         # message; fall through so the busy path reclaims the slot instead.
         if not self._has_live_turn(spec):
             return False
-        protected_peer = spec.origin=='agent' and bool(spec.sender_agent_id)
         try:
             peer_text=spec.text
             if spec.origin=='agent' and spec.sender_agent_id:
                 from . import oracle_delegations
                 obligations=oracle_delegations.active_requests_for_trace(spec.agent_id,active_trace)
-                protected_peer=bool(obligations)
                 if obligations:
                     peer_context=('Clarp peer message: additional collaboration from another agent, '
                         'not the user replacing or cancelling your active assignment. '
@@ -1201,15 +1245,16 @@ class TurnDispatchService:
             ))
         except Exception as e:  # noqa: BLE001
             log_exception("turnSteerFail", e, detail=spec.agent_id)
-            if protected_peer:
-                raise DispatchError(503,'Peer message could not be delivered; the active Oracle assignment was preserved') from e
+            # A peer message falls through to wait behind the turn (it is
+            # always queueable), so an Oracle assignment is never preempted.
             return False
-        if protected_peer and not accepted:
-            raise DispatchError(503,'Peer steering was unavailable; the active Oracle assignment was preserved')
         if accepted:
             if spec.origin == "oracle":
                 from . import oracle_delegations
                 oracle_delegations.attach_steered_trace(spec.trace_id, active_trace)
+            if spec.queue_id:
+                # Delivered into the running turn: its durable queue
+                # receipt is spent and the visible user row is due now.
                 turn_queue.mark_started(spec.queue_id)
                 self._record_user_message(spec)
                 self._broadcast_queue_state(spec, started=True)

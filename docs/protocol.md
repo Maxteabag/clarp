@@ -413,7 +413,12 @@ Rules:
   from `trace_id`, in which case you cannot confirm delivery.
 - If the agent is busy the new turn **preempts** the running one unless
   `queue_if_busy` is true, in which case it queues and a `queue-updated`
-  event follows.
+  event follows. A message from another agent (`origin: "agent"` with a
+  `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
+  queues as if `queue_if_busy` were true.
+- While a turn process of the agent is still running, no second one starts:
+  every send waits until it exits, even after the Host recorded that turn as
+  finished.
 - `hands_free: true` is for dictation: the server may route the text to a
   different agent (name routing or the orchestrator) and answers with the
   session it chose.

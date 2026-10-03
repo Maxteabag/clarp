@@ -547,6 +547,7 @@ class ClaudeBackend(Backend):
         ends the read loop below."""
         saw_init = False
         saw_result = False
+        final_result: Optional[dict] = None
         saw_usage_limit = False
         live_text = ""
         phase = ""
@@ -668,22 +669,32 @@ class ClaudeBackend(Backend):
                         if not isolated:
                             pacer.offer(current_text)
                 elif typ == "result":
+                    # One process can run several CLI turns: resuming a
+                    # session whose last process left background tasks
+                    # behind answers the queued <task-notification> first,
+                    # with its own result, and only then runs this prompt.
+                    # The turn ends when the process does, with the last
+                    # result; the first one ending it let the next message
+                    # start a second Claude on the same session.
                     saw_result = True
                     if not isolated:
                         settle_message()
-                    if on_result is not None:
-                        try:
-                            assistant_text = (
-                                "\n\n".join(t for t in isolated_texts if t.strip())
-                                if isolated else live_text
-                            )
-                            if assistant_text:
-                                ev = {**ev, "_assistant_text": assistant_text}
-                            on_result(ev)
-                        except Exception as e:            # noqa: BLE001
-                            log_exception("clarpRunnerResultCbFail", e,
-                                          detail=trace_id)
+                    assistant_text = (
+                        "\n\n".join(t for t in isolated_texts if t.strip())
+                        if isolated else live_text
+                    )
+                    final_result = (
+                        {**ev, "_assistant_text": assistant_text}
+                        if assistant_text else ev)
+                    live_text = ""
+                    isolated_texts = []
             rc = proc.wait()
+            if final_result is not None and on_result is not None:
+                try:
+                    on_result(final_result)
+                except Exception as e:                    # noqa: BLE001
+                    log_exception("clarpRunnerResultCbFail", e,
+                                  detail=trace_id)
             err = stderr_text(proc)
             if rc != 0 and not saw_usage_limit:
                 log("clarpExitErr", f"rc={rc} trace={trace_id or '∅'} "

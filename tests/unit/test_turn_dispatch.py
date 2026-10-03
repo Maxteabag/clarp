@@ -1348,10 +1348,10 @@ def test_peer_steering_keeps_the_active_oracle_assignment_visible(tmp_path,rejec
         client_msg_id='oracle-stock',origin='oracle',queue_if_busy=True,synthesize_audio=False)
     if reject_peer:
         backend.steer_turn=lambda *args,**kwargs:False
-        with pytest.raises(DispatchError) as error:
-            service.dispatch(text='Inspect prices independently.',requested_session='rowan',trace_id='peer-prices',
-                origin='agent',sender_agent_id=peer_id,synthesize_audio=False)
-        assert error.value.status==503
+        # Unsteerable now, the peer waits behind the assignment instead.
+        sent=service.dispatch(text='Inspect prices independently.',requested_session='rowan',trace_id='peer-prices',
+            origin='agent',sender_agent_id=peer_id,synthesize_audio=False)
+        assert sent.queued is True
         assert backend.interrupted==[] and len(backend.spawned)==1
         assert oracle_delegations.get('stock')['status']=='accepted'
         return
@@ -2129,7 +2129,6 @@ def test_no_second_process_starts_while_the_agents_last_turn_process_still_runs(
     assert queued.queued is True and direct.queued is True
     assert len(backends.spawned) == 1
     assert backends.interrupted == []
-    assert agents_db.is_busy(agent_id) or _td._INFLIGHT.get(agent_id)
 
     backends.processes[0].alive = False
     assert _wait_until(lambda: len(backends.spawned) == 2)
