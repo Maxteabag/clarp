@@ -220,9 +220,16 @@ function agentRow() {
 }
 
 // A second, idle agent with a short history, for agent switching.
-const mikeTurns = Array.from({ length: 30 }, (_, i) => ({ id: `mike-${i}`, role: i % 2 ? 'assistant' : 'user',
+// 150 turns, paged 100 at a time, with Codex-style display cells on some.
+const mikeTurns = Array.from({ length: 150 }, (_, i) => ({ id: `mike-${i}`, role: i % 2 ? 'assistant' : 'user',
   text: i % 2 ? `Answer ${i}: the **deploy** finished.\n\n\`\`\`sh\nmake deploy-${i}\n\`\`\`` : `Question ${i}?`,
-  timestamp: new Date(start - (60 - i) * 60000).toISOString(), revision: i + 1 }));
+  timestamp: new Date(start - (200 - i) * 60000).toISOString(), revision: i + 1,
+  display_cells: i % 2 ? [
+    { id: `cx-${i}-a`, kind: 'exploration', title: 'Explored', summary: 'Read Makefile, deploy.sh', status: 'ok',
+      lines: [{ label: 'Read', text: 'Makefile', kind: 'detail' }, { label: 'Read', text: 'scripts/deploy.sh', kind: 'detail' }] },
+    { id: `cx-${i}-b`, kind: 'command', title: 'Ran', summary: `make deploy-${i}`, status: i % 10 === 9 ? 'error' : 'ok',
+      lines: [{ text: 'deploying…', kind: 'output' }, { text: i % 10 === 9 ? 'error: timeout' : 'done', kind: 'output' }] },
+  ] : [] }));
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -238,14 +245,23 @@ const server = http.createServer((req, res) => {
   }
   if (p === '/agents/snapshot') {
     return sendJson(res, { agents: [agentRow(), { session: 'mike', name: 'Mike', persona: 'Mike', agent_id: 'agent-2',
-      alive: true, backend: 'codex', latest_state: 'done', busy: false, conversation_id: 'conv-m', head_revision: 30 }],
+      alive: true, backend: 'codex', latest_state: 'done', busy: false, conversation_id: 'conv-m', head_revision: 150 }],
       focused: 'rachel',
       tool_explanations: { enabled: EXPLAIN, detail_level: 2 } });
   }
   if (p === '/log' && url.searchParams.get('session') === 'mike') {
     const after = Number(url.searchParams.get('after_revision') || 0);
-    return sendJson(res, { session: 'mike', conversation_id: 'conv-m', turns: mikeTurns.filter(t => t.revision > after),
-      latest_revision: 30, has_more: false, cwd: '/home/demo/deploy' });
+    const before = url.searchParams.get('before');
+    if (before) {
+      const end = mikeTurns.findIndex(t => t.id === before);
+      const page = mikeTurns.slice(Math.max(0, end - 100), end);
+      return sendJson(res, { session: 'mike', conversation_id: 'conv-m', turns: page, latest_revision: 150,
+        has_more: end - 100 > 0 });
+    }
+    if (after) return sendJson(res, { session: 'mike', conversation_id: 'conv-m', turns: mikeTurns.filter(t => t.revision > after),
+      latest_revision: 150, has_more: false });
+    return sendJson(res, { session: 'mike', conversation_id: 'conv-m', turns: mikeTurns.slice(-100),
+      latest_revision: 150, has_more: true, cwd: '/home/demo/deploy' });
   }
   if (p === '/live' && url.searchParams.get('session') === 'mike') {
     return sendJson(res, { conv: 'conv-m', session: 'mike', agent_id: 'agent-2', epoch: 'boot-a', lseq: 0,

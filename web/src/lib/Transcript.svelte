@@ -97,6 +97,46 @@
     return () => ro.disconnect();
   });
 
+  // Older history lands above the reader. WebKit has no scroll anchoring, so
+  // hold the old first turn where it was: note its position before the DOM
+  // changes and move the scroll by however far it was pushed down.
+  let anchor = null;
+  $effect.pre(() => {
+    conv.turns;
+    if (!bodyEl || !contentEl || pinned) return;
+    const first = contentEl.querySelector('.turn');
+    anchor = first ? { el: first, top: first.getBoundingClientRect().top } : null;
+  });
+  // Rows above the reader keep resizing for a few frames after they land
+  // (content-visibility estimates, then real sizes), so the anchor is held
+  // for a short settle window rather than corrected once.
+  const ANCHOR_SETTLE_MS = 600;
+  let settleUntil = 0;
+  let settleFrame = 0;
+  $effect(() => {
+    conv.turns;
+    const a = anchor;
+    anchor = null;
+    if (!a || !bodyEl || !a.el.isConnected) return;
+    if (Math.abs(a.el.getBoundingClientRect().top - a.top) < 1) return;
+    settleUntil = performance.now() + ANCHOR_SETTLE_MS;
+    const hold = () => {
+      settleFrame = 0;
+      if (!bodyEl || !a.el.isConnected) return;
+      const moved = a.el.getBoundingClientRect().top - a.top;
+      if (Math.abs(moved) >= 1) {
+        programmatic = true;
+        bodyEl.scrollTop += moved;
+        setTimeout(() => { programmatic = false; }, 0);
+      }
+      if (performance.now() < settleUntil) settleFrame = requestAnimationFrame(hold);
+    };
+    if (settleFrame) cancelAnimationFrame(settleFrame);
+    hold();
+  });
+  // A deliberate scroll ends the hold at once.
+  function releaseAnchor() { settleUntil = 0; }
+
   // Hidden behind another chat (phone): onScroll remembers where the reader
   // was; coming back returns there, or to the newest content when following.
   $effect(() => {
@@ -122,6 +162,8 @@
   class:hide-tools={prefs.hideTools}
   bind:this={bodyEl}
   onscroll={onScroll}
+  onwheel={releaseAnchor}
+  ontouchstart={releaseAnchor}
 >
   <div class="history-content" bind:this={contentEl}>
   {#if placeholder}

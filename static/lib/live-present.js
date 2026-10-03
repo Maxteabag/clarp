@@ -283,3 +283,24 @@ export function activityFromStatus(s) {
   return { state, headline, tool: null, running_tools: state === 'tool' ? 1 : 0,
     turn_started_ms: turnStarted, since_ms: turnStarted };
 }
+
+const CELL_STATUS = { ok: 'completed', error: 'failed', running: 'running', recorded: 'completed' };
+
+/**
+ * A /log display cell as a settled row, so history reads like the live
+ * turn did. Provider sub-agent cells are not rendered here.
+ */
+export function cellRow(cell) {
+  if (!cell || !cell.id || cell.kind === 'subagents') return null;
+  return {
+    type: 'cell',
+    id: cell.id,
+    kind: cell.kind || '',
+    status: CELL_STATUS[cell.status] || 'completed',
+    running: cell.status === 'running',
+    verb: String(cell.title || ''),
+    label: String(cell.summary || ''),
+    lines: (cell.lines || []).filter(l => l && l.text).map(l => ({
+      label: l.label || '', text: String(l.text), kind: l.kind || '' })),
+  };
+}

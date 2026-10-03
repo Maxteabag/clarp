@@ -11,7 +11,7 @@ import {
   applyLiveEvent, applyLiveSnapshot, blankLive, liveItems,
 } from '@core/live-items.js';
 import {
-  activityFromStatus, clock, currentTurnItems, formatDuration, liveRows, settledFold, statusLine, takenOverTurns,
+  activityFromStatus, cellRow, clock, currentTurnItems, formatDuration, liveRows, settledFold, statusLine, takenOverTurns,
 } from '@core/live-present.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -282,5 +282,25 @@ describe('status line without the live channel', () => {
   it('is gone for an idle agent', () => {
     expect(statusLine(activityFromStatus({ latest_state: 'done' }), { now: T0 })).toBe(null);
     expect(statusLine(activityFromStatus(undefined), { now: T0 })).toBe(null);
+  });
+});
+
+describe('display cells in history', () => {
+  it('read like settled live rows', () => {
+    const row = cellRow({ id: 'call_1', kind: 'command', title: 'Ran', summary: 'npm test', status: 'error',
+      lines: [{ label: 'Command', text: 'npm test -- parser', kind: 'detail' },
+        { text: 'FAIL a', kind: 'output' }, { text: 'FAIL b', kind: 'output' }] });
+    expect(row).toMatchObject({ type: 'cell', id: 'call_1', status: 'failed', verb: 'Ran', label: 'npm test' });
+    expect(row.lines.map(l => l.text)).toEqual(['npm test -- parser', 'FAIL a', 'FAIL b']);
+  });
+
+  it('map the cell statuses onto the live ones', () => {
+    expect(cellRow({ id: 'a', status: 'ok', title: 'Explored' }).status).toBe('completed');
+    expect(cellRow({ id: 'a', status: 'running', title: 'Running' }).status).toBe('running');
+    expect(cellRow({ id: 'a', status: 'recorded', title: 'Read' }).status).toBe('completed');
+  });
+
+  it('leave provider sub-agent cells out', () => {
+    expect(cellRow({ id: 'a', kind: 'subagents', title: 'Spawned agent' })).toBe(null);
   });
 });
