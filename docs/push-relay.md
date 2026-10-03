@@ -17,8 +17,12 @@ names the phone, so no device token or credential of the Host's is involved.
 
 - A device row with a grant always uses it, whatever else is configured
   (except `mode = "direct"` or `"off"`).
-- A grant the phone revoked (the user unpaired this Host) makes the relay
-  answer 401; the Host disables that token and stops pushing to it.
+- A grant the phone revoked (the user removed this Host in the app) makes
+  the relay answer 401. The Host forgets the grant and uses its own path
+  for that token if it has one (credential relay or local key); otherwise
+  it disables the token.
+- Re-registering a token with a grant retires any other row holding the
+  same grant, so a rotated token does not push twice.
 - `409 device_token_missing` means Apple retired the phone's token; the
   phone registers a new one on its next launch, so the row is kept.
 - Re-registering without `push_grant` keeps the stored grant, so older app
