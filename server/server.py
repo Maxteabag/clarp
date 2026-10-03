@@ -732,7 +732,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if "Cache-Control" not in headers:
+            self.send_header("Cache-Control", "no-store")
         for k, v in headers.items():
             self.send_header(k, v)
         self.end_headers()
@@ -762,7 +763,8 @@ class Handler(BaseHTTPRequestHandler):
         ).encode()
         self._send(200, body, "application/javascript")
 
-    def _send_file(self, path: pathlib.Path, content_type: str = "", secure: bool = False):
+    def _send_file(self, path: pathlib.Path, content_type: str = "", secure: bool = False,
+                   cache_headers: dict | None = None):
         if not path.is_file():
             return self._send(404, b"not found")
         ctype = content_type
@@ -771,9 +773,30 @@ class Handler(BaseHTTPRequestHandler):
         if not ctype:
             ctype = "application/octet-stream"
         data = path.read_bytes()
-        return self._send_ranged_data(data, ctype, secure=secure)
+        return self._send_ranged_data(data, ctype, secure=secure, cache_headers=cache_headers)
 
-    def _send_ranged_data(self, data: bytes, ctype: str, *, secure: bool = False):
+    def _send_not_modified(self, headers: dict) -> None:
+        self.send_response(304)
+        for k, v in headers.items():
+            self.send_header(k, v)
+        self.end_headers()
+
+    def _send_app_asset(self, path: pathlib.Path):
+        """One of the web app's own files: immutable when the URL carries its
+        content hash (see lib/static_assets.py), revalidated otherwise."""
+        from lib import static_assets
+        if not path.is_file():
+            return self._send(404, b"not found")
+        requested = (self._query().get("v") or [""])[0]
+        headers = static_assets.asset_cache_headers(path, requested)
+        if (headers["Cache-Control"] != static_assets.IMMUTABLE
+                and static_assets.etag_matches(self.headers.get("If-None-Match", ""),
+                                               headers["ETag"])):
+            return self._send_not_modified(headers)
+        return self._send_file(path, cache_headers=headers)
+
+    def _send_ranged_data(self, data: bytes, ctype: str, *, secure: bool = False,
+                          cache_headers: dict | None = None):
         total = len(data)
         security_headers = ({"X-Content-Type-Options": "nosniff",
                              "Content-Security-Policy": "sandbox; default-src 'none'"}
@@ -803,17 +826,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(206, data[start:end + 1], ctype, extra_headers={
                 "Content-Range": f"bytes {start}-{end}/{total}",
                 "Accept-Ranges": "bytes",
-                **security_headers,
+                **security_headers, **(cache_headers or {}),
             })
         self._send(200, data, ctype, extra_headers={
-            "Accept-Ranges": "bytes", **security_headers,
+            "Accept-Ranges": "bytes", **security_headers, **(cache_headers or {}),
         })
 
     def _send_index(self):
-        return self._send_file(self.ctx.static / "index.html")
+        # The shell is small and names every asset by content hash, so it is
+        # always revalidated (304 when unchanged) and the assets never are.
+        from lib import static_assets
+        body = static_assets.versioned_index(self.ctx.static)
+        headers = {"Cache-Control": static_assets.REVALIDATE,
+                   "ETag": static_assets.etag_for(body)}
+        if static_assets.etag_matches(self.headers.get("If-None-Match", ""), headers["ETag"]):
+            return self._send_not_modified(headers)
+        return self._send(200, body, "text/html", extra_headers=headers)
 
     def _send_root_static(self, path: str):
-        return self._send_file(self.ctx.static / path.lstrip("/"))
+        return self._send_app_asset(self.ctx.static / path.lstrip("/"))
 
     def _send_complete_clip(self, clip_id: int) -> None:
         """Wait for a chunked-file clip to finalize, then serve it statically."""
@@ -1028,7 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
             rel = path[len("/static/"):]
             target = (self.ctx.static / rel).resolve()
             if self.ctx.static.resolve() in target.parents or target == self.ctx.static.resolve():
-                return self._send_file(target)
+                return self._send_app_asset(target)
             return self._send(403, b"forbidden")
         if path.startswith("/media/"):
             asset_id = path[len("/media/"):].strip("/")
