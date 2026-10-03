@@ -788,13 +788,17 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: replace a chat's history with `count` rows of
             # varied height (wrapped prose, code, tables, lists, tool calls,
             # user bubbles), deterministic by index, and announce it.
+            # `stamp_step`: seconds between rows' stamps (default all alike),
+            # so artifacts made at a time land on a row of their own.
             session, count = body["session"], int(body["count"])
+            step = float(body.get("stamp_step", 0))
             with state_lock:
                 rows = []
                 for i in range(count):
                     revision += 1
+                    stamp = iso_at(1_789_459_200_000 + int(i * step * 1000)) if step else "2026-09-15T08:00:00Z"
                     rows.append({"id": f"{session}-{i}", "revision": revision,
-                                 "timestamp": "2026-09-15T08:00:00Z", **rich_turn(i)})
+                                 "timestamp": stamp, **rich_turn(i)})
                 turns[session] = rows
                 for agent in agents:
                     if agent["session"] == session:
