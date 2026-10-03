@@ -269,23 +269,27 @@ pub fn live_check(out: String) {
             let stopped = live_row("live:cl:msg_02:0").unwrap_or_default();
             check(message_text(&stopped) == "The failure came from an off-by-one", &format!("the stopped answer stays: {:?}", message_text(&stopped)));
             check(stopped.live.meta == "interrupted", "and says it was interrupted");
-            *app.artifact_cursor.borrow_mut() = String::new();
             app_now().focus_transcript();
             shot(&out4, "live-04-folded");
-            // From none, J is the topmost card on screen: walk to the fold.
-            headless::press("j");
+            // On the failed command, K is the row above it: the fold.
+            *app.artifact_cursor.borrow_mut() = "live:cl:toolu_03".into();
             true
         })),
-        ("to the fold", Box::new(move |app, _window, elapsed| {
-            let cursor = app.artifact_cursor.borrow().clone();
-            if cursor == "live:fold:tr-1" {
-                headless::press("o");
-                return true;
+        ("on the command", Box::new(move |app, _window, elapsed| {
+            // Selected once the row has reported itself on screen.
+            if crate::artifacts_view::selected(app).as_deref() != Some("live:cl:toolu_03") || elapsed < Duration::from_millis(300) {
+                return false;
             }
-            if elapsed.as_millis() % 500 < 100 {
-                headless::press(if live_rows().iter().position(|r| r.live.key == cursor.as_str()).is_some() { "k" } else { "j" });
+            headless::press("k");
+            true
+        })),
+        ("to the fold", Box::new(move |app, _window, _| {
+            if app.artifact_cursor.borrow().as_str() != "live:fold:tr-1" {
+                return false;
             }
-            false
+            check(true, "K from the failed command reaches the fold");
+            headless::press("o");
+            true
         })),
         ("fold open", Box::new(move |_, _window, _| {
             if !live_row("live:fold:tr-1").is_some_and(|r| r.live.expanded) {
