@@ -35,6 +35,13 @@ def main() -> int:
     runtime = RuntimeRPCServer(
         paths.runtime_socket, dispatch_service=dispatch,
         release_id=running_release_id)
+    # Live items (docs/live-items.md): this process runs the agents, so it
+    # owns the hub; the HTTP server follows it over the runtime socket.
+    from lib import live_hub
+    live_fanout = live_hub.LiveFanout()
+    runtime.live_fanout = live_fanout
+    runtime.live_hub = live_hub.LiveHub(sink=live_fanout.publish)
+    live_hub.install(runtime.live_hub, live_fanout)
     release_monitor = RuntimeReleaseMonitor(
         runtime,
         running_release_id=running_release_id,

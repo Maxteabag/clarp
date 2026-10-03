@@ -293,7 +293,7 @@ class StreamJsonBackend(Backend):
     def persist_live_text(self, st: Any, *, text: str, backend_session_id: str,
                           agent_id: str, session: str, trace_id: str, stream: Any,
                           force: bool, interval: float | None = None,
-                          item_key: str | None = None) -> None:
+                          item_key: str | None = None, phase: str | None = None) -> None:
         """Write one mutable assistant row at a bounded visual cadence.
 
         The row is keyed by the turn's trace, so a later transcript import
@@ -324,13 +324,41 @@ class StreamJsonBackend(Backend):
         st._live_target.update(
             backend_session_id=backend_session_id, agent_id=agent_id,
             session=session, trace_id=trace_id, stream=stream)
+        self._live_message_item(st, text, phase=phase)
         pacer.offer(text, final=force)
+
+    def _live_item_id(self, st: Any) -> str:
+        from ..live_hub import item_prefix
+        target = st._live_target
+        key = target.get("item_key") or ""
+        if key:
+            return f"{item_prefix(self.id)}:{key}"
+        return f"{item_prefix(self.id)}:{target.get('trace_id') or ''}:m{getattr(st, '_live_msg_n', 0)}"
+
+    def _live_message_item(self, st: Any, text: str, *, phase: str | None) -> None:
+        """The text as a live message item (docs/live-items.md), unpaced."""
+        from .. import live_hub
+        hub = live_hub.current()
+        target = st._live_target
+        if hub is None or not target.get("agent_id"):
+            return
+        if not hub.has_open_turn(target["agent_id"]):
+            live_hub.ensure_turn(hub, target["agent_id"])
+        from ..message_live import _live_message_id
+        live_hub.report(
+            "message_text", target["agent_id"], self._live_item_id(st), text,
+            phase=phase, row_id=_live_message_id(
+                target["agent_id"], target.get("backend_session_id") or "",
+                target.get("trace_id") or "", target.get("item_key") or ""))
 
     def settle_live_text(self, st: Any) -> None:
         """The current provider message finished: its row stops being live."""
         target = getattr(st, "_live_target", None)
         if not target or not target.get("agent_id"):
             return
+        from .. import live_hub
+        live_hub.report("done", target["agent_id"], self._live_item_id(st))
+        st._live_msg_n = getattr(st, "_live_msg_n", 0) + 1
         backend_session_id = target.get("backend_session_id") or \
             agents_db.live_backend_session(target["agent_id"])
         if not backend_session_id:

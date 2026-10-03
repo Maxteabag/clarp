@@ -404,6 +404,7 @@ class Handler(BaseHTTPRequestHandler):
         "/sw.js": "_send_sw",
         "/events": "_sse",
         "/log": "_handle_log",
+        "/live": "_handle_live",
         "/message-tool-details": "_handle_message_tool_details",
         "/status": "_handle_status",
         "/network/relay": "_handle_relay_status",
@@ -2641,6 +2642,40 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(404, "message not found")
         self._json_ok(details)
 
+    def _live_subscription(self) -> set[str] | None:
+        """GET /events?live=a,b: the chats whose live item ops this client
+        wants (docs/live-items.md §4); absent means no live events."""
+        values = self._query().get("live")
+        if values is None:
+            return None
+        return {part.strip() for value in values for part in value.split(",") if part.strip()}
+
+    def _handle_live(self):
+        """GET /live?session=…: the open turn's live items (docs/live-items.md §5)."""
+        from lib import live_hub
+        session = (self._query().get("session", [""])[0] or "").strip()
+        agent = agents_db.get_by_session(session) if session else None
+        if not agent:
+            return self._json_error(404, "unknown session")
+        agent_id = agent["agent_id"]
+        runtime = getattr(self.ctx, "runtime_client", None)
+        try:
+            if runtime is not None:
+                snapshot = runtime.live_snapshot(session=session, agent_id=agent_id) or {}
+            else:
+                hub = live_hub.current()
+                snapshot = (hub.snapshot(session=session, agent_id=agent_id)
+                            or {"epoch": hub.epoch, "missing": True}) if hub else {}
+        except Exception as exc:  # noqa: BLE001
+            log_exception("liveSnapshotFail", exc, detail=session)
+            return self._json_error(503, "live items unavailable")
+        if not snapshot.get("conv"):
+            # Nothing has happened since the hub started: an idle, empty view.
+            snapshot = live_hub.empty_snapshot(
+                conv=agents_db.live_backend_session(agent_id) or "", session=session,
+                agent_id=agent_id, epoch=str(snapshot.get("epoch") or ""))
+        self._json_ok(snapshot)
+
     def _sse(self):
         last_event_id = ""
         try:
@@ -2666,7 +2701,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
         self.end_headers()
-        q = self.ctx.stream.subscribe()
+        q = self.ctx.stream.subscribe(live=self._live_subscription())
         try:
             self.wfile.write(b": connected\n\n")
             self.wfile.flush()
@@ -5691,7 +5726,30 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
 
     def start_runtime_events():
         from lib.runtime_events import RuntimeEventWatcher
-        return started(RuntimeEventWatcher(ctx.stream))
+        watcher = started(RuntimeEventWatcher(ctx.stream))
+        srv.runtime_event_watcher = watcher
+        return watcher
+
+    def start_live_hub():
+        # No separate runtime: the agents run here, so does the hub.
+        from lib import live_hub
+        hub = live_hub.LiveHub(sink=ctx.stream.broadcast_live)
+        live_hub.install(hub)
+        return hub
+
+    def stop_live_hub(_hub):
+        from lib import live_hub
+        live_hub.install(None)
+
+    def start_live_relay():
+        from lib import live_hub
+        socket_path = getattr(ctx.runtime_client, "socket_path", None)
+        if socket_path is None:
+            return None
+        watcher = getattr(srv, "runtime_event_watcher", None)
+        return live_hub.LiveRelay(
+            socket_path, ctx.stream,
+            on_nudge=watcher.poll_now if watcher is not None else None).start()
 
     def start_tts_worker():
         from lib.clip_delivery import build_from_config, DeliveryDeps
@@ -5748,6 +5806,10 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         Worker("background-job-watcher",
                lambda: started(BackgroundJobWatcher(ctx.stream))),
         Worker("runtime-event-watcher", start_runtime_events, enabled=has_runtime_client),
+        Worker("live-hub", start_live_hub, stop=stop_live_hub,
+               enabled=lambda: not has_runtime_client()),
+        Worker("live-relay", start_live_relay, stop=lambda relay: relay and relay.stop(),
+               enabled=has_runtime_client),
         # TTS worker: drains tts_queue, does the provider call from the
         # server process (not from short-lived hook subprocesses). The hooks
         # only write queue rows; this is the executor side. It starts before

@@ -64,8 +64,14 @@ class SubscriberQueue(queue.Queue):
     (queue full). The owning SSE handler must then deliver what remains and
     close the connection — an evicted queue never receives another event, and
     pinging it would present the client a healthy-looking dead stream.
+
+    `live` is the connection's live-items subscription (GET /events?live=…):
+    None for a client that did not ask (it gets no `live` events), else the
+    sessions or agent ids whose item ops it wants ("*" for all); every live
+    subscriber gets status and turn ops for the whole fleet.
     """
     evicted: bool = False
+    live: frozenset[str] | None = None
 
 
 class AudioStream:
@@ -93,8 +99,13 @@ class AudioStream:
 
     # --- subscriber API ---------------------------------------------------
 
-    def subscribe(self, maxsize: int = 128) -> "SubscriberQueue":
+    def subscribe(self, maxsize: int = 128,
+                  live: "set[str] | frozenset[str] | None" = None) -> "SubscriberQueue":
+        if live is not None:
+            # Item ops are small but frequent while a chat streams.
+            maxsize = max(maxsize, 512)
         q = SubscriberQueue(maxsize=maxsize)
+        q.live = frozenset(live) if live is not None else None
         with self._subs_lock:
             self._subs.append(q)
             n = len(self._subs)
@@ -189,6 +200,36 @@ class AudioStream:
         a microphone or stop an agent.
         """
         self._deliver(dict(events.as_event(event_dict)), sse_event_id=None)
+
+    def broadcast_live(self, event_dict: dict) -> None:
+        """Deliver one `live` event (docs/live-items.md §4). Never stored:
+        a client that misses one recovers through GET /live."""
+        event = dict(events.as_event(event_dict))
+        keys = {str(event.get("session") or ""), str(event.get("agent_id") or "")} - {""}
+        full = json.dumps(event)
+        summary_ops = [op for op in event.get("ops") or []
+                       if op.get("op") in ("status", "turn")]
+        summary = json.dumps({**event, "ops": summary_ops}) if summary_ops else None
+        dead = []
+        with self._subs_lock:
+            for q in self._subs:
+                wanted = getattr(q, "live", None)
+                if wanted is None:
+                    continue
+                payload = full if ("*" in wanted or keys & wanted) else summary
+                if payload is None:
+                    continue
+                try:
+                    q.put_nowait(payload)
+                except queue.Full:
+                    if isinstance(q, SubscriberQueue):
+                        q.evicted = True
+                    dead.append(q)
+            for q in dead:
+                try:
+                    self._subs.remove(q)
+                except ValueError:
+                    pass
 
     def _deliver(self, event_dict: dict, *, sse_event_id: int | None) -> None:
         payload = json.dumps(event_dict)

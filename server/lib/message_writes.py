@@ -539,7 +539,7 @@ def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
             """SELECT message_id, text FROM messages
                 WHERE agent_id=? AND backend_session_id=? AND role='assistant'
                   AND source_file LIKE 'live:%'
-                ORDER BY timestamp, seq DESC""",
+                ORDER BY timestamp, seq""",
             (agent_id, backend_session_id)).fetchall():
         if row["message_id"] in exclude:
             continue

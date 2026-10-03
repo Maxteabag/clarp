@@ -30,6 +30,7 @@ Which executable runs is the Host ``claude_cli`` setting, read by
 """
 from __future__ import annotations
 
+import functools
 import json
 import os
 import pathlib
@@ -197,6 +198,34 @@ def _content_text(content) -> str:
     return ""
 
 
+@functools.lru_cache(maxsize=8)
+def _thinking_display_support(executable: str, stamp: float) -> bool:
+    """Whether this Claude CLI takes ``--thinking-display`` (2.1.2xx+).
+
+    Claude 5.x and Opus 4.7+ omit thinking text unless asked for a summary.
+    The option is not in ``--help``; a CLI that knows it rejects a bad value
+    with its allowed choices, an older one ignores it under ``--version``.
+    Cached per binary and modification time.
+    """
+    try:
+        probe = subprocess.run(
+            [executable, "--thinking-display", "nonsense", "--version"],
+            capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    output = (probe.stdout or "") + (probe.stderr or "")
+    return probe.returncode != 0 and "summarized" in output
+
+
+def _wants_summarized_thinking(executable: str) -> bool:
+    path = shutil.which(executable) or executable
+    try:
+        stamp = os.stat(path).st_mtime
+    except OSError:
+        return False
+    return _thinking_display_support(path, stamp)
+
+
 def _event_message_id(ev: dict) -> str:
     """The Anthropic message id an assistant event belongs to, if it says."""
     inner = ev.get("event")
@@ -361,6 +390,9 @@ class ClaudeBackend(Backend):
             "--include-partial-messages",
             "--verbose",   # required for stream-json to actually stream
         ]
+        if _wants_summarized_thinking(cmd[0]):
+            # Thinking shows as a live, collapsible summary (docs/live-items.md).
+            cmd += ["--thinking-display", "summarized"]
         # Clarp's agent-state hooks ship as a Claude Code plugin loaded from disk.
         # Passing it here rather than registering in ~/.claude/settings.json keeps
         # the install out of the user's Claude Code configuration entirely.
@@ -533,6 +565,12 @@ class ClaudeBackend(Backend):
                 item_key=key))
 
         pacer = new_pacer("")
+        from ..live_claude import ClaudeLiveItems
+        from ..message_live import _live_message_id
+        items = ClaudeLiveItems(
+            agent_id="" if isolated else agent_id, trace_id=trace_id,
+            row_id=lambda key: _live_message_id(
+                agent_id, bound["backend_session_id"] or "", trace_id, key))
 
         def settle_message() -> None:
             if message["text"]:
@@ -559,6 +597,7 @@ class ClaudeBackend(Backend):
                     continue
                 typ = ev.get("type")
                 sub = ev.get("subtype")
+                items.on_event(ev)
                 if typ == "rate_limit_event":
                     info = ev.get("rate_limit_info")
                     if (isinstance(info, dict)

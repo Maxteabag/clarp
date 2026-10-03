@@ -102,8 +102,13 @@ def runtime_status() -> dict[str, Any]:
     """Serializable ownership snapshot served to replaceable HTTP processes."""
     from . import compaction
     status = _SLOTS.snapshot()
+    from . import live_hub
+    hub = live_hub.current()
     status.update({
         "compactions": compaction.active_sessions(),
+        # The status line per agent (docs/live-items.md §1.3), for the
+        # HTTP process's /agents/snapshot.
+        "live_activities": hub.activities() if hub is not None else {},
         **{f"{pool}_account_recovery": coordinator.status()
            for pool, coordinator in _FAILOVERS.items()},
     })

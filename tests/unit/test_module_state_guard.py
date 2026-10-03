@@ -49,6 +49,8 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/backend_auth.py", "_tasks"): JOBS,
     ("lib/backend_auth.py", "_validation_cache"): CACHE,
     ("lib/backends.py", "_RUNTIME_CLIENT"): CLIENT,
+    ("lib/live_hub.py", "_HUB"): CLIENT,
+    ("lib/live_hub.py", "_FANOUT"): CLIENT,
     ("lib/backends.py", "_STATUS_CACHE"): CACHE,
     ("lib/cartesia_voices.py", "_cache"): CACHE,
     ("lib/codex_app_server.py", "_CLIENTS"): CLIENT,

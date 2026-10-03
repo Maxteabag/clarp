@@ -362,7 +362,7 @@ Event types and payloads:
 | `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
 | `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
-| `live` | `agent_id`, `session`, `conv`, `epoch`, `lseq`, `server_now_ms`, `ops` | Only with `GET /events?live=…` and feature `live_items`: item ops for the open turn. Never replayed, no `id:`. See [live-items.md](live-items.md). |
+| `live` | `agent_id`, `session`, `conv`, `epoch`, `lseq`, `server_now_ms`, `ops` | Only with `GET /events?live=…` and feature `live_items`: item ops for the open turn. Never replayed, no `id:`; recover a gap with `GET /live?session=`. See [live-items.md](live-items.md). |
 | `orchestrator-decision` | `decision_id`, `trace_id`, `action`, `kind`, `target_session`, `confidence`, `reason` | Hands-free routing picked (or declined to pick) an agent for an utterance. Informational. |
 
 `controller-event` is the simulation/relay form of a physical controller
