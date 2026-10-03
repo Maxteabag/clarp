@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clarp/live.json",
+  "title": "Live items: the `live` SSE event and GET /live (docs/live-items.md)",
+  "$ref": "#/$defs/live-event",
+  "$defs": {
+    "live-event": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["type", "conv", "epoch", "lseq", "ops"],
+      "properties": {
+        "type": {"const": "live"},
+        "agent_id": {"type": "string"},
+        "session": {"type": "string"},
+        "conv": {"type": "string"},
+        "epoch": {"type": "string"},
+        "lseq": {"type": "integer"},
+        "server_now_ms": {"type": "integer"},
+        "ops": {"type": "array", "items": {"$ref": "#/$defs/op"}}
+      }
+    },
+    "op": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["op", "conv"],
+      "properties": {
+        "op": {"enum": ["upsert", "append", "done", "status", "turn"]},
+        "conv": {"type": "string"},
+        "id": {"type": "string"},
+        "kind": {"$ref": "#/$defs/item-kind"},
+        "rev": {"type": "integer"},
+        "item": {"type": "object"},
+        "field": {"enum": ["text", "tool.output"]},
+        "chunk": {"type": "string"},
+        "lines": {"type": "array", "items": {"type": "string"}},
+        "total_lines": {"type": "integer"},
+        "status": {"$ref": "#/$defs/item-status"},
+        "started_at_ms": {"type": "integer"},
+        "ended_at_ms": {"type": "integer"},
+        "activity": {"$ref": "#/$defs/activity"},
+        "turn": {"$ref": "#/$defs/turn"}
+      }
+    },
+    "item-kind": {"enum": ["message", "reasoning", "tool", "plan", "diff", "compaction"]},
+    "item-status": {"enum": ["pending", "running", "completed", "failed", "interrupted"]},
+    "item": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "conv", "turn_id", "kind", "status", "ordinal", "started_at_ms", "ended_at_ms", "rev"],
+      "properties": {
+        "id": {"type": "string"},
+        "conv": {"type": "string"},
+        "turn_id": {"type": "string"},
+        "kind": {"$ref": "#/$defs/item-kind"},
+        "status": {"$ref": "#/$defs/item-status"},
+        "ordinal": {"type": "integer"},
+        "started_at_ms": {"type": "integer"},
+        "ended_at_ms": {"type": ["integer", "null"]},
+        "rev": {"type": "integer"},
+        "text": {"type": "string"},
+        "phase": {"enum": ["commentary", "final"]},
+        "row_id": {"type": ["string", "null"]},
+        "title": {"type": ["string", "null"]},
+        "tool": {"$ref": "#/$defs/tool"},
+        "plan": {"type": "object"},
+        "diff": {"$ref": "#/$defs/diff"}
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["name", "call_id", "category", "label"],
+      "properties": {
+        "name": {"type": "string"},
+        "call_id": {"type": "string"},
+        "category": {"enum": ["exec", "read", "list", "search", "edit", "write", "fetch", "mcp", "todo", "agent", "other"]},
+        "group": {"type": ["string", "null"]},
+        "label": {"type": "string"},
+        "command": {"type": ["string", "null"]},
+        "input_preview": {"type": "object"},
+        "explain": {"type": ["object", "null"]},
+        "output": {"type": ["object", "null"]},
+        "diff": {"$ref": "#/$defs/diff"}
+      }
+    },
+    "diff": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "added": {"type": "integer"},
+        "removed": {"type": "integer"},
+        "files": {"type": "array"},
+        "preview": {"type": "string"}
+      }
+    },
+    "activity": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["state"],
+      "properties": {
+        "state": {"enum": ["idle", "thinking", "responding", "tool", "compacting", "waiting", "interrupted", "background", "limited"]},
+        "tool": {"type": ["object", "null"]},
+        "running_tools": {"type": "integer"},
+        "headline": {"type": ["string", "null"]},
+        "item_id": {"type": ["string", "null"]},
+        "since_ms": {"type": ["integer", "null"]},
+        "turn_id": {"type": ["string", "null"]},
+        "turn_started_ms": {"type": ["integer", "null"]}
+      }
+    },
+    "turn": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["turn_id", "status", "started_at_ms"],
+      "properties": {
+        "turn_id": {"type": "string"},
+        "status": {"enum": ["running", "completed", "failed", "interrupted"]},
+        "started_at_ms": {"type": "integer"},
+        "ended_at_ms": {"type": ["integer", "null"]},
+        "worked_ms": {"type": ["integer", "null"]},
+        "tool_count": {"type": "integer"}
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["conv", "epoch", "lseq", "activity", "items"],
+      "properties": {
+        "conv": {"type": "string"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "epoch": {"type": "string"},
+        "lseq": {"type": "integer"},
+        "server_now_ms": {"type": "integer"},
+        "activity": {"$ref": "#/$defs/activity"},
+        "turn": {"type": ["object", "null"]},
+        "items": {"type": "array", "items": {"$ref": "#/$defs/item"}},
+        "tool_explanations": {"type": "object"}
+      }
+    }
+  }
+}

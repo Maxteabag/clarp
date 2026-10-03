@@ -17,6 +17,13 @@ these files are the parts a computer can verify.
   `tests/contract/test_fixtures_validate.py` checks the embedded payloads
   against `schemas/` so fixtures cannot describe a server that does not
   exist.
+- `live/` — recorded `live` SSE streams plus the state a client must reach
+  (docs/live-items.md). Desktop, web and iOS replay them through their own
+  reducers; `tests/contract/test_live_fixtures.py` validates them against
+  `schemas/live.json` and the Host's reference reducer (`server/lib/live_items.py`).
+  Steps are `{"snapshot": <GET /live body>}` or `{"event": <live event>}`;
+  `expect` lists the effects (`fetch_live`), the final `lseq`, `activity`,
+  `turn` and the items in order (expected fields are a subset of the item).
 - `ios/` — `sync-fixtures.sh` copies the fixtures into the clarp-ios
   CoreBehaviorTests target (separate repo, separate PR).
   `--check DEST` compares content hashes and provenance. Fixtures may declare

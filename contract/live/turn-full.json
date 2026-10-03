@@ -1,0 +1,1253 @@
+{
+ "title": "one Claude turn: thinking, commentary, an explore group, a long failing command, an edit with a diff, then an interrupt",
+ "area": "live",
+ "steps": [
+  {
+   "snapshot": {
+    "conv": "conv-1",
+    "session": "rachel",
+    "agent_id": "agent-1",
+    "epoch": "boot-a",
+    "lseq": 0,
+    "server_now_ms": 1759479999000,
+    "activity": {
+     "state": "idle",
+     "tool": null,
+     "running_tools": 0,
+     "headline": null,
+     "item_id": null,
+     "since_ms": 1759479940000,
+     "turn_id": null,
+     "turn_started_ms": null
+    },
+    "turn": null,
+    "items": [],
+    "tool_explanations": {
+     "enabled": true,
+     "detail_level": 2
+    }
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 1,
+    "server_now_ms": 1759480000000,
+    "ops": [
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-1",
+       "status": "running",
+       "started_at_ms": 1759480000000,
+       "ended_at_ms": null,
+       "worked_ms": null,
+       "tool_count": 0
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "thinking",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Thinking",
+       "item_id": null,
+       "since_ms": 1759480000000,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 2,
+    "server_now_ms": 1759480000200,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:msg_01:0",
+      "kind": "reasoning",
+      "rev": 1,
+      "item": {
+       "id": "cl:msg_01:0",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "reasoning",
+       "status": "running",
+       "ordinal": 1,
+       "started_at_ms": 1759480000200,
+       "ended_at_ms": null,
+       "text": "",
+       "title": null
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 3,
+    "server_now_ms": 1759480000600,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cl:msg_01:0",
+      "kind": "reasoning",
+      "rev": 2,
+      "field": "text",
+      "chunk": "**Finding the flaky test**\n\nThe parser test fails "
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 4,
+    "server_now_ms": 1759480000900,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cl:msg_01:0",
+      "kind": "reasoning",
+      "rev": 3,
+      "field": "text",
+      "chunk": "only on CI; check the tokenizer."
+     },
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:msg_01:0",
+      "kind": "reasoning",
+      "rev": 4,
+      "item": {
+       "title": "Finding the flaky test"
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "thinking",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Thinking: Finding the flaky test",
+       "item_id": "cl:msg_01:0",
+       "since_ms": 1759480000200,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 5,
+    "server_now_ms": 1759480004200,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:msg_01:0",
+      "kind": "reasoning",
+      "rev": 5,
+      "status": "completed",
+      "started_at_ms": 1759480000200,
+      "ended_at_ms": 1759480004200
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 6,
+    "server_now_ms": 1759480004300,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:msg_01:1",
+      "kind": "message",
+      "rev": 1,
+      "item": {
+       "id": "cl:msg_01:1",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "message",
+       "status": "running",
+       "ordinal": 2,
+       "started_at_ms": 1759480004300,
+       "ended_at_ms": null,
+       "text": "",
+       "phase": "commentary",
+       "row_id": "live-abc"
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "responding",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Responding",
+       "item_id": "cl:msg_01:1",
+       "since_ms": 1759480004300,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 7,
+    "server_now_ms": 1759480004400,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cl:msg_01:1",
+      "kind": "message",
+      "rev": 2,
+      "field": "text",
+      "chunk": "Let me look at the parser "
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 8,
+    "server_now_ms": 1759480004600,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cl:msg_01:1",
+      "kind": "message",
+      "rev": 3,
+      "field": "text",
+      "chunk": "and its tests."
+     },
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:msg_01:1",
+      "kind": "message",
+      "rev": 4,
+      "status": "completed",
+      "started_at_ms": 1759480004300,
+      "ended_at_ms": 1759480004600
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 9,
+    "server_now_ms": 1759480004700,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:toolu_01",
+      "kind": "tool",
+      "rev": 1,
+      "item": {
+       "id": "cl:toolu_01",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "tool",
+       "status": "running",
+       "ordinal": 3,
+       "started_at_ms": 1759480004700,
+       "ended_at_ms": null,
+       "tool": {
+        "name": "Read",
+        "call_id": "toolu_01",
+        "category": "read",
+        "group": "explore:cl:toolu_01",
+        "label": "src/parser.ts",
+        "command": null,
+        "input_preview": {
+         "file_path": "src/parser.ts"
+        },
+        "explain": null,
+        "output": null,
+        "diff": null
+       }
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "tool",
+       "tool": {
+        "name": "Read",
+        "call_id": "toolu_01",
+        "label": "src/parser.ts",
+        "item_id": "cl:toolu_01",
+        "started_at_ms": 1759480004700
+       },
+       "running_tools": 1,
+       "headline": "Reading src/parser.ts",
+       "item_id": "cl:toolu_01",
+       "since_ms": 1759480004700,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 10,
+    "server_now_ms": 1759480004750,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:toolu_02",
+      "kind": "tool",
+      "rev": 1,
+      "item": {
+       "id": "cl:toolu_02",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "tool",
+       "status": "running",
+       "ordinal": 4,
+       "started_at_ms": 1759480004750,
+       "ended_at_ms": null,
+       "tool": {
+        "name": "Grep",
+        "call_id": "toolu_02",
+        "category": "search",
+        "group": "explore:cl:toolu_01",
+        "label": "tokenize",
+        "command": null,
+        "input_preview": {
+         "pattern": "tokenize"
+        },
+        "explain": null,
+        "output": null,
+        "diff": null
+       }
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "tool",
+       "tool": {
+        "name": "Grep",
+        "call_id": "toolu_02",
+        "label": "tokenize",
+        "item_id": "cl:toolu_02",
+        "started_at_ms": 1759480004750
+       },
+       "running_tools": 2,
+       "headline": "Searching tokenize",
+       "item_id": "cl:toolu_02",
+       "since_ms": 1759480004750,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 11,
+    "server_now_ms": 1759480004800,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:toolu_01",
+      "kind": "tool",
+      "rev": 2,
+      "status": "completed",
+      "started_at_ms": 1759480004700,
+      "ended_at_ms": 1759480004800
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 12,
+    "server_now_ms": 1759480004900,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:toolu_02",
+      "kind": "tool",
+      "rev": 2,
+      "status": "completed",
+      "started_at_ms": 1759480004750,
+      "ended_at_ms": 1759480004900
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "thinking",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Thinking",
+       "item_id": null,
+       "since_ms": 1759480004900,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 13,
+    "server_now_ms": 1759480005000,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:toolu_03",
+      "kind": "tool",
+      "rev": 1,
+      "item": {
+       "id": "cl:toolu_03",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "tool",
+       "status": "running",
+       "ordinal": 5,
+       "started_at_ms": 1759480005000,
+       "ended_at_ms": null,
+       "tool": {
+        "name": "Bash",
+        "call_id": "toolu_03",
+        "category": "exec",
+        "group": null,
+        "label": "npm test",
+        "command": "npm test -- parser",
+        "input_preview": {
+         "command": "npm test -- parser"
+        },
+        "explain": null,
+        "output": {
+         "tail": [],
+         "total_lines": 0,
+         "truncated": false,
+         "exit_code": null
+        },
+        "diff": null
+       }
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "tool",
+       "tool": {
+        "name": "Bash",
+        "call_id": "toolu_03",
+        "label": "npm test",
+        "item_id": "cl:toolu_03",
+        "started_at_ms": 1759480005000
+       },
+       "running_tools": 1,
+       "headline": "Running npm test",
+       "item_id": "cl:toolu_03",
+       "since_ms": 1759480005000,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 14,
+    "server_now_ms": 1759480005050,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:toolu_03",
+      "kind": "tool",
+      "rev": 2,
+      "item": {
+       "tool": {
+        "explain": {
+         "text": "Runs the parser tests",
+         "level": 2,
+         "status": "ready"
+        }
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 15,
+    "server_now_ms": 1759480005300,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cl:toolu_03",
+      "kind": "tool",
+      "rev": 3,
+      "field": "tool.output",
+      "lines": [
+       "line 1",
+       "line 2",
+       "line 3",
+       "line 4",
+       "line 5",
+       "line 6",
+       "line 7",
+       "line 8",
+       "line 9",
+       "line 10",
+       "line 11",
+       "line 12",
+       "line 13",
+       "line 14",
+       "line 15",
+       "line 16",
+       "line 17",
+       "line 18",
+       "line 19",
+       "line 20",
+       "line 21",
+       "line 22",
+       "line 23",
+       "line 24",
+       "line 25",
+       "line 26",
+       "line 27",
+       "line 28",
+       "line 29",
+       "line 30"
+      ],
+      "total_lines": 30
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 16,
+    "server_now_ms": 1759480005600,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cl:toolu_03",
+      "kind": "tool",
+      "rev": 4,
+      "field": "tool.output",
+      "lines": [
+       "line 791",
+       "line 792",
+       "line 793",
+       "line 794",
+       "line 795",
+       "line 796",
+       "line 797",
+       "line 798",
+       "line 799",
+       "line 800",
+       "line 801",
+       "line 802",
+       "line 803",
+       "line 804",
+       "line 805",
+       "line 806",
+       "line 807",
+       "line 808",
+       "line 809",
+       "line 810",
+       "line 811",
+       "line 812"
+      ],
+      "total_lines": 812
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 17,
+    "server_now_ms": 1759480008200,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:toolu_03",
+      "kind": "tool",
+      "rev": 5,
+      "status": "failed",
+      "started_at_ms": 1759480005000,
+      "ended_at_ms": 1759480008200,
+      "item": {
+       "tool": {
+        "output": {
+         "exit_code": 1
+        }
+       }
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "thinking",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Thinking",
+       "item_id": null,
+       "since_ms": 1759480008200,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 18,
+    "server_now_ms": 1759480008300,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:toolu_04",
+      "kind": "tool",
+      "rev": 1,
+      "item": {
+       "id": "cl:toolu_04",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "tool",
+       "status": "running",
+       "ordinal": 6,
+       "started_at_ms": 1759480008300,
+       "ended_at_ms": null,
+       "tool": {
+        "name": "Edit",
+        "call_id": "toolu_04",
+        "category": "edit",
+        "group": null,
+        "label": "src/tokenizer.ts",
+        "command": null,
+        "input_preview": {
+         "file_path": "src/tokenizer.ts"
+        },
+        "explain": null,
+        "output": null,
+        "diff": null
+       }
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "tool",
+       "tool": {
+        "name": "Edit",
+        "call_id": "toolu_04",
+        "label": "src/tokenizer.ts",
+        "item_id": "cl:toolu_04",
+        "started_at_ms": 1759480008300
+       },
+       "running_tools": 1,
+       "headline": "Editing src/tokenizer.ts",
+       "item_id": "cl:toolu_04",
+       "since_ms": 1759480008300,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 19,
+    "server_now_ms": 1759480008400,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:toolu_04",
+      "kind": "tool",
+      "rev": 2,
+      "status": "completed",
+      "started_at_ms": 1759480008300,
+      "ended_at_ms": 1759480008400,
+      "item": {
+       "tool": {
+        "diff": {
+         "added": 3,
+         "removed": 1,
+         "files": [
+          {
+           "path": "src/tokenizer.ts",
+           "added": 3,
+           "removed": 1
+          }
+         ],
+         "preview": "@@ -40,3 +40,5 @@\n-  i += 1\n+  if (ch === '\\n') {\n+    line += 1\n+  }\n+  i += 1"
+        }
+       }
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "thinking",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Thinking",
+       "item_id": null,
+       "since_ms": 1759480008400,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 20,
+    "server_now_ms": 1759480009000,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:msg_02:0",
+      "kind": "message",
+      "rev": 1,
+      "item": {
+       "id": "cl:msg_02:0",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "message",
+       "status": "running",
+       "ordinal": 7,
+       "started_at_ms": 1759480009000,
+       "ended_at_ms": null,
+       "text": "",
+       "phase": "final",
+       "row_id": "live-abc"
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "responding",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Responding",
+       "item_id": "cl:msg_02:0",
+       "since_ms": 1759480009000,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 21,
+    "server_now_ms": 1759480009100,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cl:msg_02:0",
+      "kind": "message",
+      "rev": 2,
+      "field": "text",
+      "chunk": "The failure came from an off-by-one "
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 22,
+    "server_now_ms": 1759480009200,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cl:toolu_05",
+      "kind": "tool",
+      "rev": 1,
+      "item": {
+       "id": "cl:toolu_05",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "tool",
+       "status": "running",
+       "ordinal": 8,
+       "started_at_ms": 1759480009200,
+       "ended_at_ms": null,
+       "tool": {
+        "name": "Bash",
+        "call_id": "toolu_05",
+        "category": "exec",
+        "group": null,
+        "label": "npm test",
+        "command": "npm test",
+        "input_preview": {},
+        "explain": null,
+        "output": {
+         "tail": [],
+         "total_lines": 0,
+         "truncated": false,
+         "exit_code": null
+        },
+        "diff": null
+       }
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "tool",
+       "tool": {
+        "name": "Bash",
+        "call_id": "toolu_05",
+        "label": "npm test",
+        "item_id": "cl:toolu_05",
+        "started_at_ms": 1759480009200
+       },
+       "running_tools": 1,
+       "headline": "Running npm test",
+       "item_id": "cl:toolu_05",
+       "since_ms": 1759480009200,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 23,
+    "server_now_ms": 1759480012000,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:msg_02:0",
+      "kind": "message",
+      "rev": 3,
+      "status": "interrupted",
+      "started_at_ms": 1759480009000,
+      "ended_at_ms": 1759480012000
+     },
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:toolu_05",
+      "kind": "tool",
+      "rev": 2,
+      "status": "interrupted",
+      "started_at_ms": 1759480009200,
+      "ended_at_ms": 1759480012000
+     },
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-1",
+       "status": "interrupted",
+       "started_at_ms": 1759480000000,
+       "ended_at_ms": 1759480012000,
+       "worked_ms": 12000,
+       "tool_count": 5
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "interrupted",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Interrupted",
+       "item_id": null,
+       "since_ms": 1759480012000,
+       "turn_id": "tr-1",
+       "turn_started_ms": null
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 23,
+    "server_now_ms": 1759480012000,
+    "ops": [
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:msg_02:0",
+      "kind": "message",
+      "rev": 3,
+      "status": "interrupted",
+      "started_at_ms": 1759480009000,
+      "ended_at_ms": 1759480012000
+     },
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cl:toolu_05",
+      "kind": "tool",
+      "rev": 2,
+      "status": "interrupted",
+      "started_at_ms": 1759480009200,
+      "ended_at_ms": 1759480012000
+     },
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-1",
+       "status": "interrupted",
+       "started_at_ms": 1759480000000,
+       "ended_at_ms": 1759480012000,
+       "worked_ms": 12000,
+       "tool_count": 5
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "interrupted",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Interrupted",
+       "item_id": null,
+       "since_ms": 1759480012000,
+       "turn_id": "tr-1",
+       "turn_started_ms": null
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "expect": {
+  "effects": [],
+  "lseq": 23,
+  "activity": {
+   "state": "interrupted",
+   "headline": "Interrupted",
+   "tool": null
+  },
+  "turn": {
+   "turn_id": "tr-1",
+   "status": "interrupted",
+   "worked_ms": 12000,
+   "tool_count": 5
+  },
+  "items": [
+   {
+    "id": "cl:msg_01:0",
+    "kind": "reasoning",
+    "status": "completed",
+    "title": "Finding the flaky test",
+    "text": "**Finding the flaky test**\n\nThe parser test fails only on CI; check the tokenizer.",
+    "started_at_ms": 1759480000200,
+    "ended_at_ms": 1759480004200
+   },
+   {
+    "id": "cl:msg_01:1",
+    "kind": "message",
+    "status": "completed",
+    "phase": "commentary",
+    "text": "Let me look at the parser and its tests.",
+    "row_id": "live-abc"
+   },
+   {
+    "id": "cl:toolu_01",
+    "kind": "tool",
+    "status": "completed",
+    "tool": {
+     "group": "explore:cl:toolu_01",
+     "category": "read"
+    }
+   },
+   {
+    "id": "cl:toolu_02",
+    "kind": "tool",
+    "status": "completed",
+    "tool": {
+     "group": "explore:cl:toolu_01",
+     "category": "search"
+    }
+   },
+   {
+    "id": "cl:toolu_03",
+    "kind": "tool",
+    "status": "failed",
+    "started_at_ms": 1759480005000,
+    "ended_at_ms": 1759480008200,
+    "tool": {
+     "label": "npm test",
+     "command": "npm test -- parser",
+     "explain": {
+      "text": "Runs the parser tests",
+      "level": 2,
+      "status": "ready"
+     },
+     "output": {
+      "tail": [
+       "line 3",
+       "line 4",
+       "line 5",
+       "line 6",
+       "line 7",
+       "line 8",
+       "line 9",
+       "line 10",
+       "line 11",
+       "line 12",
+       "line 13",
+       "line 14",
+       "line 15",
+       "line 16",
+       "line 17",
+       "line 18",
+       "line 19",
+       "line 20",
+       "line 21",
+       "line 22",
+       "line 23",
+       "line 24",
+       "line 25",
+       "line 26",
+       "line 27",
+       "line 28",
+       "line 29",
+       "line 30",
+       "line 791",
+       "line 792",
+       "line 793",
+       "line 794",
+       "line 795",
+       "line 796",
+       "line 797",
+       "line 798",
+       "line 799",
+       "line 800",
+       "line 801",
+       "line 802",
+       "line 803",
+       "line 804",
+       "line 805",
+       "line 806",
+       "line 807",
+       "line 808",
+       "line 809",
+       "line 810",
+       "line 811",
+       "line 812"
+      ],
+      "total_lines": 812,
+      "truncated": true,
+      "exit_code": 1
+     }
+    }
+   },
+   {
+    "id": "cl:toolu_04",
+    "kind": "tool",
+    "status": "completed",
+    "tool": {
+     "diff": {
+      "added": 3,
+      "removed": 1,
+      "files": [
+       {
+        "path": "src/tokenizer.ts",
+        "added": 3,
+        "removed": 1
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "cl:msg_02:0",
+    "kind": "message",
+    "status": "interrupted",
+    "phase": "final",
+    "text": "The failure came from an off-by-one ",
+    "ended_at_ms": 1759480012000
+   },
+   {
+    "id": "cl:toolu_05",
+    "kind": "tool",
+    "status": "interrupted",
+    "ended_at_ms": 1759480012000
+   }
+  ]
+ }
+}

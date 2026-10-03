@@ -1,0 +1,291 @@
+{
+ "title": "after GET /live the stream continues above the snapshot lseq; a new epoch asks for a snapshot again",
+ "area": "live",
+ "steps": [
+  {
+   "snapshot": {
+    "conv": "conv-1",
+    "session": "rachel",
+    "agent_id": "agent-1",
+    "epoch": "boot-a",
+    "lseq": 0,
+    "server_now_ms": 1759479999000,
+    "activity": {
+     "state": "idle",
+     "tool": null,
+     "running_tools": 0,
+     "headline": null,
+     "item_id": null,
+     "since_ms": 1759479940000,
+     "turn_id": null,
+     "turn_started_ms": null
+    },
+    "turn": null,
+    "items": [],
+    "tool_explanations": {
+     "enabled": true,
+     "detail_level": 2
+    }
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 1,
+    "server_now_ms": 1759480000000,
+    "ops": [
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-1",
+       "status": "running",
+       "started_at_ms": 1759480000000,
+       "ended_at_ms": null,
+       "worked_ms": null,
+       "tool_count": 0
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "thinking",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Thinking",
+       "item_id": null,
+       "since_ms": 1759480000000,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 2,
+    "server_now_ms": 1759480000100,
+    "ops": [
+     {
+      "op": "upsert",
+      "conv": "conv-1",
+      "id": "cx:msg_a",
+      "kind": "message",
+      "rev": 1,
+      "item": {
+       "id": "cx:msg_a",
+       "conv": "conv-1",
+       "turn_id": "tr-1",
+       "kind": "message",
+       "status": "running",
+       "ordinal": 1,
+       "started_at_ms": 1759480000100,
+       "ended_at_ms": null,
+       "text": "Hello",
+       "phase": "final",
+       "row_id": "live-x"
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "responding",
+       "tool": null,
+       "running_tools": 0,
+       "headline": "Responding",
+       "item_id": "cx:msg_a",
+       "since_ms": 1759480000100,
+       "turn_id": "tr-1",
+       "turn_started_ms": 1759480000000
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 4,
+    "server_now_ms": 1759480000300,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cx:msg_a",
+      "kind": "message",
+      "rev": 3,
+      "field": "text",
+      "chunk": "ld"
+     }
+    ]
+   }
+  },
+  {
+   "snapshot": {
+    "conv": "conv-1",
+    "session": "rachel",
+    "agent_id": "agent-1",
+    "epoch": "boot-a",
+    "lseq": 4,
+    "server_now_ms": 1759480000350,
+    "activity": {
+     "state": "responding",
+     "tool": null,
+     "running_tools": 0,
+     "headline": "Responding",
+     "item_id": "cx:msg_a",
+     "since_ms": 1759480000100,
+     "turn_id": "tr-1",
+     "turn_started_ms": 1759480000000
+    },
+    "turn": {
+     "turn_id": "tr-1",
+     "status": "running",
+     "started_at_ms": 1759480000000,
+     "ended_at_ms": null,
+     "worked_ms": null,
+     "tool_count": 0
+    },
+    "items": [
+     {
+      "id": "cx:msg_a",
+      "conv": "conv-1",
+      "turn_id": "tr-1",
+      "kind": "message",
+      "status": "running",
+      "ordinal": 1,
+      "started_at_ms": 1759480000100,
+      "ended_at_ms": null,
+      "rev": 3,
+      "text": "Hello world",
+      "phase": "final",
+      "row_id": "live-x"
+     }
+    ],
+    "tool_explanations": {
+     "enabled": false,
+     "detail_level": 2
+    }
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-a",
+    "lseq": 5,
+    "server_now_ms": 1759480000500,
+    "ops": [
+     {
+      "op": "append",
+      "conv": "conv-1",
+      "id": "cx:msg_a",
+      "kind": "message",
+      "rev": 4,
+      "field": "text",
+      "chunk": "!"
+     },
+     {
+      "op": "done",
+      "conv": "conv-1",
+      "id": "cx:msg_a",
+      "kind": "message",
+      "rev": 5,
+      "status": "completed",
+      "started_at_ms": 1759480000100,
+      "ended_at_ms": 1759480000500
+     },
+     {
+      "op": "turn",
+      "conv": "conv-1",
+      "turn": {
+       "turn_id": "tr-1",
+       "status": "completed",
+       "started_at_ms": 1759480000000,
+       "ended_at_ms": 1759480000500,
+       "worked_ms": 500,
+       "tool_count": 0
+      }
+     },
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "idle",
+       "tool": null,
+       "running_tools": 0,
+       "headline": null,
+       "item_id": null,
+       "since_ms": 1759480000500,
+       "turn_id": null,
+       "turn_started_ms": null
+      }
+     }
+    ]
+   }
+  },
+  {
+   "event": {
+    "type": "live",
+    "agent_id": "agent-1",
+    "session": "rachel",
+    "conv": "conv-1",
+    "epoch": "boot-b",
+    "lseq": 1,
+    "server_now_ms": 1759480000900,
+    "ops": [
+     {
+      "op": "status",
+      "conv": "conv-1",
+      "activity": {
+       "state": "thinking",
+       "since_ms": 1759480000900
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "expect": {
+  "effects": [
+   "fetch_live",
+   "fetch_live"
+  ],
+  "lseq": 5,
+  "activity": {
+   "state": "idle"
+  },
+  "turn": {
+   "status": "completed",
+   "worked_ms": 500
+  },
+  "items": [
+   {
+    "id": "cx:msg_a",
+    "text": "Hello world!",
+    "status": "completed",
+    "rev": 5,
+    "started_at_ms": 1759480000100,
+    "ended_at_ms": 1759480000500
+   }
+  ]
+ }
+}
