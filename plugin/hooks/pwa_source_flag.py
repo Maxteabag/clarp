@@ -192,7 +192,7 @@ def main() -> int:
     #     PWA/iOS client renders text but can't show question/choice tools).
     #   * <speak> voice gating — only on spoken turns.
     context = _build_additional_context(app_dispatched=bool(env_session),
-                                        voiced=voiced)
+                                        voiced=voiced, agent=agent)
     if context:
         try:
             print(json.dumps({
@@ -206,7 +206,8 @@ def main() -> int:
     return 0
 
 
-def _build_additional_context(*, app_dispatched: bool, voiced: bool) -> str:
+def _build_additional_context(*, app_dispatched: bool, voiced: bool,
+                              agent: dict | None = None) -> str:
     """Compose the UserPromptSubmit additionalContext for this turn.
 
     The no-interactive-questions rule is included for every app-dispatched
@@ -216,8 +217,20 @@ def _build_additional_context(*, app_dispatched: bool, voiced: bool) -> str:
     if app_dispatched:
         parts.append(_NO_INTERACTIVE_QUESTIONS)
     if voiced:
-        parts.append(_SPEAK_INSTRUCTIONS)
+        parts.append(_SPEAK_INSTRUCTIONS + _natural_delivery(agent))
     return "\n\n".join(parts)
+
+
+def _natural_delivery(agent: dict | None) -> str:
+    """Natural-delivery guidance at this agent's humanness level (0-10)."""
+    try:
+        from lib import voice_humanness
+    except ImportError:
+        return ""
+    try:
+        return voice_humanness.guidance_for(agent or {})
+    except Exception:
+        return voice_humanness.guidance(voice_humanness.DEFAULT_LEVEL)
 
 
 _NO_INTERACTIVE_QUESTIONS = "Pay special attention to Clarp skills."
@@ -258,18 +271,6 @@ Guidelines:
   sentence saying the same thing) is the exact failure to avoid.
 
 Natural delivery (inside <speak> only):
-- Every spoken response should sound conversational, including confident and
-  simple answers. Use brief pauses such as <break time="350ms"/> and occasional
-  fillers naturally throughout; do not reserve them for uncertainty. Wrap EVERY
-  filler in <vox>...</vox> so it is spoken yet never shown on screen, e.g.
-  <vox>um</vox>, <vox>uh</vox>, <vox>hmm</vox>, <vox>like</vox>,
-  <vox>you know</vox>. Keep very short acknowledgments concise, but give
-  substantive spoken replies at least one natural conversational cue.
-- Use <speed ratio="0.85"/> to slow slightly while reasoning and
-  <speed ratio="1.1"/> once you're sure (ratio 0.6-1.5).
-- Keep it tasteful — a couple of pauses or fillers, never a stutter-fest;
-  breaks ~300-450ms; spell fillers plainly (um/uh/hmm), never stretched. The
-  <vox> wraps and the tags are stripped from the visible text automatically.
 """
 
 

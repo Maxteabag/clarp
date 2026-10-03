@@ -461,6 +461,7 @@ class Handler(BaseHTTPRequestHandler):
         "/judgments/decisions": "_handle_judgments_decisions_get",
         "/tool-explanations/stats": "_handle_tool_explanations_stats",
         "/tool-explanations/settings": "_handle_tool_explanation_settings_get",
+        "/voice-humanness": "_handle_voice_humanness_get",
         "/personalities/settings": "_handle_personalities_settings_get",
         "/automation-settings": "_handle_automation_settings_get",
         "/avatar-settings": "_handle_avatar_settings_get",
@@ -559,6 +560,7 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-rename": "_handle_agent_rename",
         "/agent-assign": "_handle_agent_assign",
         "/agent-voice-verbosity": "_handle_agent_voice_verbosity",
+        "/voice-humanness": "_handle_voice_humanness_post",
         "/team-nudging": "_handle_team_nudging",
         "/compact": "_handle_compact",
         "/orchestrator/settings": "_handle_orchestrator_settings_post",
@@ -3679,6 +3681,20 @@ class Handler(BaseHTTPRequestHandler):
             "dream_settings": settings.as_dict(),
             "dream_prompt": dreaming.dreaming_prompt_text(),
         })
+
+    def _handle_voice_humanness_get(self):
+        from lib import voice_humanness
+        self._json_ok(voice_humanness.get())
+
+    def _handle_voice_humanness_post(self):
+        """Set the Host default and per-agent humanness (0-10) of spoken
+        replies. Read on the next spoken turn, so no relaunch is needed."""
+        from lib import voice_humanness
+        try:
+            result = voice_humanness.update(self._read_json())
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        self._json_ok(result)
 
     def _handle_agent_voice_verbosity(self):
         """Set how much one agent narrates aloud while it is still working.

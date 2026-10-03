@@ -1,6 +1,10 @@
 const SPEAK_TAG_RE = /<\/?speak\b[^>]*>/gi;
 const VOX_BLOCK_RE = /<vox\b[^>]*>[\s\S]*?<\/vox>/gi;
 const VOICE_SSML_RE = /<\/?(?:break|speed|volume|emotion)\b[^>]*\/?>/gi;
+// Bracketed emotion tags Gemini TTS acts out ([laughing], [sigh]). Dropped from
+// display inside <speak>; mirrors server/lib/voice_markup.py.
+const EMOTION_TAG_RE = /\[[a-z][a-z' -]{2,30}\](?![(:])/g;
+const SPEAK_REGION_RE = /(<speak\b[^>]*>)([\s\S]*?)(<\/speak>|$)/gi;
 const VOICE_SENTINEL = '\uE000';
 const VOX_BOUNDARY_RE = /[ \t]*[,;:—–-]?[ \t]*\uE000[ \t]*[,.;:!?…—–-]?[ \t]*/g;
 const LEADING_VOX_RE = /(^[ \t]*|[.!?][ \t]+|\n[ \t]*)\uE000[ \t]*([a-z])/g;
@@ -31,6 +35,8 @@ export function hideIncompleteStreamingVoiceMarkup(value) {
 export function stripVoiceMarkup(value, { streaming = false } = {}) {
   const source = streaming ? hideIncompleteStreamingVoiceMarkup(value) : String(value);
   return source
+    .replace(SPEAK_REGION_RE, (_, open, body, close) =>
+      open + body.replace(EMOTION_TAG_RE, ' ') + close)
     .replace(SPEAK_TAG_RE, '')
     .replace(VOICE_SSML_RE, '')
     .replace(VOX_BLOCK_RE, VOICE_SENTINEL)

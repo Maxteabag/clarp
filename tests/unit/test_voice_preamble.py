@@ -36,9 +36,19 @@ def test_text_turn_has_only_the_question_restriction():
 
 
 def test_voice_turn_adds_speak_and_natural_speech_blocks():
+    from lib import voice_humanness
     body = vp.app_turn_instructions(voice=True)
-    assert body.split("\n\n") == [vp._NO_INTERACTIVE_QUESTIONS, vp._VOICE_INSTRUCTION, vp._NATURAL_SPEECH]
-    assert "<speak>" in vp._VOICE_INSTRUCTION and "<vox>" in vp._NATURAL_SPEECH
+    assert body.split("\n\n") == [vp._NO_INTERACTIVE_QUESTIONS, vp._VOICE_INSTRUCTION,
+                                   voice_humanness.guidance(voice_humanness.DEFAULT_LEVEL)]
+    assert "<speak>" in vp._VOICE_INSTRUCTION and "occasional fillers" in body
+
+
+def test_voice_turn_uses_the_agents_humanness_level(tmp_path):
+    from lib import voice_humanness
+    agents.create_agent(persona="Axel", voice_id="V", cwd=str(tmp_path), session="axel")
+    voice_humanness.update({"agents": {"axel": 10}})
+    assert "Humanness: 10/10." in vp.app_turn_instructions(voice=True, session="axel")
+    assert "Humanness: 5/10." in vp.app_turn_instructions(voice=True)
 
 
 def test_voice_defaults_true_in_apply():

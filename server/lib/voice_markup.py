@@ -19,6 +19,11 @@ Markup vocabulary:
                     strip_ssml_for_plain_tts, otherwise the tag is read aloud.
   <speed/> <volume/> <emotion/>  display + TTS: dropped; Cartesia does not
                     reliably honour them and leaked tags are worse than no tag.
+  [laughing] [sigh] …  bracketed emotion tags that Gemini TTS acts out. Agents
+                    write them inside <vox> (hidden like any filler); a bare
+                    one inside <speak> is dropped from display too. TTS: kept
+                    for Gemini, removed for every other engine at the provider
+                    boundary via strip_emotion_tags, which would read them aloud.
 """
 from __future__ import annotations
 
@@ -41,6 +46,12 @@ _SPEAK_TAG_RE = re.compile(r"</?speak\b[^>]*>", re.IGNORECASE)
 _VOX_TAG_RE = re.compile(r"</?vox\b[^>]*>", re.IGNORECASE)
 _VOX_BLOCK_RE = re.compile(r"<vox\b[^>]*>.*?</vox>", re.DOTALL | re.IGNORECASE)
 _SSML_RE = re.compile(r"</?(?:break|speed|volume|emotion)\b[^>]*/?>", re.IGNORECASE)
+# Lowercase words in square brackets, not a markdown link or reference:
+# [laughing], [short pause]. Kept narrow so [x] checkboxes and [1] citations
+# survive.
+_EMOTION_TAG_RE = re.compile(r"\[[a-z][a-z' -]{2,30}\](?![(:])")
+_SPEAK_REGION_RE = re.compile(r"(<speak\b[^>]*>)(.*?)(</speak>|$)",
+                              re.DOTALL | re.IGNORECASE)
 _TTS_DROP_SSML_RE = re.compile(r"</?(?:speed|volume|emotion)\b[^>]*/?>", re.IGNORECASE)
 # A <team>…</team> block is an agent's broadcast to its teammates — private to
 # the team feed. The user never sees or hears it in their 1:1, so it is dropped
@@ -70,6 +81,27 @@ def _drop_vox_for_display(text: str) -> str:
     return marked.replace(_VOX_SENTINEL, " ")
 
 
+def _drop_spoken_emotion_tags(text: str) -> str:
+    if "[" not in text:
+        return text
+    return _SPEAK_REGION_RE.sub(
+        lambda m: m.group(1) + _EMOTION_TAG_RE.sub(" ", m.group(2)) + m.group(3),
+        text)
+
+
+def strip_emotion_tags(text: str | None) -> str:
+    """Remove bracketed emotion tags for a TTS engine that would read them
+    aloud (everything but Gemini). Each becomes a space, then gaps are tidied."""
+    if not text:
+        return ""
+    if "[" not in text:
+        return text
+    s = _EMOTION_TAG_RE.sub(" ", text)
+    s = _INLINE_WS_RE.sub(" ", s).strip()
+    s = re.sub(r"([,;:])(?:\s*[,;:])+", r"\1", s)
+    return _SPACE_BEFORE_PUNCT_RE.sub(r"\1", s)
+
+
 def strip_hidden_blocks(text: str | None) -> str:
     """Remove internal metadata blocks, including a streaming open tail."""
     if not text:
@@ -90,6 +122,7 @@ def clean_for_display(text: str | None, *, oneline: bool = False) -> str:
         return ""
     s = strip_hidden_blocks(text)
     s = _TEAM_BLOCK_RE.sub("", s)       # team broadcasts: never shown to the user
+    s = _drop_spoken_emotion_tags(s)    # bare [laughing] inside <speak>
     s = _SPEAK_TAG_RE.sub("", s)        # <speak> markers: gone, inner text kept
     s = _SSML_RE.sub("", s)             # <break>/<speed>/<volume>/<emotion>: gone
     s = _drop_vox_for_display(s)        # fillers + their conversational punctuation

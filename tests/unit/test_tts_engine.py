@@ -132,3 +132,29 @@ def test_elevenlabs_fallback_gets_its_own_id_from_a_provider_map(tmp_path, monke
     engine.synthesize("hello", "plainElevenId")
 
     assert sent == ["elevenId123", "plainElevenId"]
+
+
+def test_emotion_tags_reach_gemini_but_not_its_cartesia_fallback(tmp_path, monkeypatch):
+    """Gemini acts [laughing] out; Cartesia, the fallback, would read it aloud."""
+    from lib import config, gemini_tts, tts_mode, tts_worker
+    cfg = config.Config(tts_provider="gemini", tts_fallback="cartesia",
+                        cartesia_api_key="k", gemini_api_key="g")
+    sent = []
+
+    def failing_gemini(*, text, **_kwargs):
+        sent.append(("gemini", text))
+        raise gemini_tts.GeminiTTSError("down")
+
+    def cartesia(*, text, **_kwargs):
+        sent.append(("cartesia", text))
+        return 3
+
+    monkeypatch.setattr(gemini_tts, "synthesize", failing_gemini)
+    monkeypatch.setattr(tts_worker, "cartesia_synthesize", cartesia)
+    monkeypatch.setattr(tts_worker, "_gemini_voice", lambda *a, **k: "Kore")
+    tts_worker._synthesize(
+        cfg=cfg, row={"text": "Ha, [laughing] it works.", "voice_id": "c-uuid"},
+        agent={"persona": "Rachel"}, out_path=tmp_path / "x.mp3", on_chunk=None,
+        trace_id="", clip_route=tts_mode.Route("gemini", None, "cartesia"))
+
+    assert sent == [("gemini", "Ha, [laughing] it works."), ("cartesia", "Ha, it works.")]

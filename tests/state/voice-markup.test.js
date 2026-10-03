@@ -38,4 +38,10 @@ describe('voice markup display cleanup', () => {
     expect(hideIncompleteStreamingVoiceMarkup('2 < 3')).toBe('2 < 3');
     expect(stripVoiceMarkup('literal <s')).toBe('literal <s');
   });
+
+  it('hides Gemini emotion tags inside speak but keeps links and checkboxes', () => {
+    expect(stripVoiceMarkup(
+      '<speak>Oh <vox>[laughing]</vox> that worked. [sigh] Finally.</speak> See [docs](https://x.y) [x]',
+    )).toBe('Oh that worked. Finally. See [docs](https://x.y) [x]');
+  });
 });

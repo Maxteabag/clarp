@@ -52,23 +52,9 @@ _VOICE_INSTRUCTION = (
     "restate your spoken text in the written part."
 )
 
-# Added for spoken turns: make the delivery sound human. Fillers are wrapped in
-# <vox>…</vox> so they're SPOKEN but stripped from the on-screen text; <break>
-# is honoured by the TTS engine and likewise hidden from display.
-_NATURAL_SPEECH = (
-    "Every spoken response should sound conversational, including confident "
-    "and simple answers. Use brief pauses such as <break time=\"350ms\"/> and "
-    "occasional fillers naturally throughout; do not reserve them for "
-    "uncertainty. Wrap EVERY filler in <vox>…</vox> so it is spoken yet never "
-    "shown on screen, e.g. "
-    "<vox>um</vox>, <vox>uh</vox>, <vox>hmm</vox>, <vox>like</vox>, "
-    "<vox>you know</vox>. Keep very short acknowledgments concise, but give "
-    "substantive spoken replies at least one natural conversational cue. Keep it tasteful "
-    "— a couple of pauses or fillers, never a stutter-fest; breaks around "
-    "300–450ms; spell fillers plainly (um/uh/hmm), never stretched out. These "
-    "cues live ONLY inside <speak>; the <vox> wraps and the tags are stripped "
-    "from the visible text automatically."
-)
+# The natural-delivery part of a spoken turn (fillers in <vox>, pauses, and
+# emotion tags for Gemini voices) depends on the agent's humanness level; see
+# lib.voice_humanness.
 
 # Voice-markup normalization (display strip + TTS unwrap) lives in one place:
 # lib.voice_markup. spoken_for_tts is imported above and re-exported so existing
@@ -124,11 +110,20 @@ def app_turn_instructions(*, voice: bool, session: str = "") -> str:
     """
     body = _NO_INTERACTIVE_QUESTIONS
     if voice:
-        body = f"{body}\n\n{_VOICE_INSTRUCTION}\n\n{_NATURAL_SPEECH}"
+        body = f"{body}\n\n{_VOICE_INSTRUCTION}\n\n{_natural_speech(session)}"
         narration = _narration_clause(session)
         if narration:
             body = f"{body}\n\n{narration}"
     return body
+
+
+def _natural_speech(session: str) -> str:
+    """Natural-delivery guidance at the agent's humanness level."""
+    from . import voice_humanness
+    try:
+        return voice_humanness.guidance_for(session=session or None)
+    except Exception:  # noqa: BLE001 - a prompt tweak must never fail a turn
+        return voice_humanness.guidance(voice_humanness.DEFAULT_LEVEL)
 
 
 def _narration_clause(session: str) -> str:
