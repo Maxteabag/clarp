@@ -189,7 +189,9 @@ impl SyncState {
                         Some(_) => {}
                     }
                 }
-                self.has_more = truthy(d.get("has_more"));
+                // A delta's has_more says newer changes remain; `has_more`
+                // here is older history, which a delta never changes.
+                let newer = truthy(d.get("has_more"));
                 self.cursor = self.cursor.max(js_number(d.get("latest_revision")));
                 if !incoming_id.is_empty() {
                     self.conversation_id = incoming_id;
@@ -199,7 +201,7 @@ impl SyncState {
                 }
                 self.missing = truthy(d.get("missing")) && self.order.is_empty();
                 self.loaded = true;
-                if self.has_more { vec![Effect::FetchDelta] } else { Vec::new() }
+                if newer { vec![Effect::FetchDelta] } else { Vec::new() }
             }
         }
     }
