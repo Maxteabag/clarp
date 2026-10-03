@@ -265,22 +265,30 @@ export function takenOverTurns(turns, items) {
   return hidden;
 }
 
-const FALLBACK_STATES = new Set(['thinking', 'tool', 'compacting']);
+const FALLBACK_STATES = new Set(['thinking', 'responding', 'tool', 'compacting']);
+const BUSY_KINDS = new Set(['thinking', 'tool', 'compacting']);
 
 /**
  * A status-line activity from an /agents/snapshot row, for Hosts without
  * the live channel: the same line, from what `agent-state` and
- * `agent-activity` already say.
+ * `agent-activity` already say. Newer Hosts put the status-line state, the
+ * tool's start and the turn's start on `agent-activity`; older ones only
+ * the agent state and the turn start in seconds.
  */
 export function activityFromStatus(s) {
-  const state = s && s.latest_state;
+  if (!s || !(s.busy || BUSY_KINDS.has(s.latest_state))) return { state: 'idle' };
+  const a = s.activity || {};
+  const state = FALLBACK_STATES.has(a.state) ? a.state : s.latest_state;
   if (!FALLBACK_STATES.has(state)) return { state: 'idle' };
-  const turnStarted = s.turn_started_at ? s.turn_started_at * 1000 : null;
-  const summary = String(s.activity_summary || '').trim();
-  const action = String(s.activity_action || '').trim();
-  let headline = state === 'compacting' ? 'Compacting' : 'Thinking';
+  const turnStarted = a.turn_started_ms || (s.turn_started_at ? s.turn_started_at * 1000 : null);
+  const summary = String(s.activity_summary || a.summary || '').trim();
+  const action = String(s.activity_action || a.action || '').trim();
+  let headline = { compacting: 'Compacting', responding: 'Responding' }[state] || 'Thinking';
   if (state === 'tool' && summary) headline = action ? `${action} ${summary}` : summary;
-  return { state, headline, tool: null, running_tools: state === 'tool' ? 1 : 0,
+  const tool = state === 'tool' && a.started_at_ms
+    ? { started_at_ms: a.started_at_ms, item_id: a.call_id || '', label: summary }
+    : null;
+  return { state, headline, tool, running_tools: state === 'tool' ? 1 : 0,
     turn_started_ms: turnStarted, since_ms: turnStarted };
 }
 

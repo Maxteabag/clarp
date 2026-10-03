@@ -70,4 +70,14 @@ describe('delayed status', () => {
     vi.advanceTimersByTime(400);
     expect(shown).toEqual(['Thinking', 'Running npm test']);
   });
+
+  it('replaces a stale status within 400 ms even while the new one keeps changing', () => {
+    status.set(tool('a', 'Running npm test'));
+    vi.advanceTimersByTime(1000);
+    for (let i = 0; i < 10; i++) {
+      status.set(i % 2 ? thinking() : { key: 'responding:', text: 'Responding' });
+      vi.advanceTimersByTime(150);
+    }
+    expect(status.current().text).not.toBe('Running npm test');
+  });
 });
