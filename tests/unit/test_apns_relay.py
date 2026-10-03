@@ -504,3 +504,31 @@ def test_direct_mode_ignores_grants(tmp_path, monkeypatch):
 
     assert summary["sent"] == 1
     assert relay.requests == [] and len(relay.apple_direct) == 1
+
+
+def test_revoked_grant_falls_back_to_the_hosts_own_path(tmp_path, monkeypatch):
+    _config(tmp_path)
+    relay = _FakeRelay()
+    relay.grants[GRANT] = "revoked"
+    _install(monkeypatch, relay)
+    apns.register_token("tok-a", session="mike", push_grant=GRANT)
+
+    summary = apns.send_user_notification(_notification())
+
+    assert summary == {"enabled": True, "sent": 1, "failed": 0, "disabled": 0}
+    assert [row["push_grant"] for row in apns.active_tokens()] == [""]
+    assert _sends(relay)[-1]["headers"]["authorization"] == f"Bearer {CREDENTIAL}"
+
+
+def test_one_grant_keeps_one_live_row_when_the_token_rotates(tmp_path, monkeypatch):
+    _config(tmp_path, relay=False)
+    relay = _FakeRelay()
+    relay.grants[GRANT] = "live"
+    _install(monkeypatch, relay)
+    apns.register_token("tok-old", session="", push_grant=GRANT)
+    apns.register_token("tok-new", session="", push_grant=GRANT)
+
+    summary = apns.send_user_notification(_notification())
+
+    assert [row["token"] for row in apns.active_tokens()] == ["tok-new"]
+    assert summary["sent"] == 1 and len(_sends(relay)) == 1
