@@ -230,3 +230,56 @@ export function statusLine(activity, { now = Date.now(), skewMs = 0 } = {}) {
     interrupt: INTERRUPTIBLE.has(state),
   };
 }
+
+/** The items of the turn the Host calls current, by ordinal. */
+export function currentTurnItems(state) {
+  const turnId = state && state.turn && state.turn.turn_id;
+  if (!turnId) return [];
+  return Object.values(state.items || {})
+    .filter(item => item.turn_id === turnId)
+    .sort((a, b) => (a.ordinal || 0) - (b.ordinal || 0));
+}
+
+/**
+ * The /log rows the live turn stands in for (docs/live-items.md §7.5): the
+ * row a message item names as `row_id`, rows whose every tool or display
+ * cell is a live tool call, and any streaming `live` row. They are hidden
+ * while the live turn is shown, so nothing renders twice and nothing is
+ * deleted and re-inserted when the durable copy lands.
+ */
+export function takenOverTurns(turns, items) {
+  const hidden = new Set();
+  if (!items || !items.length) return hidden;
+  const rowIds = new Set();
+  const callIds = new Set();
+  for (const item of items) {
+    if (item.row_id) rowIds.add(item.row_id);
+    if (item.tool && item.tool.call_id) callIds.add(item.tool.call_id);
+  }
+  for (const turn of turns || []) {
+    if (rowIds.has(turn.id) || turn.kind === 'live') { hidden.add(turn.id); continue; }
+    const parts = [...(turn.tools || []), ...(turn.display_cells || [])];
+    const text = String(turn.text || '').trim();
+    if (!text && parts.length && parts.every(p => p && callIds.has(p.id))) hidden.add(turn.id);
+  }
+  return hidden;
+}
+
+const FALLBACK_STATES = new Set(['thinking', 'tool', 'compacting']);
+
+/**
+ * A status-line activity from an /agents/snapshot row, for Hosts without
+ * the live channel: the same line, from what `agent-state` and
+ * `agent-activity` already say.
+ */
+export function activityFromStatus(s) {
+  const state = s && s.latest_state;
+  if (!FALLBACK_STATES.has(state)) return { state: 'idle' };
+  const turnStarted = s.turn_started_at ? s.turn_started_at * 1000 : null;
+  const summary = String(s.activity_summary || '').trim();
+  const action = String(s.activity_action || '').trim();
+  let headline = state === 'compacting' ? 'Compacting' : 'Thinking';
+  if (state === 'tool' && summary) headline = action ? `${action} ${summary}` : summary;
+  return { state, headline, tool: null, running_tools: state === 'tool' ? 1 : 0,
+    turn_started_ms: turnStarted, since_ms: turnStarted };
+}

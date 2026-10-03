@@ -7,6 +7,8 @@ export const SSEType = Object.freeze({
   AGENT_ROSTER: 'agent-roster',
   AGENT_FOCUS: 'agent-focus',
   TRANSCRIPT_UPDATED: 'transcript-updated',
+  // Live item ops for the open turn (docs/live-items.md), only on /events?live=.
+  LIVE: 'live',
   USER_NOTIFICATION: 'user-notification',
   QUEUE_UPDATED: 'queue-updated',
   ARTIFACT_UPDATED: 'artifact-updated',
