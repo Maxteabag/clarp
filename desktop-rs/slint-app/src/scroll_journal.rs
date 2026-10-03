@@ -98,6 +98,8 @@ impl Journal {
 
 thread_local! {
     static JOURNAL: std::cell::RefCell<Journal> = std::cell::RefCell::default();
+    /// The causes of the lines logged, oldest first (for the checks).
+    static LOGGED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Logs `entry` (rate-limited).
@@ -105,7 +107,13 @@ pub fn record(entry: Move) {
     let clock = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
     if let Some(line) = JOURNAL.with(|j| j.borrow_mut().record(&entry, Instant::now(), &clock)) {
         eprintln!("{line}");
+        LOGGED.with(|l| l.borrow_mut().push(entry.cause));
     }
+}
+
+/// The causes of every line logged so far.
+pub fn logged() -> Vec<String> {
+    LOGGED.with(|l| l.borrow().clone())
 }
 
 /// The app emptied a pane's transcript to fill it again (`why`: another
