@@ -116,3 +116,20 @@ def test_direct_apns_sends_live_activity_pushes_to_the_liveactivity_topic():
                    "ab" * 32, {"aps": {}}, push_type="liveactivity", priority="5")
     assert client.headers["apns-topic"] == "com.clarp.app.push-type.liveactivity"
     assert client.headers["apns-push-type"] == "liveactivity"
+
+
+def test_pending_decisions_count_as_needing_the_owner():
+    rachel, _mike = _agents()
+    clock, sent = FakeClock(), []
+    pusher = live_activity.LiveActivityPusher(
+        lambda payload, priority: sent.append((payload, priority)),
+        clock=clock, schedule=clock.schedule, pending_decisions=lambda: 2)
+    pusher.observe(_status(rachel, "rachel", "thinking", turn_started=1))
+    state = sent[-1][0]["aps"]["content-state"]
+    assert (state["needs_you"], state["decisions"]) == (2, 2)
+    clock.advance(3)
+    pusher.set_pending_decisions(3)
+    assert sent[-1][0]["aps"]["content-state"]["needs_you"] == 3 and sent[-1][1] == "10"
+    clock.advance(3)
+    pusher.set_pending_decisions(0)
+    assert sent[-1][0]["aps"]["content-state"]["needs_you"] == 0
