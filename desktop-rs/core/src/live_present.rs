@@ -99,6 +99,15 @@ pub struct Presented {
     pub stripped_calls: HashSet<String>,
 }
 
+impl Presented {
+    /// Where the turn's rows go among the chat's rows (§7.3): after the
+    /// prompt that started it and every row from before it began, before
+    /// the first row written after that.
+    pub fn anchor(&self, rows: &[&Message]) -> usize {
+        rows.len()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StatusLine {
     pub text: String,
