@@ -492,6 +492,10 @@ impl PaneTree {
         });
     }
 
+    /// Dismiss the conflict warning, accepting the newer layout another
+    /// window saved (stub: not implemented yet).
+    pub fn dismiss_workspace_save_warning(&mut self) {}
+
     /// Keep this window's layout even though another window saved newer.
     pub fn save_workspace_layout_instead(&mut self) {
         self.persist_workspaces(true);
