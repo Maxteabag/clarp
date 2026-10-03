@@ -189,14 +189,23 @@ def _classify_exploration(command: str) -> dict | None:
     display = _strip_shell_wrapper(command).strip()
     if not display:
         return None
-    if "&&" in display:
-        for part in reversed([p.strip() for p in display.split("&&")]):
-            if part in {"pwd", "true"}:
-                continue
-            line = _classify_exploration(part)
-            if line:
-                return line
-        return None
+    if "&&" in display or ";" in display:
+        # A chain: label it by its explorers. When every step reads files,
+        # name each file once; otherwise the last explorer stands for it.
+        parts = [p.strip() for p in display.replace("&&", ";").split(";")]
+        parts = [p for p in parts if p and p not in {"pwd", "true"}]
+        if len(parts) > 1:
+            lines = [_classify_exploration(part) for part in parts]
+            if all(line and line["label"] == "Read" for line in lines):
+                texts = [t for line in lines for t in line["text"].split(", ")]
+                return {"label": "Read", "text": ", ".join(dict.fromkeys(texts))}
+            for line in reversed(lines):
+                if line:
+                    return line
+            return None
+        display = parts[0] if parts else ""
+        if not display:
+            return None
     if _first_word_rules_out(display, _EXPLORERS):
         return None
     words = _shell_words(display)
