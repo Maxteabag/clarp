@@ -275,6 +275,12 @@ export component Transcript inherits FocusScope {
     callback copy-message(string);
     // The reader reached the oldest loaded row: time for the page before.
     callback reached-top();
+    // The scroll journal: a move of the offset that was not the reader's
+    // own wheel or touchpad (its cause), or a jump of over a viewport no
+    // one asked for ("unexplained"): the cause, the old and new offset,
+    // where both are in the chat (0 the top, 1 the end), the content and
+    // viewport heights, at-end, follow and the row count.
+    callback journal(string, length, length, float, float, length, length, bool, bool, int);
     // While an older page lands above, the reader's place is held by its
     // distance from the bottom, which prepended rows do not change.
     property <bool> holding;
@@ -380,14 +386,14 @@ export component Transcript inherits FocusScope {
         }
     }
     changed rows => {
-        if (root.follow) { root.scroll-to-latest(); }
+        if (root.follow) { root.pin("follow"); }
     }
     // Following also tracks rows that grow while streaming.
     changed list-height => {
         if (root.follow) {
-            root.scroll-to-latest();
+            root.pin("follow");
         } else if (root.holding) {
-            list.content-y = Math.min(0px, root.from-bottom - list.content-height);
+            root.move-to(Math.min(0px, root.from-bottom - list.content-height), "load-older");
         }
     }
     function check-top() {
@@ -430,14 +436,46 @@ export component Transcript inherits FocusScope {
     Timer {
         interval: 16ms;
         running: root.follow && !root.at-end;
-        triggered => { root.scroll-to-latest(); }
+        triggered => { root.pin("follow"); }
     }
-    public function scroll-to-latest() {
+    // Where the offset is in the chat, 0 the top and 1 the end: unlike the
+    // offset, it holds while the list corrects its estimate of the rows'
+    // heights.
+    function place() -> float {
+        return list.content-height > list.visible-height ? -list.content-y / (list.content-height - list.visible-height) : 1;
+    }
+    // The offset the journal last saw, and where it was.
+    property <length> seen-y;
+    property <float> seen-place: 1;
+    function move-to(y: length, cause: string) {
+        let old-y = list.content-y;
+        let old-place = root.place();
+        list.content-y = y;
+        root.journal(cause, old-y, list.content-y, old-place, root.place(), list.content-height, list.visible-height, root.at-end, root.follow, root.rows.length);
+        root.seen-y = list.content-y;
+        root.seen-place = root.place();
+    }
+    // A move nobody made here (the list resetting or re-estimating) that
+    // carried the reader over a viewport, unless it was their own scroll.
+    changed offset => {
+        if (!root.settling && Math.abs(root.place() - root.seen-place) * Math.max(0px, list.content-height - list.visible-height) > list.visible-height) {
+            root.journal("unexplained", root.seen-y, list.content-y, root.seen-place, root.place(), list.content-height, list.visible-height, root.at-end, root.follow, root.rows.length);
+        }
+        root.seen-y = list.content-y;
+        root.seen-place = root.place();
+    }
+    function pin(cause: string) {
         root.follow = true;
-        list.content-y = Math.min(0px, list.visible-height - list.content-height);
+        root.move-to(Math.min(0px, list.visible-height - list.content-height), cause);
     }
-    public function scroll-by(delta: length) {
-        list.content-y = Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta));
+    // The latest, asked for (End, Ctrl+End, a chat opened): following
+    // again, and a card J/K were still bringing into view is let go.
+    public function scroll-to-latest() {
+        ArtifactBridge.reader-moved();
+        root.pin("jump-latest");
+    }
+    public function scroll-by(delta: length, cause: string) {
+        root.move-to(Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta)), cause);
         root.holding = false;
         root.follow = root.at-end;
         root.check-top();
@@ -448,11 +486,11 @@ export component Transcript inherits FocusScope {
         if (event.text == Key.UpArrow || event.text == Key.DownArrow || event.text == Key.PageUp || event.text == Key.PageDown || event.text == Key.Home || event.text == Key.End) {
             ArtifactBridge.reader-moved();
         }
-        if (event.text == Key.UpArrow) { root.scroll-by(-40px); return accept; }
-        if (event.text == Key.DownArrow) { root.scroll-by(40px); return accept; }
-        if (event.text == Key.PageUp) { root.scroll-by(-list.visible-height * 0.9); return accept; }
-        if (event.text == Key.PageDown) { root.scroll-by(list.visible-height * 0.9); return accept; }
-        if (event.text == Key.Home) { root.scroll-by(-list.content-height); return accept; }
+        if (event.text == Key.UpArrow) { root.scroll-by(-40px, "key:Up"); return accept; }
+        if (event.text == Key.DownArrow) { root.scroll-by(40px, "key:Down"); return accept; }
+        if (event.text == Key.PageUp) { root.scroll-by(-list.visible-height * 0.9, "key:PageUp"); return accept; }
+        if (event.text == Key.PageDown) { root.scroll-by(list.visible-height * 0.9, "key:PageDown"); return accept; }
+        if (event.text == Key.Home) { root.scroll-by(-list.content-height, "key:Home"); return accept; }
         if (event.text == Key.End) { root.scroll-to-latest(); return accept; }
         reject
     }

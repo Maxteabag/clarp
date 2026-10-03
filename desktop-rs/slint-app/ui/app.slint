@@ -146,6 +146,7 @@ export component AppWindow inherits Window {
     callback attach(string);
     callback remove-attachment(string, string);
     callback load-older(string);
+    callback scroll-journal(string, string, length, length, float, float, length, length, bool, bool, int);
     callback toggle-activity(string, string, string);
     callback copy-message(string, string);
     callback silence();
@@ -397,6 +398,7 @@ export component AppWindow inherits Window {
                     remove-attachment(id, attachment) => { root.remove-attachment(id, attachment); }
                     link-clicked(url) => { root.link-clicked(url); }
                     load-older(id) => { root.load-older(id); }
+                    scroll-journal(id, cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(id, cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
                     toggle-activity(id, message, group) => { root.toggle-activity(id, message, group); }
                     copy-message(id, message) => { root.copy-message(id, message); }
                     silence => { root.silence(); }

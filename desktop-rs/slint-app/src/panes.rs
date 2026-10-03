@@ -96,6 +96,7 @@ impl App {
     /// changes rows their source rows do not.
     pub fn rebuild_transcripts(&self) {
         for pane in self.pane_state.borrow_mut().iter_mut() {
+            crate::scroll_journal::reset(&pane.id, "rebuild", pane.messages.row_count());
             pane.shown.clear();
             pane.cards.clear();
             pane.messages.set_vec(Vec::new());
@@ -385,6 +386,7 @@ impl App {
                 if pane.session != session {
                     // Another chat: its rows, its draft, from its latest message.
                     pane.session = session.clone();
+                    crate::scroll_journal::reset(&pane.id, "chat", pane.messages.row_count());
                     pane.shown.clear();
                     pane.cards.clear();
                     pane.messages.set_vec(Vec::new());

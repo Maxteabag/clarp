@@ -131,7 +131,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("escape", &["Escape"], "Chat", false, Always, false),
         ],
         "pane" => vec![
-            // The chat's artifact cards: K from the chat is the latest card.
+            // The chat's artifact cards: K from the chat is the lowest card on screen.
             b("artifact-previous", &["K"], "Cards", true, Artifacts, false),
             b("artifact-next", &["J"], "Next card", false, Artifacts, false),
             b("artifact-open", &["Return"], "Open", true, Artifact, false),
