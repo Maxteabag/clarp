@@ -54,6 +54,7 @@ FULL_SAMPLES = {
         status="running", tool="Read", action="read", summary="x",
         file_path="/f", ts=1, state="tool", call_id="toolu_1",
         started_at_ms=1, turn_started_ms=1),
+    SSEType.HEARTBEAT: lambda: events.heartbeat(ts=1),
     SSEType.LIVE: lambda: events.live(
         agent_id="a", session="s", conv="c", epoch="e", lseq=1,
         server_now_ms=1, ops=[{"op": "status", "conv": "c", "activity": {"state": "idle"}}]),

@@ -277,7 +277,15 @@ GET /events?live=                   status/turn ops only (the agent list)
 gets no `live` events at all (old clients). For a conversation outside your
 list the event carries only its `status` and `turn` ops; its `lseq` still counts
 the ops you did not get, so do not track `lseq` (or fetch `/live`) for those: use
-them only to update the agent's status line. Change the set by reconnecting; that
+them only to update the agent's status line.
+
+The same conversation's events reach every connection with the same `lseq`: a
+connection that lists the chat gets every op, one that does not gets the
+summary-only copy (status and turn ops) under that same `lseq`. A client with
+more than one `/events` connection (or one that changes its `live` list by
+reconnecting) must remember which connection carries a chat's item ops and
+apply item ops, and check `lseq`, only from that one; a summary copy must
+never advance the held `lseq` for a chat it renders items for. Change the set by reconnecting; that
 is cheap because `live` is not replayed and the other events resume from
 `Last-Event-ID` as before. Subscribe to the open chat and the few cached ones,
 not the whole fleet: a 100-agent Host must not push every token to every phone.
