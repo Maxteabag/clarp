@@ -109,24 +109,70 @@ def _display_cell(
 
 
 def _shell_words(command: str) -> list[str]:
-    return list(_split_command(command))
+    wrapped = _quoted_wrapper_words(command)
+    if wrapped is not None:
+        return wrapped
+    if len(command) <= _SPLIT_CACHE_MAX_CHARS:
+        return list(_cached_split(command))
+    return list(_split(command))
 
 
-# A transcript is reparsed whole each time it grows, and every command is
-# classified several times per parse. shlex reads one character at a time in
-# Python, so splitting the same commands again was most of a long import.
-@functools.lru_cache(maxsize=8192)
-def _split_command(command: str) -> tuple[str, ...]:
+def _split(command: str) -> tuple[str, ...]:
     try:
         return tuple(shlex.split(command))
     except ValueError:
         return tuple(command.split())
 
 
+# The same short exploration commands (rg, sed, cat) come back on every
+# reparse of a growing transcript; long scripts are left out to bound memory.
+_SPLIT_CACHE_MAX_CHARS = 1024
+_cached_split = functools.lru_cache(maxsize=4096)(_split)
+
+
+# `shlex.join(["/usr/bin/bash", "-lc", script])`, the shape of nearly every
+# Codex command: single-quoted text has no escapes, and quote() writes each
+# embedded ' as '"'"', so the script decodes without a character-wise lexer.
+_QUOTED_WRAPPER = re.compile(r"([A-Za-z0-9_./+:@%=,-]+) (-lc) '(.*)'", re.DOTALL)
+_QUOTE_ESCAPE = "'\"'\"'"
+
+
+def _quoted_wrapper_words(command: str) -> list[str] | None:
+    match = _QUOTED_WRAPPER.fullmatch(command)
+    if match is None:
+        return None
+    pieces = match.group(3).split(_QUOTE_ESCAPE)
+    if any("'" in piece for piece in pieces):
+        return None
+    return [match.group(1), match.group(2), "'".join(pieces)]
+
+
+_SHELLS = frozenset({"bash", "sh", "zsh"})
+_EXPLORERS = frozenset({
+    "rg", "grep", "git", "ls", "find", "fd", "cat", "sed", "nl", "head", "tail",
+})
+# A leading word with no quotes, escapes or exotic whitespace is the first
+# word shlex.split would return, and the first word of its str.split fallback.
+_PLAIN_FIRST_WORD = re.compile(r"[ \t\r\n]*([A-Za-z0-9_./+:@%=,-]+)(?:[ \t\r\n]|$)")
+
+
+def _first_word_rules_out(command: str, names: frozenset[str]) -> bool:
+    """True when the command's first word alone shows it is none of ``names``.
+
+    A transcript is reparsed whole each time it grows, and shlex reads one
+    character at a time in Python: splitting every long heredoc or script
+    just to learn it is not ``rg`` or ``cat`` was most of a large import.
+    """
+    match = _PLAIN_FIRST_WORD.match(command)
+    return match is not None and pathlib.PurePosixPath(match.group(1)).name not in names
+
+
 def _strip_shell_wrapper(command: str) -> str:
+    if _first_word_rules_out(command, _SHELLS):
+        return command
     words = _shell_words(command)
     shell = pathlib.PurePosixPath(words[0]).name if words else ""
-    if len(words) >= 3 and shell in {"bash", "sh", "zsh"} and words[1] == "-lc":
+    if len(words) >= 3 and shell in _SHELLS and words[1] == "-lc":
         return words[2]
     return command
 
@@ -150,6 +196,8 @@ def _classify_exploration(command: str) -> dict | None:
             line = _classify_exploration(part)
             if line:
                 return line
+        return None
+    if _first_word_rules_out(display, _EXPLORERS):
         return None
     words = _shell_words(display)
     if not words:

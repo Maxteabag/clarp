@@ -889,3 +889,34 @@ def test_dual_reply_events_differing_only_by_a_hidden_block_are_one_turn(tmp_pat
     assert [t["role"] for t in turns] == ["user", "assistant"]
     # The fuller copy survives, so the hidden block is still available.
     assert "oai-mem-citation" in turns[1]["text"]
+
+
+def test_wrapped_scripts_with_quotes_unwrap_and_classify(tmp_path):
+    """Codex records commands as `bash -lc <script>`; a quote inside the script
+    is escaped by the join and must still show the script the agent ran."""
+    f = tmp_path / "rollout.jsonl"
+    heredoc = "python3 - <<'EOF'\nprint('it''s')\nEOF"
+    _write_rollout(f, [
+        {"timestamp": "t0", "type": "event_msg",
+         "payload": {"type": "agent_message", "message": "checking"}},
+        {"timestamp": "t1", "type": "event_msg", "payload": {
+            "type": "item_completed", "turn_id": "turn-1", "item": {
+                "type": "CommandExecution", "id": "search",
+                "command": ["/usr/bin/bash", "-lc", "rg \"it's\" server/lib"],
+                "status": "completed", "stdout": "server/a.py", "exit_code": 0,
+            }}},
+        {"timestamp": "t2", "type": "event_msg", "payload": {
+            "type": "item_completed", "turn_id": "turn-1", "item": {
+                "type": "CommandExecution", "id": "script",
+                "command": ["/usr/bin/bash", "-lc", heredoc],
+                "status": "completed", "stdout": "its", "exit_code": 0,
+            }}},
+    ])
+
+    cells = codex_transcript.parse_turns(f)[0]["display_cells"]
+
+    assert [(c["kind"], c["title"]) for c in cells] == [
+        ("exploration", "Explored"), ("command", "Ran")]
+    assert cells[0]["lines"][0]["label"] == "Search"
+    assert cells[0]["lines"][0]["text"] == "it's in server/lib"
+    assert cells[1]["summary"] == heredoc
