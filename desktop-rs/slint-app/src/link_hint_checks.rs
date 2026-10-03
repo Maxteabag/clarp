@@ -266,9 +266,10 @@ pub fn link_hints_check(out: String) {
                 let geo = geometry();
                 let inside = all.iter().all(|b| b.x >= geo.left && b.x < geo.right && b.y >= geo.top - 1.0 && b.y < geo.bottom);
                 check(inside, &format!("every badge sits in the chat's viewport {:.0}..{:.0} × {:.0}..{:.0}: {:?}", geo.left, geo.right, geo.top, geo.bottom, all.iter().map(|b| (b.label.to_string(), b.x, b.y)).collect::<Vec<_>>()));
-                // Each badge is over its own message.
+                // Each badge is over its own message (raised a little over
+                // its line, so a first line's badge may touch the padding).
                 let row_of = |url: &str| if url == SHOWN[5] { "user-link" } else { "target" };
-                let placed = all.iter().all(|b| geo.row(row_of(&b.url)).is_some_and(|(top, bottom)| b.y >= top - 2.0 && b.y < bottom));
+                let placed = all.iter().all(|b| geo.row(row_of(&b.url)).is_some_and(|(top, bottom)| b.y >= top - 8.0 && b.y < bottom));
                 check(placed, "each badge is drawn over its link's message");
                 let hints = bar();
                 check(hints.contains(&("1-6".into(), "Open".into())) && hints.contains(&("Esc".into(), "Cancel".into())), &format!("the shortcut bar shows the hint keys: {hints:?}"));

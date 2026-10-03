@@ -1,14 +1,14 @@
 import { Palette } from "theme.slint";
 
-// One link on screen with its number, drawn over the link's first letters
-// (window coordinates). A link that wraps or repeats carries its number on
-// each piece.
+// One link on screen with its number, drawn just above the link's first
+// letters (window coordinates). A link shown twice carries its number at
+// each place.
 export struct LinkBadge {
     label: string,
     url: string,
     x: length,
     y: length,
-    // The digits typed so far rule it out.
+    // The digits typed so far rule it out: hidden.
     dim: bool,
 }
 
@@ -23,21 +23,22 @@ export global LinkHints {
 }
 
 export component LinkHintLayer inherits Rectangle {
+    // A number the typed digits rule out goes (its link shows whole again).
     for badge in LinkHints.badges: Rectangle {
+        visible: !badge.dim;
         x: badge.x - 2px;
         y: badge.y;
-        width: label.preferred-width + 8px;
+        width: Math.max(16px, label.preferred-width + 8px);
         height: 16px;
         border-radius: 3px;
-        background: badge.dim ? Palette.raised : Palette.accent;
+        background: Palette.accent;
         border-width: 1px;
-        border-color: badge.dim ? Palette.border : Palette.accent-text.with-alpha(0.35);
-        opacity: badge.dim ? 0.55 : 1;
+        border-color: Palette.window;
         accessible-role: text;
         accessible-label: "Link " + badge.label + ": " + badge.url;
         label := Text {
             text: badge.label;
-            color: badge.dim ? Palette.faint : Palette.accent-text;
+            color: Palette.accent-text;
             font-size: 11px;
             font-weight: 700;
             vertical-alignment: center;

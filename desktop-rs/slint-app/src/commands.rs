@@ -11,6 +11,10 @@ use crate::{App, AppWindow, Focus, Hint, SwitcherRow, pump_now, switcher};
 
 /// The keyboard map's state for where the keyboard is now.
 pub fn context(app: &App, window: &AppWindow) -> &'static str {
+    // Link hints take every key while they show.
+    if crate::link_hints::active() {
+        return "hints";
+    }
     if app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
         // ---- launch dialogs: the hub has its own keyboard state.
         if !app.switcher.borrow().open && *app.overlay.borrow() == crate::launch_view::HUB {
@@ -70,8 +74,15 @@ pub fn show_hints(app: &App, window: &AppWindow) {
         .filter(|b| card_keys.is_none() || !b.action.starts_with("artifact-") || b.action == "artifact-previous")
         .filter(|b| b.action != "artifact-open")
         .map(|b| Hint {
-            // J and K both walk the cards.
-            keys: if b.action == "artifact-previous" { "J/K".into() } else { b.keys.first().map(|k| k.replace("Return", "Enter").replace("Escape", "Esc")).unwrap_or_default().into() },
+            // J and K both walk the cards; the hints' digits are their numbers.
+            keys: if b.action == "artifact-previous" {
+                "J/K".into()
+            } else if b.action == "hint-digit" {
+                match crate::link_hints::count() {
+                    1 => "1".into(),
+                    n => format!("1-{n}").into(),
+                }
+            } else { b.keys.first().map(|k| k.replace("Return", "Enter").replace("Escape", "Esc")).unwrap_or_default().into() },
             label: if b.action == "toggle-preview" {
                 if app.engine.borrow().settings().boolean("explorer/livePreview", false) { "Preview: on".into() } else { "Preview: off".into() }
             } else {
@@ -88,6 +99,9 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     // From the composer, the way onto the chat's cards.
     if state == "composer" && crate::artifacts_view::has_cards(app) && !window.global::<crate::ArtifactBridge>().get_editing() {
         hints.push(Hint { keys: "Esc K".into(), label: "Cards".into() });
+    }
+    if state == "hints" && crate::link_hints::count() == 0 {
+        hints = vec![Hint { keys: "".into(), label: "No links on screen".into() }];
     }
     let mode = match state {
         "composer" => "INSERT".to_owned(),
@@ -108,6 +122,12 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool) -> bool {
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return false };
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
     let state = context(&app, &window);
+    if state == "hints" {
+        let action = keymap::action_for(state, &chord, &overrides(&app), facts(&app, &window));
+        let used = crate::link_hints::key(&window, action, &chord);
+        show_hints(&app, &window);
+        return used;
+    }
     let Some(action) = keymap::action_for(state, &chord, &overrides(&app), facts(&app, &window)) else { return false };
     // ---- profile and overview: in the composer Ctrl+Shift+O attaches a
     // file (Composer.qml's own shortcut), elsewhere it opens the overview.
@@ -147,6 +167,9 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             app.engine.borrow_mut().settings_mut().set("appearance/shortcutsVisible", visible);
         }
         "switcher" => open_switcher(app, window),
+        "link-hints" => {
+            crate::link_hints::start(app, window);
+        }
         // Ctrl+R: the recent agents, newest first; Enter on the first row
         // goes back to the chat before this one.
         "recent-agents" => {
