@@ -804,6 +804,29 @@ def test_real_1_1_21_fixtures(fake_agy, tmp_path, fixture_name, expected):
             assert evidence["turn_execution_id"]
 
 
+def test_web_search_and_fetch_show_what_was_searched_and_read(fake_agy, tmp_path):
+    """agy 1.2.16 on Claude Opus 5.5 searches the web and reads pages; the tool
+    rows say what it searched for and which URL it read (agy spells it ``Url``)."""
+    agent_id = _make_agy_agent(persona="Searcher", session="searcher")
+    trace_id = _open_owned_turn(agent_id, "fixture-web")
+    fake_agy((_FIXTURES / "1.2.16-web.jsonl").read_text())
+    results, errors = [], []
+    handle = AGY.start_turn(
+        text="search", cwd=tmp_path, agent_id=agent_id, session="searcher",
+        on_result=results.append, on_error=errors.append, trace_id=trace_id)
+    handle.wait(timeout=8)
+    assert _wait_for(lambda: len(results) == 1)
+    assert errors == []
+    assert "0.28.1" in results[0]["last_agent_message"]
+    tools = [json.loads(row["detail"]) for row in agents_db.conn().execute(
+        "SELECT detail FROM state_log WHERE agent_id=? AND kind=?",
+        (agent_id, AgentState.TOOL)).fetchall()]
+    searched = [t["input"].get("query") for t in tools if t["tool"] == "WebSearch"]
+    fetched = [t["input"].get("url") for t in tools if t["tool"] == "WebFetch"]
+    assert "httpx latest release version PyPI" in searched
+    assert "https://pypi.org/pypi/httpx/json" in fetched
+
+
 def test_provider_event_revision_dedupe_conflict_and_stale_order():
     st = agy._TurnState(evidence_scope={
         "provider_instance_id": "computer:agy",

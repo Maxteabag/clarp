@@ -381,8 +381,8 @@ def _canonical_tool_input(name: str, value: Any) -> dict[str, Any]:
         return {"pattern": clean(raw.get("pattern"), 100),
                 "path": clean(raw.get("path"), 240)}
     if name in {"WebSearch", "WebFetch"}:
-        return {"query": clean(raw.get("query"), 130),
-                "url": clean(raw.get("url"), 180)}
+        return {"query": clean(raw.get("query") or raw.get("Query"), 130),
+                "url": clean(raw.get("url") or raw.get("Url"), 180)}
     return {}
 
 
@@ -404,20 +404,26 @@ class AgyBackend(StreamJsonBackend):
     runner = 'agy'
     config_model_field = 'agy_model'
     model_family = 'gemini'
+    # Mirrors `agy models` (1.2.16, 2026-10-03); only used before the first
+    # probe. Effort is part of each id, so `claude-opus-5-5` alone is no model.
     fallback_models = (
+        ('gemini-3.8-flash-high', 'Gemini 3.8 Flash (High)'),
+        ('gemini-3.8-flash-medium', 'Gemini 3.8 Flash (Medium)'),
+        ('gemini-3.8-flash-low', 'Gemini 3.8 Flash (Low)'),
         ('gemini-3.7-flash-high', 'Gemini 3.7 Flash (High)'),
         ('gemini-3.7-flash-medium', 'Gemini 3.7 Flash (Medium)'),
         ('gemini-3.7-flash-low', 'Gemini 3.7 Flash (Low)'),
         ('gemini-3.6-flash-high', 'Gemini 3.6 Flash (High)'),
         ('gemini-3.6-flash-medium', 'Gemini 3.6 Flash (Medium)'),
         ('gemini-3.6-flash-low', 'Gemini 3.6 Flash (Low)'),
-        ('gemini-3.5-flash-medium', 'Gemini 3.5 Flash (Medium)'),
-        ('gemini-3.5-flash-high', 'Gemini 3.5 Flash (High)'),
-        ('gemini-3.5-flash-low', 'Gemini 3.5 Flash (Low)'),
         ('gemini-3.1-pro-high', 'Gemini 3.1 Pro (High)'),
         ('gemini-3.1-pro-low', 'Gemini 3.1 Pro (Low)'),
-        ('claude-sonnet-4-6', 'Claude Sonnet 4.6 (Thinking)'),
-        ('claude-opus-4-6-thinking', 'Claude Opus 4.6 (Thinking)'),
+        ('claude-opus-5-5-low', 'Claude Opus 5.5 (Low)'),
+        ('claude-opus-5-5-medium', 'Claude Opus 5.5 (Medium)'),
+        ('claude-opus-5-5-high', 'Claude Opus 5.5 (High)'),
+        ('claude-sonnet-5-5-low', 'Claude Sonnet 5.5 (Low)'),
+        ('claude-sonnet-5-5-medium', 'Claude Sonnet 5.5 (Medium)'),
+        ('claude-sonnet-5-5-high', 'Claude Sonnet 5.5 (High)'),
         ('gpt-oss-120b-medium', 'GPT-OSS 120B (Medium)'),
     )
 
