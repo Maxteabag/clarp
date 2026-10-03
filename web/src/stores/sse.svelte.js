@@ -105,6 +105,9 @@ onSubscriptionsChanged(() => {
 });
 
 export function connectSSE() {
+  // Replace, never add: every open stream holds one of the browser's six
+  // HTTP/1.1 connections to the Host and handles every event again.
+  if (es) { try { es.close(); } catch (_) {} es = null; }
   if (!resubscribing) setConn('connecting', Timing.DEAD_OVERLAY_MS);
   // Until this connection is open, the chats it adds are carried by none.
   setConnectedLive([]);
