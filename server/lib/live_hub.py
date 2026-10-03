@@ -437,7 +437,8 @@ class LiveHub:
                     "headline": tool_headline(tool.get("name") or "", tool.get("category") or "",
                                               tool.get("label") or ""),
                     "tool": {"name": tool.get("name"), "call_id": tool.get("call_id"),
-                             "label": tool.get("label"), "item_id": newest["id"],
+                             "label": tool.get("label"), "category": tool.get("category"),
+                             "item_id": newest["id"],
                              "started_at_ms": newest.get("started_at_ms")}}
         for kind, name in (("compaction", "compacting"), ("message", "responding"),
                            ("reasoning", "thinking")):

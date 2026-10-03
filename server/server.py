@@ -4466,7 +4466,9 @@ class Handler(BaseHTTPRequestHandler):
             attention_count=attention_count))
         pusher = getattr(self.server, "live_activity_pusher", None)
         if pusher is not None:
-            pusher.set_pending_decisions(attention_count)
+            from lib import live_activity
+            threading.Thread(target=lambda: pusher.set_attention(live_activity.badge_attention()),
+                             daemon=True, name="live-activity-attention").start()
 
     def _handle_artifacts_list(self):
         from lib import artifacts
@@ -5838,13 +5840,12 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # One sender thread: APNs I/O never runs inside the hub's lock, and
         # pushes leave in the order they were decided.
         sender = ThreadPoolExecutor(max_workers=1, thread_name_prefix="live-activity")
-        def pending_decisions():
-            from lib import artifacts
-            return len(artifacts.attention(include_questions=True))
+        def in_background(job):
+            threading.Thread(target=job, daemon=True, name="live-activity-attention").start()
 
         pusher = live_activity.LiveActivityPusher(
             lambda payload, priority: sender.submit(apns.send_live_activity, payload, priority),
-            pending_decisions=pending_decisions)
+            attention=live_activity.badge_attention, background=in_background)
         srv.live_activity_pusher = pusher
 
         class _Observers:

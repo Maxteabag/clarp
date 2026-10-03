@@ -374,13 +374,30 @@ Each push: `apns-push-type: liveactivity`, topic `<bundle>.push-type.liveactivit
 {"aps": {"timestamp": 1759480000, "event": "update", "stale-date": 1759480900,
          "content-state": {
            "working": 2,            // agents thinking, responding, in a tool, compacting or limited
-           "needs_you": 3,          // agents waiting for the owner + pending decisions and questions
-           "decisions": 2,          // pending decisions and questions (part of needs_you)
+           "needs_you": 4,          // equals the apps' Updates badge, plus waiting agents with nothing filed
+           "decisions": 3,          // the badge part: unarchived pending decisions and questions,
+                                    // blocking attention artifacts, and Janitor failures
            "lead": ROW | null,      // the working agent whose turn started last
            "agents": [ROW, …],      // at most 5: needing you first, then newest work
            "updated_at_ms": 1759480000123}}}
 // ROW = {"agent_id", "session", "persona", "state", "headline", "tool", "started_at_ms", "turn_started_ms"}
 ```
+
+- `needs_you` counts what the Updates badge counts (unarchived pending decisions
+  and questions, artifacts whose attention bucket is `blocking`, Janitor
+  failure items) plus agents in `waiting` that have none of those filed, so
+  an agent is never counted twice.
+- `persona` is the agent's display name, by the same rule as the app:
+  `clarp-memory-expert` and `CLARP-MEMORY-EXPERT` read `Clarp Memory Expert`;
+  `ECIT Rachel` stays as it is.
+- `headline` is never null. A tool reads like the live rows: `Running npm test`,
+  `Editing AppModel.swift`, `Reading parser.py`, `Searching tokenize`
+  (`Listing`, `Writing`, `Fetching`, `Planning`, `Delegating`, `Calling`), with
+  file paths shortened to the file name. Otherwise it is the state's word:
+  `Thinking` (or the reasoning headline), `Responding`, `Compacting`,
+  `Waiting for you`, `Waiting for the usage limit`, `Interrupted`,
+  `Background work`.
+- `started_at_ms` is the running tool's start, else when the state began.
 
 Use `started_at_ms` (the tool's start, else the state's) or `turn_started_ms`
 with a system timer. The Host never sends `end`: when nothing works it sends
