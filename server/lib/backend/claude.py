@@ -43,6 +43,8 @@ from .. import agents as agents_db
 from .. import config as _config
 from .. import events
 from .. import provider_capabilities
+from .. import turn_lifecycle
+from ..turn_lifecycle import TurnEvent
 from ..log import log, log_exception
 from ..proc_util import stderr_text
 from ..process_registry import TurnHandle
@@ -140,6 +142,39 @@ def _assistant_event_text(ev: dict) -> tuple[str, bool]:
         if text:
             return text, False
     return "", False
+
+
+def _stream_phase(ev: dict) -> str:
+    """thinking / responding / tool for a partial-message event, else ""."""
+    if ev.get("type") != "stream_event":
+        return ""
+    inner = ev.get("event")
+    if not isinstance(inner, dict):
+        return ""
+    inner_type = inner.get("type")
+    if inner_type == "content_block_start":
+        block = inner.get("content_block")
+        block_type = block.get("type") if isinstance(block, dict) else ""
+    elif inner_type == "content_block_delta":
+        delta = inner.get("delta")
+        block_type = delta.get("type") if isinstance(delta, dict) else ""
+    else:
+        return ""
+    if block_type in {"thinking", "redacted_thinking", "thinking_delta", "signature_delta"}:
+        return "thinking"
+    if block_type in {"text", "text_delta"}:
+        return "responding"
+    if block_type in {"tool_use", "server_tool_use", "input_json_delta"}:
+        return "tool"
+    return ""
+
+
+def _report_phase(agent_id: str, trace_id: str, phase: str, dispatch: str) -> None:
+    try:
+        turn_lifecycle.transition(agent_id, TurnEvent.TEXT_STREAMED,
+                                  {"dispatch": dispatch, "trace_id": trace_id, "phase": phase})
+    except Exception as e:                            # noqa: BLE001
+        log_exception("clarpPhaseFail", e, detail=trace_id or agent_id)
 
 
 def _content_text(content) -> str:
@@ -448,6 +483,7 @@ class ClaudeBackend(Backend):
         saw_result = False
         saw_usage_limit = False
         live_text = ""
+        phase = ""
         isolated_texts: list[str] = []
         live_backend_session_id = backend_session_id
         try:
@@ -492,6 +528,11 @@ class ClaudeBackend(Backend):
                                 log_exception("clarpRunnerInitCbFail", e,
                                               detail=trace_id or sid)
                 elif _is_assistant_event(ev):
+                    current = _stream_phase(ev)
+                    if current and current != phase and agent_id and not isolated:
+                        phase = current
+                        if current != "tool":   # tools are reported by the hooks
+                            _report_phase(agent_id, trace_id, current, self.id)
                     text, is_delta = _assistant_event_text(ev)
                     if text:
                         if isolated and not is_delta:

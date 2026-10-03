@@ -296,7 +296,8 @@ class GrokBackend(StreamJsonBackend):
             if st.phase != "thinking":
                 st.phase = "thinking"
                 self._transition(agent_id, TurnEvent.TEXT_STREAMED,
-                                   {"dispatch": self.runner, "trace_id": trace_id})
+                                   {"dispatch": self.runner, "trace_id": trace_id,
+                                    "phase": "thinking"})
             return
         if etype in _TOOL_START_TYPES:
             # Grok has written the assistant row that carries this call to
@@ -321,7 +322,8 @@ class GrokBackend(StreamJsonBackend):
                 # picks up its output and status.
                 st.phase = "thinking"
                 self._transition(agent_id, TurnEvent.TEXT_STREAMED,
-                                   {"dispatch": self.runner, "trace_id": trace_id})
+                                   {"dispatch": self.runner, "trace_id": trace_id,
+                                    "phase": "thinking"})
                 self._broadcast(stream, agent_id, session)
             return
         if etype in {"turn_started", "turn.started"}:
@@ -354,7 +356,8 @@ class GrokBackend(StreamJsonBackend):
         if st.phase != "speaking":
             st.phase = "speaking"
             self._transition(agent_id, TurnEvent.TEXT_STREAMED,
-                               {"dispatch": self.runner, "trace_id": trace_id})
+                               {"dispatch": self.runner, "trace_id": trace_id,
+                                "phase": "responding"})
         st.live_text += delta
         st.turn_text += delta
         st.last_agent_message = st.live_text

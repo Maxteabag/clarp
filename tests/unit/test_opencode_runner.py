@@ -13,6 +13,7 @@ import pytest
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
+from lib.protocol import AgentState
 from lib import activity  # noqa: E402
 from lib import agents as agents_db  # noqa: E402
 from lib.backend import opencode  # noqa: E402
@@ -450,6 +451,34 @@ def test_run_path_asks_for_reasoning_events_and_treats_them_as_busy(tmp_path, mo
                                  on_result=results.append, enqueue=lambda **_k: 1)
     handle.drain_thread.join(timeout=5)
     assert "--thinking" in json.loads((tmp_path / "argv.json").read_text())
-    assert states[states.index(turn_lifecycle.TurnEvent.TOOL_STARTED) + 1] == \
-        turn_lifecycle.TurnEvent.TEXT_STREAMED
+    after_tool = states[states.index(turn_lifecycle.TurnEvent.TOOL_STARTED) + 1]
+    assert turn_lifecycle.target(after_tool) == AgentState.THINKING
     assert results[0]["last_agent_message"] == "Done."
+
+
+def test_text_is_responding_and_a_finished_tool_reports_its_call(tmp_path, monkeypatch):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
+    events = [
+        {"type": "step_start", "sessionID": "ses_x", "part": {"type": "step-start"}},
+        {"type": "text", "sessionID": "ses_x", "part": {"type": "text", "text": "Looking."}},
+        {"type": "tool_use", "sessionID": "ses_x", "part": {
+            "id": "prt_1", "callID": "call_1", "tool": "read",
+            "state": {"status": "completed", "input": {"filePath": "/a.py"}}}},
+        {"type": "step_finish", "sessionID": "ses_x", "part": {"type": "step-finish"}},
+    ]
+    _install_fake_opencode(bin_dir, "".join(json.dumps(row) + "\n" for row in events))
+    seen: list[tuple[str, dict]] = []
+    monkeypatch.setattr(OPENCODE, "_transition",
+                        lambda _agent_id, event, detail: seen.append((event, detail)))
+    monkeypatch.setattr(agents_db, "get_by_agent_id", lambda _id: None)
+    monkeypatch.setattr(agents_db, "latest_turn_synthesize_audio", lambda _id: False)
+    handle = OPENCODE.start_turn(
+        text="hello", cwd=tmp_path, agent_id="a1", session="s",
+        on_session_init=lambda _sid: True, enqueue=lambda **_k: 1)
+    handle.drain_thread.join(timeout=5)
+    phases = [d.get("phase") for e, d in seen if e == turn_lifecycle.TurnEvent.TEXT_STREAMED]
+    assert "responding" in phases
+    finished = [d for e, d in seen if e == turn_lifecycle.TurnEvent.TOOL_FINISHED]
+    assert [(d["call_id"], d["status"]) for d in finished] == [("call_1", "ok")]

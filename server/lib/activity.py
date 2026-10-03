@@ -157,6 +157,14 @@ def state_activity_event(
         action = action or tool_summary["action"]
         summary = summary or tool_summary["summary"]
         file_path = file_path or tool_summary["file_path"]
+    elif kind == AgentState.THINKING and phase == "tool_finished":
+        # The tool settled and the model has the turn again. The row still
+        # says which tool finished and how, for clients that close a tool row
+        # from this event; the live state (below) is thinking.
+        tool_summary = summarize_tool_activity(tool, detail.get("input") or {})
+        action = action or tool_summary["action"]
+        summary = summary or tool_summary["summary"]
+        file_path = file_path or tool_summary["file_path"]
     elif kind == AgentState.THINKING:
         # A turn parked by Claude account failover records THINKING so the turn
         # keeps its place, but it is not thinking: it is queued behind a provider
@@ -169,6 +177,10 @@ def state_activity_event(
             action = action or "waiting for account"
             summary = (summary or truncate(detail.get("message"), 140)
                        or "Waiting for an account with available usage")
+        elif detail.get("phase") == "responding":
+            phase = "responding"
+            action = action or "responding"
+            summary = summary or "Responding"
         else:
             phase = "thinking"
             action = action or "thinking"
@@ -222,4 +234,44 @@ def state_activity_event(
         "summary": summary,
         "file_path": file_path,
         "ts": int(ts),
+        "state": live_state(kind, detail),
+        "call_id": str(detail.get("call_id") or "") or None,
+        "started_at_ms": int(ts) if kind == AgentState.TOOL else None,
+        "turn_started_ms": _turn_started_ms(agent_id) if kind in AgentState.busy_states() else None,
     }
+
+
+def live_state(kind: str, detail: dict[str, Any] | None = None) -> str:
+    """The status-line state of docs/live-items.md §1.3 for a state_log row.
+
+    ``agent-state.kind`` keeps the coarse kinds old clients know; this is the
+    finer reading (``responding`` is reported there as ``thinking``).
+    """
+    detail = detail or {}
+    if kind == AgentState.TOOL:
+        return "tool"
+    if kind == AgentState.THINKING:
+        if detail.get("account_recovery"):
+            return "limited"
+        return "responding" if detail.get("phase") == "responding" else "thinking"
+    if kind == AgentState.COMPACTING:
+        return "compacting"
+    if kind == AgentState.WAITING:
+        return "waiting"
+    if kind in (AgentState.INTERRUPTED, AgentState.STOPPED):
+        return "interrupted"
+    if kind == AgentState.BACKGROUND:
+        return "background"
+    return "idle"
+
+
+def _turn_started_ms(agent_id: str) -> int | None:
+    try:
+        from .db import conn
+        row = conn().execute(
+            """SELECT started_at FROM turns
+                WHERE agent_id = ? AND ended_at IS NULL
+                ORDER BY started_at DESC LIMIT 1""", (agent_id,)).fetchone()
+    except Exception:  # noqa: BLE001 - a status line never fails its event
+        return None
+    return int(row["started_at"]) if row and row["started_at"] else None

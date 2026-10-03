@@ -127,7 +127,7 @@ def test_hook_transition_never_raises(tmp_path):
     assert turn_lifecycle.hook_transition(
         agent_id, TurnEvent.PROMPT_ADMITTED).to_state == AgentState.THINKING
     assert turn_lifecycle.hook_transition(
-        agent_id, TurnEvent.TOOL_FINISHED).to_state == AgentState.TOOL
+        agent_id, TurnEvent.TOOL_FINISHED).to_state == AgentState.THINKING
 
 
 def test_turn_rows_open_close_and_open_turns(tmp_path):

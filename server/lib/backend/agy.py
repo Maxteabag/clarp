@@ -738,7 +738,7 @@ class AgyBackend(StreamJsonBackend):
             self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
                 "dispatch": self.runner, "agy_raw_evidence": evidence,
                 "step_index": update.get("step_index"), "step_state": state,
-                "trace_id": trace_id,
+                "trace_id": trace_id, "phase": "responding",
             })
             return
         if step_type == "tool":
@@ -756,20 +756,18 @@ class AgyBackend(StreamJsonBackend):
                 "subagent_info": update.get("subagent_info")
                     if isinstance(update.get("subagent_info"), dict) else None,
                 "trace_id": trace_id,
+                "phase": "tool_finished" if state == "DONE" else "tool_started",
+                "call_id": str(tool_info.get("id") or update.get("tool_call_id")
+                               or f"step-{update.get('step_index')}"),
             }
             self._transition(agent_id, TurnEvent.TOOL_FINISHED if state == "DONE"
                              else TurnEvent.TOOL_STARTED, detail)
             self._broadcast_transcript(stream, agent_id, session)
-            if state == "DONE":
-                self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
-                    "dispatch": self.runner, "agy_raw_evidence": evidence,
-                    "trace_id": trace_id,
-                })
             return
         if step_type == "checkpoint":
             self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
                 "dispatch": self.runner, "agy_raw_evidence": evidence,
-                "trace_id": trace_id,
+                "trace_id": trace_id, "phase": "thinking",
             })
 
     def _finalize_success(self, st: _TurnState, *, agent_id: str, session: str,

@@ -641,7 +641,7 @@ def _normalize_item(item: dict) -> dict:
         "collabAgentToolCall": "collab_agent_tool_call",
         "webSearch": "web_search_call", "imageView": "image_view",
         "imageGeneration": "image_generation", "plan": "plan",
-        "reasoning": "reasoning",
+        "reasoning": "reasoning", "contextCompaction": "context_compaction",
     }
     out["type"] = kinds.get(str(out.get("type")), out.get("type"))
     if out.get("type") == "agent_message" and not out.get("text"):

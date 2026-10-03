@@ -38,7 +38,8 @@ def test_tool_finished_records_state_for_injected_session(tmp_path):
             "SELECT kind, detail FROM state_log ORDER BY state_id DESC"
         ).fetchall()
         assert rows, "hook recorded no state"
-        assert rows[0][0] == "tool", rows[0]
+        # The finished tool hands the turn back to the model.
+        assert rows[0][0] == "thinking", rows[0]
         assert "tool_finished" in (rows[0][1] or ""), rows[0]
 
         # State only — no audio from hooks any more.

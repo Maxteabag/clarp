@@ -57,7 +57,8 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
     SSEType.AGENT_ACTIVITY: (
         "agent_id", "session", "persona", "kind", "phase", "status", "tool",
-        "action", "summary", "file_path", "ts",
+        "action", "summary", "file_path", "ts", "state", "call_id",
+        "started_at_ms", "turn_started_ms",
     ),
     SSEType.AGENT_ROSTER: (
         "kind", "session", "persona", "voice_id", "backend", "name",
@@ -97,6 +98,9 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "confidence", "reason",
     ),
     SSEType.ORACLE_HANDOFF: _ORACLE_HANDOFF_FIELDS,
+    SSEType.LIVE: (
+        "agent_id", "session", "conv", "epoch", "lseq", "server_now_ms", "ops",
+    ),
 }
 
 # Keys the stream hub adds after construction (the durable row id and its
@@ -190,7 +194,9 @@ def agent_state(*, session: str, agent_id: str, kind: str,
 
 def agent_activity(*, agent_id: str, session: str, persona: str, kind: str,
                    phase: str, status: str, tool: str, action: str,
-                   summary: str, file_path: str, ts: int) -> Event:
+                   summary: str, file_path: str, ts: int,
+                   state: Any = OMIT, call_id: Any = OMIT,
+                   started_at_ms: Any = OMIT, turn_started_ms: Any = OMIT) -> Event:
     return _build(SSEType.AGENT_ACTIVITY, [
         ("agent_id", agent_id),
         ("session", session),
@@ -203,6 +209,27 @@ def agent_activity(*, agent_id: str, session: str, persona: str, kind: str,
         ("summary", summary),
         ("file_path", file_path),
         ("ts", ts),
+        ("state", state),
+        ("call_id", call_id),
+        ("started_at_ms", started_at_ms),
+        ("turn_started_ms", turn_started_ms),
+    ])
+
+
+def live(*, agent_id: str, session: str, conv: str, epoch: str, lseq: int,
+         server_now_ms: int, ops: list[dict[str, Any]]) -> Event:
+    """Item ops for one conversation's open turn (docs/live-items.md).
+
+    Never durable: it carries no event id and is not replayed.
+    """
+    return _build(SSEType.LIVE, [
+        ("agent_id", agent_id),
+        ("session", session),
+        ("conv", conv),
+        ("epoch", epoch),
+        ("lseq", lseq),
+        ("server_now_ms", server_now_ms),
+        ("ops", ops),
     ])
 
 
@@ -410,6 +437,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.GOAL_UPDATED: goal_updated,
     SSEType.ORCHESTRATOR_DECISION: orchestrator_decision,
     SSEType.ORACLE_HANDOFF: oracle_handoff,
+    SSEType.LIVE: live,
 }
 
 

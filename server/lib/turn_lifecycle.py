@@ -118,9 +118,11 @@ TRANSITIONS: dict[str, tuple[str, frozenset[str]]] = {
     # previous turn's terminal state is a legal origin.
     TurnEvent.TEXT_STREAMED: (AgentState.THINKING, STARTED),
     TurnEvent.TOOL_STARTED: (AgentState.TOOL, ACTIVE),
-    TurnEvent.TOOL_FINISHED: (AgentState.TOOL, ACTIVE),
+    # A finished tool hands the turn back to the model: the agent is thinking
+    # (or about to respond), not still "using a tool".
+    TurnEvent.TOOL_FINISHED: (AgentState.THINKING, ACTIVE),
     TurnEvent.COMPACTION_STARTED: (AgentState.COMPACTING, ACTIVE),
-    TurnEvent.COMPACTION_FINISHED: (AgentState.IDLE, ACTIVE),
+    TurnEvent.COMPACTION_FINISHED: (AgentState.THINKING, ACTIVE),
     # Claude Code nags about idleness from a settled turn too.
     TurnEvent.NOTIFICATION: (AgentState.WAITING, STARTED),
     TurnEvent.BACKGROUND_DECLARED: (AgentState.BACKGROUND, STARTED),
@@ -238,6 +240,13 @@ class TurnStateMachine:
             self._refuse(agent_id, event, from_state, target)
             raise IllegalTransition(agent_id, event, from_state, target)
         stamp = now_ms() if ts is None else int(ts)
+        if event == TurnEvent.TEXT_STREAMED and self._same_phase(agent_id, target, detail):
+            # A backend reports every delta; the state only changes when the
+            # phase does (thinking -> responding), so repeat rows are noise
+            # that would each become two SSE events.
+            return Transition(
+                agent_id=agent_id, event=event, from_state=from_state,
+                to_state=target, ts=stamp, detail=detail, forced=force)
         detail = _detail_with_origin(agent_id, target, detail, stamp)
         from . import agents as agents_db
         runtime_id = agents_db.current_runtime_id(agent_id)
@@ -255,6 +264,24 @@ class TurnStateMachine:
                detail: dict[str, Any] | None = None) -> Transition:
         """Compatibility writer: an explicit kind, legal from every state."""
         return self.transition(agent_id, TurnEvent.RECORDED, detail, kind=kind)
+
+    @staticmethod
+    def _same_phase(agent_id: str, target: str,
+                    detail: dict[str, Any] | None) -> bool:
+        phase = (detail or {}).get("phase")
+        if not phase:
+            return False
+        row = conn().execute(
+            """SELECT kind, detail FROM state_log WHERE agent_id = ?
+                ORDER BY ts DESC, state_id DESC LIMIT 1""",
+            (agent_id,)).fetchone()
+        if not row or row["kind"] != target:
+            return False
+        try:
+            latest = json.loads(row["detail"] or "{}")
+        except ValueError:
+            return False
+        return isinstance(latest, dict) and latest.get("phase") == phase
 
     @staticmethod
     def current_kind(agent_id: str) -> str:
