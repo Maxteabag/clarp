@@ -50,6 +50,7 @@ class _TurnState:
     part_texts: dict[str, str] = field(default_factory=dict)
     step_parts: list[str] = field(default_factory=list)
     started_tools: set[str] = field(default_factory=set)
+    finished_tools: set[str] = field(default_factory=set)
     phase: str = ""
     busy: bool = False
     errors: list[str] = field(default_factory=list)
@@ -119,6 +120,10 @@ def _bounded(value: Any) -> Any:
                 for item in value[:_LIST_ITEMS]
                 if isinstance(item, (dict, str, int, float, bool))]
     return value
+
+
+def _call_id(part: dict) -> str | None:
+    return str(part.get("callID") or part.get("id") or "") or None
 
 
 def _tool_detail(agent_id: str, part: dict) -> tuple[str, dict[str, Any]]:
@@ -326,23 +331,29 @@ class OpenCodeBackend(StreamJsonBackend):
                     if etype == "reasoning":
                         # Model thinking: busy, as Codex reasoning items are;
                         # never chat text.
-                        self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
-                            "dispatch": self.runner, "trace_id": trace_id,
-                        })
+                        self._phase(st, "thinking", agent_id, trace_id)
                         continue
                     if etype == "step_start":
                         st.step_texts = []
-                        self._transition(agent_id, TurnEvent.TEXT_STREAMED, {
-                            "dispatch": self.runner, "trace_id": trace_id,
-                        })
+                        st.phase = ""
+                        self._phase(st, "thinking", agent_id, trace_id)
                         self._broadcast(stream, agent_id, session)
                         continue
                     if etype in {"tool_use", "tool_start", "tool.running"}:
-                        name, tool_input = _tool_detail(agent_id, part or ev)
+                        tool_part = part or ev
+                        name, tool_input = _tool_detail(agent_id, tool_part)
+                        detail = {"dispatch": self.runner, "trace_id": trace_id,
+                                  "tool": name, "input": tool_input,
+                                  "call_id": _call_id(tool_part)}
+                        st.phase = "tool"
                         self._transition(agent_id, TurnEvent.TOOL_STARTED, {
-                            "dispatch": self.runner, "trace_id": trace_id, "tool": name,
-                            "input": tool_input,
-                        })
+                            **detail, "phase": "tool_started", "status": "running"})
+                        state = tool_part.get("state") if isinstance(tool_part.get("state"), dict) else {}
+                        if state.get("status") in {"completed", "error"}:
+                            st.phase = ""
+                            self._transition(agent_id, TurnEvent.TOOL_FINISHED, {
+                                **detail, "phase": "tool_finished",
+                                "status": "error" if state.get("status") == "error" else "ok"})
                         self._broadcast(stream, agent_id, session)
                         continue
                     if etype in {"error", "session.error"}:
@@ -362,6 +373,7 @@ class OpenCodeBackend(StreamJsonBackend):
                                  or _text_from(ev.get("delta"))
                                  or _text_from(ev))
                         if delta:
+                            self._phase(st, "responding", agent_id, trace_id)
                             st.live_text += delta
                             st.step_texts.append(delta.strip())
                             st.last_agent_message = "\n\n".join(
@@ -575,10 +587,20 @@ class OpenCodeBackend(StreamJsonBackend):
                 st.phase = "tool"
                 self._transition(agent_id, TurnEvent.TOOL_STARTED, {
                     "dispatch": self.runner, "trace_id": trace_id, "tool": name,
-                    "input": tool_input,
+                    "input": tool_input, "call_id": _call_id(part),
+                    "phase": "tool_started", "status": "running",
                 })
                 self._broadcast(stream, agent_id, session)
-            if status in {"completed", "error"}:
+            if status in {"completed", "error"} and part_id not in st.finished_tools:
+                st.finished_tools.add(part_id)
+                name, tool_input = _tool_detail(agent_id, part)
+                st.phase = ""
+                self._transition(agent_id, TurnEvent.TOOL_FINISHED, {
+                    "dispatch": self.runner, "trace_id": trace_id, "tool": name,
+                    "input": tool_input, "call_id": _call_id(part),
+                    "phase": "tool_finished",
+                    "status": "error" if status == "error" else "ok",
+                })
                 self._broadcast(stream, agent_id, session)
         elif ptype == "text" and not part.get("synthetic") and not part.get("ignored"):
             st.part_texts[part_id] = str(part.get("text") or "")
@@ -610,7 +632,7 @@ class OpenCodeBackend(StreamJsonBackend):
             st.step_parts.append(part_id)
         st.last_agent_message = "\n\n".join(filter(None, (
             st.part_texts.get(pid, "").strip() for pid in st.step_parts)))
-        self._phase(st, "thinking", agent_id, trace_id)
+        self._phase(st, "responding", agent_id, trace_id)
         self._speak(text, st, agent_id=agent_id, session=session,
                     trace_id=trace_id, enqueue=enqueue)
         self.persist_live_text(
@@ -626,7 +648,7 @@ class OpenCodeBackend(StreamJsonBackend):
             return
         st.phase = phase
         self._transition(agent_id, TurnEvent.TEXT_STREAMED,
-                         {"dispatch": self.runner, "trace_id": trace_id})
+                         {"dispatch": self.runner, "trace_id": trace_id, "phase": phase})
 
     @staticmethod
     def _result(st: _TurnState) -> dict[str, Any]:

@@ -71,6 +71,20 @@ class TurnState:
     pending_live_text: str = ""
     persisted_live_text: str = ""
     last_live_write_at: float = 0.0
+    # thinking | responding: what the turn's text stream is doing now, so a
+    # phase is reported once per switch rather than once per delta.
+    live_phase: str = ""
+
+
+def _tool_item_status(item: dict) -> str:
+    """ok / error for a completed tool item (app-server or exec shapes)."""
+    status = str(item.get("status") or "").lower()
+    exit_code = item.get("exitCode", item.get("exit_code"))
+    if status in {"failed", "declined", "error"}:
+        return "error"
+    if isinstance(exit_code, int) and not isinstance(exit_code, bool) and exit_code != 0:
+        return "error"
+    return "ok"
 
 
 # ---- event extraction helpers (tolerant of envelope vs flat shapes) ----
@@ -583,18 +597,36 @@ class CodexBackend(StreamJsonBackend):
         if itype == "reasoning":
             # Model thinking — keep the agent in a busy state, but nothing to
             # speak or render.
-            self.transition(agent_id, TurnEvent.TEXT_STREAMED,
-                               {"dispatch": self.runner, "trace_id": trace_id})
+            self._enter_phase(st, "thinking", agent_id=agent_id, trace_id=trace_id)
+            return
+
+        if itype == "context_compaction":
+            st.live_phase = ""
+            if etype == "item.started":
+                self.transition(agent_id, TurnEvent.COMPACTION_STARTED,
+                                {"dispatch": self.runner, "trace_id": trace_id})
+            elif etype == "item.completed":
+                self.transition(agent_id, TurnEvent.COMPACTION_FINISHED,
+                                {"dispatch": self.runner, "trace_id": trace_id})
             return
 
         if itype in _TOOL_ITEM_TYPES:
+            if etype == "item.updated":
+                self.broadcast_transcript(stream, agent_id, session)
+                return
             name = str(item.get("command") or item.get("name") or itype)
-            # The apps show and explain `name` clipped; the explainer
-            # completes it from here (see tool_explanation_commands).
-            tool_explanation_commands.remember(agent_id, name)
-            self.transition(agent_id, TurnEvent.TOOL_STARTED,
-                               {"dispatch": self.runner, "tool": name[:80],
-                                "trace_id": trace_id})
+            st.live_phase = ""
+            detail = {"dispatch": self.runner, "tool": name[:80],
+                      "trace_id": trace_id, "call_id": str(item.get("id") or "") or None}
+            if etype == "item.completed":
+                detail.update(phase="tool_finished", status=_tool_item_status(item))
+                self.transition(agent_id, TurnEvent.TOOL_FINISHED, detail)
+            else:
+                # The apps show and explain `name` clipped; the explainer
+                # completes it from here (see tool_explanation_commands).
+                tool_explanation_commands.remember(agent_id, name)
+                detail.update(phase="tool_started", status="running")
+                self.transition(agent_id, TurnEvent.TOOL_STARTED, detail)
             self.broadcast_transcript(stream, agent_id, session)
             return
 
@@ -615,12 +647,21 @@ class CodexBackend(StreamJsonBackend):
         """Write one mutable assistant row at a bounded visual cadence."""
         if text.strip():
             st.pending_live_text = text.strip()
+            self._enter_phase(st, "responding", agent_id=agent_id, trace_id=trace_id)
         self.persist_live_text(
             st, text=st.pending_live_text,
             backend_session_id=st.live_backend_session_id,
             agent_id=agent_id, session=session, trace_id=trace_id, stream=stream,
             force=force,
             interval=self.live_text_interval)
+
+    def _enter_phase(self, st: TurnState, phase: str, *, agent_id: str,
+                     trace_id: str) -> None:
+        if st.live_phase == phase:
+            return
+        st.live_phase = phase
+        self.transition(agent_id, TurnEvent.TEXT_STREAMED,
+                        {"dispatch": self.runner, "trace_id": trace_id, "phase": phase})
 
     def _speak(self, text: str, st: TurnState, *, agent_id: str, session: str,
                trace_id: str, enqueue: Callable[..., int]) -> None:

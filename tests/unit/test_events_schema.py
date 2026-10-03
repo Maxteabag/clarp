@@ -52,7 +52,11 @@ FULL_SAMPLES = {
     SSEType.AGENT_ACTIVITY: lambda: events.agent_activity(
         agent_id="a", session="s", persona="P", kind="tool", phase="tool",
         status="running", tool="Read", action="read", summary="x",
-        file_path="/f", ts=1),
+        file_path="/f", ts=1, state="tool", call_id="toolu_1",
+        started_at_ms=1, turn_started_ms=1),
+    SSEType.LIVE: lambda: events.live(
+        agent_id="a", session="s", conv="c", epoch="e", lseq=1,
+        server_now_ms=1, ops=[{"op": "status", "conv": "c", "activity": {"state": "idle"}}]),
     SSEType.AGENT_ROSTER: lambda: events.agent_roster(
         "created", session="s", persona="P", voice_id="v", backend="claude",
         name="N"),

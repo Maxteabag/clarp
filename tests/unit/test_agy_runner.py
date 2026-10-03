@@ -794,8 +794,9 @@ def test_real_1_1_21_fixtures(fake_agy, tmp_path, fixture_name, expected):
             "total_tokens": 21633,
         }
         tool_rows = agents_db.conn().execute(
-            "SELECT detail FROM state_log WHERE agent_id=? AND kind=?",
-            (agent_id, AgentState.TOOL),).fetchall()
+            "SELECT detail FROM state_log WHERE agent_id=?"
+            " AND json_extract(detail, '$.tool') IS NOT NULL",
+            (agent_id,),).fetchall()
         assert len(tool_rows) == 2
         for tool_row in tool_rows:
             evidence = json.loads(tool_row["detail"])["agy_raw_evidence"]
@@ -859,8 +860,9 @@ def test_drain_dedupes_identical_text_and_tool_events(
     assert _wait_for(lambda: len(results) == 1)
     assert writes == ["DONE"]
     tool_rows = agents_db.conn().execute(
-        "SELECT detail FROM state_log WHERE agent_id=? AND kind=?",
-        (agent_id, AgentState.TOOL),).fetchall()
+        "SELECT detail FROM state_log WHERE agent_id=?"
+        " AND json_extract(detail, '$.tool') IS NOT NULL",
+        (agent_id,),).fetchall()
     assert len(tool_rows) == 2  # one ACTIVE and one DONE, duplicate copies dropped
 
 
@@ -956,3 +958,21 @@ def test_preempted_owner_gate_blocks_all_stream_side_effects(fake_agy, tmp_path)
     assert agents_db.conn().execute(
         "SELECT 1 FROM state_log WHERE agent_id=? AND kind=?",
         (agent_id, AgentState.THINKING),).fetchall() == []
+
+
+def test_streamed_deltas_write_one_responding_state_row(fake_agy, tmp_path):
+    agent_id = _make_agy_agent()
+    trace_id = _open_owned_turn(agent_id, "deltas")
+    lines = _stream("done.").splitlines()
+    extra = [json.dumps({"event": "step_update", "step_update": {
+        "conversation_id": _FAKE_CONV, "step_index": 2, "state": "ACTIVE",
+        "step_type": "agent_response", "text_delta": chunk}}) for chunk in ("One ", "two ", "three ")]
+    fake_agy("\n".join(lines[:2] + extra + lines[2:]) + "\n")
+    handle = AGY.start_turn(text="go", cwd=tmp_path, agent_id=agent_id, session="elli",
+                            trace_id=trace_id)
+    handle.wait(timeout=8.0)
+    rows = agents_db.conn().execute(
+        "SELECT kind, detail FROM state_log WHERE agent_id = ? ORDER BY state_id",
+        (agent_id,)).fetchall()
+    responding = [r for r in rows if json.loads(r["detail"] or "{}").get("phase") == "responding"]
+    assert len(responding) == 1

@@ -619,3 +619,33 @@ def test_default_model_pin_means_cli_default():
     support this model"). It must dispatch as no --model at all."""
     assert "--model" not in CLAUDE.build_cmd(model="default")
     assert "--model" not in CLAUDE.build_cmd(model="Default ")
+
+
+def test_claude_thinking_then_text_reports_thinking_then_responding(fake_clarp, tmp_path):
+    agent_id = agents_db.create_agent(
+        persona="Rachel", voice_id="V", cwd=str(tmp_path), session="rachel")
+    fake_clarp([
+        {"type": "system", "subtype": "init", "session_id": "sid-phase"},
+        {"type": "stream_event", "event": {"type": "message_start", "message": {"id": "msg_1"}}},
+        {"type": "stream_event", "event": {"type": "content_block_start", "index": 0,
+                                           "content_block": {"type": "thinking", "thinking": ""}}},
+        {"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
+                                           "delta": {"type": "thinking_delta", "thinking": "Hmm"}}},
+        {"type": "stream_event", "event": {"type": "content_block_start", "index": 1,
+                                           "content_block": {"type": "text", "text": ""}}},
+        {"type": "stream_event", "event": {"type": "content_block_delta", "index": 1,
+                                           "delta": {"type": "text_delta", "text": "Hi"}}},
+        {"type": "stream_event", "event": {"type": "content_block_delta", "index": 1,
+                                           "delta": {"type": "text_delta", "text": " there"}}},
+    ])
+    agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="trace-phase")
+    handle = CLAUDE.start_turn(
+        text="hi", cwd=tmp_path, backend_session_id="sid-phase", session="rachel",
+        agent_id=agent_id, trace_id="trace-phase")
+    handle.wait(timeout=5.0)
+    rows = agents_db.conn().execute(
+        "SELECT kind, detail FROM state_log WHERE agent_id = ? ORDER BY state_id",
+        (agent_id,)).fetchall()
+    phases = [json.loads(r["detail"] or "{}").get("phase") for r in rows if r["kind"] == "thinking"]
+    assert phases[-2:] == ["thinking", "responding"]
+    assert phases.count("responding") == 1
