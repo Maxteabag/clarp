@@ -39,8 +39,14 @@ const EXPLAIN_START = arg('explanations', 'on') !== 'off';
 // agent-activity events for the status line.
 const NO_LIVE = process.argv.includes('--no-live');
 
-const T0 = 1759480000000;
-const fixture = JSON.parse(fs.readFileSync(path.join(repo, 'contract/live/turn-full.json'), 'utf8'));
+// --recording <file>: replay {snapshot0, events} recorded from a real Host
+// hub instead of turn-full (turn B is then left out).
+const RECORDING = arg('recording', '');
+const recorded = RECORDING ? JSON.parse(fs.readFileSync(RECORDING, 'utf8')) : null;
+const fixture = recorded
+  ? { steps: [{ snapshot: recorded.snapshot0 }, ...recorded.events.map(event => ({ event }))] }
+  : JSON.parse(fs.readFileSync(path.join(repo, 'contract/live/turn-full.json'), 'utf8'));
+const T0 = recorded ? recorded.snapshot0.server_now_ms + 1000 : 1759480000000;
 const start = Date.now() + 1500;   // a moment to load the page first
 const shift = start - T0;
 
@@ -156,6 +162,7 @@ pushB(200, () => [done('cl:msg_b4:0', 'message', 'completed', m0),
     item_id: null, since_ms: now(), turn_id: 'tr-2', turn_started_ms: null } }]);
 timeline.push({ at: bClock + 400, log: { id: 'live-b', role: 'assistant', text: answer,
   timestamp: new Date(bClock).toISOString(), revision: 4 } });
+if (recorded) timeline.splice(0, timeline.length, ...timeline.filter(step => step.at < bStart - 100));
 timeline.sort((a, b) => a.at - b.at);
 
 // ---- state the Host would hold -------------------------------------------------
