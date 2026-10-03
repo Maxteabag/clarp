@@ -13,6 +13,25 @@ import sys
 import pytest
 
 
+def default_temp_root(environ, *, var_tmp_exists: bool) -> str | None:
+    """Where pytest's per-run temp folders go when nobody chose.
+
+    /tmp is a small RAM-backed tmpfs with a per-user quota; pytest keeps its
+    last three run folders, each up to several gigabytes, which filled it and
+    broke installs and other agents' shells. An explicit TMPDIR or
+    PYTEST_DEBUG_TEMPROOT always wins.
+    """
+    if environ.get("TMPDIR") or environ.get("PYTEST_DEBUG_TEMPROOT") or not var_tmp_exists:
+        return None
+    return "/var/tmp"
+
+
+_TEMP_ROOT = default_temp_root(os.environ, var_tmp_exists=os.path.isdir("/var/tmp"))
+if _TEMP_ROOT:
+    # Read lazily by pytest's tmp_path factory, after initial conftests load.
+    os.environ["PYTEST_DEBUG_TEMPROOT"] = _TEMP_ROOT
+
+
 # Match the installed layout: server/lib is imported as the top-level `lib`
 # package. Centralizing this keeps test collection independent of file order.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "server"))
