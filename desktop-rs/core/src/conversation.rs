@@ -554,16 +554,24 @@ impl Conversation {
         self.drop_superseded_live_turns();
     }
 
-    /// A new durable row goes after the live row it finalises, before any
-    /// optimistic/failed/live tail, and before a row with a higher revision.
+    /// A new durable row goes after the live row it finalises (not one
+    /// written before that row began), before any optimistic/failed/live
+    /// tail, and before a row with a higher revision.
     fn insertion_row(&self, incoming: &Message) -> usize {
         for (row, candidate) in self.messages.iter().enumerate() {
             if candidate.kind == "live"
                 && incoming.role == "assistant"
                 && incoming.kind != "live"
                 && (candidate.revision == 0 || incoming.revision >= candidate.revision)
+                && !written_after(candidate, incoming)
             {
                 return row + 1;
+            }
+            // A live row is the newest row while it streams, unless the
+            // incoming one was written after it began (the next message
+            // once the turn settled): that one goes below it.
+            if candidate.kind == "live" && written_after(incoming, candidate) {
+                continue;
             }
             if candidate.pending || candidate.delivery_failed || candidate.kind == "live" {
                 return row;
@@ -634,6 +642,12 @@ impl Conversation {
             }
         }
     }
+}
+
+/// Both rows carry Host times and `later`'s is after `earlier`'s.
+fn written_after(later: &Message, earlier: &Message) -> bool {
+    let ms = |m: &Message| crate::time_format::epoch_ms(&m.timestamp);
+    matches!((ms(later), ms(earlier)), (Some(a), Some(b)) if a > b)
 }
 
 fn changed_roles(previous: &Message, incoming: &Message) -> Vec<Role> {

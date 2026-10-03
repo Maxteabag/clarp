@@ -111,7 +111,7 @@ from lib.live_items import LiveView  # noqa: E402
 
 live_features = False
 live_truth = {}      # session -> LiveView: what GET /live answers
-live_cursor = {}     # session -> (fixture name, next step index)
+live_cursor = {}     # session -> (fixture name, next step index, time shift)
 live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without ?live=
 tool_explanation_settings = {"enabled": True, "detail_level": 2}
 
@@ -243,6 +243,16 @@ def live_step(session, step, skip=()):
         view.awaiting_snapshot = False
     if payload["lseq"] not in skip:
         broadcast_live(session, {**payload, "session": session})
+
+
+def shifted(value, shift):
+    """A recorded step with every `*_ms` time moved by `shift` ms."""
+    if isinstance(value, dict):
+        return {k: v + shift if k.endswith("_ms") and isinstance(v, int) and not isinstance(v, bool) and v > 10**12 else shifted(v, shift)
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [shifted(v, shift) for v in value]
+    return value
 
 
 def iso_at(ms, offset_hours=0):
@@ -949,19 +959,25 @@ class Handler(BaseHTTPRequestHandler):
             # for `session` up to step `through` (exclusive; all by default),
             # from where the last replay of it stopped. Events whose lseq is
             # in `skip` are not sent (a gap the client must notice).
+            # The recording's times move by one offset so its turn starts
+            # now, after the chat's rows, as on a real Host (the client
+            # places the turn by its start among the rows' times).
             session, name = body.get("session", "rachel"), body["fixture"]
             steps = json.loads((LIVE_FIXTURES / f"{name}.json").read_text())["steps"]
-            fixture, start = live_cursor.get(session, (name, 0))
+            fixture, start, shift = live_cursor.get(session, (name, 0, 0))
             if fixture != name or body.get("restart"):
                 start = 0
                 with state_lock:
                     live_truth.pop(session, None)
+            if start == 0:
+                first = min((s.get("event", s.get("snapshot", {})).get("server_now_ms") or 0 for s in steps), default=0)
+                shift = int(time.time() * 1000) - first if first else 0
             through = min(int(body.get("through", len(steps))), len(steps))
             for step in steps[start:through]:
-                live_step(session, step, set(body.get("skip", [])))
+                live_step(session, shifted(step, shift), set(body.get("skip", [])))
                 if body.get("delay_ms"):
                     time.sleep(body["delay_ms"] / 1000)
-            live_cursor[session] = (name, max(start, through))
+            live_cursor[session] = (name, max(start, through), shift)
             return self.reply(200, {"ok": True, "next": max(start, through), "steps": len(steps)})
         if url.path == "/__control/live-load":
             # Test control: a turn the real Host recorded (tests/fixtures/NAME,
