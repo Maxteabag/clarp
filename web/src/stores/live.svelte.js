@@ -1,0 +1,263 @@
+// The live channel (docs/live-items.md): a running turn as items pushed over
+// SSE instead of "go refetch /log" pings.
+//
+// Gated on `live_items` in /server-info; without it nothing here subscribes
+// and the transcript keeps today's /log path. With it:
+//
+//   subscribe  /events?live=<chats on screen + the few opened last>
+//   open chat  GET /live?session=… once, then apply `live` events above it
+//   gap/epoch  the reducer asks for GET /live again (one at a time)
+//   other chats  status/turn ops only, kept as each agent's activity
+//
+// Events are queued and applied once per animation frame, so a burst of
+// appends costs one state write per chat per frame. Each chat's state is a
+// $state.raw value replaced on change: a pane re-renders only the items the
+// reducer replaced.
+
+import {
+  applyLiveEvent, applyLiveSnapshot, blankLive, LiveEffects, liveSnapshotFailed,
+  requestLiveSnapshot,
+} from '@core/live-items.js';
+import { clog } from '../lib/net.js';
+
+export const LIVE_FEATURE = 'live_items';
+/** Chats kept subscribed besides the ones on screen. */
+const MAX_WATCHED = 4;
+/** Events held while a snapshot is on its way. */
+const MAX_BUFFERED = 1000;
+
+export const live = $state({
+  enabled: false,
+  /** The Host's tool-explanation setting (§6). */
+  explanations: { enabled: true, detail_level: 2, loaded: false },
+});
+
+class LiveChat {
+  state = $state.raw(null);
+}
+
+class RosterEntry {
+  activity = $state.raw(null);
+  turn = $state.raw(null);
+}
+
+const chats = new Map();     // session → LiveChat
+const roster = new Map();    // session → RosterEntry
+const watched = [];          // most recent last
+const queued = new Map();    // session → events waiting for the next frame
+const buffered = new Map();  // session → events that arrived during GET /live
+const fetching = new Set();
+let frameRequested = false;
+let subscriptionsChanged = () => {};
+
+function chatOf(session) {
+  let chat = chats.get(session);
+  if (!chat) { chat = new LiveChat(); chats.set(session, chat); }
+  return chat;
+}
+
+function rosterOf(session) {
+  let entry = roster.get(session);
+  if (!entry) { entry = new RosterEntry(); roster.set(session, entry); }
+  return entry;
+}
+
+// ---- feature gate and subscriptions ----------------------------------------
+
+/** From /server-info `capabilities.features`. */
+export function setServerFeatures(features = []) {
+  const on = Array.isArray(features) && features.includes(LIVE_FEATURE);
+  if (on === live.enabled) return;
+  live.enabled = on;
+  if (!on) {
+    for (const chat of chats.values()) chat.state = null;
+  }
+  subscriptionsChanged();
+}
+
+export function onSubscriptionsChanged(fn) {
+  subscriptionsChanged = fn || (() => {});
+}
+
+/** A chat is on screen or was just opened: keep its items coming. */
+export function watchSession(session) {
+  if (!session) return;
+  const at = watched.indexOf(session);
+  if (at >= 0) {
+    // Already subscribed: only its recency moves, the URL stays.
+    watched.splice(at, 1);
+    watched.push(session);
+    return;
+  }
+  watched.push(session);
+  while (watched.length > MAX_WATCHED) {
+    const dropped = watched.shift();
+    const chat = chats.get(dropped);
+    if (chat) chat.state = null;
+  }
+  subscriptionsChanged();
+}
+
+export function watchedSessions() {
+  return [...watched];
+}
+
+/** The `/events` query for the live channel, '' when it is off. */
+export function liveQuery() {
+  if (!live.enabled) return '';
+  return `live=${[...watched].sort().map(encodeURIComponent).join(',')}`;
+}
+
+// ---- reads ----------------------------------------------------------------
+
+/** The live state of a subscribed chat, null before its first snapshot. */
+export function liveFor(session) {
+  if (!live.enabled || !session) return null;
+  return chats.get(session)?.state || null;
+}
+
+/** The newest status of any agent, subscribed or not. */
+export function rosterActivity(session) {
+  const own = liveFor(session);
+  if (own) return own.activity;
+  return roster.get(session)?.activity || null;
+}
+
+const BUSY = new Set(['thinking', 'responding', 'tool', 'compacting', 'limited']);
+
+/** A turn is open: its turn says running, or its status line is busy. */
+export function liveTurnRunning(session) {
+  const own = liveFor(session);
+  const turn = own ? own.turn : roster.get(session)?.turn;
+  if (turn && turn.status === 'running') return true;
+  const activity = rosterActivity(session);
+  return !!activity && BUSY.has(activity.state);
+}
+
+// ---- snapshots ------------------------------------------------------------
+
+/** GET /live for a chat, once at a time. Events meanwhile are buffered. */
+export async function openLive(session) {
+  if (!live.enabled || !session || fetching.has(session)) return;
+  const chat = chatOf(session);
+  if (!chat.state || !chat.state.awaitingSnapshot) {
+    chat.state = requestLiveSnapshot(chat.state || blankLive()).state;
+  }
+  fetching.add(session);
+  try {
+    const r = await fetch('/live?session=' + encodeURIComponent(session));
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const snapshot = await r.json();
+    let next = applyLiveSnapshot(chat.state || blankLive(), snapshot);
+    const held = buffered.get(session) || [];
+    buffered.delete(session);
+    fetching.delete(session);
+    chat.state = next;
+    if (held.length) enqueue(session, held);
+    if (snapshot.tool_explanations) setExplanationState(snapshot.tool_explanations);
+  } catch (err) {
+    fetching.delete(session);
+    buffered.delete(session);
+    if (chat.state) chat.state = liveSnapshotFailed(chat.state);
+    clog('liveSnapshotFail', `${session} ${err && err.message ? err.message : err}`);
+  }
+}
+
+// ---- events ---------------------------------------------------------------
+
+function enqueue(session, events) {
+  const list = queued.get(session) || [];
+  list.push(...events);
+  queued.set(session, list);
+  if (!frameRequested) {
+    frameRequested = true;
+    const raf = globalThis.requestAnimationFrame || (cb => setTimeout(cb, 16));
+    raf(flush);
+  }
+}
+
+function flush() {
+  frameRequested = false;
+  const work = [...queued.entries()];
+  queued.clear();
+  for (const [session, events] of work) applyQueued(session, events);
+}
+
+function applyQueued(session, events) {
+  const chat = chats.get(session);
+  if (!chat || !chat.state) return;
+  if (fetching.has(session)) {
+    const held = buffered.get(session) || [];
+    held.push(...events);
+    buffered.set(session, held.slice(-MAX_BUFFERED));
+    return;
+  }
+  let state = chat.state;
+  let needSnapshot = false;
+  for (const ev of events) {
+    const r = applyLiveEvent(state, ev);
+    state = r.state;
+    if (r.effects.includes(LiveEffects.FETCH_LIVE)) { needSnapshot = true; break; }
+  }
+  if (state !== chat.state) chat.state = state;
+  noteRoster(session, state.activity, state.turn);
+  if (needSnapshot) openLive(session);
+}
+
+function noteRoster(session, activity, turn) {
+  const entry = rosterOf(session);
+  if (activity && activity !== entry.activity) entry.activity = activity;
+  if (turn !== undefined && turn !== entry.turn) entry.turn = turn;
+}
+
+/** A `live` SSE event. */
+export function handleLiveEvent(ev) {
+  if (!live.enabled || !ev || !ev.session) return;
+  const session = ev.session;
+  if (watched.includes(session) && chats.get(session)?.state) {
+    enqueue(session, [ev]);
+    return;
+  }
+  // Not subscribed: only status and turn ops reach us. Keep the newest.
+  for (const op of ev.ops || []) {
+    if (op.op === 'status') noteRoster(session, op.activity || null);
+    else if (op.op === 'turn') noteRoster(session, rosterOf(session).activity, op.turn || null);
+  }
+}
+
+// ---- tool explanations (§6) -------------------------------------------------
+
+function setExplanationState(s) {
+  if (!s || typeof s !== 'object') return;
+  live.explanations = {
+    enabled: s.enabled !== false,
+    detail_level: Number.isFinite(s.detail_level) ? s.detail_level : live.explanations.detail_level,
+    loaded: true,
+  };
+}
+
+export async function loadExplanationSettings() {
+  if (!live.enabled) return;
+  try {
+    const r = await fetch('/tool-explanations/settings');
+    if (r.ok) setExplanationState(await r.json());
+  } catch (_) {}
+}
+
+/** Flip the Host setting. The switch moves at once and moves back on failure. */
+export async function setExplanationsEnabled(enabled) {
+  const before = { ...live.explanations };
+  live.explanations = { ...before, enabled: !!enabled };
+  try {
+    const r = await fetch('/tool-explanations/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !!enabled }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    setExplanationState(await r.json());
+  } catch (err) {
+    live.explanations = before;
+    clog('toolExplanationSettingFail', err && err.message ? err.message : String(err));
+  }
+}
