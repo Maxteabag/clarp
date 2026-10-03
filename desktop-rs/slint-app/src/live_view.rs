@@ -44,6 +44,7 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
     let narrating = engine.narrator_enabled() && !engine.narrator_unavailable();
     let explain = |tool: &clarp_core::json::Object| engine.explanation_for(session, tool);
     let options = clarp_core::history_fold::Options {
+        summaries: engine.log_turn_summary(),
         explanations: explanations(engine, session),
         expanded: expanded.clone(),
         open_turn: live.map(|l| l.turn_id.clone()).unwrap_or_default(),

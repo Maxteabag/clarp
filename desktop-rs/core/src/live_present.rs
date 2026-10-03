@@ -344,12 +344,15 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
         if let Some(&first) = folded.first() {
             let key = format!("live:fold:{turn_id}");
             let open = options.expanded.contains(&key);
-            let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?)).unwrap_or(0);
+            let worked_ms = int(turn, "worked_ms").or_else(|| Some(int(turn, "ended_at_ms")? - int(turn, "started_at_ms")?));
             let tools = int(turn, "tool_count").unwrap_or(0).max(0) as usize;
-            let mut title = format!("Worked for {}", worked(worked_ms));
-            if tools > 0 {
-                title.push_str(&format!(" · {}", plural(tools, "tool", "tools")));
-            }
+            // A turn whose worked time nobody recorded says what it used.
+            let title = match worked_ms {
+                Some(ms) if tools > 0 => format!("Worked for {} · {}", worked(ms), plural(tools, "tool", "tools")),
+                Some(ms) => format!("Worked for {}", worked(ms)),
+                None if tools > 0 => format!("Used {}", plural(tools, "tool", "tools")),
+                None => "Worked".to_owned(),
+            };
             let fold = Entry {
                 items: folded.iter().flat_map(|i| entries[*i].items.clone()).collect(),
                 rev: folded.iter().map(|i| entries[*i].rev).sum(),

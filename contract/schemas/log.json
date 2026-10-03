@@ -32,7 +32,23 @@
           "reply_to_name": {"type": ["string", "null"]},
           "reply_to_session": {"type": ["string", "null"]},
           "delivery": {"type": "string"},
-          "automation_kind": {"type": ["string", "null"]}
+          "automation_kind": {"type": ["string", "null"]},
+          "trace_id": {"type": "string"},
+          "phase": {"enum": ["commentary", "final", null]},
+          "turn": {
+            "type": ["object", "null"],
+            "description": "log_turn_summary: on a settled turn's last row, shaped like GET /live's turn.",
+            "additionalProperties": true,
+            "required": ["turn_id", "status"],
+            "properties": {
+              "turn_id": {"type": "string"},
+              "status": {"enum": ["completed", "failed", "interrupted"]},
+              "started_at_ms": {"type": ["integer", "null"]},
+              "ended_at_ms": {"type": ["integer", "null"]},
+              "worked_ms": {"type": ["integer", "null"]},
+              "tool_count": {"type": ["integer", "null"]}
+            }
+          }
         }
       }
     },

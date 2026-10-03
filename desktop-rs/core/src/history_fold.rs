@@ -2,7 +2,11 @@
 //! of the `/log` rows folds behind `Worked for N · K tools` the way the
 //! live fold does, with the same entries and keys, so a turn reads the same
 //! while live items hold it, after the next turn takes over, and opened
-//! cold. Pure: the window splices the pieces among the chat's rows.
+//! cold. It needs the Host's turn summaries (`log_turn_summary`, §9): every
+//! row of a turn carries its trace id, text rows their phase, and the last
+//! row the turn's summary (worked time, tool count). A turn ended before the
+//! Host had them folds without a worked time; none is guessed. Pure: the
+//! window splices the pieces among the chat's rows.
 
 use std::collections::{HashMap, HashSet};
 
@@ -15,6 +19,9 @@ use crate::protocol::Message;
 
 #[derive(Default)]
 pub struct Options<'a> {
+    /// The Host sends turn summaries in `/log` (`log_turn_summary`):
+    /// without them history keeps its rows as they are.
+    pub summaries: bool,
     /// The Host explains tool items (`tool_explanations.enabled`).
     pub explanations: bool,
     /// Entry keys the reader opened.
@@ -66,6 +73,9 @@ pub struct Folded {
 /// keeps its worked time, reasoning and keys; otherwise from `/log`.
 pub fn present(rows: &[Message], live: Option<&LiveView>, options: &Options) -> Folded {
     let mut folded = Folded::default();
+    if !options.summaries {
+        return folded;
+    }
     let prompts: Vec<usize> = (0..rows.len()).filter(|&i| rows[i].role == "user").collect();
     // Each agent row's turn: the prompt carrying its trace id, else the
     // last prompt written before it (the Host lands a turn's tool rows once
@@ -201,7 +211,9 @@ fn turn(
     if (!turn_id.is_empty() && turn_id == options.open_turn) || members.iter().any(|m| options.held_rows.contains(&m.id)) {
         return None;
     }
-    let over = next.is_some_and(|n| !rows[n].pending) || !options.busy;
+    // The Host's summary of the turn, on its last row once it ended.
+    let logged = members.iter().rev().find_map(|m| m.turn.as_ref());
+    let over = logged.is_some() || next.is_some_and(|n| !rows[n].pending) || !options.busy;
     let mut seen = HashSet::new();
     let listed = members.iter().flat_map(|m| calls(m)).filter(|(v, _)| seen.insert(text(v, "id").to_owned())).count();
     // A row sent without its tool calls lists one and counts them all.
@@ -210,7 +222,13 @@ fn turn(
     if !over || tool_count == 0 {
         return None;
     }
+    // Without a phase (an older row) the last text is the answer.
     let answer = members.iter().rposition(|m| !m.display_text.trim().is_empty());
+    let final_text = |index: usize, row: &Message| match row.phase.as_str() {
+        "final" => true,
+        "commentary" => false,
+        _ => answer == Some(index),
+    };
     let retired = (!turn_id.is_empty()).then(|| live.and_then(|v| v.retired(turn_id))).flatten();
     let remembered: HashMap<&str, &Object> = retired
         .iter()
@@ -244,8 +262,8 @@ fn turn(
         });
     };
     for (index, row) in members.iter().enumerate() {
-        let is_answer = answer == Some(index);
         let has_text = !row.display_text.trim().is_empty();
+        let is_answer = has_text && final_text(index, row);
         if has_text && !is_answer {
             message(&mut items, row, "commentary");
         }
@@ -277,17 +295,11 @@ fn turn(
     }
     flush(&mut items, &mut reasoning, None);
 
-    let summary = match retired {
-        Some((turn, _)) => turn.clone(),
-        None => {
-            let start = prompt.and_then(|p| ms(&rows[p])).or_else(|| members.first().and_then(|m| ms(m)));
-            let end = members.iter().rev().find_map(|m| ms(m));
-            let worked = match (start, end) {
-                (Some(start), Some(end)) => end - start,
-                _ => 0,
-            };
-            json!({"turn_id": turn_id, "status": "completed", "worked_ms": worked, "tool_count": tool_count}).as_object().cloned().unwrap_or_default()
-        }
+    // The turn as the live view saw it, else as the Host summed it up;
+    // without either, no worked time.
+    let summary = match retired.map(|(turn, _)| turn).or(logged) {
+        Some(turn) => turn.clone(),
+        None => json!({"turn_id": turn_id, "status": "completed", "tool_count": tool_count}).as_object().cloned().unwrap_or_default(),
     };
     let id = if turn_id.is_empty() { format!("row:{}", members[0].id) } else { turn_id.to_owned() };
     if options.expanded.contains(&format!("live:fold:{id}")) {

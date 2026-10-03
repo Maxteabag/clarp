@@ -1,7 +1,8 @@
-//! Finished turns fold in history (docs/live-items.md §7.6): over the
+//! Finished turns fold in history (docs/live-items.md §7.6, §9): over the
 //! recorded `/log` rows each settled turn shows one `Worked for N · K tools`
-//! row; opened, one row per tool and the commentary; what failed or stopped
-//! and the final answer stay outside it.
+//! row, N and K from the Host's turn summary; opened, one row per tool and
+//! the commentary; what failed or stopped and the final answer stay outside
+//! it. Without `log_turn_summary` history keeps its rows.
 
 use std::collections::HashSet;
 
@@ -32,7 +33,7 @@ fn real_rows(next: bool) -> Vec<Message> {
 }
 
 fn options(expanded: &[&str]) -> Options<'static> {
-    Options { explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), ..Options::default() }
+    Options { summaries: true, explanations: true, expanded: expanded.iter().map(|s| (*s).to_owned()).collect::<HashSet<_>>(), ..Options::default() }
 }
 
 /// Each piece as the transcript reads it: an entry's title, a row's id.
@@ -81,9 +82,8 @@ fn a_chat_opened_cold_folds_its_settled_turn_from_log() {
     let fold = &folded.folds[0];
     assert_eq!(fold.key, format!("live:fold:{T1}"), "the live fold's key, so the takeover is in place");
     assert_eq!(fold.prompt.as_deref(), Some(T1_PROMPT));
-    // Without the Host's worked time: from the prompt to the turn's last row
-    // (11:48:57.181 → 11:49:07.816).
-    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 11s · 2 tools", &format!("row {T1_ANSWER}")]);
+    // The Host's summary on the turn's last row: worked_ms 16337, 2 tools.
+    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 16s · 2 tools", &format!("row {T1_ANSWER}")]);
     let failed = entry(fold, &format!("live:log:{FAILED_CALL}"));
     assert_eq!((failed.kind, failed.status.as_str()), (Kind::Tool, "failed"), "the failed tool stays in view");
     assert_eq!(failed.secondary, "Pause execution for 60 seconds.", "with its explanation");
@@ -100,7 +100,7 @@ fn an_open_fold_shows_one_row_per_tool() {
     let rows = real_rows(false);
     let folded = present(&rows, None, &options(&[&format!("live:fold:{T1}")]));
     let fold = &folded.folds[0];
-    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 11s · 2 tools", "Ran sleep 60", &format!("row {T1_ANSWER}")]);
+    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 16s · 2 tools", "Ran sleep 60", &format!("row {T1_ANSWER}")]);
     assert!(entry(fold, &format!("live:fold:{T1}")).expanded);
     assert_eq!(entry(fold, "live:log:toolu_01NHjm6d6UD9Xncd1t3gSZKG").status, "completed");
 }
@@ -154,10 +154,10 @@ fn several_finished_turns_each_fold_and_the_open_turn_is_left_alone() {
     let second = &folded.folds[1];
     assert_eq!(second.key, format!("live:fold:{T2}"));
     assert_eq!(second.next.as_deref(), Some("u-clarp-admin-3c48398b85b08a09"));
-    // 11:52:12.389 → 11:52:22.707.
-    assert_eq!(read(second), ["Worked for 10s · 3 tools", "row live-567165763b2310817088"]);
+    // It ended before the Host summed turns up: no worked time is guessed.
+    assert_eq!(read(second), ["Used 3 tools", "row live-567165763b2310817088"]);
     let open = present(&rows, None, &Options { open_turn: T3.to_owned(), busy: true, ..options(&[&format!("live:fold:{T2}")]) });
-    assert_eq!(read(&open.folds[1]), ["Worked for 10s · 3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date", "row live-567165763b2310817088"]);
+    assert_eq!(read(&open.folds[1]), ["Used 3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date", "row live-567165763b2310817088"]);
     assert!(!folded.hidden_rows.contains("msg-e60c25b9161ac8b660ca"), "the open turn's running tool row is live's");
     // Without live items the chat's last turn, the agent still working,
     // is not over: it does not fold either.
@@ -178,6 +178,20 @@ fn text_row(id: &str, at: &str, text: &str) -> Value {
     json!({"id": id, "role": "assistant", "timestamp": at, "text": text, "origin": "agent"})
 }
 
+/// A row as the Host sends it with `log_turn_summary`: the turn's trace id
+/// and the text's phase.
+fn of_turn(mut row: Value, trace: &str, phase: Option<&str>) -> Value {
+    row["trace_id"] = json!(trace);
+    row["phase"] = json!(phase);
+    row
+}
+
+/// The turn's summary on its last row.
+fn summed(mut row: Value, trace: &str, status: &str, worked_ms: i64, tool_count: i64) -> Value {
+    row["turn"] = json!({"turn_id": trace, "status": status, "started_at_ms": 1_000, "ended_at_ms": 1_000 + worked_ms, "worked_ms": worked_ms, "tool_count": tool_count});
+    row
+}
+
 fn prompt(id: &str, at: &str, trace: &str) -> Value {
     json!({"id": id, "role": "user", "timestamp": at, "text": "Go.", "origin": "user", "trace_id": trace})
 }
@@ -186,10 +200,10 @@ fn prompt(id: &str, at: &str, trace: &str) -> Value {
 fn commentary_between_tools_folds_with_them() {
     let rows = turn(&[
         prompt("u1", "2026-10-03T10:00:00Z", "t1"),
-        tool_row("a1", "2026-10-03T10:00:02Z", "c1", "make build", "ok"),
-        text_row("a2", "2026-10-03T10:00:05Z", "Built. Now the tests."),
-        tool_row("a3", "2026-10-03T10:00:09Z", "c2", "make test", "ok"),
-        text_row("a4", "2026-10-03T10:01:12Z", "All green."),
+        of_turn(tool_row("a1", "2026-10-03T10:00:02Z", "c1", "make build", "ok"), "t1", None),
+        of_turn(text_row("a2", "2026-10-03T10:00:05Z", "Built. Now the tests."), "t1", Some("commentary")),
+        of_turn(tool_row("a3", "2026-10-03T10:00:09Z", "c2", "make test", "ok"), "t1", None),
+        summed(of_turn(text_row("a4", "2026-10-03T10:01:12Z", "All green."), "t1", Some("final")), "t1", "completed", 72_400, 2),
     ]);
     let folded = present(&rows, None, &options(&[]));
     let fold = &folded.folds[0];
@@ -204,13 +218,23 @@ fn commentary_between_tools_folds_with_them() {
 fn a_tool_that_never_finished_in_a_settled_turn_shows_interrupted() {
     let rows = turn(&[
         prompt("u1", "2026-10-03T10:00:00Z", "t1"),
-        tool_row("a1", "2026-10-03T10:00:02Z", "c1", "make build", "ok"),
-        tool_row("a2", "2026-10-03T10:00:04Z", "c2", "make test", "running"),
+        of_turn(tool_row("a1", "2026-10-03T10:00:02Z", "c1", "make build", "ok"), "t1", None),
+        summed(of_turn(tool_row("a2", "2026-10-03T10:00:04Z", "c2", "make test", "interrupted"), "t1", None), "t1", "interrupted", 4_200, 2),
         prompt("u2", "2026-10-03T10:00:30Z", "t2"),
     ]);
     let folded = present(&rows, None, &options(&[]));
     let fold = &folded.folds[0];
     assert_eq!(read(fold), ["Worked for 4s · 2 tools", "Stopped make test"]);
+    assert_eq!(entry(fold, "live:fold:t1").status, "interrupted");
+    // A turn from before the Host marked them: a tool left running in a
+    // turn that is over was stopped too.
+    let older = turn(&[
+        prompt("u1", "2026-10-03T10:00:00Z", "t1"),
+        tool_row("a2", "2026-10-03T10:00:04Z", "c2", "make test", "running"),
+        prompt("u2", "2026-10-03T10:00:30Z", "t2"),
+    ]);
+    // Nothing worked to fold: as live, only the stopped tool shows.
+    assert_eq!(read(&present(&older, None, &options(&[])).folds[0]), ["Stopped make test"]);
     let stopped = entry(fold, "live:log:c2");
     assert_eq!((stopped.status.as_str(), stopped.meta.as_str()), ("interrupted", "interrupted"), "it stays in view");
 }
@@ -233,10 +257,10 @@ fn a_reply_carrying_text_and_tools_shows_its_text_and_folds_its_tools() {
     first["text"] = json!("Building first.");
     let rows = turn(&[prompt("u1", "2026-10-03T10:00:00Z", "t1"), first, text_row("a2", "2026-10-03T10:00:06Z", "Done.")]);
     let folded = present(&rows, None, &options(&[]));
-    assert_eq!(read(&folded.folds[0]), ["Worked for 6s · 1 tool", "row a2"]);
+    assert_eq!(read(&folded.folds[0]), ["Used 1 tool", "row a2"]);
     assert!(folded.hidden_rows.contains("a1"), "folded commentary");
     let open = present(&rows, None, &options(&["live:fold:t1"]));
-    assert_eq!(read(&open.folds[0]), ["Worked for 6s · 1 tool", "row a1", "Ran make build", "row a2"]);
+    assert_eq!(read(&open.folds[0]), ["Used 1 tool", "row a1", "Ran make build", "row a2"]);
     assert!(open.stripped_calls.contains("c1") && !open.hidden_rows.contains("a1"), "its text shows, its tool as the tool row");
 }
 
@@ -253,6 +277,28 @@ fn tool_rows_landing_after_the_next_prompt_fold_with_their_turn() {
     assert_eq!(folded.folds.len(), 1, "{:?}", folded.folds);
     let fold = &folded.folds[0];
     assert_eq!(fold.next.as_deref(), Some("u-next"));
-    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 11s · 2 tools", &format!("row {T1_ANSWER}")]);
+    assert_eq!(read(fold), ["Ran sleep 60", "Worked for 16s · 2 tools", &format!("row {T1_ANSWER}")]);
     assert_eq!(sorted(&folded.hidden_rows), T1_TOOLS);
+}
+
+#[test]
+fn without_turn_summaries_history_keeps_its_rows() {
+    let rows = real_rows(true);
+    let folded = present(&rows, None, &Options { summaries: false, ..options(&[]) });
+    assert!(folded.folds.is_empty() && folded.hidden_rows.is_empty() && folded.stripped_calls.is_empty());
+}
+
+/// The Host's phase decides: a turn that stopped after commentary has no
+/// answer to keep out of the fold, and a summary means the turn is over
+/// even while the agent works on.
+#[test]
+fn the_phase_says_what_is_commentary_and_the_summary_that_the_turn_is_over() {
+    let rows = turn(&[
+        prompt("u1", "2026-10-03T10:00:00Z", "t1"),
+        of_turn(text_row("a1", "2026-10-03T10:00:01Z", "Let me build it."), "t1", Some("commentary")),
+        summed(of_turn(tool_row("a2", "2026-10-03T10:00:04Z", "c1", "make build", "ok"), "t1", None), "t1", "completed", 4_000, 1),
+    ]);
+    let folded = present(&rows, None, &Options { busy: true, ..options(&[]) });
+    assert_eq!(read(&folded.folds[0]), ["Worked for 4s · 1 tool"]);
+    assert_eq!(sorted(&folded.hidden_rows), ["a1", "a2"]);
 }
