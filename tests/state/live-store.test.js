@@ -197,9 +197,59 @@ describe('the connection that carries a chat', () => {
     expect(store.liveFor('rachel').lseq).toBe(1);
     expect(store.rosterActivity('rachel')).toMatchObject({ state: 'thinking' });
     store.setConnectedLive(['rachel']);
+    await settle(); await settle();            // the fresh snapshot for the carried chat
     store.handleLiveEvent(event(2));
     runFrames();
     expect(store.liveFor('rachel').lseq).toBe(2);
     expect(store.liveFor('rachel').items['cl:msg_01:0']).toBeTruthy();
+  });
+});
+
+describe('a snapshot taken before the stream carried the chat', () => {
+  beforeEach(installGlobals);
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('is asked for again once the stream carries the chat, even on a quiet stream', async () => {
+    const store = await freshStore();
+    let lseq = 1;
+    routes['/live?'] = () => ({ status: 200, body: snapshotOf(lseq) });
+    store.setServerFeatures(['live_items']);
+    store.setConnectedLive([]);
+    store.watchSession('rachel');
+    await store.openLive('rachel');            // the chat opened while the stream was reconnecting
+    lseq = 4;                                  // events 2..4 went by before the new stream carried it
+    store.setConnectedLive(['rachel']);
+    await settle(); await settle();
+    expect(liveGets()).toHaveLength(2);
+    expect(store.liveFor('rachel').lseq).toBe(4);
+  });
+
+  it('is asked for again after it lands when the stream starts carrying the chat mid-fetch', async () => {
+    const store = await freshStore();
+    const answers = [];
+    routes['/live?'] = () => new Promise(r => answers.push(r));
+    store.setServerFeatures(['live_items']);
+    store.setConnectedLive([]);
+    store.watchSession('rachel');
+    const first = store.openLive('rachel');
+    store.setConnectedLive(['rachel']);
+    answers[0]({ status: 200, body: snapshotOf(1) });
+    await first; await settle(); await settle();
+    expect(liveGets()).toHaveLength(2);
+    answers[1]({ status: 200, body: snapshotOf(4) });
+    await settle(); await settle();
+    expect(store.liveFor('rachel').lseq).toBe(4);
+  });
+
+  it('is not asked for again when the stream already carried the chat', async () => {
+    const store = await freshStore();
+    routes['/live?'] = () => ({ status: 200, body: snapshotOf(1) });
+    store.setServerFeatures(['live_items']);
+    store.setConnectedLive(['rachel']);
+    store.watchSession('rachel');
+    await store.openLive('rachel');
+    store.setConnectedLive(['rachel']);
+    await settle(); await settle();
+    expect(liveGets()).toHaveLength(1);
   });
 });

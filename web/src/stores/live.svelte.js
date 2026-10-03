@@ -51,6 +51,8 @@ let connected = null;
 const queued = new Map();    // session → events waiting for the next frame
 const buffered = new Map();  // session → events that arrived during GET /live
 const fetching = new Set();
+/** Snapshots in flight that were asked for before the stream carried the chat. */
+const staleFetch = new Set();
 let frameRequested = false;
 let subscriptionsChanged = () => {};
 let turnSettled = () => {};
@@ -119,7 +121,17 @@ export function watchedSessions() {
  * skip its item ops.
  */
 export function setConnectedLive(sessions) {
+  const before = connected || new Set();
   connected = new Set(sessions || []);
+  // A snapshot taken before this stream carried the chat may be missing the
+  // events that went by meanwhile, and a quiet stream never shows the gap:
+  // every chat the stream starts carrying gets a snapshot from now on. One
+  // still in flight is asked again when it lands.
+  for (const session of connected) {
+    if (before.has(session) || !watched.includes(session)) continue;
+    if (fetching.has(session)) staleFetch.add(session);
+    else openLive(session);
+  }
 }
 
 const carried = session => (connected ? connected.has(session) : watched.includes(session));
@@ -171,14 +183,22 @@ export async function openLive(session) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const snapshot = await r.json();
     let next = applyLiveSnapshot(chat.state || blankLive(), snapshot);
+    fetching.delete(session);
+    if (snapshot.tool_explanations) setExplanationState(snapshot.tool_explanations);
+    if (staleFetch.delete(session)) {
+      // Taken before the stream carried the chat: show it, keep the events
+      // buffered, and take the snapshot again.
+      chat.state = requestLiveSnapshot(next).state;
+      openLive(session);
+      return;
+    }
     const held = buffered.get(session) || [];
     buffered.delete(session);
-    fetching.delete(session);
     chat.state = next;
     if (held.length) enqueue(session, held);
-    if (snapshot.tool_explanations) setExplanationState(snapshot.tool_explanations);
   } catch (err) {
     fetching.delete(session);
+    if (staleFetch.delete(session)) { openLive(session); return; }
     buffered.delete(session);
     if (chat.state) chat.state = liveSnapshotFailed(chat.state);
     clog('liveSnapshotFail', `${session} ${err && err.message ? err.message : err}`);
