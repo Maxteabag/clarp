@@ -434,8 +434,7 @@ impl App {
             .entries
             .iter()
             .map(|entry| {
-                let blocks = if entry.kind == clarp_core::live_present::Kind::Message { crate::live_view::message_blocks(&entry.text) } else { Vec::new() };
-                let row = crate::live_view::row(entry, blocks);
+                let row = crate::live_view::row(entry, crate::live_view::cached_blocks(entry));
                 let source = clarp_core::presentation::PresentedRow {
                     source_row: usize::MAX,
                     message: clarp_core::protocol::Message { id: entry.key.clone(), ..Default::default() },
@@ -506,8 +505,7 @@ impl App {
                         continue;
                     }
                     pane.shown[at].2 = signature;
-                    let blocks = if entry.kind == clarp_core::live_present::Kind::Message { crate::live_view::message_blocks(&entry.text) } else { Vec::new() };
-                    pane.messages.set_row_data(at, crate::live_view::row(entry, blocks));
+                    pane.messages.set_row_data(at, crate::live_view::row(entry, crate::live_view::cached_blocks(entry)));
                 }
             }
             drop(engine);
