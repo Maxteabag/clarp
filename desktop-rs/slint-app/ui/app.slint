@@ -27,6 +27,8 @@ import { VoiceDialog, VoiceBridge, VoiceItem } from "voice.slint";
 import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
 import { DisplayCell, CellLine } from "cells.slint";
 import { ArtifactItem, ArtifactBridge, CardHint } from "artifacts.slint";
+import { LinkHints, LinkBadge, LinkHintLayer } from "link_hints.slint";
+export { LinkHints, LinkBadge }
 export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint }
 
 export { Palette, Focus, ChatRow, MessageRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
@@ -642,6 +644,14 @@ export component AppWindow inherits Window {
             visible: root.overlay == "orchestrator";
             width: parent.width;
             height: parent.height;
+        }
+        // Over the chat, under the switcher: the numbered links.
+        if LinkHints.active: LinkHintLayer {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            background: transparent;
         }
         switcher := Switcher {
             visible: root.switcher-open;

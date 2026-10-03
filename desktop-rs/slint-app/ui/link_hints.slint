@@ -1,0 +1,47 @@
+import { Palette } from "theme.slint";
+
+// One link on screen with its number, drawn over the link's first letters
+// (window coordinates). A link that wraps or repeats carries its number on
+// each piece.
+export struct LinkBadge {
+    label: string,
+    url: string,
+    x: length,
+    y: length,
+    // The digits typed so far rule it out.
+    dim: bool,
+}
+
+// Link hints (Vimium's): every link in the active chat's viewport gets a
+// number; typing it opens the link. The badges float over the chat, so
+// nothing moves or re-lays out while they show.
+export global LinkHints {
+    in property <bool> active;
+    in property <[LinkBadge]> badges;
+    // The digits typed so far ("1" of "12").
+    in property <string> typed;
+}
+
+export component LinkHintLayer inherits Rectangle {
+    for badge in LinkHints.badges: Rectangle {
+        x: badge.x - 2px;
+        y: badge.y;
+        width: label.preferred-width + 8px;
+        height: 16px;
+        border-radius: 3px;
+        background: badge.dim ? Palette.raised : Palette.accent;
+        border-width: 1px;
+        border-color: badge.dim ? Palette.border : Palette.accent-text.with-alpha(0.35);
+        opacity: badge.dim ? 0.55 : 1;
+        accessible-role: text;
+        accessible-label: "Link " + badge.label + ": " + badge.url;
+        label := Text {
+            text: badge.label;
+            color: badge.dim ? Palette.faint : Palette.accent-text;
+            font-size: 11px;
+            font-weight: 700;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
+    }
+}
