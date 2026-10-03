@@ -574,6 +574,7 @@ class Handler(BaseHTTPRequestHandler):
         "/focus": "_handle_focus",
         "/clips/ack": "_handle_clip_ack",
         "/devices": "_handle_register_device",
+        "/devices/live-activity": "_handle_live_activity_register",
         "/location": "_handle_set_location",
         "/location/request": "_handle_request_location",
         "/calendar/request": "_handle_request_calendar",
@@ -2935,6 +2936,36 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(500, "register failed")
         return self._json_ok({"ok": True})
 
+    def _handle_live_activity_register(self):
+        """POST /devices/live-activity: register (or with "ended": true,
+        drop) an ActivityKit push token (docs/live-items.md §8)."""
+        from lib import live_activity
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        if data.get("ended") is True:
+            removed = live_activity.unregister(
+                activity_id=str(data.get("activity_id") or ""), token=str(data.get("token") or ""))
+            return self._json_ok({"ok": True, "removed": removed})
+        try:
+            row = live_activity.register(
+                token=str(data.get("token") or ""), activity_id=str(data.get("activity_id") or ""),
+                kind=str(data.get("kind") or "agents-working"),
+                environment=str(data.get("environment") or ""))
+        except ValueError as error:
+            return self._json_error(400, str(error))
+        return self._json_ok({"ok": True, "activity_id": row["activity_id"]})
+
+    def _handle_live_activity_delete(self):
+        from lib import live_activity
+        data = self._read_json() if int(self.headers.get("Content-Length") or 0) else {}
+        query = self._query()
+        data = data if isinstance(data, dict) else {}
+        removed = live_activity.unregister(
+            activity_id=str(data.get("activity_id") or query.get("activity_id", [""])[0] or ""),
+            token=str(data.get("token") or query.get("token", [""])[0] or ""))
+        return self._json_ok({"ok": True, "removed": removed})
+
     def _handle_set_location(self):
         """The app POSTs the user's current GPS fix for a session (one-shot
         CoreLocation, When-In-Use). Body: {"session","lat","lng","accuracy"?}."""
@@ -4348,6 +4379,8 @@ class Handler(BaseHTTPRequestHandler):
                 path[len("/transcription-results/"):].strip("/"))
         if path.startswith("/schedules/"):
             return self._handle_schedule_delete(path[len("/schedules/"):].strip("/"))
+        if path == "/devices/live-activity":
+            return self._handle_live_activity_delete()
         if path.startswith("/agents/"):
             return self._handle_delete_agent(path[len("/agents/"):])
         if path.startswith("/personas/"):
@@ -5760,8 +5793,24 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         return watcher
 
     def live_explainer(patch):
+        """What watches the live events in this process: the tool explainer
+        and the Live Activity pusher (docs/live-items.md §6, §8)."""
+        from lib import apns, live_activity
         from lib.live_explain import LiveExplainer
-        return LiveExplainer(lambda: ctx.tool_explanations, patch)
+        explainer = LiveExplainer(lambda: ctx.tool_explanations, patch)
+        from concurrent.futures import ThreadPoolExecutor
+        # One sender thread: APNs I/O never runs inside the hub's lock, and
+        # pushes leave in the order they were decided.
+        sender = ThreadPoolExecutor(max_workers=1, thread_name_prefix="live-activity")
+        pusher = live_activity.LiveActivityPusher(
+            lambda payload, priority: sender.submit(apns.send_live_activity, payload, priority))
+
+        class _Observers:
+            @staticmethod
+            def observe(event):
+                explainer.observe(event)
+                pusher.observe(event)
+        return _Observers()
 
     def start_live_hub():
         # No separate runtime: the agents run here, so does the hub.

@@ -132,3 +132,39 @@ def test_a_quiet_stream_sends_a_heartbeat_event_clients_can_see(core_server, mon
     assert beat["type"] == "heartbeat" and isinstance(beat["ts"], int)
     # Not durable: no id line, so it never moves a client's resume cursor.
     assert not lines[index - 1].startswith("id: ")
+
+
+def _delete(base, path, body):
+    request = urllib.request.Request(base + path, data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="DELETE")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}")
+
+
+def test_live_activity_tokens_register_and_receive_the_fleet_status(core_server, monkeypatch):
+    from lib import apns
+
+    base = core_server["base"]
+    pushed = []
+    monkeypatch.setattr(apns, "send_live_activity",
+                        lambda payload, priority: pushed.append((payload, priority)))
+    assert "live_activity_push" in _get(base, "/server-info")[1]["capabilities"]["features"]
+    assert _post(base, "/devices/live-activity", {"token": "zz", "kind": "agents-working"})[0] == 400
+    status, body = _post(base, "/devices/live-activity",
+                         {"token": "ab" * 32, "activity_id": "act-1", "kind": "agents-working"})
+    assert status == 200 and body == {"ok": True, "activity_id": "act-1"}
+
+    hub = live_hub.current()
+    agent_id = agents_db.get_by_session("rachel")["agent_id"]
+    hub.begin_turn(agent_id=agent_id, session="rachel", conv="conv-r", turn_id="tr-la")
+    deadline = time.monotonic() + 3
+    while not pushed and time.monotonic() < deadline:
+        time.sleep(0.05)
+    state = pushed[-1][0]["aps"]["content-state"]
+    assert state["working"] == 1 and state["lead"]["persona"] == "Rachel"
+
+    assert _delete(base, "/devices/live-activity", {"activity_id": "act-1"}) == (
+        200, {"ok": True, "removed": 1})
