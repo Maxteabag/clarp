@@ -38,21 +38,24 @@ def active_by_agent() -> dict[str, list[dict[str, Any]]]:
     One indexed read per snapshot. Stale jobs are reconciled by the watcher,
     so a crashed worker drops out within a heartbeat timeout.
     """
+    from .provider_background_jobs import mirror_lookup
     marks = ",".join("?" for _ in ACTIVE_STATUSES)
     out: dict[str, list[dict[str, Any]]] = {}
-    for row in db.conn().execute(
+    rows = db.conn().execute(
             f"SELECT job_id, agent_id, kind, title, detail, metadata_json, heartbeat_source, "
             f"progress_text, COALESCE(progress_at, started_at) AS active_at, "
             f"COALESCE(heartbeat_at, updated_at) AS heartbeat_at "
             f"FROM background_jobs WHERE status IN ({marks}) "
             "AND COALESCE(agent_id, '') != '' "
-            "ORDER BY started_at", tuple(sorted(ACTIVE_STATUSES))):
+            "ORDER BY started_at", tuple(sorted(ACTIVE_STATUSES))).fetchall()
+    registered_mirror = mirror_lookup(
+        row["agent_id"] for row in rows if row["heartbeat_source"] == "provider_event")
+    for row in rows:
         try:
             metadata = json.loads(row["metadata_json"] or "{}")
         except json.JSONDecodeError:
             metadata = {}
-        from .provider_background_jobs import mirrors_registered
-        if row["heartbeat_source"] == "provider_event" and mirrors_registered({"agent_id": row["agent_id"], "metadata": metadata}):
+        if row["heartbeat_source"] == "provider_event" and registered_mirror({"agent_id": row["agent_id"], "metadata": metadata}):
             continue
         out.setdefault(row["agent_id"], []).append({
             "job_id": str(row["job_id"]),
@@ -529,11 +532,14 @@ def snapshot(*, include_terminal: bool = True, now_ms: int | None = None) -> dic
     except BaseException:
         c.execute("ROLLBACK")
         raise
-    from .provider_background_jobs import mirrors_registered
+    from .provider_background_jobs import mirror_lookup
     public_jobs = [_public(row, observed_at=now) for row in [*active_rows, *terminal_rows]]
+    registered_mirror = mirror_lookup(
+        job.get("agent_id") for job in public_jobs
+        if job.get("heartbeat_source") == "provider_event")
     return {
         "jobs": [job for job in public_jobs
-                 if job.get("heartbeat_source") != "provider_event" or not mirrors_registered(job)],
+                 if job.get("heartbeat_source") != "provider_event" or not registered_mirror(job)],
         "snapshot_revision": revision,
         "observed_at": now,
     }

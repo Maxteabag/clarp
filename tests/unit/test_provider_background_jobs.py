@@ -278,6 +278,25 @@ def test_idle_observer_does_not_write_or_refresh_evidence(case):
     assert db.conn().total_changes == before
 
 
+def test_registration_dedupes_only_its_own_agents_provider_job(case, tmp_path):
+    owner, path, ident = case
+    other_id = agents.create_agent(persona='Other fixture', voice_id='', cwd=str(tmp_path),
+                                   session='other-fixture')
+    other = {'agent_id': other_id, 'session': 'other-fixture', 'backend': 'claude'}
+    other_path = tmp_path / '-other' / f'{NATIVE}.jsonl'
+    other_path.parent.mkdir()
+    for owner_row, transcript in ((owner, path), (other, other_path)):
+        append(transcript, launch(), receipt())
+        provider.observe(owner_row, NATIVE, transcript)
+    jobs.upsert(session=owner['session'], job_id='explicit', title='Visible watcher',
+                metadata={'provider':'claude','native_session_id':NATIVE,'tool_use_id':TOOL})
+    other_job = provider.job_id(other_id, NATIVE, TOOL)
+    assert sorted(j['job_id'] for j in jobs.snapshot()['jobs']) == sorted(['explicit', other_job])
+    active = jobs.active_by_agent()
+    assert [j['job_id'] for j in active[owner['agent_id']]] == ['explicit']
+    assert [j['job_id'] for j in active[other_id]] == [other_job]
+
+
 def test_real_hook_shell_and_legacy_helper_automatically_deduplicate(case):
     """No registration metadata authored by the agent; execute the actual helper."""
     import pathlib

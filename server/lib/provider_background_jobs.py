@@ -12,6 +12,7 @@ import os
 import pathlib
 import re
 import time
+from collections.abc import Callable
 from datetime import datetime
 
 from . import background_jobs as jobs, db
@@ -331,23 +332,56 @@ def output(job: dict) -> dict:
     return result
 
 
-def registered_mirror(job: dict) -> str:
-    """Deduplicate only an explicit exact identity link, never title/command similarity."""
+_MIRROR_KEYS = ('provider', 'native_session_id', 'tool_use_id')
+
+
+def mirror_lookup(agent_ids) -> Callable[[dict], str]:
+    """``registered_mirror`` for many jobs from one read of their owners' jobs.
+
+    A dashboard snapshot asks about every active provider job; one query per
+    job scanned and decoded the whole table each time.
+    """
+    ids = sorted({str(agent_id) for agent_id in agent_ids if agent_id})
+    candidates: dict[str, list[tuple[dict, str]]] = {}
+    if ids:
+        marks = ','.join('?' for _ in ids)
+        for row in db.conn().execute(
+                f"SELECT agent_id,metadata_json,job_id FROM background_jobs "
+                f"WHERE agent_id IN ({marks}) AND heartbeat_source!='provider_event' "
+                "ORDER BY rowid", ids):
+            try:
+                other = json.loads(row['metadata_json'])
+            except (ValueError, TypeError):
+                continue
+            if isinstance(other, dict):
+                candidates.setdefault(row['agent_id'], []).append((other, str(row['job_id'])))
+
+    def lookup(job: dict) -> str:
+        meta = _mirror_identity(job)
+        if meta is None:
+            return ''
+        for other, job_id in candidates.get(str(job.get('agent_id') or ''), ()):
+            if all(other.get(key) == meta.get(key) for key in _MIRROR_KEYS):
+                return job_id
+        return ''
+
+    return lookup
+
+
+def _mirror_identity(job: dict) -> dict | None:
     meta = job.get('metadata') or {}
     if not isinstance(meta, dict):
-        return ''
+        return None
     if not meta.get('provider') or not meta.get('tool_use_id'):
+        return None
+    return meta
+
+
+def registered_mirror(job: dict) -> str:
+    """Deduplicate only an explicit exact identity link, never title/command similarity."""
+    if _mirror_identity(job) is None:
         return ''
-    for row in db.conn().execute("SELECT metadata_json,job_id FROM background_jobs WHERE agent_id=? AND heartbeat_source!='provider_event'", (job['agent_id'],)):
-        try:
-            other = json.loads(row[0])
-        except (ValueError, TypeError):
-            continue
-        if not isinstance(other, dict):
-            continue
-        if all(other.get(key) == meta.get(key) for key in ('provider', 'native_session_id', 'tool_use_id')):
-            return str(row['job_id'])
-    return ''
+    return mirror_lookup([job.get('agent_id')])(job)
 
 
 def mirrors_registered(job: dict) -> bool:
