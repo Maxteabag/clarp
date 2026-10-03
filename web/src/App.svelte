@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte';
   // Desktop and phone are separate shells rather than one tree full of
   // {#if isDesktop}. They differ in layout, in what the dock holds and in
   // whether a conversation rail exists at all; the pieces they do share
@@ -84,6 +85,12 @@
   // ---- boot ----
   $effect(() => {
     if (!playerEl) return;
+    // Boot once per player element. Untracked, so opening another chat
+    // (`app.session`) does not re-run the bootstrap and reconnect.
+    untrack(() => boot(playerEl));
+  });
+
+  function boot(playerEl) {
     initAudio(playerEl);
 
     setSseHooks({
@@ -113,7 +120,7 @@
       .catch(() => setVersion('', PLAYER_ADAPTER_VERSION));
 
     handleUrlAction('load');
-  });
+  }
 
   // Any pointerdown primes audio. iOS Safari won't autoplay without a recent
   // gesture having activated the element; without this, opening the app and
