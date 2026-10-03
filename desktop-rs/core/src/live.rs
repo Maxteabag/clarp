@@ -220,7 +220,15 @@ fn apply_op((activity, turn, items): &mut Staged, op: &Object) -> bool {
             return true;
         }
         "turn" => {
-            *turn = op.get("turn").and_then(Value::as_object).cloned();
+            let next = op.get("turn").and_then(Value::as_object).cloned();
+            let id = |t: &Object| t.get("turn_id").cloned();
+            // A new turn: the last one's items now live in /log.
+            if let (Some(held), Some(new)) = (turn.as_ref(), next.as_ref())
+                && id(held) != id(new)
+            {
+                items.clear();
+            }
+            *turn = next;
             return true;
         }
         "upsert" | "append" | "done" => {}

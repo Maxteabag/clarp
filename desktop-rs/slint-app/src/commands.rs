@@ -403,7 +403,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         "update-preview" => return crate::preview_view::update_or_open(app, window),
         "toggle-explanations" => {
-            if !app.engine.borrow().live_items() {
+            if !app.engine.borrow().tool_explanation_setting() {
                 return false;
             }
             toggle_explanations(app);
@@ -495,7 +495,7 @@ fn toggles(app: &App, window: &AppWindow) -> switcher::Toggles {
         narration: engine.narrator_enabled(),
         preview_versions: crate::preview_view::enabled(),
         detail_level: engine.narrator_detail_level(),
-        tool_explanations: engine.live_items().then(|| engine.tool_explanations_enabled(engine.selected_session())),
+        tool_explanations: engine.tool_explanation_setting().then(|| engine.tool_explanations_enabled(engine.selected_session())),
     }
 }
 
