@@ -202,6 +202,15 @@ def admission(origin: str, agent: Mapping, teams: Sequence[Mapping],
     elif origin == "janitor":
         return Reject(409, JANITOR_ORIGIN_NEEDS_RUN, janitor=True)
 
+    # A message from another agent never kills the turn it arrives in: it
+    # steers a steerable turn and otherwise waits behind it, durably. Before
+    # 2026-10-03 it preempted a busy Claude helper (SIGKILL mid-tool). An
+    # explicit queue request keeps its own semantics (no steering).
+    peer_waits = (origin == "agent" and bool(live_work.sender_agent_id)
+                  and not queue_if_busy)
+    if peer_waits:
+        queue_if_busy = True
+
     if origin == "heartbeat" and settings.heartbeats_disabled:
         return Reject(409, HEARTBEATS_DISABLED)
 
@@ -212,7 +221,8 @@ def admission(origin: str, agent: Mapping, teams: Sequence[Mapping],
 
     paused_bypass = False
     parked = False
-    if queue_if_busy and queue.paused and not live_work.allow_paused_queue:
+    if (queue_if_busy and queue.paused and not live_work.allow_paused_queue
+            and not peer_waits):
         if origin in PAUSED_QUEUE_BYPASS_ORIGINS and not live_work.skip_admission:
             paused_bypass = True
         else:
@@ -225,7 +235,7 @@ def admission(origin: str, agent: Mapping, teams: Sequence[Mapping],
         mute_audio=mute_audio,
         notify_herald=notify_herald,
         paused_bypass=paused_bypass,
-        steer_allowed=not queue_if_busy or origin == "oracle",
+        steer_allowed=not queue_if_busy or origin == "oracle" or peer_waits,
         protected_peer=origin == "agent" and bool(live_work.sender_agent_id),
     )
     if parked:
