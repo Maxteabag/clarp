@@ -439,9 +439,11 @@ def _send_one(client, base: str, auth: str, bundle_id: str,
     Background pushes MUST use push_type="background" + priority "5" (Apple
     rejects priority 10 for them)."""
     url = f"{base}/3/device/{token}"
+    # Live Activity pushes go to the app's dedicated liveactivity topic.
+    topic = f"{bundle_id}.push-type.liveactivity" if push_type == "liveactivity" else bundle_id
     headers = {
         "authorization": f"bearer {auth}",
-        "apns-topic": bundle_id,
+        "apns-topic": topic,
         "apns-push-type": push_type,
         "apns-priority": priority,
         "apns-collapse-id": collapse_id or _collapse_id(payload),
@@ -1171,3 +1173,39 @@ def on_decision_created(artifact: dict) -> None:
     threading.Thread(
         target=send_decision_created, args=(dict(artifact),), daemon=True
     ).start()
+
+
+def send_live_activity(payload: dict, priority: str = "5") -> dict:
+    """Push one Live Activity content state to every registered activity
+    token (docs/live-items.md §8). Best effort; never raises."""
+    from . import config, live_activity
+    cfg = config.load()
+    rows = live_activity.tokens()
+    if not rows or not cfg.apns_enabled():
+        return {"enabled": cfg.apns_enabled(), "sent": 0, "failed": 0, "disabled": 0}
+    sent = failed = disabled = 0
+    try:
+        transport = _transport(cfg)
+        for row in rows:
+            token = row["token"]
+            try:
+                status, reason, _apns_id = transport.send(
+                    token, row.get("environment") or cfg.apns_environment, payload,
+                    push_type="liveactivity", priority=priority,
+                    collapse_id=f"live-activity-{row['activity_id']}"[:64])
+            except Exception as e:  # noqa: BLE001
+                log_exception("apnsLiveActivitySendFail", e, detail=token[:12])
+                transport.reset()
+                failed += 1
+                continue
+            if status == 200:
+                sent += 1
+            elif status == 410 or reason in _DEAD_REASONS:
+                live_activity.unregister(token=token)
+                disabled += 1
+            else:
+                log("apnsLiveActivityRejected", f"status={status} reason={reason}")
+                failed += 1
+    except Exception as e:  # noqa: BLE001
+        log_exception("apnsLiveActivityFail", e)
+    return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}

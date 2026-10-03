@@ -352,3 +352,37 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
 6. Settled turn: fold its work behind `Worked for <worked_ms>`; failed or
    interrupted items stay visible.
 7. Ignore unknown kinds, ops and fields.
+
+## 8. Live Activity pushes (feature `live_activity_push`, Host contract 45)
+
+The phone's "agents working" Live Activity is kept current by APNs pushes
+from the Host, built from the same status the live stream carries.
+
+```
+POST   /devices/live-activity  {"token": "<hex>", "activity_id": "act-1", "kind": "agents-working",
+                                "environment": "sandbox" | "production"}   -> {"ok": true, "activity_id"}
+DELETE /devices/live-activity  {"activity_id": "act-1"} or {"token": "<hex>"} -> {"ok": true, "removed": n}
+```
+
+Register again when ActivityKit rotates the token (same `activity_id`
+replaces it); drop it when the activity ends on the phone. Tokens APNs reports
+dead are dropped by the Host.
+
+Each push: `apns-push-type: liveactivity`, topic `<bundle>.push-type.liveactivity`,
+
+```jsonc
+{"aps": {"timestamp": 1759480000, "event": "update", "stale-date": 1759480900,
+         "content-state": {
+           "working": 2,            // agents thinking, responding, in a tool, compacting or limited
+           "needs_you": 1,          // agents waiting for the owner
+           "lead": ROW | null,      // the working agent whose turn started last
+           "agents": [ROW, …],      // at most 5: needing you first, then newest work
+           "updated_at_ms": 1759480000123}}}
+// ROW = {"agent_id", "session", "persona", "state", "headline", "tool", "started_at_ms", "turn_started_ms"}
+```
+
+Use `started_at_ms` (the tool's start, else the state's) or `turn_started_ms`
+with a system timer. The Host never sends `end`: when nothing works it sends
+`working: 0`, and the app decides whether to end the activity. Cadence:
+routine changes at most every 15 s at priority 5; a rising `needs_you` at once
+at priority 10; a turn starting or ending or a new lead at once (≥ 2 s apart).
