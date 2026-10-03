@@ -58,6 +58,8 @@ pub struct Entry {
     pub secondary: String,
     /// Keep a line for an explanation that has not arrived.
     pub reserve_secondary: bool,
+    /// The explanation is on its way: the reserved line says so.
+    pub explaining: bool,
     /// Monospace lines: an output tail, a diff, a plan's steps, members.
     pub lines: Vec<String>,
     /// What `lines` leaves out ("+808 lines").
@@ -69,6 +71,9 @@ pub struct Entry {
     pub expanded: bool,
     /// The items' revisions summed: a row changes only when this does.
     pub rev: i64,
+    /// The durable `/log` row that took over this message: it shows here,
+    /// in the item's place.
+    pub row: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -88,6 +93,10 @@ pub struct Presented {
     pub hidden_rows: Vec<String>,
     /// Item id → the durable row that took it over.
     pub taken_over: HashMap<String, String>,
+    /// Durable rows whose every part an entry shows: not shown themselves.
+    pub absorbed_rows: Vec<String>,
+    /// Tool and cell ids entries show: left out of the durable rows.
+    pub stripped_calls: HashSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
