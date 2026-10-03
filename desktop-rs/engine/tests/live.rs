@@ -145,3 +145,28 @@ fn turning_the_feature_on_and_reconnecting_follows_the_open_chat() {
     host.control("/__control/live-replay", json!({"fixture": "turn-full", "through": 5}));
     d.until("the thinking title", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(4)));
 }
+
+/// A Host that lists `live_items` but sends no live events yet (its live hub
+/// not serving) must not leave chats looking idle: until a live event (or a
+/// snapshot with something in it) arrives for a chat, the old activity rows
+/// and typing indicator stay in charge.
+#[test]
+fn a_flag_without_live_events_keeps_the_old_activity() {
+    let host = Host::start("live-silent");
+    host.control("/__control/live", json!({"on": true}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    assert!(d.engine.live_items());
+    d.engine.select("rachel");
+    d.until("the empty snapshot", |e| e.live_view("rachel").is_some_and(|v| v.lseq() == Some(0)));
+    assert!(!d.engine.live_active("rachel"), "an idle, empty snapshot does not take the chat over");
+    host.control("/__control/event", json!({"type": "agent-activity", "session": "rachel", "activity_status": "ok",
+        "activity_action": "Bash", "activity_summary": "npm test", "state": "tool"}));
+    d.until("the old activity row", |e| e.conversation("rachel").is_some_and(|c| c.rows().iter().any(|m| m.activity)));
+
+    // The first live event for the chat hands it to live items.
+    d.until("the stream asks for rachel", |_| events_queries(&host).iter().any(|q| q.get("live") == Some(&json!("rachel"))));
+    d.settle(std::time::Duration::from_millis(300));
+    host.control("/__control/live-replay", json!({"fixture": "turn-full"}));
+    d.until("live takes over", |e| e.live_active("rachel"));
+}
