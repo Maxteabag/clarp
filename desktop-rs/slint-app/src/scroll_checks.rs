@@ -97,6 +97,12 @@ pub(super) fn anchor_now() -> Option<(String, f32)> {
     geometry().anchor()
 }
 
+/// Row `id`'s place on screen, as `anchor_moved` compares it.
+pub(super) fn place_of(id: &str) -> Option<(String, f32)> {
+    let geo = geometry();
+    geo.find(id).map(|(top, _)| (id.to_owned(), top - geo.top))
+}
+
 /// The drawn height of row `id` (0 when it is not drawn).
 pub(super) fn row_height(id: &str) -> f32 {
     geometry().find(id).map_or(0.0, |(top, bottom)| bottom - top)

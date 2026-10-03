@@ -15,7 +15,7 @@ use serde_json::json;
 use slint::Model;
 use slint::platform::Key;
 
-use super::scroll_checks::{anchor_now, anchor_moved, last_row_visible, row_height, wheel_up};
+use super::scroll_checks::{anchor_now, anchor_moved, last_row_visible, place_of, row_height, wheel_up};
 use super::{Stage, app_now, check, control, posts, report, requests, rows, run_stages, shot, view};
 use crate::headless;
 
@@ -94,6 +94,9 @@ pub fn live_check(out: String) {
     let (out1, out2, out3, out4, out5, out6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
     let (out7, out8, out9, out10) = (out.clone(), out.clone(), out.clone(), out.clone());
     let (out11, out12, out13) = (out.clone(), out.clone(), out.clone());
+    let (out14, out15, out16) = (out.clone(), out.clone(), out.clone());
+    let retiring: Rc<RefCell<((usize, usize), Option<(String, f32)>)>> = Rc::default();
+    let (retiring1, retiring2) = (retiring.clone(), retiring.clone());
     let landing: Rc<RefCell<((usize, usize), Option<(String, f32)>)>> = Rc::default();
     let (landing1, landing2) = (landing.clone(), landing.clone());
     let running_at: Rc<RefCell<usize>> = Rc::default();
@@ -477,8 +480,14 @@ pub fn live_check(out: String) {
             let shown = rows(&crate::window().expect("window"));
             check(shown.iter().all(|r| r.id != REAL_RUNNING_ROW), "its /log row is not shown again as a 'Show · 1 tool call' row");
             let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);
-            let order = [at(REAL_ANSWER_ROW), at(REAL_PREVIOUS_ANSWER), at(REAL_NEXT_PROMPT), at(REAL_RUNNING)];
-            check(order.iter().all(Option::is_some) && order.windows(2).all(|w| w[0] < w[1]), &format!("strict order: earlier turns, then the prompt, then the new turn: {order:?}"));
+            let order = [at(REAL_FOLD), at(&format!("live:{REAL_FAILED}")), at(REAL_ANSWER_ROW), at(BETWEEN_FOLD), at(REAL_PREVIOUS_ANSWER), at(REAL_NEXT_PROMPT), at(REAL_RUNNING)];
+            check(order.iter().all(Option::is_some) && order.windows(2).all(|w| w[0] < w[1]), &format!("strict order: each earlier turn's fold, failed tool and answer, then the prompt, then the new turn: {order:?}"));
+            let fold = live_row(REAL_FOLD).unwrap_or_default();
+            check(fold.live.title == "Worked for 16s · 2 tools" && !fold.live.expanded, &format!("the turn seen live stays folded in history, with the Host's worked time: {:?}", fold.live.title));
+            check(live_row(&format!("live:{REAL_FAILED}")).is_some_and(|r| r.live.status == "failed"), "its failed tool stays in view");
+            let between = live_row(BETWEEN_FOLD).unwrap_or_default();
+            check(between.live.title == "Worked for 10s · 3 tools" && !between.live.expanded, &format!("the turn in between, only ever in /log, folds the same: {:?}", between.live.title));
+            check(activity_rows().is_empty(), &format!("no finished turn shows its tools as 'Show · 1 tool call' rows: {:?}", activity_rows()));
             *running_at1.borrow_mut() = at(REAL_RUNNING).unwrap_or(usize::MAX);
             *before3.borrow_mut() = crate::view::sync_stats();
             shot(&out10, "live-09-real-running");
@@ -495,6 +504,39 @@ pub fn live_check(out: String) {
             check(shown.iter().position(|r| r.live.key == REAL_RUNNING) == Some(*running_at2.borrow()), "at the same place");
             let (_, inserted_before) = *before4.borrow();
             check(crate::view::sync_stats().1 == inserted_before, "no row inserted");
+            app_now().focus_transcript();
+            *app_now().artifact_cursor.borrow_mut() = BETWEEN_FOLD.to_owned();
+            true
+        })),
+        ("history on the fold", Box::new(move |app, _window, elapsed| {
+            if crate::artifacts_view::selected(app).as_deref() != Some(BETWEEN_FOLD) || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(true, "J/K reach a fold in history");
+            headless::press("o");
+            true
+        })),
+        ("history fold open", Box::new(move |_, _window, _| {
+            if !live_row(BETWEEN_FOLD).is_some_and(|r| r.live.expanded) {
+                return false;
+            }
+            let shown = rows(&crate::window().expect("window"));
+            let from = shown.iter().position(|r| r.live.key == BETWEEN_FOLD).unwrap_or(0);
+            let turn: Vec<String> = shown[from..].iter().take_while(|r| r.id != REAL_PREVIOUS_ANSWER).map(|r| r.live.title.to_string()).collect();
+            check(
+                turn == ["Worked for 10s · 3 tools", "Ran ls /var/tmp/probe", "Read /etc/hostname", "Ran date"],
+                &format!("O opens it to one row per tool, as the live fold opens: {turn:?}"),
+            );
+            check(activity_rows().is_empty(), "and no activity rows");
+            shot(&out14, "live-13-history-fold-open");
+            headless::press("o");
+            true
+        })),
+        ("history fold closed", Box::new(move |_, _window, _| {
+            if live_row(BETWEEN_FOLD).is_none_or(|r| r.live.expanded) {
+                return false;
+            }
+            check(true, "O folds it again");
             // Another chat with the same real turn, settled, its tool rows
             // and finalized answer not in /log yet.
             control("/__control/live-load", &json!({"session": "anchor", "fixture": "live-real-settled-turn.json", "hold": true, "agent_id": "agent-anchor"})).is_ok()
@@ -544,6 +586,7 @@ pub fn live_check(out: String) {
                 None => check(false, "the place on screen was recorded"),
             }
             shot(&out12, "live-11-anchor-landed");
+            *retiring1.borrow_mut() = (crate::view::sync_stats(), place_of(ANCHOR_NEXT));
             // The next turn starts (the message's): the settled turn retires.
             let started = ANCHOR_STARTED;
             control("/__control/live-event", &json!({"session": "anchor", "event": {"conv": "c-probe", "server_now_ms": started + 2_000, "ops": [
@@ -558,9 +601,59 @@ pub fn live_check(out: String) {
             if live_row(ANCHOR_TOOL).is_none() || elapsed < Duration::from_millis(600) {
                 return false;
             }
-            check(live_row(REAL_FOLD).is_none(), "the settled turn retired: its fold is gone");
-            let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_TOOL]);
-            check(in_order(&order), &format!("the earlier turn, the message, the new turn: {order:?}"));
+            let fold = live_row(REAL_FOLD).unwrap_or_default();
+            check(fold.live.title == "Worked for 16s · 2 tools" && !fold.live.expanded, &format!("the retired turn keeps ONE fold row in history: {:?}", fold.live.title));
+            check(live_rows().iter().filter(|r| r.live.kind == "fold").count() == 1, "one fold");
+            check(live_row(&format!("live:{REAL_FAILED}")).is_some_and(|r| r.live.status == "failed"), "its failed tool stays in view");
+            check(activity_rows().is_empty(), &format!("its tool rows are not shown as 'Show · 1 tool call': {:?}", activity_rows()));
+            let order = anchor_order(&[REAL_PROMPT, REAL_FOLD, &format!("live:{REAL_FAILED}"), REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_TOOL]);
+            check(in_order(&order), &format!("strict order: the earlier turn folded, the message, the new turn: {order:?}"));
+            let ((_, inserted_before), place) = retiring2.borrow().clone();
+            check(crate::view::sync_stats().1 == inserted_before + 1, &format!("the fold stays in place: only the new tool row inserted ({inserted_before} → {})", crate::view::sync_stats().1));
+            match place {
+                Some(place) => {
+                    let (still, detail) = anchor_moved(&place);
+                    check(still, &format!("nothing above the new turn moved: {detail}"));
+                }
+                None => check(false, "the message's place on screen was recorded"),
+            }
+            shot(&out15, "live-14-anchor-retired-folded");
+            app_now().focus_transcript();
+            *app_now().artifact_cursor.borrow_mut() = REAL_FOLD.to_owned();
+            true
+        })),
+        ("anchor on the fold", Box::new(move |app, _window, elapsed| {
+            if crate::artifacts_view::selected(app).as_deref() != Some(REAL_FOLD) || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            headless::press("o");
+            true
+        })),
+        ("anchor fold open", Box::new(move |_, _window, _| {
+            if !live_row(REAL_FOLD).is_some_and(|r| r.live.expanded) {
+                return false;
+            }
+            let order = anchor_order(&[REAL_PROMPT, REAL_FOLD, &format!("live:{REAL_FAILED}"), REAL_ANSWER_ROW, ANCHOR_NEXT]);
+            check(in_order(&order), &format!("open, in order: {order:?}"));
+            let titles = titles();
+            check(
+                titles.starts_with(&[
+                    "Worked for 16s · 2 tools".to_owned(),
+                    "Thought for 4s: There's a tension here: the task explicitly says not to report to anyone, but th".to_owned(),
+                    "Ran sleep 60".to_owned(),
+                    "Thought for 2s: Since foreground sleep is blocked, I'll run this in the background instead to sa".to_owned(),
+                    "Ran sleep 60".to_owned(),
+                ]),
+                &format!("O opens the retired turn as its live fold opened: {titles:?}"),
+            );
+            shot(&out16, "live-15-anchor-retired-open");
+            headless::press("o");
+            true
+        })),
+        ("anchor fold closed", Box::new(move |_, _window, _| {
+            if live_row(REAL_FOLD).is_none_or(|r| r.live.expanded) {
+                return false;
+            }
             // A message queued while the turn runs goes below it.
             control("/__control/upsert", &json!({"session": "anchor", "turns": [{"id": ANCHOR_QUEUED, "role": "user", "text": "Also check the docs.", "timestamp": "2026-10-03T11:49:40.000Z", "trace_id": "tr-anchor-3"}]})).is_ok()
         })),
@@ -578,6 +671,17 @@ pub fn live_check(out: String) {
 }
 
 const REAL_PROMPT: &str = "u-clarp-admin-23071c64bf0fc449";
+/// The probe's turn in between: only ever in /log.
+const BETWEEN_FOLD: &str = "live:fold:8b701eb0b9fe4f19";
+
+/// Rows showing tool activity the old way ('Show · 1 tool call').
+fn activity_rows() -> Vec<String> {
+    rows(&crate::window().expect("window"))
+        .iter()
+        .filter(|r| r.live.key.is_empty() && (r.tools.row_count() > 0 || r.cells.row_count() > 0 || !r.activity_label.is_empty()))
+        .map(|r| r.id.to_string())
+        .collect()
+}
 const REAL_ANSWER: &str = "live:cl:msg_011CffFaGNXmnoVdTuwgSXcv:0";
 const ANCHOR_NEXT: &str = "u-anchor-next";
 const ANCHOR_QUEUED: &str = "u-anchor-queued";
