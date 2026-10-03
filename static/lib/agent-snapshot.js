@@ -35,6 +35,11 @@ function normalizeActivity(row) {
     summary,
     file_path: row.file_path || '',
     ts,
+    // Status-line facts (docs/live-items.md §1.3), when the Host sends them.
+    state: row.state || '',
+    call_id: row.call_id || '',
+    started_at_ms: Number(row.started_at_ms) || 0,
+    turn_started_ms: Number(row.turn_started_ms) || 0,
   };
 }
 

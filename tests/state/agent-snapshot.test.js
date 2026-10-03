@@ -209,3 +209,15 @@ describe('agent snapshot store', () => {
     expect(store.asStatusMap().rachel).toBeUndefined();
   });
 });
+
+describe('agent-activity status-line fields', () => {
+  it('keeps the state, call and start times the Host sends', () => {
+    const store = createAgentSnapshotStore();
+    store.replaceFromSnapshot({ agents: [{ session: 'rachel', agent_id: 'a1' }] });
+    const map = store.patchActivity({ type: 'agent-activity', session: 'rachel', agent_id: 'a1', kind: 'tool',
+      status: 'running', tool: 'Bash', action: 'Running', summary: 'npm test', ts: 1759480030,
+      state: 'tool', call_id: 'toolu_1', started_at_ms: 1759480030000, turn_started_ms: 1759480000000 });
+    expect(map.rachel.activity).toMatchObject({ state: 'tool', call_id: 'toolu_1',
+      started_at_ms: 1759480030000, turn_started_ms: 1759480000000 });
+  });
+});

@@ -34,6 +34,10 @@ const PORT = Number(arg('port', 7799));
 const BUILD = path.resolve(arg('build', path.join(repo, 'static')));
 const SPEED = Number(arg('speed', 1));
 const EXPLAIN_START = arg('explanations', 'on') !== 'off';
+// --no-live: a Host from before live items. The same turns arrive as today:
+// a growing `live` /log row with transcript-updated pings, and agent-state /
+// agent-activity events for the status line.
+const NO_LIVE = process.argv.includes('--no-live');
 
 const T0 = 1759480000000;
 const fixture = JSON.parse(fs.readFileSync(path.join(repo, 'contract/live/turn-full.json'), 'utf8'));
@@ -174,6 +178,34 @@ function broadcast(payload, withId = true) {
   for (const res of clients) res.write(frame);
 }
 
+const LEGACY_KIND = { thinking: 'thinking', responding: 'thinking', tool: 'tool', compacting: 'compacting',
+  idle: 'done', interrupted: 'interrupted' };
+function legacyBroadcast(ev) {
+  for (const op of ev.ops) {
+    if (op.op === 'status') {
+      const a = op.activity || {};
+      const kind = LEGACY_KIND[a.state] || 'done';
+      broadcast({ type: 'agent-state', session: 'rachel', agent_id: 'agent-1', persona: 'Rachel', kind,
+        ts: Math.floor(ev.server_now_ms / 1000), detail: a.tool ? { tool: a.tool.name } : {} });
+      broadcast({ type: 'agent-activity', session: 'rachel', agent_id: 'agent-1', persona: 'Rachel', kind,
+        phase: kind, status: ['thinking', 'tool', 'compacting'].includes(kind) ? 'running' : 'ok',
+        tool: a.tool ? a.tool.name : '', action: a.tool ? (a.headline || '').split(' ')[0] : '',
+        summary: a.tool ? a.tool.label : '', ts: Math.floor(ev.server_now_ms / 1000), state: a.state,
+        call_id: a.tool ? a.tool.call_id : '', started_at_ms: a.tool ? a.tool.started_at_ms : 0,
+        turn_started_ms: a.turn_started_ms || 0 });
+    }
+    const item = op.id && liveState.items[op.id];
+    if (item && item.kind === 'message' && item.row_id) {
+      logRevision += 1;
+      const turn = { id: item.row_id, role: 'assistant', kind: item.status === 'running' ? 'live' : null,
+        text: item.text || '', timestamp: new Date(item.started_at_ms).toISOString(), revision: logRevision };
+      const at = logTurns.findIndex(x => x.id === turn.id);
+      if (at >= 0) logTurns[at] = turn; else logTurns.push(turn);
+      broadcast({ type: 'transcript-updated', session: 'rachel', agent_id: 'agent-1' });
+    }
+  }
+}
+
 let cursor = 0;
 setInterval(() => {
   const t = Date.now();
@@ -182,7 +214,8 @@ setInterval(() => {
     if (step.event) {
       const r = applyLiveEvent(liveState, step.event, step.event.server_now_ms);
       liveState = r.state;
-      broadcast(step.event, false);
+      if (NO_LIVE) legacyBroadcast(step.event);
+      else broadcast(step.event, false);
     } else if (step.log) {
       logRevision += 1;
       const turn = { ...step.log, revision: logRevision };
@@ -240,7 +273,8 @@ const server = http.createServer((req, res) => {
   if (p.startsWith('/static/app/')) return sendFile(res, path.join(BUILD, p.slice('/static/'.length)));
   if (p.startsWith('/static/')) return sendFile(res, path.join(repo, p.slice(1)));
   if (p === '/server-info') {
-    return sendJson(res, { name: 'fake', capabilities: { version: 1, features: ['live_items', 'tool_explanations'] },
+    return sendJson(res, { name: 'fake', capabilities: { version: 1,
+      features: NO_LIVE ? ['tool_explanations'] : ['live_items', 'tool_explanations'] },
       contract: { host: 40, min_ios: 1, features: { live_items: 40 } } });
   }
   if (p === '/agents/snapshot') {

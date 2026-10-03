@@ -304,3 +304,25 @@ describe('display cells in history', () => {
     expect(cellRow({ id: 'a', kind: 'subagents', title: 'Spawned agent' })).toBe(null);
   });
 });
+
+describe('status line from agent-activity on Hosts without live items', () => {
+  const row = activity => ({ latest_state: 'tool', busy: true, turn_started_at: 1759480000, activity });
+
+  it('times the tool from its own start', () => {
+    const a = activityFromStatus(row({ state: 'tool', action: 'Running', summary: 'npm test',
+      started_at_ms: T0 + 30000, turn_started_ms: T0 }));
+    expect(statusLine(a, { now: T0 + 42000 })).toMatchObject({ text: 'Running npm test', time: '0:12' });
+  });
+
+  it('says responding while text streams', () => {
+    const a = activityFromStatus({ latest_state: 'thinking', busy: true,
+      activity: { state: 'responding', turn_started_ms: T0 } });
+    expect(statusLine(a, { now: T0 + 5000 })).toMatchObject({ state: 'responding', text: 'Responding', time: '0:05' });
+  });
+
+  it('goes back to thinking once a tool finishes', () => {
+    const a = activityFromStatus(row({ state: 'thinking', phase: 'tool_finished', summary: 'npm test',
+      turn_started_ms: T0 }));
+    expect(statusLine(a, { now: T0 + 9000 })).toMatchObject({ state: 'thinking', text: 'Thinking', time: '0:09' });
+  });
+});

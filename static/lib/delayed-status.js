@@ -43,7 +43,10 @@ export function createDelayedStatus({
       }
       return;
     }
-    cancel();
+    // Already waiting to replace the shown status: keep that deadline, so a
+    // target that keeps changing still lands within the delay (show() takes
+    // whatever the target is by then).
+    if (timer) return;
     const held = shown ? Math.max(0, shownAt + holdMs - now()) : 0;
     const wait = target ? Math.max(delayMs, held) : held;
     if (wait <= 0) show();
