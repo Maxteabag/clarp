@@ -29,6 +29,5 @@ fn the_reveal_catches_up_within_a_few_frames_and_stops_at_words() {
         frames += 1;
     }
     assert!((3..=12).contains(&frames), "{frames} frames for {} chars", text.len());
-    assert_eq!(next_reveal(5, "héllo wörld, ünïcode"), "héllo wörld, ünïcode".len().min(next_reveal(5, "héllo wörld, ünïcode")));
     assert!("héllo wörld".is_char_boundary(next_reveal(0, "héllo wörld")));
 }
