@@ -767,12 +767,10 @@ def archive(artifact_id: str, *, archived: bool, expected_updated_at: int) -> tu
             con.execute("COMMIT"); return current, False
         if current["updated_at"] != expected_updated_at: raise ValueError("artifact changed")
         now = max(db.now_ms(), current["updated_at"] + 1)
-        # Archiving takes the item out of the Pinned menu as well; restoring
-        # does not pin it again.
-        con.execute("""UPDATE artifacts SET archived_at=?,updated_at=?,
-                              pinned_at=CASE WHEN ? THEN NULL ELSE pinned_at END
-                        WHERE artifact_id=?""",
-                    (now if archived else None, now, archived, artifact_id))
+        # Archiving only hides the item from Updates (opening its chat does it
+        # too); a pin is a separate library preference and stays.
+        con.execute("UPDATE artifacts SET archived_at=?,updated_at=? WHERE artifact_id=?",
+                    (now if archived else None, now, artifact_id))
         con.execute("COMMIT"); return get(artifact_id) or {}, True
     except BaseException:
         con.execute("ROLLBACK"); raise
@@ -805,8 +803,8 @@ def pin(artifact_id: str, *, pinned: bool) -> tuple[dict, bool]:
     """Pin or unpin an artifact for the owner's Pinned menu on every device.
 
     A pin is a preference, not an edit: ``updated_at`` is left alone so the
-    artifact keeps its place in chat and the library.  Archived artifacts are
-    not pinnable; archiving or discarding one unpins it.
+    artifact keeps its place in chat and the library.  Archiving (hiding it
+    from Updates) does not affect the pin; discarding one unpins it.
     """
     if not isinstance(pinned, bool): raise ValueError("pinned must be a boolean")
     con = db.conn(); con.execute("BEGIN IMMEDIATE")
@@ -815,8 +813,8 @@ def pin(artifact_id: str, *, pinned: bool) -> tuple[dict, bool]:
         if not current: raise ValueError("artifact not found")
         if (current["pinned_at"] is not None) == pinned:
             con.execute("COMMIT"); return current, False
-        if pinned and current["archived_at"] is not None:
-            raise ValueError("archived artifacts cannot be pinned")
+        if pinned and current["deleted_at"] is not None:
+            raise ValueError("discarded artifacts cannot be pinned")
         con.execute("UPDATE artifacts SET pinned_at=? WHERE artifact_id=?",
                     (db.now_ms() if pinned else None, artifact_id))
         con.execute("COMMIT"); return get(artifact_id) or {}, True
@@ -829,7 +827,7 @@ def list_pinned(*, limit: int = 100) -> list[dict]:
     rows = db.conn().execute(
         """SELECT a.*,g.persona AS agent_name FROM artifacts a JOIN agents g
               ON g.agent_id=a.agent_id
-            WHERE a.pinned_at IS NOT NULL AND a.deleted_at IS NULL AND a.archived_at IS NULL
+            WHERE a.pinned_at IS NOT NULL AND a.deleted_at IS NULL
               AND a.type NOT IN ('image','image_gallery','live_task','event')
             ORDER BY a.pinned_at DESC,a.artifact_id DESC LIMIT ?""",
         (max(1, min(int(limit), 500)),)).fetchall()
