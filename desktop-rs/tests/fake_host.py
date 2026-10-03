@@ -13,9 +13,11 @@ background jobs, and each has its own 512 px portrait (the Host's bundled
 ones, as served from /static/avatars).
 """
 import argparse
+import copy
 import json
 import pathlib
 import queue
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -98,6 +100,20 @@ failures = {}
 # Seconds an older page (/log?before=) takes; /__control/older-delay sets it.
 older_delay = 0.0
 CLOSE = object()
+# Live items (docs/live-items.md): off until /__control/live turns the
+# feature on. The recorded streams in contract/live/ are replayed as `live`
+# events to the streams that asked for their session (/events?live=), and
+# GET /live answers from the Host's reference reducer fed the same steps.
+REPO = pathlib.Path(__file__).resolve().parents[2]
+LIVE_FIXTURES = REPO / "contract" / "live"
+sys.path.insert(0, str(REPO / "server"))
+from lib.live_items import LiveView  # noqa: E402
+
+live_features = False
+live_truth = {}      # session -> LiveView: what GET /live answers
+live_cursor = {}     # session -> (fixture name, next step index)
+live_filters = {}    # id(inbox) -> set of sessions ("*" for all), None without ?live=
+tool_explanation_settings = {"enabled": True, "detail_level": 2}
 
 
 LOREM = ("The build runs the unit tests first, then the integration suite against a scratch "
@@ -178,6 +194,55 @@ def broadcast(event):
         payload = f"id: {event_id}\ndata: {json.dumps(event)}\n\n".encode()
         for subscriber in list(subscribers):
             subscriber.put(payload)
+
+
+def broadcast_live(session, event):
+    """A `live` event: no SSE id (never replayed), only to the streams that
+    asked for this session or for every one."""
+    payload = f"data: {json.dumps(event)}\n\n".encode()
+    with state_lock:
+        for subscriber in list(subscribers):
+            wanted = live_filters.get(id(subscriber))
+            if wanted is not None and (session in wanted or "*" in wanted):
+                subscriber.put(payload)
+
+
+def live_view(session):
+    view = live_truth.get(session)
+    if view is None:
+        view = live_truth[session] = LiveView()
+        view.apply_snapshot({"epoch": "boot-a", "lseq": 0, "activity": {"state": "idle"}, "turn": None, "items": []})
+    return view
+
+
+def live_snapshot(session):
+    view = live_view(session)
+    agent = next((a for a in agents if a["session"] == session), {})
+    return {"conv": agent.get("conversation_id", ""), "session": session, "agent_id": agent.get("agent_id", ""),
+            "epoch": view.epoch, "lseq": view.lseq, "server_now_ms": int(time.time() * 1000),
+            "activity": copy.deepcopy(view.activity), "turn": copy.deepcopy(view.turn),
+            "items": copy.deepcopy(view.items()), "tool_explanations": dict(tool_explanation_settings)}
+
+
+def live_step(session, step, skip=()):
+    """One recorded step: a snapshot becomes what GET /live answers; an
+    event feeds the reducer and goes out unless its lseq is skipped (a gap)."""
+    (name, payload), = step.items()
+    with state_lock:
+        view = live_view(session)
+        if name == "snapshot":
+            view.apply_snapshot(payload)
+            return
+        if view.awaiting_snapshot or view.epoch != payload.get("epoch"):
+            # The Host's own truth never waits: a new epoch starts afresh.
+            view.awaiting_snapshot = False
+            if view.epoch != payload.get("epoch"):
+                view.apply_snapshot({"epoch": payload.get("epoch"), "lseq": payload["lseq"] - 1,
+                                     "activity": view.activity, "turn": view.turn, "items": view.items()})
+        view.apply_event(payload)
+        view.awaiting_snapshot = False
+    if payload["lseq"] not in skip:
+        broadcast_live(session, {**payload, "session": session})
 
 
 def iso_at(ms, offset_hours=0):
@@ -491,7 +556,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
-        query = {k: v[0] for k, v in parse_qs(url.query).items()}
+        query = {k: v[0] for k, v in parse_qs(url.query, keep_blank_values=True).items()}
         if self.in_outage():
             return
         record({"method": "GET", "path": url.path, "query": query,
@@ -504,10 +569,14 @@ class Handler(BaseHTTPRequestHandler):
             failure[1] -= 1
             return self.reply(failure[0], {"error": "Gateway Timeout"})
         if url.path == "/server-info":
-            return self.reply(200, {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp"})
+            info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp"}
+            if live_features:
+                info["features"] = ["live_items"]
+            return self.reply(200, info)
         if url.path == "/agents/snapshot":
             with state_lock:
                 return self.reply(200, {"agents": agents, "personas": personas,
+                                        "tool_explanations": tool_explanation_settings,
                                         "available_mcp_servers": [{"name": "github", "description": "GitHub"}]})
         if url.path == "/teams":
             with state_lock:
@@ -651,14 +720,25 @@ class Handler(BaseHTTPRequestHandler):
                         chosen, more = chosen[-limit:], True
             return self.reply(200, {"conversation_id": cid, "turns": chosen, "latest_revision": latest,
                                     "has_more": more, "missing": False})
+        if url.path == "/live":
+            session = query.get("session", "")
+            with state_lock:
+                if not any(a["session"] == session for a in agents):
+                    return self.reply(404, {"error": "unknown session"})
+                return self.reply(200, live_snapshot(session))
+        if url.path == "/tool-explanations/settings":
+            return self.reply(200, tool_explanation_settings)
         if url.path == "/events":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             inbox = queue.Queue()
+            # `live=` (blank) asks for status ops only; no parameter, none.
+            live = parse_qs(url.query, keep_blank_values=True).get("live", [None])[0]
             with state_lock:
                 subscribers.append(inbox)
+                live_filters[id(inbox)] = None if live is None else {n for n in live.split(",") if n}
             try:
                 self.wfile.write(b": connected\n\n")
                 self.wfile.flush()
@@ -677,6 +757,7 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 with state_lock:
                     subscribers.remove(inbox)
+                    live_filters.pop(id(inbox), None)
             return
         return self.reply(404, {"error": "not found"})
 
@@ -855,6 +936,44 @@ class Handler(BaseHTTPRequestHandler):
                                             "revision": pair_revision, "timestamp": "2026-09-29T09:31:00Z"})
             broadcast({"type": "transcript-updated", "session": "rachel"})
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/live":
+            # Test control: the live_items feature on or off (the client
+            # reads it from /server-info when it connects).
+            global live_features
+            live_features = bool(body.get("on", True))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/live-replay":
+            # Test control: replay a recorded stream (contract/live/NAME.json)
+            # for `session` up to step `through` (exclusive; all by default),
+            # from where the last replay of it stopped. Events whose lseq is
+            # in `skip` are not sent (a gap the client must notice).
+            session, name = body.get("session", "rachel"), body["fixture"]
+            steps = json.loads((LIVE_FIXTURES / f"{name}.json").read_text())["steps"]
+            fixture, start = live_cursor.get(session, (name, 0))
+            if fixture != name or body.get("restart"):
+                start = 0
+                with state_lock:
+                    live_truth.pop(session, None)
+            through = min(int(body.get("through", len(steps))), len(steps))
+            for step in steps[start:through]:
+                live_step(session, step, set(body.get("skip", [])))
+                if body.get("delay_ms"):
+                    time.sleep(body["delay_ms"] / 1000)
+            live_cursor[session] = (name, max(start, through))
+            return self.reply(200, {"ok": True, "next": max(start, through), "steps": len(steps)})
+        if url.path == "/__control/live-event":
+            # Test control: one `live` event as given (its lseq follows the
+            # session's truth unless set), sent and applied.
+            session = body.get("session", "rachel")
+            event = dict(body["event"])
+            with state_lock:
+                view = live_view(session)
+                event.setdefault("epoch", view.epoch)
+                event.setdefault("lseq", view.lseq + 1)
+                event.setdefault("type", "live")
+                event.setdefault("conv", "conv-1")
+            live_step(session, {"event": event}, set(body.get("skip", [])))
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/event":
             # Test control: push one SSE event to every stream.
             broadcast(body)
@@ -981,6 +1100,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "pairing code expired"})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
+        if url.path == "/tool-explanations/settings":
+            for key in ("enabled", "detail_level"):
+                if key in body:
+                    tool_explanation_settings[key] = body[key]
+            broadcast({"type": "tool-explanations-settings", **tool_explanation_settings})
+            return self.reply(200, tool_explanation_settings)
         if url.path == "/tool-explanations":
             # First poll of an item is pending, the next is ready.
             rows = []

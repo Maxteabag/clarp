@@ -16,6 +16,7 @@ mod voice;
 mod narrator;
 mod host_status;
 pub mod lifecycle;
+mod live;
 mod queue;
 mod panels;
 pub mod profile;
@@ -55,6 +56,8 @@ pub enum Change {
     Selection,
     /// A conversation's rows or state changed.
     Conversation(String),
+    /// A chat's live items, status line or turn changed.
+    Live(String),
     Sending,
     Error,
     /// A preference (mute, theme, …) changed.
