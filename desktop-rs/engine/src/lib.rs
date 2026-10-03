@@ -474,7 +474,17 @@ impl Engine {
     /// A conversation as the transcript shows it: tool activity grouped
     /// and collapsed per the activity mode (`clarp_core::presentation`).
     pub fn presented(&mut self, session: &str) -> Vec<clarp_core::presentation::PresentedRow> {
-        self.present_with_explanations(session)
+        self.present_with_explanations(session, &Default::default(), &Default::default())
+    }
+    /// The conversation without the rows in `hide` and without the tools
+    /// and cells whose ids are in `strip`: what live item rows show instead.
+    pub fn presented_except(
+        &mut self,
+        session: &str,
+        hide: &std::collections::HashSet<String>,
+        strip: &std::collections::HashSet<String>,
+    ) -> Vec<clarp_core::presentation::PresentedRow> {
+        self.present_with_explanations(session, hide, strip)
     }
     /// Fetches the tool calls of a message the Host sent without them
     /// (`tool_details_available`), once per message at a time.
