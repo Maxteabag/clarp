@@ -1288,6 +1288,7 @@ impl Engine {
                     }
                     self.request_snapshot();
                     self.live_reconnected();
+                    self.live_resubscribed();
                 } else {
                     self.live_stream_dropped();
                     self.mutate_roster(Roster::mark_transport_unavailable);
@@ -1302,6 +1303,7 @@ impl Engine {
                 self.error_is_transport = true;
             }
             SseSignal::Event(event) => self.handle_event(&event),
+            SseSignal::Resubscribed => self.live_resubscribed(),
         }
     }
 
