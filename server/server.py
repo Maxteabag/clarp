@@ -2843,7 +2843,10 @@ class Handler(BaseHTTPRequestHandler):
         POSTs its token (optionally the session it's focused on); when any agent
         finishes its turn the server pushes a "your turn" alert to it. Body:
         {"token": "<hex>", "session": "...", "environment": "production",
-         "base_url": "http://private-overlay-address:7682"}."""
+         "base_url": "http://private-overlay-address:7682",
+         "push_grant": "pg1.…"}. The optional push grant is issued by the
+        phone through Audio Central and lets this Host push to it without an
+        APNs key or Audio Central account of its own."""
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
@@ -2858,6 +2861,7 @@ class Handler(BaseHTTPRequestHandler):
                 environment=(data.get("environment") or "").strip() or None,
                 platform=(data.get("platform") or "ios").strip() or "ios",
                 base_url=(data.get("base_url") or "").strip(),
+                push_grant=str(data.get("push_grant") or ""),
             )
         except Exception as e:  # noqa: BLE001
             log_exception("deviceRegisterFail", e)

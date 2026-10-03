@@ -4,9 +4,14 @@ When an agent's turn completes (state_log kind == 'done'), the state watcher
 calls `on_turn_done(session, persona)` which fans a "your turn" alert out to
 every live iOS device token registered via POST /devices.
 
-Auth is token-based (a .p8 APNs Auth Key → short-lived ES256 JWT), the same
-crypto PyJWT does for the App Store Connect client (see
-ios-native/scripts/testflight/asc.py). No certificates, no per-app key.
+Two delivery paths, chosen by `Config.apns_transport()`:
+
+- relay (the default whenever this Computer has an Audio Central credential):
+  pushes go to Clarp Audio Central, which holds the developer's APNs key and
+  sends to Apple. The Computer needs no .p8. See `_RelayTransport`.
+- direct (development): token-based auth with a local .p8 APNs Auth Key →
+  short-lived ES256 JWT, the same crypto PyJWT does for the App Store Connect
+  client (see ios-native/scripts/testflight/asc.py).
 
 Everything here is best-effort and defensive: if APNs isn't configured, or a
 send fails, we log and move on — a push must never break a turn. APNs requires
@@ -16,6 +21,7 @@ from __future__ import annotations
 
 import pathlib
 import json
+import re
 import hashlib
 import ipaddress
 import collections
@@ -102,9 +108,19 @@ def _device_base_url(raw: str) -> str:
         return ""
 
 
+_PUSH_GRANT = re.compile(r"^pg1\.[0-9a-f]{64}\.[0-9a-f]{16}\.[0-9a-f]{64}$")
+
+
+def _push_grant(raw: str) -> str:
+    """A phone-issued Audio Central push grant, or "" when absent/malformed."""
+    value = str(raw or "").strip()
+    return value if _PUSH_GRANT.match(value) else ""
+
+
 def register_token(token: str, session: str | None = None,
                     environment: str | None = None,
-                    platform: str = "ios", base_url: str = "") -> None:
+                    platform: str = "ios", base_url: str = "",
+                    push_grant: str = "") -> None:
     """Upsert a device token. Re-registering clears any prior disabled flag.
 
     A reinstall can leave multiple live APNs tokens for the same app/session.
@@ -119,6 +135,7 @@ def register_token(token: str, session: str | None = None,
     session_key = (session or "").strip() or None
     platform_key = (platform or "ios").strip() or "ios"
     base_url_key = _device_base_url(base_url)
+    grant_key = _push_grant(push_grant)
     now = db.now_ms()
     database = db.conn()
     if session_key:
@@ -131,10 +148,13 @@ def register_token(token: str, session: str | None = None,
                   AND disabled_at IS NULL""",
             (now, session_key, platform_key, token),
         )
+    # An app that sends no grant (older build, or attestation unavailable)
+    # keeps any grant this token already has.
     database.execute(
         """INSERT INTO device_tokens
-                (token, session, platform, environment, base_url, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+                (token, session, platform, environment, base_url, push_grant,
+                 created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(token) DO UPDATE SET
                 session     = excluded.session,
                 platform    = excluded.platform,
@@ -142,9 +162,12 @@ def register_token(token: str, session: str | None = None,
                 base_url    = CASE WHEN excluded.base_url != ''
                                    THEN excluded.base_url
                                    ELSE device_tokens.base_url END,
+                push_grant  = CASE WHEN excluded.push_grant != ''
+                                   THEN excluded.push_grant
+                                   ELSE device_tokens.push_grant END,
                 updated_at  = excluded.updated_at,
                 disabled_at = NULL""",
-        (token, session_key, platform_key, env, base_url_key, now, now),
+        (token, session_key, platform_key, env, base_url_key, grant_key, now, now),
     )
 
 
@@ -152,7 +175,7 @@ def active_tokens() -> list[dict]:
     """Every live (non-disabled) device token."""
     from . import db
     rows = db.conn().execute(
-        "SELECT token, session, environment, base_url FROM device_tokens "
+        "SELECT token, session, environment, base_url, push_grant FROM device_tokens "
         "WHERE disabled_at IS NULL"
     ).fetchall()
     return [dict(r) for r in rows]
@@ -419,6 +442,310 @@ def _send_one(client, base: str, auth: str, bundle_id: str,
 _DEAD_REASONS = {"BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic"}
 
 
+# --------------------------------------------------------------------------
+# Transports
+# --------------------------------------------------------------------------
+class _DirectTransport:
+    """Signs with the local .p8 and talks HTTP/2 to Apple."""
+    name = "direct"
+
+    def __init__(self, cfg):
+        self._cfg = cfg
+        self._auth = _auth_jwt(cfg)
+        self._client = _pooled_client()
+
+    def send(self, token: str, environment: str, payload: dict, *,
+             push_type: str = "alert", priority: str = "10",
+             collapse_id: str | None = None) -> tuple[int, str, str]:
+        return _send_one(self._client, _host(environment), self._auth,
+                         self._cfg.apns_bundle_id, token, payload,
+                         push_type=push_type, priority=priority,
+                         collapse_id=collapse_id)
+
+    def reset(self) -> None:
+        _reset_pooled_client()
+        self._client = _pooled_client()
+
+
+class _RelayUnavailable(Exception):
+    """Audio Central could not take the push at all (down, not deployed, or
+    not configured for push) — as opposed to Apple rejecting one token."""
+
+
+# Tokens already bound to this Computer at Audio Central in this process,
+# keyed by credential so a new credential re-registers. Registration is
+# idempotent, so a restart simply re-registers each token once.
+_RELAY_REGISTERED_LOCK = threading.Lock()
+_RELAY_REGISTERED: set[tuple[str, str, str]] = set()
+_RELAY_CLIENT_LOCK = threading.Lock()
+_RELAY_CLIENT = None
+_RELAY_CLIENT_CTOR = None
+
+
+def _relay_client():
+    global _RELAY_CLIENT, _RELAY_CLIENT_CTOR
+    import httpx
+    with _RELAY_CLIENT_LOCK:
+        if _RELAY_CLIENT is None or _RELAY_CLIENT_CTOR is not httpx.Client:
+            _close_quietly(_RELAY_CLIENT)
+            # Longer than the Worker's own 10 s APNs deadline, so the relay
+            # answers before we give up and a fallback cannot double-send.
+            _RELAY_CLIENT = httpx.Client(timeout=20.0)
+            _RELAY_CLIENT_CTOR = httpx.Client
+        return _RELAY_CLIENT
+
+
+def _reset_relay_state() -> None:
+    """Test/ops helper: forget registrations and drop the relay connection."""
+    global _RELAY_CLIENT, _RELAY_CLIENT_CTOR
+    with _RELAY_REGISTERED_LOCK:
+        _RELAY_REGISTERED.clear()
+    with _RELAY_CLIENT_LOCK:
+        client, _RELAY_CLIENT, _RELAY_CLIENT_CTOR = _RELAY_CLIENT, None, None
+    _close_quietly(client)
+
+
+class _RelayTransport:
+    """Sends through Clarp Audio Central with this Computer's credential.
+
+    The relay only delivers to tokens this Computer bound with
+    POST /v1/push/devices, and decides production vs sandbox from that
+    binding, so each token is registered (once per process) before its
+    first push."""
+    name = "relay"
+
+    def __init__(self, cfg):
+        self._base = cfg.audio_central_url.rstrip("/")
+        self._credential = cfg.audio_central_credential
+        self._credential_key = hashlib.sha256(
+            self._credential.encode("utf-8")).hexdigest()[:16]
+        self._headers = {"authorization": f"Bearer {self._credential}"}
+        self._down: str | None = None
+
+    def _post(self, method: str, path: str, body: dict):
+        # One outage per batch: later tokens fail (or fall back) immediately
+        # instead of each waiting out the timeout.
+        if self._down:
+            raise _RelayUnavailable(self._down)
+        try:
+            return self._checked(method, path, body)
+        except _RelayUnavailable as e:
+            self._down = str(e)
+            raise
+
+    def _checked(self, method: str, path: str, body: dict):
+        try:
+            resp = _relay_client().request(
+                method, f"{self._base}{path}", headers=self._headers, json=body)
+        except Exception as e:  # noqa: BLE001 - network failure
+            raise _RelayUnavailable(f"{type(e).__name__}") from e
+        if resp.status_code in (404, 405) or resp.status_code >= 500:
+            raise _RelayUnavailable(f"{path} HTTP {resp.status_code}")
+        return resp
+
+    def _register(self, token: str, environment: str) -> bool:
+        key = (self._credential_key, token, environment)
+        with _RELAY_REGISTERED_LOCK:
+            if key in _RELAY_REGISTERED:
+                return True
+        resp = self._post("POST", "/v1/push/devices", {
+            "devices": [{"deviceToken": token, "environment": environment}]})
+        if resp.status_code != 200:
+            log("apnsRelayRegisterReject",
+                f"status={resp.status_code} {_relay_error(resp)} token={token[:12]}…")
+            return False
+        with _RELAY_REGISTERED_LOCK:
+            _RELAY_REGISTERED.add(key)
+        return True
+
+    def _forget(self, token: str) -> None:
+        with _RELAY_REGISTERED_LOCK:
+            for key in [k for k in _RELAY_REGISTERED if k[1] == token]:
+                _RELAY_REGISTERED.discard(key)
+
+    def send(self, token: str, environment: str, payload: dict, *,
+             push_type: str = "alert", priority: str = "10",
+             collapse_id: str | None = None) -> tuple[int, str, str]:
+        environment = "sandbox" if (environment or "").lower() == "sandbox" else "production"
+        notification = {
+            "deviceToken": token,
+            "pushType": push_type,
+            "priority": priority,
+            # APNs (and the relay) cap collapse ids at 64 bytes, not chars.
+            "collapseId": (collapse_id or _collapse_id(payload)).encode(
+                "utf-8")[:64].decode("utf-8", "ignore"),
+            "payload": payload,
+        }
+        for attempt in range(2):
+            if not self._register(token, environment):
+                return 401, "RelayRegistrationRejected", ""
+            resp = self._post("POST", "/v1/push/send", {"notifications": [notification]})
+            if resp.status_code != 200:
+                if resp.status_code == 401:
+                    # A revoked credential: registrations it made are gone too.
+                    self._forget(token)
+                return resp.status_code, _relay_error(resp) or f"Relay{resp.status_code}", ""
+            try:
+                result = (resp.json().get("results") or [{}])[0]
+            except Exception:  # noqa: BLE001
+                return 502, "RelayBadResponse", ""
+            status = int(result.get("status") or 0)
+            reason = str(result.get("reason") or "")
+            if reason == "RelayDeliveryFailed":
+                # The relay is up but could not reach Apple: an outage of
+                # the relay path, not a verdict on this token.
+                self._down = "relay could not reach APNs"
+                raise _RelayUnavailable(self._down)
+            if reason == "DeviceNotRegistered" and attempt == 0:
+                # The relay dropped the binding (revoked and reclaimed, or
+                # evicted); bind again and retry once.
+                self._forget(token)
+                continue
+            if status == 410 or reason in _DEAD_REASONS:
+                self._forget(token)
+            return status, reason, str(result.get("apnsId") or "")
+        return 403, "DeviceNotRegistered", ""
+
+    def reset(self) -> None:
+        pass
+
+
+def _relay_error(resp) -> str:
+    try:
+        return str(((resp.json() or {}).get("error") or {}).get("code") or "")[:64]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+class _AutoTransport:
+    """Relay first; fall back to the local .p8 when Audio Central cannot take
+    pushes at all and a direct key is still configured (migration window)."""
+
+    def __init__(self, cfg):
+        self._cfg = cfg
+        self._active = _RelayTransport(cfg)
+        self.name = "relay"
+
+    def send(self, token: str, environment: str, payload: dict, **kwargs) -> tuple[int, str, str]:
+        try:
+            return self._active.send(token, environment, payload, **kwargs)
+        except _RelayUnavailable as e:
+            if self._active.name != "relay" or not self._cfg.apns_direct_ready():
+                raise
+            log("apnsRelayFallback", f"reason={e} using=direct")
+            self._active = _DirectTransport(self._cfg)
+            self.name = "direct"
+            return self._active.send(token, environment, payload, **kwargs)
+
+    def reset(self) -> None:
+        self._active.reset()
+
+
+def _base_transport(cfg):
+    """The transport for tokens without a phone grant."""
+    kind = cfg.apns_transport()
+    if kind == "relay":
+        if cfg.apns_mode != "relay" and cfg.apns_direct_ready():
+            return _AutoTransport(cfg)
+        return _RelayTransport(cfg)
+    if kind == "direct":
+        return _DirectTransport(cfg)
+    return None
+
+
+class _GrantTransport:
+    """Sends with a phone-issued push grant: no Computer credential and no
+    Audio Central account. The grant names the phone, so no token is sent."""
+    name = "grant"
+
+    def __init__(self, cfg):
+        self._base = cfg.audio_central_url.rstrip("/")
+        self._down: str | None = None
+
+    def send(self, grant: str, payload: dict, *, push_type: str = "alert",
+             priority: str = "10", collapse_id: str | None = None) -> tuple[int, str, str]:
+        if self._down:
+            raise _RelayUnavailable(self._down)
+        notification = {
+            "pushType": push_type,
+            "priority": priority,
+            "collapseId": (collapse_id or _collapse_id(payload)).encode(
+                "utf-8")[:64].decode("utf-8", "ignore"),
+            "payload": payload,
+        }
+        try:
+            resp = _relay_client().request(
+                "POST", f"{self._base}/v1/push/send",
+                headers={"authorization": f"Bearer {grant}"},
+                json={"notifications": [notification]})
+        except Exception as e:  # noqa: BLE001 - network failure
+            self._down = type(e).__name__
+            raise _RelayUnavailable(self._down) from e
+        if resp.status_code in (404, 405) or resp.status_code >= 500:
+            self._down = f"grant send HTTP {resp.status_code}"
+            raise _RelayUnavailable(self._down)
+        if resp.status_code == 401:
+            # The phone revoked this server's grant: stop pushing to it.
+            return 410, "GrantRevoked", ""
+        if resp.status_code != 200:
+            return resp.status_code, _relay_error(resp) or f"Relay{resp.status_code}", ""
+        try:
+            result = (resp.json().get("results") or [{}])[0]
+        except Exception:  # noqa: BLE001
+            return 502, "RelayBadResponse", ""
+        reason = str(result.get("reason") or "")
+        if reason == "RelayDeliveryFailed":
+            self._down = "relay could not reach APNs"
+            raise _RelayUnavailable(self._down)
+        return int(result.get("status") or 0), reason, str(result.get("apnsId") or "")
+
+
+class _Router:
+    """Routes each device row: a phone grant when it has one, else this
+    Computer's credential relay or local key. In auto mode a relay outage
+    falls back to the local key for grant rows too."""
+
+    def __init__(self, cfg):
+        self._cfg = cfg
+        self._base = _base_transport(cfg)
+        self._grant = _GrantTransport(cfg) if cfg.apns_relay_url_ok() else None
+        self._direct_fallback = None
+        self.name = self._base.name if self._base else "grant"
+
+    def send(self, token: str, environment: str, payload: dict, *,
+             grant: str = "", **kwargs) -> tuple[int, str, str]:
+        grant = _push_grant(grant)
+        if grant and self._grant and self._cfg.apns_mode in ("auto", "relay"):
+            self.name = "grant"
+            try:
+                return self._grant.send(grant, payload, **kwargs)
+            except _RelayUnavailable as e:
+                if self._cfg.apns_mode != "auto" or not self._cfg.apns_direct_ready():
+                    raise
+                if self._direct_fallback is None:
+                    log("apnsRelayFallback", f"reason={e} using=direct")
+                    self._direct_fallback = _DirectTransport(self._cfg)
+                self.name = "direct"
+                return self._direct_fallback.send(token, environment, payload, **kwargs)
+        if self._base is None:
+            return 0, "NoPushPath", ""
+        self.name = self._base.name
+        return self._base.send(token, environment, payload, **kwargs)
+
+    def reset(self) -> None:
+        if self._base:
+            self._base.reset()
+        if self._direct_fallback:
+            self._direct_fallback.reset()
+
+
+def _transport(cfg):
+    """The transport for one batch of pushes, per `cfg.apns_transport()`."""
+    if not cfg.apns_enabled():
+        raise RuntimeError("push is not configured")
+    return _Router(cfg)
+
+
 def send_user_notification(notification: dict) -> dict:
     """Send APNs for an already-classified User notification.
 
@@ -467,8 +794,7 @@ def send_user_notification(notification: dict) -> dict:
     started = time.monotonic()
     with _send_lock(session):
         try:
-            auth = _auth_jwt(cfg)
-            client = _pooled_client()
+            transport = _transport(cfg)
             for row in tokens:
                 # A desktop may become active while this transport waited for
                 # another send. Recheck immediately before each phone alert.
@@ -495,19 +821,18 @@ def send_user_notification(notification: dict) -> dict:
                     bool(notification.get("needs_response")),
                 )
                 try:
-                    status, reason, apns_id = _send_one(
-                        client, _host(env), auth, cfg.apns_bundle_id, tok, payload)
+                    status, reason, apns_id = transport.send(
+                        tok, env, payload, grant=row.get("push_grant") or "")
                 except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
                     log_exception("apnsSendFail", e,
                                   detail=f"notification={notification_id} token={tok[:12]}…")
-                    _reset_pooled_client()
-                    client = _pooled_client()
+                    transport.reset()
                     failed += 1
                     continue
                 log("apnsSendResult",
                     f"notification={notification_id} source={source_message_id} "
                     f"preview={preview_hash} session={session} status={status} "
-                    f"apns_id={apns_id or '-'} token={tok[:12]}…")
+                    f"via={transport.name} apns_id={apns_id or '-'} token={tok[:12]}…")
                 if status == 200:
                     sent += 1
                     _mark_pushed(tok)
@@ -582,27 +907,24 @@ def send_background_sync(session: str, agent_id: str = "") -> dict:
     payload = background_sync_payload(session, agent_id)
     sent = failed = disabled = 0
     try:
-        auth = _auth_jwt(cfg)
-        client = _pooled_client()
+        transport = _transport(cfg)
         for row in tokens:
             tok = row["token"]
             env = row.get("environment") or cfg.apns_environment
             try:
-                status, reason, _apns_id = _send_one(
-                    client, _host(env), auth, cfg.apns_bundle_id, tok, payload,
+                status, reason, _apns_id = transport.send(
+                    tok, env, payload, grant=row.get("push_grant") or "",
                     push_type="background", priority="5",
                     collapse_id=f"sync-{session}"[:64])
             except Exception as e:  # noqa: BLE001
                 log_exception("apnsBackgroundSendFail", e, detail=tok[:12])
-                _reset_pooled_client()
-                client = _pooled_client()
+                transport.reset()
                 failed += 1
                 continue
             if status == 200:
                 sent += 1
-            elif status == 410 or reason in ("BadDeviceToken", "Unregistered",
-                                              "DeviceTokenNotForTopic"):
-                disable_token(tok)
+            elif status == 410 or reason in _DEAD_REASONS:
+                disable_token(tok, reason or str(status))
                 disabled += 1
             else:
                 failed += 1
@@ -765,8 +1087,7 @@ def send_decision_created(artifact: dict) -> dict:
     started = time.monotonic()
     with _send_lock(session):
         try:
-            auth = _auth_jwt(cfg)
-            client = _pooled_client()
+            transport = _transport(cfg)
             for row in tokens:
                 tok = row["token"]
                 env = row.get("environment") or cfg.apns_environment
@@ -782,19 +1103,18 @@ def send_decision_created(artifact: dict) -> dict:
                     avatar_url=avatar_url, avatar_custom=avatar_custom,
                     server_instance_id=_server_instance_id())
                 try:
-                    status, reason, apns_id = _send_one(
-                        client, _host(env), auth, cfg.apns_bundle_id, tok, payload)
+                    status, reason, apns_id = transport.send(
+                        tok, env, payload, grant=row.get("push_grant") or "")
                 except Exception as e:  # noqa: BLE001 — one bad token shouldn't abort the batch
                     log_exception("apnsSendFail", e,
                                   detail=f"notification={notification_id} token={tok[:12]}…")
-                    _reset_pooled_client()
-                    client = _pooled_client()
+                    transport.reset()
                     failed += 1
                     continue
                 log("apnsSendResult",
                     f"notification={notification_id} decision={decision_id} "
-                    f"session={session} status={status} apns_id={apns_id or '-'} "
-                    f"token={tok[:12]}…")
+                    f"session={session} status={status} via={transport.name} "
+                    f"apns_id={apns_id or '-'} token={tok[:12]}…")
                 if status == 200:
                     sent += 1
                     _mark_pushed(tok)

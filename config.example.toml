@@ -164,14 +164,33 @@ deepseek_effort        = ""   # same values as opencode_effort
 
 # [apns]
 # Push notifications: when an agent finishes its turn and is waiting on you,
-# the server sends a "your turn" alert to registered iOS devices. Disabled
-# until key_path + key_id + team_id are all set, then it's best-effort (a
-# failed push never breaks a turn). Create the .p8 in the Apple developer
-# portal under Keys (enable "Apple Push Notifications service"). The .p8 is a
-# secret — keep it out of git, e.g. ~/.config/clarp/AuthKey_XXXX.p8.
-# key_path    = "~/.config/clarp/AuthKey_XXXXXXXXXX.p8"
-# key_id      = "XXXXXXXXXX"          # the .p8 Key ID
-# team_id     = "XXXXXXXXXX"          # Apple Developer Team ID
-# bundle_id   = "com.maxteabag.clarp" # the app's bundle id (default shown)
-# environment = "production"          # production (TestFlight/App Store) | sandbox
+# the server sends a "your turn" alert to registered iOS devices. Best-effort:
+# a failed push never breaks a turn.
+#
+# Phones running a current Clarp app issue this Host a push grant when they
+# pair; those phones get pushes through Clarp Audio Central with no key or
+# account here. Other devices go one of two ways (see docs/push-relay.md):
+#   relay  - through Clarp Audio Central, which holds the app's APNs key.
+#            Used automatically when [audio_central] has a credential; this
+#            Computer needs no .p8.
+#   direct - signed here with your own .p8 (development). Create it in the
+#            Apple developer portal under Keys (enable "Apple Push
+#            Notifications service"). The .p8 is a secret — keep it out of
+#            git, e.g. ~/.config/clarp/AuthKey_XXXX.p8.
+# mode        = "auto"                # auto (relay if possible, else direct) | relay | direct | off
+# background_sync = false             # silent sync push when a turn ends without an alert
+# key_path    = "~/.config/clarp/AuthKey_XXXXXXXXXX.p8"   # direct only
+# key_id      = "XXXXXXXXXX"          # direct only: the .p8 Key ID
+# team_id     = "XXXXXXXXXX"          # direct only: Apple Developer Team ID
+# bundle_id   = "com.maxteabag.clarp" # direct only: the app's bundle id (default shown)
+# environment = "production"          # fallback for tokens registered without one:
+#                                     # production (TestFlight/App Store) | sandbox
 # # The .p8 path may also be supplied via the APNS_KEY_PATH env var.
+
+# [audio_central]
+# Clarp Audio Central: managed Clarp Voice and the APNs push relay. The
+# credential is this Computer's cav1.… Computer credential, returned when the
+# Computer is claimed with a claim code from the Clarp app. It is a secret;
+# revoking the Computer in the app stops its voice and its pushes.
+# url        = "https://clarp-audio-central.peter-w-adams96.workers.dev"  # default
+# credential = "cav1.<account>.<key-id>.<secret>"
