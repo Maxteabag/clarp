@@ -131,6 +131,12 @@ pending ──► running ──► completed
 - When a turn ends, every item still pending or running is settled: by its own
   `done` op, or with `interrupted` when the turn was stopped. Clients never see
   a spinner left over from a finished turn.
+- A stop (`POST /stop`, a Janitor cancel) or a runtime restart that kills a
+  turn always ends it on the live channel: running items `done` with
+  `interrupted`, a `turn` op with `status: interrupted`, `ended_at_ms` and
+  `worked_ms`, and a `status` op with `state: interrupted`. This holds even
+  when the hub never saw the turn (a restarted runtime): it settles it from
+  the turn record. Recorded stream: `contract/live/stopped-mid-tool.json`.
 
 ### 1.3 Activity (status line)
 

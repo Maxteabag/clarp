@@ -658,7 +658,10 @@ def observe_transition(agent_id: str, event: str, to_state: str,
     own processes; its tools come from the stream instead).
     """
     hub = _HUB
-    if hub is None or not agent_id:
+    if not agent_id:
+        return
+    if hub is None:
+        _forward_to_runtime(agent_id, event, to_state, detail or {})
         return
     try:
         _observe(hub, agent_id, event, to_state, detail or {})
@@ -672,8 +675,14 @@ def _observe(hub: LiveHub, agent_id: str, event: str, to_state: str,
     from .protocol import AgentState
     from .turn_lifecycle import BUSY, TERMINAL, TurnEvent
     if to_state in TERMINAL:
-        hub.end_turn(agent_id, status="interrupted" if to_state in (
-            AgentState.INTERRUPTED, AgentState.STOPPED) else "completed")
+        interrupted = to_state in (AgentState.INTERRUPTED, AgentState.STOPPED)
+        if interrupted and not hub.has_open_turn(agent_id):
+            # The hub never saw this turn or lost it (a restarted runtime, a
+            # stop recorded elsewhere): settle it from the database so clients
+            # get an explicit end instead of a turn that runs forever.
+            _settle_from_database(hub, agent_id, detail)
+            return
+        hub.end_turn(agent_id, status="interrupted" if interrupted else "completed")
         return
     if to_state not in BUSY:
         return
@@ -701,6 +710,50 @@ def _observe(hub: LiveHub, agent_id: str, event: str, to_state: str,
         hub.item(agent_id, compaction_id, "compaction", {"status": "running"})
     elif event == TurnEvent.COMPACTION_FINISHED:
         hub.done(agent_id, compaction_id)
+
+
+def _settle_from_database(hub: LiveHub, agent_id: str, detail: dict[str, Any]) -> None:
+    from . import agents as agents_db
+    from .db import conn
+    agent = agents_db.get_by_agent_id(agent_id)
+    if not agent:
+        return
+    trace = str(detail.get("trace_id") or "")
+    row = conn().execute(
+        """SELECT trace_id, started_at FROM turns WHERE agent_id = ?
+              AND (? = '' OR trace_id = ?)
+            ORDER BY started_at DESC LIMIT 1""", (agent_id, trace, trace)).fetchone()
+    if row is None:
+        return
+    snapshot = hub.snapshot(agent_id=agent_id) or {}
+    if (snapshot.get("turn") or {}).get("turn_id") == row["trace_id"]:
+        return                                    # already settled
+    conv = agents_db.live_backend_session(agent_id) or f"pending:{agent_id}"
+    hub.begin_turn(agent_id=agent_id, session=str(agent.get("session") or ""), conv=conv,
+                   turn_id=str(row["trace_id"] or f"turn-{_now_ms()}"),
+                   started_at_ms=int(row["started_at"]) if row["started_at"] else None)
+    hub.end_turn(agent_id, status="interrupted")
+
+
+def _forward_to_runtime(agent_id: str, event: str, to_state: str,
+                        detail: dict[str, Any]) -> None:
+    """This process has no hub (the HTTP server of a split Host): hand the
+    transition to the runtime's hub, which serves the live events. Off the
+    caller's thread; best effort."""
+    from . import backends
+    client = backends._RUNTIME_CLIENT
+    forward = getattr(client, "live_observe", None)
+    if forward is None:
+        return
+    keep = {key: detail.get(key) for key in ("trace_id", "call_id", "tool", "input", "status")
+            if detail.get(key) is not None}
+
+    def send() -> None:
+        try:
+            forward(agent_id, event, to_state, keep)
+        except Exception:  # noqa: BLE001 - an older runtime, or it is restarting
+            pass
+    threading.Thread(target=send, daemon=True, name="live-forward").start()
 
 
 def _preview(tool_input: Any) -> dict[str, Any]:
