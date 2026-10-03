@@ -999,3 +999,95 @@ def test_streamed_deltas_write_one_responding_state_row(fake_agy, tmp_path):
         (agent_id,)).fetchall()
     responding = [r for r in rows if json.loads(r["detail"] or "{}").get("phase") == "responding"]
     assert len(responding) == 1
+
+
+def _install_waiting_agy(bin_dir: pathlib.Path, rows: list[dict], release: pathlib.Path) -> None:
+    """A fake agy that streams ``rows`` and then keeps running, as agy does
+    while a long tool runs, until ``release`` exists (or a stop kills it)."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    fake = bin_dir / "agy"
+    stdout = "\n".join(json.dumps(row) for row in rows) + "\n"
+    fake.write_text(textwrap.dedent(f"""\
+        #!{sys.executable}
+        import os, sys, time
+        sys.stdout.write({stdout!r})
+        sys.stdout.flush()
+        deadline = time.time() + 20
+        while time.time() < deadline and not os.path.exists({str(release)!r}):
+            time.sleep(0.05)
+        sys.exit(1)
+    """))
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+
+
+def _step(index: int, state: str, step_type: str, **fields) -> dict:
+    return {"event": "step_update", "step_update": {
+        "conversation_id": _FAKE_CONV, "step_index": index,
+        "state": state, "step_type": step_type, **fields}}
+
+
+def test_long_turn_shows_and_speaks_its_ack_while_tools_run_and_a_stop_keeps_it(
+        tmp_path, monkeypatch):
+    """Bloop, 2026-10-03: agy said "<speak>Starting the login…</speak>", then ran
+    tools for minutes and was stopped. The chat must show the whole ack and speak
+    it while the tools run, as a live message item, and the stop must leave it
+    as a settled message rather than a live stub."""
+    from lib import live_hub
+    bin_dir = tmp_path / "bin"
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    ack = "Starting the headless login for your personal account now."
+    _install_waiting_agy(bin_dir, [
+        {"event": "init", "conversation_id": _FAKE_CONV,
+         "init": {"model": "claude-opus-5-5-high", "tools": ["run_command"]}},
+        _step(0, "DONE", "user_input"),
+        _step(1, "ACTIVE", "agent_response", text_delta="<speak>"),
+        _step(1, "ACTIVE", "agent_response", text_delta=ack[:20]),
+        _step(1, "ACTIVE", "agent_response", text_delta=ack[20:] + "</speak>"),
+        _step(1, "DONE", "agent_response", text_delta="\n"),
+        _step(2, "ACTIVE", "tool", tool_name="run_command", tool_info={
+            "name": "run_command", "parameters": {"CommandLine": "claude-login"}}),
+    ], tmp_path / "release")
+    hub = live_hub.LiveHub(sink=lambda _event: None)
+    live_hub.install(hub)
+    try:
+        agent_id = _make_agy_agent(persona="Bloop", session="bloop")
+        turn_id = agents_db.open_turn(agent_id=agent_id, source="pwa", trace_id="login")
+        owned = [True]
+
+        def run_if_owned(action) -> bool:
+            if not owned[0]:
+                return False
+            action()
+            return True
+
+        handle = AGY.start_turn(
+            text="Log in for me", cwd=tmp_path, agent_id=agent_id, session="bloop",
+            voice_preamble=True, trace_id="login", run_if_owned=run_if_owned)
+
+        def assistant_rows():
+            return agents_db.conn().execute(
+                "SELECT message_id, text, kind FROM messages"
+                " WHERE agent_id=? AND role='assistant'", (agent_id,)).fetchall()
+
+        assert _wait_for(lambda: any(ack in r["text"] for r in assistant_rows())), \
+            [dict(r) for r in assistant_rows()]
+        assert _wait_for(lambda: any(ack in t for t in _queued_texts(agent_id)))
+        [row] = assistant_rows()
+
+        def message_items():
+            snapshot = hub.snapshot(session="bloop") or {}
+            return [i for i in snapshot.get("items") or [] if i["kind"] == "message"]
+        assert _wait_for(lambda: any(ack in (i.get("text") or "") for i in message_items()))
+        assert message_items()[0]["row_id"] == row["message_id"]
+        assert handle.is_alive(), "the turn is still running its tool"
+
+        # The owner stops the turn from the phone.
+        owned[0] = False
+        agents_db.close_turn(turn_id)
+        handle.terminate()
+        handle.wait(timeout=8)
+        assert _wait_for(lambda: all(r["kind"] != "live" for r in assistant_rows())), \
+            [dict(r) for r in assistant_rows()]
+        assert [r["text"] for r in assistant_rows()] == [row["text"]]
+    finally:
+        live_hub.install(None)
