@@ -62,12 +62,18 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
     let label_of = |id: &str, with_none: bool| {
         providers(tts, with_none).into_iter().find(|(p, _)| p == id).map(|(_, l)| l).unwrap_or_else(|| if id.is_empty() { "Unknown".into() } else { id.to_owned() })
     };
-    vec![
+    let mut rows = vec![
         section("CHATS"),
         toggle("timestamps", "Timestamps", prefs.timestamps),
         toggle("show-when-ready", "Show when ready", engine.show_when_ready()),
         toggle("reduced-motion", "Reduce Motion", settings.boolean("appearance/reducedMotion", false)),
         choice("activity", "Tool activity", ACTIVITY[engine.activity_mode().clamp(0, 2) as usize]),
+    ];
+    // The Host's setting, on Hosts that send live items (§6).
+    if engine.live_items() {
+        rows.push(toggle("tool-explanations", "Tool explanations (Host · Ctrl+Shift+X)", engine.tool_explanations_enabled(engine.selected_session())));
+    }
+    rows.extend(vec![
         section("EXPERIMENTS"),
         toggle("narration", "Plain-English tools (Spark · extra usage)", engine.narrator_enabled()),
         choice("tool-detail", "Tool detail", clarp_engine::Engine::narrator_detail_levels()[engine.narrator_detail_level().clamp(0, 4) as usize]),
@@ -114,7 +120,8 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         section("ABOUT"),
         info("Desktop client", concat!(env!("CARGO_PKG_VERSION"), " preview (Slint)")),
         info("Host version", if engine.server_version().is_empty() { "Unknown" } else { engine.server_version() }),
-    ]
+    ]);
+    rows
 }
 
 /// Shows the rows again (a setting or the Host status changed).
@@ -181,6 +188,7 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
             let enabled = app.engine.borrow().narrator_enabled();
             app.engine.borrow_mut().set_narrator_enabled(!enabled);
         }
+        "tool-explanations" => crate::commands::toggle_explanations(app),
         "tool-detail" => {
             let level = app.engine.borrow().narrator_detail_level();
             app.engine.borrow_mut().set_narrator_detail_level((level + delta).rem_euclid(5));

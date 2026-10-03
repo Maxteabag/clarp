@@ -49,6 +49,8 @@ pub struct Toggles {
     pub narration: bool,
     pub preview_versions: bool,
     pub detail_level: i32,
+    /// The Host's tool explanations, on a Host with live items.
+    pub tool_explanations: Option<bool>,
 }
 
 fn toggle(on: bool, label: &str, action: &str, key: &str, keywords: &'static str) -> Item {
@@ -112,6 +114,9 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         toggle(toggles.show_when_ready, "Show when ready", "setting:showWhenReady", "", "stream streaming answers typing"),
         toggle(toggles.shared_filesystem, "Shared filesystem access (trusted Host)", "setting:sharedFilesystem", "", "files local folders"),
     ];
+    if let Some(on) = toggles.tool_explanations {
+        rows.push(toggle(on, "Tool explanations (Host)", "toggle-explanations", "Ctrl+Shift+X", "explain plain english tool rows command label narration"));
+    }
     for (mode, label) in ["Grouped", "Always visible", "Group old"].iter().enumerate() {
         let current = if toggles.activity_mode == mode as i32 { " (current)" } else { "" };
         rows.push(command(&format!("Tool activity: {label}{current}"), &format!("setting:activity:{mode}"), if mode == 1 { "Ctrl+Shift+T" } else { "" }, "settings", "tool calls collapse expand grouping"));

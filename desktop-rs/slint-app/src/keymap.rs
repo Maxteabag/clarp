@@ -93,6 +93,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("mute", &["Ctrl+M"], "Mute", false, Always, false),
             b("overview", &["Ctrl+Shift+O"], "Overview", false, Always, false),
             b("tools", &["Ctrl+Shift+T"], "Tools", false, Always, false),
+            b("toggle-explanations", &["Ctrl+Shift+X"], "Tool explanations", false, Always, false),
             b("ui-larger", &["Ctrl+="], "Larger", false, Always, false),
             b("ui-smaller", &["Ctrl+-"], "Smaller", false, Always, false),
             b("ui-reset", &["Ctrl+0"], "Reset scale", false, Always, false),
