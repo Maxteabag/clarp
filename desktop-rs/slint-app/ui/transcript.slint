@@ -2,6 +2,7 @@ import { Palette, Focus } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
+import { AgentAvatar } from "avatar.slint";
 
 export struct TableRow {
     cells: [styled-text],
@@ -102,7 +103,6 @@ export struct MessageRow {
     // user, assistant, activity
     author: string,
     blocks: [MessageBlock],
-    sender: string,
     stamp: string,
     meta: string,
     pending: bool,
@@ -401,6 +401,81 @@ component LiveItem inherits Rectangle {
     }
 }
 
+// Another agent's message (iOS labels it "<Name> prompted"): one line, the
+// sender and its first line elided, until O (or a click) opens it to the
+// whole message; the line stays on top, so opening never moves it. J/K
+// reach it like a card.
+component PromptLine inherits Rectangle {
+    in property <PromptRow> prompt;
+    in property <length> view-top;
+    in property <length> view-bottom;
+    property <bool> selected: ArtifactBridge.cursor == root.prompt.key;
+    height: 22px;
+    border-radius: 3px;
+    border-width: root.selected ? 1px : 0px;
+    border-color: Palette.accent;
+    accessible-role: button;
+    accessible-label: root.prompt.sender + " prompted" + (root.prompt.expanded || root.prompt.line == "" ? "" : " · " + root.prompt.line);
+    accessible-action-default => { ArtifactBridge.open(root.prompt.key); }
+    Timer {
+        interval: 150ms;
+        running: true;
+        triggered => { ArtifactBridge.card-shown(root.prompt.key, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { ArtifactBridge.open(root.prompt.key); }
+    }
+    HorizontalLayout {
+        padding-left: 2px;
+        padding-right: 2px;
+        spacing: 6px;
+        AgentAvatar {
+            y: (parent.height - self.height) / 2;
+            size: 18px;
+            name: root.prompt.sender;
+            initial: root.prompt.initial;
+        }
+        Text {
+            text: root.prompt.sender;
+            color: Palette.accent;
+            font-size: 12px;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.prompt.expanded || root.prompt.line == "" ? "prompted" : "prompted ·";
+            color: Palette.muted;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+        // The rest of the line: its first line, elided to the bubble.
+        Text {
+            text: root.prompt.expanded ? "" : root.prompt.line;
+            color: Palette.text;
+            font-size: 13px;
+            overflow: elide;
+            horizontal-stretch: 1;
+            min-width: 0px;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.prompt.expanded ? "▾" : "▸";
+            color: Palette.faint;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+        // Its key only while it works: selected, in the focused chat.
+        if root.selected && Focus.mode == "pane": KeyHint {
+            y: (parent.height - self.height) / 2;
+            key: "O";
+            label: root.prompt.expanded ? "Collapse" : "Expand";
+            emphasised: true;
+            clicked => { ArtifactBridge.open(root.prompt.key); }
+        }
+    }
+}
+
 export component Block inherits VerticalLayout {
     in property <MessageBlock> block;
     // The chat's visible band (an image block in the chat reports where it
@@ -632,12 +707,17 @@ export component Transcript inherits FocusScope {
                     copy := TouchArea { clicked => { root.copy-message(row.id); } }
                 }
                 VerticalLayout {
-                    padding: row.receipt.key != "" ? 0px : row.author == "user" ? 10px : 2px;
+                    // A folded prompt is one line in a slim bubble.
+                    padding: row.receipt.key != "" ? 0px : row.prompt.key != "" && !row.prompt.expanded ? 5px : row.author == "user" ? 10px : 2px;
                     spacing: 8px;
-                    if row.sender != "": Text { text: row.sender; color: Palette.accent; font-size: 12px; font-weight: 600; }
                     if row.receipt.key != "": DecisionReceipt {
                         receipt: row.receipt;
                         preferred-width: 420px;
+                        view-top: root.absolute-position.y;
+                        view-bottom: root.absolute-position.y + root.height;
+                    }
+                    if row.prompt.key != "": PromptLine {
+                        prompt: row.prompt;
                         view-top: root.absolute-position.y;
                         view-bottom: root.absolute-position.y + root.height;
                     }
@@ -685,7 +765,7 @@ export component Transcript inherits FocusScope {
                             view-bottom: root.absolute-position.y + root.height;
                         }
                     }
-                    if row.pending || row.failed || row.stamp != "": Text {
+                    if (row.pending || row.failed || row.stamp != "") && (row.prompt.key == "" || row.prompt.expanded): Text {
                         text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
                         color: row.failed ? Palette.danger : Palette.faint;
                         font-size: 11px;

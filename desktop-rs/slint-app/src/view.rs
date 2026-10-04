@@ -358,16 +358,18 @@ pub(crate) fn message_row(
     // all there was shows nothing rather than the tags.
     let text = if row.body.is_empty() && !row.activity && author == "user" { m.text.clone() } else { row.body.clone() };
     let receipt = if author == "user" { receipt_row(m) } else { None };
-    // The user's own words stay literal; replies are Markdown. A resolved
-    // decision is its receipt, never the Host's prompt.
-    let blocks = if receipt.is_some() {
-        Vec::new()
-    } else if author == "user" {
-        vec![clarp_engine::blocks::Block::Prose(text.clone())]
-    } else {
-        clarp_engine::blocks::blocks(&text)
+    // Another agent's message folds to one line until opened by its key
+    // (a resolved decision is its receipt instead).
+    let prompt = if author == "user" && receipt.is_none() { clarp_core::agent_prompt::of(m) } else { None };
+    let prompt_open = prompt.as_ref().is_some_and(|p| expanded.contains(&p.key));
+    // The user's own words stay literal; replies and opened prompts are
+    // Markdown. A resolved decision is its receipt, never the Host's prompt.
+    let blocks = match &prompt {
+        _ if receipt.is_some() => Vec::new(),
+        Some(_) if !prompt_open => Vec::new(),
+        None if author == "user" => vec![clarp_engine::blocks::Block::Prose(text.clone())],
+        _ => clarp_engine::blocks::blocks(&text),
     };
-    let from_agent = author == "user" && m.origin == "agent" && !m.sender_name.is_empty();
     let count = (row.activity_count as usize).max(row.tools.len()).max(row.display_cells.len());
     let has_activity = !row.activity && count > 0;
     let inline = always_show_tools || row.activity_inline;
@@ -387,7 +389,7 @@ pub(crate) fn message_row(
         id: m.id.clone().into(),
         author: author.into(),
         blocks: ModelRc::new(VecModel::from({
-            let mut shown: Vec<crate::MessageBlock> = blocks.iter().flat_map(|b| crate::artifacts_view::with_images(b, author == "user")).collect();
+            let mut shown: Vec<crate::MessageBlock> = blocks.iter().flat_map(|b| crate::artifacts_view::with_images(b, author == "user" && prompt.is_none())).collect();
             // Image blocks the keyboard reaches (J/K) and enlarges: not the
             // web's, which are never fetched.
             for (index, block) in shown.iter_mut().enumerate() {
@@ -397,7 +399,6 @@ pub(crate) fn message_row(
             }
             shown
         })),
-        sender: if from_agent { m.sender_name.clone() } else { String::new() }.into(),
         stamp: message_stamp(&m.timestamp).into(),
         meta: SharedString::new(),
         pending: m.pending,
@@ -412,7 +413,13 @@ pub(crate) fn message_row(
         artifacts: ModelRc::new(VecModel::<crate::ArtifactItem>::default()),
         live: crate::LiveRow::default(),
         receipt: receipt.unwrap_or_default(),
-        prompt: crate::PromptRow::default(),
+        prompt: prompt.map_or_else(crate::PromptRow::default, |p| crate::PromptRow {
+            initial: p.sender.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
+            key: p.key.into(),
+            sender: p.sender.into(),
+            line: p.line.into(),
+            expanded: prompt_open,
+        }),
     }
 }
 
@@ -445,6 +452,8 @@ struct RowSource {
     row: PresentedRow,
     always: bool,
     open: bool,
+    /// Another agent's prompt is open (by its key).
+    prompt_open: bool,
     /// Rows with images are built again when a picture lands.
     pictures: Option<u64>,
 }
@@ -498,14 +507,19 @@ impl RowCache {
             .map(|row| {
                 let id = row.message.id.clone();
                 let open = expanded.contains(&id);
+                let prompt_open = row.message.origin == "agent" && expanded.contains(&clarp_core::agent_prompt::key(&id));
                 let reused = self.rows.remove(&id).filter(|(source, _)| {
-                    source.always == always && source.open == open && source.pictures.is_none_or(|p| p == pictures) && source.row == *row
+                    source.always == always
+                        && source.open == open
+                        && source.prompt_open == prompt_open
+                        && source.pictures.is_none_or(|p| p == pictures)
+                        && source.row == *row
                 });
                 let (source, shown) = reused.unwrap_or_else(|| {
                     self.built += 1;
                     let shown = message_row(row, always, expanded);
                     let images = slint::Model::iter(&shown.blocks).any(|b| b.kind == "images");
-                    (RowSource { row: row.clone(), always, open, pictures: images.then_some(pictures) }, shown)
+                    (RowSource { row: row.clone(), always, open, prompt_open, pictures: images.then_some(pictures) }, shown)
                 });
                 let copy = shown.clone();
                 kept.insert(id, (source, shown));
@@ -620,10 +634,15 @@ mod tests {
         assert_eq!(closed.prompt.initial, "R");
         assert_eq!(closed.prompt.line, "Build plan");
         assert!(!closed.prompt.expanded, "folded by default");
-        assert_eq!(closed.sender, "", "the folded line names the sender, not a second label");
         let open = super::message_row(&rows[0], false, &["a2a:u7".to_owned()].into_iter().collect());
         assert!(open.prompt.expanded);
-        assert_eq!(block_kinds(&open), ["heading", "prose", "prose"], "opened, the whole message as Markdown");
+        assert_eq!(block_kinds(&open), ["heading", "prose"], "opened, the whole message as Markdown");
+        let markdown: Vec<_> = clarp_engine::blocks::blocks("## Build plan\n\nRun `cargo test` first.\n\n- then report")
+            .iter()
+            .map(|b| super::message_block(b, false).styled)
+            .collect();
+        let shown: Vec<_> = slint::Model::iter(&open.blocks).map(|b| b.styled).collect();
+        assert_eq!(shown, markdown, "styled as a reply is, not kept literal as the user's own words");
     }
 
     /// The user's own words and the agent's replies are not folded.

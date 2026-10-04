@@ -38,6 +38,11 @@ fn turns() -> serde_json::Value {
     }
     turns.push(json!({"id": "u7", "role": "user", "origin": "agent", "sender_name": "Rachel", "sender_agent_id": "a1",
         "text": "## Review the parser change\n\nRead `src/tokenizer.ts` and its tests, then report back.\n\n```bash\nnpm test -- tokenizer\n```\n\n- keep the main checkout untouched\n- say what failed"}));
+    // Rows under it, so a reader scrolled up a little is farther from the
+    // end than the message is tall (nearer, folding it must pull the end in).
+    for i in 0..6 {
+        turns.push(json!({"id": format!("g{i}"), "role": "assistant", "text": format!("Reply {i}: the parser test passes now, and the tokenizer keeps its offsets.")}));
+    }
     turns.push(json!({"id": "f-reply", "role": "assistant", "text": "On it."}));
     turns.push(json!({"id": "f-own", "role": "user", "text": "Thanks, both\nof you"}));
     json!({"session": "rachel", "turns": turns})
@@ -105,7 +110,7 @@ pub fn a2a_check(out: String) {
             let (visible, detail) = last_row_visible();
             check(report().follows && visible, &format!("a follower stays at the end: {detail}"));
             shot(&out2, "a2a-02-open-light");
-            wheel_up(160.0);
+            wheel_up(320.0);
             true
         })),
         ("reader up", Box::new(move |_, _, elapsed| {
@@ -154,12 +159,14 @@ pub fn a2a_check(out: String) {
             crate::pump();
             true
         })),
-        ("dark", Box::new(move |_, _, elapsed| {
+        ("dark", Box::new(move |app, _, elapsed| {
             if elapsed < Duration::from_millis(1500) {
                 return false;
             }
             check(report().follows, "End follows again");
             shot(&out3, "a2a-03-folded-dark");
+            // From no card, K is the lowest on screen (Escape on a card).
+            crate::artifacts_view::leave(app);
             headless::press("k");
             true
         })),
