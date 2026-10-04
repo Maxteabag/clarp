@@ -5,7 +5,8 @@ janitors, decision delivery) ends up in `TurnDispatchService(ctx).dispatch`.
 Before this module each of them carried its own closure in `build_server`
 with the same three facts repeated: the turn targets one forced session, it
 is silent (`synthesize_audio=False`) and it declares an `origin` so the
-conversation read model can file it. This class states those once.
+conversation read model can file it. User form submissions explicitly carry
+their original reply-audio preference; autonomous callbacks remain silent.
 
 The service is constructed through `service_factory` on every call rather
 than cached: `server.py` passes `lambda ctx: TurnDispatchService(ctx)`, so a
@@ -57,13 +58,13 @@ class DispatchAdapters:
 
     def _dispatch(self, session: str, text: str, *, origin: str,
                   trace_id: str = "", client_msg_id: str = "",
-                  queue_if_busy: bool = False, **extra):
-        """A silent turn forced onto `session`. Schedulers never route."""
+                  queue_if_busy: bool = False, synthesize_audio: bool = False, **extra):
+        """A turn forced onto `session`; autonomous callers remain silent by default."""
         from .turn_dispatch import DispatchCommand
         return self._service(self.ctx).submit(DispatchCommand(
             text=text, requested_session=session, forced_session=session,
             trace_id=trace_id or self._new_trace_id(),
-            client_msg_id=client_msg_id, synthesize_audio=False,
+            client_msg_id=client_msg_id, synthesize_audio=synthesize_audio,
             origin=origin, queue_if_busy=queue_if_busy, **extra))
 
     @staticmethod
@@ -160,6 +161,7 @@ class DispatchAdapters:
             self._dispatch(
                 submission["session"], submission["prompt"], origin=ORIGIN_USER,
                 client_msg_id="html-form-" + submission["submission_id"],
+                synthesize_audio=bool(submission.get("synthesize_audio", False)),
                 queue_if_busy=True)
             html_forms.mark_delivered(submission["submission_id"])
         except Exception as exc:
