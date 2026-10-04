@@ -144,7 +144,11 @@ def _isolated_db(tmp_path, monkeypatch):
                 # suite inherits them: they pause heartbeats, bind hooks to
                 # the caller's session and point scripts at the live tree.
                 "CLARP_HEARTBEATS_DISABLED", "CLAUDE_PWA_SESSION",
-                "CLARP_CODE_ROOT"):
+                "CLARP_CODE_ROOT",
+                # Set inside a Clarp-run Claude turn and its background
+                # commands: they would mark every hook in the suite as
+                # belonging to the caller's live turn.
+                "CLARP_PROVIDER_TURN", "CLARP_BACKGROUND_ORIGIN"):
         monkeypatch.delenv(var, raising=False)
     try:
         from lib import config as _config

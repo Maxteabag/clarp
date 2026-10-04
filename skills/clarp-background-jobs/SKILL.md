@@ -90,59 +90,75 @@ boundary across restarts so items arriving during downtime remain eligible.
 A Claude background `Bash` task belongs to the turn that started it. Clarp runs
 one Claude process per turn; when your reply ends, that process exits and the
 task stops with it, so "you will be notified when it completes" does not hold
-here. A process you start detached keeps running, but nobody hears that it
-finished. On 2026-10-04 a detached render finished in two minutes, its watcher
-had ended with the turn, and the user polled 45 minutes later.
+here. A process you detach with `setsid` or `nohup` outlives the turn, but it
+stays in the Clarp runtime service's cgroup, and a runtime restart (an update,
+an idle release handoff) kills it. On 2026-10-04 one render's watcher ended
+with its turn and the user polled 45 minutes later; that evening a second
+render was killed mid-way by the runtime's release handoff, its own closing
+`job-fail` and self-prompt never ran, and the job read failed only when its
+heartbeat timed out ten minutes later. Nothing woke the agent either time.
 
 When the result must reach you after this turn, keep four things separate:
 the work itself, the worker that watches it, the worker's durable receipt,
-and the wake that brings you back.
+and the wake that brings you back. Use the worker script for all four:
 
-1. Have a goal for the outcome (`clarp-goal create`, see `clarp-goal`).
-2. Start the work through the worker, `scripts/run_detached_job.sh` in this
-   skill's directory (for example
-   `~/.claude/skills/clarp-background-jobs/scripts/run_detached_job.sh`). It
-   registers the job under its own PID and prints the handle:
+```sh
+"$SKILL_DIR/scripts/run_detached_job.sh" --goal "$PLAN_ID" --deadline 7200 \
+    "$SESSION" render-intro-2 render "Render intro video" \
+    /var/tmp/intro/render.log -- ffmpeg -i in.mov out.mp4
+```
 
-   ```sh
-   H=$("$SKILL_DIR/scripts/run_detached_job.sh" "$SESSION" render-intro-2 render \
-       "Render intro video" /var/tmp/intro/render.log -- ffmpeg -i in.mov out.mp4)
-   ```
+(`$SKILL_DIR` is this skill's directory, for example
+`~/.claude/skills/clarp-background-jobs`; the goal comes from `clarp-goal`.)
 
-   A job id names one run: give a new run a new id. A cancelled id is refused
-   (the script exits non-zero and runs nothing); use `job-restart` only for a
-   deliberate rerun of that same target. The worker writes
-   `/var/tmp/intro/render.log`, `render.log.exit` with the exit status, and
-   reports `job-finish` (exit 0) or `job-fail` (anything else) itself. A
-   cancel stops its command.
-3. Attach the dependency before you reply, while the handle is in hand:
+- With a user systemd manager (Linux) the worker runs as its own service,
+  outside the runtime's cgroup, so a runtime restart does not kill it. The
+  command gets your exact environment, umask and open-file limit; the
+  environment and arguments travel through private files, never through
+  systemd's command line or logs (the working directory is a unit property).
+  When the command ends, its unit ends, and anything it left running ends
+  too. Without a user systemd manager the script warns that the worker is
+  not restart-safe; say so to the user.
+- It registers the job under its own PID, so a dead worker is noticed within
+  seconds (`worker_vanished`) instead of after the ten-minute heartbeat
+  timeout. Registering a job yourself from the turn records no worker PID.
+- It keeps the log, writes `LOG.exit` with the exit status, and reports
+  `job-finish` or `job-fail` itself. A cancel stops its own command.
+- `--goal` attaches the dependency before the script returns, keeping the
+  goal's own progress and next work. It prints the handle and exits 0 when
+  both are done. It exits 3, with the reason, if the job is running but the
+  dependency is not attached: the goal is paused or not yours, or it already
+  waits on another job (a goal waits on one dependency at a time). Attach it
+  yourself when that is right:
 
-   ```sh
-   clarp-goal checkpoint "$PLAN" "$REV" "{\"progress\":\"Render started\",
-     \"next_work\":\"Read render.log.exit and the log before delivering\",
-     \"continuation\":{\"kind\":\"dependency\",\"key\":\"render-intro-2\",
-     \"job_handle\":\"$H\",\"reason\":\"Waiting for the render\",
-     \"due_at\":$(( ($(date +%s) + 3600) * 1000 ))}}"
-   ```
+  ```sh
+  clarp-goal checkpoint "$PLAN_ID" "$REVISION" "{\"progress\":\"Render started\",
+    \"next_work\":\"Read render.log.exit and the log before reporting\",
+    \"continuation\":{\"kind\":\"dependency\",\"key\":\"render-intro-2\",
+    \"job_handle\":\"$HANDLE\",\"reason\":\"Waiting for the render\",
+    \"due_at\":$(( ($(date +%s) + 7200) * 1000 ))}}"
+  ```
+- A job id names one run. A cancelled id is refused; use `job-restart` only
+  for a deliberate rerun of that same target.
 
 When the job ends, goal recovery records it as the dependency result
 (`outcome` is how the job ended, `outcome_state` what is known of the work,
 `terminal_reason` why) and dispatches a wake; the goal history then shows
 `dependency_result`, `wake_claim`, `dispatch_admitted` and, once your turn
-runs, `execution_observed`. A worker that dies without a receipt reads
+runs, `execution_observed`. A worker killed without a receipt reads
 `outcome: failed`, `outcome_state: unknown`, `terminal_reason:
-worker_vanished`: the work may or may not have finished, so look before
-saying either. If the deadline passes first you are woken to inspect it. On waking,
-read the exit file and the output yourself: the job status says how the
-worker ended, not that the result is right.
+worker_vanished`: look at the log and output before saying it failed or
+finished. If the deadline passes first you are woken to inspect it. A
+closing self-prompt inside your own script is not a substitute: a killed
+script never reaches it.
 
 That wake depends on goal recovery running on this Host. The goal's
 `continuation.observed_state` reads `host_paused` when autonomous wakes are
 paused (`CLARP_HEARTBEATS_DISABLED`), and `blocked`, `attention` or
-`owner_changed` when it cannot wake you. Then nothing will: tell the user so,
-say where the result will appear (job detail, the exit file), and check it
-yourself on the next turn. Never describe a registered job or a scheduled
-check as a promise that you will report back.
+`owner_changed` when it cannot wake you. A paused or cancelled goal is not
+woken. Then tell the user so, say where the result will appear (job detail,
+the exit file), and check it yourself on the next turn. Never describe a
+registered job or a scheduled check as a promise that you will report back.
 
 ## Provider-native tasks (Host contract 24)
 

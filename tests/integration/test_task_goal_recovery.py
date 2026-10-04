@@ -196,48 +196,77 @@ def test_external_result_and_user_pause_cancel_boundaries(host, outcome):
         )
 
 
-@pytest.mark.parametrize("worker", ["finishes", "killed"])
-def test_detached_render_wakes_its_owner_across_a_host_restart(host, worker):
-    """The clarp-background-jobs recipe: a worker-owned job and a goal
-    dependency on its handle. The render ends while the Host is down; the
-    restarted Host wakes the owner with the worker's receipt, or with an
-    unknown outcome when the worker died without one."""
+@pytest.mark.parametrize("case", ["finishes", "killed", "paused", "cancelled"])
+def test_detached_job_with_goal_wakes_its_owner_or_respects_the_user(host, case):
+    """The clarp-background-jobs recipe in one call: run_detached_job.sh
+    --goal registers a worker-owned job and attaches the goal dependency.
+    The owner is woken and actually answers whether the render finishes
+    (across a Host restart) or is killed without a receipt; a paused goal is
+    not woken; a cancelled job stops its command and wakes the owner."""
     import shlex
     import signal
     p = create(host)
     env = {**os.environ, "CLAUDE_PWA_DB": str(host.root / "state.sqlite"),
            "CLARP_CODE_ROOT": str(ROOT / "server"),
-           "CLARP_AGENT_BG": shlex.join([sys.executable, str(ROOT / "scripts/agent_bg.py")])}
+           "CLARP_AGENT_BG": shlex.join([sys.executable, str(ROOT / "scripts/agent_bg.py")]),
+           "CLARP_GOAL": shlex.join([sys.executable, str(ROOT / "scripts/agent_tasks.py")])}
     env.pop("CLARP_BACKGROUND_WORKER_PID", None)
     log = host.root / "render.log"
-    handle = subprocess.run(
-        [str(ROOT / "skills/clarp-background-jobs/scripts/run_detached_job.sh"), "rachel",
-         "render-intro", "render", "Render intro", str(log), "--", "sh", "-c", "sleep 2; echo rendered"],
-        env=env, capture_output=True, text=True, timeout=40, check=True).stdout.strip()
-    p = arm(host, p, kind="dependency", key="render-intro", job_handle=handle,
-            reason="Waiting for the render", due_at=int(time.time() * 1000) + 600000)
-    host.stop()
-    if worker == "killed":  # it dies while the Host is down, without a receipt
+    seconds = {"finishes": 2, "killed": 8, "paused": 2, "cancelled": 60}[case]
+    out = subprocess.run(
+        [str(ROOT / "skills/clarp-background-jobs/scripts/run_detached_job.sh"),
+         "--goal", p["plan_id"], "--deadline", "600", "rachel", "render-intro", "render",
+         "Render intro", str(log), "--", "sh", "-c", f"sleep {seconds}; echo rendered"],
+        env=env, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    p = host.request("/task-plans?session=rachel")["plans"][0]
+    continuation = p["goal"]["continuation"]
+    assert (continuation["dependency_key"], continuation["job_handle"]) == ("render-intro", out.stdout.strip())
+
+    def job(field):
         with sqlite3.connect(host.root / "state.sqlite") as con:
-            pid = con.execute("SELECT worker_pid FROM background_jobs WHERE job_id='render-intro'").fetchone()[0]
-        os.killpg(os.getpgid(pid), signal.SIGKILL)
-    time.sleep(4)  # the render finishes while the Host is down
-    host.start()
-    rows = wait_wake(host)
+            return con.execute(f"SELECT {field} FROM background_jobs WHERE job_id='render-intro'").fetchone()[0]
+
+    if case == "paused":
+        action(host, p, "pause", {"reason": "User paused this outcome"})
+        deadline = time.time() + 15
+        while job("status") == "running" and time.time() < deadline:
+            time.sleep(0.2)
+        time.sleep(3)  # recovery ticks run; a paused goal must stay asleep
+        with sqlite3.connect(host.root / "state.sqlite") as con:
+            assert con.execute("SELECT count(*) FROM messages WHERE message_id LIKE 'u-task-goal-%'").fetchone()[0] == 0
+        assert job("status") == "succeeded"
+        return
+    if case == "cancelled":
+        handle = out.stdout.strip()
+        subprocess.run([*shlex.split(env["CLARP_AGENT_BG"]), "rachel", "job-cancel", handle],
+                       env=env, check=True, capture_output=True, timeout=20)
+    else:
+        host.stop()
+        if case == "killed":  # dies while the Host is down, without a receipt
+            os.killpg(os.getpgid(job("worker_pid")), signal.SIGKILL)
+        time.sleep(4)
+        host.start()
+    rows = wait_wake(host)  # also waits for the owner's actual reply
     p = host.request("/task-plans?session=rachel")["plans"][0]
     result = p["goal"]["continuation"]["dependency_result"]
+    assert rows[0][0] == "u-" + p["goal"]["continuation"]["request_id"]
     history = [h["kind"] for h in p["goal"]["history"]]
     assert ["dependency_result", "wake_claim", "dispatch_admitted"] == [
         k for k in history if k in {"dependency_result", "wake_claim", "dispatch_admitted"}]
-    assert rows[0][0] == "u-" + p["goal"]["continuation"]["request_id"]
-    if worker == "finishes":
-        assert (result["outcome"], result["outcome_state"]) == ("succeeded", "succeeded")
-        assert Path(f"{log}.exit").read_text().strip() == "0"
-        assert log.read_text().strip() == "rendered"
-    else:
-        assert (result["outcome"], result["outcome_state"], result["terminal_reason"]) == (
-            "failed", "unknown", "worker_vanished")
-        assert not Path(f"{log}.exit").exists()
+    expected = {"finishes": ("succeeded", "succeeded", ""),
+                "killed": ("failed", "unknown", "worker_vanished"),
+                "cancelled": ("cancelled", "cancelled", "")}[case]
+    assert (result["outcome"], result["outcome_state"], result["terminal_reason"])[:2] == expected[:2]
+    if case == "finishes":
+        assert Path(f"{log}.exit").read_text().strip() == "0" and log.read_text().strip() == "rendered"
+    if case == "killed":
+        assert result["terminal_reason"] == "worker_vanished" and not Path(f"{log}.exit").exists()
+    if case == "cancelled":
+        deadline = time.time() + 30
+        while not Path(f"{log}.exit").exists() and time.time() < deadline:
+            time.sleep(0.2)
+        assert Path(f"{log}.exit").read_text().strip() != "0"   # its command was stopped
 
 
 def test_lost_worker_timeout_replans_and_stale_wake_is_rejected(host):
