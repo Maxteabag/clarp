@@ -95,7 +95,12 @@ if (pending && typeof pending.then === "function") {
 ```
 
 Catch rejections and keep the draft available. Acceptance is not completed agent
-work. Archiving a form hides it from the inbox; ready/active forms remain open
+work. Host contract 50 carries the native user's `synthesize_audio` preference
+with the immutable submission into the normal voice preamble and configured
+reply synthesis. The native wrapper owns this flag; HTML answer data must not
+choose a recipient, audio provider or delivery policy. Retries keep the original
+preference. Previously delivered answers are not replayed to obtain speech.
+Archiving a form hides it from the inbox; ready/active forms remain open
 for answers. Closing/cancelling or discarding the form stops new submissions.
 
 The wrapper saves drafts on input/change in native storage scoped to Host,

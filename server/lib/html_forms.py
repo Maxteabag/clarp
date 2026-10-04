@@ -14,7 +14,8 @@ SCHEMA = '''CREATE TABLE IF NOT EXISTS form_submissions (
  prompt TEXT NOT NULL,
  status TEXT NOT NULL DEFAULT 'pending',
  created_at INTEGER NOT NULL,
- delivered_at INTEGER
+ delivered_at INTEGER,
+ synthesize_audio INTEGER NOT NULL DEFAULT 0 CHECK (synthesize_audio IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_form_submission_pending ON form_submissions(status,created_at);'''
 from . import db
@@ -73,6 +74,8 @@ def submit(artifact_id: str, data: dict) -> dict:
     try: encoded = json.dumps(answers, sort_keys=True, separators=(',', ':'), allow_nan=False)
     except (ValueError, TypeError) as exc: raise ValueError('answers must be finite JSON') from exc
     if len(encoded.encode()) > 131072: raise ValueError('answers exceed 128 KiB')
+    synthesize_audio = data.get('synthesize_audio', True)
+    if not isinstance(synthesize_audio, bool): raise ValueError('synthesize_audio must be a boolean')
     version = data.get('version')
     digest = hashlib.sha256(json.dumps([artifact_id, version, encoded]).encode()).hexdigest()
     con = db.conn()
@@ -81,6 +84,8 @@ def submit(artifact_id: str, data: dict) -> dict:
         previous = con.execute('SELECT * FROM form_submissions WHERE submission_id=?', (submission_id,)).fetchone()
         if previous:
             if previous['payload_hash'] != digest: raise ValueError('submission ID already used for different answers')
+            if 'synthesize_audio' in data and bool(previous['synthesize_audio']) != synthesize_audio:
+                raise ValueError('submission ID already used for a different audio preference')
             result = receipt(previous)
         else:
             form = artifacts.get(artifact_id)
@@ -98,8 +103,8 @@ def submit(artifact_id: str, data: dict) -> dict:
                       "These are user preferences for review, not approval to perform protected actions. "
                       "Interpret the answers in the context of the originating plan.\nAnswers:\n"+encoded)
             con.execute('''INSERT INTO form_submissions(submission_id,artifact_id,version,session,
-                answers_json,payload_hash,prompt,created_at) VALUES(?,?,?,?,?,?,?,?)''',
-                (submission_id, artifact_id, version, form['session'], encoded, digest, prompt, db.now_ms()))
+                answers_json,payload_hash,prompt,created_at,synthesize_audio) VALUES(?,?,?,?,?,?,?,?,?)''',
+                (submission_id, artifact_id, version, form['session'], encoded, digest, prompt, db.now_ms(), int(synthesize_audio)))
             result = receipt(con.execute('SELECT * FROM form_submissions WHERE submission_id=?',(submission_id,)).fetchone())
         con.execute('COMMIT')
         return result

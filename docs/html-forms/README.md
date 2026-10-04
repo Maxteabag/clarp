@@ -13,6 +13,12 @@ questions require a new artifact, preserving earlier responses and drafts.
 
 `POST /artifacts/{id}/submit` accepts `{submission_id, version, answers}` and
 returns `{accepted, submission_id, artifact_id, version, delivery_status}`.
+Host contract 50 accepts optional boolean `synthesize_audio`, default true as for
+ordinary user messages. Native clients persist their current reply-audio/mute
+choice in the original submission body. The Host snapshots it with the receipt;
+retries cannot alter the accepted preference. Delayed form delivery uses the
+same voice preamble and configured synthesis as an ordinary user turn. Existing
+receipts remain unchanged and are never replayed by this repair.
 The recipient is resolved from the stored artifact, never client input. The
 receipt and pending delivery snapshot are committed in the same transaction.
 An identical ID/payload retry returns the existing receipt. Reusing an ID for
