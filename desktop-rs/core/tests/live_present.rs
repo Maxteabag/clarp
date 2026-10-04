@@ -141,7 +141,7 @@ fn a_settled_turn_folds_its_work_and_keeps_what_failed_or_stopped_in_view() {
     assert_eq!(p.entries[0].kind, Kind::Fold);
     assert_eq!(p.entries[0].key, "live:fold:tr-1");
     assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:msg_01:1", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"]);
-    assert_eq!(p.entries[2].text, "The failure came from an off-by-one ");
+    assert_eq!(p.entries[2].text, "The failure came from an off-by-one", "as written: trimmed, like `/log`");
     assert_eq!(p.entries[2].status, "interrupted");
     assert_eq!(p.entries[3].meta, "interrupted");
     let open = present(&view, &[], &options(&["live:fold:tr-1"], 1759480012000));
@@ -411,8 +411,8 @@ fn a_streaming_message_never_shows_voice_markup() {
     for (index, chunk) in chunks.iter().enumerate() {
         full.push_str(chunk);
         let event = json!({"type": "live", "agent_id": "agent-1", "session": "rachel", "conv": "conv-1", "epoch": "boot-a",
-            "lseq": 100 + index as i64, "server_now_ms": 1759480004400i64 + index as i64,
-            "ops": [{"op": "append", "conv": "conv-1", "id": "cl:msg_01:1", "kind": "message", "rev": 10 + index as i64, "field": "text", "chunk": chunk}]});
+            "lseq": 7 + index as i64, "server_now_ms": 1759480004400i64 + index as i64,
+            "ops": [{"op": "append", "conv": "conv-1", "id": "cl:msg_01:1", "kind": "message", "rev": 2 + index as i64, "field": "text", "chunk": chunk}]});
         view.apply_event(event.as_object().unwrap());
         let p = present(&view, &[], &options(&[], 1759480004500));
         let message = p.entries.iter().find(|e| e.kind == Kind::Message).expect("the message row");
@@ -422,8 +422,8 @@ fn a_streaming_message_never_shows_voice_markup() {
         assert!(message.text.starts_with("Sure"), "{:?}", message.text);
     }
     let done = json!({"type": "live", "agent_id": "agent-1", "session": "rachel", "conv": "conv-1", "epoch": "boot-a",
-        "lseq": 200, "server_now_ms": 1759480004900i64,
-        "ops": [{"op": "done", "conv": "conv-1", "id": "cl:msg_01:1", "kind": "message", "rev": 30, "status": "completed", "started_at_ms": 1759480004300i64, "ended_at_ms": 1759480004900i64}]});
+        "lseq": 7 + chunks.len() as i64, "server_now_ms": 1759480004900i64,
+        "ops": [{"op": "done", "conv": "conv-1", "id": "cl:msg_01:1", "kind": "message", "rev": 2 + chunks.len() as i64, "status": "completed", "started_at_ms": 1759480004300i64, "ended_at_ms": 1759480004900i64}]});
     view.apply_event(done.as_object().unwrap());
     let p = present(&view, &[], &options(&[], 1759480005000));
     let message = p.entries.iter().find(|e| e.kind == Kind::Message).unwrap();

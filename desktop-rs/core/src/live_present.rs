@@ -431,7 +431,10 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
     match text(item, "kind") {
         "message" => {
             entry.kind = Kind::Message;
-            entry.text = text(item, "text").to_owned();
+            // The written reply only, as `/log` rows show it: no voice
+            // markup, and while it streams no tag that is still arriving.
+            let streaming = matches!(status.as_str(), "running" | "pending" | "");
+            entry.text = crate::text::cleaned_display_text(text(item, "text"), streaming);
             entry.phase = text(item, "phase").to_owned();
             if status == "interrupted" {
                 entry.meta = "interrupted".into();
