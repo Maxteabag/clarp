@@ -27,11 +27,13 @@ validates stdin without switching accounts or making provider requests.
 ## Runtime behavior
 
 - A persisted runtime row identifies a conversation; it does not establish
-  unfinished work. At runtime restart, continuity turns are limited to work
-  marked interrupted by that restart. Idle/completed conversations and routine
-  heartbeat checks are not woken. User stops, valid queued work and enrolled
-  goals retain their own authority and recovery paths. This prevents restarting
-  dozens of cold, long conversations merely to obtain `HEARTBEAT_OK`.
+  unfinished work. Runtime restart generates **no continuity prompts**. It
+  restores conversation bindings and marks interrupted work visibly. The agent
+  performing a planned restart owns the inventory, original work and direct
+  targeted continuation; see [runtime restart handoff](runtime-restarts.md).
+  Periodic heartbeats and their Janitor must not independently resume a
+  restart-interrupted turn. User stops, valid queued work and explicitly
+  enrolled goals retain their own authority and recovery paths.
 - A queued goal wake is fenced by its exact request, plan revision, owner and
   native conversation. Permanently superseded packets are retired once with
   payload-free cancellation receipts; temporary capacity/approval/pause waits

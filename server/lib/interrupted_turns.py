@@ -2,12 +2,11 @@
 
 A restart (deploy, update, crash-and-respawn) takes every backend child down
 with it. The turn that was running never reports back, so no assistant row is
-written and no terminal state is recorded. Until now the only party told was
-the agent, through the restart heartbeat; the user's message just sat there
+written and no terminal state is recorded. The user's message would otherwise sit there
 with nothing after it, indistinguishable from an agent that chose to say
 nothing (issue #11).
 
-Boot recovery runs before the restart heartbeat. For every live, non-archived
+Boot recovery marks the interruption without starting inference. For every non-archived
 agent whose latest persisted state is still busy it records an INTERRUPTED
 state (so the existing banner shows) and, when the turn was something the
 user or a user-facing channel asked for, writes a visible marker row under

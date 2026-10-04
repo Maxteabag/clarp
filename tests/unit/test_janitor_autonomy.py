@@ -26,10 +26,11 @@ def test_model_chooses_message_and_cadence_and_noop(env):
     worker.heartbeat_once();assert len(sent)==1
     assert heartbeat.HeartbeatScheduler(send_heartbeat=lambda *_:pytest.fail('Rigid scheduler still active')).run_once()==0
 
-def test_stop_during_model_call_cannot_dispatch(env):
+@pytest.mark.parametrize("source", ["user_stop", "server_restart"])
+def test_stop_or_restart_during_model_call_cannot_dispatch(env, source):
     aid,_=env
     def decide(packet,run):
-        agents.record_state(aid,'interrupted',{'source':'user_stop'})
+        agents.record_state(aid,'interrupted',{'source':source})
         return {'action':'wake','delay_seconds':60,'message':'Continue','reason':'Proposed before stop'}
     worker=service.AutonomyJanitors(lambda *_:pytest.fail('Stopped agent woken'),lambda _:None,decide)
     worker.heartbeat_once()

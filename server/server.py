@@ -6025,15 +6025,12 @@ def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
         resume_persisted_agents(ctx)
     if restart_recovery and runtime_client is None:
         # Mark the turns the previous process took down with it before the
-        # restart heartbeat asks the agents to carry on (issue #11).
+        # restarting agent chooses explicit continuations (issue #11).
         from lib import interrupted_turns
         interrupted = interrupted_turns.recover_after_restart(
             stream=getattr(ctx, "stream", None))
         if interrupted:
             log("turnRestartRecovery", f"marked={len(interrupted)}")
-        restart_heartbeats = workers.get("heartbeat").run_restart_recovery_once()
-        if restart_heartbeats:
-            log("heartbeatRestartRecovery", f"sent={restart_heartbeats}")
     try:
         recovered_queues = TurnDispatchService(ctx).recover_queued()
     except Exception as exc:  # runtime may still be starting; its own boot recovers
