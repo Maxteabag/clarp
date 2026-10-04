@@ -35,13 +35,15 @@ BACKGROUND_TASK_CONTEXT = (
     "Clarp: this background command belongs to the current turn. Clarp runs one "
     "Claude process per turn, and when your reply ends, that process exits and "
     "this task stops with it: you will not be notified when it finishes, and a "
-    "watcher loop here stops too. A process you start detached (setsid or nohup) "
-    "keeps running, but nothing reports its result back to you. If its result "
-    "must reach you after this turn, start it as a registered job and attach a "
-    "clarp-goal dependency with its job handle and a deadline before you reply "
-    "(clarp-background-jobs skill, \"Completion that must wake you\"). That wake "
-    "happens only while goal recovery runs on this Host; if the goal shows "
-    "paused or blocked, tell the user you will not be woken."
+    "watcher loop here stops too. A process you detach with setsid or nohup "
+    "outlives the turn but still belongs to the Clarp runtime service, so a "
+    "runtime restart can kill it, and nothing reports its result to you. For work "
+    "whose result must reach you, start it with run_detached_job.sh from the "
+    "clarp-background-jobs skill (\"Completion that must wake you\"): where a "
+    "user systemd manager runs, it runs as its own service, and --goal attaches "
+    "a goal dependency that wakes you when it ends. That wake happens only while "
+    "goal recovery runs on this Host; if "
+    "the goal shows paused or blocked, tell the user you will not be woken."
 )
 
 
