@@ -86,6 +86,17 @@ export struct ReceiptRow {
     linked: bool,
 }
 
+// A message another agent sent into the chat: folded to one line,
+// "<sender> prompted · <line>", until O (or a click) opens it by its key.
+export struct PromptRow {
+    // "" for a row that is not another agent's prompt.
+    key: string,
+    sender: string,
+    initial: string,
+    line: string,
+    expanded: bool,
+}
+
 export struct MessageRow {
     id: string,
     // user, assistant, activity
@@ -108,6 +119,7 @@ export struct MessageRow {
     // A live item row (author "live", or an assistant message item).
     live: LiveRow,
     receipt: ReceiptRow,
+    prompt: PromptRow,
 }
 
 // One tool call (ToolCard.qml): name, summary, status; details on request.

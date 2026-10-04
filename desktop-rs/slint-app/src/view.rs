@@ -412,6 +412,7 @@ pub(crate) fn message_row(
         artifacts: ModelRc::new(VecModel::<crate::ArtifactItem>::default()),
         live: crate::LiveRow::default(),
         receipt: receipt.unwrap_or_default(),
+        prompt: crate::PromptRow::default(),
     }
 }
 
@@ -596,6 +597,66 @@ mod tests {
         assert_eq!(text(&second[30]), super::styled("Partial answer, growing", false), "the changed row shows its new text");
         cache.rows(&present(&messages), true, &expanded);
         assert_eq!(cache.built, 63, "a presentation setting builds every row again");
+    }
+
+    fn prompt_rows(messages: &[serde_json::Value]) -> Vec<clarp_core::presentation::PresentedRow> {
+        let messages: Vec<Message> = messages.iter().map(|m| Message::from_json(m.as_object().expect("an object"))).collect();
+        clarp_core::presentation::present(&messages, &mut clarp_core::presentation::Settings::default(), None).rows
+    }
+
+    fn block_kinds(row: &crate::MessageRow) -> Vec<String> {
+        slint::Model::iter(&row.blocks).map(|b| b.kind.to_string()).collect()
+    }
+
+    /// Another agent's message shows folded to one line, "Rachel prompted ·
+    /// <first line>"; its key opens it to the whole message as Markdown.
+    #[test]
+    fn an_agents_prompt_is_one_line_until_opened() {
+        let rows = prompt_rows(&[serde_json::json!({"id": "u7", "role": "user", "origin": "agent", "sender_name": "Rachel",
+            "text": "## Build plan\n\nRun `cargo test` first.\n\n- then report"})]);
+        let closed = super::message_row(&rows[0], false, &std::collections::HashSet::new());
+        assert_eq!(closed.prompt.key, "a2a:u7");
+        assert_eq!(closed.prompt.sender, "Rachel");
+        assert_eq!(closed.prompt.initial, "R");
+        assert_eq!(closed.prompt.line, "Build plan");
+        assert!(!closed.prompt.expanded, "folded by default");
+        assert_eq!(closed.sender, "", "the folded line names the sender, not a second label");
+        let open = super::message_row(&rows[0], false, &["a2a:u7".to_owned()].into_iter().collect());
+        assert!(open.prompt.expanded);
+        assert_eq!(block_kinds(&open), ["heading", "prose", "prose"], "opened, the whole message as Markdown");
+    }
+
+    /// The user's own words and the agent's replies are not folded.
+    #[test]
+    fn own_messages_and_replies_are_not_prompts() {
+        let rows = prompt_rows(&[
+            serde_json::json!({"id": "u1", "role": "user", "text": "Hello\nthere"}),
+            serde_json::json!({"id": "a1", "role": "assistant", "text": "Hi"}),
+        ]);
+        for row in &rows {
+            let shown = super::message_row(row, false, &std::collections::HashSet::new());
+            assert_eq!(shown.prompt.key, "", "{}", shown.id);
+        }
+    }
+
+    /// Opening a prompt builds its row again (the cache never shows a stale
+    /// fold); the other rows are reused.
+    #[test]
+    fn a_prompts_open_state_is_kept_by_id_through_the_cache() {
+        let rows = prompt_rows(&[
+            serde_json::json!({"id": "u1", "role": "user", "text": "Hello"}),
+            serde_json::json!({"id": "u7", "role": "user", "origin": "agent", "sender_name": "Rachel", "text": "Line one\nLine two"}),
+        ]);
+        let mut cache = super::RowCache::default();
+        let mut expanded = std::collections::HashSet::new();
+        assert!(!cache.rows(&rows, false, &expanded)[1].prompt.expanded);
+        expanded.insert("a2a:u7".to_owned());
+        let open = cache.rows(&rows, false, &expanded);
+        assert!(open[1].prompt.expanded, "opened by its key");
+        assert_eq!(cache.built, 3, "only the prompt is built again");
+        assert!(cache.rows(&rows, false, &expanded)[1].prompt.expanded, "and stays open when presented again");
+        expanded.remove("a2a:u7");
+        assert!(!cache.rows(&rows, false, &expanded)[1].prompt.expanded, "folds again");
     }
 
     /// A live item's row is reused until its entry changes; a streaming

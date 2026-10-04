@@ -132,6 +132,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
             expanded: entry.expanded,
         },
         receipt: crate::ReceiptRow::default(),
+        prompt: crate::PromptRow::default(),
     }
 }
 
