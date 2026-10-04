@@ -45,3 +45,13 @@ See `docs/protocol.md`.
 See the managed `clarp-html-forms` skill for authoring, draft restoration,
 custom controls and publishing. Native implementation and testing live in the
 separate iOS repository.
+
+
+Interactive pages may use `window.clarpForm.submit(answers, {stayOpen: true})`
+when `window.clarpForm.capabilities?.stayOpen` is true. This native presentation
+option does not change the Host submission contract. After durable acceptance,
+the native wrapper retains the WebKit page, archives its local receipt and
+prepares a fresh submission ID only for the next explicit Send. Existing HTML
+can choose **Send and keep open** in native confirmation; it needs no payload
+revision. Default submissions return to chat as before. Ambiguous retries keep
+the original ID, payload, reply-audio preference and presentation choice.

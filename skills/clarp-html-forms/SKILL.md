@@ -76,7 +76,21 @@ native wrapper. Use `name` as a stable answer key. Custom controls can supply an
 JSON object through `window.clarpForm.setAnswers(answers)`. Restore custom state
 from `window.clarpForm.getDraft()` or the `clarpformready` event's `detail`.
 Call `window.clarpForm.submit(answers)` to submit custom state, or use a normal
-HTML form submit button. Page-requested submission opens a native confirmation;
+HTML form submit button. For an interactive game, use `window.clarpForm.submit(answers, {stayOpen: true})`.
+The receipt Promise still proves only durable acceptance. The same page remains
+mounted, a native receipt notice appears, and the next user-confirmed submission
+gets a new ID. Repeated calls while one submission is pending share its Promise.
+Check `window.clarpForm.capabilities?.stayOpen === true` before relying on this;
+older clients ignore the second argument and may return to chat. Existing
+immutable forms can also choose native "Send and keep open" in confirmation,
+without modifying their published HTML or answers. "Send and return to chat"
+restores the usual navigation. Native "New answers" keeps the page mounted.
+The choice persists with an ambiguous pending draft; retrying does not create a
+new ID or alter its audio preference. Reply audio uses the ordinary global player
+while the artifact remains open, subject to the existing mute/voice policy.
+Do not republish or replay already accepted answers just to enable this option.
+
+Page-requested submission opens a native confirmation;
 Clarp also provides its own Send answers button for direct user submission.
 Opening a form or running its scripts cannot send answers without a user action.
 A receipt-aware native bridge returns a Promise from `submit`: it resolves only
