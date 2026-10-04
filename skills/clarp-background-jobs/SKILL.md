@@ -98,9 +98,10 @@ render was killed mid-way by the runtime's release handoff, its own closing
 `job-fail` and self-prompt never ran, and the job read failed only when its
 heartbeat timed out ten minutes later. Nothing woke the agent either time.
 
-When the result must reach you after this turn, keep four things separate:
-the work itself, the worker that watches it, the worker's durable receipt,
-and the wake that brings you back. Use the worker script for all four:
+When the result must reach you after this turn, use the one supported
+launch. It composes the four things that must all hold, so you do not have
+to remember them: the work runs in its own service, its own worker registers
+the job, your goal stores the wake, and the worker writes the receipt.
 
 ```sh
 "$SKILL_DIR/scripts/run_detached_job.sh" --goal "$PLAN_ID" --deadline 7200 \
@@ -109,37 +110,36 @@ and the wake that brings you back. Use the worker script for all four:
 ```
 
 (`$SKILL_DIR` is this skill's directory, for example
-`~/.claude/skills/clarp-background-jobs`; the goal comes from `clarp-goal`.)
+`~/.claude/skills/clarp-background-jobs`; `$PLAN_ID` is the goal that should
+be woken, from `clarp-goal list`/`create`. The command and strategy are
+yours; the launch only carries them.)
 
+- **Exit 0 means ready**: the job is registered by its own worker, the
+  dependency is stored on the goal and read back, and only then has the
+  command started. It prints the job handle.
+- **Nothing starts otherwise.** Exit 4: the goal cannot carry the wake (not
+  yours, not active, recovery stopped, or already waiting on something
+  else; if that is a job that has already ended, read its result and
+  checkpoint the goal first); exit 2: usage; exit 3: the command did not
+  run and the job is closed as not started. The worker and the launcher make
+  that call together, so exit 0 and exit 3 are always the truth. If your
+  turn dies mid-launch, the worker checks the goal itself for up to two
+  minutes: a stored wake still runs the command once, an unstored one never
+  runs it, and a relaunch never collides with the old attempt.
+- `--no-wake` starts the command with no dependency. Nobody will tell you
+  when it ends; say so.
 - With a user systemd manager (Linux) the worker runs as its own service,
   outside the runtime's cgroup, so a runtime restart does not kill it. The
-  command gets your exact environment, umask and open-file limit; the
-  environment and arguments travel through private files, never through
-  systemd's command line or logs (the working directory is a unit property).
-  When the command ends, its unit ends, and anything it left running ends
-  too. Without a user systemd manager the script warns that the worker is
-  not restart-safe; say so to the user.
-- It registers the job under its own PID, so a dead worker is noticed within
-  seconds (`worker_vanished`) instead of after the ten-minute heartbeat
-  timeout. Registering a job yourself from the turn records no worker PID.
-- It keeps the log, writes `LOG.exit` with the exit status, and reports
-  `job-finish` or `job-fail` itself. A cancel stops its own command.
-- `--goal` attaches the dependency before the script returns, keeping the
-  goal's own progress and next work. It prints the handle and exits 0 when
-  both are done. It exits 3, with the reason, if the job is running but the
-  dependency is not attached: the goal is paused or not yours, or it already
-  waits on another job (a goal waits on one dependency at a time). Attach it
-  yourself when that is right:
-
-  ```sh
-  clarp-goal checkpoint "$PLAN_ID" "$REVISION" "{\"progress\":\"Render started\",
-    \"next_work\":\"Read render.log.exit and the log before reporting\",
-    \"continuation\":{\"kind\":\"dependency\",\"key\":\"render-intro-2\",
-    \"job_handle\":\"$HANDLE\",\"reason\":\"Waiting for the render\",
-    \"due_at\":$(( ($(date +%s) + 7200) * 1000 ))}}"
-  ```
-- A job id names one run. A cancelled id is refused; use `job-restart` only
-  for a deliberate rerun of that same target.
+  command gets your exact environment, umask and open-file limit, through
+  private files rather than systemd's command line or logs (the working
+  directory is a unit property). When the command ends, its unit ends, and
+  anything it left running ends too. Without a user systemd manager the
+  script warns that the worker is not restart-safe; say so to the user.
+- The worker registers the job under its own PID, so a dead worker is
+  noticed within seconds (`worker_vanished`); registering a job yourself
+  from the turn records no worker PID. It keeps the log, writes `LOG.exit`,
+  and reports finish or fail itself. A cancel stops its own command. A job
+  id names one run: use a new id for a new run.
 
 When the job ends, goal recovery records it as the dependency result
 (`outcome` is how the job ended, `outcome_state` what is known of the work,
@@ -155,7 +155,8 @@ script never reaches it.
 That wake depends on goal recovery running on this Host. The goal's
 `continuation.observed_state` reads `host_paused` when autonomous wakes are
 paused (`CLARP_HEARTBEATS_DISABLED`), and `blocked`, `attention` or
-`owner_changed` when it cannot wake you. A paused or cancelled goal is not
+`owner_changed` when it cannot wake you. A paused goal is not woken until it
+is resumed, and then with the job's actual ending; a cancelled goal is never
 woken. Then tell the user so, say where the result will appear (job detail,
 the exit file), and check it yourself on the next turn. Never describe a
 registered job or a scheduled check as a promise that you will report back.
