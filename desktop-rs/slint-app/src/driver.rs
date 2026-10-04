@@ -358,6 +358,7 @@ pub fn start_check(name: &str, out: String) {
         "overview" => profile_checks::overview_check(out),
         "extras" => profile_checks::extras_check(out),
         "artifacts" => artifact_checks::artifacts_check(out),
+        "receipts" => artifact_checks::receipts_check(out),
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),

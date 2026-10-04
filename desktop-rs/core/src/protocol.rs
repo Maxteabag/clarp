@@ -5,7 +5,7 @@ use chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone, Utc};
 use serde_json::{Map, Value, json};
 
 use crate::json::{self, Object};
-use crate::text::{cleaned_display_text, plain_preview_text};
+use crate::text::cleaned_display_text;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Agent {
