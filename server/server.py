@@ -1055,6 +1055,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/background-jobs/"):
             return self._handle_background_job_detail(
                 path[len("/background-jobs/"):].strip("/"))
+        if path.startswith("/artifacts/") and path.endswith("/events-config"):
+            return self._handle_artifact_events_config(unquote(path[len("/artifacts/"):-len("/events-config")].strip("/")), write=False)
+        if path.startswith("/artifacts/") and path.endswith("/events"):
+            return self._handle_artifact_events(unquote(path[len("/artifacts/"):-len("/events")].strip("/")), write=False)
         if path.startswith("/artifacts/") and path.endswith("/revisions"):
             from lib import html_report_revisions
             artifact_id = unquote(path[len("/artifacts/"):-len("/revisions")].strip("/"))
@@ -2903,11 +2907,11 @@ class Handler(BaseHTTPRequestHandler):
             from lib import podcast_history_http
             return podcast_history_http.handle(self, "POST")
         if path.startswith("/artifacts/"):
-            for action in ("archive", "discard", "submit", "pin"):
+            for action in ("archive", "discard", "submit", "pin", "events", "events-config"):
                 suffix = "/" + action
                 if path.endswith(suffix):
                     artifact_id = unquote(path[len("/artifacts/"):-len(suffix)].strip("/"))
-                    return getattr(self, "_handle_artifact_" + action)(artifact_id)
+                    return getattr(self, "_handle_artifact_" + action.replace("-", "_"))(artifact_id)
             return self._handle_artifact_update(unquote(path[len("/artifacts/"):].strip("/")))
         return self._send(404, b"not found")
 
@@ -4527,6 +4531,37 @@ class Handler(BaseHTTPRequestHandler):
             order=(qs.get("order", ["updated"])[0] or "updated").strip(),
         )
         return self._json_ok({"artifacts": [artifacts.response_representation(row, representation) for row in rows]})
+
+    def _handle_artifact_events_config(self, artifact_id: str, *, write: bool = True):
+        if getattr(self, "_request_device_scope", "") == "limited":
+            return self._json_error(403, "full device access required")
+        from lib import html_form_events
+        try:
+            return self._json_ok(html_form_events.configure(artifact_id, self._read_json()) if write
+                                 else html_form_events.configuration(artifact_id))
+        except (ValueError, TypeError) as exc:
+            return self._json_error(400, str(exc))
+
+    def _handle_artifact_events(self, artifact_id: str, *, write: bool = True):
+        # Telemetry may contain personal answers; limited devices cannot read it.
+        if getattr(self, "_request_device_scope", "") == "limited":
+            return self._json_error(403, "full device access required")
+        from lib import html_form_events
+        try:
+            if write:
+                return self._json_ok(html_form_events.append(artifact_id, self._read_json()))
+            query = parse_qs(urlparse(self.path).query)
+            through = query.get("through", [None])[0]
+            result = html_form_events.read(artifact_id, after=int(query.get("after", [0])[0]),
+                limit=int(query.get("limit", [100])[0]), through=int(through) if through is not None else None)
+            format = query.get("format", ["json"])[0]
+            if format == "jsonl":
+                body = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in result["events"]).encode()
+                return self._send(200, body, "application/x-ndjson")
+            if format != "json": raise ValueError("unsupported event format")
+            return self._json_ok(result)
+        except (ValueError, TypeError) as exc:
+            return self._json_error(409 if write else 400, str(exc))
 
     def _handle_artifact_submit(self, artifact_id: str):
         from lib import html_forms

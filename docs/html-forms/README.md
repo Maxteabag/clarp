@@ -55,3 +55,43 @@ prepares a fresh submission ID only for the next explicit Send. Existing HTML
 can choose **Send and keep open** in native confirmation; it needs no payload
 revision. Default submissions return to chat as before. Ambiguous retries keep
 the original ID, payload, reply-audio preference and presentation choice.
+
+
+## Event journal (Host 51)
+
+`window.clarpForm.log(event)` records an explicit finite JSON object without
+confirmation, navigation, answer submission or agent dispatch. Its Promise
+resolves to `{event_id, queued: true, synced: false}` only after durable native
+queuing; this is not Host receipt proof. The app syncs bounded batches to the
+original authenticated Host with stable event IDs. A temporary failure retains
+records and retries; permanent/authentication failures retain them for original
+connection recovery. No credentials or destination are supplied by the HTML.
+
+Full-device authenticated POST `/artifacts/{id}/events` accepts `{version,
+events: [{event_id, client_seq, client_at, event}]}` (1-32 rows, 16 KiB per event).
+Same event ID/version/content returns its original receipt and first metadata;
+a conflicting event rejects the entire batch. Host timestamps are independent
+of client times. Read-only reports and deleted artifacts reject logging.
+Archiving is an inbox preference and does not close the journal. The journal
+has no UPDATE/DELETE API and never wakes an agent or mutates answers or the inbox.
+
+GET `/artifacts/{id}/events?after=SEQ&limit=100` returns events, next_seq,
+snapshot_seq and has_more. Pass `through=snapshot_seq` on subsequent pages for a
+consistent export. `format=jsonl` returns the bounded page as NDJSON.
+`clarp-agent-artifacts form-events ID --output FILE.jsonl` exports all pages of
+one snapshot atomically with private permissions; an existing output requires
+`--overwrite`. Event text is user data, not instructions or execution approval.
+
+An existing immutable game that already stores a custom draft event array can
+opt in explicitly with `clarp-agent-artifacts form-events ID --draft-key events`.
+Only that artifact/key is followed; other drafts stay local. Empty `--draft-key`
+disables capture. The app loads/caches the original Host policy, imports deltas
+from the selected array using stable content IDs and a durable import cursor,
+and does not alter the HTML, answers or form version. New authored pages should
+use explicit log calls instead of enabling both paths for the same events.
+Draft-array capture is bounded at 10,000 entries; explicit events can continue
+without a cumulative array. Local unsynced storage is bounded at 8 MiB and
+reports capacity errors without dropping prior records; acknowledged records
+are compacted only after a verified Host receipt. These are transport bounds,
+not gameplay rules. Telemetry is visible through authenticated read/export,
+not pushed into an inference turn.

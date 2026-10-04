@@ -159,6 +159,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 110:
             _migrate_to_v110(con)
 
+        if version < 111:
+            _migrate_to_v111(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -813,3 +816,13 @@ def _migrate_to_v110(con: sqlite3.Connection) -> None:
     columns = {row[1] for row in con.execute("PRAGMA table_info(form_submissions)")}
     if "synthesize_audio" not in columns:
         con.execute("ALTER TABLE form_submissions ADD COLUMN synthesize_audio INTEGER NOT NULL DEFAULT 0 CHECK (synthesize_audio IN (0,1))")
+
+
+def _migrate_to_v111(con: sqlite3.Connection) -> None:
+    """A separate telemetry journal; original artifacts and answers are untouched."""
+    statement = ""
+    for line in db_schema._HTML_FORM_EVENTS_SCHEMA.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            con.execute(statement); statement = ""
+    if statement.strip(): raise RuntimeError("incomplete form event schema")
