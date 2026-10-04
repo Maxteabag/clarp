@@ -1,6 +1,7 @@
 """Representative Claude 2.1.283 receipts; no paid model or live processes."""
 import json
 import os
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -319,6 +320,8 @@ def test_real_hook_shell_and_legacy_helper_automatically_deduplicate(case):
     assert hook.returncode == 0, hook.stderr
     response = json.loads(hook.stdout)['hookSpecificOutput']
     assert 'permissionDecision' not in response
+    # Outside a Clarp-run turn (no runner token) the task does not end with a reply.
+    assert 'additionalContext' not in response
     updated = response['updatedInput']
     assert updated['command'].endswith(command)
     assert {k:v for k,v in updated.items() if k != 'command'} == {k:v for k,v in inputs.items() if k != 'command'}
@@ -499,3 +502,172 @@ def test_stale_launch_and_receipt_with_same_timestamp_keep_task_identity(case):
     job=jobs.get(ident)
     assert job['metadata']['provider_task_id']==TASK
     assert job['status']=='succeeded'
+
+
+TOOL2 = 'toolu_02SuccessorTurnTask0000000'
+
+
+def _turn(owner, pid=None):
+    token = provider.new_turn_token()
+    provider.turn_started(token, agent_id=owner['agent_id'], provider='claude',
+                          pid=pid or os.getpid())
+    return token
+
+
+def test_normal_turn_exit_ends_its_watcher_while_the_detached_render_survives(case, tmp_path, monkeypatch):
+    """Ziggy, 2026-10-04: the render ran detached and finished; the background
+    Bash watching it ended with the ordinary claude -p turn exit, and the job
+    stayed "running" until the next user turn 45 minutes later. A fake CLI in
+    the real runner calls the real PreToolUse hook and exits like a turn."""
+    import pathlib, stat, subprocess, sys, textwrap
+    from lib.backend.registry import by_id
+    owner, path, ident = case
+    root = pathlib.Path(__file__).resolve().parents[2]
+    db.conn().execute('INSERT INTO runtimes(agent_id,session,backend_session_id,started_at) VALUES (?,?,?,?)',
+                      (owner['agent_id'], owner['session'], NATIVE, db.now_ms() - 1000))
+    render, hook_out = tmp_path / 'render.done', tmp_path / 'hook.json'
+    payload = {'session_id': NATIVE, 'tool_use_id': TOOL, 'tool_name': 'Bash', 'tool_input': {
+        'command': f'until [ -f {render} ]; do sleep 1; done', 'run_in_background': True}}
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    fake = bin_dir / 'claude'
+    fake.write_text(textwrap.dedent(f"""\
+        #!{sys.executable}
+        import json, subprocess, sys
+        subprocess.Popen(['sh', '-c', 'sleep 2; touch {render}'], start_new_session=True)
+        hook = subprocess.run([sys.executable, {str(root / 'plugin/hooks/tool_activity.py')!r}],
+                              input={json.dumps(payload)!r}, capture_output=True, text=True)
+        open({str(hook_out)!r}, 'w').write(hook.stdout)
+        print(json.dumps({{"type": "system", "subtype": "init", "session_id": {NATIVE!r}}}))
+        print(json.dumps({{"type": "result", "subtype": "success", "result": "Render running"}}))
+        """))
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv('PATH', f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv('CLAUDE_PWA_DB', str(db.DB_PATH))
+    monkeypatch.setenv('CLARP_CODE_ROOT', str(root / 'server'))
+
+    handle = by_id('claude').start_turn(text='Re run it', cwd=tmp_path, agent_id=owner['agent_id'],
+                                        session=owner['session'], backend_session_id=NATIVE)
+    handle.wait(timeout=15)
+    handle.drain_thread.join(timeout=15)
+    output = json.loads(hook_out.read_text())['hookSpecificOutput']
+    assert 'permissionDecision' not in output and output['updatedInput']['command'].endswith(
+        payload['tool_input']['command'])
+    assert 'Completion that must wake you' in output['additionalContext']
+    # The transcript is read on the observer's schedule, after the exit.
+    append(path, launch(), receipt())
+    provider.observe(owner, NATIVE, path)
+    job = jobs.get(ident)
+    assert (job['status'], job['outcome_state'], job['terminal_reason']) == (
+        'failed', 'unknown', 'provider_turn_exited_without_result')
+    deadline = time.monotonic() + 10
+    while not render.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert render.exists(), 'the detached render must outlive the turn'
+
+
+def test_delayed_exit_of_an_older_turn_never_stops_a_successor_task(case):
+    owner, path, ident = case
+    old, new = _turn(owner), _turn(owner)
+    successor = provider.job_id(owner['agent_id'], NATIVE, TOOL2)
+    append(path, launch(), receipt(), record('assistant', message={'content': [{
+        'type': 'tool_use', 'id': TOOL2, 'name': 'Bash',
+        'input': {'run_in_background': True, 'command': 'sleep 1'}}]}))
+    provider.observe(owner, NATIVE, path)
+    assert provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, old)
+    assert provider.record_task_turn(owner['agent_id'], NATIVE, TOOL2, new)
+    assert provider.turn_exited(old) == 1
+    assert jobs.get(ident)['metadata']['stop_turn'] == old
+    assert jobs.get(successor)['terminal_at'] is None
+    # An exited turn, or another agent's turn, cannot claim a new task.
+    other = agents.create_agent(persona='Other', voice_id='', cwd=str(path.parent), session='other')
+    foreign = provider.new_turn_token()
+    provider.turn_started(foreign, agent_id=other, provider='claude', pid=os.getpid())
+    assert not provider.record_task_turn(owner['agent_id'], NATIVE, 'toolu_late', old)
+    assert not provider.record_task_turn(owner['agent_id'], NATIVE, 'toolu_foreign', foreign)
+    assert provider.turn_exited(old) == 0  # idempotent
+    assert provider.turn_exited(new) == 1
+    assert jobs.get(successor)['terminal_reason'] == 'provider_turn_exited_without_result'
+
+
+def test_a_completion_record_outranks_the_turn_exit(case):
+    owner, path, ident = case
+    token = _turn(owner)
+    at = db.now_ms() - 5000
+    append(path, launch(at), receipt(at + 1))
+    provider.observe(owner, NATIVE, path)
+    provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, token)
+    provider.turn_exited(token)
+    assert jobs.get(ident)['outcome_state'] == 'unknown'
+    # Written before the exit, imported after it: the provider's record decides.
+    append(path, notice('completed', at=at + 2))
+    provider.observe(owner, NATIVE, path)
+    job = jobs.get(ident)
+    assert (job['status'], job['outcome_state']) == ('succeeded', 'succeeded')
+    assert 'stop_basis' not in job['metadata']
+    # And a recorded completion is never overwritten by a later exit.
+    later = _turn(owner)
+    provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, later)
+    provider.turn_exited(later)
+    assert jobs.get(ident)['status'] == 'succeeded'
+
+
+def test_dead_turn_processes_are_reaped_without_signalling_live_ones(case):
+    import subprocess
+    owner, path, ident = case
+    live = subprocess.Popen(['sleep', '30'])
+    gone = subprocess.Popen(['sleep', '30'])
+    try:
+        live_turn, gone_turn = _turn(owner, live.pid), _turn(owner, gone.pid)
+        unverified = provider.new_turn_token()
+        db.conn().execute("INSERT INTO provider_turns(turn_token,agent_id,provider,pid,start_token,started_at)"
+                          " VALUES (?,?,?,?,'',?)", (unverified, owner['agent_id'], 'claude', 999999, db.now_ms()))
+        append(path, launch(), receipt())
+        provider.observe(owner, NATIVE, path)
+        provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, gone_turn)
+        gone.kill(); gone.wait()   # e.g. the runtime restarted and its drain never ran
+        # The older live turn comes first; it must not hide the dead one.
+        assert provider.reap_exited_turns(limit=1) == 1
+        assert jobs.get(ident)['metadata']['stop_turn'] == gone_turn
+        open_turns = {r[0] for r in db.conn().execute(
+            'SELECT turn_token FROM provider_turns WHERE exited_at IS NULL')}
+        assert open_turns == {live_turn, unverified}
+        assert live.poll() is None
+        # Exited turns are kept long enough for delayed imports, then pruned.
+        db.conn().execute('UPDATE provider_turns SET exited_at=? WHERE turn_token=?',
+                          (db.now_ms() - provider.TURN_RETENTION_MS - 1, gone_turn))
+        provider.ProviderJobObserver().poll_once()
+        assert not db.conn().execute('SELECT 1 FROM provider_turns WHERE turn_token=?', (gone_turn,)).fetchone()
+        assert not db.conn().execute('SELECT 1 FROM provider_task_turns WHERE turn_token=?', (gone_turn,)).fetchone()
+        assert jobs.get(ident)['terminal_reason'] == 'provider_turn_exited_without_result'
+    finally:
+        live.kill(); live.wait()
+
+
+@pytest.mark.parametrize('before_exit', [(), ('launch',)])
+def test_a_task_that_completed_in_its_turn_stays_completed_when_read_after_the_exit(case, before_exit):
+    """The observer reads transcripts on its own schedule, often after the
+    turn has exited. The task's receipt and completion record, imported
+    later, decide; the exit only covers tasks still unfinished."""
+    owner, path, ident = case
+    token = _turn(owner)
+    at = db.now_ms() - 5000
+    if before_exit:
+        append(path, launch(at))
+        provider.observe(owner, NATIVE, path)
+    provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, token)
+    provider.turn_exited(token)
+    append(path, *([] if before_exit else [launch(at)]), receipt(at + 1), notice('completed', at=at + 2))
+    provider.observe(owner, NATIVE, path)
+    job = jobs.get(ident)
+    assert (job['status'], job['outcome_state']) == ('succeeded', 'succeeded')
+
+
+def test_an_unreadable_process_identity_never_closes_a_live_turn(case, monkeypatch):
+    """Out of file descriptors, every /proc read fails; that proves nothing."""
+    owner, path, ident = case
+    token = _turn(owner)              # this test process: alive
+    monkeypatch.setattr(jobs, 'process_start_token', lambda _pid: '')
+    assert provider.reap_exited_turns() == 0
+    assert db.conn().execute('SELECT exited_at FROM provider_turns WHERE turn_token=?',
+                             (token,)).fetchone()[0] is None

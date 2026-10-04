@@ -496,8 +496,21 @@ class ClaudeBackend(Backend):
                          f"session={session or '∅'}")
         # stdin is a pipe here (not DEVNULL like the other runners): the prompt
         # travels as a stream-json user message, written right below.
+        from .. import provider_background_jobs as provider_jobs
+        turn_token = provider_jobs.new_turn_token()
         proc, handle = launch(cmd, cwd=cwd, session=env_session,
-                              stdin=subprocess.PIPE)
+                              stdin=subprocess.PIPE,
+                              env_extra={provider_jobs.TURN_ENV: turn_token})
+        recorded = False
+        if agent_id and not isolated:
+            try:
+                provider_jobs.turn_started(turn_token, agent_id=agent_id,
+                                           provider=self.id, pid=proc.pid)
+                recorded = True
+            except Exception as e:                        # noqa: BLE001
+                log_exception("providerTurnStartFail", e, detail=trace_id)
+        if not recorded:
+            turn_token = ""  # nothing to close at exit
         # Hand the CLI the single user message, then close stdin so it sees EOF and
         # runs exactly one turn. Guard the write: if clarp died on spawn the pipe
         # is already broken, and the drainer will surface the non-zero exit.
@@ -514,7 +527,7 @@ class ClaudeBackend(Backend):
             proc=proc, on_session_init=on_session_init, on_result=on_result,
             on_error=on_error, trace_id=trace_id, agent_id=agent_id,
             handle=handle, session=session, backend_session_id=backend_session_id,
-            stream=stream, isolated=isolated,
+            stream=stream, isolated=isolated, turn_token=turn_token,
         )
         return handle
 
@@ -531,6 +544,7 @@ class ClaudeBackend(Backend):
         backend_session_id: str = "",
         stream=None,
         isolated: bool = False,
+        turn_token: str = "",
     ) -> None:
         """Background thread body. Reads stream-json line by line and fires
         the cared-about callbacks. Swallows every exception — drainer errors
@@ -728,6 +742,20 @@ class ClaudeBackend(Backend):
             pacer.cancel()
             if agent_id and handle is not None and not isolated:
                 self.unregister_handle(agent_id, handle)
+            # This process is gone, and its background Bash tasks with it.
+            # (stdout can close a moment before the exit; past that, the
+            # observer reaps the turn by its process identity.)
+            if turn_token:
+                try:
+                    proc.wait(timeout=5)
+                except Exception:                         # noqa: BLE001
+                    pass
+            if turn_token and proc.poll() is not None:
+                try:
+                    from .. import provider_background_jobs as provider_jobs
+                    provider_jobs.turn_exited(turn_token)
+                except Exception as e:                    # noqa: BLE001
+                    log_exception("providerTurnExitFail", e, detail=trace_id)
 
     # ---- orchestrator routing ----------------------------------------------
 

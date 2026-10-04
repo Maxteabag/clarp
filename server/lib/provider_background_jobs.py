@@ -11,6 +11,8 @@ import json
 import os
 import pathlib
 import re
+import secrets
+import sys
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -25,6 +27,36 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS provider_job_cursors (
  discarding INTEGER NOT NULL DEFAULT 0,
  action_offset INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY(agent_id,native_id))"""
+# A Clarp turn is one provider process. Claude ends its background Bash tasks
+# with that process, so a task is fenced to the exact process that launched it:
+# the runner records each spawn under a fresh token with the process identity,
+# and the PreToolUse hook (running inside that process) records which token
+# launched each background tool call. Native session ids span resumed turns
+# and are not enough on their own.
+TURN_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS provider_turns (
+ turn_token TEXT PRIMARY KEY, agent_id TEXT NOT NULL, provider TEXT NOT NULL,
+ pid INTEGER, start_token TEXT NOT NULL DEFAULT '',
+ started_at INTEGER NOT NULL, exited_at INTEGER)""",
+    """CREATE INDEX IF NOT EXISTS idx_provider_turns_open
+ ON provider_turns(started_at) WHERE exited_at IS NULL""",
+    """CREATE TABLE IF NOT EXISTS provider_task_turns (
+ agent_id TEXT NOT NULL, native_id TEXT NOT NULL, tool_use_id TEXT NOT NULL,
+ turn_token TEXT NOT NULL, recorded_at INTEGER NOT NULL,
+ PRIMARY KEY(agent_id,native_id,tool_use_id))""",
+    """CREATE INDEX IF NOT EXISTS idx_provider_task_turns_token
+ ON provider_task_turns(turn_token)""",
+)
+TURN_ENV = "CLARP_PROVIDER_TURN"
+_TOKEN = re.compile(r"[0-9a-f]{24}\Z")
+# Open turns whose process is gone are closed by the observer (runtime restart
+# or a drain that died); a few per visit, like every other observer write.
+# Every open turn is checked (one /proc read each), so live long turns at the
+# head of the list cannot hide dead ones behind them.
+MAX_REAPED = 8
+MAX_OPEN_CHECKED = 512
+# Delayed transcript imports need an exited turn's links for hours, not weeks.
+TURN_RETENTION_MS = 7 * 86_400_000
 MAX_BYTES = 256 * 1024
 MAX_RECORD_BYTES = 4 * 1024 * 1024
 MAX_ACTIONS = 64
@@ -136,6 +168,127 @@ def apply_actions(c, owner: dict, native: str, actions: list[dict]) -> None:
             if not row or json.loads(row[0]).get('provider_task_id') != fields['task']:
                 continue
         _write(c, owner, native, **fields)
+    # Evidence imported after its turn ended (the transcript is read on the
+    # observer's schedule, not the runner's) still meets that end, but only
+    # after the whole batch: its own receipt or completion record comes first.
+    for tool in dict.fromkeys(a['tool'] for a in actions):
+        _project_turn_exit(c, owner['agent_id'], native, tool)
+
+
+def new_turn_token() -> str:
+    return secrets.token_hex(12)
+
+
+def turn_started(token: str, *, agent_id: str, provider: str, pid: int) -> None:
+    """Record one provider process: its token and the identity of its pid."""
+    if not (agent_id and _TOKEN.fullmatch(token or '')):
+        return
+    c = db.conn()
+    c.execute("""INSERT OR IGNORE INTO provider_turns
+        (turn_token,agent_id,provider,pid,start_token,started_at) VALUES (?,?,?,?,?,?)""",
+        (token, agent_id, provider, pid, jobs.process_start_token(pid), db.now_ms()))
+
+
+def record_task_turn(agent_id: str, native: str, tool: str, token: str) -> bool:
+    """Link a background tool call to the open turn that launched it.
+
+    Called by the PreToolUse hook inside the turn's own process. The token
+    must name an open turn of this agent; the first link for a call wins.
+    """
+    if not (_ID.fullmatch(native or '') and _ID.fullmatch(tool or '')
+            and _TOKEN.fullmatch(token or '')):
+        return False
+    c = db.conn()
+    cur = c.execute("""INSERT OR IGNORE INTO provider_task_turns
+        (agent_id,native_id,tool_use_id,turn_token,recorded_at)
+        SELECT ?,?,?,turn_token,? FROM provider_turns
+         WHERE turn_token=? AND agent_id=? AND exited_at IS NULL""",
+        (agent_id, native, tool, db.now_ms(), token, agent_id))
+    return cur.rowcount == 1
+
+
+def turn_exited(token: str, *, at: int | None = None) -> int:
+    """The process of `token` has exited: its unfinished tasks ended with it.
+
+    Only tasks that exact process launched are touched, so a delayed exit of
+    an older turn never stops a successor's tasks on the same native session.
+    Returns the number of tasks projected.
+    """
+    if not _TOKEN.fullmatch(token or ''):
+        return 0
+    c = db.conn()
+    c.execute('BEGIN IMMEDIATE')
+    try:
+        closed = c.execute("""UPDATE provider_turns SET exited_at=?
+            WHERE turn_token=? AND exited_at IS NULL""",
+            (at or db.now_ms(), token)).rowcount
+        count = 0
+        if closed:
+            for row in c.execute("""SELECT agent_id,native_id,tool_use_id
+                    FROM provider_task_turns WHERE turn_token=?""", (token,)).fetchall():
+                count += _project_turn_exit(c, row['agent_id'], row['native_id'],
+                                            row['tool_use_id'])
+        c.execute('COMMIT')
+    except BaseException:
+        c.execute('ROLLBACK')
+        raise
+    return count
+
+
+def _project_turn_exit(c, agent_id: str, native: str, tool: str) -> int:
+    turn = c.execute("""SELECT t.turn_token,t.exited_at FROM provider_task_turns k
+        JOIN provider_turns t ON t.turn_token=k.turn_token
+        WHERE k.agent_id=? AND k.native_id=? AND k.tool_use_id=?
+          AND t.exited_at IS NOT NULL""", (agent_id, native, tool)).fetchone()
+    if turn is None:
+        return 0
+    return int(jobs.project_native_task_turn_exit(
+        c, job_id(agent_id, native, tool), turn=turn['turn_token'],
+        exited_at=turn['exited_at']))
+
+
+def _process_gone(pid: int, start_token: str) -> bool:
+    """True only when the pid is free, reused, or this process's zombie.
+
+    A failed read (out of file descriptors, say) proves nothing: unknown.
+    """
+    if jobs.worker_is_alive(pid, start_token):
+        return False
+    if jobs.process_start_token(pid):
+        return True  # readable but not alive as that process
+    return sys.platform.startswith('linux') and not os.path.exists(f'/proc/{pid}')
+
+
+def reap_exited_turns(*, limit: int = MAX_REAPED) -> int:
+    """Close open turns whose recorded process is gone. Never signals.
+
+    A turn without a recorded process identity is left to its runner: its pid
+    cannot be told apart from a reused one.
+    """
+    c = db.conn()
+    rows = c.execute("""SELECT turn_token,pid,start_token FROM provider_turns
+        WHERE exited_at IS NULL AND start_token!='' AND pid IS NOT NULL
+        ORDER BY started_at LIMIT ?""", (MAX_OPEN_CHECKED,)).fetchall()
+    count = 0
+    for row in rows:
+        if count >= limit:
+            break
+        if not _process_gone(row['pid'], row['start_token']):
+            continue
+        turn_exited(row['turn_token'])
+        count += 1
+    cutoff = db.now_ms() - TURN_RETENTION_MS
+    if c.execute('SELECT 1 FROM provider_turns WHERE exited_at<? LIMIT 1', (cutoff,)).fetchone():
+        c.execute('BEGIN IMMEDIATE')
+        try:
+            c.execute("""DELETE FROM provider_task_turns WHERE turn_token IN (
+                SELECT turn_token FROM provider_turns WHERE exited_at<?)""", (cutoff,))
+            c.execute('DELETE FROM provider_turns WHERE exited_at<?', (cutoff,))
+            c.execute('COMMIT')
+        except BaseException:
+            c.execute('ROLLBACK')
+            raise
+    return count
 
 
 def ingest(c, owner: dict, native: str, project: str, record: dict) -> None:
@@ -270,6 +423,10 @@ class ProviderJobObserver:
 
     def poll_once(self) -> None:
         from . import backends
+        try:
+            reap_exited_turns()
+        except Exception as exc:
+            log_exception('providerTurnReapFail', exc)
         rows = db.conn().execute('''SELECT a.agent_id,a.session,r.backend_session_id,
             MIN(r.started_at) AS bound_at,
             MAX(CASE WHEN r.ended_at IS NULL THEN 1 ELSE 0 END) AS live

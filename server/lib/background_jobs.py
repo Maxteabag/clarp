@@ -1355,8 +1355,26 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
     row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
     if row:
         meta = json.loads(row['metadata_json'])
-        if row['terminal_at'] is not None or at < meta['provider_observed_at']:
+        # A turn-exit stop is inferred, not reported: the provider's own
+        # completion record for the task, imported later, still decides.
+        receipt_after_turn_exit = (
+            row['terminal_at'] is not None and meta.get('stop_basis') == 'turn_exit'
+            and state in {'completed', 'failed'}
+            and (not task or meta.get('provider_task_id') in ('', task)))
+        if (row['terminal_at'] is not None and meta.get('stop_basis') == 'turn_exit'
+                and state == 'running' and task and not meta.get('provider_task_id')):
+            # The receipt names the task its completion record will cite; keep
+            # the stop, but let that record be matched when it is imported.
+            meta['provider_task_id'] = task
+            c.execute('UPDATE background_jobs SET metadata_json=? WHERE job_id=?',
+                      (json.dumps(meta), ident))
             return
+        if ((row['terminal_at'] is not None and not receipt_after_turn_exit)
+                or at < meta['provider_observed_at']):
+            return
+        if receipt_after_turn_exit:
+            for key in ('stop_basis', 'stop_turn', 'turn_exited_at'):
+                meta.pop(key, None)
         if task and meta.get('provider_task_id') not in ('', task):
             return
         # Replayed launch requests cannot undo a receipt, even at equal time.
@@ -1400,6 +1418,33 @@ def observe_native_task(c, owner: dict, ident: str, *, native: str, tool: str,
         progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
         (status, observed, json.dumps(meta), progress, observed, at if terminal else None, reason, ident))
     _record_event(c, ident, observed, note=progress)
+
+
+def project_native_task_turn_exit(c, ident: str, *, turn: str, exited_at: int) -> bool:
+    """The provider process that launched this task has exited.
+
+    Claude ends a turn's background Bash tasks with its process, so an
+    unfinished task is over; what it was waiting for may still be running
+    elsewhere and its outcome stays unknown. Provisional: a completion record
+    imported later supersedes it (observe_native_task), and an existing
+    terminal record is never overwritten.
+    """
+    row = c.execute('SELECT * FROM background_jobs WHERE job_id=?', (ident,)).fetchone()
+    if row is None or row['terminal_at'] is not None or row['heartbeat_source'] != 'provider_event':
+        return False
+    meta = json.loads(row['metadata_json'])
+    # provider_observed_at keeps the last real evidence, so a receipt written
+    # before the exit but imported after it is still newer than that.
+    meta.update(provider_state='stopped', stop_basis='turn_exit', stop_turn=turn,
+                turn_exited_at=exited_at)
+    progress = ('Its Claude turn ended, and the task ended with it. '
+                'No completion record; outcome unknown')
+    c.execute('''UPDATE background_jobs SET status='failed',updated_at=?,metadata_json=?,
+        progress_text=?,progress_at=?,terminal_at=?,terminal_reason=? WHERE job_id=?''',
+        (exited_at, json.dumps(meta), progress, exited_at, exited_at,
+         'provider_turn_exited_without_result', ident))
+    _record_event(c, ident, exited_at, note=progress)
+    return True
 
 
 def _native_origin(agent: dict) -> dict:
