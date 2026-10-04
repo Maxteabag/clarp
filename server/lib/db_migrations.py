@@ -147,6 +147,11 @@ def _migrate(con: sqlite3.Connection) -> None:
             _migrate_to_v106(con)
         if version < 107:
             _migrate_to_v107(con)
+        if version < 108:
+            # Which provider process launched each background task.
+            from .provider_background_jobs import TURN_SCHEMA
+            for statement in TURN_SCHEMA:
+                con.execute(statement)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")

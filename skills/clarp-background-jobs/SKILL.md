@@ -85,13 +85,76 @@ idempotency key across retries and restarts where the destination supports it;
 otherwise reconcile uncertain acceptance before retrying. Preserve a fixed watch
 boundary across restarts so items arriving during downtime remain eligible.
 
+## Completion that must wake you
+
+A Claude background `Bash` task belongs to the turn that started it. Clarp runs
+one Claude process per turn; when your reply ends, that process exits and the
+task stops with it, so "you will be notified when it completes" does not hold
+here. A process you start detached keeps running, but nobody hears that it
+finished. On 2026-10-04 a detached render finished in two minutes, its watcher
+had ended with the turn, and the user polled 45 minutes later.
+
+When the result must reach you after this turn, keep four things separate:
+the work itself, the worker that watches it, the worker's durable receipt,
+and the wake that brings you back.
+
+1. Have a goal for the outcome (`clarp-goal create`, see `clarp-goal`).
+2. Start the work through the worker, `scripts/run_detached_job.sh` in this
+   skill's directory (for example
+   `~/.claude/skills/clarp-background-jobs/scripts/run_detached_job.sh`). It
+   registers the job under its own PID and prints the handle:
+
+   ```sh
+   H=$("$SKILL_DIR/scripts/run_detached_job.sh" "$SESSION" render-intro-2 render \
+       "Render intro video" /var/tmp/intro/render.log -- ffmpeg -i in.mov out.mp4)
+   ```
+
+   A job id names one run: give a new run a new id. A cancelled id is refused
+   (the script exits non-zero and runs nothing); use `job-restart` only for a
+   deliberate rerun of that same target. The worker writes
+   `/var/tmp/intro/render.log`, `render.log.exit` with the exit status, and
+   reports `job-finish` (exit 0) or `job-fail` (anything else) itself. A
+   cancel stops its command.
+3. Attach the dependency before you reply, while the handle is in hand:
+
+   ```sh
+   clarp-goal checkpoint "$PLAN" "$REV" "{\"progress\":\"Render started\",
+     \"next_work\":\"Read render.log.exit and the log before delivering\",
+     \"continuation\":{\"kind\":\"dependency\",\"key\":\"render-intro-2\",
+     \"job_handle\":\"$H\",\"reason\":\"Waiting for the render\",
+     \"due_at\":$(( ($(date +%s) + 3600) * 1000 ))}}"
+   ```
+
+When the job ends, goal recovery records it as the dependency result
+(`outcome` is how the job ended, `outcome_state` what is known of the work,
+`terminal_reason` why) and dispatches a wake; the goal history then shows
+`dependency_result`, `wake_claim`, `dispatch_admitted` and, once your turn
+runs, `execution_observed`. A worker that dies without a receipt reads
+`outcome: failed`, `outcome_state: unknown`, `terminal_reason:
+worker_vanished`: the work may or may not have finished, so look before
+saying either. If the deadline passes first you are woken to inspect it. On waking,
+read the exit file and the output yourself: the job status says how the
+worker ended, not that the result is right.
+
+That wake depends on goal recovery running on this Host. The goal's
+`continuation.observed_state` reads `host_paused` when autonomous wakes are
+paused (`CLARP_HEARTBEATS_DISABLED`), and `blocked`, `attention` or
+`owner_changed` when it cannot wake you. Then nothing will: tell the user so,
+say where the result will appear (job detail, the exit file), and check it
+yourself on the next turn. Never describe a registered job or a scheduled
+check as a promise that you will report back.
+
 ## Provider-native tasks (Host contract 24)
 
 The Host automatically observes Claude background `Bash` requests and their
 native task receipts from transcripts bound to Clarp runtimes. Check the job's
 `metadata.provider_state`: launching is only a request, running means the provider
 reported a task ID, and unknown means evidence is missing or stale. A stopped
-session without a completion record has unknown outcome. These jobs do not claim
+session without a completion record has unknown outcome. When the Claude turn that
+launched a task exits, the task is shown stopped right away
+(`provider_turn_exited_without_result`), fenced to that exact process: a
+later turn on the same conversation is not affected. That stop is provisional;
+the provider's own completion record, if it arrives later, replaces it. These jobs do not claim
 PID ownership or heartbeats. A successful watcher task does not establish that a
 remote deployment succeeded; inspect the actual deployment result.
 

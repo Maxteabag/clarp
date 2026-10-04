@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 
@@ -58,12 +59,29 @@ def main() -> int:
     except Exception:
         pass
     if tool_name == "Bash":
-        from lib.backend.claude_background_provenance import tool_input_with_origin
+        from lib.backend.claude_background_provenance import (
+            background_task_context, tool_input_with_origin)
+        from lib.provider_background_jobs import TURN_ENV, record_task_turn
+        tool_use_id = payload.get("tool_use_id")
         updated = tool_input_with_origin(agent, backend_session_id,
-                                         payload.get("tool_use_id"), tool_input)
+                                         tool_use_id, tool_input)
+        # Only a Clarp-run turn (the runner set its token) ends with its
+        # reply; an interactive `claude --resume` of the same session does not.
+        turn = os.environ.get(TURN_ENV, "")
+        context = background_task_context(tool_input) if turn else None
+        if context:
+            # This process launched it; its exit is when the task ends.
+            try:
+                record_task_turn(agent["agent_id"], backend_session_id, tool_use_id, turn)
+            except Exception:
+                pass
+        output = {"hookEventName": "PreToolUse"}
         if updated is not None:
-            print(json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PreToolUse", "updatedInput": updated}}))
+            output["updatedInput"] = updated
+        if context:
+            output["additionalContext"] = context
+        if len(output) > 1:
+            print(json.dumps({"hookSpecificOutput": output}))
     return 0
 
 

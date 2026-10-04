@@ -286,6 +286,10 @@ def _claim(plan_id, now):
                 result = {
                     "key": state["dependency_key"],
                     "outcome": job["status"],
+                    # How the job ended is not what became of the work: a
+                    # worker that vanished leaves the outcome unknown.
+                    "outcome_state": job.get("outcome_state") or "unknown",
+                    "terminal_reason": job.get("terminal_reason") or "",
                     "evidence": job.get("log_path")
                     or job.get("terminal_reason")
                     or job.get("detail")
