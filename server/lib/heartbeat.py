@@ -116,8 +116,8 @@ def _is_user_stopped(latest: dict[str, Any]) -> bool:
 def _is_restart_interrupted(latest: dict) -> bool:
     """A turn the previous server process took down with it (issue #11).
 
-    The restart heartbeat already tells the agent its turn may have been cut,
-    so the system-limit wording would only be noise on top of it.
+    Planned restart continuation belongs to the restarting agent. Periodic
+    heartbeats must not independently retry the interrupted turn.
     """
     detail = latest.get("detail") or {}
     return isinstance(detail, dict) and detail.get("source") == "server_restart"
@@ -167,46 +167,6 @@ def heartbeat_prompt_text(agent: dict | None = None) -> str:
     if shown == 0:
         lines.append("- No pending, in-progress, or blocked items.")
     return prefix + HEARTBEAT_PROMPT + "\n\n" + "\n".join(lines)
-
-
-def restart_heartbeat_prompt_text(agent: dict) -> str:
-    """Continuity prompt used once for every active runtime after boot."""
-    return RESTART_HEARTBEAT_PREFIX + heartbeat_prompt_text(agent)
-
-
-def restart_heartbeat_agents() -> list[dict]:
-    """Work actually interrupted by this runtime's restart.
-
-    A persisted runtime is a conversation binding, not an in-flight turn.
-    Waking every binding reloads idle conversations (and their full provider
-    context) just to answer HEARTBEAT_OK. Boot has already marked genuinely
-    interrupted turns, so that marker is the recovery authority. Durable goals
-    and explicit queued requests retain their own recovery paths.
-    """
-    if globally_disabled():
-        return []
-    from . import origins, turn_dispatch, turn_queue
-
-    interrupted = []
-    for agent in agents_db.list_agents():
-        agent_id = agent["agent_id"]
-        if (agent.get("archived_at")
-                or agents_db.current_runtime_id(agent_id) is None
-                or _goal_recovery_owns(agent_id)):
-            continue
-        latest = agents_db.latest_state(agent_id) or {}
-        if (latest.get("kind") != AgentState.INTERRUPTED
-                or not _is_restart_interrupted(latest)):
-            continue
-        if (latest.get("detail") or {}).get("origin") in origins.ROUTINE_AUTOMATION_ORIGINS:
-            continue
-        queue = turn_queue.state(agent_id)
-        live = turn_dispatch.live_work(agent_id, session=agent.get("session") or "")
-        if (queue["paused"] or queue["count"] or live.queued or live.terminal
-                or live.compacting or backends.active_handles(agent.get("backend"), agent_id)):
-            continue
-        interrupted.append(agent)
-    return interrupted
 
 
 def _goal_recovery_owns(agent_id: str) -> bool:
@@ -564,6 +524,8 @@ def _skip_reason(*, snapshot: _AgentSnapshot, state: _HeartbeatState, now: float
     """
     latest = snapshot.latest
     latest_kind = latest.get("kind")
+    if latest_kind == AgentState.INTERRUPTED and _is_restart_interrupted(latest):
+        return "restart-owner-handoff"
     if latest_kind == AgentState.WAITING:
         return str(latest_kind)
     if latest_kind == AgentState.INTERRUPTED and _is_user_stopped(latest):
@@ -866,7 +828,6 @@ class HeartbeatScheduler:
         self.now = now
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._restart_recovery_done = False
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -885,7 +846,7 @@ class HeartbeatScheduler:
     def run_once(self) -> int:
         from . import janitor_builtins
         if settings_store.get_bool("heartbeat.janitor_adopted") or janitor_builtins.resolve("heartbeat-decider"):
-            # The decision Janitor now owns periodic continuity. Restart recovery is separate.
+            # The decision Janitor owns periodic continuity; startup never wakes agents.
             return 0
         now = self.now()
         sent = 0
@@ -899,27 +860,6 @@ class HeartbeatScheduler:
                 log("heartbeatTick", f"agent={agent_id} session={session}")
             except Exception as e:  # noqa: BLE001
                 log_exception("heartbeatTickFail", e, detail=session)
-        return sent
-
-    def run_restart_recovery_once(self) -> int:
-        """Immediately wake each active runtime once for this server process."""
-        if self._restart_recovery_done:
-            return 0
-        self._restart_recovery_done = True
-        now = self.now()
-        sent = 0
-        for agent in restart_heartbeat_agents():
-            agent_id = agent["agent_id"]
-            session = agent["session"]
-            try:
-                _record_run_start(agent_id, now)
-                self._send_heartbeat(
-                    session, restart_heartbeat_prompt_text(agent))
-                sent += 1
-                log("heartbeatRestartTick",
-                    f"agent={agent_id} session={session}")
-            except Exception as e:  # noqa: BLE001
-                log_exception("heartbeatRestartTickFail", e, detail=session)
         return sent
 
     def _loop(self) -> None:

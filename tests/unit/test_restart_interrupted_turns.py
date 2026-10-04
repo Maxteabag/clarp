@@ -179,22 +179,19 @@ def test_only_the_stalled_agent_is_touched(backend):
     assert [r["role"] for r in _visible(idle, bs2)] == ["user"]
 
 
-def test_restart_heartbeat_still_follows_the_marker(monkeypatch):
+def test_periodic_heartbeat_does_not_take_over_restart_owner_handoff(monkeypatch):
     monkeypatch.setenv("CLAUDE_PWA_HEARTBEAT_QUIET_PERIOD_SEC", "0")
     aid, session, bs = _agent(backends.CLAUDE)
+    agents_db.update_agent(aid, heartbeat_enabled=True)
     _dispatch(aid, bs, backends.CLAUDE)
     interrupted_turns.recover_after_restart()
-    sent: list[tuple[str, str]] = []
+    sent = []
     scheduler = heartbeat.HeartbeatScheduler(
         send_heartbeat=lambda s, text: sent.append((s, text)),
-        now=lambda: 1_000.0)
-
-    assert scheduler.run_restart_recovery_once() == 1
-    assert sent[0][0] == session
-    assert sent[0][1].startswith(heartbeat.RESTART_HEARTBEAT_PREFIX)
-    # The restart prefix already says the turn may have been cut; do not
-    # stack the usage-limit wording on top of it.
-    assert heartbeat.INTERRUPTED_HEARTBEAT_PREFIX not in sent[0][1]
+        now=lambda: db.now_ms() / 1000 + 7200)
+    assert scheduler.run_once() == 0
+    assert sent == []
+    assert agents_db.latest_state(aid)["detail"]["source"] == "server_restart"
 
 
 def test_marker_never_becomes_the_next_turns_reply():

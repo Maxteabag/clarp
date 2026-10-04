@@ -134,6 +134,17 @@ Never force a runtime or fleet restart to make a rollout look complete. A manual
 restart interrupts in-flight turns and requires explicit authorization. Preserve
 an existing recovery pause, active conversations, account selection, and rollback.
 
+Runtime startup performs no generic assistant continuity checks. The agent
+performing an authorized planned restart owns targeted resumption: capture the
+exact unfinished work/native-thread inventory first, checkpoint its own handoff,
+then recheck each target after activation. Prompt only genuinely stranded work
+directly from the verified owner, preserving the original task and limits. Do
+not prompt busy agents, valid queued continuations, legitimate waits, completed
+work or idle conversations. Verify an actual native response/tool call afterward.
+See the Host's `docs/runtime-restarts.md`. Unexpected crashes retain visible
+interruption markers; explicitly enrolled goals and user/peer queued work keep
+their independent ownership and recovery rules.
+
 ## Docker Container Administration
 
 When diagnosing or managing Clarp inside a Docker container:

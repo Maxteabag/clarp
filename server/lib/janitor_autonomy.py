@@ -37,7 +37,7 @@ def snapshot(agent):
     if agents.is_busy(agent['agent_id']) or backends.active_handles(agent['backend'],agent['agent_id']):return None
     if state.get('kind')==AgentState.WAITING:return None
     detail=state.get('detail') or {}
-    if detail.get('source')=='user_stop' or detail.get('reason')=='interrupted':return None
+    if detail.get('source') in {'user_stop', 'server_restart'} or detail.get('reason')=='interrupted':return None
     from . import turn_queue,task_plans,team_store
     queue=turn_queue.state(agent['agent_id'])
     if queue.get('paused') or db.conn().execute("SELECT 1 FROM queued_turns WHERE agent_id=? AND status IN ('queued','claimed')",(agent['agent_id'],)).fetchone():return None

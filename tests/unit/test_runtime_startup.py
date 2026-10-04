@@ -18,68 +18,25 @@ def test_ephemeral_janitors_do_not_start_unused_chat_runtimes(tmp_path, monkeypa
     assert set(restored) == {"sam", "rivet"}
 
 
-def test_runtime_recovery_marks_dead_work_before_reconcile_and_continuity():
-    order = []
-    dispatch = SimpleNamespace(
-        submit=lambda command: order.append(("dispatch", {
-            key: getattr(command, key) for key in (
-                "text", "requested_session", "forced_session", "trace_id",
-                "synthesize_audio", "origin")})),
-        recover_queued=lambda: order.append("queues") or 3,
-    )
+def test_runtime_restart_marks_interrupted_work_without_submitting_continuity():
+    from lib import agents, turn_lifecycle
+    from lib.turn_lifecycle import TurnEvent
 
-    result = recover_runtime(
-        SimpleNamespace(stream="stream"),
-        dispatch,
-        restore_agents=lambda _ctx: order.append("restore"),
-        mark_interrupted=lambda stream=None: order.append(
-            ("interrupt", stream)) or [{"agent_id": "a"}],
-        reconcile=lambda: order.append("reconcile") or 1,
-        restart_agents=lambda: [{"session": "theo"}],
-        restart_prompt=lambda _agent: "runtime restarted",
-    )
-
-    assert order == [
-        "restore",
-        ("interrupt", "stream"),
-        "reconcile",
-        ("dispatch", {
-            "text": "runtime restarted",
-            "requested_session": "theo",
-            "forced_session": "theo",
-            "trace_id": result["restart_trace_ids"][0],
-            "synthesize_audio": False,
-            "origin": "heartbeat",
-        }),
-        "queues",
-    ]
-    assert result["interrupted"] == 1
-    assert result["reconciled"] == 1
-    assert result["restart_heartbeats"] == 1
-    assert result["queued"] == 3
-
-
-def test_runtime_recovery_isolates_one_failed_continuity_prompt():
-    sent = []
-
-    def submit(command):
-        sent.append(command.requested_session)
-        if command.requested_session == "broken":
-            raise RuntimeError("provider unavailable")
-
+    aid = agents.create_agent(persona="Theo", voice_id="", cwd="/tmp", session="theo")
+    agents.start_runtime(aid, "theo")
+    agents.open_turn(agent_id=aid, source="pwa", trace_id="original-request")
+    turn_lifecycle.transition(aid, TurnEvent.SPAWN_STARTED,
+                              {"trace_id": "original-request", "origin": "user"})
+    submitted = []
     result = recover_runtime(
         SimpleNamespace(stream=None),
-        SimpleNamespace(submit=submit, recover_queued=lambda: 0),
+        SimpleNamespace(submit=submitted.append, recover_queued=lambda: 3),
         restore_agents=lambda _ctx: None,
-        mark_interrupted=lambda stream=None: [],
-        reconcile=lambda: 0,
-        restart_agents=lambda: [
-            {"session": "broken"}, {"session": "healthy"}],
-        restart_prompt=lambda agent: f"continue {agent['session']}",
     )
-
-    assert sent == ["broken", "healthy"]
-    assert result["restart_heartbeats"] == 1
+    assert result["interrupted"] == 1
+    assert agents.latest_state(aid)["detail"]["source"] == "server_restart"
+    assert submitted == [], "the restarting agent, not startup, decides who to continue"
+    assert result["queued"] == 3
 
 
 def test_clean_runtime_handoff_does_not_invent_an_interruption():
@@ -91,13 +48,10 @@ def test_clean_runtime_handoff_does_not_invent_an_interruption():
         restore_agents=lambda _ctx: order.append("restore"),
         mark_interrupted=lambda stream=None: order.append("interrupt") or [],
         reconcile=lambda: order.append("reconcile") or 0,
-        restart_agents=lambda: order.append("restart-agents") or [],
-        restart_prompt=lambda _agent: "unused",
     )
 
     assert order == ["restore", "reconcile", "queues"]
     assert result["interrupted"] == 0
-    assert result["restart_heartbeats"] == 0
 
 
 def test_runtime_recovery_raises_sqlite_busy_timeout_during_boot(monkeypatch):
@@ -120,7 +74,5 @@ def test_runtime_recovery_raises_sqlite_busy_timeout_during_boot(monkeypatch):
         restore_agents=lambda _ctx: None,
         mark_interrupted=lambda stream=None: [],
         reconcile=lambda: 0,
-        restart_agents=lambda: [],
-        restart_prompt=lambda _agent: "unused",
     )
     assert seen == [SQLITE_RECOVERY_BUSY_TIMEOUT_MS]

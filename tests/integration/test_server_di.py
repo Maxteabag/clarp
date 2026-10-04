@@ -120,65 +120,18 @@ def _post_with_headers(url, body: dict, headers: dict):
         return r.status, r.read()
 
 
-def test_production_startup_requests_restart_heartbeat_recovery(
-    fake_ctx, monkeypatch,
-):
-    from lib import heartbeat
+def test_production_restart_marks_interrupted_turns_without_new_assistant_prompt(fake_ctx, monkeypatch):
+    from lib import interrupted_turns
+    from lib.turn_dispatch import TurnDispatchService
 
-    calls: list[bool] = []
-    monkeypatch.setattr(
-        heartbeat.HeartbeatScheduler,
-        "run_restart_recovery_once",
-        lambda _scheduler: calls.append(True) or 2,
-    )
-    srv = build_server(
-        fake_ctx, _free_port(), bind_addr="127.0.0.1",
-        restart_recovery=True)
+    marked, submitted = [], []
+    monkeypatch.setattr(interrupted_turns, "recover_after_restart",
+                        lambda stream=None: marked.append(True) or [])
+    monkeypatch.setattr(TurnDispatchService, "submit", lambda self, command: submitted.append(command))
+    srv = build_server(fake_ctx, _free_port(), bind_addr="127.0.0.1", restart_recovery=True)
     try:
-        assert calls == [True]
-    finally:
-        srv.server_close()
-
-
-def test_production_startup_marks_restart_interrupted_turns(
-    fake_ctx, monkeypatch,
-):
-    """Issue #11: the previous process's in-flight turn is marked before the
-    restart heartbeat asks the agent to carry on."""
-    from lib import heartbeat, interrupted_turns
-
-    order: list[str] = []
-    monkeypatch.setattr(
-        interrupted_turns, "recover_after_restart",
-        lambda stream=None: order.append("mark") or [])
-    monkeypatch.setattr(
-        heartbeat.HeartbeatScheduler,
-        "run_restart_recovery_once",
-        lambda _scheduler: order.append("heartbeat") or 0,
-    )
-    srv = build_server(
-        fake_ctx, _free_port(), bind_addr="127.0.0.1",
-        restart_recovery=True)
-    try:
-        assert order == ["mark", "heartbeat"]
-    finally:
-        srv.server_close()
-
-
-def test_injected_test_server_does_not_run_restart_recovery(
-    fake_ctx, monkeypatch,
-):
-    from lib import heartbeat
-
-    calls: list[bool] = []
-    monkeypatch.setattr(
-        heartbeat.HeartbeatScheduler,
-        "run_restart_recovery_once",
-        lambda _scheduler: calls.append(True) or 2,
-    )
-    srv = build_server(fake_ctx, _free_port(), bind_addr="127.0.0.1")
-    try:
-        assert calls == []
+        assert marked == [True]
+        assert submitted == []
     finally:
         srv.server_close()
 
@@ -187,7 +140,7 @@ def test_server_restart_does_not_interrupt_healthy_external_runtime(
     fake_ctx, monkeypatch,
 ):
     """A server-only restart must leave runtime-owned work completely alone."""
-    from lib import heartbeat, interrupted_turns
+    from lib import interrupted_turns
 
     calls: list[str] = []
     fake_ctx.replace_service("runtime_client", SimpleNamespace(
@@ -200,9 +153,6 @@ def test_server_restart_does_not_interrupt_healthy_external_runtime(
     monkeypatch.setattr(
         interrupted_turns, "recover_after_restart",
         lambda stream=None: calls.append("mark") or [])
-    monkeypatch.setattr(
-        heartbeat.HeartbeatScheduler, "run_restart_recovery_once",
-        lambda _scheduler: calls.append("heartbeat") or 0)
 
     srv = build_server(
         fake_ctx, _free_port(), bind_addr="127.0.0.1",

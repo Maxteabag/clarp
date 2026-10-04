@@ -509,9 +509,6 @@ def test_enrolled_goal_is_not_also_woken_by_generic_heartbeat(tmp_path):
     from lib import janitor_autonomy
 
     assert janitor_autonomy.snapshot(agent) is None
-    assert all(
-        a["agent_id"] != p["agent_id"] for a in heartbeat.restart_heartbeat_agents()
-    )
 
 
 def test_large_plan_is_never_silently_truncated(tmp_path):

@@ -1816,12 +1816,11 @@ def test_failed_direct_send_can_retry_via_durable_queue(tmp_path, monkeypatch):
     assert len(backends.spawned) == 1
 
 
-def test_host_heartbeat_disable_blocks_dispatch_and_restart(monkeypatch, tmp_path):
+def test_host_heartbeat_disable_blocks_dispatch(monkeypatch, tmp_path):
     from lib import heartbeat
     monkeypatch.setenv('CLARP_HEARTBEATS_DISABLED', '1')
     service, backends, agent_id = _make_service(tmp_path)
     assert not heartbeat.heartbeat_enabled({'heartbeat_enabled': True})
-    assert heartbeat.restart_heartbeat_agents() == []
     with pytest.raises(DispatchError, match='Heartbeats are disabled'):
         service.dispatch(text='check', requested_session='mike', trace_id='disabled-wake', origin='heartbeat')
     assert not backends.spawned
