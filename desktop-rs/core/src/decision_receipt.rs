@@ -117,3 +117,17 @@ fn answer_words(json: &str) -> Option<String> {
         .find_map(|key| value.get(*key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()))
         .map(str::to_owned)
 }
+
+/// One line for a preview (sidebar, overview, notification): voice markup
+/// removed, a resolved decision read as its question and outcome, or, cut
+/// short by the Host, as "Resolved a decision".
+pub fn preview_line(text: &str) -> String {
+    if let Some(receipt) = parse(text) {
+        return format!("{} · {}", receipt.question, receipt.outcome.label());
+    }
+    let (speaker, rest) = text.strip_prefix("You: ").map_or(("", text), |rest| ("You: ", rest));
+    if rest.starts_with("[Clarp decision resolved]") {
+        return format!("{speaker}Resolved a decision");
+    }
+    crate::text::plain_preview_text(&crate::text::cleaned_display_text(text, false))
+}

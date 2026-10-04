@@ -68,3 +68,17 @@ fn anything_else_stays_a_message() {
     let receipt = parse(&prompt("Q?", "", "The user answered this clarification: not json. Continue using this answer.")).unwrap();
     assert_eq!(receipt.outcome, Outcome::Answered("Answered".into()));
 }
+
+/// One line of a reply or prompt for a preview (sidebar, overview,
+/// notification): voice markup gone, a resolved decision read as one.
+#[test]
+fn a_preview_line_never_shows_voice_markup_or_the_decision_envelope() {
+    use clarp_core::decision_receipt::preview_line;
+    assert_eq!(preview_line("<speak>Done <break time=\"350ms\"/> pushed it</speak>"), "Done, pushed it");
+    assert_eq!(preview_line("<vox>um</vox> **Fixed** the `parser`"), "Fixed the parser");
+    let whole = prompt("Deploy?", "", "The user chose: accepted. Approval applies only to the described action.");
+    assert_eq!(preview_line(&whole), "Deploy? · Approved");
+    // The Host's own preview: one line, "You: ", cut at 80 characters.
+    assert_eq!(preview_line("You: [Clarp decision resolved] Decision ID: dec_01 Artifact ID: art_02 Question: Dep…"), "You: Resolved a decision");
+    assert_eq!(preview_line("You: please deploy"), "You: please deploy");
+}

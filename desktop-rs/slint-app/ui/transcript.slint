@@ -68,6 +68,24 @@ export struct LiveRow {
     expanded: bool,
 }
 
+// The Host's resolved-decision prompt, shown as what the user decided
+// (core `decision_receipt`): the key the keyboard selects it by ("" for an
+// ordinary row), the question asked, the outcome's mark and words, its
+// tone (success, danger, answer, muted), whose question and what it was
+// (Decision or Question), and the decision card it answers.
+export struct ReceiptRow {
+    key: string,
+    question: string,
+    mark: string,
+    outcome: string,
+    tone: string,
+    kind: string,
+    agent: string,
+    artifact-id: string,
+    // Its decision card is in the chat: O goes to it.
+    linked: bool,
+}
+
 export struct MessageRow {
     id: string,
     // user, assistant, activity
@@ -89,6 +107,7 @@ export struct MessageRow {
     artifacts: [ArtifactItem],
     // A live item row (author "live", or an assistant message item).
     live: LiveRow,
+    receipt: ReceiptRow,
 }
 
 // One tool call (ToolCard.qml): name, summary, status; details on request.
@@ -133,6 +152,122 @@ component ToolCard inherits Rectangle {
             font-size: 11px;
             color: Palette.text;
             wrap: word-wrap;
+        }
+    }
+}
+
+// A decision the user resolved, in their own column: what was asked, and
+// their answer as a chip whose mark and words say it (the colour only
+// repeats them). J/K reach it like a card; O (or a click) goes to the
+// decision card it answers.
+component DecisionReceipt inherits Rectangle {
+    in property <ReceiptRow> receipt;
+    in property <length> view-top;
+    in property <length> view-bottom;
+    property <bool> selected: ArtifactBridge.cursor == root.receipt.key;
+    property <color> tone: root.receipt.tone == "success" ? Palette.success
+        : root.receipt.tone == "danger" ? Palette.danger
+        : root.receipt.tone == "answer" ? Palette.accent : Palette.muted;
+    background: touch.has-hover && root.receipt.linked ? Palette.bubble.mix(root.tone, 0.9) : Palette.bubble;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Palette.accent : root.tone.with-alpha(0.35);
+    border-radius: 8px;
+    accessible-role: groupbox;
+    accessible-id: "receipt";
+    accessible-label: root.receipt.kind + " " + root.receipt.question;
+    accessible-description: root.receipt.outcome;
+    Timer {
+        interval: 150ms;
+        running: true;
+        triggered => { ArtifactBridge.card-shown(root.receipt.key, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
+    }
+    touch := TouchArea {
+        enabled: root.receipt.linked;
+        mouse-cursor: self.enabled ? pointer : default;
+        clicked => { ArtifactBridge.open(root.receipt.key); }
+    }
+    // A stripe in the outcome's tone down the leading edge.
+    Rectangle {
+        x: 0;
+        width: 3px;
+        height: parent.height;
+        border-top-left-radius: 8px;
+        border-bottom-left-radius: 8px;
+        background: root.tone;
+    }
+    VerticalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        padding-top: 10px;
+        padding-bottom: 11px;
+        spacing: 7px;
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: "?";
+                color: Palette.warning;
+                font-size: 11px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.receipt.agent != "" ? root.receipt.kind + " · " + root.receipt.agent : root.receipt.kind;
+                color: Palette.faint;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.8px;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            if root.selected && Focus.mode == "pane" && root.receipt.linked: KeyHint {
+                key: "O";
+                label: "Show decision";
+                emphasised: true;
+                clicked => { ArtifactBridge.open(root.receipt.key); }
+            }
+        }
+        Text {
+            text: root.receipt.question;
+            color: Palette.text;
+            font-size: 14px;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: start;
+            Rectangle {
+                min-height: 22px;
+                border-radius: 11px;
+                background: root.tone.with-alpha(0.16);
+                border-width: 1px;
+                border-color: root.tone.with-alpha(0.4);
+                accessible-role: text;
+                accessible-id: "receipt-outcome";
+                accessible-label: root.receipt.outcome;
+                HorizontalLayout {
+                    padding-left: 9px;
+                    padding-right: 10px;
+                    padding-top: 2px;
+                    padding-bottom: 2px;
+                    spacing: 6px;
+                    Text {
+                        text: root.receipt.mark;
+                        color: root.tone;
+                        font-size: 12px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.receipt.outcome;
+                        color: root.tone;
+                        font-size: 12px;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                    }
+                }
+            }
         }
     }
 }
@@ -467,13 +602,13 @@ export component Transcript inherits FocusScope {
                 // One message of the list; the id finds it in the checks.
                 accessible-role: list-item;
                 accessible-id: "row:" + row.id;
-                background: row.author == "user" ? Palette.bubble : transparent;
+                background: row.author == "user" && row.receipt.key == "" ? Palette.bubble : transparent;
                 border-radius: 2px;
                 max-width: row.author == "user" ? list.visible-width * 0.75 : list.visible-width;
                 // Hovering a message offers its copy button (Slint's rich text
                 // cannot be selected: the message's text is copied whole).
                 hover := TouchArea { }
-                if row.author != "activity" && row.author != "live": Rectangle {
+                if row.author != "activity" && row.author != "live" && row.receipt.key == "": Rectangle {
                     x: parent.width - 20px;
                     y: 2px;
                     width: 18px;
@@ -485,9 +620,15 @@ export component Transcript inherits FocusScope {
                     copy := TouchArea { clicked => { root.copy-message(row.id); } }
                 }
                 VerticalLayout {
-                    padding: row.author == "user" ? 10px : 2px;
+                    padding: row.receipt.key != "" ? 0px : row.author == "user" ? 10px : 2px;
                     spacing: 8px;
                     if row.sender != "": Text { text: row.sender; color: Palette.accent; font-size: 12px; font-weight: 600; }
+                    if row.receipt.key != "": DecisionReceipt {
+                        receipt: row.receipt;
+                        preferred-width: 420px;
+                        view-top: root.absolute-position.y;
+                        view-bottom: root.absolute-position.y + root.height;
+                    }
                     if row.author == "live": LiveItem {
                         live: row.live;
                         view-top: root.absolute-position.y;

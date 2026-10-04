@@ -335,7 +335,9 @@ impl App {
         let always = self.engine.borrow().activity_mode() == clarp_core::presentation::ALWAYS_VISIBLE;
         let expanded = self.expanded.borrow();
         let stamps = self.prefs.borrow().timestamps;
-        let artifacts = crate::cells_view::artifacts_by_row(&presented, &self.engine.borrow().artifacts_for_session(&pane.session));
+        let session_artifacts = self.engine.borrow().artifacts_for_session(&pane.session);
+        let artifacts = crate::cells_view::artifacts_by_row(&presented, &session_artifacts);
+        let agent_name = self.engine.borrow().roster().find(&pane.session).map(|a| clarp_core::protocol::display_name(a).to_owned()).unwrap_or_default();
         let cursor = self.artifact_cursor.borrow().clone();
         // Image blocks show the keyboard's place from the bridge.
         if let Some(window) = crate::window() {
@@ -366,6 +368,16 @@ impl App {
             .map(|((row, artifacts), mut shown)| {
                 if !stamps {
                     shown.stamp = SharedString::new();
+                }
+                // A receipt names whose question it was and goes to its card
+                // when the card is in the chat.
+                if !shown.receipt.key.is_empty() {
+                    let card = session_artifacts.iter().find(|a| text_of(a, "artifact_id") == shown.receipt.artifact_id.as_str());
+                    shown.receipt.agent = agent_name.clone().into();
+                    shown.receipt.linked = card.is_some();
+                    if let Some(card) = card {
+                        shown.receipt.kind = if text_of(card, "type") == "question" { "QUESTION" } else { "DECISION" }.into();
+                    }
                 }
                 let engine = self.engine.borrow();
                 let cards: Vec<crate::ArtifactItem> = artifacts.iter().map(|a| crate::artifacts_view::card(a, &engine, &state)).collect();
@@ -438,7 +450,8 @@ impl App {
                 .join(",");
             // A row with images is drawn again when one lands.
             let pictures = if row.blocks.iter().any(|b| b.kind == "images") { crate::artifacts_view::pictures_landed() } else { 0 };
-            format!("{cards}|{}|{pictures}", explained.join(","))
+            let receipt = format!("{}:{}:{}", row.receipt.agent, row.receipt.kind, row.receipt.linked);
+            format!("{cards}|{}|{pictures}|{receipt}", explained.join(","))
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let mut fresh: Vec<Shown> = presented
