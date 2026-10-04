@@ -53,7 +53,7 @@ impl Outcome {
             Self::Declined => "✕",
             Self::Answered(_) => "↳",
             Self::Discarded => "⊘",
-            Self::Expired => "⏱",
+            Self::Expired => "◷",
             Self::Resolved => "•",
         }
     }

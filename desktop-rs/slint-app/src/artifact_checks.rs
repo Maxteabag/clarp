@@ -1819,12 +1819,136 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
     stages
 }
 
+// ---- resolved-decision receipts
+
+/// The Host's prompt for a resolved decision, as
+/// `artifacts.format_delivery_prompt` writes it.
+fn resolved_prompt(decision: &str, artifact: &str, question: &str, outcome: &str) -> String {
+    format!("[Clarp decision resolved]\nDecision ID: {decision}\nArtifact ID: {artifact}\nQuestion: {question}\nContext: Two reviews are in.\nReference: \nPayload: {{\"ticket\": \"OPS-12\"}}\n{outcome}")
+}
+
+/// A resolved decision shows as a receipt in the user's column: the
+/// question, the outcome as a chip, the agent; no protocol line. J/K reach
+/// it, O goes to the decision card it answers. Light and dark shots.
+fn receipt_stages(out: &str) -> Vec<Stage> {
+    let (out, out2, out3) = (out.to_owned(), out.to_owned(), out.to_owned());
+    const SESSION: &str = "art-receipt";
+    let receipts = [
+        ("dec-approved", "Upgrade to Postgres 17?", "The user chose: accepted. Approval applies only to the described action. Revalidate it before acting.", "Approved", "success", "DECISION"),
+        ("dec-declined", "Delete staging data?", "The user chose: rejected. Do not perform the protected action.", "Declined", "danger", "DECISION"),
+        ("q-picked", "Which database?", "The user answered this clarification: {\"option_id\": \"lite\", \"label\": \"SQLite\"}. Continue using this answer. This does not grant approval for unrelated protected actions.", "SQLite", "answer", "QUESTION"),
+        ("dec-discard", "Archive the 40 merged branches?", "The user discarded this request. This is not an answer or approval. Do not guess permission or repeat the unchanged request. Continue independent work only.", "Discarded", "muted", "DECISION"),
+        ("dec-expired", "Book it before Friday?", "The request expired without an answer or approval. Do not infer a choice or perform the protected action. Continue independent work only.", "Expired", "muted", "DECISION"),
+    ];
+    let mut turns: Vec<Value> = receipts
+        .iter()
+        .enumerate()
+        .map(|(i, (artifact, question, outcome, ..))| json!({"id": format!("receipt-{i}"), "role": "user", "origin": "automation", "text": resolved_prompt(&format!("d-{artifact}"), artifact, question, outcome)}))
+        .collect();
+    turns.push(json!({"id": "spoken", "role": "assistant", "text": "<speak>Noted <break time=\"350ms\"/> <vox>um</vox> I will keep the staging data.</speak>"}));
+    vec![
+        ("receipt load", Box::new(move |app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            let loaded = control("/__control/artifact-chat", &json!({"session": SESSION, "persona": "Rachel", "types": ["decision", "question"], "turns": turns}));
+            check(loaded.is_ok(), &format!("the Host takes a chat with resolved decisions {}", loaded.err().unwrap_or_default()));
+            true
+        })),
+        ("receipt open", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find(SESSION).is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select(SESSION);
+            crate::pump();
+            true
+        })),
+        ("receipt rows", Box::new(move |app, window, elapsed| {
+            let shown: Vec<crate::MessageRow> = rows(window).into_iter().filter(|r| !r.receipt.key.is_empty()).collect();
+            if (shown.len() < receipts.len() || !shown.iter().all(|r| r.receipt.linked) || elapsed < Duration::from_millis(400)) && elapsed < Duration::from_secs(5) {
+                return false;
+            }
+            check(shown.len() == receipts.len(), &format!("each resolved decision is a receipt: {}", shown.len()));
+            for ((artifact, question, _, outcome, tone, kind), row) in receipts.iter().zip(&shown) {
+                let r = &row.receipt;
+                check(row.author == "user" && row.blocks.row_count() == 0, &format!("{artifact}: in the user's column, no prompt text ({} blocks)", row.blocks.row_count()));
+                check(r.question == *question && r.outcome == *outcome && r.tone == *tone && !r.mark.is_empty(), &format!("{artifact}: {:?} {:?} {:?} {:?}", r.question, r.outcome, r.tone, r.mark));
+                check(r.artifact_id == *artifact && r.linked && r.kind == *kind && r.agent == "Rachel", &format!("{artifact}: answers its card, names the agent: {:?} {} {:?} {:?}", r.artifact_id, r.linked, r.kind, r.agent));
+            }
+            // What the rows draw: a prompt's text only through a block, a
+            // reply's from its written form.
+            let drawn: Vec<String> = app.engine.borrow().conversation(SESSION).map(|c| {
+                c.rows().iter().filter(|m| rows(window).iter().any(|r| r.id == m.id.as_str() && r.blocks.row_count() > 0)).map(|m| if m.role == "user" { m.text.clone() } else { m.display_text.clone() }).collect()
+            }).unwrap_or_default();
+            let leaked: Vec<&String> = drawn.iter().filter(|t| ["Clarp decision resolved", "Decision ID", "Artifact ID", "Payload:", "<speak", "<break", "<vox", "um</vox>"].iter().any(|p| t.contains(p))).collect();
+            check(leaked.is_empty(), &format!("no protocol line or voice tag reaches the chat: {leaked:?}"));
+            check(drawn.iter().any(|t| t == "Noted, I will keep the staging data."), &format!("a spoken reply reads as written: {:?}", drawn.last()));
+            check(app.active_messages().is_some(), "the chat is open");
+            app.focus_transcript();
+            true
+        })),
+        ("receipt end", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press(slint::platform::Key::End);
+            true
+        })),
+        ("receipt dark shot", Box::new(move |app, _, elapsed| {
+            let shown = crate::artifacts_view::on_screen(app);
+            if !(elapsed >= Duration::from_millis(700) && shown.iter().any(|id| id == "receipt:receipt-4")) && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            check(shown.iter().any(|id| id == "receipt:receipt-4"), &format!("the receipts report where they are, as cards do: {shown:?}"));
+            shot(&out, "artifacts-20-receipts-dark");
+            headless::press("k");
+            true
+        })),
+        ("receipt selected", Box::new(move |app, _, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let selected = crate::artifacts_view::selected(app).unwrap_or_default();
+            check(selected == "receipt:receipt-4", &format!("K from the end is the last receipt: {selected:?}"));
+            let hints = crate::artifacts_view::selected_hints(app).unwrap_or_default();
+            check(hints == [("O".to_owned(), "Show decision".to_owned())], &format!("its key: {hints:?}"));
+            shot(&out2, "artifacts-20b-receipt-selected");
+            headless::press("o");
+            true
+        })),
+        ("receipt opens its decision", Box::new(move |app, window, elapsed| {
+            let selected = crate::artifacts_view::selected(app).unwrap_or_default();
+            if selected != "dec-expired" && elapsed < Duration::from_secs(4) {
+                return false;
+            }
+            check(selected == "dec-expired", &format!("O goes to the decision card it answers, in view: {selected:?}"));
+            crate::view::apply_theme(window, "paper");
+            headless::press(slint::platform::Key::End);
+            true
+        })),
+        ("receipt light shot", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            shot(&out3, "artifacts-20c-receipts-light");
+            crate::view::apply_theme(window, "terminal");
+            true
+        })),
+    ]
+}
+
+/// `--check receipts`: the receipt stages alone.
+pub(super) fn receipts_check(out: String) {
+    run_stages(receipt_stages(&out));
+}
+
 pub(super) fn artifacts_check(out: String) {
     let mut stages: Vec<Stage> = Vec::new();
     stages.extend(countdown_stages(&out));
     stages.extend(html_form_stages(&out));
     stages.extend(decision_stages(&out));
     stages.extend(question_stages(&out));
+    stages.extend(receipt_stages(&out));
     stages.extend(plan_stages(&out));
     stages.extend(document_stages(&out));
     stages.extend(research_stages(&out));
