@@ -79,6 +79,24 @@ Call `window.clarpForm.submit(answers)` to submit custom state, or use a normal
 HTML form submit button. Page-requested submission opens a native confirmation;
 Clarp also provides its own Send answers button for direct user submission.
 Opening a form or running its scripts cannot send answers without a user action.
+A receipt-aware native bridge returns a Promise from `submit`: it resolves only
+after confirmed Host acceptance and rejects on cancellation or failure. Older
+clients return nothing, so `await submit(...)` alone must never trigger a "Sent"
+message. Keep the page status pending unless the result is a receipt Promise:
+
+```js
+const pending = window.clarpForm.submit(answers);
+if (pending && typeof pending.then === "function") {
+  const receipt = await pending;
+  if (receipt.accepted === true) showStatus("Accepted for delivery");
+} else {
+  showStatus("Confirm submission in Clarp; acceptance is not verified here");
+}
+```
+
+Catch rejections and keep the draft available. Acceptance is not completed agent
+work. Archiving a form hides it from the inbox; ready/active forms remain open
+for answers. Closing/cancelling or discarding the form stops new submissions.
 
 The wrapper saves drafts on input/change in native storage scoped to Host,
 artifact and version, and caches the complete HTML for offline reopening. This

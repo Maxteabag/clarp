@@ -87,7 +87,8 @@ def submit(artifact_id: str, data: dict) -> dict:
             if not form or form['type'] != 'html_form': raise ValueError('HTML form not found')
             if form['payload'].get('read_only') is True:
                 raise ReadOnlyForm('read-only report; it does not accept answers')
-            if form['status'] not in {'ready', 'active'} or form.get('archived_at'):
+            # Archiving only hides the inbox entry; it does not close the form.
+            if form['status'] not in {'ready', 'active'}:
                 raise ValueError('HTML form no longer accepts answers')
             if version != form['payload']['version']: raise ValueError('form version mismatch; reopen the form')
             try: Draft202012Validator(form['payload']['answer_schema']).validate(answers)
