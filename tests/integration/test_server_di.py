@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -80,6 +81,15 @@ def fake_ctx(tmp_path):
 
 @pytest.fixture
 def running_server(fake_ctx):
+    yield from _running_context_server(fake_ctx)
+
+
+@pytest.fixture
+def authenticated_terminal_server(fake_ctx):
+    yield from _running_context_server(fake_ctx.with_(auth_token="home-terminal-owner-test"))
+
+
+def _running_context_server(fake_ctx):
     """Start the real ThreadingHTTPServer with the fake ctx on a random port."""
     port = _free_port()
     srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
@@ -89,7 +99,10 @@ def running_server(fake_ctx):
     # Wait for socket to accept.
     for _ in range(50):
         try:
-            urllib.request.urlopen(base + "/agents/snapshot", timeout=0.2).read()
+            request = urllib.request.Request(base + "/agents/snapshot")
+            if fake_ctx.auth_token:
+                request.add_header("Authorization", "Bearer " + fake_ctx.auth_token)
+            urllib.request.urlopen(request, timeout=0.2).read()
             break
         except Exception:
             time.sleep(0.02)
@@ -3918,3 +3931,88 @@ def test_agent_fallback_engine_saves_the_recording_when_the_first_fails(running_
     status, body = _post_raw(base + "/transcribe", b"voice audio", headers)
     assert status == 200 and json.loads(body)["text"] == "Hei."
     assert used == ["google:chirp_3", "elevenlabs:scribe_v2"]
+
+
+def test_server_home_terminal_requires_authenticated_full_device(authenticated_terminal_server):
+    from lib import device_pairing
+    base, ctx, _ = authenticated_terminal_server
+    issued = device_pairing.issue(scope="limited")
+    limited = device_pairing.exchange(issued["code"], device_name="Limited terminal test")["token"]
+    for credential, expected in [(None, 401), ("invalid-terminal-test", 401),
+                                 (limited, 403), (ctx.auth_token, 426)]:
+        headers = {"Authorization": "Bearer " + credential} if credential else {}
+        with pytest.raises(urllib.error.HTTPError) as error:
+            _get(base + "/server-terminal", headers=headers)
+        assert error.value.code == expected
+
+
+def test_server_home_terminal_runs_shell_in_home_without_resuming_an_agent(
+    authenticated_terminal_server, monkeypatch, tmp_path,
+):
+    from lib import agents, db, terminal_ws, ws
+    base, ctx, _ = authenticated_terminal_server
+    home = tmp_path / "server-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setattr(terminal_ws, "backends", SimpleNamespace(
+        by_id=lambda *_: pytest.fail("Home terminal must not launch a provider")))
+    agent = agents.get_by_session("claude")
+    agents.start_runtime(agent["agent_id"], "preserved-native-thread")
+    before = [tuple(r) for r in db.conn().execute("SELECT agent_id,backend_session_id FROM runtimes")]
+    port = urlsplit(base).port
+    mask = b"\x01\x02\x03\x04"
+
+    def client_frame(opcode, payload):
+        return bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + bytes(
+            value ^ mask[index % 4] for index, value in enumerate(payload))
+
+    def read_exact(stream, count):
+        data = stream.read(count)
+        assert data is not None and len(data) == count
+        return data
+
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as connection:
+        connection.sendall((
+            "GET /server-terminal HTTP/1.1\r\nHost: localhost\r\n"
+            "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+            "Authorization: Bearer " + ctx.auth_token + "\r\n\r\n").encode())
+        stream = connection.makefile("rb")
+        status = stream.readline()
+        assert b"101" in status, status
+        while stream.readline() != b"\r\n":
+            pass
+        connection.sendall(client_frame(ws.OP_BINARY, b"printf '\\nCLARP_HOME=%s\\n' \"$PWD\"\n"))
+        received = b""
+        expected = ("CLARP_HOME=" + str(home)).encode()
+        for _ in range(30):
+            header = read_exact(stream, 2)
+            count = header[1] & 0x7f
+            if count == 126:
+                count = struct.unpack("!H", read_exact(stream, 2))[0]
+            elif count == 127:
+                count = struct.unpack("!Q", read_exact(stream, 8))[0]
+            assert count < 65536
+            payload = read_exact(stream, count)
+            if header[0] & 0x0f == ws.OP_BINARY:
+                received += payload
+            if expected in received:
+                break
+        assert expected in received
+        connection.sendall(client_frame(ws.OP_BINARY, b"exit\n"))
+        for _ in range(30):
+            header = read_exact(stream, 2)
+            count = header[1] & 0x7f
+            if count == 126:
+                count = struct.unpack("!H", read_exact(stream, 2))[0]
+            elif count == 127:
+                count = struct.unpack("!Q", read_exact(stream, 8))[0]
+            payload = read_exact(stream, count)
+            if header[0] & 0x0f == ws.OP_CLOSE:
+                break
+        else:
+            pytest.fail("Exiting the shell must close the terminal socket")
+        stream.close()
+    after = [tuple(r) for r in db.conn().execute("SELECT agent_id,backend_session_id FROM runtimes")]
+    assert after == before

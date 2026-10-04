@@ -989,7 +989,7 @@ class Handler(BaseHTTPRequestHandler):
         "/backend-auth", "/server-update", "/managed-skills",
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/avatar-settings", "/paired-devices",
-        "/tts/providers", "/network/",
+        "/tts/providers", "/network/", "/server-terminal",
         "/oracle/", "/agent-file", "/janitor-runs/",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
@@ -1103,6 +1103,13 @@ class Handler(BaseHTTPRequestHandler):
             parsed = self._query()
             return serve_stt_stream(
                 self, {k: (v[0] if v else "") for k, v in parsed.items()})
+        if path == "/server-terminal":
+            if not getattr(self, "_request_auth_validated", False):
+                return self._json_error(401, "Server terminal requires authenticated full-device access")
+            if os.name != "posix":
+                return self._json_error(501, "Server terminal is unavailable on this platform")
+            from lib.terminal_ws import serve_server_terminal
+            return serve_server_terminal(self)
         if path.startswith("/terminal/"):
             # Interactive terminal WS: spawns the agent's CLI in a PTY resumed
             # on the same session id and bridges raw bytes both ways.

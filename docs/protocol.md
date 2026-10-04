@@ -772,3 +772,11 @@ learn pins only over an already trusted authenticated HTTPS connection, validate
 the exact certificate before sending credentials, and use `server_id` to confirm
 the paired identity. Bonjour metadata does not authorize certificate trust. The
 local endpoint uses the same device tokens and protocol without a relay prefix.
+
+### Server home terminal
+
+`GET /server-terminal` upgrades to a WebSocket for an authenticated full-device
+owner. It runs the server user's login shell with the server home as its working
+directory. Frames and resize messages use the same protocol as `/terminal/<session>`.
+Disconnect closes only this shell process group; no agent binding, dispatch, queue
+or provider inference is created. Feature: `server_home_terminal` (Host contract 48).
