@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 47
+HOST_CONTRACT = 48
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -110,6 +110,7 @@ FEATURES: tuple[str, ...] = (
     "live_activity_push",
     "voice_humanness",
     "log_turn_summary",
+    "server_home_terminal",
 )
 
 
@@ -154,6 +155,7 @@ FEATURE_CONTRACTS["tool_explanation_setting"] = 43
 FEATURE_CONTRACTS["sse_heartbeat"] = 44
 FEATURE_CONTRACTS["live_activity_push"] = 45
 FEATURE_CONTRACTS["log_turn_summary"] = 47
+FEATURE_CONTRACTS["server_home_terminal"] = 48
 FEATURE_CONTRACTS["voice_humanness"] = 46
 FEATURE_CONTRACTS["oracle_gemini_voice"] = 36
 FEATURE_CONTRACTS["push_grants"] = 39
@@ -184,7 +186,9 @@ def live_serving() -> bool:
 
 def _features() -> list[str]:
     serving = live_serving()
-    return [f for f in FEATURES if serving or f not in LIVE_FEATURES]
+    return [f for f in FEATURES
+            if (serving or f not in LIVE_FEATURES)
+            and (os.name == "posix" or f != "server_home_terminal")]
 
 
 def capabilities() -> dict[str, object]:

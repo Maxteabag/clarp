@@ -32,6 +32,8 @@ import struct
 import termios
 import threading
 import json
+import pathlib
+import socket
 
 from . import agents as agents_db
 from . import backends
@@ -99,9 +101,32 @@ def serve_terminal(handler, session: str) -> None:
     from .launch_paths import existing_workspace_path
     cwd = str(existing_workspace_path(agent.get("cwd")))
 
+    return _serve_pty(handler, key=key, argv=argv, cwd=cwd,
+                      session=session, agent_id=agent_id, backend=backend.id, bsid=bsid)
+
+
+def serve_server_terminal(handler) -> None:
+    """Authenticated full-device route: a login shell in the server's home."""
+    headers = {k.lower(): v for k, v in handler.headers.items()}
+    if not ws.is_websocket_upgrade(headers):
+        return _send_http_error(handler, 426, "upgrade required (websocket)")
+    key = headers.get("sec-websocket-key", "").strip()
+    if not key:
+        return _send_http_error(handler, 400, "missing Sec-WebSocket-Key")
+    shell = os.environ.get("SHELL") or "/bin/sh"
+    if shutil.which(shell) is None:
+        return _send_http_error(handler, 500, "server shell unavailable")
+    return _serve_pty(handler, key=key, argv=[shell, "-l"],
+                      cwd=str(pathlib.Path.home()), session="server-home",
+                      agent_id=None, backend="shell", bsid="")
+
+
+def _serve_pty(handler, *, key: str, argv: list[str], cwd: str,
+               session: str, agent_id: str | None, backend: str, bsid: str) -> None:
     try:
         handler.wfile.write(ws.handshake_response(key))
         handler.wfile.flush()
+        handler.close_connection = True
         # Upgraded long-lived socket: exempt from the Handler idle timeout
         # (an idle terminal would otherwise be reaped after 120s of quiet).
         handler.connection.settimeout(None)
@@ -115,7 +140,8 @@ def serve_terminal(handler, session: str) -> None:
         try:
             os.chdir(cwd)
         except OSError:
-            pass
+            if agent_id is None:
+                os._exit(126)
         os.environ["TERM"] = "xterm-256color"
         os.environ.setdefault("LANG", "en_US.UTF-8")
         try:
@@ -123,8 +149,9 @@ def serve_terminal(handler, session: str) -> None:
         except OSError:
             os._exit(127)
 
-    log("terminalStart", f"session={session} backend={backend.id} bsid={bsid} pid={pid}")
-    _mark(agent_id, +1)
+    log("terminalStart", f"session={session} backend={backend} bsid={bsid} pid={pid}")
+    if agent_id is not None:
+        _mark(agent_id, +1)
     _set_winsize(fd, 80, 24)
 
     wlock = threading.Lock()
@@ -159,6 +186,12 @@ def serve_terminal(handler, session: str) -> None:
                     break
         finally:
             stop.set()
+            # PTY EOF must release a client-frame read already blocked below.
+            # Keep the write side open long enough to send the closing frame.
+            try:
+                handler.connection.shutdown(socket.SHUT_RD)
+            except (OSError, AttributeError):
+                pass
 
     reader = threading.Thread(target=pump_pty, daemon=True, name=f"term-pty-{session}")
     reader.start()
@@ -206,7 +239,8 @@ def serve_terminal(handler, session: str) -> None:
         except OSError:
             pass
         reader.join(timeout=1.0)
-        _mark(agent_id, -1)
+        if agent_id is not None:
+            _mark(agent_id, -1)
         try:
             handler.wfile.write(ws.close_frame(1000))
             handler.wfile.flush()
@@ -214,11 +248,12 @@ def serve_terminal(handler, session: str) -> None:
             pass
         # Drain any normal turns that queued behind this terminal while it was
         # live (e.g. a voice command routed to this same agent).
-        try:
-            from . import turn_dispatch
-            turn_dispatch.drain_after_terminal(handler.ctx, agent_id)
-        except Exception as e:  # noqa: BLE001
-            log_exception("terminalDrainFail", e, detail=session)
+        if agent_id is not None:
+            try:
+                from . import turn_dispatch
+                turn_dispatch.drain_after_terminal(handler.ctx, agent_id)
+            except Exception as e:  # noqa: BLE001
+                log_exception("terminalDrainFail", e, detail=session)
         log("terminalClose", f"session={session} pid={pid}")
 
 
