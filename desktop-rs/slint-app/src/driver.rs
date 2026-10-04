@@ -41,6 +41,8 @@ mod startup_checks;
 mod live_checks;
 #[path = "observe_checks.rs"]
 mod observe_checks;
+#[path = "a2a_checks.rs"]
+mod a2a_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -366,6 +368,7 @@ pub fn start_check(name: &str, out: String) {
         "link-hints" => link_hint_checks::link_hints_check(out),
         "live" => live_checks::live_check(out),
         "observe" => observe_checks::observe_check(out),
+        "a2a" => a2a_checks::a2a_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
