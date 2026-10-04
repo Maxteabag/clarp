@@ -394,3 +394,39 @@ fn a_message_queued_while_the_turn_runs_goes_below_it() {
     assert_eq!(refs[at - 1].id, "u-clarp-admin-3c48398b85b08a09", "right after the prompt that started it");
     assert_eq!(refs[at].id, "u-queued");
 }
+
+/// A live message streams its voice markup as text: the row shows the
+/// written reply only, never a tag, a half-arrived tag or a filler.
+#[test]
+fn a_streaming_message_never_shows_voice_markup() {
+    let mut view = turn_full(after(6));
+    let chunks = [
+        "Sure <spe",
+        "ak>Here it is <break time=\"35",
+        "0ms\"/> the plan <vox>u",
+        "m</vox>, step one",
+        " and two.</speak>",
+    ];
+    let mut full = String::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        full.push_str(chunk);
+        let event = json!({"type": "live", "agent_id": "agent-1", "session": "rachel", "conv": "conv-1", "epoch": "boot-a",
+            "lseq": 100 + index as i64, "server_now_ms": 1759480004400i64 + index as i64,
+            "ops": [{"op": "append", "conv": "conv-1", "id": "cl:msg_01:1", "kind": "message", "rev": 10 + index as i64, "field": "text", "chunk": chunk}]});
+        view.apply_event(event.as_object().unwrap());
+        let p = present(&view, &[], &options(&[], 1759480004500));
+        let message = p.entries.iter().find(|e| e.kind == Kind::Message).expect("the message row");
+        for leak in ["<", ">", "speak", "break", "vox", "um", "35"] {
+            assert!(!message.text.contains(leak), "{leak:?} shows in {:?} after {full:?}", message.text);
+        }
+        assert!(message.text.starts_with("Sure"), "{:?}", message.text);
+    }
+    let done = json!({"type": "live", "agent_id": "agent-1", "session": "rachel", "conv": "conv-1", "epoch": "boot-a",
+        "lseq": 200, "server_now_ms": 1759480004900i64,
+        "ops": [{"op": "done", "conv": "conv-1", "id": "cl:msg_01:1", "kind": "message", "rev": 30, "status": "completed", "started_at_ms": 1759480004300i64, "ended_at_ms": 1759480004900i64}]});
+    view.apply_event(done.as_object().unwrap());
+    let p = present(&view, &[], &options(&[], 1759480005000));
+    let message = p.entries.iter().find(|e| e.kind == Kind::Message).unwrap();
+    assert_eq!(message.text, clarp_core::text::cleaned_display_text(&full, false));
+    assert_eq!(message.text, "Sure Here it is, the plan, step one and two.");
+}
