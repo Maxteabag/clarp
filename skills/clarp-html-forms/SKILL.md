@@ -29,8 +29,8 @@ clarp-agent-artifacts create-form ACTUAL_SESSION "Plan title" plan.html answers.
 
 Use `--dry-run` to inspect the exact request without publishing. Choose the ID
 once, then reconcile it with the artifact API after an ambiguous POST; never
-blindly mint another ID. Payloads are immutable. Changed questions or HTML need
-a new artifact ID/version, leaving existing drafts and receipts attached to the
+blindly mint another ID. Interactive-form payloads are immutable. Changed questions
+or HTML need a new artifact ID, leaving existing drafts and receipts attached to the
 original. Existing quick-decision and task APIs remain unchanged.
 
 ## Read-only reports
@@ -44,8 +44,28 @@ clarp-agent-artifacts create-report ACTUAL_SESSION "Report title" report.html \
 ```
 
 The default artifact ID comes from the title and HTML, so a retry of the same
-report reconciles to the same artifact; pass `--artifact-id` and `--version` to
-publish a revision. The Host refuses answers to a report. Keep it readable on a
+report reconciles to the same artifact. On Host contract 49 (`html_report_revisions`),
+reuse one explicit `--artifact-id` and choose a new `--version` for each changed
+publication. The report keeps its link, owner, creation time, pin and archive state.
+An identical retry returns the current report; retrying an older published version
+cannot roll the link back. Reusing a version for different HTML is rejected.
+
+```bash
+clarp-agent-artifacts create-report ACTUAL_SESSION "Report title" report.html \
+  --artifact-id report-STABLE_ID --version 2 --summary "Updated findings"
+clarp-agent-artifacts report-history report-STABLE_ID
+clarp-agent-artifacts report-history report-STABLE_ID --version 1
+```
+
+History lists contain bounded metadata; an explicit version returns that revision
+including its HTML. Restore old content by publishing it under a new version label.
+The helper compares the current version before replacing a report; concurrent
+changes stop for review instead of silently overwriting another publication.
+The artifact update API also accepts report `payload_patch` changes and assigns
+a fresh cache version when no version is supplied. Pass `expected_version` to
+reject a patch based on an outdated revision. Interactive forms remain immutable,
+including their drafts and submission receipts. Older Hosts require a new artifact ID.
+The Host refuses answers to a report. Keep it readable on a
 phone in light and dark mode (`prefers-color-scheme`). Plans with questions stay
 forms.
 

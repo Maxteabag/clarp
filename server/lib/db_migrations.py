@@ -152,6 +152,9 @@ def _migrate(con: sqlite3.Connection) -> None:
             from .provider_background_jobs import TURN_SCHEMA
             for statement in TURN_SCHEMA:
                 con.execute(statement)
+        if version < 109:
+            for statement in db_schema._HTML_REPORT_REVISIONS_SCHEMA.split(";"):
+                if statement.strip(): con.execute(statement)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")

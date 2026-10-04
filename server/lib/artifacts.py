@@ -234,17 +234,17 @@ def _sanitize_json(value: Any) -> Any:
 
 def create(*, session: str, type: str, title: str, summary: str = "",
            status: str = "ready", reference_id: str = "", payload: Any = None,
-           artifact_id: str = "") -> dict:
+           artifact_id: str = "", expected_version: str | None = None) -> dict:
     if type.strip().lower() in {"decision", "question", "plan"}:
         raise ValueError(f"{type} must use its dedicated lifecycle endpoint")
     return _create(session=session, type=type, title=title, summary=summary,
                    status=status, reference_id=reference_id, payload=payload,
-                   artifact_id=artifact_id)
+                   artifact_id=artifact_id, expected_version=expected_version)
 
 
 def _create(*, session: str, type: str, title: str, summary: str = "",
             status: str = "ready", reference_id: str = "", payload: Any = None,
-            artifact_id: str = "") -> dict:
+            artifact_id: str = "", expected_version: str | None = None) -> dict:
     agent = _agent(session)
     type, status = type.strip().lower(), status.strip().lower()
     title = strip_hidden_blocks(title).strip()
@@ -258,6 +258,13 @@ def _create(*, session: str, type: str, title: str, summary: str = "",
         payload = normalize(payload)
     payload = _payload(payload, preserve_html=type == "html_form")
     _require_payload(type, payload, artifact_id, str(agent["session"]))
+    if type == "html_form" and payload.get("read_only") is True:
+        from . import html_report_revisions
+        return html_report_revisions.publish(agent, artifact_id, title, summary, status, reference_id, payload, expected_version)
+    return _insert_artifact(agent, artifact_id, type, title, summary, status, reference_id, payload)
+
+
+def _insert_artifact(agent, artifact_id, type, title, summary, status, reference_id, payload):
     now = db.now_ms()
     db.conn().execute(
         """INSERT INTO artifacts(artifact_id,agent_id,session,type,title,summary,
@@ -417,7 +424,13 @@ def update(artifact_id: str, data: dict) -> dict:
     if current["type"] in {"decision", "question", "plan"}:
         raise ValueError(f"{current['type']} must use its dedicated lifecycle endpoint")
     if current["type"] == "html_form" and any(key in data for key in ("payload", "payload_patch")):
-        raise ValueError("HTML forms are immutable; publish a new artifact/version")
+        from . import html_report_revisions
+        return html_report_revisions.update(artifact_id, data)
+    return _apply_update(current, data)
+
+
+def _apply_update(current, data, *, report_payload=False):
+    artifact_id = current["artifact_id"]
     status = str(data.get("status") or current["status"]).lower()
     if status not in STATUSES: raise ValueError("unsupported artifact status")
     if "payload" in data and "payload_patch" in data:
@@ -425,7 +438,7 @@ def update(artifact_id: str, data: dict) -> dict:
     if "payload_patch" in data:
         payload = _payload({**current["payload"], **_payload(data["payload_patch"])})
     else:
-        payload = current["payload"] if "payload" not in data else _payload(data["payload"])
+        payload = current["payload"] if "payload" not in data else _payload(data["payload"], preserve_html=report_payload)
     if "payload" in data or "payload_patch" in data:
         _require_payload(current["type"], payload, artifact_id, str(current["session"]))
     title = strip_hidden_blocks(str(data.get("title") or current["title"])).strip()

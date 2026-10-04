@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 108
+_SCHEMA_VERSION = 109
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -1345,3 +1345,6 @@ _SCHEMA_SQL += _BUILTIN_JANITOR_SCHEMA
 
 from .audio_bookkeeper import SCHEMA_STATEMENTS as _AUDIO_BOOKKEEPING_SCHEMA
 _SCHEMA_SQL += ";\n".join(_AUDIO_BOOKKEEPING_SCHEMA) + ";"
+
+from .html_report_revisions import SCHEMA as _HTML_REPORT_REVISIONS_SCHEMA
+_SCHEMA_SQL += "\n" + _HTML_REPORT_REVISIONS_SCHEMA + "\n"

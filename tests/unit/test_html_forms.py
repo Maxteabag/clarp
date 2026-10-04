@@ -81,8 +81,8 @@ def test_read_only_report_stores_empty_schema_and_refuses_answers(tmp_path):
         with pytest.raises(html_forms.ReadOnlyForm,match='read-only report'):
             html_forms.submit(row['artifact_id'],{'submission_id':'e'*32,'version':'1','answers':answers})
     assert not html_forms.pending()
-    with pytest.raises(ValueError,match='immutable'):
-        artifacts.update(row['artifact_id'],{'payload_patch':{'content':'changed'}})
+    changed = artifacts.update(row['artifact_id'],{'payload_patch':{'content':'changed'}})
+    assert changed['artifact_id'] == row['artifact_id'] and changed['version'] != '1'
 
 
 def test_read_only_validation(tmp_path):
@@ -112,3 +112,19 @@ def test_read_only_report_allows_large_self_contained_html(tmp_path):
     row=artifacts.create(session='mike',type='html_form',title='Big',payload={
         'content':content,'version':'1','read_only':True})
     assert row['content']==content
+
+
+def test_report_history_upgrade_preserves_artifacts_and_answer_receipts(tmp_path):
+    f = form(tmp_path)
+    body = {'submission_id': 'report-history-migration-receipt', 'version': '1', 'answers': {'budget': 7}}
+    html_forms.submit(f['artifact_id'], body)
+    con = db.conn()
+    artifact_before = tuple(con.execute('SELECT * FROM artifacts WHERE artifact_id=?', (f['artifact_id'],)).fetchone())
+    receipt_before = tuple(con.execute('SELECT * FROM form_submissions WHERE submission_id=?', (body['submission_id'],)).fetchone())
+    con.execute('DROP TABLE html_report_revisions')
+    con.execute('PRAGMA user_version=108')
+    db._migrate(con)
+    assert tuple(con.execute('SELECT * FROM artifacts WHERE artifact_id=?', (f['artifact_id'],)).fetchone()) == artifact_before
+    assert tuple(con.execute('SELECT * FROM form_submissions WHERE submission_id=?', (body['submission_id'],)).fetchone()) == receipt_before
+    assert con.execute('SELECT COUNT(*) FROM html_report_revisions').fetchone()[0] == 0
+    assert con.execute('PRAGMA user_version').fetchone()[0] == db._SCHEMA_VERSION
