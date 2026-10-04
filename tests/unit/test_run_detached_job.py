@@ -27,7 +27,7 @@ def run(tmp_path):
 
     def start(job_id, *command, log_name=None, expect=0):
         log = tmp_path / 'out' / (log_name or f'{job_id}.log')   # directory made by the script
-        out = subprocess.run([str(SCRIPT), 'ziggy-fixture', job_id, 'render', 'Render fixture', str(log), '--', *command],
+        out = subprocess.run([str(SCRIPT), '--no-wake', 'ziggy-fixture', job_id, 'render', 'Render fixture', str(log), '--', *command],
                              env=env, capture_output=True, text=True, timeout=40)
         assert out.returncode == expect, out.stderr
         return (out.stdout.strip() if expect == 0 else out.stderr), log
@@ -115,7 +115,7 @@ env -i PATH="$PATH" HOME="$HOME" setsid "$@" >/dev/null 2>&1 < /dev/null &
            'CLARP_AGENT_BG': shlex.join([sys.executable, str(ROOT / 'scripts/agent_bg.py')]),
            'RENDER_TOKEN': secret}
     env.pop('CLARP_BACKGROUND_WORKER_PID', None)
-    out = subprocess.run([str(SCRIPT), 'ziggy-fixture', 'own-service', 'render', 'Render $HOME fixture', str(log), '--',
+    out = subprocess.run([str(SCRIPT), '--no-wake', 'ziggy-fixture', 'own-service', 'render', 'Render $HOME fixture', str(log), '--',
                           'sh', '-c', 'pwd; echo "$RENDER_TOKEN" | wc -c; echo literal \\$HOME; '
                           'grep SigIgn /proc/self/status'],
                          cwd=work, env=env, capture_output=True, text=True, timeout=40)
@@ -154,10 +154,12 @@ def goal_env(tmp_path):
            'CLARP_GOAL': shlex.join([sys.executable, str(ROOT / 'scripts/agent_tasks.py')])}
     env.pop('CLARP_BACKGROUND_WORKER_PID', None)
 
-    def launch(job_id, *options):
+    def launch(job_id, *options, command=('sleep', '1'), session='ziggy-fixture', extra_env=None, **popen):
         log = tmp_path / 'out' / f'{job_id}.log'
-        return subprocess.run([str(SCRIPT), *options, 'ziggy-fixture', job_id, 'render', 'Render', str(log),
-                               '--', 'sleep', '1'], env=env, capture_output=True, text=True, timeout=60)
+        return subprocess.run([str(SCRIPT), *options, session, job_id, 'render', 'Render', str(log),
+                               '--', *command], env={**env, **(extra_env or {})}, capture_output=True,
+                              text=True, timeout=90, **popen)
+    launch.tmp = tmp_path
     return plan, launch
 
 
@@ -178,7 +180,16 @@ def test_goal_dependency_is_attached_without_losing_the_goals_own_plan(goal_env)
     assert goal['checkpoint']['next_work'].startswith('Compose the board after the render')
     # A second job never silently takes the first one's wake.
     second = launch('render-b', '--goal', pid)
-    assert second.returncode == 3 and 'already waits on render-a' in second.stderr
+    assert second.returncode == 4 and 'already waits on render-a' in second.stderr
+    assert jobs.get('render-b', reconcile=False) is None   # nothing was started
+    # Once render-a has ended (the owner may still be in its turn, so the goal
+    # has not recorded it), the refusal says what to do instead of dropping it.
+    assert wait_for(lambda: jobs.get('render-a', reconcile=False)['status'] == 'succeeded')
+    third = launch('render-b2', '--goal', pid)
+    assert third.returncode == 4 and 'already ended' in third.stderr and 'checkpoint' in third.stderr
+    signals = [f.name for f in (launch.tmp / 'out').glob('render-a.log.*.*')
+               if f.suffix in ('.handle', '.go', '.decided')]
+    assert signals == []   # each launch removes its own signal files
     assert task_plans.get(pid)['goal']['continuation']['dependency_key'] == 'render-a'
 
 
@@ -191,14 +202,124 @@ def test_a_goal_waiting_on_another_kind_of_dependency_keeps_it(goal_env):
         'continuation': {'kind': 'dependency', 'key': 'client-reply', 'reason': 'Waiting for a reply',
                          'due_at': db.now_ms() + 3600_000}})
     out = launch('render-c', '--goal', pid)
-    assert out.returncode == 3 and 'already waits on client-reply' in out.stderr
+    assert out.returncode == 4 and 'already waits on client-reply' in out.stderr
+    assert 'LOG.exit' not in out.stderr   # job advice only for a job
+    assert jobs.get('render-c', reconcile=False) is None
     assert task_plans.get(pid)['goal']['continuation']['dependency_key'] == 'client-reply'
 
 
-@pytest.mark.parametrize('options', [['--goal'], ['--deadline'], ['--deadline', '1h'], ['--goal', ''],
-                                     ['--deadline', '0'], ['--deadline', '99999999999999999999']])
+@pytest.mark.parametrize('options', [[], ['--goal'], ['--deadline'], ['--deadline', '1h'], ['--goal', ''],
+                                     ['--deadline', '0'], ['--deadline', '99999999999999999999'],
+                                     ['--goal', 'x', '--no-wake']])
 def test_bad_options_are_refused_before_anything_starts(goal_env, options):
     plan, launch = goal_env
     out = launch('never-started', *options)
     assert out.returncode == 2
     assert jobs.get('never-started', reconcile=False) is None
+
+
+
+def test_a_goal_that_cannot_carry_the_wake_starts_nothing(goal_env):
+    from lib import task_plans
+    plan, launch = goal_env
+    agents.create_agent(persona='Other fixture', voice_id='', cwd=str(launch.tmp), session='other-fixture')
+    marker = launch.tmp / 'ran'
+    foreign = launch('foreign', '--goal', plan['plan_id'], session='other-fixture', command=('touch', str(marker)))
+    assert foreign.returncode == 4 and 'belongs to ziggy-fixture' in foreign.stderr
+    p = task_plans._goal_mutate(plan['plan_id'], revision=plan['revision'], action='pause', data={'reason': 'User paused'})
+    paused = launch('paused', '--goal', plan['plan_id'], command=('touch', str(marker)))
+    assert paused.returncode == 4 and 'paused' in paused.stderr
+    p = task_plans._goal_mutate(p['plan_id'], revision=p['revision'], action='resume', data={'reason': 'User resumed'})
+    task_plans._goal_mutate(p['plan_id'], revision=p['revision'], action='block', data={'reason': 'Needs a decision'})
+    blocked = launch('blocked', '--goal', plan['plan_id'], command=('touch', str(marker)))
+    assert blocked.returncode == 4 and 'blocked' in blocked.stderr
+    manual = task_plans.create(session='ziggy-fixture', plan_id='manual', title='Manual',
+                               items=[{'id': 'm', 'title': 'Manual'}],
+                               goal={'outcome': 'Tracked by hand', 'criteria': ['Done'], 'limits': 'none', 'enroll': False})
+    unenrolled = launch('unenrolled', '--goal', manual['plan_id'], command=('touch', str(marker)))
+    missing = launch('missing', '--goal', 'no-such-goal', command=('touch', str(marker)))
+    assert unenrolled.returncode == 4 and 'not enrolled' in unenrolled.stderr
+    assert missing.returncode == 4 and 'Traceback' not in missing.stderr
+    assert not marker.exists()
+    assert all(jobs.get(j, reconcile=False) is None for j in ('foreign', 'paused', 'blocked', 'unenrolled', 'missing'))
+
+
+def _goal_helper(tmp_path, body):
+    """A clarp-goal stand-in whose checkpoint misbehaves; everything else is real."""
+    script = tmp_path / 'goal-helper.sh'
+    real = shlex.join([sys.executable, str(ROOT / 'scripts/agent_tasks.py')])
+    script.write_text(f'#!/bin/bash\nif [ "$1" = checkpoint ]; then\n{body}\nfi\nexec {real} "$@"\n')
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_the_command_never_runs_when_its_wake_was_not_stored(goal_env):
+    plan, launch = goal_env
+    marker = launch.tmp / 'ran'
+    helper = _goal_helper(launch.tmp, '  echo "database is locked" >&2; exit 1')
+    out = launch('unstored', '--goal', plan['plan_id'], command=('touch', str(marker)),
+                 extra_env={'CLARP_GOAL': helper})
+    assert out.returncode == 3 and 'did NOT run' in out.stderr
+    assert wait_for(lambda: jobs.get('unstored', reconcile=False)['status'] == 'failed')
+    assert jobs.get('unstored', reconcile=False)['terminal_reason'].startswith('not started')
+    time.sleep(1)
+    assert not marker.exists()
+
+
+def test_a_launcher_lost_after_storing_the_wake_still_runs_the_command_once(goal_env):
+    """The turn can die between storing the dependency and the go signal; the
+    worker reads the goal itself, so the stored wake is honoured exactly once."""
+    from lib import task_plans
+    plan, launch = goal_env
+    marker = launch.tmp / 'runs'
+    real = shlex.join([sys.executable, str(ROOT / 'scripts/agent_tasks.py')])
+    helper = _goal_helper(launch.tmp, f'  {real} "$@" >/dev/null || exit 1\n  kill -9 -- -$(ps -o pgid= -p $$ | tr -d " ")')
+    out = launch('lost-launcher', '--goal', plan['plan_id'], extra_env={'CLARP_GOAL': helper},
+                 command=('sh', '-c', f'echo run >> {marker}'), start_new_session=True)
+    assert out.returncode == -9
+    assert wait_for(lambda: jobs.get('lost-launcher', reconcile=False)['status'] == 'succeeded')
+    assert marker.read_text() == 'run\n'
+    assert task_plans.get(plan['plan_id'])['goal']['continuation']['job_handle'] == 'bg1:1:lost-launcher'
+
+
+
+def test_a_readback_that_never_confirms_reports_not_run_truthfully(goal_env):
+    """The dependency is stored but cannot be read back (here: every read fails
+    after the store). The launcher and the worker share one decision, so the
+    launcher only says "not run" when the command really did not run."""
+    plan, launch = goal_env
+    marker = launch.tmp / 'ran'
+    flag = launch.tmp / 'stored'
+    real = shlex.join([sys.executable, str(ROOT / 'scripts/agent_tasks.py')])
+    script = launch.tmp / 'goal-reads-fail.sh'
+    script.write_text(f'#!/bin/bash\nif [ "$1" = get ] && [ -e {flag} ]; then echo "database is locked" >&2; exit 1; fi\n'
+                      f'if [ "$1" = checkpoint ]; then {real} "$@" && : > {flag}; exit $?; fi\nexec {real} "$@"\n')
+    script.chmod(0o755)
+    out = launch('unconfirmed', '--goal', plan['plan_id'], command=('touch', str(marker)),
+                 extra_env={'CLARP_GOAL': str(script)})
+    assert out.returncode == 3 and 'did NOT run' in out.stderr
+    time.sleep(2)
+    assert not marker.exists()
+    assert wait_for(lambda: jobs.get('unconfirmed', reconcile=False)['status'] == 'failed')
+
+
+def test_a_failed_confirmation_never_hides_a_command_that_started(goal_env):
+    """The launcher's read-back hangs and fails, while the worker reads the
+    stored dependency and starts first. The launcher used to print "did NOT
+    run" anyway."""
+    plan, launch = goal_env
+    marker = launch.tmp / 'ran'
+    real = shlex.join([sys.executable, str(ROOT / 'scripts/agent_tasks.py')])
+    script = launch.tmp / 'launcher-reads-fail.sh'
+    script.write_text(f"""#!/bin/bash
+in_worker() {{ p=$$; while [ "$p" -gt 1 ]; do tr '\\\\0' ' ' < /proc/$p/cmdline | grep -q __worker && return 0
+  p=$(awk '{{print $4}}' /proc/$p/stat); done; return 1; }}
+if [ "$1" = get ] && [ -e {launch.tmp}/stored ] && ! in_worker; then sleep 5; echo "database is locked" >&2; exit 1; fi
+if [ "$1" = checkpoint ]; then {real} "$@" && : > {launch.tmp}/stored; exit $?; fi
+exec {real} "$@"
+""")
+    script.chmod(0o755)
+    out = launch('confirmed-by-worker', '--goal', plan['plan_id'], command=('touch', str(marker)),
+                 extra_env={'CLARP_GOAL': str(script)})
+    assert marker.exists() and out.returncode == 0, out.stderr
+    assert out.stdout.strip() == 'bg1:1:confirmed-by-worker' and 'worker started the command' in out.stderr

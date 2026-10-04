@@ -720,3 +720,21 @@ def test_enrollment_never_treats_the_string_false_as_authorization(tmp_path):
     with pytest.raises(ValueError, match="boolean"):
         make_goal(tmp_path, enroll="false")
     assert task_plans.list_for_session("goal-owner") == []
+
+
+def test_a_dependency_awaited_through_a_pause_is_awaited_again_on_resume(tmp_path):
+    """A job may end while the user has the goal paused. Resume used to set a
+    plain ready wake, so the job's ending was never recorded or delivered."""
+    p = make_goal(tmp_path)
+    due = db.now_ms() + 3_600_000
+    p = act(p, "checkpoint", {"progress": "Render started", "next_work": "Read the render",
+                              "continuation": {"kind": "dependency", "key": "render-1",
+                                               "reason": "Render running", "due_at": due}})
+    p = act(p, "pause", {"reason": "User paused this outcome"})
+    assert p["goal"]["continuation"]["state"] == "paused"
+    p = act(p, "resume", {"reason": "User explicitly resumed this goal"})
+    continuation = p["goal"]["continuation"]
+    assert (continuation["state"], continuation["dependency_key"], continuation["due_at"]) == (
+        "waiting", "render-1", due)
+    p = act(p, "dependency", {"key": "render-1", "outcome": "succeeded", "evidence": "render.log"})
+    assert p["goal"]["continuation"]["dependency_result"]["outcome"] == "succeeded"

@@ -582,14 +582,26 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 "block": "blocked",
                 "resume": "active",
             }[action]
+            # A dependency still awaited when the goal is paused or blocked is
+            # awaited again on resume, with its deadline: its result (a job
+            # that ended meanwhile, say) is then recorded and delivered,
+            # instead of a bare resume wake that never reads it.
+            if action in {"pause", "block"} and state.get("state") == "waiting":
+                state["paused_dependency_due_at"] = state.get("due_at")
+            awaited = (action == "resume" and state.get("dependency_key")
+                       and "paused_dependency_due_at" in state)
+            paused_due = (state.pop("paused_dependency_due_at", None)
+                          if action in {"resume", "cancel", "supersede"} else None)
+            resumed = ("waiting" if awaited else "ready")
             state.update(
                 generation=state["generation"] + 1,
-                state="ready" if action == "resume" else status,
+                state=resumed if action == "resume" else status,
                 reason=reason,
-                observed_state="ready" if action == "resume" else status,
+                observed_state=resumed if action == "resume" else status,
                 observed_reason=reason,
                 observed_at=now,
-                due_at=now + 15000 if action == "resume" else None,
+                due_at=(max(paused_due or 0, now + 15000) if awaited else now + 15000)
+                if action == "resume" else None,
                 lease_until=None,
                 request_id="",
                 attempts=0,
