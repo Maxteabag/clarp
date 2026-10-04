@@ -105,7 +105,6 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
         id: entry.key.clone().into(),
         author: if message { "assistant" } else { "live" }.into(),
         blocks: ModelRc::new(VecModel::from(blocks)),
-        sender: SharedString::new(),
         stamp: SharedString::new(),
         meta: SharedString::new(),
         pending: false,

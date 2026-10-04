@@ -1175,6 +1175,10 @@ pub fn selectables(app: &App) -> Vec<String> {
         if row.live.expandable && !row.live.key.is_empty() {
             ids.push(row.live.key.to_string());
         }
+        // Another agent's prompt, folded or open.
+        if !row.prompt.key.is_empty() {
+            ids.push(row.prompt.key.to_string());
+        }
     }
     ids
 }
@@ -1211,7 +1215,14 @@ pub fn take_return() -> bool {
     RETURN_TO_CHAT.with(|r| r.replace(false))
 }
 
-/// O on a live item row (or a click): opens or folds it, kept by its key.
+/// A live item row or another agent's prompt: O (or a click) opens and
+/// folds it.
+fn toggles(id: &str) -> bool {
+    id.starts_with("live:") || id.starts_with(clarp_core::agent_prompt::PREFIX)
+}
+
+/// O on a live item row or a prompt (or a click): opens or folds it, kept
+/// by its key.
 pub fn toggle_live(app: &App, key: &str) {
     *app.artifact_cursor.borrow_mut() = key.to_owned();
     {
@@ -1264,7 +1275,7 @@ pub fn activate(app: &App, window: &AppWindow, id: &str) {
         show_decision(app, id);
         return;
     }
-    if id.starts_with("live:") {
+    if toggles(id) {
         toggle_live(app, id);
         return;
     }
@@ -1365,6 +1376,10 @@ pub fn selected_hints(app: &App) -> Option<Vec<(String, String)>> {
     }
     if id.starts_with("receipt:") {
         return Some(if receipt(app, &id).is_some_and(|r| r.linked) { vec![("O".to_owned(), "Show decision".to_owned())] } else { Vec::new() });
+    }
+    if id.starts_with(clarp_core::agent_prompt::PREFIX) {
+        let open = app.active_messages()?.iter().any(|r| r.prompt.key == id && r.prompt.expanded);
+        return Some(vec![("O".to_owned(), if open { "Collapse" } else { "Expand" }.to_owned())]);
     }
     if id.starts_with("img:") {
         let gallery = image_block(app, &id).is_some_and(|i| i.len() > 1);
@@ -1594,7 +1609,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
         show_decision(app, id);
         return;
     }
-    if id.starts_with("live:") {
+    if toggles(id) {
         toggle_live(app, id);
         return;
     }

@@ -451,7 +451,8 @@ impl App {
             // A row with images is drawn again when one lands.
             let pictures = if row.blocks.iter().any(|b| b.kind == "images") { crate::artifacts_view::pictures_landed() } else { 0 };
             let receipt = format!("{}:{}:{}", row.receipt.agent, row.receipt.kind, row.receipt.linked);
-            format!("{cards}|{}|{pictures}|{receipt}", explained.join(","))
+            // Another agent's prompt is drawn again when it opens or folds.
+            format!("{cards}|{}|{pictures}|{receipt}|{}", explained.join(","), row.prompt.expanded)
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let mut fresh: Vec<Shown> = presented
