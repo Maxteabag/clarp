@@ -67,9 +67,53 @@ pub struct DecisionReceipt {
     pub outcome: Outcome,
 }
 
+const ANSWERED: &str = "The user answered this clarification: ";
+const ANSWER_END: &str = ". Continue using this answer.";
+
 /// The receipt in a user row's text, or None when it is anything else.
-pub fn parse(_text: &str) -> Option<DecisionReceipt> {
-    let _ = HEADER;
-    let _: Option<Value> = None;
-    None
+/// Only the Host's whole envelope is one: its header first, then the
+/// artifact and question lines; the outcome sentence is the last line
+/// (the Host writes the answer as JSON, so it holds no line break).
+pub fn parse(text: &str) -> Option<DecisionReceipt> {
+    let rest = text.strip_prefix(HEADER)?;
+    let (decision_id, rest) = rest.split_once('\n')?;
+    let rest = rest.strip_prefix("Artifact ID: ")?;
+    let (artifact_id, rest) = rest.split_once('\n')?;
+    let rest = rest.strip_prefix("Question: ")?;
+    let (question, rest) = rest.split_once("\nContext: ")?;
+    // Context may run over lines; Payload is the last line before the outcome.
+    let (_, outcome) = rest.rsplit_once('\n')?;
+    if !rest.contains("\nPayload: ") && !rest.starts_with("Payload: ") {
+        return None;
+    }
+    let outcome = if outcome.starts_with("The user chose: accepted.") {
+        Outcome::Approved
+    } else if outcome.starts_with("The user chose: rejected.") {
+        Outcome::Declined
+    } else if outcome.starts_with("The user discarded this request.") {
+        Outcome::Discarded
+    } else if outcome.starts_with("The request expired") {
+        Outcome::Expired
+    } else if let Some(answer) = outcome.strip_prefix(ANSWERED) {
+        let answer = answer.rsplit_once(ANSWER_END).map_or(answer, |(json, _)| json);
+        Outcome::Answered(answer_words(answer).unwrap_or_else(|| "Answered".into()))
+    } else {
+        Outcome::Resolved
+    };
+    Some(DecisionReceipt {
+        decision_id: decision_id.to_owned(),
+        artifact_id: artifact_id.to_owned(),
+        question: question.trim().to_owned(),
+        outcome,
+    })
+}
+
+/// A choice's label or the typed text (`{"option_id", "label"}` or
+/// `{"text"}`).
+fn answer_words(json: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(json).ok()?;
+    ["label", "text", "option_id"]
+        .iter()
+        .find_map(|key| value.get(*key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()))
+        .map(str::to_owned)
 }
