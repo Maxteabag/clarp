@@ -215,13 +215,40 @@ def _create_report(args: list[str]) -> dict:
             "payload": {"content": content, "version": parsed.version, "read_only": True}}
     if parsed.dry_run:
         return {"method": "POST", "path": "/artifacts", "body": body}
-    return _request("POST", "/artifacts", body)["artifact"]
+    try:
+        return _request("POST", "/artifacts", body)["artifact"]
+    except urllib.error.HTTPError as exc:
+        if exc.code != 409:
+            raise
+        current = _request("GET", "/artifacts/" + urllib.parse.quote(body["artifact_id"], safe=""))["artifact"]
+        if current.get("session") != parsed.session or current.get("read_only") is not True:
+            raise ValueError("the artifact ID does not identify this agent's read-only report") from exc
+        if current.get("version") == parsed.version:
+            raise
+        body["expected_version"] = current["version"]
+        # One compare-and-set attempt: a concurrent edit is not silently overwritten.
+        return _request("POST", "/artifacts", body)["artifact"]
+
+
+def _report_history(args: list[str]) -> dict:
+    parser = _Parser(prog="clarp-agent-artifacts report-history")
+    parser.add_argument("artifact_id")
+    parser.add_argument("--version")
+    parser.add_argument("--limit", type=int, default=50)
+    parser.add_argument("--offset", type=int, default=0)
+    parsed = parser.parse_args(args)
+    query = {"limit": max(1, min(parsed.limit, 100)), "offset": max(0, parsed.offset)}
+    if parsed.version is not None:
+        query["version"] = parsed.version
+    return _request("GET", "/artifacts/" + urllib.parse.quote(parsed.artifact_id, safe="")
+                    + "/revisions?" + urllib.parse.urlencode(query))
 
 
 def main(argv: list[str]) -> int:
     usage = ("usage: agent_artifacts.py create SESSION TYPE TITLE [SUMMARY] [JSON_PAYLOAD] | "
              "create-form SESSION TITLE HTML_FILE SCHEMA_FILE --version V --artifact-id ID | "
              "create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V] | "
+             "report-history ARTIFACT_ID [--version V] [--limit N] [--offset N] | "
              "decision SESSION TITLE QUESTION YES_LABEL NO_LABEL [JSON_PAYLOAD] [OPTIONS] | "
              "question SESSION TITLE QUESTION JSON_OPTIONS [OPTIONS] | "
              "input SESSION TITLE PROMPT [--hint one_time_code] [--expires-in S] [OPTIONS] | "
@@ -234,6 +261,8 @@ def main(argv: list[str]) -> int:
             result = _create_form(argv[2:])
         elif cmd == "create-report":
             result = _create_report(argv[2:])
+        elif cmd == "report-history":
+            result = _report_history(argv[2:])
         elif cmd == "create" and len(argv) in {5, 6, 7}:
             result = _request("POST", "/artifacts", {
                 "session": argv[2], "type": argv[3], "title": argv[4],

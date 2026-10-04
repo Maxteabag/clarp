@@ -1055,6 +1055,17 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/background-jobs/"):
             return self._handle_background_job_detail(
                 path[len("/background-jobs/"):].strip("/"))
+        if path.startswith("/artifacts/") and path.endswith("/revisions"):
+            from lib import html_report_revisions
+            artifact_id = unquote(path[len("/artifacts/"):-len("/revisions")].strip("/"))
+            try:
+                query = parse_qs(urlparse(self.path).query)
+                version = query.get("version", [None])[0]
+                value = html_report_revisions.revisions(artifact_id, version,
+                    limit=int(query.get("limit", [50])[0]), offset=int(query.get("offset", [0])[0]))
+            except (ValueError, TypeError) as exc:
+                return self._json_error(404, str(exc))
+            return self._json_ok({"revision" if version is not None else "revisions": value})
         if path.startswith("/artifacts/"):
             return self._handle_artifact_get(unquote(path[len("/artifacts/"):].strip("/")))
         if path.startswith("/static/"):
@@ -4549,7 +4560,7 @@ class Handler(BaseHTTPRequestHandler):
                 title=str(data.get("title") or ""), summary=str(data.get("summary") or ""),
                 status=str(data.get("status") or "ready"),
                 reference_id=str(data.get("reference_id") or ""), payload=data.get("payload"),
-                artifact_id=str(data.get("artifact_id") or ""))
+                artifact_id=str(data.get("artifact_id") or ""), expected_version=data.get("expected_version"))
         except (ValueError, sqlite3.IntegrityError) as exc:
             return self._json_error(409, str(exc))
         self._broadcast_artifact(row)
