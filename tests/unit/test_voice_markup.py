@@ -119,6 +119,22 @@ def test_strip_ssml_for_plain_tts_replaces_tags_with_a_space():
     assert strip_ssml_for_plain_tts(None) == ""
 
 
+def test_plain_tts_strips_ssml_outside_clarps_internal_markup_vocabulary():
+    """No SSML syntax should be read aloud when an adapter declares no SSML.
+
+    Issue #14 was fixed for Clarp's four internal tags, but standard SSML tags
+    such as prosody, emphasis, say-as, p, and s still cross the plain-provider
+    boundary verbatim.
+    """
+    raw = (
+        '<prosody rate="slow">Careful</prosody> '
+        '<emphasis level="strong">now</emphasis>. '
+        '<say-as interpret-as="characters">API</say-as> '
+        '<p><s>Done.</s></p>'
+    )
+    assert strip_ssml_for_plain_tts(raw) == "Careful now. API Done."
+
+
 def test_spoken_for_tts_empty():
     assert spoken_for_tts("") == ""
     assert spoken_for_tts(None) == ""

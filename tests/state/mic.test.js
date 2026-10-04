@@ -20,6 +20,7 @@ vi.mock('../../web/src/stores/audio.svelte.js', () => ({
   machine: { startRecording() {}, endRecording() {}, settle() {} },
   playerAdapter: { interrupt() {} },
   scheduler: { flushOlderThan() {} },
+  addConditionSource() {},
   tick() {},
   unlockAudio,
   addConditionSource() {},
@@ -157,4 +158,25 @@ describe('tap-to-record', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(fetchSpy.mock.calls[0][0]).toBe('/transcribe');
   });
+
+  it('a second tap cancels a start that is still awaiting mic permission', async () => {
+    let grant;
+    const pendingPermission = new Promise(resolve => { grant = resolve; });
+    navigator.mediaDevices.getUserMedia = vi.fn(() => pendingPermission);
+    const m = await loadStore();
+
+    const firstTap = m.micTap();
+    const secondTap = m.micTap();
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+    grant(fakeStream());
+    await Promise.all([firstTap, secondTap]);
+
+    expect(recorders).toHaveLength(0);
+    expect(m.mic.recording).toBe(false);
+    expect(m.mic.capturing).toBe(false);
+  });
+
+
+
+
 });
