@@ -244,10 +244,54 @@ def _report_history(args: list[str]) -> dict:
                     + "/revisions?" + urllib.parse.urlencode(query))
 
 
+def _form_events(args: list[str]) -> dict:
+    parser = _Parser(prog="clarp-agent-artifacts form-events")
+    parser.add_argument("artifact_id")
+    parser.add_argument("--after", type=int, default=0)
+    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--draft-key", help="explicitly follow an existing custom draft event array; empty disables")
+    parser.add_argument("--output", help="export a consistent full snapshot as private JSONL")
+    parser.add_argument("--overwrite", action="store_true")
+    parsed = parser.parse_args(args)
+    artifact_path = "/artifacts/" + urllib.parse.quote(parsed.artifact_id, safe="")
+    if parsed.draft_key is not None:
+        return _request("POST", artifact_path + "/events-config", {"draft_key": parsed.draft_key or None})
+    path = artifact_path + "/events?"
+    query = {"after": parsed.after, "limit": parsed.limit}
+    first = _request("GET", path + urllib.parse.urlencode(query))
+    if parsed.output is None: return first
+    import tempfile
+    target = pathlib.Path(parsed.output).absolute()
+    if target.exists() and not parsed.overwrite: raise ValueError("output already exists; use --overwrite to refresh it")
+    descriptor, name = tempfile.mkstemp(prefix=".form-events-", dir=target.parent)
+    total = 0
+    try:
+        with os.fdopen(descriptor, "w") as file:
+            page = first
+            while True:
+                for event in page['events']:
+                    file.write(json.dumps(event, ensure_ascii=False) + "\n"); total += 1
+                if not page['has_more']: break
+                if page['next_seq'] <= query['after']: raise ValueError("event cursor did not advance")
+                query.update(after=page['next_seq'], through=first['snapshot_seq'])
+                page = _request("GET", path + urllib.parse.urlencode(query))
+            file.flush(); os.fsync(file.fileno())
+        if target.exists() and not parsed.overwrite: raise ValueError("output appeared during export; refusing to replace it")
+        if parsed.overwrite:
+            os.replace(name, target)
+        else:
+            os.link(name, target)
+    finally:
+        if os.path.exists(name): os.unlink(name)
+    return {"artifact_id": parsed.artifact_id, "output": str(target), "events": total,
+            "snapshot_seq": first['snapshot_seq'], "next_seq": page['next_seq']}
+
+
 def main(argv: list[str]) -> int:
     usage = ("usage: agent_artifacts.py create SESSION TYPE TITLE [SUMMARY] [JSON_PAYLOAD] | "
              "create-form SESSION TITLE HTML_FILE SCHEMA_FILE --version V --artifact-id ID | "
              "create-report SESSION TITLE HTML_FILE [--summary S] [--artifact-id ID] [--version V] | "
+             "form-events ARTIFACT_ID [--draft-key KEY] [--after N] [--limit N] [--output JSONL] [--overwrite] | "
              "report-history ARTIFACT_ID [--version V] [--limit N] [--offset N] | "
              "decision SESSION TITLE QUESTION YES_LABEL NO_LABEL [JSON_PAYLOAD] [OPTIONS] | "
              "question SESSION TITLE QUESTION JSON_OPTIONS [OPTIONS] | "
@@ -261,6 +305,8 @@ def main(argv: list[str]) -> int:
             result = _create_form(argv[2:])
         elif cmd == "create-report":
             result = _create_report(argv[2:])
+        elif cmd == "form-events":
+            result = _form_events(argv[2:])
         elif cmd == "report-history":
             result = _report_history(argv[2:])
         elif cmd == "create" and len(argv) in {5, 6, 7}:
