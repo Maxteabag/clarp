@@ -1,3 +1,4 @@
+import pytest
 from tests.integration.test_attention_questions_http import host, _request, server_module
 from lib import artifacts, html_forms
 
@@ -118,3 +119,32 @@ def test_report_revision_conflicts_do_not_overwrite_another_publisher(host, tmp_
         'payload': {'content': '<main>Do not take over</main>', 'version': '4', 'read_only': True}})[0] == 409
     assert artifacts.get('report-concurrent')['session'] == 'theo'
     assert _request(host, '/artifacts/report-concurrent/revisions', authenticated=False)[0] == 401
+
+
+@pytest.mark.parametrize("status", ["ready", "active"])
+def test_archived_form_accepts_answers_until_closed_or_discarded(host, status):
+    from lib import db
+    row = artifacts.create(session='theo', type='html_form', title='Archived plan', status=status, payload={
+        'content': '<form><input name="priority"></form>', 'version': '1',
+        'answer_schema': {'type': 'object', 'properties': {'priority': {'type': 'string'}},
+                          'required': ['priority'], 'additionalProperties': False}})
+    path = '/artifacts/' + row['artifact_id']
+    code, archived = _request(host, path + '/archive', {'archived': True, 'expected_updated_at': row['updated_at']})
+    assert code == 200 and archived['artifact']['archived_at'] is not None
+    body = {'submission_id': 'archived-form-receipt-123456', 'version': '1', 'answers': {'priority': 'keep'}}
+    code, receipt = _request(host, path + '/submit', body)
+    assert code == 200 and receipt['accepted'] is True and receipt['delivery_status'] == 'pending'
+    assert _request(host, path + '/submit', body)[1] == receipt
+    assert db.conn().execute('SELECT COUNT(*) FROM form_submissions').fetchone()[0] == 1
+    assert artifacts.get(row['artifact_id'])['archived_at'] is not None
+    assert _request(host, path + '/submit', {**body, 'submission_id': 'stale-archived-receipt-123456', 'version': '2'})[0] == 409
+    assert _request(host, path + '/submit', {**body, 'submission_id': 'invalid-archived-receipt-1234', 'answers': {}})[0] == 409
+    artifacts.update(row['artifact_id'], {'status': 'completed'})
+    assert _request(host, path + '/submit', {**body, 'submission_id': 'closed-form-receipt-123456'})[0] == 409
+    assert _request(host, path + '/submit', body)[1] == receipt
+    artifacts.update(row['artifact_id'], {'status': status})
+    restored = artifacts.get(row['artifact_id'])
+    assert _request(host, path + '/discard', {'expected_updated_at': restored['updated_at']})[0] == 200
+    assert _request(host, path + '/submit', {**body, 'submission_id': 'deleted-form-receipt-123456'})[0] == 409
+    assert _request(host, path + '/submit', body)[1] == receipt
+    assert db.conn().execute('SELECT COUNT(*) FROM form_submissions').fetchone()[0] == 1

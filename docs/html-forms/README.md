@@ -18,6 +18,9 @@ receipt and pending delivery snapshot are committed in the same transaction.
 An identical ID/payload retry returns the existing receipt. Reusing an ID for
 different answers is rejected. The normal dispatch worker uses a stable
 `html-form-{submission_id}` request ID with durable queueing and no steering.
+Archiving hides the inbox entry without closing a ready or active form.
+Completed, cancelled, expired, or discarded forms reject new answers; an
+identical retry of an already accepted submission still returns its receipt.
 Receiving a receipt proves acceptance, not completed agent work. Failed dispatch
 stays pending for retry. Submissions are preferences, not protected-action approval.
 
