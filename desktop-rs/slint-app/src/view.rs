@@ -354,9 +354,15 @@ pub(crate) fn message_row(
 ) -> MessageRow {
     let m = &row.message;
     let author = if row.activity { "activity" } else if m.role == "user" { "user" } else { "assistant" };
-    let text = if row.body.is_empty() && !row.activity { m.text.clone() } else { row.body.clone() };
-    // The user's own words stay literal; replies are Markdown.
-    let blocks = if author == "user" {
+    // A reply is only ever its written form: a row whose voice markup was
+    // all there was shows nothing rather than the tags.
+    let text = if row.body.is_empty() && !row.activity && author == "user" { m.text.clone() } else { row.body.clone() };
+    let receipt = if author == "user" { receipt_row(m) } else { None };
+    // The user's own words stay literal; replies are Markdown. A resolved
+    // decision is its receipt, never the Host's prompt.
+    let blocks = if receipt.is_some() {
+        Vec::new()
+    } else if author == "user" {
         vec![clarp_engine::blocks::Block::Prose(text.clone())]
     } else {
         clarp_engine::blocks::blocks(&text)
@@ -405,7 +411,31 @@ pub(crate) fn message_row(
         cells: ModelRc::new(VecModel::from(crate::cells_view::cells(row))),
         artifacts: ModelRc::new(VecModel::<crate::ArtifactItem>::default()),
         live: crate::LiveRow::default(),
+        receipt: receipt.unwrap_or_default(),
     }
+}
+
+/// The receipt a resolved-decision prompt shows as (its agent, kind and
+/// whether its card is in the chat are the pane's to fill in).
+pub(crate) fn receipt_row(m: &clarp_core::protocol::Message) -> Option<crate::ReceiptRow> {
+    let receipt = clarp_core::decision_receipt::parse(&m.text)?;
+    let kind = if matches!(receipt.outcome, clarp_core::decision_receipt::Outcome::Answered(_)) { "QUESTION" } else { "DECISION" };
+    Some(crate::ReceiptRow {
+        key: receipt_key(&m.id).into(),
+        question: receipt.question.into(),
+        mark: receipt.outcome.mark().into(),
+        outcome: receipt.outcome.label().into(),
+        tone: receipt.outcome.tone().into(),
+        kind: kind.into(),
+        agent: SharedString::new(),
+        artifact_id: receipt.artifact_id.into(),
+        linked: false,
+    })
+}
+
+/// A receipt's key: J/K and link hints reach it by its message.
+pub(crate) fn receipt_key(message_id: &str) -> String {
+    format!("receipt:{message_id}")
 }
 
 /// What a cached row was built from: an equal source builds an equal row.
@@ -588,4 +618,34 @@ mod tests {
         cache.live_row(&ticked);
         assert_eq!(cache.built, 4, "a dropped row is built afresh");
     }
+
+    /// The Host's resolved-decision prompt (origin automation, role user)
+    /// shows as its receipt: no protocol line reaches the chat.
+    #[test]
+    fn a_resolved_decision_shows_as_its_receipt_not_the_prompt() {
+        let text = "[Clarp decision resolved]\nDecision ID: dec-7\nArtifact ID: art-42\nQuestion: Deploy to production?\nContext: CI is green.\nReference: \nPayload: {}\nThe user chose: rejected. Do not perform the protected action.";
+        let messages = [Message::from_json(serde_json::json!({"id": "m1", "role": "user", "origin": "automation", "text": text}).as_object().unwrap())];
+        let rows = clarp_core::presentation::present(&messages, &mut clarp_core::presentation::Settings::default(), None).rows;
+        let row = super::message_row(&rows[0], false, &Default::default());
+        assert_eq!(row.author, "user");
+        assert_eq!(slint::Model::row_count(&row.blocks), 0, "no prompt text");
+        assert_eq!(row.receipt.key, "receipt:m1");
+        assert_eq!(row.receipt.question, "Deploy to production?");
+        assert_eq!((row.receipt.outcome.as_str(), row.receipt.tone.as_str(), row.receipt.mark.as_str()), ("Declined", "danger", "✕"));
+        assert_eq!(row.receipt.artifact_id, "art-42");
+        assert_eq!(row.receipt.kind, "DECISION");
+        let plain = [Message::from_json(serde_json::json!({"id": "m2", "role": "user", "text": "The user chose: accepted."}).as_object().unwrap())];
+        let rows = clarp_core::presentation::present(&plain, &mut clarp_core::presentation::Settings::default(), None).rows;
+        assert_eq!(super::message_row(&rows[0], false, &Default::default()).receipt.key, "", "the user's own words stay a message");
+    }
+
+    /// A reply that was only spoken markup shows nothing, not its tags.
+    #[test]
+    fn a_reply_of_voice_markup_only_shows_no_tags() {
+        let messages = [Message::from_json(serde_json::json!({"id": "a1", "role": "assistant", "text": "<speak><vox>um</vox> <break time=\"350ms\"/></speak>", "tools": [{"name": "Read"}]}).as_object().unwrap())];
+        let rows = clarp_core::presentation::present(&messages, &mut clarp_core::presentation::Settings::default(), None).rows;
+        let row = super::message_row(&rows[0], true, &Default::default());
+        assert_eq!(slint::Model::row_count(&row.blocks), 0, "the raw text is never the fallback");
+    }
+
 }

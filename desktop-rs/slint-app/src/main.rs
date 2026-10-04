@@ -691,7 +691,13 @@ fn main() {
     window.on_copy_message(|pane, id| with_window(|app, _| {
         let session = app.session_of(&pane);
         let text = app.engine.borrow().conversation(&session).and_then(|c| {
-            c.rows().iter().find(|m| m.id == id.as_str()).map(|m| if m.display_text.is_empty() { m.text.clone() } else { m.display_text.clone() })
+            c.rows().iter().find(|m| m.id == id.as_str()).map(|m| match clarp_core::decision_receipt::parse(&m.text) {
+                // A receipt copies as it reads, not as the Host's prompt.
+                Some(receipt) => format!("{}\n{}", receipt.question, receipt.outcome.label()),
+                // A reply copies its written form only.
+                None if m.display_text.is_empty() && m.role == "user" => m.text.clone(),
+                None => m.display_text.clone(),
+            })
         });
         match text.map(|text| platform::clipboard::copy(&text)) {
             Some(Ok(())) => {}

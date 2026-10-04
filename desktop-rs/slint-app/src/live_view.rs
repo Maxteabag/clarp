@@ -131,6 +131,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
             expandable: entry.expandable,
             expanded: entry.expanded,
         },
+        receipt: crate::ReceiptRow::default(),
     }
 }
 

@@ -243,7 +243,7 @@ pub fn number(pieces: &[Piece]) -> Vec<String> {
 fn cards_on_screen(app: &App, top: f32) -> Vec<Piece> {
     crate::artifacts_view::on_screen(app)
         .into_iter()
-        .filter(|id| id.starts_with("img:") || crate::artifacts_view::card_item(app, id).is_some_and(|c| !c.action.is_empty() || c.pending))
+        .filter(|id| id.starts_with("img:") || crate::artifacts_view::receipt_linked(app, id) || crate::artifacts_view::card_item(app, id).is_some_and(|c| !c.action.is_empty() || c.pending))
         .filter_map(|id| {
             let (x, y, _, height) = crate::artifacts_view::card_rect(app, &id)?;
             // Over the card's corner (its glyph), where it shows.

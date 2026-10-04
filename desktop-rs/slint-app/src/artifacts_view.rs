@@ -1165,6 +1165,10 @@ pub fn selectables(app: &App) -> Vec<String> {
     let Some(rows) = app.active_messages() else { return Vec::new() };
     let mut ids = Vec::new();
     for row in rows.iter() {
+        // A resolved decision's receipt.
+        if !row.receipt.key.is_empty() {
+            ids.push(row.receipt.key.to_string());
+        }
         ids.extend(row.blocks.iter().filter(|b| !b.key.is_empty()).map(|b| b.key.to_string()));
         ids.extend(row.artifacts.iter().map(|a| a.id.to_string()));
         // A live item row that opens (a tool, a group, the fold).
@@ -1220,6 +1224,35 @@ pub fn toggle_live(app: &App, key: &str) {
     app.refresh(&[Change::Live(session), Change::Updates]);
 }
 
+/// The receipt `key` in the open chat.
+fn receipt(app: &App, key: &str) -> Option<crate::ReceiptRow> {
+    app.active_messages()?.iter().find(|r| r.receipt.key == key).map(|r| r.receipt)
+}
+
+/// A receipt whose decision card is in the chat (a link hint reaches it).
+pub fn receipt_linked(app: &App, key: &str) -> bool {
+    key.starts_with("receipt:") && receipt(app, key).is_some_and(|r| r.linked)
+}
+
+/// O on a receipt (or a click): the keyboard goes to the decision card it
+/// answers, brought into view.
+pub fn show_decision(app: &App, key: &str) {
+    let Some(receipt) = receipt(app, key) else {
+        eprintln!("clarp-slint: no receipt {key}");
+        return;
+    };
+    let card = receipt.artifact_id.to_string();
+    if !receipt.linked || !selectables(app).contains(&card) {
+        eprintln!("clarp-slint: the decision card {card} is not in the chat");
+        return;
+    }
+    let direction = if selectables(app).iter().position(|i| *i == card) < selectables(app).iter().position(|i| i == key) { -1 } else { 1 };
+    TILE.with(|t| t.set(0));
+    *app.artifact_cursor.borrow_mut() = card.clone();
+    bring_into_view(app, &card, direction);
+    app.refresh(&[Change::Updates]);
+}
+
 fn live_row(app: &App, key: &str) -> Option<crate::MessageRow> {
     app.active_messages()?.iter().find(|r| r.live.key == key)
 }
@@ -1227,6 +1260,10 @@ fn live_row(app: &App, key: &str) -> Option<crate::MessageRow> {
 /// O on what the keyboard is on (or its link hint's number): a card's
 /// action, or an image enlarged.
 pub fn activate(app: &App, window: &AppWindow, id: &str) {
+    if id.starts_with("receipt:") {
+        show_decision(app, id);
+        return;
+    }
     if id.starts_with("live:") {
         toggle_live(app, id);
         return;
@@ -1325,6 +1362,9 @@ pub fn selected_hints(app: &App) -> Option<Vec<(String, String)>> {
     if id.starts_with("live:") {
         let open = live_row(app, &id).is_some_and(|r| r.live.expanded);
         return Some(vec![("O".to_owned(), if open { "Collapse" } else { "Expand" }.to_owned())]);
+    }
+    if id.starts_with("receipt:") {
+        return Some(if receipt(app, &id).is_some_and(|r| r.linked) { vec![("O".to_owned(), "Show decision".to_owned())] } else { Vec::new() });
     }
     if id.starts_with("img:") {
         let gallery = image_block(app, &id).is_some_and(|i| i.len() > 1);
@@ -1550,6 +1590,10 @@ pub fn leave(app: &App) {
 
 /// A card's action (Enter on the selected card, or a click).
 pub fn open(app: &App, window: &AppWindow, id: &str) {
+    if id.starts_with("receipt:") {
+        show_decision(app, id);
+        return;
+    }
     if id.starts_with("live:") {
         toggle_live(app, id);
         return;
