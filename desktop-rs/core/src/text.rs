@@ -75,6 +75,11 @@ pub fn cleaned_display_text(text: &str, streaming: bool) -> String {
     static BETWEEN: LazyLock<Regex> = LazyLock::new(|| re(r"(?<=\S)[\x{E000}\x{E001}]+(?=\S)"));
     static LEFTOVER: LazyLock<Regex> = LazyLock::new(|| re(r"[\x{E000}\x{E001}]+"));
 
+    // Most text has no markup: skip the passes (previews, a streaming
+    // reply every frame).
+    if !text.contains('<') && !text.contains([FILLER, PAUSE]) {
+        return text.trim().to_owned();
+    }
     let mut text = replace_all(&SPOKEN_BLOCK, text, &FILLER.to_string());
     text = replace_all(&PAUSE_TAG, &text, &PAUSE.to_string());
     text = replace_all(&VOX_BLOCK, &text, "");
