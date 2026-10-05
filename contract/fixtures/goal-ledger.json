@@ -2,7 +2,7 @@
   "delegations": {
     "delegations": [
       {
-        "created_at": 1791160025000,
+        "created_at": 1791160026000,
         "created_reason": "Pilot bookkeeping for Pip",
         "delegate_agent_id": "agent-pip-accountant",
         "delegate_session": "pip-accountant",
@@ -12,12 +12,12 @@
         "goal_event_through": 10,
         "in_flight": false,
         "job_handle": "",
-        "lag_ms": 13000,
-        "last_applied_at": 1791160045000,
+        "lag_ms": 14000,
+        "last_applied_at": 1791160046000,
         "last_error": "",
-        "last_heartbeat_at": 1791160046000,
-        "last_source_at": 1791160046000,
-        "last_wake_at": 1791160034000,
+        "last_heartbeat_at": 1791160048000,
+        "last_source_at": 1791160047000,
+        "last_wake_at": 1791160035000,
         "last_wake_id": "bookkeeping-dg0000000000000001-m1-e10",
         "message_through": 1,
         "principal_agent_id": "agent-pip",
@@ -25,7 +25,7 @@
         "status": "active",
         "stopped_at": null,
         "stopped_reason": "",
-        "unapplied_since": 1791160046000
+        "unapplied_since": 1791160047000
       }
     ]
   },
@@ -80,7 +80,7 @@
         "actor_agent_id": "agent-pip",
         "actor_kind": "owner",
         "actor_session": "pip",
-        "at": 1791160005000,
+        "at": 1791160006000,
         "basis": "",
         "delegation_id": "",
         "event_id": 2,
@@ -96,7 +96,7 @@
           },
           "goal": {
             "checkpoint": {
-              "at": 1791160005000,
+              "at": 1791160006000,
               "evidence": {
                 "criterion-2": "Told Peter build 2741 is required"
               },
@@ -142,7 +142,7 @@
         "actor_agent_id": "agent-pip",
         "actor_kind": "owner",
         "actor_session": "pip",
-        "at": 1791160008000,
+        "at": 1791160009000,
         "basis": "",
         "delegation_id": "",
         "event_id": 3,
@@ -193,7 +193,7 @@
         "actor_agent_id": "agent-pip",
         "actor_kind": "owner",
         "actor_session": "pip",
-        "at": 1791160008000,
+        "at": 1791160009000,
         "basis": "",
         "delegation_id": "",
         "event_id": 4,
@@ -225,7 +225,7 @@
         "actor_agent_id": "agent-pip",
         "actor_kind": "owner",
         "actor_session": "pip",
-        "at": 1791160012000,
+        "at": 1791160013000,
         "basis": "",
         "delegation_id": "",
         "event_id": 5,
@@ -251,7 +251,7 @@
         "actor_agent_id": "agent-pip",
         "actor_kind": "owner",
         "actor_session": "pip",
-        "at": 1791160014000,
+        "at": 1791160015000,
         "basis": "",
         "delegation_id": "",
         "event_id": 6,
@@ -274,7 +274,7 @@
         "actor_agent_id": "agent-pip",
         "actor_kind": "owner",
         "actor_session": "pip",
-        "at": 1791160016000,
+        "at": 1791160017000,
         "basis": "",
         "delegation_id": "",
         "event_id": 7,
@@ -295,7 +295,7 @@
         "actor_agent_id": "agent-pip",
         "actor_kind": "owner",
         "actor_session": "pip",
-        "at": 1791160018000,
+        "at": 1791160019000,
         "basis": "",
         "delegation_id": "",
         "event_id": 8,
@@ -318,7 +318,7 @@
         "actor_agent_id": "",
         "actor_kind": "user",
         "actor_session": "",
-        "at": 1791160019000,
+        "at": 1791160020000,
         "basis": "",
         "delegation_id": "",
         "event_id": 9,
@@ -342,7 +342,7 @@
         "actor_agent_id": "",
         "actor_kind": "user",
         "actor_session": "",
-        "at": 1791160022000,
+        "at": 1791160023000,
         "basis": "",
         "delegation_id": "",
         "event_id": 10,
@@ -366,12 +366,22 @@
         "actor_agent_id": "agent-pip-accountant",
         "actor_kind": "delegate",
         "actor_session": "pip-accountant",
-        "at": 1791160037000,
+        "at": 1791160038000,
         "basis": "observed",
         "delegation_id": "dg0000000000000001",
         "event_id": 11,
         "kind": "discrepancy",
         "new": {
+          "sources": [
+            {
+              "ref": "goal_event:1",
+              "status": "exact"
+            },
+            {
+              "ref": "goal_event:4",
+              "status": "exact"
+            }
+          ],
           "text": "Criterion names v5 while the plan now publishes v6"
         },
         "plan_id": "agent-pip:number-ninja:0000000a",
@@ -388,12 +398,18 @@
         "actor_agent_id": "agent-pip-accountant",
         "actor_kind": "delegate",
         "actor_session": "pip-accountant",
-        "at": 1791160038000,
+        "at": 1791160039000,
         "basis": "observed",
         "delegation_id": "dg0000000000000001",
         "event_id": 12,
         "kind": "observation",
         "new": {
+          "sources": [
+            {
+              "ref": "goal_event:4",
+              "status": "exact"
+            }
+          ],
           "text": "v6 replaces v5 publishing"
         },
         "plan_id": "agent-pip:number-ninja:0000000a",
@@ -409,12 +425,18 @@
         "actor_agent_id": "agent-pip-accountant",
         "actor_kind": "delegate",
         "actor_session": "pip-accountant",
-        "at": 1791160039000,
+        "at": 1791160040000,
         "basis": "claimed",
         "delegation_id": "dg0000000000000001",
         "event_id": 13,
         "kind": "claim",
         "new": {
+          "sources": [
+            {
+              "ref": "goal_event:2",
+              "status": "exact"
+            }
+          ],
           "text": "Pip says Peter was told build 2741 is required"
         },
         "plan_id": "agent-pip:number-ninja:0000000a",
@@ -430,13 +452,14 @@
         "actor_agent_id": "agent-pip-accountant",
         "actor_kind": "delegate",
         "actor_session": "pip-accountant",
-        "at": 1791160040000,
+        "at": 1791160041000,
         "basis": "inferred",
         "delegation_id": "dg0000000000000001",
         "event_id": 14,
         "kind": "unknown",
         "new": {
           "observed_at": 1791160060000,
+          "sources": [],
           "text": "Whether 2741 is installed on Peter's phone"
         },
         "plan_id": "agent-pip:number-ninja:0000000a",
@@ -450,7 +473,7 @@
         "actor_agent_id": "agent-pip-accountant",
         "actor_kind": "delegate",
         "actor_session": "pip-accountant",
-        "at": 1791160042000,
+        "at": 1791160043000,
         "basis": "observed",
         "delegation_id": "dg0000000000000001",
         "event_id": 15,
@@ -483,7 +506,7 @@
         "actor_agent_id": "agent-pip-accountant",
         "actor_kind": "delegate",
         "actor_session": "pip-accountant",
-        "at": 1791160044000,
+        "at": 1791160045000,
         "basis": "claimed",
         "delegation_id": "dg0000000000000001",
         "event_id": 16,
@@ -506,7 +529,7 @@
         "actor_agent_id": "",
         "actor_kind": "system",
         "actor_session": "",
-        "at": 1791160067000,
+        "at": 1791160069000,
         "basis": "",
         "delegation_id": "",
         "event_id": 17,
@@ -528,7 +551,7 @@
         "actor_agent_id": "agent-pip",
         "actor_kind": "owner",
         "actor_session": "pip",
-        "at": 1791160052000,
+        "at": 1791160054000,
         "basis": "",
         "delegation_id": "",
         "event_id": 18,
@@ -547,7 +570,7 @@
           },
           "goal": {
             "checkpoint": {
-              "at": 1791160052000,
+              "at": 1791160054000,
               "evidence": {},
               "next_work": "Read her answer, then report",
               "progress": "Asked Avana which build Peter runs"
@@ -558,7 +581,7 @@
         "plan_revision": 5,
         "prior": {
           "checkpoint": {
-            "at": 1791160005000,
+            "at": 1791160006000,
             "evidence": {
               "criterion-2": "Told Peter build 2741 is required"
             },
@@ -592,7 +615,7 @@
     "created_at": 1791160001000,
     "goal": {
       "checkpoint": {
-        "at": 1791160052000,
+        "at": 1791160054000,
         "evidence": {},
         "next_work": "Read her answer, then report",
         "progress": "Asked Avana which build Peter runs"
@@ -605,7 +628,7 @@
         "generation": 5,
         "job_handle": "",
         "lease_until": null,
-        "observed_at": 1791160067000,
+        "observed_at": 1791160069000,
         "observed_reason": "Owner is idle",
         "observed_state": "idle",
         "plan_revision": 4,
@@ -637,7 +660,7 @@
           "revision": 0
         },
         {
-          "at": 1791160005000,
+          "at": 1791160006000,
           "detail": {
             "evidence": {
               "criterion-2": "Told Peter build 2741 is required"
@@ -649,7 +672,7 @@
           "revision": 1
         },
         {
-          "at": 1791160008000,
+          "at": 1791160009000,
           "detail": {
             "items": [
               {
@@ -686,7 +709,7 @@
           "revision": 2
         },
         {
-          "at": 1791160008000,
+          "at": 1791160009000,
           "detail": {
             "reason": "v6 logs with clarpForm.log directly; v5 draft keys duplicate it",
             "steps": [
@@ -704,7 +727,7 @@
           "revision": 2
         },
         {
-          "at": 1791160019000,
+          "at": 1791160020000,
           "detail": {
             "reason": "User paused this goal"
           },
@@ -712,7 +735,7 @@
           "revision": 3
         },
         {
-          "at": 1791160022000,
+          "at": 1791160023000,
           "detail": {
             "reason": "User explicitly resumed this goal"
           },
@@ -720,7 +743,7 @@
           "revision": 4
         },
         {
-          "at": 1791160067000,
+          "at": 1791160069000,
           "detail": {
             "generation": 4,
             "request_id": "task-goal-00000000000000000000000000000000"
@@ -729,7 +752,7 @@
           "revision": 4
         },
         {
-          "at": 1791160052000,
+          "at": 1791160054000,
           "detail": {
             "continuation": {
               "due_at": 1791163600000,
@@ -754,7 +777,7 @@
     "items": [
       {
         "active_ms": 0,
-        "completed_at": 1791160008000,
+        "completed_at": 1791160009000,
         "created_at": 1791160001000,
         "detail": "v6 logs with clarpForm.log directly; v5 draft keys duplicate it",
         "elapsed_ms": 0,
@@ -771,7 +794,7 @@
       {
         "active_ms": 0,
         "completed_at": null,
-        "created_at": 1791160008000,
+        "created_at": 1791160009000,
         "detail": "",
         "elapsed_ms": 0,
         "item_id": "agent-pip:number-ninja:0000000a:v6",
@@ -805,7 +828,7 @@
       "accounting": [
         {
           "actor_agent_id": "agent-pip-accountant",
-          "at": 1791160040000,
+          "at": 1791160041000,
           "basis": "inferred",
           "delegation_id": "dg0000000000000001",
           "event_id": 14,
@@ -817,7 +840,7 @@
         },
         {
           "actor_agent_id": "agent-pip-accountant",
-          "at": 1791160039000,
+          "at": 1791160040000,
           "basis": "claimed",
           "delegation_id": "dg0000000000000001",
           "event_id": 13,
@@ -831,7 +854,7 @@
         },
         {
           "actor_agent_id": "agent-pip-accountant",
-          "at": 1791160038000,
+          "at": 1791160039000,
           "basis": "observed",
           "delegation_id": "dg0000000000000001",
           "event_id": 12,
@@ -845,7 +868,7 @@
         },
         {
           "actor_agent_id": "agent-pip-accountant",
-          "at": 1791160037000,
+          "at": 1791160038000,
           "basis": "observed",
           "delegation_id": "dg0000000000000001",
           "event_id": 11,
@@ -860,7 +883,7 @@
         }
       ],
       "delegation": {
-        "created_at": 1791160025000,
+        "created_at": 1791160026000,
         "created_reason": "Pilot bookkeeping for Pip",
         "delegate_agent_id": "agent-pip-accountant",
         "delegate_session": "pip-accountant",
@@ -870,12 +893,12 @@
         "goal_event_through": 10,
         "in_flight": false,
         "job_handle": "",
-        "lag_ms": 12000,
-        "last_applied_at": 1791160045000,
+        "lag_ms": 13000,
+        "last_applied_at": 1791160046000,
         "last_error": "",
-        "last_heartbeat_at": 1791160046000,
-        "last_source_at": 1791160046000,
-        "last_wake_at": 1791160034000,
+        "last_heartbeat_at": 1791160048000,
+        "last_source_at": 1791160047000,
+        "last_wake_at": 1791160035000,
         "last_wake_id": "bookkeeping-dg0000000000000001-m1-e10",
         "message_through": 1,
         "principal_agent_id": "agent-pip",
@@ -883,21 +906,21 @@
         "status": "active",
         "stopped_at": null,
         "stopped_reason": "",
-        "unapplied_since": 1791160046000
+        "unapplied_since": 1791160047000
       },
       "event_count": 18,
-      "last_event_at": 1791160067000
+      "last_event_at": 1791160069000
     },
     "legacy": false,
     "plan_id": "agent-pip:number-ninja:0000000a",
     "recovery_enabled": 1,
     "revision": 5,
-    "server_now": 1791160057000,
+    "server_now": 1791160059000,
     "session": "pip",
     "status": "active",
     "subgoals": [
       {
-        "created_at": 1791160011000,
+        "created_at": 1791160012000,
         "created_by": {
           "actor_kind": "owner",
           "agent_id": "agent-pip"
@@ -924,10 +947,10 @@
         "status": "unknown",
         "subgoal_id": "phone",
         "title": "Events arrive from Peter's phone",
-        "updated_at": 1791160041000
+        "updated_at": 1791160042000
       },
       {
-        "created_at": 1791160013000,
+        "created_at": 1791160014000,
         "created_by": {
           "actor_kind": "owner",
           "agent_id": "agent-pip"
@@ -943,10 +966,10 @@
         "status": "retired",
         "subgoal_id": "v5-draft",
         "title": "v5 draft-key capture",
-        "updated_at": 1791160015000
+        "updated_at": 1791160016000
       },
       {
-        "created_at": 1791160043000,
+        "created_at": 1791160044000,
         "created_by": {
           "actor_kind": "delegate",
           "agent_id": "agent-pip-accountant"
@@ -962,11 +985,11 @@
         "status": "proposed",
         "subgoal_id": "report",
         "title": "Peter hears the corrected status",
-        "updated_at": 1791160043000
+        "updated_at": 1791160044000
       }
     ],
     "title": "Number Ninja logs events",
     "total_count": 3,
-    "updated_at": 1791160052000
+    "updated_at": 1791160054000
   }
 }

@@ -25,6 +25,24 @@ meaningful change:
 | `idempotency_key` | unique per plan; a replayed write is a no-op |
 | `at` | Host time in ms |
 
+A delegate's observation, claim, discrepancy or unknown also stores `new.sources`:
+for each reference, what it pointed at when recorded.
+
+| reference | status | kept |
+|---|---|---|
+| `message:<id>@<revision>`, that revision still current | `exact` | hash and first 300 characters |
+| `message:<id>@<revision>`, row rewritten since | `changed` | only the current revision and hash, labelled current; the cited text is not retained |
+| `message:<id>` without a revision | `unpinned` | current revision and hash |
+| a revision newer than the row's | `invalid` | current revision |
+| no such message of the principal, or one the delegate sent | `unavailable` | nothing |
+| `goal_event:<id>` of the principal's goals, `document:<name>@<revision>` | `exact` or `unavailable` | immutable rows |
+| any other prefix (`job:` …) | `unverified` | nothing |
+
+A message row is rewritten not only while streaming but also when its turn
+settles (metadata only, same text), so `changed` means "rewritten since", not
+"the text changed". Excerpts are kept in the append-only ledger: text a user later
+deletes from the conversation stays in the excerpt.
+
 Existing `goal_json.history` is unchanged and still written; on upgrade each
 historical entry is copied into `goal_events` with `actor_kind = legacy`.
 
@@ -84,8 +102,8 @@ from that token, not from a session name the caller types:
 - A delegation needs both agents on a backend whose turns carry tokens, and stops
   if either moves off one.
 
-Limits, stated rather than hidden: agents share one Unix user and the Host API
-token, so a process that deliberately reads another process's environment, writes
+Limits, stated rather than hidden: this is not cryptographic isolation and not
+an OS sandbox. Agents share one Unix user and the Host API token, so a process that deliberately reads another process's environment, writes
 the database directly, or calls the HTTP API as the user is not stopped by this.
 The Codex app-server serves all Codex agents from one process and has no per-turn
 token, so an unverified reply claiming a Codex replier cannot be told apart. A
@@ -107,15 +125,24 @@ events and any message the delegate sent. It coalesces a burst until it has been
 quiet for a few seconds (bounded by a maximum delay), then wakes the delegate once
 with a stable id (`bookkeeping-<delegation>-m<message revision>-e<goal event>`),
 queued behind any running turn. It does not dispatch again until the delegate has
-applied that wake. A wake left unapplied for 15 minutes is resent under
+applied that wake, and never while an earlier wake for the delegation is still
+queued or parked or the delegate's newest turn is unsettled (started within the
+last 2 hours; an older unsettled turn is treated as stale): that is read from the queue and turn
+records, not only the stored cursors, so a wake admitted just before a listener
+crash (cursor not saved) or still running in a long turn is not joined by a
+second one. A wake that ended without being applied for 15 minutes is resent under
 `…-r<seconds>`, unless the previous one is still queued. A failed send backs off.
 A listener job that fails (a missed heartbeat during suspend) is re-registered;
 only cancelling the job stops the pilot. Cursors live in the database, so a
 restart backfills from the last applied point. Stop: the delegation's status goes
 to `stopped`, the listener exits and the job closes; no further wakes are sent.
 
-Health (`GET /goal-ledger/delegations`) reports when the newest activity was first
-seen, the last wake and apply, `lag_ms` (how long the oldest activity not yet in
-the books has waited), `in_flight`, the last heartbeat and error; it does not
-promise zero delay. Without a user systemd manager the listener cannot be checked
+Health (`GET /goal-ledger/delegations`) reports `last_source_at` (when the newest
+unbooked activity happened: the message's own `timestamp` or the goal event's
+`at`, never when a listener noticed it or a row was rewritten, so a restart does
+not make old history fresh), `unapplied_since` (when the oldest unbooked activity
+happened, not earlier than the delegation, recomputed on every apply), the last
+wake and apply, `lag_ms` (how long that oldest activity has waited), `in_flight`,
+the last heartbeat, and `last_error` (also why it is waiting). It does not promise
+zero delay. Without a user systemd manager the listener cannot be checked
 or restarted by the Host.

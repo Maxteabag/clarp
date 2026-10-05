@@ -455,3 +455,127 @@ def test_the_plan_carries_the_delegates_current_books_and_the_ledger_keeps_the_r
         ("subgoal:phone", "observation", "Phone runs 2741")]
     assert [e["new"]["text"] for e in _events(plan_id) if e["kind"] == "observation"] == [
         "Phone build unknown", "Phone runs 2741"]
+
+
+def _admit_wake(pilot, wake_id):
+    """The Host accepted a wake for the accountant: its durable queue row."""
+    from lib import turn_queue
+    turn_queue.enqueue(queue_id=wake_id, agent_id=ACC(pilot), session="pip-accountant",
+                       text="[Bookkeeping wake]", trace_id=wake_id, client_msg_id=wake_id,
+                       synthesize_audio=False, origin="automation", sender_agent_id="")
+
+
+def test_a_long_running_wake_is_never_joined_by_a_retry(pilot):
+    d, pip = pilot["delegation"], pilot["pip"]["agent_id"]
+    sent, pending = [], listener.Pending()
+    send = lambda session, text, wake_id: (sent.append(wake_id), _admit_wake(pilot, wake_id))   # noqa: E731
+    t = 10**13
+    _say(pip, "first", client="a")
+    listener.tick(d, pending, send, now=t)
+    assert listener.tick(d, pending, send, now=t + 70_000) == "dispatched"
+    # The accountant takes the wake and is still working on it, for an hour.
+    db.conn().execute("UPDATE queued_turns SET status='started' WHERE client_msg_id=?", (sent[0],))
+    db.conn().execute("INSERT INTO turns (agent_id, source, trace_id, started_at) VALUES (?,?,?,?)",
+                      (ACC(pilot), "pwa", sent[0], t + 70_000))
+    for minutes in (16, 31, 46, 61):
+        _say(pip, f"more at {minutes}", client=f"m{minutes}")
+        assert listener.tick(d, pending, send, now=t + minutes * 60_000) == "waiting"
+    assert sent == sent[:1]
+
+
+def test_a_wake_admitted_before_a_crash_is_not_sent_twice(pilot):
+    d, pip = pilot["delegation"], pilot["pip"]["agent_id"]
+    _say(pip, "work", client="a")
+    # The previous listener sent this wake and died before saving its cursor.
+    _admit_wake(pilot, f"bookkeeping-{d}-m1-e1")
+    _say(pip, "more work", client="b")
+    sent, pending = [], listener.Pending()
+    t = 10**13
+    listener.tick(d, pending, lambda *a: sent.append(a), now=t)
+    assert listener.tick(d, pending, lambda *a: sent.append(a), now=t + 70_000) == "waiting"
+    assert sent == []
+
+
+def test_a_reference_keeps_what_it_pointed_at_when_recorded(pilot):
+    d, token, plan_id, pip = pilot["delegation"], pilot["token"], pilot["plan"]["plan_id"], pilot["pip"]["agent_id"]
+    live = _say(pip, "Publishing v6 now", client="live")
+    ref = f"message:{live['id']}@{live['revision']}"
+    ledger.record(d, token, plan_id, caller=ACC(pilot), wake_id="w1", entries=[
+        {"type": "observation", "text": "v6 publishing", "source_refs": [ref, "message:gone@1"]}])
+    # The row is rewritten in place, as a streaming reply is: new text, new revision.
+    db.conn().execute("UPDATE messages SET text=?, revision=revision+1000 WHERE message_id=?",
+                      ("Publishing v6 now. Done, it is live.", live["id"]))
+    ledger.record(d, token, plan_id, caller=ACC(pilot), wake_id="w2", entries=[
+        {"type": "claim", "text": "v6 live", "source_refs": [ref]}])
+    first, second = [e["new"]["sources"] for e in _events(plan_id) if e["kind"] in ("observation", "claim")]
+    assert [(s["status"], s.get("excerpt")) for s in first] == [
+        ("exact", "Publishing v6 now"), ("unavailable", None)]
+    # Rewritten since: the cited text is not kept, and nothing pretends it is.
+    assert second[0]["status"] == "changed" and "excerpt" not in second[0]
+    assert second[0]["current_revision"] > live["revision"]
+
+
+def test_activity_times_come_from_the_record_not_from_noticing_it(pilot):
+    d, pip = pilot["delegation"], pilot["pip"]["agent_id"]
+    from lib.message_turns import iso_ms
+    said = _say(pip, "old news", client="old")
+    happened = iso_ms(db.conn().execute("SELECT timestamp FROM messages WHERE message_id=?",
+                                        (said["id"],)).fetchone()[0])
+    # Its turn settling later rewrites the row; that is not new activity.
+    db.conn().execute("UPDATE messages SET updated_at=updated_at+36000000, revision=revision+5 "
+                      "WHERE message_id=?", (said["id"],))
+    t = happened + 10 * 3_600_000   # noticed ten hours later, e.g. after a restart
+    listener.tick(d, listener.Pending(), lambda *a: None, now=t)
+    listener.tick(d, listener.Pending(), lambda *a: None, now=t + 60_000)
+    assert ledger.delegation(d)["last_source_at"] == happened
+
+
+def test_a_settled_wake_that_was_never_applied_is_retried_and_stale_turns_do_not_block(pilot):
+    d, pip = pilot["delegation"], pilot["pip"]["agent_id"]
+    sent, pending = [], listener.Pending()
+    send = lambda session, text, wake_id: (sent.append(wake_id), _admit_wake(pilot, wake_id))   # noqa: E731
+    t = 10**13
+    # A turn a crash left unsettled three hours ago does not block...
+    db.conn().execute("INSERT INTO turns (agent_id, source, trace_id, started_at) VALUES (?,?,?,?)",
+                      (ACC(pilot), "pwa", "crashed", t - 3 * 3_600_000))
+    _say(pip, "first", client="a")
+    listener.tick(d, pending, send, now=t)
+    assert listener.tick(d, pending, send, now=t + 70_000) == "dispatched"
+    db.conn().execute("UPDATE queued_turns SET status='started' WHERE client_msg_id=?", (sent[0],))
+    db.conn().execute("INSERT INTO turns (agent_id, source, trace_id, started_at, settled_at, outcome) "
+                      "VALUES (?,?,?,?,?,?)", (ACC(pilot), "pwa", sent[0], t + 71_000, t + 90_000, "done"))
+    assert listener.tick(d, pending, send, now=t + 70_000 + listener.WAKE_TIMEOUT_MS) == "retried"
+
+
+def test_a_partial_apply_moves_the_oldest_unbooked_time(pilot):
+    from lib.message_turns import iso_ms
+    d, token, plan_id, pip = pilot["delegation"], pilot["token"], pilot["plan"]["plan_id"], pilot["pip"]["agent_id"]
+    first = _say(pip, "one", client="one")
+    second = _say(pip, "two", client="two")
+    goals_seen = ledger.observe(d, token, caller=ACC(pilot))["goal_event_through"]
+    ledger.record(d, token, plan_id, caller=ACC(pilot), wake_id="w1", entries=[],
+                  message_through=first["revision"], goal_event_through=goals_seen)
+    second_at = iso_ms(db.conn().execute("SELECT timestamp FROM messages WHERE message_id=?",
+                                         (second["id"],)).fetchone()[0])
+    assert ledger.delegation(d)["unapplied_since"] == max(second_at, ledger.delegation(d)["created_at"])
+    ledger.record(d, token, plan_id, caller=ACC(pilot), wake_id="w2", entries=[],
+                  message_through=second["revision"], goal_event_through=goals_seen)
+    assert ledger.delegation(d)["unapplied_since"] is None
+
+
+def test_references_are_the_principals_own_and_say_what_is_kept(pilot, tmp_path):
+    d, token, plan_id, pip = pilot["delegation"], pilot["token"], pilot["plan"]["plan_id"], pilot["pip"]["agent_id"]
+    other = _agent(tmp_path, "avana")
+    with ledger.acting_as("owner"):
+        theirs = task_plans.create(session="avana", title="Other", items=[{"id": "a", "title": "A"}],
+                                   goal={"criteria": ["x"], "limits": "none"})
+    their_event = _events(theirs["plan_id"])[0]["event_id"]
+    mine = _say(pip, "Pip's words", client="pw")
+    own = _say(pip, "the accountant writing into Pip's chat", client="acc",
+               sender=ACC(pilot), origin="agent")
+    ledger.record(d, token, plan_id, caller=ACC(pilot), wake_id="w1", entries=[{
+        "type": "observation", "text": "refs", "source_refs": [
+            f"goal_event:{their_event}", f"message:{mine['id']}", f"message:{mine['id']}@{mine['revision'] + 99}",
+            f"message:{own['id']}@{own['revision']}", "job:bg1:1:x"]}])
+    sources = [e for e in _events(plan_id) if e["kind"] == "observation"][0]["new"]["sources"]
+    assert [s["status"] for s in sources] == ["unavailable", "unpinned", "invalid", "unavailable", "unverified"]

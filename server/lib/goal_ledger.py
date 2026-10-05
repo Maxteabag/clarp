@@ -751,6 +751,7 @@ def record(delegation_id: str, token: str, plan_id: str, *, caller: str, wake_id
                 refs = _refs(entry.get("source_refs"))
                 if kind != "unknown" and not refs:
                     raise LedgerError(f"a {kind} needs source_refs")
+                sources = [_snapshot(con, row, ref) for ref in refs]
                 subject = _clean_text(entry.get("subject") or "goal", "subject", limit=120)
                 if not (subject == "goal" or subject.split(":", 1)[0] in ("criterion", "step", "subgoal")):
                     raise LedgerError("subject is goal, criterion:<id>, step:<id> or subgoal:<id>")
@@ -758,6 +759,7 @@ def record(delegation_id: str, token: str, plan_id: str, *, caller: str, wake_id
                        basis=BOOKKEEPING_KINDS[kind], source_refs=refs,
                        reason=_clean_text(entry.get("reason"), "reason"),
                        new={"text": _clean_text(entry.get("text"), "text", required=True),
+                            "sources": sources,
                             **({"observed_at": entry["observed_at"]}
                                if isinstance(entry.get("observed_at"), int) else {})},
                        plan_revision=plan["revision"])
@@ -787,14 +789,44 @@ def record(delegation_id: str, token: str, plan_id: str, *, caller: str, wake_id
              min(int(goal_event_through or 0), latest_event), now, delegation_id))
         fresh = con.execute("SELECT * FROM goal_delegations WHERE delegation_id=?",
                             (delegation_id,)).fetchone()
-        if not _unapplied(con, fresh):
-            con.execute("UPDATE goal_delegations SET unapplied_since=NULL WHERE delegation_id=?",
-                        (delegation_id,))
+        # Recomputed after every apply: a partial apply moves it to the oldest
+        # activity still unbooked; a full one clears it.
+        con.execute("UPDATE goal_delegations SET unapplied_since=? WHERE delegation_id=?",
+                    (unapplied_since(con, fresh, now), delegation_id))
         con.execute("COMMIT")
     except BaseException:
         con.execute("ROLLBACK")
         raise
     return {"applied": applied, "delegation": delegation(delegation_id)}
+
+
+def unbooked_activity(con, row) -> tuple[int, int, int | None, int | None]:
+    """The principal's activity the delegate has not booked: newest message
+    revision, newest goal event, and when the oldest and newest of it actually
+    happened (message `timestamp`, goal event `at`). A row rewritten later (its
+    turn settling, a restart) keeps its original time, so it never looks new."""
+    from .message_turns import iso_ms
+    message, newest_ts, oldest_ts = con.execute(
+        "SELECT COALESCE(MAX(revision),0), MAX(timestamp), MIN(timestamp) FROM messages "
+        "WHERE agent_id=? AND revision>? AND COALESCE(sender_agent_id,'')!=?",
+        (row["principal_agent_id"], row["message_through"], row["delegate_agent_id"])).fetchone()
+    event, newest_at, oldest_at = con.execute(
+        """SELECT COALESCE(MAX(e.event_id),0), MAX(e.at), MIN(e.at) FROM goal_events e
+             JOIN task_plans p ON p.plan_id=e.plan_id
+            WHERE p.agent_id=? AND e.event_id>? AND e.delegation_id!=? AND e.actor_kind!='system'""",
+        (row["principal_agent_id"], row["goal_event_through"], row["delegation_id"])).fetchone()
+    newest = [t for t in (iso_ms(newest_ts), newest_at) if t]
+    oldest = [t for t in (iso_ms(oldest_ts), oldest_at) if t]
+    return (int(message), int(event), max(newest) if newest else None,
+            min(oldest) if oldest else None)
+
+
+def unapplied_since(con, row, now: int) -> int | None:
+    """When the oldest unbooked activity happened, never before the delegation."""
+    *_, oldest = unbooked_activity(con, row)
+    if oldest is None and not _unapplied(con, row):
+        return None
+    return min(max(oldest or now, row["created_at"]), now)
 
 
 def _unapplied(con, row) -> bool:
@@ -809,6 +841,57 @@ def _unapplied(con, row) -> bool:
             WHERE p.agent_id=? AND e.event_id>? AND e.delegation_id!=? AND e.actor_kind!='system'
             LIMIT 1""",
         (row["principal_agent_id"], row["goal_event_through"], row["delegation_id"])).fetchone() is not None
+
+
+SNAPSHOT_CHARS = 300
+
+
+def _snapshot(con, row, ref: str) -> dict:
+    """What a reference pointed at when it was recorded, kept with the record.
+
+    `message:<id>@<revision>`: `exact` (that revision is still the row's
+    current one: its excerpt and hash are kept), `changed` (the row was
+    rewritten since, possibly metadata only such as its turn settling; the
+    cited text is not retained, only the current text's hash, labelled as
+    current), `unpinned` (no revision cited), `invalid` (a revision newer than
+    the row's), `unavailable` (no such message of the principal). The
+    delegate's own messages are never a source. Goal events (of the
+    principal's goals) and document revisions are immutable rows."""
+    prefix, _, rest = ref.partition(":")
+    if prefix == "message":
+        message_id, _, revision = rest.partition("@")
+        found = con.execute(
+            "SELECT revision, text FROM messages WHERE agent_id=? AND message_id=? "
+            "AND COALESCE(sender_agent_id,'')!=?",
+            (row["principal_agent_id"], message_id, row["delegate_agent_id"])).fetchone()
+        if not found:
+            return {"ref": ref, "status": "unavailable"}
+        text, current = found["text"] or "", int(found["revision"])
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        if not revision.isdigit():
+            return {"ref": ref, "status": "unpinned", "current_revision": current,
+                    "current_sha256": digest}
+        cited = int(revision)
+        if cited == current:
+            return {"ref": ref, "status": "exact", "revision": cited, "sha256": digest,
+                    "excerpt": text[:SNAPSHOT_CHARS]}
+        if cited > current:
+            return {"ref": ref, "status": "invalid", "current_revision": current}
+        return {"ref": ref, "status": "changed", "current_revision": current,
+                "current_sha256": digest}
+    if prefix == "goal_event":
+        exists = rest.isdigit() and con.execute(
+            "SELECT 1 FROM goal_events e JOIN task_plans p ON p.plan_id=e.plan_id "
+            "WHERE e.event_id=? AND p.agent_id=?", (int(rest), row["principal_agent_id"])).fetchone()
+        return {"ref": ref, "status": "exact" if exists else "unavailable"}
+    if prefix == "document":
+        name, _, revision = rest.partition("@")
+        exists = revision.isdigit() and con.execute(
+            "SELECT 1 FROM task_goal_documents d JOIN task_plans p ON p.plan_id=d.plan_id "
+            "WHERE p.agent_id=? AND d.name=? AND d.revision=?",
+            (row["principal_agent_id"], name, int(revision))).fetchone()
+        return {"ref": ref, "status": "exact" if exists else "unavailable"}
+    return {"ref": ref, "status": "unverified"}   # jobs and other prefixes: not retained here
 
 
 # --- reads for clients ----------------------------------------------------------

@@ -39,7 +39,6 @@ class Pending:
     marker: tuple[int, int] = (0, 0)
     first_seen: int = 0
     last_change: int = 0
-    seen: tuple[int, int] = (0, 0)
     failures: int = 0
     retry_at: int = 0
 
@@ -58,24 +57,45 @@ def source_marker(row) -> tuple[int, int]:
     """Newest principal message revision and goal event past what the delegate
     has applied, excluding anything the delegate itself wrote or sent.
     (0, 0) when there is nothing new."""
+    return source_state(row)[:2]
+
+
+def source_state(row) -> tuple[int, int, int | None]:
+    """source_marker plus when the newest unbooked activity actually happened."""
+    from . import goal_ledger
+    message, event, newest, _ = goal_ledger.unbooked_activity(db.conn(), row)
+    return message, event, newest
+
+
+BUSY_TURN_MS = 2 * 60 * 60_000   # an open turn older than this is treated as stale
+
+
+def _wake_pending(row, now: int) -> str:
+    """Why the delegate cannot take another wake yet, or "".
+
+    Checked against the queue and the delegate's turns, not only the stored
+    cursors, so a wake admitted just before a listener crash (cursor not saved)
+    or still running in a long turn is never joined by a second one."""
     con = db.conn()
-    message = con.execute(
-        "SELECT COALESCE(MAX(revision),0) FROM messages WHERE agent_id=? AND revision>? "
-        "AND COALESCE(sender_agent_id,'')!=?",
-        (row["principal_agent_id"], row["message_through"], row["delegate_agent_id"])).fetchone()[0]
-    event = con.execute(
-        """SELECT COALESCE(MAX(e.event_id),0) FROM goal_events e
-             JOIN task_plans p ON p.plan_id=e.plan_id
-            WHERE p.agent_id=? AND e.event_id>? AND e.delegation_id!=?
-              AND e.actor_kind!='system'""",
-        (row["principal_agent_id"], row["goal_event_through"], row["delegation_id"])).fetchone()[0]
-    return int(message), int(event)
+    if con.execute(
+            "SELECT 1 FROM queued_turns WHERE client_msg_id LIKE ? "
+            "AND status IN ('queued','claimed','parked') LIMIT 1",
+            (f"{WAKE_PREFIX}{row['delegation_id']}-%",)).fetchone():
+        return "a wake is still queued for the delegate"
+    if con.execute(
+            # Only the newest turn counts (an older one left unsettled by a crash
+            # does not); a finished turn is settled, ended_at is mostly left empty.
+            "SELECT 1 FROM turns WHERE turn_id=(SELECT MAX(turn_id) FROM turns WHERE agent_id=?) "
+            "AND settled_at IS NULL AND ended_at IS NULL AND started_at>?",
+            (row["delegate_agent_id"], now - BUSY_TURN_MS)).fetchone():
+        return "the delegate is still working"
+    return ""
 
 
-def _queued(client_msg_id: str) -> bool:
-    return db.conn().execute(
-        "SELECT 1 FROM queued_turns WHERE client_msg_id=? AND status IN ('queued','claimed','parked')",
-        (client_msg_id,)).fetchone() is not None
+def _note(row, error: str) -> None:
+    """Record why the listener is waiting, only when the reason changes."""
+    if row["last_error"] != error:
+        _update(row["delegation_id"], last_error=error)
 
 
 def wake_text(row, wake_id: str, marker: tuple[int, int], principal: str) -> str:
@@ -113,28 +133,30 @@ def tick(delegation_id: str, pending: Pending, send, *, now: int | None = None) 
         return "stopped"
     if not row["last_heartbeat_at"] or now - row["last_heartbeat_at"] >= 5_000:
         _update(delegation_id, last_heartbeat_at=now)
-    marker = source_marker(row)
+    *marker, activity_at = source_state(row)
+    marker = tuple(marker)
     if marker == (0, 0):
         pending.marker, pending.first_seen = (0, 0), 0
         return "idle"
     if not row["unapplied_since"]:
-        _update(delegation_id, unapplied_since=now)
+        from . import goal_ledger
+        _update(delegation_id, unapplied_since=goal_ledger.unapplied_since(db.conn(), row, now))
     if now < pending.retry_at:
         return "backoff"
     newest = (max(marker[0], row["message_through"]), max(marker[1], row["goal_event_through"]))
-    if newest != pending.seen:
-        pending.seen = newest
-        _update(delegation_id, last_source_at=now)   # when the newest activity was first seen
+    if activity_at and activity_at != row["last_source_at"]:
+        _update(delegation_id, last_source_at=activity_at)   # when it happened, from the record
     in_flight = (row["dispatched_message_through"] > row["message_through"]
                  or row["dispatched_goal_event_through"] > row["goal_event_through"])
+    busy = _wake_pending(row, now)
     if in_flight:
         # One wake at a time: the delegate applies it before the next is sent.
         if now - (row["last_wake_at"] or 0) < WAKE_TIMEOUT_MS:
             return "waiting"
-        if _queued(row["last_wake_id"]):
-            _update(delegation_id, last_error="previous wake is still queued for the delegate")
+        if busy:
+            _note(row, f"previous wake not applied yet: {busy}")
             return "waiting"
-        retry = True   # sent but never applied: resend what is still unapplied
+        retry = True   # sent, ended, never applied: resend what is still unapplied
     else:
         retry = False
         beyond = (newest[0] > row["dispatched_message_through"]
@@ -147,6 +169,11 @@ def tick(delegation_id: str, pending: Pending, send, *, now: int | None = None) 
             pending.marker, pending.last_change = newest, now
         if now - pending.last_change < QUIET_MS and now - pending.first_seen < MAX_DELAY_MS:
             return "coalescing"
+        if busy:
+            # A wake admitted before a crash (cursor not saved) or a turn still
+            # running: wait for it rather than send a second one.
+            _note(row, f"waiting before the next wake: {busy}")
+            return "waiting"
     agents = {r[0]: r[1] for r in db.conn().execute(
         "SELECT agent_id, session FROM agents WHERE agent_id IN (?,?)",
         (row["principal_agent_id"], row["delegate_agent_id"]))}
