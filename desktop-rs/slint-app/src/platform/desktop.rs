@@ -178,14 +178,43 @@ fn watch_window() {
                         services.focused = focused;
                     }
                 });
+                // After Slint has handed the focus back to what had it.
+                if focused {
+                    later(regain_keyboard);
+                }
             }
-            WindowEvent::KeyboardInput { .. } | WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::Touch(_) => {
+            WindowEvent::ModifiersChanged(modifiers) => {
+                let state = modifiers.state();
+                super::keyboard::reported(super::keyboard::Modifiers {
+                    control: state.control_key(),
+                    alt: state.alt_key(),
+                    shift: state.shift_key(),
+                    meta: state.super_key(),
+                });
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                use slint::winit_030::winit::keyboard::{Key, NamedKey};
+                if matches!(event.logical_key, Key::Named(NamedKey::Control | NamedKey::Shift | NamedKey::Alt | NamedKey::AltGraph | NamedKey::Super)) {
+                    super::keyboard::modifier_key_seen();
+                } else if event.state.is_pressed() {
+                    // Before Slint delivers it: a key to nobody runs nothing.
+                    regain_keyboard();
+                }
+                note_input();
+            }
+            WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. } | WindowEvent::Touch(_) => {
                 note_input();
             }
             _ => {}
         }
         EventResult::Propagate
     });
+}
+
+fn regain_keyboard() {
+    if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+        crate::commands::regain_keyboard(&app, &window);
+    }
 }
 
 /// Someone used the window (a key, a click): they are here.

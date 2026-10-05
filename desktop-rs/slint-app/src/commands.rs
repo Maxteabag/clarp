@@ -71,8 +71,53 @@ pub fn overrides_of(engine: &clarp_engine::Engine) -> keymap::Overrides {
     engine.settings().get("keymap/bindings").map(keymap::from_settings).unwrap_or_default()
 }
 
+/// The region that has the keyboard, if one does (none while the window
+/// is behind another).
+fn region(app: &App, window: &AppWindow) -> Option<&'static str> {
+    let report = app.active_report();
+    if window.get_search_focused() {
+        Some("search")
+    } else if report.composer_focused {
+        Some("composer")
+    } else if window.get_sidebar_focused() {
+        Some("sidebar")
+    } else if report.transcript_focused {
+        Some("pane")
+    } else {
+        None
+    }
+}
+
+thread_local! {
+    /// The region that last had the keyboard.
+    static LAST_REGION: std::cell::Cell<&'static str> = const { std::cell::Cell::new("composer") };
+}
+
+/// The window is in front again (or a key arrived) and nothing in it has
+/// the keyboard: the region that last had it gets it back.
+pub fn regain_keyboard(app: &App, window: &AppWindow) {
+    // A dialog, the switcher and the other surfaces keep their own.
+    if window.get_surface() != "chats" || app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
+        return;
+    }
+    if i_slint_core::window::WindowInner::from_pub(window.window()).focus_item.borrow().upgrade().is_some() {
+        return;
+    }
+    let region = LAST_REGION.with(std::cell::Cell::get);
+    eprintln!("clarp-slint: keyboard: nothing had the keyboard; giving it back to the {region}");
+    match region {
+        "search" => window.invoke_focus_search(),
+        "sidebar" => window.invoke_focus_sidebar(),
+        "pane" => app.focus_transcript(),
+        _ => app.focus_composer(),
+    }
+}
+
 /// Updates the shortcut bar for where the keyboard is.
 pub fn show_hints(app: &App, window: &AppWindow) {
+    if let Some(region) = region(app, window) {
+        LAST_REGION.with(|r| r.set(region));
+    }
     let state = context(app, window);
     let overrides = overrides(app);
     let card_keys = if state == "pane" { crate::artifacts_view::selected_hints(app) } else { None };
@@ -139,9 +184,13 @@ thread_local! {
 }
 
 /// A key the window saw before any control: true when a binding ran.
-pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, repeat: bool) -> bool {
+pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, repeat: bool) -> bool {
     // Every key is someone at this window (headless too, where winit is not).
     crate::platform::desktop::note_input();
+    // A modifier whose release the window never saw: the key comes again without it.
+    if crate::platform::keyboard::correct(text, crate::platform::keyboard::Modifiers { control, alt, shift, meta }) {
+        return true;
+    }
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return false };
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
     let state = context(&app, &window);

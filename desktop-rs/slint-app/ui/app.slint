@@ -138,7 +138,7 @@ export component AppWindow inherits Window {
     callback link-clicked(string);
     callback dismiss-error();
     // Every key reaches the keyboard map first; true when it ran a command.
-    callback shortcut(string, bool, bool, bool, bool) -> bool;
+    callback shortcut(string, bool, bool, bool, bool, bool) -> bool;
     // Tells the map where the keyboard went.
     callback focus-moved();
     // Pane events carry the pane's id.
@@ -301,7 +301,7 @@ export component AppWindow inherits Window {
         height: root.height;
         focus-on-click: false;
         capture-key-pressed(event) => {
-            if (root.shortcut(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.repeat)) {
+            if (root.shortcut(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta, event.repeat)) {
                 return accept;
             }
             reject
