@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/goal-ledger.json",
+  "title": "Goal ledger (Host contract 52, feature goal_ledger)",
+  "description": "Additive goal payloads: plan.subgoals and plan.ledger on /task-plan and /task-plans, GET /goal-ledger and GET /goal-ledger/delegations. Older Hosts omit them; clients must treat them as optional. See docs/architecture/goal-ledger.md.",
+  "$defs": {
+    "plan": {
+      "type": "object",
+      "required": ["plan_id", "agent_id", "status", "revision", "goal", "items"],
+      "properties": {
+        "plan_id": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "status": {"enum": ["active", "paused", "blocked", "completed", "cancelled", "superseded"]},
+        "revision": {"type": "integer"},
+        "goal": {"$ref": "#/$defs/goal"},
+        "items": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+        "subgoals": {"type": "array", "items": {"$ref": "#/$defs/subgoal"}},
+        "ledger": {"$ref": "#/$defs/ledger_summary"}
+      }
+    },
+    "goal": {
+      "type": "object",
+      "required": ["outcome", "limits", "criteria", "history", "continuation"],
+      "properties": {
+        "outcome": {"type": "string"},
+        "limits": {"type": "string"},
+        "criteria": {"type": "array", "items": {
+          "type": "object", "required": ["id", "text", "evidence"],
+          "properties": {"id": {"type": "string"}, "text": {"type": "string"}, "evidence": {"type": "string"}}}},
+        "checkpoint": {"type": ["object", "null"], "properties": {
+          "at": {"type": "integer"}, "progress": {"type": "string"}, "next_work": {"type": "string"}}},
+        "history": {"type": "array"},
+        "continuation": {"type": "object", "required": ["state", "reason"], "properties": {
+          "state": {"type": "string"}, "reason": {"type": "string"},
+          "due_at": {"type": ["integer", "null"]}, "dependency_key": {"type": "string"},
+          "observed_state": {"type": "string"}, "observed_at": {"type": "integer"}}}
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["item_id", "title", "status"],
+      "properties": {
+        "item_id": {"type": "string"}, "title": {"type": "string"},
+        "status": {"enum": ["pending", "in_progress", "completed", "blocked", "skipped", "deferred", "removed"]},
+        "detail": {"type": ["string", "null"]}
+      }
+    },
+    "subgoal": {
+      "type": "object",
+      "required": ["subgoal_id", "title", "intent", "criteria", "owner", "status", "evidence",
+                   "current_action", "next_dependency", "last_observed_at", "revision",
+                   "created_by", "created_at", "updated_at"],
+      "properties": {
+        "subgoal_id": {"type": "string"},
+        "title": {"type": "string"},
+        "intent": {"type": "string"},
+        "criteria": {"type": "array", "items": {"type": "string"}},
+        "owner": {"type": "string"},
+        "status": {"enum": ["proposed", "active", "blocked", "done", "retired", "unknown"]},
+        "evidence": {"type": "array", "items": {
+          "type": "object", "required": ["text", "basis", "source_refs"],
+          "properties": {"text": {"type": "string"},
+                         "basis": {"enum": ["observed", "claimed", "inferred"]},
+                         "source_refs": {"type": "array", "items": {"type": "string"}}}}},
+        "current_action": {"type": "string"},
+        "next_dependency": {"type": "string"},
+        "last_observed_at": {"type": ["integer", "null"]},
+        "revision": {"type": "integer"},
+        "created_by": {"type": "object", "required": ["actor_kind", "agent_id"], "properties": {
+          "actor_kind": {"$ref": "#/$defs/actor_kind"}, "agent_id": {"type": "string"}}},
+        "created_at": {"type": "integer"},
+        "updated_at": {"type": "integer"}
+      }
+    },
+    "ledger_summary": {
+      "type": "object",
+      "required": ["event_count", "last_event_at", "delegation"],
+      "properties": {
+        "event_count": {"type": "integer"},
+        "last_event_at": {"type": ["integer", "null"]},
+        "delegation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/delegation"}]}
+      }
+    },
+    "actor_kind": {"enum": ["owner", "user", "delegate", "system", "peer", "legacy", "unattributed"]},
+    "event": {
+      "type": "object",
+      "required": ["event_id", "plan_id", "at", "kind", "subject", "actor_kind", "actor_agent_id",
+                   "actor_session", "delegation_id", "basis", "source_refs", "reason", "prior",
+                   "new", "plan_revision"],
+      "properties": {
+        "event_id": {"type": "integer"},
+        "plan_id": {"type": "string"},
+        "at": {"type": "integer"},
+        "kind": {"type": "string"},
+        "subject": {"type": "string"},
+        "actor_kind": {"$ref": "#/$defs/actor_kind"},
+        "actor_agent_id": {"type": "string"},
+        "actor_session": {"type": "string"},
+        "delegation_id": {"type": "string"},
+        "basis": {"enum": ["", "observed", "claimed", "inferred"]},
+        "source_refs": {"type": "array", "items": {"type": "string"}},
+        "reason": {"type": "string"},
+        "prior": {"type": ["object", "null"]},
+        "new": {"type": ["object", "null"]},
+        "plan_revision": {"type": ["integer", "null"]}
+      }
+    },
+    "ledger_page": {
+      "type": "object",
+      "required": ["plan_id", "events", "has_more", "next_after"],
+      "properties": {
+        "plan_id": {"type": "string"},
+        "events": {"type": "array", "items": {"$ref": "#/$defs/event"}},
+        "has_more": {"type": "boolean"},
+        "next_after": {"type": "integer"}
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "required": ["delegation_id", "principal_agent_id", "delegate_agent_id", "principal_session",
+                   "delegate_session", "status", "message_through", "goal_event_through",
+                   "last_wake_id", "lag_ms", "in_flight"],
+      "properties": {
+        "delegation_id": {"type": "string"},
+        "principal_agent_id": {"type": "string"},
+        "delegate_agent_id": {"type": "string"},
+        "principal_session": {"type": "string"},
+        "delegate_session": {"type": "string"},
+        "status": {"enum": ["active", "stopped"]},
+        "message_through": {"type": "integer"},
+        "goal_event_through": {"type": "integer"},
+        "dispatched_message_through": {"type": "integer"},
+        "dispatched_goal_event_through": {"type": "integer"},
+        "last_wake_id": {"type": "string"},
+        "last_wake_at": {"type": ["integer", "null"]},
+        "last_applied_at": {"type": ["integer", "null"]},
+        "last_source_at": {"type": ["integer", "null"]},
+        "last_heartbeat_at": {"type": ["integer", "null"]},
+        "last_error": {"type": "string"},
+        "unapplied_since": {"type": ["integer", "null"]},
+        "lag_ms": {"type": "integer"},
+        "in_flight": {"type": "boolean"},
+        "job_handle": {"type": "string"},
+        "stopped_reason": {"type": "string"}
+      }
+    },
+    "delegations": {
+      "type": "object",
+      "required": ["delegations"],
+      "properties": {"delegations": {"type": "array", "items": {"$ref": "#/$defs/delegation"}}}
+    }
+  }
+}
