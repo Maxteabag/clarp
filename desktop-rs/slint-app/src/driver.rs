@@ -48,6 +48,8 @@ mod row_overlap_checks;
 // ---- the keyboard after the window loses and regains it
 #[path = "refocus_checks.rs"]
 mod refocus_checks;
+#[path = "scrollbar_checks.rs"]
+mod scrollbar_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -387,6 +389,10 @@ pub fn start_check(name: &str, out: String) {
             scroll_checks::scroll_check(out)
         }
         "scroll-jump" => scroll_checks::scroll_jump_check(out),
+        "scrollbar" => {
+            row_overlap_checks::watch();
+            scrollbar_checks::scrollbar_check(out)
+        }
         "startup" => startup_checks::startup_check(out),
         "composer" => composer_check(out),
         "panes" => panes_check(out),
