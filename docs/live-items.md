@@ -137,6 +137,18 @@ pending ──► running ──► completed
   `worked_ms`, and a `status` op with `state: interrupted`. This holds even
   when the hub never saw the turn (a restarted runtime): it settles it from
   the turn record. Recorded stream: `contract/live/stopped-mid-tool.json`.
+- A turn whose provider process dies or is killed without a stop (a crash,
+  exit 137) ends with `status: failed` (running items `interrupted`, the
+  status line `interrupted`). Recorded: `contract/live/killed-without-stop.json`.
+- A new provider turn (a new prompt, a queued prompt starting, a preempting
+  prompt) always opens with its own `turn` op. When the previous turn never
+  settled (it was preempted), the Host ends it `interrupted` first, in the
+  same order clients see. Recorded:
+  `contract/live/new-prompt-over-unsettled-turn.json`.
+- Item ops always belong to the turn that produced them (`turn_id` on the
+  item). Output a killed process flushes after its turn ended is dropped,
+  never attached to the newer turn. Steering a running turn keeps it the same
+  turn.
 
 ### 1.3 Activity (status line)
 

@@ -345,12 +345,12 @@ class StreamJsonBackend(Backend):
         target = st._live_target
         if hub is None or not target.get("agent_id"):
             return
-        if not hub.has_open_turn(target["agent_id"]):
-            live_hub.ensure_turn(hub, target["agent_id"])
+        trace = target.get("trace_id") or ""
+        live_hub.ensure_turn(hub, target["agent_id"], trace=trace)
         from ..message_live import _live_message_id
         live_hub.report(
             "message_text", target["agent_id"], self._live_item_id(st), text,
-            phase=phase, row_id=_live_message_id(
+            phase=phase, turn_id=trace or None, row_id=_live_message_id(
                 target["agent_id"], target.get("backend_session_id") or "",
                 target.get("trace_id") or "", target.get("item_key") or ""))
 
@@ -360,7 +360,8 @@ class StreamJsonBackend(Backend):
         if not target or not target.get("agent_id"):
             return
         from .. import live_hub
-        live_hub.report("done", target["agent_id"], self._live_item_id(st))
+        live_hub.report("done", target["agent_id"], self._live_item_id(st),
+                        turn_id=target.get("trace_id") or None)
         st._live_msg_n = getattr(st, "_live_msg_n", 0) + 1
         backend_session_id = target.get("backend_session_id") or \
             agents_db.live_backend_session(target["agent_id"])

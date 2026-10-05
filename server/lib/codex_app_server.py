@@ -303,7 +303,7 @@ class _Client:
         live_items = getattr(active.state, "live_items", None)
         if live_items is None:
             from .live_codex import CodexLiveItems
-            live_items = active.state.live_items = CodexLiveItems(active.agent_id)
+            live_items = active.state.live_items = CodexLiveItems(active.agent_id, active.trace_id)
         if method in ("item/started", "item/completed", "item/reasoning/summaryTextDelta",
                       "item/reasoning/summaryPartAdded", "item/commandExecution/outputDelta"):
             live_items.on_notification(method, params)
