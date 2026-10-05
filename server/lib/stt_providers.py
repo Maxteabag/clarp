@@ -344,7 +344,10 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
 
     from .focus import current_focus_session
     session = stt_language.current_session() or current_focus_session()
-    text, duration = call(stt_language.language_for(session))
+    language = stt_language.language_for(session)
+    if "," in language and provider not in {"google", "elevenlabs"}:
+        raise ValueError("agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
+    text, duration = call(language)
     from .judgment_sites import is_junk
     text = (text or "").strip()
     if is_junk(text):

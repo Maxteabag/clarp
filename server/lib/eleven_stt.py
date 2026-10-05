@@ -50,7 +50,9 @@ def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
     # tag_audio_events off: Scribe otherwise writes "[lyd fra mikrofon]" or
     # "(laughter)" into the transcript, which becomes a bogus message.
     fields: list[tuple[str, str]] = [("model_id", model), ("tag_audio_events", "false")]
-    if language:
+    # A requested language set must not turn into one forced output language.
+    # Scribe's auto detection is unbounded; Google restricts to the given set.
+    if language and "," not in language:
         fields.append(("language_code", language))
     # Each term is its own `keyterms` field; the API allows up to 1000 terms of
     # under 50 characters and the compiler stays far below both.
