@@ -382,13 +382,23 @@ component LiveItem inherits Rectangle {
                 VerticalLayout {
                     padding: root.live.kind == "plan" || root.live.kind == "reasoning" ? 0px : 6px;
                     spacing: 0px;
-                    for line in root.live.lines: Text {
-                        text: line;
-                        font-family: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.body-family : "JetBrains Mono";
-                        font-size: root.live.kind == "plan" || root.live.kind == "reasoning" ? 13px : 11px;
-                        color: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.muted : Palette.text;
-                        wrap: root.live.kind == "plan" || root.live.kind == "reasoning" ? word-wrap : no-wrap;
-                        overflow: elide;
+                    // Each line is as tall as it wraps at the width it is
+                    // drawn at (laid out, it was measured at its one-line
+                    // width: see Block's code and quote).
+                    for line in root.live.lines: Rectangle {
+                        min-width: line-text.min-width;
+                        preferred-width: line-text.preferred-width;
+                        height: line-text.preferred-height;
+                        line-text := Text {
+                            width: parent.width;
+                            height: parent.height;
+                            text: line;
+                            font-family: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.body-family : "JetBrains Mono";
+                            font-size: root.live.kind == "plan" || root.live.kind == "reasoning" ? 13px : 11px;
+                            color: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.muted : Palette.text;
+                            wrap: root.live.kind == "plan" || root.live.kind == "reasoning" ? word-wrap : no-wrap;
+                            overflow: elide;
+                        }
                     }
                 }
             }
@@ -695,6 +705,14 @@ export component Transcript inherits FocusScope {
         width: parent.width;
         height: parent.height;
         for row in root.rows: HorizontalLayout {
+            // The widest the message's content is drawn. Slint measures a
+            // repeated or conditional layout in a row (opened tool calls, a
+            // card) at its preferred width when it sizes the row, so one
+            // whose text wraps prefers the width it is drawn at: measured at
+            // its one-line width, its height came out lines short and the
+            // next row was drawn over it.
+            property <length> content-width: Math.min(list.visible-width - 32px, row.author == "user" ? list.visible-width * 0.75 : list.visible-width)
+                - 2 * (row.receipt.key != "" ? 0px : row.prompt.key != "" && !row.prompt.expanded ? 5px : row.author == "user" ? 10px : 2px);
             padding-left: 16px;
             padding-right: 16px;
             padding-top: 7px;
@@ -766,11 +784,14 @@ export component Transcript inherits FocusScope {
                         }
                     }
                     if row.expanded: VerticalLayout {
+                        preferred-width: content-width;
                         spacing: 1px;
                         for cell in row.cells: DisplayCellCard { cell: cell; }
                         for tool in row.tools: ToolCard { tool: tool; }
                     }
                     for artifact in row.artifacts: HorizontalLayout {
+                        // Measured at the width the card is drawn at.
+                        preferred-width: Math.min(640px, content-width);
                         alignment: start;
                         ArtifactCard {
                             artifact: artifact;
