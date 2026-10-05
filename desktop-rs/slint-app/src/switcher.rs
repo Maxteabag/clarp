@@ -105,6 +105,8 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         command("Host connection", "connection", "", "settings", ""),
         command("Orchestrator settings", "orchestrator", "", "view", ""),
         command("Next agent needing attention", "next-attention", "Ctrl+J", "agent", ""),
+        command("Next agent", "next-agent", "", "agent", "following chat switch forward"),
+        command("Previous agent", "previous-agent", "", "agent", "back chat switch"),
         command("Release agent", "release-agent", "Ctrl+Shift+R", "agent", ""),
         command("Stop agent", "stop-agent", "Ctrl+.", "agent", ""),
         command(if toggles.muted { "Enable voice replies" } else { "Mute voice replies" }, "mute", "Ctrl+M", "settings", ""),

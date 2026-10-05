@@ -596,14 +596,16 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     }
     // Answered in this window, it keeps the line it had, so its height.
     item.keep_line = (item.pending && !item.meta.is_empty()) || !item.delivery.is_empty() || state.seen_pending.contains(item.id.as_str());
-    item.hints = slint::ModelRc::new(slint::VecModel::from(card_hints(&item)));
+    item.hints = slint::ModelRc::new(slint::VecModel::from(card_hints(&item, &crate::commands::overrides_of(engine))));
     item
 }
 
 /// A card's keys, as its hints show them (and the shortcut bar while the
 /// keyboard is on it): what each does, and the action a click runs.
-fn card_hints(item: &ArtifactItem) -> Vec<CardHint> {
+fn card_hints(item: &ArtifactItem, overrides: &crate::keymap::Overrides) -> Vec<CardHint> {
     let hint = |key: &str, label: &str, action: &str| CardHint { key: key.into(), label: label.into(), action: action.into(), chosen: false };
+    // The keys as the user bound them.
+    let key = |action: &str| crate::keymap::shown("pane", action, overrides).unwrap_or_default();
     let mut hints = Vec::new();
     if matches!(item.kind.as_str(), "decision" | "question") {
         if !item.pending {
@@ -629,17 +631,17 @@ fn card_hints(item: &ArtifactItem) -> Vec<CardHint> {
         if item.editing {
             hints.push(hint("Esc", "Keep draft", "keep-draft"));
         } else {
-            hints.push(hint("Del", "Discard", "discard"));
+            hints.push(hint(&key("artifact-discard"), "Discard", "discard"));
         }
         return hints;
     }
     if item.action.is_empty() {
         return hints;
     }
-    hints.push(hint("O", &item.action, "open"));
+    hints.push(hint(&key("artifact-open"), &item.action, "open"));
     if item.kind == "audio" {
-        hints.push(hint("←/→", "Seek", "seek"));
-        hints.push(hint("S", "Stop", "stop"));
+        hints.push(hint(&format!("{}/{}", key("artifact-back"), key("artifact-forward")).replace("Left/Right", "←/→"), "Seek", "seek"));
+        hints.push(hint(&key("artifact-stop"), "Stop", "stop"));
     }
     hints
 }
