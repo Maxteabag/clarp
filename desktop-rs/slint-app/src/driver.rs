@@ -1743,7 +1743,16 @@ fn sidebar_check(out: String) {
             let inside = |m: &Rect| m.0 >= row.0 && m.0 + m.2 <= row.0 + row.2 && m.1 >= row.1 && m.1 + m.3 <= row.1 + row.3;
             check(row.3 <= 40.0 && marks.iter().all(|m| inside(&m.2)), &format!("the marks fit inside the compact row {row:?}: {marks:?}"));
             check(window.get_explorer_compact_width() == width_before(), "the marks leave the compact explorer's width as it was");
+            let processes = marks[1].2;
+            click_at(window, processes.0 + processes.2 / 2.0, processes.1 + processes.3 / 2.0);
+            let titles: Vec<String> = window.get_process_jobs().iter().map(|j| j.title.to_string()).collect();
+            check(window.get_overlay() == "processes" && titles.iter().any(|t| t == "Watch the build"),
+                &format!("clicking a compact mark opens the process popover, as the full row's does: {titles:?}"));
+            headless::press(Key::Escape);
             true
+        })),
+        ("compact popover closed", Box::new(|_, window, _| {
+            window.get_overlay().is_empty()
         })),
         ("compact marks shot", Box::new(move |app, _, elapsed| {
             // Fonts and the theme settle before each shot.
@@ -1780,7 +1789,7 @@ fn sidebar_check(out: String) {
             if !compact_marks().is_empty() {
                 return false;
             }
-            check(true, "the marks go when the helper and the processes finish");
+            check(true, "the marks go when the helper and the processes finish, though the finished helper stays listed under its open \"helpers done\" line");
             let back = serde_json::json!({"session": "mike", "set": {"role": "agent", "parent_agent_id": "", "helper_state": ""}});
             check(control("/__control/agent", &back).is_ok(), "Mike is a chat again");
             let theme = THEME_BEFORE.with(|t| t.borrow().clone());

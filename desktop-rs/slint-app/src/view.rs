@@ -125,7 +125,7 @@ fn one_line(text: &str) -> String {
 pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str) -> ChatRow {
     let preview = one_line(if !row.last_message.is_empty() { &row.last_message } else { &row.working_directory });
     let activity = if row.busy && !row.status_text.is_empty() { one_line(&row.status_text) } else { String::new() };
-    ChatRow {
+    let mut chat = ChatRow {
         session: row.session.clone().into(),
         initial: initial(&row.name),
         name: row.name.clone().into(),
@@ -142,13 +142,18 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
         sub_agents: row.sub_agent_count,
         children: row.running_children,
         ..ChatRow::default()
-    }
+    };
+    (chat.running_helpers, chat.running_processes) = running_work(&chat, 0);
+    chat
 }
 
 /// What an explorer row shows running: (sub-agents and helpers, background
-/// processes).
-pub(crate) fn running_work(_chat: &ChatRow) -> (i32, i32) {
-    (0, 0)
+/// processes). A helper is both a running child and its mirror job, so it
+/// counts once; `nested` is the unfinished helpers listed under the row
+/// (a finished one stays listed while its "helpers done" line is open).
+pub(crate) fn running_work(chat: &ChatRow, nested: i32) -> (i32, i32) {
+    let helpers = chat.sub_agents.max(chat.children).max(nested).max(0);
+    (helpers, (chat.jobs - chat.sub_agents).max(0))
 }
 
 /// Inline Markdown as Slint styled text; plain text if Slint cannot parse it.
@@ -561,12 +566,12 @@ mod tests {
     /// processes, or both.
     #[test]
     fn running_work_counts_helpers_and_processes() {
-        let row = |jobs, sub_agents, children, fold_count| crate::ChatRow { jobs, sub_agents, children, fold_count, ..Default::default() };
-        assert_eq!(super::running_work(&row(0, 0, 0, 0)), (0, 0), "nothing runs");
-        assert_eq!(super::running_work(&row(1, 1, 1, 0)), (1, 0), "one helper");
-        assert_eq!(super::running_work(&row(0, 0, 0, 1)), (1, 0), "one helper folded under the row");
-        assert_eq!(super::running_work(&row(2, 0, 0, 0)), (0, 2), "two processes");
-        assert_eq!(super::running_work(&row(3, 1, 0, 2)), (2, 2), "both");
+        let row = |jobs, sub_agents, children| crate::ChatRow { jobs, sub_agents, children, ..Default::default() };
+        assert_eq!(super::running_work(&row(0, 0, 0), 0), (0, 0), "nothing runs");
+        assert_eq!(super::running_work(&row(1, 1, 1), 0), (1, 0), "one helper");
+        assert_eq!(super::running_work(&row(0, 0, 0), 1), (1, 0), "one helper listed under the row");
+        assert_eq!(super::running_work(&row(2, 0, 0), 0), (0, 2), "two processes");
+        assert_eq!(super::running_work(&row(3, 1, 0), 2), (2, 2), "both");
     }
 
     use clarp_core::protocol::Message;

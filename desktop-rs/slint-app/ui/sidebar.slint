@@ -1,6 +1,6 @@
 import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
-import { ProcessIndicator } from "processes.slint";
+import { CompactWork, ProcessIndicator } from "processes.slint";
 import { ProfileBridge } from "profile.slint";
 
 export struct ChatRow {
@@ -193,16 +193,27 @@ component Row inherits Rectangle {
                 if !root.compact: ProcessIndicator {
                     y: 3px;
                     only: "jobs";
-                    jobs: root.chat.jobs;
-                    sub-agents: root.chat.sub-agents;
+                    jobs: root.chat.running-processes;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
                 if !root.compact: ProcessIndicator {
                     y: 3px;
                     only: "agents";
-                    jobs: root.chat.jobs;
-                    sub-agents: root.chat.sub-agents;
-                    children: Math.max(root.chat.children, root.chat.fold-count);
+                    children: root.chat.running-helpers;
+                    clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
+                }
+                // Compact: a glyph and a count per kind, after the name, which
+                // elides to make room.
+                if root.compact && root.chat.running-helpers > 0: CompactWork {
+                    y: (parent.height - self.height) / 2;
+                    kind: "agent";
+                    count: root.chat.running-helpers;
+                    clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
+                }
+                if root.compact && root.chat.running-processes > 0: CompactWork {
+                    y: (parent.height - self.height) / 2;
+                    kind: "hourglass";
+                    count: root.chat.running-processes;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
                 if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11px; }
