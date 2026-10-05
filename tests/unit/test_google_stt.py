@@ -102,6 +102,19 @@ def test_clip_over_a_minute_is_sent_in_ordered_pieces(chirp):
     assert round(duration) == 130
 
 
+def test_agent_language_set_reaches_chirp_without_changing_other_languages(chirp):
+    stt_providers.update_settings({"language": "en", "agent_languages": {"Mochi": "no"}})
+    before = stt_providers.status()
+    after = stt_providers.update_settings({"agent_languages": {"anne-7891": " NO, pt, no "}})
+    assert after["language"] == before["language"] == "en"
+    assert after["agent_languages"] == {"mochi": "no", "anne-7891": "no,pt"}
+    for session in ("anne-7891", "Mochi", "other-chat"):
+        with stt_language.bound_session(session):
+            stt_providers.transcribe("google:chirp_3", wav_seconds(1), "audio/wav", "")
+    assert [call["config"]["languageCodes"] for call in chirp["recognize"]] == [
+        ["nb-NO", "pt-BR"], ["nb-NO"], ["en-US"]]
+
+
 def test_silence_transcribes_to_nothing(chirp):
     assert stt_providers.transcribe(
         "google:chirp_3", wav_seconds(0.4), "audio/wav", "")[0] == ""

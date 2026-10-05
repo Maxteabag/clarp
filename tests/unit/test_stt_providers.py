@@ -7,7 +7,7 @@ import urllib.parse
 
 import pytest
 
-from lib import config, stt_providers
+from lib import config, stt_language, stt_providers
 from lib import cartesia_stt, deepgram_stt, eleven_stt
 
 
@@ -185,9 +185,28 @@ def test_language_settings_round_trip_and_reject_bad_values(keys):
     status = stt_providers.update_settings({"agent_languages": {"Rachel": None}})
     assert status["agent_languages"] == {"mochi": "no"}
     for bad in ({"language": "auto"}, {"language": "norsk"}, {"agent_languages": ["no"]},
-                {"agent_languages": {"Mochi": "norsk"}}):
+                {"agent_languages": {"Mochi": "norsk"}},
+                {"language": "no,pt"},
+                {"agent_languages": {"Anne": "no,,pt"}},
+                {"agent_languages": {"Anne": "no,pt,en,sv"}},
+                {"agent_languages": {"Anne": ["no", "pt"]}}):
         with pytest.raises(ValueError):
             stt_providers.update_settings(bad)
+
+
+def test_bilingual_agent_scribe_fallback_does_not_force_one_language(keys, monkeypatch):
+    seen = []
+    def reply(request, timeout):
+        seen.append(request.data)
+        return Response({"text": "Bom dia", "words": []})
+    monkeypatch.setattr(eleven_stt.urllib.request, "urlopen", reply)
+    stt_providers.update_settings({"agent_languages": {"anne-7891": "no,pt"}})
+    with stt_language.bound_session("anne-7891"):
+        assert stt_providers.transcribe("elevenlabs:scribe_v2", b"AUDIO", "audio/wav", "")[0] == "Bom dia"
+    assert b'name="language_code"' not in seen[0]
+    with stt_language.bound_session("other-chat"):
+        stt_providers.transcribe("elevenlabs:scribe_v2", b"AUDIO", "audio/wav", "")
+    assert b'name="language_code"\r\n\r\nen' in seen[1]
 
 
 def test_recording_chat_beats_the_shared_focus(cartesia_by_language, tmp_path):

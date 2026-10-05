@@ -61,8 +61,13 @@ def _map(key: str) -> dict[str, str]:
 
 
 def agent_languages() -> dict[str, str]:
-    return {k: v.lower() for k, v in _map(AGENT_LANGUAGES_KEY).items()
-            if _CODE.match(v.lower())}
+    result = {}
+    for key, value in _map(AGENT_LANGUAGES_KEY).items():
+        try:
+            result[key] = validate_agent(value)
+        except ValueError:
+            continue
+    return result
 
 
 def agent_engines() -> dict[str, str]:
@@ -106,6 +111,20 @@ def validate(value) -> str:
     return value.strip().lower()
 
 
+def validate_agent(value) -> str:
+    """One ISO code, or a bounded expected-language set such as 'no,pt'.
+
+    The global default remains a single language. Google restricts detection
+    to the set; Scribe detects automatically when used as its fallback.
+    """
+    if not isinstance(value, str):
+        raise ValueError("agent language must be a string of ISO language codes")
+    codes = list(dict.fromkeys(validate(code) for code in value.split(",")))
+    if len(codes) > 3:
+        raise ValueError("agent language set accepts at most three language codes")
+    return ",".join(codes)
+
+
 def merge_agent_engines(value, *, is_valid) -> str:
     """Apply `{agent: engine id}` changes (empty or null removes one)."""
     if not isinstance(value, dict):
@@ -138,5 +157,5 @@ def merge_agent_languages(value) -> str:
         if code in (None, ""):
             merged.pop(key, None)
         else:
-            merged[key] = validate(code)
+            merged[key] = validate_agent(code)
     return json.dumps(merged, sort_keys=True, separators=(",", ":"))

@@ -150,7 +150,8 @@ def _recognize(wav: bytes, *, credentials_file: str, project: str,
            "/recognizers/_:recognize")
     body = json.dumps({
         "config": {"autoDecodingConfig": {}, "model": model,
-                   "languageCodes": [language],
+                   "languageCodes": list(dict.fromkeys(
+                       language_tag(code) for code in language.split(","))),
                    "features": {"enableAutomaticPunctuation": True}},
         "content": base64.b64encode(wav).decode("ascii"),
     }).encode()
