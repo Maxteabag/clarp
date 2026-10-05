@@ -99,6 +99,13 @@ def test_a_request_comes_back_to_the_requester(host, tmp_path, case):
     if case == "no-goal":
         assert via == "message"
         host.wait_reply("rachel", "The log is live as clarpForm.log()")
+        # A later, different answer arrives too; resending it changes nothing.
+        reply("result", "Correction: the log also keeps answers")
+        reply("result", "Correction: the log also keeps answers")
+        host.wait_reply("rachel", "Correction: the log also keeps answers")
+        assert rows(host, "SELECT count(*) FROM messages WHERE agent_id=? AND role='user' "
+                          "AND text LIKE '%Correction: the log also keeps answers%'",
+                    agent_id(host, "rachel"))[0][0] == 1
         return
     assert via.startswith("goal ")
     if case == "paused":
