@@ -66,11 +66,8 @@ pub(crate) fn status(engine: &Engine, session: &str) -> (String, bool, String) {
 
 /// The key that interrupts the agent, as the keymap has it (Ctrl+. today).
 pub(crate) fn stop_key() -> String {
-    crate::keymap::resolve("composer", &Default::default(), None)
-        .into_iter()
-        .find(|b| b.action == "stop-agent")
-        .and_then(|b| b.keys.first().cloned())
-        .unwrap_or_default()
+    let overrides = crate::app().map(|app| crate::commands::overrides(&app)).unwrap_or_default();
+    crate::keymap::shown("composer", "stop-agent", &overrides).unwrap_or_default()
 }
 
 /// Whether anything shown ticks (a running item, a busy status line).

@@ -10,6 +10,7 @@ mod commands;
 mod driver;
 mod headless;
 mod keymap;
+mod keymap_view;
 mod link_hints;
 mod live_view;
 mod launch;
@@ -743,7 +744,7 @@ fn main() {
             commands::show_hints(&app, &window);
         }
     });
-    window.on_shortcut(|text, control, alt, shift| commands::shortcut(&text, control, alt, shift));
+    window.on_shortcut(|text, control, alt, shift, repeat| commands::shortcut(&text, control, alt, shift, repeat));
     window.on_setting_changed(|id, delta| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             settings_view::change(&app, &window, &id, delta);
@@ -763,7 +764,7 @@ fn main() {
             eprintln!("clarp-slint: {action} is not available yet");
         }
     });
-    window.on_keymap_apply(|action, key| with_window(|app, window| commands::keymap_apply(app, window, &action, &key)));
+    window.on_keymap_clicked(|action| with_window(|app, window| keymap_view::clicked(app, window, &action)));
     window.on_keymap_import(|text| with_window(|app, window| commands::keymap_import(app, window, &text)));
     window.on_keymap_export(|| with_window(|app, window| commands::keymap_export(app, window)));
     window.on_keymap_reset(|| with_window(|app, window| commands::keymap_import(app, window, &keymap::export(&keymap::Overrides::new()))));
@@ -901,9 +902,7 @@ fn main() {
     overview_view::wire(&window);
     voice_view::wire(&window);
     orchestrator_view::wire(&window);
-    window.set_error_dismiss_key("Esc".into());
-    window.set_save_warning_dismiss_key("Esc".into());
-    window.set_save_warning_keep_key("Ctrl+Shift+S".into());
+    commands::refresh_keys(&state, &window);
     window.on_dismiss_error(|| with_window(|app, window| {
         commands::run(app, window, "dismiss-error");
     }));

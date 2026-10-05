@@ -15,6 +15,10 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     if crate::link_hints::active() {
         return "hints";
     }
+    // The key bindings editor takes every key (it says which in the bar).
+    if !app.switcher.borrow().open && *app.overlay.borrow() == "keymap" {
+        return "keymap";
+    }
     if app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
         // ---- launch dialogs: the hub has its own keyboard state.
         if !app.switcher.borrow().open && *app.overlay.borrow() == crate::launch_view::HUB {
@@ -58,17 +62,19 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
     }
 }
 
+/// The user's own key bindings, from settings.
 pub fn overrides(app: &App) -> keymap::Overrides {
     let engine = app.engine.borrow();
-    let saved = engine.settings().get("keymap/bindings").cloned().unwrap_or_default();
-    serde_json::from_value(saved).unwrap_or_default()
+    engine.settings().get("keymap/bindings").map(keymap::from_settings).unwrap_or_default()
 }
 
 /// Updates the shortcut bar for where the keyboard is.
 pub fn show_hints(app: &App, window: &AppWindow) {
     let state = context(app, window);
+    let overrides = overrides(app);
     let card_keys = if state == "pane" { crate::artifacts_view::selected_hints(app) } else { None };
-    let mut hints: Vec<Hint> = keymap::hints(state, &overrides(app), facts(app, window))
+    let shown = |action: &str| keymap::shown(state, action, &overrides).unwrap_or_default();
+    let mut hints: Vec<Hint> = keymap::hints(state, &overrides, facts(app, window))
         .into_iter()
         // The keyboard's card says what its keys do (below).
         .filter(|b| card_keys.is_none() || !b.action.starts_with("artifact-") || b.action == "artifact-previous")
@@ -76,13 +82,17 @@ pub fn show_hints(app: &App, window: &AppWindow) {
         .map(|b| Hint {
             // J and K both walk the cards; the hints' digits are their numbers.
             keys: if b.action == "artifact-previous" {
-                "J/K".into()
+                format!("{}/{}", shown("artifact-next"), shown("artifact-previous")).trim_matches('/').into()
             } else if b.action == "hint-digit" {
                 match crate::link_hints::count() {
                     1 => "1".into(),
                     n => format!("1-{n}").into(),
                 }
-            } else { b.keys.first().map(|k| k.replace("Return", "Enter").replace("Escape", "Esc")).unwrap_or_default().into() },
+            } else {
+                // The user's own key first; a second where there is room.
+                let keys: Vec<String> = b.keys.iter().take(if b.keys.len() == 2 { 2 } else { 1 }).map(|k| keymap::display(k)).collect();
+                keys.join("/").into()
+            },
             label: if b.action == "toggle-preview" {
                 if app.engine.borrow().settings().boolean("explorer/livePreview", false) { "Preview: on".into() } else { "Preview: off".into() }
             } else {
@@ -98,7 +108,11 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     }
     // From the composer, the way onto the chat's cards.
     if state == "composer" && crate::artifacts_view::has_cards(app) && !window.global::<crate::ArtifactBridge>().get_editing() {
-        hints.push(Hint { keys: "Esc K".into(), label: "Cards".into() });
+        let keys = format!("{} {}", shown("escape"), keymap::shown("pane", "artifact-previous", &overrides).unwrap_or_default());
+        hints.push(Hint { keys: keys.trim().into(), label: "Cards".into() });
+    }
+    if state == "keymap" {
+        hints = crate::keymap_view::hints(app, window).into_iter().map(|(keys, label)| Hint { keys: keys.into(), label: label.into() }).collect();
     }
     if state == "hints" && crate::link_hints::count() == 0 {
         hints = vec![Hint { keys: "".into(), label: "No links on screen".into() }];
@@ -107,6 +121,7 @@ pub fn show_hints(app: &App, window: &AppWindow) {
         "composer" => "INSERT".to_owned(),
         "sidebar" => "EXPLORER".to_owned(),
         "pane" => "CHAT".to_owned(),
+        "keymap" => "KEYS".to_owned(),
         other => other.to_uppercase(),
     };
     window.set_keyboard_mode(mode.into());
@@ -115,13 +130,31 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     window.set_hints(ModelRc::new(VecModel::from(hints)));
 }
 
+thread_local! {
+    static PRESSES: std::cell::RefCell<keymap::Presses> = std::cell::RefCell::new(keymap::Presses::default());
+}
+
 /// A key the window saw before any control: true when a binding ran.
-pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool) -> bool {
+pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, repeat: bool) -> bool {
     // Every key is someone at this window (headless too, where winit is not).
     crate::platform::desktop::note_input();
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return false };
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
     let state = context(&app, &window);
+    if state == "keymap" {
+        let used = crate::keymap_view::key(&app, &window, text, &chord, !control && !alt);
+        return used;
+    }
+    // A double press runs on its second press; the first did its own thing.
+    let window_ms = keymap::double_press_window(app.engine.borrow().settings().get("keymap/doublePressMs").and_then(serde_json::Value::as_i64));
+    let second = PRESSES.with(|p| p.borrow_mut().press(&chord, std::time::Instant::now(), window_ms, repeat));
+    if second && state != "hints" {
+        if let Some(action) = keymap::double_action(state, &chord, &overrides(&app), facts(&app, &window)) {
+            let ran = run(&app, &window, action);
+            show_hints(&app, &window);
+            return ran;
+        }
+    }
     if state == "hints" {
         let action = keymap::action_for(state, &chord, &overrides(&app), facts(&app, &window));
         let used = crate::link_hints::key(&window, action, &chord);
@@ -203,13 +236,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             open_overlay(app, window, "connection");
             window.invoke_open_connection_page();
         }
-        "edit-keymap" => {
-            window.set_keymap_actions(ModelRc::new(VecModel::from(keymap::EDITABLE.iter().map(|a| slint::SharedString::from(*a)).collect::<Vec<_>>())));
-            window.set_keymap_error("".into());
-            window.set_keymap_profile(keymap::export(&overrides(app)).into());
-            open_overlay(app, window, "keymap");
-            window.invoke_open_keymap();
-        }
+        "edit-keymap" => crate::keymap_view::open(app, window),
         // Escape first dismisses the error banner over the chats.
         "escape" | "dismiss-error" if action == "dismiss-error" || (window.get_surface() == "chats" && !window.get_error().is_empty()) => {
             app.engine.borrow_mut().dismiss_error();
@@ -274,6 +301,24 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
                 app.focus_transcript();
             } else {
                 focus_sidebar(app, window);
+            }
+        }
+        // The next chat in the explorer's order, from anywhere; the
+        // keyboard stays where it was.
+        "next-agent" | "previous-agent" => {
+            let sessions = sidebar_sessions(window);
+            let Some(at) = sessions.iter().position(|s| *s == selected).or((!sessions.is_empty()).then_some(sessions.len() - 1)) else { return false };
+            let step = if action == "next-agent" { 1 } else { sessions.len() - 1 };
+            let next = sessions[(at + step) % sessions.len()].clone();
+            let (composer, sidebar) = (app.active_report().composer_focused, window.get_sidebar_focused());
+            app.engine.borrow_mut().select(&next);
+            pump_now(app);
+            if sidebar {
+                window.set_sidebar_cursor(next.as_str().into());
+            } else if composer {
+                app.focus_composer();
+            } else {
+                app.focus_transcript();
             }
         }
         "agent-next" | "agent-previous" => {
@@ -545,6 +590,17 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     } else {
         switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings))
     };
+    // The commands' keys as the user bound them.
+    let overrides = overrides(app);
+    let items: Vec<switcher::Item> = items
+        .into_iter()
+        .map(|mut item| {
+            if item.kind == switcher::Kind::Command && overrides.contains_key(&item.target) {
+                item.key = ["pane", "main"].iter().find_map(|s| keymap::shown(s, &item.target, &overrides)).unwrap_or_default();
+            }
+            item
+        })
+        .collect();
     let mut state = app.switcher.borrow_mut();
     let current = switcher::keep_selection(&items, &state.selected);
     state.selected = usize::try_from(current).ok().and_then(|i| items.get(i)).map(switcher::Item::key_of).unwrap_or_default();
@@ -703,20 +759,8 @@ pub fn close_overlay(app: &App, window: &AppWindow) {
     show_hints(app, window);
 }
 
-fn save_overrides(app: &App, overrides: &keymap::Overrides) {
-    let value = serde_json::to_value(overrides).unwrap_or_default();
-    app.engine.borrow_mut().settings_mut().set("keymap/bindings", value);
-}
-
-pub fn keymap_apply(app: &App, window: &AppWindow, action: &str, key: &str) {
-    match keymap::set_binding(&overrides(app), action, key) {
-        Ok(next) => {
-            save_overrides(app, &next);
-            window.set_keymap_error("".into());
-            window.set_keymap_profile(keymap::export(&next).into());
-        }
-        Err(error) => window.set_keymap_error(error.into()),
-    }
+pub fn save_overrides(app: &App, overrides: &keymap::Overrides) {
+    app.engine.borrow_mut().settings_mut().set("keymap/bindings", keymap::to_settings(overrides));
 }
 
 pub fn keymap_import(app: &App, window: &AppWindow, text: &str) {
@@ -725,9 +769,20 @@ pub fn keymap_import(app: &App, window: &AppWindow, text: &str) {
             save_overrides(app, &next);
             window.set_keymap_error("".into());
             window.set_keymap_profile(keymap::export(&next).into());
+            crate::keymap_view::imported(app, window);
         }
         Err(error) => window.set_keymap_error(error.into()),
     }
+}
+
+/// The keys spelled outside the shortcut bar (the banners'), as the user
+/// bound them.
+pub fn refresh_keys(app: &App, window: &AppWindow) {
+    let overrides = overrides(app);
+    let shown = |actions: &[&str]| actions.iter().find_map(|a| keymap::shown("pane", a, &overrides)).unwrap_or_default();
+    window.set_error_dismiss_key(shown(&["dismiss-error", "escape"]).into());
+    window.set_save_warning_dismiss_key(shown(&["dismiss-layout-warning", "escape"]).into());
+    window.set_save_warning_keep_key(shown(&["keep-layout"]).into());
 }
 
 pub fn keymap_export(app: &App, window: &AppWindow) {

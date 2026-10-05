@@ -1,10 +1,17 @@
 //! The keyboard map (KeyboardMap.qml): bindings per focus state, where a
 //! child state inherits its ancestors' bindings and overrides them by
 //! action. The shortcut dispatcher and the shortcut bar's hints read the
-//! same resolved list. The user's rebinding of a few actions is kept in
-//! settings (`keymap/bindings`) as `{action: "Ctrl+…"}`.
+//! same resolved list.
+//!
+//! The user's own bindings are kept in settings (`keymap/bindings`) as
+//! `{action: {context: {"add": [keys], "remove": [keys]}}}`: keys added to
+//! or taken from the defaults in that context and every context under it.
+//! A key is a chord ("Ctrl+J") or a double press of one ("Right Right").
+//! Typing keys bound further out never reach a text field (the composer,
+//! the explorer's search); bound there itself, they do.
 
 use std::collections::{BTreeMap, HashSet};
+use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 
@@ -52,8 +59,7 @@ fn binding(action: &'static str, keys: &[&str], label: &'static str, hint: bool,
     Binding { action, keys: keys.iter().map(|k| (*k).to_owned()).collect(), label, hint, guard, native }
 }
 
-/// Actions a user may rebind, and only to one Ctrl chord each.
-pub const EDITABLE: &[&str] = &["switcher", "sidebar", "split-right", "split-down", "zoom", "balance", "next-workspace"];
+/// Text editing keys no binding may take.
 const RESERVED: &[&str] = &["Ctrl+A", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Y"];
 
 fn parent(state: &str) -> Option<&'static str> {
@@ -76,6 +82,22 @@ fn state(name: &str) -> Vec<Binding> {
             b("next-workspace", &["Ctrl+Alt+W"], "Next workspace", false, Always, false),
             b("update-preview", &["Ctrl+Alt+U"], "Update", false, Always, false),
             b("next-attention", &["Ctrl+J"], "Next attention", true, Attention, false),
+            // No keys of their own: for the user to bind (and the switcher).
+            b("next-agent", &[], "Next agent", false, Rows, false),
+            b("previous-agent", &[], "Previous agent", false, Rows, false),
+            b("orchestrator", &[], "Orchestrator settings", false, Always, false),
+            b("connection", &[], "Host connection", false, Always, false),
+            b("list-all", &[], "Agents: all chats", false, Always, false),
+            b("list-unread", &[], "Agents: unread only", false, Always, false),
+            b("list-rooms", &[], "Agent conversations", false, Always, false),
+            b("list-archive", &[], "Archived agents", false, Always, false),
+            b("agent-profile", &[], "Agent profile", false, Agent, false),
+            b("manage-queue", &[], "Message queue", false, Agent, false),
+            b("dismiss-error", &[], "Dismiss conversation error", false, Always, false),
+            b("dismiss-layout-warning", &[], "Dismiss layout warning", false, Always, false),
+            b("tool-narration", &[], "Plain-English tools", false, Always, false),
+            b("setting:timestampsVisible", &[], "Timestamps on/off", false, Always, false),
+            b("setting:workspaceBarVisible", &[], "Workspace bar on/off", false, Always, false),
             b("change-directory", &["Ctrl+Alt+D"], "Change directory", false, Always, false),
             b("switcher", &["Ctrl+K"], "Commands", true, Always, false),
             b("sidebar", &["Ctrl+B"], "Show/hide sidebar", false, Always, false),
@@ -256,27 +278,131 @@ impl Facts {
     }
 }
 
-pub type Overrides = BTreeMap<String, String>;
+/// The contexts a user binds keys in, outermost first, with their names.
+/// "Everywhere" is the window's surfaces, not its dialogs.
+pub const CONTEXTS: &[(&str, &str)] = &[
+    ("main", "Everywhere"),
+    ("workspace", "Chats"),
+    ("navigation", "Chat and explorer"),
+    ("pane", "Chat"),
+    ("sidebar", "Explorer"),
+    ("composer", "Composer"),
+    ("search", "Explorer search"),
+    ("settings", "Settings"),
+    ("updates", "Updates"),
+    ("teams", "Teams"),
+    ("launch", "New agent hub"),
+];
+
+pub fn context_name(state: &str) -> &str {
+    CONTEXTS.iter().find(|(s, _)| *s == state).map_or(state, |(_, name)| name)
+}
+
+/// Text fields, where a key without Ctrl or Alt types.
+const TYPING: &[&str] = &["composer", "search"];
+
+/// Keys added to and taken from one action's defaults in one context.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Change {
+    pub add: Vec<String>,
+    pub remove: Vec<String>,
+}
+
+/// action → context → change.
+pub type Overrides = BTreeMap<String, BTreeMap<String, Change>>;
+
+fn chain(state_name: &str) -> Vec<&'static str> {
+    let mut chain = Vec::new();
+    let mut current = STATES.iter().copied().find(|s| *s == state_name);
+    while let Some(name) = current {
+        chain.push(name);
+        current = parent(name);
+    }
+    chain
+}
+
+/// The first definition of `action`, for its label and guard.
+fn definition(action: &str) -> Option<Binding> {
+    STATES.iter().flat_map(|name| state(name)).find(|b| b.action == action)
+}
+
+/// Every action a user may bind, with its label: not the keys a control
+/// handles itself (the composer's Return) nor the link hints' and cards'
+/// digits.
+pub fn actions() -> Vec<(&'static str, &'static str)> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for name in STATES {
+        for entry in state(name) {
+            let own = entry.native || entry.action.starts_with("hint-") || entry.action == "artifact-choose";
+            if seen.insert(entry.action) && !own {
+                out.push((entry.action, entry.label));
+            }
+        }
+    }
+    out
+}
+
+fn bindable(action: &str) -> bool {
+    actions().iter().any(|(a, _)| *a == action)
+}
+
+fn is_typing(key: &str) -> bool {
+    let first = key.split(' ').next().unwrap_or(key);
+    let modified = first.starts_with("Ctrl+") || first.contains("Alt+");
+    let base = first.rsplit_once('+').map_or(first, |(_, b)| if b.is_empty() { "+" } else { b });
+    !modified && base != "Escape" && !(base.len() > 1 && base.starts_with('F'))
+}
+
+/// `defaults` with the user's changes along `chain`, outermost first; the
+/// user's own keys lead.
+fn with_changes(chain: &[&str], action: &str, defaults: Vec<String>, overrides: &Overrides) -> Vec<String> {
+    let Some(contexts) = overrides.get(action) else { return defaults };
+    let typing_here = chain.first().is_some_and(|s| TYPING.contains(s));
+    let (mut keys, mut added) = (defaults, Vec::<String>::new());
+    for (depth, context) in chain.iter().enumerate().rev() {
+        let Some(change) = contexts.get(*context) else { continue };
+        keys.retain(|k| !change.remove.contains(k));
+        added.retain(|k| !change.remove.contains(k));
+        for key in &change.add {
+            if typing_here && depth > 0 && is_typing(key) {
+                continue;
+            }
+            if !added.contains(key) {
+                added.push(key.clone());
+            }
+        }
+    }
+    keys.retain(|k| !added.contains(k));
+    added.extend(keys);
+    added
+}
 
 /// Bindings in effect in `state`, nearest state first; `facts` None ignores
 /// the guards (for conflict checks).
 pub fn resolve(state_name: &str, overrides: &Overrides, facts: Option<Facts>) -> Vec<Binding> {
+    let chain = chain(state_name);
     let (mut result, mut seen) = (Vec::new(), HashSet::new());
-    let mut current = Some(state_name);
-    while let Some(name) = current {
+    for name in &chain {
         for mut entry in state(name) {
             if !seen.insert(entry.action) {
                 continue;
             }
-            if facts.is_none_or(|facts| facts.allows(entry.guard)) {
-                if let Some(key) = overrides.get(entry.action) {
-                    entry.keys = vec![key.clone()];
-                }
-                result.push(entry);
-            }
+            entry.keys = with_changes(&chain, entry.action, std::mem::take(&mut entry.keys), overrides);
+            result.push(entry);
         }
-        current = parent(name);
     }
+    // Actions the user bound here that this state's map does not have.
+    for (action, contexts) in overrides {
+        if seen.contains(action.as_str()) || !chain.iter().any(|c| contexts.get(*c).is_some_and(|ch| !ch.add.is_empty())) {
+            continue;
+        }
+        let Some(mut entry) = definition(action).filter(|d| bindable(d.action)) else { continue };
+        entry.keys = with_changes(&chain, entry.action, Vec::new(), overrides);
+        entry.hint = false;
+        result.push(entry);
+    }
+    result.retain(|entry| !entry.keys.is_empty() && facts.is_none_or(|facts| facts.allows(entry.guard)));
     result
 }
 
@@ -289,46 +415,162 @@ pub fn action_for(state_name: &str, chord: &str, overrides: &Overrides, facts: F
         .and_then(|entry| (!entry.native).then_some(entry.action))
 }
 
+/// How near `state` the binding of `key` to `action` is: 0 is the state
+/// itself.
+fn depth(chain: &[&str], action: &str, key: &str, overrides: &Overrides) -> usize {
+    let added = chain.iter().position(|c| overrides.get(action).and_then(|a| a.get(*c)).is_some_and(|ch| ch.add.iter().any(|k| k == key)));
+    let default = chain.iter().position(|c| state(c).iter().any(|b| b.action == action)).filter(|i| state(chain[*i]).iter().any(|b| b.action == action && b.keys.iter().any(|k| k == key)));
+    added.into_iter().chain(default).min().unwrap_or(usize::MAX)
+}
+
+/// What the second press of `chord` in a row runs in `state`. The first
+/// press has already done its own thing, at once, so a double press never
+/// delays a key. Where that single press means something bound nearer
+/// than the double (Right seeks a clip, unfolds a chat), each press keeps
+/// that meaning: pressing it twice is doing it twice.
+pub fn double_action(state_name: &str, chord: &str, overrides: &Overrides, facts: Facts) -> Option<&'static str> {
+    let double = format!("{chord} {chord}");
+    let resolved = resolve(state_name, overrides, Some(facts));
+    let entry = resolved.iter().find(|e| !e.native && e.keys.contains(&double))?;
+    let chain = chain(state_name);
+    if let Some(single) = resolved.iter().find(|e| e.keys.iter().any(|k| k == chord)) {
+        if depth(&chain, single.action, chord, overrides) < depth(&chain, entry.action, &double, overrides) {
+            return None;
+        }
+    }
+    Some(entry.action)
+}
+
+/// The keys `action` has in `state`, the user's first, whatever the guards.
+pub fn keys_in(state_name: &str, action: &str, overrides: &Overrides) -> Vec<String> {
+    resolve(state_name, overrides, None).into_iter().find(|b| b.action == action).map(|b| b.keys).unwrap_or_default()
+}
+
+/// The key to show for `action` in `state` (the user's first), spelled
+/// for people.
+pub fn shown(state_name: &str, action: &str, overrides: &Overrides) -> Option<String> {
+    keys_in(state_name, action, overrides).first().map(|k| display(k))
+}
+
 /// The shortcut bar's hints for `state`.
 pub fn hints(state_name: &str, overrides: &Overrides, facts: Facts) -> Vec<Binding> {
     resolve(state_name, overrides, Some(facts)).into_iter().filter(|entry| entry.hint).collect()
 }
 
-fn is_ctrl_chord(key: &str) -> bool {
-    let Some(rest) = key.strip_prefix("Ctrl+") else { return false };
-    let rest = rest.strip_prefix("Alt+").or_else(|| rest.strip_prefix("Shift+")).unwrap_or(rest);
-    rest.chars().count() == 1 && rest.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == ',')
+/// Remembers the last key, to tell a double press: the second press of the
+/// same key within the window. A key held down repeating is not one.
+#[derive(Debug, Default)]
+pub struct Presses {
+    last: Option<(String, Instant)>,
 }
 
-/// Validates an exported keymap (`{"version": 1, "bindings": {...}}`) and
-/// returns its bindings: only editable actions, one Ctrl chord each, no
-/// reserved editing key, and no two actions on one key in any state.
-pub fn import(text: &str) -> Result<Overrides, String> {
-    let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    let object = value.as_object().ok_or("Unsupported keymap")?;
-    let supported = object.keys().all(|k| k == "version" || k == "bindings");
-    let bindings = object.get("bindings").and_then(Value::as_object);
-    let (true, Some(1), Some(bindings)) = (supported, object.get("version").and_then(Value::as_i64), bindings) else {
-        return Err("Unsupported keymap".into());
-    };
-    let mut overrides = Overrides::new();
-    for (action, key) in bindings {
-        let key = key.as_str().filter(|k| EDITABLE.contains(&action.as_str()) && is_ctrl_chord(k));
-        let Some(key) = key else { return Err("Use a supported action and one Ctrl chord".into()) };
-        if RESERVED.contains(&key) {
-            return Err("Reserved text editing key".into());
+impl Presses {
+    /// Notes a press; true when it is the second of a double press.
+    pub fn press(&mut self, chord: &str, now: Instant, window: Duration, repeat: bool) -> bool {
+        if repeat {
+            self.last = None;
+            return false;
         }
-        overrides.insert(action.clone(), key.to_owned());
+        let second = self.last.as_ref().is_some_and(|(key, at)| key == chord && now.saturating_duration_since(*at) <= window);
+        self.last = if second { None } else { Some((chord.to_owned(), now)) };
+        second
     }
+}
+
+/// The double press window, in milliseconds, from the setting.
+pub fn double_press_window(setting: Option<i64>) -> Duration {
+    Duration::from_millis(setting.unwrap_or(300).clamp(150, 1000) as u64)
+}
+
+const NAMED: &[&str] = &["Escape", "Tab", "Return", "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Delete", "Backspace", "Space"];
+
+fn parse_chord(text: &str) -> Result<String, String> {
+    let invalid = || format!("Not a key: {text}");
+    let (mut control, mut alt, mut shift, mut rest) = (false, false, false, text);
+    loop {
+        let lower = rest.to_ascii_lowercase();
+        let held = [("ctrl+", &mut control), ("alt+", &mut alt), ("shift+", &mut shift)].into_iter().find(|(p, _)| lower.starts_with(p) && rest.len() > p.len());
+        let Some((prefix, flag)) = held else { break };
+        *flag = true;
+        rest = &rest[prefix.len()..];
+    }
+    let lower = rest.to_ascii_lowercase();
+    let base = match lower.as_str() {
+        "enter" => "Return".to_owned(),
+        "esc" => "Escape".to_owned(),
+        _ => match NAMED.iter().find(|n| n.to_ascii_lowercase() == lower) {
+            Some(name) => (*name).to_owned(),
+            None if lower.len() > 1 && lower.starts_with('f') && lower[1..].parse::<u8>().is_ok_and(|n| (1..=12).contains(&n)) => rest.to_ascii_uppercase(),
+            None => {
+                let mut chars = rest.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(c), None) if !c.is_whitespace() && !c.is_control() => c.to_uppercase().to_string(),
+                    _ => return Err(invalid()),
+                }
+            }
+        },
+    };
+    let mut out = String::new();
+    for (held, name) in [(control, "Ctrl+"), (alt, "Alt+"), (shift, "Shift+")] {
+        if held {
+            out += name;
+        }
+    }
+    Ok(out + &base)
+}
+
+/// A key as the map spells it: a chord, or one chord twice for a double
+/// press ("Right Right").
+pub fn parse_key(text: &str) -> Result<String, String> {
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    match parts.as_slice() {
+        [one] => parse_chord(one),
+        [first, second] => {
+            let (first, second) = (parse_chord(first)?, parse_chord(second)?);
+            if first != second {
+                return Err(format!("A double press is one key twice: {text}"));
+            }
+            Ok(format!("{first} {second}"))
+        }
+        _ => Err(format!("Not a key: {text}")),
+    }
+}
+
+/// A key as people read it: "Enter", "Esc", "Right ×2".
+pub fn display(key: &str) -> String {
+    let one = |k: &str| k.replace("Return", "Enter").replace("Escape", "Esc");
+    match key.split_once(' ') {
+        Some((first, _)) => format!("{} ×2", one(first)),
+        None => one(key),
+    }
+}
+
+fn reserved(key: &str) -> bool {
+    key.split(' ').any(|k| RESERVED.contains(&k))
+}
+
+/// Two actions on one key in one state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Clash {
+    pub state: &'static str,
+    pub key: String,
+    pub actions: [&'static str; 2],
+}
+
+/// Every clash in the map: two actions on one key where both would run.
+/// A nearer native binding (the focused control's own key, such as the
+/// composer's Ctrl+Shift+O) shadows an outer one on purpose.
+pub fn clashes(overrides: &Overrides) -> Vec<Clash> {
+    let mut found = Vec::new();
     for name in STATES {
-        // A nearer native binding (the focused control's own key, such as
-        // the composer's Ctrl+Shift+O) shadows an outer one on purpose.
         let mut seen: BTreeMap<String, (&'static str, bool)> = BTreeMap::new();
-        for entry in resolve(name, &overrides, None) {
+        for entry in resolve(name, overrides, None) {
             for key in &entry.keys {
                 match seen.get(key) {
                     Some((_, true)) => continue,
-                    Some((other, false)) if *other != entry.action => return Err(format!("Conflict in {name}: {key}")),
+                    Some((other, false)) if *other != entry.action => {
+                        found.push(Clash { state: name, key: key.clone(), actions: [other, entry.action] });
+                    }
                     _ => {
                         seen.insert(key.clone(), (entry.action, entry.native));
                     }
@@ -336,23 +578,210 @@ pub fn import(text: &str) -> Result<Overrides, String> {
             }
         }
     }
-    Ok(overrides)
+    found
+}
+
+/// Why a key cannot be added.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refusal {
+    Invalid(String),
+    Reserved(String),
+    /// Another action has it there; `take_over` moves it.
+    Clash(Vec<Clash>),
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Refusal::Invalid(why) => f.write_str(why),
+            Refusal::Reserved(key) => write!(f, "{} is reserved for text editing", display(key)),
+            Refusal::Clash(clashes) => {
+                let Some(first) = clashes.first() else { return Ok(()) };
+                let other = first.actions[0];
+                let label = definition(other).map_or(other, |d| d.label);
+                let mut places: Vec<&str> = Vec::new();
+                for clash in clashes.iter().filter(|c| c.actions[0] == other) {
+                    if !places.contains(&context_name(clash.state)) {
+                        places.push(context_name(clash.state));
+                    }
+                }
+                write!(f, "{} already runs {label} in {}", display(&first.key), places.join(", "))
+            }
+        }
+    }
+}
+
+fn change_mut<'a>(overrides: &'a mut Overrides, action: &str, context: &str) -> &'a mut Change {
+    overrides.entry(action.to_owned()).or_default().entry(context.to_owned()).or_default()
+}
+
+fn tidy(mut overrides: Overrides) -> Overrides {
+    for contexts in overrides.values_mut() {
+        contexts.retain(|_, change| !change.add.is_empty() || !change.remove.is_empty());
+    }
+    overrides.retain(|_, contexts| !contexts.is_empty());
+    overrides
+}
+
+fn checked(action: &str, context: &str, key: &str) -> Result<String, Refusal> {
+    if !bindable(action) {
+        return Err(Refusal::Invalid(format!("{action} keeps its own keys")));
+    }
+    if !CONTEXTS.iter().any(|(c, _)| *c == context) {
+        return Err(Refusal::Invalid(format!("No context {context}")));
+    }
+    let key = parse_key(key).map_err(Refusal::Invalid)?;
+    if reserved(&key) {
+        return Err(Refusal::Reserved(key));
+    }
+    Ok(key)
+}
+
+fn add_unchecked(overrides: &Overrides, action: &str, context: &str, key: &str) -> Overrides {
+    let mut next = overrides.clone();
+    change_mut(&mut next, action, context).remove.retain(|k| k != key);
+    if !keys_in(context, action, &next).iter().any(|k| k == key) {
+        change_mut(&mut next, action, context).add.push(key.to_owned());
+    }
+    tidy(next)
+}
+
+/// Adds `key` to `action` in `context` (and the contexts under it).
+pub fn add(overrides: &Overrides, action: &str, context: &str, key: &str) -> Result<Overrides, Refusal> {
+    let key = checked(action, context, key)?;
+    let next = add_unchecked(overrides, action, context, &key);
+    let new: Vec<Clash> = clashes(&next).into_iter().filter(|c| c.key == key && c.actions.contains(&definition(action).map_or("", |d| d.action))).collect();
+    if new.is_empty() { Ok(next) } else { Err(Refusal::Clash(new)) }
+}
+
+/// Adds `key` and takes it from the actions it clashed with, where they
+/// clashed.
+pub fn take_over(overrides: &Overrides, action: &str, context: &str, key: &str) -> Result<Overrides, String> {
+    let key = checked(action, context, key).map_err(|r| r.to_string())?;
+    let mut next = add_unchecked(overrides, action, context, &key);
+    for _ in 0..STATES.len() {
+        let Some(clash) = clashes(&next).into_iter().find(|c| c.key == key && c.actions.contains(&action)) else { return Ok(next) };
+        let other = if clash.actions[0] == action { clash.actions[1] } else { clash.actions[0] };
+        next = remove(&next, other, clash.state, &key);
+    }
+    Err(format!("{} still clashes", display(&key)))
+}
+
+/// Takes `key` from `action` in `context`.
+pub fn remove(overrides: &Overrides, action: &str, context: &str, key: &str) -> Overrides {
+    let mut next = overrides.clone();
+    change_mut(&mut next, action, context).add.retain(|k| k != key);
+    if keys_in(context, action, &next).iter().any(|k| k == key) && !next[action][context].remove.iter().any(|k| k == key) {
+        change_mut(&mut next, action, context).remove.push(key.to_owned());
+    }
+    tidy(next)
+}
+
+/// Back to the defaults for `action` in `context`.
+pub fn reset(overrides: &Overrides, action: &str, context: &str) -> Overrides {
+    let mut next = overrides.clone();
+    if let Some(contexts) = next.get_mut(action) {
+        contexts.remove(context);
+    }
+    tidy(next)
+}
+
+/// Whether the user changed `action` in `context`.
+pub fn customised(overrides: &Overrides, action: &str, context: &str) -> bool {
+    overrides.get(action).is_some_and(|c| c.contains_key(context))
+}
+
+fn strings(value: Option<&Value>) -> Vec<String> {
+    value.and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_owned).collect()).unwrap_or_default()
+}
+
+/// An action's old single key: it replaced the default wherever the
+/// action had one.
+fn legacy(action: &str, key: &str) -> BTreeMap<String, Change> {
+    STATES
+        .iter()
+        .filter_map(|name| state(name).into_iter().find(|b| b.action == action).map(|b| (name, b.keys)))
+        .map(|(name, keys)| ((*name).to_owned(), Change { add: vec![key.to_owned()], remove: keys }))
+        .collect()
+}
+
+/// The setting as saved, the one-chord form from before included; what it
+/// cannot read is left out.
+pub fn from_settings(value: &Value) -> Overrides {
+    let mut overrides = Overrides::new();
+    for (action, contexts) in value.as_object().into_iter().flatten() {
+        let record = match contexts {
+            Value::String(key) => legacy(action, key),
+            Value::Object(contexts) => contexts
+                .iter()
+                .map(|(context, change)| (context.clone(), Change { add: strings(change.get("add")), remove: strings(change.get("remove")) }))
+                .collect(),
+            _ => continue,
+        };
+        overrides.insert(action.clone(), record);
+    }
+    tidy(overrides)
+}
+
+pub fn to_settings(overrides: &Overrides) -> Value {
+    let record = |change: &Change| {
+        let mut out = Map::new();
+        if !change.add.is_empty() {
+            out.insert("add".into(), json!(change.add));
+        }
+        if !change.remove.is_empty() {
+            out.insert("remove".into(), json!(change.remove));
+        }
+        Value::Object(out)
+    };
+    Value::Object(overrides.iter().map(|(action, contexts)| (action.clone(), Value::Object(contexts.iter().map(|(c, ch)| (c.clone(), record(ch))).collect()))).collect())
+}
+
+/// Validates an exported keymap (`{"version": 2, "bindings": {...}}`, or
+/// the one-chord version 1) and returns its bindings: known actions and
+/// contexts, real keys, no reserved editing key, and no clash.
+pub fn import(text: &str) -> Result<Overrides, String> {
+    let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let object = value.as_object().ok_or("Unsupported keymap")?;
+    let supported = object.keys().all(|k| k == "version" || k == "bindings");
+    let bindings = object.get("bindings").and_then(Value::as_object);
+    let version = object.get("version").and_then(Value::as_i64);
+    let (true, Some(version @ (1 | 2)), Some(bindings)) = (supported, version, bindings) else {
+        return Err("Unsupported keymap".into());
+    };
+    for (action, contexts) in bindings {
+        let readable = match (version, contexts) {
+            (1, Value::String(_)) => true,
+            (2, Value::Object(contexts)) => contexts.values().all(|c| c.as_object().is_some_and(|c| c.keys().all(|k| k == "add" || k == "remove") && c.values().all(|v| v.as_array().is_some_and(|a| a.iter().all(Value::is_string))))),
+            _ => false,
+        };
+        if !readable {
+            return Err(format!("Unsupported binding for {action}"));
+        }
+    }
+    let overrides = from_settings(&Value::Object(bindings.clone()));
+    let mut canonical = Overrides::new();
+    for (action, contexts) in &overrides {
+        for (context, change) in contexts {
+            let mut keys = Change::default();
+            for key in &change.add {
+                keys.add.push(checked(action, context, key).map_err(|r| r.to_string())?);
+            }
+            for key in &change.remove {
+                checked(action, context, key).map_err(|r| r.to_string())?;
+                keys.remove.push(parse_key(key)?);
+            }
+            canonical.entry(action.clone()).or_default().insert(context.clone(), keys);
+        }
+    }
+    if let Some(clash) = clashes(&canonical).first() {
+        return Err(format!("Conflict in {}: {}", context_name(clash.state), display(&clash.key)));
+    }
+    Ok(canonical)
 }
 
 pub fn export(overrides: &Overrides) -> String {
-    let bindings: Map<String, Value> = overrides.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
-    serde_json::to_string_pretty(&json!({"version": 1, "bindings": bindings})).unwrap_or_default()
-}
-
-/// Rebinds (or, with an empty key, resets) one action, validated as a whole.
-pub fn set_binding(overrides: &Overrides, action: &str, key: &str) -> Result<Overrides, String> {
-    let mut next = overrides.clone();
-    if key.trim().is_empty() {
-        next.remove(action);
-    } else {
-        next.insert(action.to_owned(), key.trim().to_owned());
-    }
-    import(&export(&next))
+    serde_json::to_string_pretty(&json!({"version": 2, "bindings": to_settings(overrides)})).unwrap_or_default()
 }
 
 /// A key event as the map spells it ("Ctrl+Alt+V", "Shift+Tab", "Escape",
@@ -374,8 +803,18 @@ pub fn chord(text: &str, control: bool, alt: bool, shift: bool) -> Option<String
         (Key::PageDown, "PageDown"),
         (Key::Delete, "Delete"),
         (Key::Backspace, "Backspace"),
+        (Key::F1, "F1"),
         (Key::F2, "F2"),
+        (Key::F3, "F3"),
+        (Key::F4, "F4"),
         (Key::F5, "F5"),
+        (Key::F6, "F6"),
+        (Key::F7, "F7"),
+        (Key::F8, "F8"),
+        (Key::F9, "F9"),
+        (Key::F10, "F10"),
+        (Key::F11, "F11"),
+        (Key::F12, "F12"),
         (Key::Space, "Space"),
     ];
     let modifiers = [Key::Control, Key::Alt, Key::AltGr, Key::Shift, Key::ShiftR, Key::Meta, Key::MetaR, Key::ControlR];
