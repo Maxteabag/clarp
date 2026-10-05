@@ -502,24 +502,39 @@ export component Block inherits VerticalLayout {
         link-color: Palette.link;
         link-clicked(url) => { root.link-clicked(url); }
     }
+    // A block whose text sits inside a box (code, quote) takes its height
+    // from that text at the width it is drawn at. Laid out in a layout, the
+    // box measured the text at its one-line width when the chat sized the
+    // row: a wrapped quote or code line came out lines short and the next
+    // message was drawn over it (Slint 1.18 measures a conditional layout
+    // at its preferred width).
     if root.block.kind == "code": Rectangle {
         background: Palette.sunken;
         border-radius: 2px;
-        VerticalLayout {
-            padding: 10px;
-            Text {
-                text: root.block.text;
-                font-family: "JetBrains Mono";
-                font-size: root.body-size * 0.9;
-                color: Palette.text;
-                wrap: word-wrap;
-            }
+        min-width: code-text.min-width + 20px;
+        preferred-width: code-text.preferred-width + 20px;
+        height: code-text.preferred-height + 20px;
+        code-text := Text {
+            x: 10px;
+            y: 10px;
+            width: parent.width - 20px;
+            height: parent.height - 20px;
+            text: root.block.text;
+            font-family: "JetBrains Mono";
+            font-size: root.body-size * 0.9;
+            color: Palette.text;
+            wrap: word-wrap;
         }
     }
-    if root.block.kind == "quote": HorizontalLayout {
-        spacing: 10px;
-        Rectangle { width: 3px; background: Palette.accent; }
-        StyledText {
+    if root.block.kind == "quote": Rectangle {
+        min-width: quote-text.min-width + 13px;
+        preferred-width: quote-text.preferred-width + 13px;
+        height: quote-text.preferred-height;
+        Rectangle { x: 0; width: 3px; height: parent.height; background: Palette.accent; }
+        quote-text := StyledText {
+            x: 13px;
+            width: parent.width - 13px;
+            height: parent.height;
             text: root.block.styled;
             default-color: Palette.muted;
             default-font-size: root.body-size;
