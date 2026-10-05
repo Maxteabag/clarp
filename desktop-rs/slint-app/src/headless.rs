@@ -159,6 +159,12 @@ pub fn set_active(active: bool) {
     window.dispatch_event(WindowEvent::WindowActiveChanged(active));
 }
 
+/// The window system says which modifiers are held, as winit's
+/// `ModifiersChanged` does after each modifier key.
+pub fn modifiers_changed(modifiers: crate::platform::keyboard::Modifiers) {
+    crate::platform::keyboard::reported(modifiers);
+}
+
 /// The pointer leaves the window.
 pub fn pointer_exit() {
     let Some(window) = window() else { return };

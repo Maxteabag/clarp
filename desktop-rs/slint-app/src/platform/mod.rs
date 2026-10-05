@@ -11,6 +11,7 @@ pub mod audio_output;
 pub mod clipboard;
 pub mod desktop;
 pub mod diagnostics;
+pub mod keyboard;
 pub mod stall_monitor;
 pub mod mpris;
 pub mod runtime;
