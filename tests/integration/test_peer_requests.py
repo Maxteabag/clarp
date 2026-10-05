@@ -136,3 +136,52 @@ def test_replies_that_cannot_belong_are_refused(host, tmp_path):
     assert gone.returncode == 4 and "archived" in gone.stderr
     assert rows(host, "SELECT count(*) FROM messages WHERE agent_id=? AND sender_agent_id=?",
                 agent_id(host, "rachel"), agent_id(host, "mike"))[0][0] == 0
+
+
+
+def test_a_user_stop_pause_and_peer_messages(host, tmp_path):
+    """Stop pauses the queue to hold its backlog. A plain user message runs
+    past it and leaves it; an explicitly queued agent send and a goal result
+    wait for the user's resume; a plain peer message, like any item that
+    starts with nothing held, ends the pause (and the log says so)."""
+    no_goal = json.loads(cli(host, tmp_path, "request", "--to", "mike", "--from", "rachel",
+                             "--text", "Check the build").stdout)["request_id"]
+    p = create(host)
+    goal = json.loads(cli(host, tmp_path, "request", "--to", "mike", "--from", "rachel",
+                          "--goal", p["plan_id"], "--text", "Ship the log").stdout)["request_id"]
+    host.wait_reply("mike", "Ship the log")
+    host.request("/stop", {"session": "rachel"})
+    queue = lambda: host.request("/turn-queue?session=rachel")
+    assert queue()["paused"] is True
+
+    host.request("/send", {"session": "rachel", "text": "Fresh user words", "client_msg_id": "u-fresh",
+                           "synthesize_audio": False})
+    host.wait_reply("rachel", "Fresh user words")
+    assert queue()["paused"] is True   # a plain user send does not lift the stop
+
+    held = host.request("/send", {"session": "rachel", "text": "Queued correction", "sender": "mike",
+                                  "origin": "agent", "queue_if_busy": True,
+                                  "client_msg_id": "queued-correction", "synthesize_audio": False})
+    out = cli(host, tmp_path, "reply", "--request", goal, "--from", "mike",
+              "--kind", "result", "--text", "The log is live")
+    assert "held: the goal is paused" in json.loads(out.stdout)["via"]
+    time.sleep(3)
+    assert held["queued"] and queue()["items"] and wakes(host) == []
+    assert "Queued correction" not in str(host.request("/log?session=rachel")["turns"])
+
+    host.request("/turn-queue/resume", {"session": "rachel"})
+    host.wait_reply("rachel", "Queued correction")
+    assert wakes(host) == []   # the goal has its own pause
+    action(host, host.request("/task-plans?session=rachel")["plans"][0], "resume",
+           {"reason": "User explicitly resumed this goal"})
+    assert "The log is live" in wait_wake(host)[0][1]
+
+    host.request("/stop", {"session": "rachel"})
+    assert queue()["paused"] is True
+    out = cli(host, tmp_path, "reply", "--request", no_goal, "--from", "mike",
+              "--kind", "result", "--text", "Build is green")
+    assert json.loads(out.stdout)["via"] == "message"
+    host.wait_reply("rachel", "Build is green")   # never held by the pause
+    assert queue()["paused"] is False
+    log = (host.root.parent / f"{host.root.name}.log").read_text()
+    assert "queuePauseEndedByDrain" in log and "origin=agent" in log

@@ -1867,6 +1867,12 @@ def cmd_reply(args) -> int:
             if decision["action"] == "dependency" and not force_message:
                 pr.record_result(decision["plan"], decision["data"], replier=replier)
                 via = f"goal {decision['plan']['plan_id']}"
+                cont = (decision["plan"].get("goal") or {}).get("continuation") or {}
+                if cont.get("state") in ("paused", "blocked"):
+                    # A user's stop or pause holds the result; do not resend it.
+                    via += (f" (held: the goal is {cont['state']}"
+                            f"{': ' + cont['reason'] if cont.get('reason') else ''};"
+                            " it wakes the requester when the user resumes it)")
             elif decision["action"] == "delivered":
                 via = f"goal {decision['plan']['plan_id']} (already recorded)"
             else:

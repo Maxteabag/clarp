@@ -58,7 +58,11 @@ ping-pong. A pending approval is a real blocker: report it, never work around
 it. While the user has the requester's goal paused or blocked, a result it
 still waits for is held for the resume and updates are refused; a result it
 no longer waits for (its deadline already woke the requester) comes as a
-message instead of being lost. Requests work between agents on this Host; for
+message instead of being lost; `reply` says `held` when that happens, so do
+not resend. A user's Stop also pauses the agent's queue: plain `prompt` and
+`reply` messages still run (and end the pause when nothing else is held),
+but a send with `queue_if_busy` waits, unannounced, until the user resumes
+the queue; do not use it to reach a stopped agent. Requests work between agents on this Host; for
 a peer server use `prompt`.
 
 A helper agent (one created with `--parent`) reports to its parent the same
