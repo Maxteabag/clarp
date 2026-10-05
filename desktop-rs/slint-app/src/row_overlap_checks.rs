@@ -33,6 +33,8 @@ struct Fit {
     given: f32,
     needs: f32,
     what: String,
+    /// It wraps: its height is the layout's measure of its lines.
+    wraps: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -103,20 +105,20 @@ fn fit_of(item: &ItemRc) -> Option<Fit> {
     if width <= 0.0 || given <= 0.0 {
         return None;
     }
-    let (needs, what) = if let Some(text) = item.downcast::<StyledTextItem>() {
+    let (wrap, needs, what) = if let Some(text) = item.downcast::<StyledTextItem>() {
         let text = text.as_pin_ref();
         let what = styled_words(&format!("{:?}", text.text()));
-        (needs(item, text, RenderText::wrap(text), width)?, what)
+        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, what)
     } else if let Some(text) = item.downcast::<SimpleText>() {
         let text = text.as_pin_ref();
-        (needs(item, text, RenderText::wrap(text), width)?, words(&text.text()))
+        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, words(&text.text()))
     } else if let Some(text) = item.downcast::<ComplexText>() {
         let text = text.as_pin_ref();
-        (needs(item, text, RenderText::wrap(text), width)?, words(&text.text()))
+        (RenderText::wrap(text), needs(item, text, RenderText::wrap(text), width)?, words(&text.text()))
     } else {
         return None;
     };
-    (!what.is_empty()).then_some(Fit { top, given, needs, what })
+    (!what.is_empty()).then_some(Fit { top, given, needs, what, wraps: wrap != TextWrap::NoWrap })
 }
 
 /// The active chat's viewport (top, bottom) and the rows drawn in it.
@@ -182,7 +184,10 @@ pub(super) fn tiling() -> Result<String, String> {
     }
     for row in &rows {
         for text in &row.texts {
-            if text.needs > text.given + SLACK {
+            // A one-line text in a box of its own height (a countdown's
+            // digits) may have glyphs a little taller than the box: only a
+            // wrapped text's lines are measured by the layout.
+            if text.wraps && text.needs > text.given + SLACK {
                 faults.push(format!(
                     "row {} ({:.1}..{:.1}): its text \"{}\" at {:.1} needs {:.1}px and has {:.1}px (drawn {:.1}px past its place)",
                     row.id, row.top, row.bottom, text.what, text.top, text.needs, text.given, text.needs - text.given
