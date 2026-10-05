@@ -122,6 +122,27 @@ export struct MessageRow {
     prompt: PromptRow,
 }
 
+// A row handed to the transcript to measure off screen, and the batch it
+// was asked for in (a row asked for again is reported again).
+export struct MeasureRow {
+    row: MessageRow,
+    batch: int,
+}
+
+// The chat's row heights, kept by the app per pane (scroll_book.rs): the
+// scrollbar's size and place come from them, not from the list's estimate.
+export global ScrollBook {
+    // A row measured off screen: the pane, the batch, the row's id, its
+    // height and the width it was measured at.
+    callback measured(string, int, string, length, length);
+    // A row drawn in the chat, at its height and the chat's width.
+    callback shown(string, string, length, length);
+    // The chat's text size or width changed: every row is measured again.
+    callback relayout(string);
+    // The row a distance from the chat's top falls on.
+    pure callback row-at(string, length) -> int;
+}
+
 // One tool call (ToolCard.qml): name, summary, status; details on request.
 component ToolCard inherits Rectangle {
     in property <ToolRow> tool;
@@ -176,6 +197,8 @@ component DecisionReceipt inherits Rectangle {
     in property <ReceiptRow> receipt;
     in property <length> view-top;
     in property <length> view-bottom;
+    // A copy measured off screen: it reports nothing.
+    in property <bool> measuring;
     property <bool> selected: ArtifactBridge.cursor == root.receipt.key;
     property <color> tone: root.receipt.tone == "success" ? Palette.success
         : root.receipt.tone == "danger" ? Palette.danger
@@ -185,12 +208,12 @@ component DecisionReceipt inherits Rectangle {
     border-color: root.selected ? Palette.accent : root.tone.with-alpha(0.35);
     border-radius: 8px;
     accessible-role: groupbox;
-    accessible-id: "receipt";
+    accessible-id: root.measuring ? "" : "receipt";
     accessible-label: root.receipt.kind + " " + root.receipt.question;
     accessible-description: root.receipt.outcome;
     Timer {
         interval: 150ms;
-        running: true;
+        running: !root.measuring;
         triggered => { ArtifactBridge.card-shown(root.receipt.key, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
     }
     touch := TouchArea {
@@ -255,7 +278,7 @@ component DecisionReceipt inherits Rectangle {
                 border-width: 1px;
                 border-color: root.tone.with-alpha(0.4);
                 accessible-role: text;
-                accessible-id: "receipt-outcome";
+                accessible-id: root.measuring ? "" : "receipt-outcome";
                 accessible-label: root.receipt.outcome;
                 HorizontalLayout {
                     padding-left: 9px;
@@ -294,6 +317,7 @@ component LiveItem inherits Rectangle {
     in property <LiveRow> live;
     in property <length> view-top;
     in property <length> view-bottom;
+    in property <bool> measuring;
     property <bool> selected: root.live.expandable && ArtifactBridge.cursor == root.live.key;
     property <bool> running: root.live.status == "running" || root.live.status == "pending";
     property <color> mark: root.live.status == "failed" ? Palette.danger
@@ -308,7 +332,7 @@ component LiveItem inherits Rectangle {
     // Reports where it is, as a card does, so J/K reach it.
     Timer {
         interval: 150ms;
-        running: root.live.expandable;
+        running: root.live.expandable && !root.measuring;
         triggered => { ArtifactBridge.card-shown(root.live.key, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
     }
     if root.live.expandable: TouchArea {
@@ -419,6 +443,7 @@ component PromptLine inherits Rectangle {
     in property <PromptRow> prompt;
     in property <length> view-top;
     in property <length> view-bottom;
+    in property <bool> measuring;
     property <bool> selected: ArtifactBridge.cursor == root.prompt.key;
     height: 22px;
     border-radius: 3px;
@@ -429,7 +454,7 @@ component PromptLine inherits Rectangle {
     accessible-action-default => { ArtifactBridge.open(root.prompt.key); }
     Timer {
         interval: 150ms;
-        running: true;
+        running: !root.measuring;
         triggered => { ArtifactBridge.card-shown(root.prompt.key, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
     }
     TouchArea {
@@ -492,6 +517,7 @@ export component Block inherits VerticalLayout {
     // is, like a card, so J/K reach it).
     in property <length> view-top;
     in property <length> view-bottom;
+    in property <bool> measuring;
     property <bool> selected: root.block.key != "" && ArtifactBridge.cursor == root.block.key;
     in property <length> body-size;
     in property <brush> body-color;
@@ -591,7 +617,7 @@ export component Block inherits VerticalLayout {
         alignment: start;
         Timer {
             interval: 150ms;
-            running: root.block.key != "";
+            running: root.block.key != "" && !root.measuring;
             triggered => { ArtifactBridge.card-shown(root.block.key, images.absolute-position.x, images.absolute-position.y, images.width, images.height, root.view-top, root.view-bottom); }
         }
         for picture[index] in root.block.images: Rectangle {
@@ -652,12 +678,145 @@ export component Block inherits VerticalLayout {
     }
 }
 
+// One message of the chat as the transcript draws it, and as it is
+// measured off screen (the same component, so a row measured there is as
+// tall as it is drawn).
+component TranscriptRow inherits HorizontalLayout {
+    in property <MessageRow> message;
+    // The chat's width, and its visible band (cards and images report
+    // where they are against it).
+    in property <length> list-width;
+    in property <length> view-top;
+    in property <length> view-bottom;
+    // A copy laid out off screen to measure: its cards, receipts and images
+    // report nothing and take no keyboard, and it is no list item.
+    in property <bool> measuring;
+    callback link-clicked(string);
+    callback toggle-activity(string, string);
+    callback copy-message(string);
+    // The widest the message's content is drawn. Slint measures a
+    // repeated or conditional layout in a row (opened tool calls, a
+    // card) at its preferred width when it sizes the row, so one
+    // whose text wraps prefers the width it is drawn at: measured at
+    // its one-line width, its height came out lines short and the
+    // next row was drawn over it.
+    property <length> content-width: Math.min(root.list-width - 32px, root.message.author == "user" ? root.list-width * 0.75 : root.list-width)
+        - 2 * (root.message.receipt.key != "" ? 0px : root.message.prompt.key != "" && !root.message.prompt.expanded ? 5px : root.message.author == "user" ? 10px : 2px);
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+    alignment: root.message.author == "user" ? end : stretch;
+    Rectangle {
+        // One message of the list; the id finds it in the checks.
+        accessible-role: list-item;
+        accessible-id: root.measuring ? "" : "row:" + root.message.id;
+        background: root.message.author == "user" && root.message.receipt.key == "" ? Palette.bubble : transparent;
+        border-radius: 2px;
+        max-width: root.message.author == "user" ? root.list-width * 0.75 : root.list-width;
+        // Hovering a message offers its copy button (Slint's rich text
+        // cannot be selected: the message's text is copied whole).
+        hover := TouchArea { }
+        if root.message.author != "activity" && root.message.author != "live" && root.message.receipt.key == "": Rectangle {
+            x: parent.width - 20px;
+            y: 2px;
+            width: 18px;
+            height: 18px;
+            opacity: hover.has-hover || copy.has-hover ? 1 : 0;
+            accessible-role: button;
+            accessible-label: "Copy message";
+            Image { source: @image-url("icons/copy.svg"); width: 14px; height: 14px; colorize: Palette.faint; }
+            copy := TouchArea { clicked => { root.copy-message(root.message.id); } }
+        }
+        VerticalLayout {
+            // A folded prompt is one line in a slim bubble.
+            padding: root.message.receipt.key != "" ? 0px : root.message.prompt.key != "" && !root.message.prompt.expanded ? 5px : root.message.author == "user" ? 10px : 2px;
+            spacing: 8px;
+            if root.message.receipt.key != "": DecisionReceipt {
+                receipt: root.message.receipt;
+                preferred-width: 420px;
+                view-top: root.view-top;
+                view-bottom: root.view-bottom;
+                measuring: root.measuring;
+            }
+            if root.message.prompt.key != "": PromptLine {
+                prompt: root.message.prompt;
+                view-top: root.view-top;
+                view-bottom: root.view-bottom;
+                measuring: root.measuring;
+            }
+            if root.message.author == "live": LiveItem {
+                live: root.message.live;
+                view-top: root.view-top;
+                view-bottom: root.view-bottom;
+                measuring: root.measuring;
+            }
+            for block in root.message.blocks: Block {
+                block: block;
+                view-top: root.view-top;
+                view-bottom: root.view-bottom;
+                measuring: root.measuring;
+                body-size: root.message.author == "activity" ? 13px : Palette.body-size;
+                body-color: root.message.author == "activity" ? Palette.muted : Palette.text;
+                link-clicked(url) => { root.link-clicked(url); }
+            }
+            // A stopped answer says so under its text.
+            if root.message.live.kind == "message" && root.message.live.meta != "": Text {
+                text: "■ " + root.message.live.meta;
+                color: Palette.warning;
+                font-size: 11px;
+            }
+            if root.message.activity-label != "": TouchArea {
+                height: 20px;
+                clicked => { root.toggle-activity(root.message.id, root.message.group-id); }
+                Text {
+                    text: (root.message.expanded ? "Hide · " : "Show · ") + root.message.activity-label;
+                    color: Palette.faint;
+                    font-size: 12px;
+                    x: 0;
+                }
+            }
+            if root.message.expanded: VerticalLayout {
+                preferred-width: content-width;
+                spacing: 1px;
+                for cell in root.message.cells: DisplayCellCard { cell: cell; }
+                for tool in root.message.tools: ToolCard { tool: tool; }
+            }
+            for artifact in root.message.artifacts: HorizontalLayout {
+                // Measured at the width the card is drawn at.
+                preferred-width: Math.min(640px, content-width);
+                alignment: start;
+                ArtifactCard {
+                    artifact: artifact;
+                    preferred-width: 640px;
+                    max-width: 640px;
+                    view-top: root.view-top;
+                    view-bottom: root.view-bottom;
+                    measuring: root.measuring;
+                }
+            }
+            if (root.message.pending || root.message.failed || root.message.stamp != "") && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
+                text: root.message.failed ? "Not delivered" : root.message.pending ? "Sending…" : root.message.stamp;
+                color: root.message.failed ? Palette.danger : Palette.faint;
+                font-size: 11px;
+                horizontal-alignment: root.message.author == "user" ? right : left;
+            }
+        }
+    }
+}
+
 // The transcript (TranscriptView/MessageDelegate in QML): a virtualised
 // list of Markdown messages, the user's in bubbles, tool activity folded
 // behind a toggle. It follows the latest while the reader is at the end;
 // scrolling up pauses it, and returning to the end (or End) resumes it.
 export component Transcript inherits FocusScope {
     in property <[MessageRow]> rows;
+    // The pane (the scroll book's key), the rows it asks to have measured
+    // and, from their heights, how far down the chat each row starts (one
+    // more: the chat's whole height).
+    in property <string> pane-id;
+    in property <[MeasureRow]> measure;
+    in property <[float]> before;
     in-out property <bool> follow: true;
     out property <length> offset: list.content-y;
     out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
@@ -689,128 +848,154 @@ export component Transcript inherits FocusScope {
     // Mirrors the list's height so a streaming row that grows is followed.
     property <length> list-height: list.content-height;
     list := ListView {
-        // A reader who scrolls stops following at once. A wheel notch
-        // animates: this runs as it starts, before the list has moved, so
-        // whether they ended at the end (follow again) or the top (load the
-        // page before) is decided once the scroll has settled.
-        scrolled => {
-            ArtifactBridge.reader-moved();
-            root.holding = false;
-            root.follow = false;
-            if (!root.settling) { root.start-y = list.content-y; }
-            root.settled-y = list.content-y;
-            root.still-ticks = 0;
-            root.settling = true;
-        }
+        scrolled => { root.reader-scrolled(); }
         width: parent.width;
         height: parent.height;
-        for row in root.rows: HorizontalLayout {
-            // The widest the message's content is drawn. Slint measures a
-            // repeated or conditional layout in a row (opened tool calls, a
-            // card) at its preferred width when it sizes the row, so one
-            // whose text wraps prefers the width it is drawn at: measured at
-            // its one-line width, its height came out lines short and the
-            // next row was drawn over it.
-            property <length> content-width: Math.min(list.visible-width - 32px, row.author == "user" ? list.visible-width * 0.75 : list.visible-width)
-                - 2 * (row.receipt.key != "" ? 0px : row.prompt.key != "" && !row.prompt.expanded ? 5px : row.author == "user" ? 10px : 2px);
-            padding-left: 16px;
-            padding-right: 16px;
-            padding-top: 7px;
-            padding-bottom: 7px;
-            alignment: row.author == "user" ? end : stretch;
-            Rectangle {
-                // One message of the list; the id finds it in the checks.
-                accessible-role: list-item;
-                accessible-id: "row:" + row.id;
-                background: row.author == "user" && row.receipt.key == "" ? Palette.bubble : transparent;
-                border-radius: 2px;
-                max-width: row.author == "user" ? list.visible-width * 0.75 : list.visible-width;
-                // Hovering a message offers its copy button (Slint's rich text
-                // cannot be selected: the message's text is copied whole).
-                hover := TouchArea { }
-                if row.author != "activity" && row.author != "live" && row.receipt.key == "": Rectangle {
-                    x: parent.width - 20px;
-                    y: 2px;
-                    width: 18px;
-                    height: 18px;
-                    opacity: hover.has-hover || copy.has-hover ? 1 : 0;
-                    accessible-role: button;
-                    accessible-label: "Copy message";
-                    Image { source: @image-url("icons/copy.svg"); width: 14px; height: 14px; colorize: Palette.faint; }
-                    copy := TouchArea { clicked => { root.copy-message(row.id); } }
+        // The list's own bar sizes its thumb from its estimate of the rows'
+        // heights (the average of those drawn), which changes as the reader
+        // scrolls: the transcript draws its own from the measured heights.
+        vertical-scrollbar-policy: always-off;
+        for row[index] in root.rows: TranscriptRow {
+            message: row;
+            list-width: list.visible-width;
+            view-top: root.absolute-position.y;
+            view-bottom: root.absolute-position.y + root.height;
+            link-clicked(url) => { root.link-clicked(url); }
+            toggle-activity(id, group) => { root.toggle-activity(id, group); }
+            copy-message(id) => { root.copy-message(id); }
+            // Where the row is drawn in the viewport (a ListView row's y is
+            // in the list's estimated coordinates): the one across the
+            // viewport's top tells the scrollbar where the reader is.
+            // Not as the row is created: the list has not placed it yet.
+            property <length> on-screen: self.y + list.content-y;
+            property <bool> on-top: self.on-screen <= 0 && self.on-screen + self.height > 0;
+            property <int> at: index;
+            property <length> scrolled-to: list.content-y;
+            function mark() {
+                if (self.on-top) {
+                    root.top-index = index;
+                    root.top-y = self.on-screen;
                 }
-                VerticalLayout {
-                    // A folded prompt is one line in a slim bubble.
-                    padding: row.receipt.key != "" ? 0px : row.prompt.key != "" && !row.prompt.expanded ? 5px : row.author == "user" ? 10px : 2px;
-                    spacing: 8px;
-                    if row.receipt.key != "": DecisionReceipt {
-                        receipt: row.receipt;
-                        preferred-width: 420px;
-                        view-top: root.absolute-position.y;
-                        view-bottom: root.absolute-position.y + root.height;
+            }
+            changed on-screen => { self.mark(); }
+            changed on-top => { self.mark(); }
+            changed at => { self.mark(); }
+            changed scrolled-to => { self.mark(); }
+            // Drawn, the row's height is the truth (an artifact card that
+            // grows in place changes it without a new row), and a row that
+            // changes on screen needs no measuring off screen.
+            changed height => { ScrollBook.shown(root.pane-id, row.id, self.height, list.visible-width); }
+            changed message => { ScrollBook.shown(root.pane-id, row.id, self.height, list.visible-width); }
+        }
+    }
+    // Rows measured off screen, a batch at a time, at the chat's width:
+    // each reports its height once laid out.
+    Rectangle {
+        visible: false;
+        // Far below the viewport, so nothing that looks for what is on
+        // screen (link hints, the checks) meets the copies.
+        y: root.height + 100000px;
+        width: list.visible-width;
+        height: 0;
+        for m in root.measure: TranscriptRow {
+            measuring: true;
+            x: 0;
+            y: 0;
+            width: list.visible-width;
+            message: m.row;
+            list-width: list.visible-width;
+            property <length> natural: self.preferred-height;
+            property <string> report: m.batch + ":" + m.row.id + ":" + (self.natural / 1px) + ":" + (list.visible-width / 1px);
+            init => { ScrollBook.measured(root.pane-id, m.batch, m.row.id, self.natural, list.visible-width); }
+            changed report => { ScrollBook.measured(root.pane-id, m.batch, m.row.id, self.natural, list.visible-width); }
+        }
+    }
+    property <string> layout-key: (list.visible-width / 1px) + "/" + (Palette.body-size / 1px);
+    changed layout-key => { ScrollBook.relayout(root.pane-id); }
+
+    // The scrollbar. The chat's height is the sum of its rows' measured
+    // heights, and the reader's place is the measured height of the rows
+    // above the one across the viewport's top plus how far into it they
+    // are: neither changes as the list re-estimates rows while scrolling,
+    // so the thumb keeps its size and moves only as the reader does.
+    property <int> top-index;
+    property <length> top-y;
+    property <bool> measured: root.before.length > 1;
+    property <length> total: root.measured ? root.before[root.before.length - 1] * 1px : list.content-height;
+    property <length> above: root.measured ? root.before[Math.min(root.top-index, root.before.length - 1)] * 1px - root.top-y : -list.content-y;
+    property <length> range: Math.max(1px, root.total - list.visible-height);
+    property <float> scroll-place: root.at-end ? 1 : list.content-y >= 0 ? 0 : Math.clamp(root.above / root.range, 0, 1);
+    track := Rectangle {
+        x: root.width - self.width;
+        y: 4px;
+        width: 14px;
+        height: root.height - 8px;
+        visible: root.total > list.visible-height + 1px;
+        border-radius: 7px;
+        background: bar.has-hover || root.dragging ? Palette.raised.with-alpha(0.9) : transparent;
+        property <length> thumb-height: Math.min(self.height, Math.max(24px, self.height * list.visible-height / Math.max(1px, root.total)));
+        thumb := Rectangle {
+            width: bar.has-hover || root.dragging ? 6px : 3px;
+            x: parent.width - 4px - self.width;
+            height: parent.thumb-height;
+            y: (parent.height - self.height) * root.scroll-place;
+            border-radius: self.width / 2;
+            background: root.dragging ? Palette.muted : Palette.faint;
+            animate width { duration: 150ms; easing: ease-out; }
+        }
+        bar := TouchArea {
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                    if (self.mouse-y >= thumb.y && self.mouse-y <= thumb.y + thumb.height) {
+                        // The thumb follows the pointer.
+                        root.drag-from = self.mouse-y;
+                        root.drag-above = root.above;
+                        root.drag-target = root.above;
+                        root.dragging = true;
+                        root.reader-scrolled();
+                    } else {
+                        // A click on the track pages towards it.
+                        ArtifactBridge.reader-moved();
+                        root.scroll-by(self.mouse-y < thumb.y ? -list.visible-height * 0.9 : list.visible-height * 0.9, self.mouse-y < thumb.y ? "bar:PageUp" : "bar:PageDown");
                     }
-                    if row.prompt.key != "": PromptLine {
-                        prompt: row.prompt;
-                        view-top: root.absolute-position.y;
-                        view-bottom: root.absolute-position.y + root.height;
-                    }
-                    if row.author == "live": LiveItem {
-                        live: row.live;
-                        view-top: root.absolute-position.y;
-                        view-bottom: root.absolute-position.y + root.height;
-                    }
-                    for block in row.blocks: Block {
-                        block: block;
-                        view-top: root.absolute-position.y;
-                        view-bottom: root.absolute-position.y + root.height;
-                        body-size: row.author == "activity" ? 13px : Palette.body-size;
-                        body-color: row.author == "activity" ? Palette.muted : Palette.text;
-                        link-clicked(url) => { root.link-clicked(url); }
-                    }
-                    // A stopped answer says so under its text.
-                    if row.live.kind == "message" && row.live.meta != "": Text {
-                        text: "■ " + row.live.meta;
-                        color: Palette.warning;
-                        font-size: 11px;
-                    }
-                    if row.activity-label != "": TouchArea {
-                        height: 20px;
-                        clicked => { root.toggle-activity(row.id, row.group-id); }
-                        Text {
-                            text: (row.expanded ? "Hide · " : "Show · ") + row.activity-label;
-                            color: Palette.faint;
-                            font-size: 12px;
-                            x: 0;
-                        }
-                    }
-                    if row.expanded: VerticalLayout {
-                        preferred-width: content-width;
-                        spacing: 1px;
-                        for cell in row.cells: DisplayCellCard { cell: cell; }
-                        for tool in row.tools: ToolCard { tool: tool; }
-                    }
-                    for artifact in row.artifacts: HorizontalLayout {
-                        // Measured at the width the card is drawn at.
-                        preferred-width: Math.min(640px, content-width);
-                        alignment: start;
-                        ArtifactCard {
-                            artifact: artifact;
-                            preferred-width: 640px;
-                            max-width: 640px;
-                            view-top: root.absolute-position.y;
-                            view-bottom: root.absolute-position.y + root.height;
-                        }
-                    }
-                    if (row.pending || row.failed || row.stamp != "") && (row.prompt.key == "" || row.prompt.expanded): Text {
-                        text: row.failed ? "Not delivered" : row.pending ? "Sending…" : row.stamp;
-                        color: row.failed ? Palette.danger : Palette.faint;
-                        font-size: 11px;
-                        horizontal-alignment: row.author == "user" ? right : left;
-                    }
+                }
+                if (event.button == PointerEventButton.left && event.kind == PointerEventKind.up) {
+                    root.dragging = false;
+                }
+            }
+            moved => {
+                if (root.dragging && self.pressed) {
+                    root.drag-target = Math.clamp(root.drag-above + (self.mouse-y - root.drag-from) * root.range / Math.max(1px, parent.height - parent.thumb-height), 0, root.range);
+                    root.reader-scrolled();
+                    root.seek(root.drag-target);
                 }
             }
         }
     }
+    property <bool> dragging;
+    property <length> drag-from;
+    property <length> drag-above;
+    property <length> drag-target;
+    // Brings the reader to `target` px down the chat: within a viewport the
+    // list moves by exactly that much; further, it seeks the row there by
+    // its estimate and the rest is made up on the next frames.
+    function seek(target: length) {
+        let delta = target - root.above;
+        if (Math.abs(delta / 1px) < 0.5) {
+            return;
+        }
+        if (Math.abs(delta) <= list.visible-height) {
+            list.content-y = Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta));
+        } else {
+            list.content-y = -(ScrollBook.row-at(root.pane-id, target) + 0.5) * list.content-height / Math.max(1, root.rows.length);
+        }
+    }
+    Timer {
+        interval: 16ms;
+        running: root.dragging;
+        triggered => { root.seek(root.drag-target); }
+    }
+
     changed rows => {
         if (root.follow) { root.pin("follow"); }
     }
@@ -827,6 +1012,19 @@ export component Transcript inherits FocusScope {
             root.holding = false;
             root.move-to(-(root.rows.length - root.held-count) * list.content-height / root.rows.length - 1px, "load-older");
         }
+    }
+    // The reader's own scroll (wheel, touchpad, the scrollbar): following
+    // stops at once. A wheel notch animates: this runs as it starts, before
+    // the list has moved, so whether they ended at the end (follow again)
+    // or the top (load the page before) is decided once it has settled.
+    function reader-scrolled() {
+        ArtifactBridge.reader-moved();
+        root.holding = false;
+        root.follow = false;
+        if (!root.settling) { root.start-y = list.content-y; }
+        root.settled-y = list.content-y;
+        root.still-ticks = 0;
+        root.settling = true;
     }
     function check-top() {
         if (!root.follow && list.content-y >= -40px) {
