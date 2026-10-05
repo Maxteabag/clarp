@@ -46,10 +46,6 @@ def test_clean_repairs_punctuation_and_capitalization_around_removed_fillers():
     )
 
 
-def test_clean_repairs_inline_punctuation_around_removed_fillers():
-    assert clean_for_display("I, <vox>um</vox>, think so.") == "I think so."
-
-
 def test_clean_drops_ssml_tags():
     assert clean_for_display('wait <break time="350ms"/> for it') == "wait for it"
     assert clean_for_display('slow <speed ratio="0.85"/>down') == "slow down"

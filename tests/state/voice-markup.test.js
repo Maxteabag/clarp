@@ -1,8 +1,20 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   hideIncompleteStreamingVoiceMarkup,
   stripVoiceMarkup,
 } from '../../static/lib/voice-markup.js';
+
+// Shared with the Host, desktop and iOS: the written text left once <vox>
+// fillers are hidden.
+const voiceDisplay = JSON.parse(fs.readFileSync(
+  new URL('../../contract/fixtures/voice-display.json', import.meta.url), 'utf8'));
+
+describe('voice display fixture', () => {
+  it.each(voiceDisplay.cases.map((c) => [c.name, c]))('%s', (_, c) => {
+    expect(stripVoiceMarkup(c.input, { streaming: !!c.streaming })).toBe(c.expect);
+  });
+});
 
 describe('voice markup display cleanup', () => {
   it('repairs leading filler punctuation and capitalization', () => {
@@ -13,10 +25,6 @@ describe('voice markup display cleanup', () => {
     expect(stripVoiceMarkup(raw)).toBe(
       'Okay, let’s try this naturally. I think it works. The words stay the same.',
     );
-  });
-
-  it('repairs inline punctuation around a removed filler', () => {
-    expect(stripVoiceMarkup('I, <vox>um</vox>, think so.')).toBe('I think so.');
   });
 
   it('drops paired and stray speed tags', () => {

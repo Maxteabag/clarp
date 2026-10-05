@@ -428,5 +428,5 @@ fn a_streaming_message_never_shows_voice_markup() {
     let p = present(&view, &[], &options(&[], 1759480005000));
     let message = p.entries.iter().find(|e| e.kind == Kind::Message).unwrap();
     assert_eq!(message.text, clarp_core::text::cleaned_display_text(&full, false));
-    assert_eq!(message.text, "Sure Here it is, the plan, step one and two.");
+    assert_eq!(message.text, "Sure Here it is, the plan step one and two.");
 }

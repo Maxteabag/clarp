@@ -17,6 +17,12 @@ these files are the parts a computer can verify.
   `tests/contract/test_fixtures_validate.py` checks the embedded payloads
   against `schemas/` so fixtures cannot describe a server that does not
   exist.
+- `fixtures/voice-display.json` — the written text left once `<vox>` fillers
+  are hidden: cases from real replies with the expected display string. The
+  Host (`tests/unit/test_voice_display_fixture.py`), web
+  (`tests/state/voice-markup.test.js`), desktop (`desktop-rs/core/tests/voice_display.rs`)
+  and iOS (`VoiceDisplayFixtureTests`) all run it; the Host skips the
+  `streaming` cases because it never renders a reply still arriving.
 - `live/` — recorded `live` SSE streams plus the state a client must reach
   (docs/live-items.md). Desktop, web and iOS replay them through their own
   reducers; `tests/contract/test_live_fixtures.py` validates them against

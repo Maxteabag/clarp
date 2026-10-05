@@ -9,9 +9,14 @@ python3 - "$here/../fixtures" "$dest" "$check" <<'PY'
 import hashlib, json, pathlib, shutil, subprocess, sys
 source, target = map(pathlib.Path, sys.argv[1:3])
 check = sys.argv[3] == '1'
+# Area scenarios live in subdirectories; a fixture shared across areas (such
+# as voice-display.json) sits at the top level. The iOS Fixtures directory also
+# holds its own top-level files, so only the Host's top-level names are compared.
+top = sorted(p.name for p in source.glob('*.json'))
 def hashes(root):
+    files = sorted(root.glob('*/*.json')) + [root / n for n in top if (root / n).is_file()]
     return {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted(root.glob('*/*.json'))}
+            for p in files}
 expected = hashes(source)
 manifest = target / 'contract-source.json'
 if check:
