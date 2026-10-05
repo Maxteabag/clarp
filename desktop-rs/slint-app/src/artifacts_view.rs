@@ -1636,7 +1636,22 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
     match text(&artifact, "type").as_str() {
         "html_form" if !is_report(&artifact) => {
             let version = artifact.get("version").cloned().unwrap_or(Value::Null);
-            match crate::form_server::serve(id, version, &text(&artifact, "content")) {
+            let events = {
+                let mut engine = app.engine.borrow_mut();
+                if !engine.form_events_supported() {
+                    None
+                } else {
+                    match engine.open_form_events(id, &version) {
+                        Ok(key) => Some(crate::form_server::Events { store: engine.form_event_store(), key, origin: engine.form_event_origin() }),
+                        Err(error) => {
+                            eprintln!("clarp-slint: the form's event log is unavailable: {error}");
+                            engine.set_artifact_status(id, &format!("Event log: {error}"));
+                            None
+                        }
+                    }
+                }
+            };
+            match crate::form_server::serve(id, version, &text(&artifact, "content"), events) {
                 Ok(url) => crate::open_link(&url),
                 Err(error) => {
                     eprintln!("clarp-slint: {error}");

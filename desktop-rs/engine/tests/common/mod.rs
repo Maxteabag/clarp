@@ -83,7 +83,7 @@ impl Driver {
     }
 
     pub fn with_settings(base: &str, settings: Settings) -> Self {
-        Self::with_config(Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None, keyring: false, transcript_cache: None })
+        Self::with_config(Config { base_url: base.into(), token: "probe-token".into(), settings, workspace_store: None, keyring: false, transcript_cache: None, form_events: None })
     }
 
     /// Chats cached between runs in `dir`.
@@ -95,6 +95,7 @@ impl Driver {
             workspace_store: None,
             keyring: false,
             transcript_cache: Some(dir.to_owned()),
+            form_events: None,
         })
     }
 

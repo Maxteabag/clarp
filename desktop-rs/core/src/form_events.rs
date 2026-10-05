@@ -10,6 +10,7 @@
 //! `events-import.json` (how far a draft event array was imported) and
 //! `events-config.json` (the Host's draft-key policy, kept for offline use).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -25,25 +26,30 @@ pub const MAX_JOURNAL_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_DRAFT_EVENTS: usize = 10_000;
 
 /// Where `artifact_id` at `version` keeps its journal under `root`.
-pub fn directory(_root: &Path, _artifact_id: &str, _version: &Value) -> PathBuf {
-    todo!()
+pub fn directory(root: &Path, artifact_id: &str, version: &Value) -> PathBuf {
+    root.join(&sha256_hex(serde_json::json!([artifact_id, version]).to_string().as_bytes())[..32])
 }
 
 /// A page's event id: a hyphenated UUID, as the iOS bridge makes them.
-pub fn valid_event_id(_id: &str) -> bool {
-    false
+pub fn valid_event_id(id: &str) -> bool {
+    id.len() == 36 && uuid::Uuid::parse_str(id).is_ok()
 }
 
 /// The wait before a send after `failures` failed ones in a row: a second
 /// to batch a burst, then 2, 4 … 60 seconds.
-pub fn retry_delay(_failures: u32) -> Duration {
-    Duration::ZERO
+pub fn retry_delay(failures: u32) -> Duration {
+    Duration::from_secs(if failures == 0 { 1 } else { 60.min(2u64 << (failures - 1).min(5)) })
 }
 
 /// A Host answer that retrying the same batch cannot change; the records
 /// stay until the original connection recovers.
-pub fn is_permanent(_status: u16) -> bool {
-    false
+pub fn is_permanent(status: u16) -> bool {
+    matches!(status, 400 | 401 | 403 | 404 | 409 | 413 | 422 | 501)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The records a send carries, up to `cursor` (the last one's `client_seq`).
@@ -54,71 +60,292 @@ pub struct Batch {
     pub ids: Vec<String>,
 }
 
+const JOURNAL: &str = "events-outbox.jsonl";
+const CHECKPOINT: &str = "events-sync.json";
+const IMPORT: &str = "events-import.json";
+const CONFIG: &str = "events-config.json";
+
 pub struct EventLog {
     dir: PathBuf,
+    artifact_id: String,
+    version: Value,
+    origin: Option<String>,
+    acknowledged: u64,
+    sequence: u64,
+    pending: Vec<Value>,
+    /// Encoded events by id, to tell a retried log from a conflicting one.
+    payloads: HashMap<String, String>,
+    recent: Vec<String>,
+}
+
+fn io(what: &str, path: &Path, error: impl std::fmt::Display) -> String {
+    format!("cannot {what} {}: {error}", path.display())
+}
+
+/// Written whole or not at all, readable only by the user.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let temporary = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4().simple()));
+    let written = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temporary)
+        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()));
+    if let Err(error) = written.and_then(|()| std::fs::rename(&temporary, path)) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(io("write", path, error));
+    }
+    Ok(())
+}
+
+fn read_json(path: &Path) -> Result<Option<Value>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|e| io("read", path, e)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(io("read", path, error)),
+    }
 }
 
 impl EventLog {
     /// Opens (or starts) `artifact_id`'s journal in `dir`.
-    pub fn open(dir: &Path, _artifact_id: &str, _version: &Value) -> Result<Self, String> {
-        Err(format!("not implemented: {}", dir.display()))
+    pub fn open(dir: &Path, artifact_id: &str, version: &Value) -> Result<Self, String> {
+        std::fs::create_dir_all(dir).map_err(|e| io("create", dir, e))?;
+        let mut log = Self {
+            dir: dir.to_owned(),
+            artifact_id: artifact_id.to_owned(),
+            version: version.clone(),
+            origin: None,
+            acknowledged: 0,
+            sequence: 0,
+            pending: Vec::new(),
+            payloads: HashMap::new(),
+            recent: Vec::new(),
+        };
+        if let Some(saved) = read_json(&dir.join(CHECKPOINT))? {
+            let (origin, cursor) = (saved["origin"].as_str(), saved["acknowledged"].as_u64());
+            let (Some(origin), Some(cursor)) = (origin, cursor) else {
+                return Err(format!("the event journal's checkpoint in {} is unreadable", dir.display()));
+            };
+            if saved["artifact_id"].as_str().is_some_and(|id| id != artifact_id) || saved.get("version").is_some_and(|v| v != version) {
+                return Err(format!("the event journal in {} belongs to another form", dir.display()));
+            }
+            log.origin = Some(origin.to_owned());
+            log.acknowledged = cursor;
+            log.sequence = cursor;
+        }
+        log.load_journal()?;
+        Ok(log)
     }
 
     /// Opens a journal from what it saved, with no artifact at hand (after a
     /// restart); None when it never logged anything.
-    pub fn reopen(_dir: &Path) -> Result<Option<Self>, String> {
-        Err("not implemented".into())
+    pub fn reopen(dir: &Path) -> Result<Option<Self>, String> {
+        let Some(saved) = read_json(&dir.join(CHECKPOINT))? else { return Ok(None) };
+        let Some(artifact_id) = saved["artifact_id"].as_str() else {
+            return Err(format!("the event journal in {} does not name its form", dir.display()));
+        };
+        Self::open(dir, artifact_id, saved.get("version").unwrap_or(&Value::Null)).map(Some)
+    }
+
+    fn load_journal(&mut self) -> Result<(), String> {
+        let path = self.dir.join(JOURNAL);
+        let mut bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(io("read", &path, error)),
+        };
+        if bytes.len() as u64 > MAX_JOURNAL_BYTES {
+            return Err("The local event journal exceeds its storage bound.".into());
+        }
+        // A torn, never-acknowledged final write is not a queued event.
+        if bytes.last().is_some_and(|b| *b != b'\n') {
+            bytes.truncate(bytes.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1));
+            write_atomic(&path, &bytes)?;
+        }
+        for line in bytes.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
+            let record: Value = serde_json::from_slice(line).map_err(|e| io("read a record of", &path, e))?;
+            let (Some(id), Some(seq), Some(event)) = (record["event_id"].as_str(), record["client_seq"].as_u64(), record.get("event").filter(|e| e.is_object()))
+            else {
+                return Err(format!("a record in {} is unreadable", path.display()));
+            };
+            if !valid_event_id(id) {
+                return Err(format!("a record in {} has no event id", path.display()));
+            }
+            self.sequence = self.sequence.max(seq);
+            self.payloads.insert(id.to_owned(), event.to_string());
+            self.recent.push(id.to_owned());
+            if seq > self.acknowledged {
+                self.pending.push(record);
+            }
+        }
+        if self.origin.is_none() && !self.pending.is_empty() {
+            return Err(format!("the event journal in {} does not say which Host it belongs to", self.dir.display()));
+        }
+        Ok(())
+    }
+
+    fn save_checkpoint(&self, cursor: u64) -> Result<(), String> {
+        let Some(origin) = &self.origin else { return Err("the event journal has no Host".into()) };
+        let saved = serde_json::json!({"origin": origin, "acknowledged": cursor, "artifact_id": self.artifact_id, "version": self.version});
+        write_atomic(&self.dir.join(CHECKPOINT), saved.to_string().as_bytes())
     }
 
     pub fn dir(&self) -> &Path {
         &self.dir
     }
     pub fn artifact_id(&self) -> &str {
-        ""
+        &self.artifact_id
     }
     pub fn version(&self) -> &Value {
-        static NULL: Value = Value::Null;
-        &NULL
+        &self.version
     }
     /// The Host its records belong to, once it logged one.
     pub fn origin(&self) -> Option<&str> {
-        None
+        self.origin.as_deref()
     }
     pub fn pending(&self) -> usize {
-        0
+        self.pending.len()
     }
 
     /// Appends `event` durably; false when `event_id` was already logged
     /// with the same event (nothing new is written).
-    pub fn enqueue(&mut self, _event: &Value, _event_id: &str, _origin: &str, _now_ms: u64) -> Result<bool, String> {
-        Err("not implemented".into())
+    pub fn enqueue(&mut self, event: &Value, event_id: &str, origin: &str, now_ms: u64) -> Result<bool, String> {
+        use std::io::{Seek, Write};
+        use std::os::unix::fs::OpenOptionsExt;
+        if !event.is_object() {
+            return Err("Event must be an object.".into());
+        }
+        if !valid_event_id(event_id) {
+            return Err("Event id must be a UUID.".into());
+        }
+        if self.origin.as_deref().is_some_and(|o| o != origin) {
+            return Err("Pending events belong to another Host connection.".into());
+        }
+        // serde_json's maps are sorted, so this is the Host's encoding.
+        let payload = event.to_string();
+        if payload.len() > MAX_EVENT_BYTES {
+            return Err("An event may contain at most 16 KiB.".into());
+        }
+        if let Some(previous) = self.payloads.get(event_id) {
+            if *previous != payload {
+                return Err("This event id was already used for another event.".into());
+            }
+            return Ok(false);
+        }
+        if self.origin.is_none() {
+            self.origin = Some(origin.to_owned());
+            if let Err(error) = self.save_checkpoint(self.acknowledged) {
+                self.origin = None;
+                return Err(error);
+            }
+        }
+        let next = self.sequence + 1;
+        let record = serde_json::json!({"event_id": event_id, "client_seq": next, "client_at": now_ms, "event": event});
+        let mut line = record.to_string().into_bytes();
+        line.push(b'\n');
+        let path = self.dir.join(JOURNAL);
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(&path).map_err(|e| io("open", &path, e))?;
+        let offset = file.seek(std::io::SeekFrom::End(0)).map_err(|e| io("open", &path, e))?;
+        if offset + line.len() as u64 > MAX_JOURNAL_BYTES {
+            return Err("Offline event storage is full; existing events have been retained.".into());
+        }
+        if let Err(error) = file.write_all(&line).and_then(|()| file.sync_data()) {
+            let _ = file.set_len(offset);
+            return Err(io("write", &path, error));
+        }
+        self.sequence = next;
+        self.pending.push(record);
+        self.payloads.insert(event_id.to_owned(), payload);
+        self.recent.push(event_id.to_owned());
+        Ok(true)
     }
 
     /// Imports the entries `values[key]` gained since the last import, each
     /// under an id derived from its content and place; how many were new.
-    pub fn capture_draft(&mut self, _values: &Value, _key: &str, _origin: &str, _now_ms: u64) -> Result<usize, String> {
-        Err("not implemented".into())
+    pub fn capture_draft(&mut self, values: &Value, key: &str, origin: &str, now_ms: u64) -> Result<usize, String> {
+        let Some(events) = values.get(key).and_then(Value::as_array) else { return Ok(0) };
+        if events.len() > MAX_DRAFT_EVENTS {
+            return Err("Draft event history is too large; use explicit log(event) for new events.".into());
+        }
+        let cursor_file = self.dir.join(IMPORT);
+        let (artifact_id, version) = (self.artifact_id.clone(), self.version.clone());
+        let fingerprint = |index: usize, event: &Value| sha256_hex(serde_json::json!([artifact_id, version, key, index, event]).to_string().as_bytes());
+        let mut count = 0;
+        if let Some(saved) = read_json(&cursor_file)?
+            && saved["origin"] == origin
+            && saved["key"] == key
+            && let Some(old) = saved["count"].as_u64().map(|c| c as usize)
+            && old > 0
+            && old <= events.len()
+            && saved["tail"].as_str() == Some(fingerprint(old - 1, &events[old - 1]).as_str())
+        {
+            count = old;
+        }
+        let mut imported = 0;
+        while count < events.len() {
+            let digest = fingerprint(count, &events[count]);
+            let id = format!("{}-{}-{}-{}-{}", &digest[0..8], &digest[8..12], &digest[12..16], &digest[16..20], &digest[20..32]);
+            if !events[count].is_object() {
+                return Err(format!("Draft event {count} is not an object."));
+            }
+            if self.enqueue(&events[count], &id, origin, now_ms)? {
+                imported += 1;
+            }
+            count += 1;
+            let saved = serde_json::json!({"origin": origin, "key": key, "count": count, "tail": digest});
+            write_atomic(&cursor_file, saved.to_string().as_bytes())?;
+        }
+        Ok(imported)
     }
 
     /// The next records to send, oldest first.
     pub fn batch(&self) -> Option<Batch> {
-        None
+        let records: Vec<Value> = self.pending.iter().take(MAX_BATCH).cloned().collect();
+        let cursor = records.last()?["client_seq"].as_u64()?;
+        let ids = records.iter().filter_map(|r| r["event_id"].as_str().map(str::to_owned)).collect();
+        Some(Batch { body: serde_json::json!({"version": self.version, "events": records}), cursor, ids })
     }
 
     /// The Host's receipt for `batch`: once it names every record, they are
     /// acknowledged on disk and leave the queue.
-    pub fn acknowledge(&mut self, _batch: &Batch, _receipt: &Value) -> Result<(), String> {
-        Err("not implemented".into())
+    pub fn acknowledge(&mut self, batch: &Batch, receipt: &Value) -> Result<(), String> {
+        let receipts = receipt["events"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let named: std::collections::HashSet<&str> = receipts.iter().filter_map(|r| r["event_id"].as_str()).collect();
+        let sent: std::collections::HashSet<&str> = batch.ids.iter().map(String::as_str).collect();
+        let valid = receipt["accepted"] == true
+            && receipt["artifact_id"] == self.artifact_id.as_str()
+            && receipt["version"] == self.version
+            && receipts.len() == batch.ids.len()
+            && named == sent
+            && receipts.iter().all(|r| r["seq"].as_u64().is_some_and(|seq| seq > 0));
+        if !valid {
+            return Err("The Host's receipt does not match the events sent.".into());
+        }
+        self.save_checkpoint(batch.cursor)?;
+        self.acknowledged = batch.cursor;
+        self.pending.retain(|r| r["client_seq"].as_u64().unwrap_or(0) > self.acknowledged);
+        let keep = self.recent.len().saturating_sub(256);
+        self.recent.drain(..keep);
+        let retained: std::collections::HashSet<&str> =
+            self.recent.iter().map(String::as_str).chain(self.pending.iter().filter_map(|r| r["event_id"].as_str())).collect();
+        self.payloads.retain(|id, _| retained.contains(id.as_str()));
+        if self.pending.is_empty() {
+            write_atomic(&self.dir.join(JOURNAL), b"")?;
+        }
+        Ok(())
     }
 
     /// The draft key the Host's policy follows for `origin`, as last saved.
-    pub fn cached_draft_key(&self, _origin: &str) -> Option<Option<String>> {
-        None
+    pub fn cached_draft_key(&self, origin: &str) -> Option<Option<String>> {
+        let saved = read_json(&self.dir.join(CONFIG)).ok()??;
+        (saved["origin"] == origin).then(|| saved["draft_key"].as_str().map(str::to_owned))
     }
 
     /// Saves the Host's draft-key policy for `origin`.
-    pub fn save_draft_key(&self, _origin: &str, _key: Option<&str>) -> Result<(), String> {
-        Err("not implemented".into())
+    pub fn save_draft_key(&self, origin: &str, key: Option<&str>) -> Result<(), String> {
+        write_atomic(&self.dir.join(CONFIG), serde_json::json!({"origin": origin, "draft_key": key}).to_string().as_bytes())
     }
 }
 

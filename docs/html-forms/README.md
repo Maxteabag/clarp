@@ -95,3 +95,11 @@ reports capacity errors without dropping prior records; acknowledged records
 are compacted only after a verified Host receipt. These are transport bounds,
 not gameplay rules. Telemetry is visible through authenticated read/export,
 not pushed into an inference turn.
+
+The Linux desktop offers the same `log(event)` and `capabilities.eventLog`
+from its loopback form page when the Host advertises `html_form_events`. The
+page never sees the token or the Host: the app appends each event to
+`$XDG_DATA_HOME/clarp/form-events/<form>/events-outbox.jsonl` before resolving,
+sends it with its own credential under the same wire fields and limits, and
+sends what a previous run left queued as soon as it reconnects, without the
+form being reopened. A followed draft key is honoured the same way.
