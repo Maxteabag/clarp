@@ -10,6 +10,7 @@ use slint::platform::Key;
 
 use super::{Stage, check, report, run_stages, shot};
 use crate::headless;
+use crate::platform::keyboard::Modifiers;
 
 /// Leaves for another window with `modifier` held and comes back, as
 /// winit reports it on Wayland: the pointer leaves with the keyboard and
@@ -27,7 +28,7 @@ fn away_and_back(modifier: Key) {
 }
 
 pub fn refocus_check(out: String) {
-    let (out2, out3) = (out.clone(), out.clone());
+    let (out2, out3, out4) = (out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _window, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -142,6 +143,45 @@ pub fn refocus_check(out: String) {
             }
             check(window.get_keyboard_mode() == "INSERT", "I reaches the composer from the conversation after coming back");
             shot(&out3, "refocus-03-insert");
+            // Back with Alt+Tab, Ctrl seen going down but its release taken
+            // by the input method: the window system says nothing is held.
+            headless::hold(Key::Control);
+            headless::modifiers_changed(Modifiers::default());
+            headless::type_text("ty");
+            true
+        })),
+        ("typed past a lost release", Box::new(|app, window, elapsed| {
+            if !app.active_draft().ends_with("ty") {
+                return elapsed > Duration::from_secs(2) && {
+                    check(false, &format!("typing works once the window system says Ctrl is up: {:?} (switcher open {})", app.active_draft(), window.get_switcher_open()));
+                    true
+                };
+            }
+            check(!window.get_switcher_open(), "typing works once the window system says Ctrl is up");
+            headless::press_with(&[Key::Control], "e");
+            true
+        })),
+        ("explorer past a lost release", Box::new(|_, window, elapsed| {
+            if !window.get_sidebar_focused() {
+                return false;
+            }
+            if elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::hold(Key::Alt);
+            headless::modifiers_changed(Modifiers::default());
+            headless::press("j");
+            true
+        })),
+        ("j past a lost release", Box::new(move |_, window, elapsed| {
+            if window.get_sidebar_cursor() != "mike" {
+                return elapsed > Duration::from_secs(2) && {
+                    check(false, &format!("J moves the cursor once the window system says Alt is up: {}", window.get_sidebar_cursor()));
+                    true
+                };
+            }
+            check(true, "J moves the cursor once the window system says Alt is up");
+            shot(&out4, "refocus-04-lost-release");
             true
         })),
     ];
