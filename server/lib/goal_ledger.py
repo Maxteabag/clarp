@@ -290,10 +290,14 @@ def is_active_delegate(agent_id: str) -> bool:
 
 
 def _last_status(con, plan_id: str) -> str:
-    """The plan status the ledger last recorded (a goal starts active)."""
+    """The plan status the ledger last recorded (a goal starts active).
+
+    Only goal-level events count: a subgoal event's new.status is that
+    subgoal's status (retired, proposed, ...), not the goal's."""
     row = con.execute(
         "SELECT json_extract(new_json, '$.status') FROM goal_events WHERE plan_id=? "
-        "AND json_extract(new_json, '$.status') IS NOT NULL ORDER BY event_id DESC LIMIT 1",
+        "AND subject='goal' AND json_extract(new_json, '$.status') IS NOT NULL "
+        "ORDER BY event_id DESC LIMIT 1",
         (plan_id,)).fetchone()
     return row[0] if row and row[0] else "active"
 

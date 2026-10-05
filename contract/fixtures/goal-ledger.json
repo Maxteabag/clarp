@@ -332,7 +332,7 @@
         "plan_id": "agent-pip:number-ninja:0000000a",
         "plan_revision": 3,
         "prior": {
-          "status": "retired"
+          "status": "active"
         },
         "reason": "User paused this goal",
         "source_refs": [],

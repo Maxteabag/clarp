@@ -163,6 +163,13 @@ def test_the_goal_ledger_fixture_is_what_the_host_emits(monkeypatch, tmp_path):
     schema = json.loads(SCHEMA.read_text())
     for key, definition in (("plan", "plan"), ("ledger", "ledger_page"), ("delegations", "delegations")):
         validate(produced[key], schema["$defs"][definition], schema, key)
+    # A goal event's status is a goal status; subgoal statuses belong to subgoal events.
+    goal_statuses = set(schema["$defs"]["plan"]["properties"]["status"]["enum"])
+    for event in produced["ledger"]["events"]:
+        if event["subject"] == "goal":
+            for side in ("prior", "new"):
+                status = (event[side] or {}).get("status")
+                assert status is None or status in goal_statuses, (event["event_id"], side, status)
     document = {"description": json.loads(FIXTURE.read_text())["description"]
                 if FIXTURE.exists() else "", **produced}
     if os.environ.get("CLARP_UPDATE_FIXTURES"):
