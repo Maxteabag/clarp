@@ -25,6 +25,7 @@
     {"id": "clarp-directories", "pack": "artifacts", "description": "Publish safe file-explorer directory shortcuts"},
     {"id": "clarp-github-actions", "pack": "artifacts", "description": "Track GitHub Actions workflow runs", "requires": ["gh"]},
     {"id": "clarp-goal", "pack": "core", "description": "Own durable outcomes, adaptive plans, working context, evidence and continuation"},
+    {"id": "clarp-goal-bookkeeping", "pack": "core", "description": "Keep the goal books for the agent you are a bookkeeping delegate of"},
     {"id": "clarp-tasks", "pack": "core", "description": "Compatibility route to durable goals and adaptive task plans"},
     {"id": "clarp-agent-communication", "pack": "core", "description": "Send agent-to-agent work"},
     {"id": "clarp-agent-admin", "pack": "core", "description": "Create and refine agent personas"},
