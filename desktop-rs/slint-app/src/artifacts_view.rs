@@ -600,12 +600,25 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     item
 }
 
+/// A card key as the user bound it (the default spelled as is, without
+/// resolving the map, while they have not).
+fn card_key(action: &str, overrides: &crate::keymap::Overrides) -> String {
+    let default = match action {
+        "artifact-open" => "O",
+        "artifact-discard" => "Del",
+        "artifact-back" => "Left",
+        "artifact-forward" => "Right",
+        "artifact-stop" => "S",
+        _ => "",
+    };
+    crate::keymap::shown_or("pane", action, overrides, default)
+}
+
 /// A card's keys, as its hints show them (and the shortcut bar while the
 /// keyboard is on it): what each does, and the action a click runs.
 fn card_hints(item: &ArtifactItem, overrides: &crate::keymap::Overrides) -> Vec<CardHint> {
     let hint = |key: &str, label: &str, action: &str| CardHint { key: key.into(), label: label.into(), action: action.into(), chosen: false };
-    // The keys as the user bound them.
-    let key = |action: &str| crate::keymap::shown("pane", action, overrides).unwrap_or_default();
+    let key = |action: &str| card_key(action, overrides);
     let mut hints = Vec::new();
     if matches!(item.kind.as_str(), "decision" | "question") {
         if !item.pending {
@@ -1374,7 +1387,7 @@ pub fn selected_hints(app: &App) -> Option<Vec<(String, String)>> {
     let id = selected(app)?;
     // The keys as the user bound them.
     let overrides = crate::commands::overrides(app);
-    let key = |action: &str| crate::keymap::shown("pane", action, &overrides).unwrap_or_default();
+    let key = |action: &str| card_key(action, &overrides);
     if id.starts_with("live:") {
         let open = live_row(app, &id).is_some_and(|r| r.live.expanded);
         return Some(vec![(key("artifact-open"), if open { "Collapse" } else { "Expand" }.to_owned())]);

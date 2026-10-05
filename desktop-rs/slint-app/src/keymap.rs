@@ -452,6 +452,12 @@ pub fn shown(state_name: &str, action: &str, overrides: &Overrides) -> Option<St
     keys_in(state_name, action, overrides).first().map(|k| display(k))
 }
 
+/// `shown`, or `default` for an action the user never changed: what the
+/// cards and their hints spell on every rebuild, without resolving the map.
+pub fn shown_or(state_name: &str, action: &str, overrides: &Overrides, default: &str) -> String {
+    if overrides.contains_key(action) { shown(state_name, action, overrides).unwrap_or_default() } else { default.to_owned() }
+}
+
 /// The shortcut bar's hints for `state`.
 pub fn hints(state_name: &str, overrides: &Overrides, facts: Facts) -> Vec<Binding> {
     resolve(state_name, overrides, Some(facts)).into_iter().filter(|entry| entry.hint).collect()
