@@ -89,6 +89,10 @@ pub(crate) fn apply_theme(window: &AppWindow, id: &str) {
         ("link", &|c| palette.set_link(c)),
         ("selection", &|_| {}),
     ];
+    // The focused frame's colour: the theme's own, else its accent.
+    if let Some(focus) = pick("focus").or_else(|| pick("accent")) {
+        palette.set_focus(focus);
+    }
     for (key, apply) in pairs {
         match pick(key) {
             Some(value) => apply(value),
