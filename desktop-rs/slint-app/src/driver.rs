@@ -45,6 +45,9 @@ mod observe_checks;
 mod a2a_checks;
 #[path = "row_overlap_checks.rs"]
 mod row_overlap_checks;
+// ---- the keyboard after the window loses and regains it
+#[path = "refocus_checks.rs"]
+mod refocus_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -421,6 +424,7 @@ pub fn start_check(name: &str, out: String) {
         "form-log" => artifact_checks::form_log_check(out),
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
+        "refocus" => refocus_checks::refocus_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         "link-hints" => link_hint_checks::link_hints_check(out),
