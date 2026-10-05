@@ -33,7 +33,10 @@ START = 1_791_160_000_000
 
 def _scenario(monkeypatch, tmp_path) -> dict:
     clock = iter(range(START, START + 10**9, 1000))
-    monkeypatch.setattr(db, "now_ms", lambda: next(clock))
+    tick = lambda: next(clock)   # noqa: E731
+    monkeypatch.setattr(db, "now_ms", tick)
+    from lib import message_writes
+    monkeypatch.setattr(message_writes, "now_ms", tick)   # message rows share the pinned clock
 
     def agent(session, persona, parent=None):
         agent_id = agents.create_agent(persona=persona, voice_id="v", cwd=str(tmp_path), session=session)
