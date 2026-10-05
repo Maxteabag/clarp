@@ -112,6 +112,11 @@ class LiveHub:
             current = state.view.turn
             if current and current.get("turn_id") == turn_id and current.get("status") == "running":
                 return
+            if current and current.get("status") == "running":
+                # A new provider turn while the last one never settled (it was
+                # preempted or its process was killed without a stop): end it
+                # first, so clients never keep a turn running forever.
+                self.end_turn(agent_id, status="interrupted")
             self._flush(state)
             state.explore_group = None
             state.account_wait = None
@@ -128,7 +133,7 @@ class LiveHub:
                 return
             self._flush(state)
             now = self._clock_ms()
-            settle = "interrupted" if status == "interrupted" else "completed"
+            settle = "completed" if status == "completed" else "interrupted"
             ops: list[dict[str, Any]] = []
             for item in state.view.items():
                 if item.get("status") in {"pending", "running"}:
@@ -152,14 +157,16 @@ class LiveHub:
             self._emit(state, [], status_after=True)
 
     def message_text(self, agent_id: str, item_id: str, text: str, *,
-                     phase: str | None = None, row_id: str | None = None) -> None:
+                     phase: str | None = None, row_id: str | None = None,
+                     turn_id: str | None = None) -> None:
         self._grow_text(agent_id, item_id, "message", text,
-                        {"phase": phase or "final", "row_id": row_id})
+                        {"phase": phase or "final", "row_id": row_id}, turn_id=turn_id)
 
-    def reasoning_text(self, agent_id: str, item_id: str, text: str) -> None:
+    def reasoning_text(self, agent_id: str, item_id: str, text: str, *,
+                       turn_id: str | None = None) -> None:
         with self._lock:
-            self._grow_text(agent_id, item_id, "reasoning", text, {"title": None})
-            state = self._open(agent_id)
+            self._grow_text(agent_id, item_id, "reasoning", text, {"title": None}, turn_id=turn_id)
+            state = self._open(agent_id, turn_id)
             item = state.view._items.get(item_id) if state else None
             if state is None or item is None:
                 return
@@ -173,9 +180,9 @@ class LiveHub:
     def tool_start(self, agent_id: str, item_id: str, *, name: str, call_id: str,
                    category: str, label: str, command: str | None = None,
                    input_preview: dict[str, Any] | None = None,
-                   status: str = "running") -> None:
+                   status: str = "running", turn_id: str | None = None) -> None:
         with self._lock:
-            state = self._open(agent_id)
+            state = self._open(agent_id, turn_id)
             if state is None:
                 return
             existing = state.view._items.get(item_id)
@@ -212,9 +219,9 @@ class LiveHub:
             self._emit(state, ops, status_after=True)
 
     def tool_output(self, agent_id: str, item_id: str, lines: list[str], *,
-                    total_lines: int) -> None:
+                    total_lines: int, turn_id: str | None = None) -> None:
         with self._lock:
-            state = self._open(agent_id)
+            state = self._open(agent_id, turn_id)
             if state is None or item_id not in state.view._items:
                 return
             pending, _total = state.pending_output.get(item_id, ([], 0))
@@ -224,20 +231,22 @@ class LiveHub:
                 state.order.append(item_id)
             self._arm(state, self._output_interval)
 
-    def patch(self, agent_id: str, item_id: str, fields: dict[str, Any]) -> None:
+    def patch(self, agent_id: str, item_id: str, fields: dict[str, Any], *,
+              turn_id: str | None = None) -> None:
         """Merge fields into an item (explanation, diff stats, plan steps)."""
         with self._lock:
-            state = self._open(agent_id)
+            state = self._open(agent_id, turn_id)
             if state is None or item_id not in state.view._items:
                 return
             self._flush(state)
             kind = state.view._items[item_id].get("kind")
             self._emit(state, [self._upsert_op(state, item_id, kind, fields)])
 
-    def item(self, agent_id: str, item_id: str, kind: str, fields: dict[str, Any]) -> None:
+    def item(self, agent_id: str, item_id: str, kind: str, fields: dict[str, Any], *,
+             turn_id: str | None = None) -> None:
         """Create or patch an item of any kind (plan, diff, compaction)."""
         with self._lock:
-            state = self._open(agent_id)
+            state = self._open(agent_id, turn_id)
             if state is None:
                 return
             self._flush(state)
@@ -248,9 +257,9 @@ class LiveHub:
             self._emit(state, [op], status_after=True)
 
     def done(self, agent_id: str, item_id: str, *, status: str = "completed",
-             patch: dict[str, Any] | None = None) -> None:
+             patch: dict[str, Any] | None = None, turn_id: str | None = None) -> None:
         with self._lock:
-            state = self._open(agent_id)
+            state = self._open(agent_id, turn_id)
             if state is None:
                 return
             item = state.view._items.get(item_id)
@@ -306,16 +315,30 @@ class LiveHub:
                 return state
         return None
 
-    def _open(self, agent_id: str) -> _Conv | None:
+    def _open(self, agent_id: str, turn_id: str | None = None) -> _Conv | None:
+        """The agent's conversation state, or None. With ``turn_id`` (the turn
+        that produced an op) only while that very turn is the running one:
+        ops from a turn that already ended are dropped, never attached to the
+        newer turn."""
         state = self._by_agent.get(agent_id)
         if state is None or not state.view.turn:
             return None
+        if turn_id is not None and (state.view.turn.get("turn_id") != turn_id
+                                    or state.view.turn.get("status") != "running"):
+            return None
         return state
 
-    def _grow_text(self, agent_id: str, item_id: str, kind: str, text: str,
-                   create_fields: dict[str, Any]) -> None:
+    def current_turn_id(self, agent_id: str) -> str | None:
+        """The running turn's id, or None."""
         with self._lock:
-            state = self._open(agent_id)
+            state = self._by_agent.get(agent_id)
+            turn = state.view.turn if state else None
+            return turn.get("turn_id") if turn and turn.get("status") == "running" else None
+
+    def _grow_text(self, agent_id: str, item_id: str, kind: str, text: str,
+                   create_fields: dict[str, Any], turn_id: str | None = None) -> None:
+        with self._lock:
+            state = self._open(agent_id, turn_id)
             if state is None:
                 return
             item = state.view._items.get(item_id)
@@ -437,7 +460,7 @@ class LiveHub:
                 "turn_started_ms": turn.get("started_at_ms")}
         if ended or turn.get("status") not in (None, "running"):
             final = ended or str(turn.get("status") or "completed")
-            state_name = "interrupted" if final == "interrupted" else "idle"
+            state_name = "interrupted" if final in ("interrupted", "failed") else "idle"
             return {**base, "state": state_name, "turn_started_ms": None,
                     "headline": "Interrupted" if state_name == "interrupted" else None}
         if state.account_wait:
@@ -704,19 +727,28 @@ def _observe_state(hub: LiveHub, agent_id: str, event: str, to_state: str,
                    detail: dict[str, Any]) -> None:
     from .protocol import AgentState
     from .turn_lifecycle import BUSY, TERMINAL, TurnEvent
+    trace = str(detail.get("trace_id") or "")
+    current = hub.current_turn_id(agent_id)
     if to_state in TERMINAL:
         interrupted = to_state in (AgentState.INTERRUPTED, AgentState.STOPPED)
-        if interrupted and not hub.has_open_turn(agent_id):
+        if trace and current and trace != current:
+            return              # an older turn's late end: the running one is newer
+        if interrupted and current is None:
             # The hub never saw this turn or lost it (a restarted runtime, a
             # stop recorded elsewhere): settle it from the database so clients
             # get an explicit end instead of a turn that runs forever.
             _settle_from_database(hub, agent_id, detail)
             return
-        hub.end_turn(agent_id, status="interrupted" if interrupted else "completed")
+        status = "completed"
+        if event in _FAILED_EVENTS:
+            status = "failed"
+        elif interrupted:
+            status = "interrupted"
+        hub.end_turn(agent_id, status=status)
         return
     if to_state not in BUSY:
         return
-    agent = ensure_turn(hub, agent_id)
+    agent = ensure_turn(hub, agent_id, trace=trace)
     if agent is None:
         return
     if event == TurnEvent.ACCOUNT_RECOVERY_WAIT:
@@ -746,6 +778,11 @@ def _observe_state(hub: LiveHub, agent_id: str, event: str, to_state: str,
         hub.item(agent_id, compaction_id, "compaction", {"status": "running"})
     elif event == TurnEvent.COMPACTION_FINISHED:
         hub.done(agent_id, compaction_id)
+
+
+# A provider turn that failed (its process died and was not retried): the
+# live turn ends `failed`, its running items `interrupted`.
+_FAILED_EVENTS = frozenset({"process_exited_failed", "turn_failed_unclassified", "unlaunched"})
 
 
 def _settle_from_database(hub: LiveHub, agent_id: str, detail: dict[str, Any]) -> None:
@@ -805,23 +842,52 @@ def _preview(tool_input: Any) -> dict[str, Any]:
     return out
 
 
-def ensure_turn(hub: LiveHub, agent_id: str) -> dict[str, Any] | None:
-    """Open the hub's turn for an agent from the database if it has none."""
+def ensure_turn(hub: LiveHub, agent_id: str, *, trace: str = "") -> dict[str, Any] | None:
+    """The agent's live turn is the provider turn that is running now.
+
+    Without a trace: keep the running turn, else open the newest from the
+    database. With the trace of the turn that produced an event: that turn,
+    opening it (and so settling an unsettled older one) when it is newer than
+    the running turn. An event from an older turn changes nothing.
+    """
     from . import agents as agents_db
     from .db import conn
     agent = agents_db.get_by_agent_id(agent_id)
     if not agent:
         return None
-    if hub.has_open_turn(agent_id):
+    current = hub.current_turn_id(agent_id)
+    if current is not None and (not trace or trace == current):
+        return agent
+    session = str(agent.get("session") or "")
+    conv = agents_db.live_backend_session(agent_id) or f"pending:{agent_id}"
+    if trace:
+        bounds = conn().execute(
+            """SELECT MIN(started_at) AS first, MAX(started_at) AS last, MAX(turn_id) AS row
+                 FROM turns WHERE agent_id = ? AND trace_id = ?""", (agent_id, trace)).fetchone()
+        first = int(bounds["first"]) if bounds and bounds["first"] is not None else None
+        newest = int(bounds["last"]) if bounds and bounds["last"] is not None else None
+        last = (hub.snapshot(agent_id=agent_id) or {}).get("turn") or {}
+        if last.get("turn_id") and last["turn_id"] != trace and bounds and bounds["row"] is not None:
+            # Turn rows are numbered in the order prompts were admitted, which
+            # two prompts in one millisecond cannot break.
+            held = conn().execute(
+                "SELECT MAX(turn_id) AS row FROM turns WHERE agent_id = ? AND trace_id = ?",
+                (agent_id, last["turn_id"])).fetchone()
+            if held and held["row"] is not None and int(bounds["row"]) < int(held["row"]):
+                return None     # a late event from an older turn
+        if last.get("turn_id") == trace and last.get("status") != "running" and not (
+                newest is not None and last.get("ended_at_ms") and newest > int(last["ended_at_ms"])):
+            return None         # that turn ended; only a new prompt reopens its trace
+        hub.begin_turn(agent_id=agent_id, session=session, conv=conv, turn_id=trace,
+                       started_at_ms=first)
         return agent
     row = conn().execute(
         """SELECT trace_id, started_at FROM turns
             WHERE agent_id = ? AND ended_at IS NULL
             ORDER BY started_at DESC LIMIT 1""", (agent_id,)).fetchone()
-    trace = str((row["trace_id"] if row else "") or f"turn-{_now_ms()}")
-    conv = agents_db.live_backend_session(agent_id) or f"pending:{agent_id}"
-    hub.begin_turn(agent_id=agent_id, session=str(agent.get("session") or ""), conv=conv,
-                   turn_id=trace, started_at_ms=int(row["started_at"]) if row and row["started_at"] else None)
+    hub.begin_turn(agent_id=agent_id, session=session, conv=conv,
+                   turn_id=str((row["trace_id"] if row else "") or f"turn-{_now_ms()}"),
+                   started_at_ms=int(row["started_at"]) if row and row["started_at"] else None)
     return agent
 
 

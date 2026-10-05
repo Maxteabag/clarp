@@ -124,18 +124,18 @@ def _bounded(value: Any) -> Any:
     return value
 
 
-def _live(agent_id: str, method: str, *args: Any, **kwargs: Any) -> None:
+def _live(agent_id: str, method: str, *args: Any, trace_id: str = "", **kwargs: Any) -> None:
     """Report to the live hub, opening its turn first (docs/live-items.md)."""
     from .. import live_hub
     hub = live_hub.current()
     if hub is None or not agent_id:
         return
-    if not hub.has_open_turn(agent_id):
-        live_hub.ensure_turn(hub, agent_id)
-    live_hub.report(method, *args, **kwargs)
+    live_hub.ensure_turn(hub, agent_id, trace=trace_id)
+    live_hub.report(method, *args, turn_id=trace_id or None, **kwargs)
 
 
-def _live_tool_output(agent_id: str, part: dict, state: dict, st: Any) -> None:
+def _live_tool_output(agent_id: str, part: dict, state: dict, st: Any,
+                      trace_id: str = "") -> None:
     """A running tool's output as a live tail; an edit's diff stats."""
     from .. import live_hub
     from ..live_tools import diff_stats, output_tail
@@ -154,13 +154,13 @@ def _live_tool_output(agent_id: str, part: dict, state: dict, st: Any) -> None:
         if total > seen:
             st.tool_lines[call_id] = total
             _live(agent_id, "tool_output", agent_id, item_id,
-                  tail[-min(len(tail), total - seen):], total_lines=total)
+                  tail[-min(len(tail), total - seen):], total_lines=total, trace_id=trace_id)
     diff = metadata.get("diff")
     if isinstance(diff, str) and diff:
         tool_input = state.get("input") if isinstance(state.get("input"), dict) else {}
         stats = diff_stats("patch", {"diff": diff, "path": tool_input.get("filePath") or ""})
         if stats:
-            _live(agent_id, "patch", agent_id, item_id, {"tool": {"diff": stats}})
+            _live(agent_id, "patch", agent_id, item_id, {"tool": {"diff": stats}}, trace_id=trace_id)
 
 
 def _call_id(part: dict) -> str | None:
@@ -629,9 +629,9 @@ class OpenCodeBackend(StreamJsonBackend):
             if part_id:
                 text = str(part.get("text") or "") or st.reasoning_texts.get(part_id, "")
                 st.reasoning_texts[part_id] = text
-                _live(agent_id, "reasoning_text", agent_id, f"oc:{part_id}", text)
+                _live(agent_id, "reasoning_text", agent_id, f"oc:{part_id}", text, trace_id=trace_id)
                 if isinstance(part.get("time"), dict) and part["time"].get("end"):
-                    _live(agent_id, "done", agent_id, f"oc:{part_id}")
+                    _live(agent_id, "done", agent_id, f"oc:{part_id}", trace_id=trace_id)
         elif ptype == "tool":
             state = part.get("state") if isinstance(part.get("state"), dict) else {}
             status = str(state.get("status") or "")
@@ -646,7 +646,7 @@ class OpenCodeBackend(StreamJsonBackend):
                     "phase": "tool_started", "status": "running",
                 })
                 self._broadcast(stream, agent_id, session)
-            _live_tool_output(agent_id, part, state, st)
+            _live_tool_output(agent_id, part, state, st, trace_id)
             if status in {"completed", "error"} and part_id not in st.finished_tools:
                 st.finished_tools.add(part_id)
                 name, tool_input = _tool_detail(agent_id, part)
@@ -676,7 +676,7 @@ class OpenCodeBackend(StreamJsonBackend):
             self._phase(st, "thinking", agent_id, trace_id)
             st.reasoning_texts[part_id] = st.reasoning_texts.get(part_id, "") + delta
             _live(agent_id, "reasoning_text", agent_id, f"oc:{part_id}",
-                  st.reasoning_texts[part_id])
+                  st.reasoning_texts[part_id], trace_id=trace_id)
         elif st.part_types.get(part_id) == "text":
             st.part_texts[part_id] = st.part_texts.get(part_id, "") + delta
             self._on_text(part_id, st, ended=False, agent_id=agent_id,

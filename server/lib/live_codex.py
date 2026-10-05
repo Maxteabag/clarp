@@ -16,8 +16,9 @@ _PHASES = {"final_answer": "final", "final": "final", "commentary": "commentary"
 
 
 class CodexLiveItems:
-    def __init__(self, agent_id: str) -> None:
+    def __init__(self, agent_id: str, trace_id: str = "") -> None:
         self.agent_id = agent_id
+        self.trace_id = trace_id
         self._reasoning: dict[str, str] = {}
         self._partial: dict[str, str] = {}
         self._lines: dict[str, int] = {}
@@ -29,7 +30,7 @@ class CodexLiveItems:
             return
         try:
             if not self._ready:
-                self._ready = live_hub.ensure_turn(hub, self.agent_id) is not None
+                self._ready = live_hub.ensure_turn(hub, self.agent_id, trace=self.trace_id) is not None
             if self._ready:
                 self._handle(hub, method, params)
         except Exception as exc:  # noqa: BLE001 - live items never break a turn
@@ -41,7 +42,7 @@ class CodexLiveItems:
         if method == "item/reasoning/summaryTextDelta" and item_id:
             text = self._reasoning.get(item_id, "") + str(params.get("delta") or "")
             self._reasoning[item_id] = text
-            hub.reasoning_text(self.agent_id, f"cx:{item_id}", text)
+            hub.reasoning_text(self.agent_id, f"cx:{item_id}", text, turn_id=self.trace_id or None)
         elif method == "item/reasoning/summaryPartAdded" and item_id:
             if self._reasoning.get(item_id):
                 self._reasoning[item_id] += "\n\n"
@@ -52,7 +53,7 @@ class CodexLiveItems:
             if complete:
                 self._lines[item_id] = self._lines.get(item_id, 0) + len(complete)
                 hub.tool_output(self.agent_id, f"cx:{item_id}", complete,
-                                total_lines=self._lines[item_id])
+                                total_lines=self._lines[item_id], turn_id=self.trace_id or None)
         elif method in ("item/started", "item/completed"):
             item = params.get("item")
             if isinstance(item, dict):
@@ -70,11 +71,11 @@ class CodexLiveItems:
                 text = "\n\n".join(str(part.get("text") if isinstance(part, dict) else part)
                                    for part in summary)
                 self._reasoning[raw_id] = text
-                hub.reasoning_text(self.agent_id, item_id, text)
+                hub.reasoning_text(self.agent_id, item_id, text, turn_id=self.trace_id or None)
             elif not hub.has_item(self.agent_id, item_id):
-                hub.reasoning_text(self.agent_id, item_id, self._reasoning.get(raw_id, ""))
+                hub.reasoning_text(self.agent_id, item_id, self._reasoning.get(raw_id, ""), turn_id=self.trace_id or None)
             if completed:
-                hub.done(self.agent_id, item_id)
+                hub.done(self.agent_id, item_id, turn_id=self.trace_id or None)
         elif kind == "commandExecution" and completed:
             exit_code = item.get("exitCode")
             output = item.get("aggregatedOutput")
@@ -82,7 +83,7 @@ class CodexLiveItems:
             if isinstance(output, str):
                 tail, total = output_tail(output)
                 fields.update(tail=tail, total_lines=total, truncated=total > len(tail))
-            hub.patch(self.agent_id, item_id, {"tool": {"output": fields}})
+            hub.patch(self.agent_id, item_id, {"tool": {"output": fields}}, turn_id=self.trace_id or None)
         elif kind == "fileChange":
             changes = [c for c in item.get("changes") or [] if isinstance(c, dict)]
             files, added, removed, preview = [], 0, 0, []
@@ -100,8 +101,8 @@ class CodexLiveItems:
                 lines = "\n".join(preview).splitlines()[:40]
                 hub.patch(self.agent_id, item_id, {"tool": {"diff": {
                     "added": added, "removed": removed, "files": files,
-                    "preview": "\n".join(lines)}}})
+                    "preview": "\n".join(lines)}}}, turn_id=self.trace_id or None)
         elif kind == "agentMessage" and item.get("phase"):
             phase = _PHASES.get(str(item["phase"]))
             if phase and hub.has_item(self.agent_id, item_id):
-                hub.patch(self.agent_id, item_id, {"phase": phase})
+                hub.patch(self.agent_id, item_id, {"phase": phase}, turn_id=self.trace_id or None)

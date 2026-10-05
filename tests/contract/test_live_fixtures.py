@@ -35,7 +35,8 @@ def _subset(actual, expected, path="$"):
 def test_live_fixtures_exist():
     names = {path.stem for path in FIXTURES}
     assert {"turn-full", "gap-needs-snapshot", "gap-recovers-from-snapshot",
-            "new-turn-replaces-items", "stopped-mid-tool"} <= names
+            "new-turn-replaces-items", "stopped-mid-tool", "killed-without-stop",
+            "new-prompt-over-unsettled-turn"} <= names
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)

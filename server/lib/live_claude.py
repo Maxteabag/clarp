@@ -39,7 +39,7 @@ class ClaudeLiveItems:
 
     def _ready(self, hub) -> bool:
         if not self._turn_checked:
-            self._turn_checked = live_hub.ensure_turn(hub, self.agent_id) is not None
+            self._turn_checked = live_hub.ensure_turn(hub, self.agent_id, trace=self.trace_id) is not None
         return self._turn_checked
 
     def _on_event(self, hub, ev: dict[str, Any]) -> None:
@@ -63,7 +63,7 @@ class ClaudeLiveItems:
         if inner_type == "message_stop":
             for kind, item_id in self._blocks.values():
                 if kind in {"reasoning", "message"}:
-                    hub.done(self.agent_id, item_id)
+                    hub.done(self.agent_id, item_id, turn_id=self.trace_id or None)
             return
         if inner_type == "content_block_start" and isinstance(index, int):
             self._block_start(hub, index, inner.get("content_block") or {})
@@ -78,13 +78,13 @@ class ClaudeLiveItems:
             item_id = f"cl:{self._message}:{index}"
             self._blocks[index] = ("reasoning", item_id)
             self._texts[item_id] = str(block.get("thinking") or "")
-            hub.reasoning_text(self.agent_id, item_id, self._texts[item_id])
+            hub.reasoning_text(self.agent_id, item_id, self._texts[item_id], turn_id=self.trace_id or None)
         elif block_type == "text":
             item_id = f"cl:{self._message}:{index}"
             self._blocks[index] = ("message", item_id)
             self._texts[item_id] = str(block.get("text") or "")
             hub.message_text(self.agent_id, item_id, self._texts[item_id], phase="final",
-                             row_id=self._row_id(self._message))
+                             row_id=self._row_id(self._message), turn_id=self.trace_id or None)
         elif block_type in {"tool_use", "server_tool_use"} and block.get("id"):
             call_id = str(block["id"])
             name = str(block.get("name") or "tool")
@@ -94,24 +94,24 @@ class ClaudeLiveItems:
             self._inputs[index] = ""
             category, label, command = classify_tool(name, block.get("input") or {})
             hub.tool_start(self.agent_id, item_id, name=name, call_id=call_id,
-                           category=category, label=label, command=command)
+                           category=category, label=label, command=command, turn_id=self.trace_id or None)
 
     def _block_delta(self, hub, index: int, delta: dict[str, Any]) -> None:
         kind, item_id = self._blocks.get(index, ("", ""))
         delta_type = delta.get("type")
         if kind == "reasoning" and delta_type == "thinking_delta":
             self._texts[item_id] += str(delta.get("thinking") or "")
-            hub.reasoning_text(self.agent_id, item_id, self._texts[item_id])
+            hub.reasoning_text(self.agent_id, item_id, self._texts[item_id], turn_id=self.trace_id or None)
         elif kind == "message" and delta_type == "text_delta":
             self._texts[item_id] += str(delta.get("text") or "")
-            hub.message_text(self.agent_id, item_id, self._texts[item_id])
+            hub.message_text(self.agent_id, item_id, self._texts[item_id], turn_id=self.trace_id or None)
         elif kind == "tool" and delta_type == "input_json_delta":
             self._inputs[index] = self._inputs.get(index, "") + str(delta.get("partial_json") or "")
 
     def _block_stop(self, hub, index: int) -> None:
         kind, item_id = self._blocks.get(index, ("", ""))
         if kind in {"reasoning", "message"}:
-            hub.done(self.agent_id, item_id)
+            hub.done(self.agent_id, item_id, turn_id=self.trace_id or None)
         elif kind == "tool":
             try:
                 tool_input = json.loads(self._inputs.get(index) or "{}")
@@ -124,10 +124,10 @@ class ClaudeLiveItems:
             category, label, command = classify_tool(name, tool_input)
             hub.tool_start(self.agent_id, item_id, name=name, call_id=call_id,
                            category=category, label=label, command=command,
-                           input_preview=live_hub._preview(tool_input))
+                           input_preview=live_hub._preview(tool_input), turn_id=self.trace_id or None)
             diff = diff_stats(name, tool_input)
             if diff is not None:
-                hub.patch(self.agent_id, item_id, {"tool": {"diff": diff}})
+                hub.patch(self.agent_id, item_id, {"tool": {"diff": diff}}, turn_id=self.trace_id or None)
 
     def _tool_results(self, hub, ev: dict[str, Any]) -> None:
         message = ev.get("message")
@@ -142,7 +142,7 @@ class ClaudeLiveItems:
                 continue
             tail, total = output_tail(part.get("content"))
             if tail:
-                hub.tool_output(self.agent_id, item_id, tail, total_lines=total)
+                hub.tool_output(self.agent_id, item_id, tail, total_lines=total, turn_id=self.trace_id or None)
             hub.done(self.agent_id, item_id,
                      status="failed" if part.get("is_error") else "completed",
-                     patch={"tool": {"output": {"exit_code": 1 if part.get("is_error") else 0}}})
+                     patch={"tool": {"output": {"exit_code": 1 if part.get("is_error") else 0}}}, turn_id=self.trace_id or None)
