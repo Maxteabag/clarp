@@ -58,6 +58,11 @@ def main():
     from lib.context import ServerContext, StubSTT
     from lib.tts_engine import FakeTTSEngine
     backends.by_id('codex').required_binary = str(REPO / 'tests/qa/fake_codex.py')
+    # Capability probes would otherwise run the developer's real provider CLIs
+    # (opencode's wrapper rewrites global mise config and outlives the Host).
+    from lib import provider_capabilities
+    provider_capabilities._resolve_executable = (
+        lambda provider_id: str(REPO / 'tests/qa/fake_codex.py') if provider_id == 'codex' else None)
     provider_spawn = backends.spawn_turn
     def deterministic_spawn(backend, **kwargs):
         if backends.normalize(backend) != 'codex':
