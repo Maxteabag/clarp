@@ -65,16 +65,16 @@ def test_marker_carries_disabled_audio_policy(tmp_path):
 # --include-partial-messages stream-json deltas.
 
 
-def test_app_turn_always_forbids_interactive_questions():
-    """Any app-dispatched turn gets the no-interactive-questions rule, even
-    when it's silent (synthesize_audio off / typed). Spoken turns also get the
-    <speak> guidance."""
+def test_app_turn_always_carries_the_shared_clarp_skills_guidance():
+    """Any app-dispatched Claude turn gets the guidance every provider gets,
+    once, even when it's silent (synthesize_audio off / typed). Spoken turns
+    also get the <speak> guidance."""
+    from lib.clarp_guidance import CLARP_SKILLS_GUIDANCE
     silent = pwa_source_flag._build_additional_context(app_dispatched=True, voiced=False)
-    assert "Pay special attention to Clarp skills." in silent
-    assert "<speak>" not in silent
+    assert silent == CLARP_SKILLS_GUIDANCE
 
     spoken = pwa_source_flag._build_additional_context(app_dispatched=True, voiced=True)
-    assert "Pay special attention to Clarp skills." in spoken
+    assert spoken.count(CLARP_SKILLS_GUIDANCE) == 1
     assert "<speak>" in spoken
 
 

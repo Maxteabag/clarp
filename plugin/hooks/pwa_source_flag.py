@@ -79,7 +79,7 @@ def main() -> int:
     backend_session_id = (payload.get("session_id") or "").strip()
     # CLAUDE_PWA_SESSION is set only by the server's clarp dispatcher, so a
     # non-empty value is the authoritative "this turn came through the app"
-    # signal — used below to inject the no-interactive-questions rule.
+    # signal — used below to inject the Clarp-skills guidance.
     env_session = app_session()
     session   = env_session
 
@@ -188,8 +188,7 @@ def main() -> int:
 
     # Inject this app's constraints via the official UserPromptSubmit
     # additionalContext mechanism, as one combined block:
-    #   * no-interactive-questions — always, for any app-dispatched turn (the
-    #     PWA/iOS client renders text but can't show question/choice tools).
+    #   * Clarp-skills guidance — always, for any app-dispatched turn.
     #   * <speak> voice gating — only on spoken turns.
     context = _build_additional_context(app_dispatched=bool(env_session),
                                         voiced=voiced, agent=agent)
@@ -210,12 +209,12 @@ def _build_additional_context(*, app_dispatched: bool, voiced: bool,
                               agent: dict | None = None) -> str:
     """Compose the UserPromptSubmit additionalContext for this turn.
 
-    The no-interactive-questions rule is included for every app-dispatched
-    turn; the <speak> voice guidance is appended only on spoken turns.
+    The Clarp-skills guidance is included for every app-dispatched turn; the <speak> voice guidance is appended only on spoken turns.
     Returns "" when neither applies (e.g. a third-party local terminal)."""
     parts = []
-    if app_dispatched:
-        parts.append(_NO_INTERACTIVE_QUESTIONS)
+    guidance = _clarp_guidance() if app_dispatched else ""
+    if guidance:
+        parts.append(guidance)
     if voiced:
         parts.append(_SPEAK_INSTRUCTIONS + _natural_delivery(agent))
     return "\n\n".join(parts)
@@ -233,7 +232,13 @@ def _natural_delivery(agent: dict | None) -> str:
         return voice_humanness.guidance(voice_humanness.DEFAULT_LEVEL)
 
 
-_NO_INTERACTIVE_QUESTIONS = "Pay special attention to Clarp skills."
+def _clarp_guidance() -> str:
+    """The shared app-turn guidance (lib.clarp_guidance), one source for all providers."""
+    try:
+        from lib.clarp_guidance import CLARP_SKILLS_GUIDANCE
+    except ImportError:
+        return ""
+    return CLARP_SKILLS_GUIDANCE
 
 
 _SPEAK_INSTRUCTIONS = """\

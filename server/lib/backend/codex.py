@@ -302,7 +302,7 @@ class CodexBackend(StreamJsonBackend):
             model=model, reasoning_effort=effort, isolated=isolated)
         # Every codex turn is app-dispatched, so the instruction block is always
         # prepended (Codex has no hook to inject it like Claude does): the
-        # no-interactive-questions rule always, plus the <speak> voice guidance
+        # Clarp-skills guidance always, plus the <speak> voice guidance
         # when this is a spoken turn.
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""

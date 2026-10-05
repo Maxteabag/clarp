@@ -26,7 +26,7 @@ from .protocol import TurnSource
 from . import turn_lifecycle
 from . import events
 from .turn_lifecycle import TurnEvent
-from .voice_preamble import app_turn_instructions, persona_identity_instruction
+from .voice_preamble import app_turn_instructions, persona_identity_instruction, voice_instructions
 
 
 def _backend() -> CodexBackend:
@@ -580,7 +580,8 @@ class _Client:
         if synthesize_audio and not active.voice:
             params["additionalContext"] = {"clarp-voice-followup": {
                 "kind": "application",
-                "value": app_turn_instructions(voice=True, session=active.session),
+                # The turn already carries the app guidance from turn/start.
+                "value": voice_instructions(active.session),
             }}
             active.voice = True
             agents_db.enable_latest_turn_audio(active.agent_id)

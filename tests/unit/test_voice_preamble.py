@@ -28,17 +28,17 @@ def test_strip_is_a_no_op_without_the_full_sentinel_pair(value):
     assert vp.strip_voice_preamble(value) is value
 
 
-def test_text_turn_has_only_the_question_restriction():
+def test_text_turn_has_only_the_clarp_skills_guidance():
+    from lib.clarp_guidance import CLARP_SKILLS_GUIDANCE
     body = vp.app_turn_instructions(voice=False)
-    assert body == vp._NO_INTERACTIVE_QUESTIONS
+    assert body == CLARP_SKILLS_GUIDANCE
     assert "<speak>" not in body and "<vox>" not in body
-    assert "Pay special attention to Clarp skills." in body
 
 
 def test_voice_turn_adds_speak_and_natural_speech_blocks():
     from lib import voice_humanness
     body = vp.app_turn_instructions(voice=True)
-    assert body.split("\n\n") == [vp._NO_INTERACTIVE_QUESTIONS, vp._VOICE_INSTRUCTION,
+    assert body.split("\n\n") == [vp._APP_TURN_GUIDANCE, vp._VOICE_INSTRUCTION,
                                    voice_humanness.guidance(voice_humanness.DEFAULT_LEVEL)]
     assert "<speak>" in vp._VOICE_INSTRUCTION and "occasional fillers" in body
 
@@ -60,7 +60,7 @@ def test_identity_empty_without_persona():
     assert vp.persona_identity_instruction("") == ""
     assert vp.persona_identity_instruction("   ", "sess") == ""
     assert vp.apply_voice_preamble("m", voice=False) == (
-        "[voice-mode] " + vp._NO_INTERACTIVE_QUESTIONS + "\n\n--- user message ---\nm")
+        "[voice-mode] " + vp._APP_TURN_GUIDANCE + "\n\n--- user message ---\nm")
 
 
 def test_identity_uses_builtin_personality():
@@ -100,7 +100,7 @@ def test_identity_unknown_session_is_tolerated():
 
 def test_identity_is_placed_after_instructions_before_split():
     wrapped = vp.apply_voice_preamble("msg", voice=False, persona="Zorblax")
-    assert wrapped == ("[voice-mode] " + vp._NO_INTERACTIVE_QUESTIONS
+    assert wrapped == ("[voice-mode] " + vp._APP_TURN_GUIDANCE
                        + "\n\nYou are Zorblax.\n\n--- user message ---\nmsg")
 
 
@@ -111,7 +111,7 @@ def test_narration_clause_follows_agent_level(tmp_path):
     body = vp.app_turn_instructions(voice=True, session="iris-1")
     assert body.endswith("\n\n" + voice_verbosity.narration_clause(voice_verbosity.STEPS))
     # Narration is spoken-only: a text turn never carries it.
-    assert vp.app_turn_instructions(voice=False, session="iris-1") == vp._NO_INTERACTIVE_QUESTIONS
+    assert vp.app_turn_instructions(voice=False, session="iris-1") == vp._APP_TURN_GUIDANCE
 
 
 def test_narration_clause_missing_session_is_quiet():
