@@ -53,6 +53,9 @@ thread_local! {
     static STEP: Cell<usize> = const { Cell::new(0) };
     static STREAMED: Cell<bool> = const { Cell::new(false) };
     static SINCE: RefCell<Option<Instant>> = const { RefCell::new(None) };
+    // The sidebar check's theme before its compact work shots.
+    static THEME_BEFORE: RefCell<String> = const { RefCell::new(String::new()) };
+    static WIDTH_BEFORE: Cell<f32> = const { Cell::new(0.0) };
     static TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
@@ -328,6 +331,43 @@ fn report() -> crate::panes::Report {
 
 fn view() -> crate::PaneView {
     app_now().active_view().unwrap_or_default()
+}
+
+fn width_before() -> f32 {
+    WIDTH_BEFORE.with(Cell::get)
+}
+
+/// A drawn element's box in the window: (x, y, width, height).
+type Rect = (f32, f32, f32, f32);
+
+fn rect(e: &i_slint_backend_testing::ElementHandle) -> Rect {
+    let (at, size) = (e.absolute_position(), e.size());
+    (at.x, at.y, size.width, size.height)
+}
+
+/// The compact explorer's drawn work marks, in list order: (kind, count, box).
+fn compact_marks() -> Vec<(String, String, Rect)> {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return Vec::new() };
+    let mut marks: Vec<(String, String, Rect)> = ElementQuery::from_root(&window)
+        .match_predicate(|e| e.accessible_id().is_some_and(|id| id.starts_with("compact-")))
+        .find_all()
+        .into_iter()
+        .filter(|e| e.size().width > 0.0)
+        .filter_map(|e| Some((e.accessible_id()?.to_string(), e.accessible_value()?.to_string(), rect(&e))))
+        .collect();
+    marks.sort_by(|a, b| a.2.1.total_cmp(&b.2.1).then(a.2.0.total_cmp(&b.2.0)));
+    marks
+}
+
+/// The explorer row named `name`, as drawn.
+fn explorer_row(name: &str) -> Option<Rect> {
+    use i_slint_backend_testing::{AccessibleRole, ElementQuery};
+    let (window, name) = (crate::window()?, name.to_owned());
+    ElementQuery::from_root(&window)
+        .match_predicate(move |e| e.accessible_role() == Some(AccessibleRole::ListItem) && e.accessible_label().is_some_and(|l| l == name.as_str()))
+        .find_first()
+        .map(|e| rect(&e))
 }
 
 /// `--check transcript --out DIR`: tool activity folds and opens (fetching
@@ -1538,6 +1578,7 @@ fn sidebar_check(out: String) {
     let out2 = out.clone();
     let out3 = out.clone();
     let out4 = out.clone();
+    let out5 = out.clone();
     fn names(window: &crate::AppWindow) -> Vec<String> {
         window.get_chats().iter().map(|r| r.name.to_string()).collect()
     }
@@ -1679,7 +1720,78 @@ fn sidebar_check(out: String) {
             }
             let width = window.get_explorer_compact_width();
             check(width < 320.0 && width >= 120.0, &format!("the compact explorer narrows to an average row: {width}px"));
+            check(compact_marks().is_empty(), "nothing runs, so no compact row shows a work mark");
+            WIDTH_BEFORE.with(|w| w.set(width));
             shot(&out3, "sidebar-02-compact");
+            // Rachel runs Mike as a helper (its mirror job too) and two processes.
+            let helper = serde_json::json!({"session": "mike", "set": {"role": "helper", "parent_agent_id": "a1", "helper_state": "working"}});
+            let job = |id: &str, kind: &str, title: &str| serde_json::json!({"job_id": id, "agent_id": "a1", "session": "rachel", "status": "running", "kind": kind, "title": title});
+            let jobs = serde_json::json!({"jobs": [job("w1", "watch", "Watch the build"), job("w2", "watch", "Tail the logs"), job("h1", "sub-agent", "Mike")],
+                "event": {"type": "background-job-updated", "job": job("w1", "watch", "Watch the build")}});
+            let sent = control("/__control/agent", &helper).and_then(|()| control("/__control/jobs", &jobs));
+            check(sent.is_ok(), &format!("Rachel starts a helper and two processes: {sent:?}"));
+            true
+        })),
+        ("compact marks", Box::new(|_, window, elapsed| {
+            let marks = compact_marks();
+            let kinds: Vec<(&str, &str)> = marks.iter().map(|m| (m.0.as_str(), m.1.as_str())).collect();
+            if kinds != [("compact-helpers", "1"), ("compact-processes", "2")] || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(true, "Rachel's compact row marks one running helper and two processes, each with its own icon and count");
+            let row = explorer_row("Rachel").unwrap_or_default();
+            let inside = |m: &Rect| m.0 >= row.0 && m.0 + m.2 <= row.0 + row.2 && m.1 >= row.1 && m.1 + m.3 <= row.1 + row.3;
+            check(row.3 <= 40.0 && marks.iter().all(|m| inside(&m.2)), &format!("the marks fit inside the compact row {row:?}: {marks:?}"));
+            check(window.get_explorer_compact_width() == width_before(), "the marks leave the compact explorer's width as it was");
+            true
+        })),
+        ("compact marks shot", Box::new(move |app, _, elapsed| {
+            // Fonts and the theme settle before each shot.
+            let theme = app.engine.borrow().reading_theme();
+            if elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            match theme.as_str() {
+                "paper" => {
+                    shot(&out5, "sidebar-02b-compact-work-light");
+                    app.engine.borrow_mut().set_reading_theme("night");
+                    crate::pump();
+                    false
+                }
+                "night" if elapsed > Duration::from_millis(1200) => {
+                    shot(&out5, "sidebar-02c-compact-work-dark");
+                    check(compact_marks().len() == 2, "the marks stay in the light and the dark theme");
+                    let done = serde_json::json!({"session": "mike", "set": {"helper_state": "done"}});
+                    let sent = control("/__control/agent", &done).and_then(|()| control("/__control/jobs", &serde_json::json!({"jobs": [],
+                        "event": {"type": "background-job-updated", "job": {"job_id": "w1", "agent_id": "a1", "status": "completed"}}})));
+                    check(sent.is_ok(), &format!("the helper and the processes finish: {sent:?}"));
+                    true
+                }
+                "night" => false,
+                _ => {
+                    THEME_BEFORE.with(|t| *t.borrow_mut() = theme);
+                    app.engine.borrow_mut().set_reading_theme("paper");
+                    crate::pump();
+                    false
+                }
+            }
+        })),
+        ("compact marks gone", Box::new(|app, _, _| {
+            if !compact_marks().is_empty() {
+                return false;
+            }
+            check(true, "the marks go when the helper and the processes finish");
+            let back = serde_json::json!({"session": "mike", "set": {"role": "agent", "parent_agent_id": "", "helper_state": ""}});
+            check(control("/__control/agent", &back).is_ok(), "Mike is a chat again");
+            let theme = THEME_BEFORE.with(|t| t.borrow().clone());
+            app.engine.borrow_mut().set_reading_theme(&theme);
+            crate::pump();
+            true
+        })),
+        ("compact rows back", Box::new(|_, window, _| {
+            if names(window).len() != 2 {
+                return false;
+            }
             window.invoke_focus_search();
             true
         })),
