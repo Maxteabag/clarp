@@ -269,6 +269,10 @@ fn history() -> serde_json::Value {
             turns.push(serde_json::json!({"id": id, "role": "user", "timestamp": "2026-10-05T09:30:00Z", "origin": "user", "trace_id": trace,
                 "text": "A long message of the user's own that wraps inside its bubble, which is narrower than the chat, over three or four lines, so its height must be measured at the bubble's width and not the chat's. ".repeat(2)}));
             turns.push(summed(text_row(&format!("{id}-a"), "2026-10-05T09:30:05Z", &trace, "final", "Noted."), &trace, 3_000, 0));
+            // And one that quotes and pastes code: its bubble is as wide as
+            // they are, up to its most.
+            turns.push(serde_json::json!({"id": format!("{id}-quote"), "role": "user", "timestamp": "2026-10-05T09:30:10Z", "origin": "user", "trace_id": format!("{trace}-q"),
+                "text": "Look at this:\n\n> The quoted line from the log that is long enough to wrap inside the bubble at most widths, twice over, so its height is the wrapped one.\n\n```\nshort code\n```\n\n> Short quote."}));
             continue;
         }
         turns.push(serde_json::json!({"id": format!("{id}-u"), "role": "user", "timestamp": "2026-10-05T09:30:00Z", "text": "Show me.", "origin": "user", "trace_id": trace}));
@@ -324,6 +328,45 @@ fn row(id: &str) -> Option<crate::MessageRow> {
     crate::window().map(|w| super::rows(&w)).unwrap_or_default().into_iter().find(|r| r.id == id)
 }
 
+fn live_row(key: &str) -> Option<crate::MessageRow> {
+    crate::window().map(|w| super::rows(&w)).unwrap_or_default().into_iter().find(|r| r.live.key == key)
+}
+
+fn live_event(ops: serde_json::Value) {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    let event = serde_json::json!({"agent_id": "overlap-id", "session": SESSION, "server_now_ms": now, "ops": ops});
+    if let Err(error) = super::control("/__control/live-event", &serde_json::json!({"session": SESSION, "event": event})) {
+        check(false, &format!("the Host sends a live event: {error}"));
+    }
+}
+
+/// A live turn whose plan steps and thinking are each longer than a line.
+fn live_turn_starts() -> serde_json::Value {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    let step = |text: &str, status: &str| serde_json::json!({"text": text, "status": status});
+    serde_json::json!([
+        {"op": "turn", "turn": {"turn_id": "t-d", "status": "running", "started_at_ms": now, "ended_at_ms": null, "worked_ms": null, "tool_count": 0}},
+        {"op": "status", "activity": {"state": "thinking", "tool": null, "running_tools": 0, "headline": "Thinking", "item_id": null, "since_ms": now, "turn_id": "t-d", "turn_started_ms": now}},
+        {"op": "upsert", "id": "ov-think", "kind": "reasoning", "rev": 1, "item": {"id": "ov-think", "turn_id": "t-d", "kind": "reasoning", "status": "completed", "ordinal": 1,
+            "started_at_ms": now, "ended_at_ms": now + 4_000, "title": "Weighing the rollout",
+            "text": format!("{}\n\n{}", "The guidance has to reach every backend, and each reads its context at a different moment, so the rollout depends on when each runtime starts its next turn and what it reads then. ".repeat(2), "Claude reads the hook on every turn; the others read their instructions when the runtime starts, which is why they lag behind until their next idle handoff.")}},
+        {"op": "upsert", "id": "ov-plan", "kind": "plan", "rev": 1, "item": {"id": "ov-plan", "turn_id": "t-d", "kind": "plan", "status": "running", "ordinal": 2, "started_at_ms": now,
+            "plan": {"steps": [
+                step("Write one source of truth for the guidance and replace the old line on every route the prompt takes, typed, spoken, peer and resumed alike", "completed"),
+                step("Drive every kind of turn through the real Host to the fake provider and check the text arrives once and is never repeated inside the message", "in_progress"),
+                step("Deploy, then confirm each backend sees it at its next start and tell the owner when each one takes effect", "pending"),
+            ]}}},
+    ])
+}
+
+fn live_turn_ends() -> serde_json::Value {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+    serde_json::json!([
+        {"op": "turn", "turn": {"turn_id": "t-d", "status": "completed", "started_at_ms": now - 9_000, "ended_at_ms": now, "worked_ms": 9_000, "tool_count": 0}},
+        {"op": "status", "activity": {"state": "idle", "tool": null, "running_tools": 0, "headline": null, "item_id": null, "since_ms": now, "turn_id": null, "turn_started_ms": null}},
+    ])
+}
+
 /// A stage that waits `ms` after `ready`, asserts the rows tile, then acts.
 fn moment(label: &'static str, ms: u64, ready: impl Fn() -> bool + 'static, act: impl Fn(&crate::App, &crate::AppWindow) + 'static) -> super::Stage {
     (label, Box::new(move |app, window, elapsed| {
@@ -377,6 +420,7 @@ pub(super) fn row_overlap_check(out: String) {
         move || super::shot(&out, name)
     };
     let (shot1, shot2, shot3, shot4) = (shot("row-overlap-01-history"), shot("row-overlap-02-prompt"), shot("row-overlap-03-settled"), shot("row-overlap-04-next-turn"));
+    let shot5 = shot("row-overlap-05-narrow-large");
     let stages: Vec<super::Stage> = vec![
         ("live", Box::new(|app, _, _| {
             if app.engine.borrow().connection_state() != "live" {
@@ -384,6 +428,7 @@ pub(super) fn row_overlap_check(out: String) {
             }
             check(super::control("/__control/add-agent", &serde_json::json!({"session": SESSION, "persona": "Overlap"})).is_ok(), "the Host takes a new chat");
             check(super::control("/__control/turn-summary", &serde_json::json!({"on": true})).is_ok(), "the Host turns log_turn_summary on");
+            check(super::control("/__control/live", &serde_json::json!({"on": true})).is_ok(), "the Host turns live items on");
             app.engine.borrow_mut().reconnect();
             true
         })),
@@ -430,9 +475,112 @@ pub(super) fn row_overlap_check(out: String) {
             upsert(serde_json::json!([{"id": "c-prompt", "role": "user", "timestamp": "2026-10-05T10:07:00Z", "text": "Thanks. Anything else?", "origin": "user", "trace_id": "t-c"}]));
             agent_state("thinking");
         }),
-        moment("the next turn starts and the last one folds into history", 1200, || has_row("c-prompt"), move |_, _| {
+        moment("the next turn starts and the last one folds into history", 1200, || has_row("c-prompt"), move |app, window| {
             shot4();
+            crate::artifacts_view::open(app, window, "a2a:b-prompt");
         }),
+        moment("the agent's prompt opens", 800, || row("b-prompt").is_some_and(|r| r.prompt.expanded), |app, window| {
+            crate::artifacts_view::open(app, window, "a2a:b-prompt");
+        }),
+        moment("and folds again", 800, || row("b-prompt").is_some_and(|r| !r.prompt.expanded), |app, _| {
+            crate::artifacts_view::toggle_live(app, "live:fold:t-b");
+        }),
+        moment("the settled turn's fold opens", 800, || true, |app, _| {
+            crate::artifacts_view::toggle_live(app, "live:fold:t-b");
+        }),
+        moment("and closes", 800, || app_now().engine.borrow().live_view(SESSION).is_some_and(|v| v.lseq().is_some()), |_, _| {
+            live_event(live_turn_starts());
+        }),
+        moment("a live turn shows a long plan and its thinking", 1000, || live_row("live:ov-plan").is_some(), |app, _| {
+            crate::artifacts_view::toggle_live(app, "live:ov-think");
+        }),
+        moment("its thinking opens to long paragraphs", 1000, || live_row("live:ov-think").is_some_and(|r| r.live.expanded), |app, _| {
+            app.engine.borrow_mut().set_reading_theme("night");
+            crate::pump();
+        }),
+        moment("a dark theme", 1000, || true, |_, window| {
+            window.global::<crate::Palette>().set_body_size(19.0);
+        }),
+        moment("a larger text size", 1000, || true, |_, window| {
+            window.window().set_size(slint::LogicalSize::new(860.0, 640.0));
+        }),
+        moment("a narrower window", 1200, || true, |_, _| {
+            crate::headless::press(slint::platform::Key::Home);
+        }),
+        read_through("reading the history narrow and large"),
+        moment("back at the end, narrow", 800, || true, move |_, window| {
+            shot5();
+            window.window().set_size(slint::LogicalSize::new(1280.0, 800.0));
+            window.global::<crate::Palette>().set_body_size(15.0);
+        }),
+        moment("the window and the size back", 1200, || true, |app, _| {
+            app.engine.borrow_mut().set_reading_theme("paper");
+            crate::pump();
+        }),
+        read_through("reading the history again"),
+        moment("at the end again", 800, || true, |_, _| {
+            live_event(live_turn_ends());
+        }),
+        moment("the live turn ends", 1500, || true, |_, _| {}),
     ];
     super::run_stages(stages);
+}
+
+/// The watch other checks turn on: the rows must tile at every moment the
+/// check looks (each poll of its stages), not only where it asks.
+#[derive(Default)]
+struct Watch {
+    on: bool,
+    moments: usize,
+    faults: usize,
+    /// The stages a fault was reported in (each once).
+    reported: Vec<String>,
+    spent: std::time::Duration,
+}
+
+thread_local! {
+    static WATCH: std::cell::RefCell<Watch> = std::cell::RefCell::new(Watch::default());
+}
+
+/// Watches the rows tile at every poll of the check's stages.
+pub(super) fn watch() {
+    WATCH.with(|w| w.borrow_mut().on = true);
+}
+
+/// One moment of the watch, during stage `stage` (a chat must be shown).
+pub(super) fn watched(stage: &str) {
+    if !WATCH.with(|w| w.borrow().on) {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let shown = crate::app().is_some_and(|app| app.active_messages().is_some_and(|m| slint::Model::row_count(&*m) > 0));
+    let result = if shown { Some(tiling()) } else { None };
+    WATCH.with(|w| {
+        let mut w = w.borrow_mut();
+        w.spent += started.elapsed();
+        match result {
+            Some(Ok(_)) => w.moments += 1,
+            Some(Err(numbers)) if !numbers.starts_with("the active chat's transcript is not found") => {
+                w.moments += 1;
+                w.faults += 1;
+                if !w.reported.iter().any(|s| s == stage) {
+                    w.reported.push(stage.to_owned());
+                    drop(w);
+                    check(false, &format!("during {stage}: rows overlap: {numbers}"));
+                }
+            }
+            _ => {}
+        }
+    });
+}
+
+/// The watch's verdict, once the check's stages are done.
+pub(super) fn watch_verdict() {
+    let Some((moments, faults, spent)) = WATCH.with(|w| {
+        let w = w.borrow();
+        w.on.then(|| (w.moments, w.faults, w.spent))
+    }) else {
+        return;
+    };
+    check(moments > 0 && faults == 0, &format!("the rows tiled at every moment watched: {} of {moments} ({:.1} ms a look)", moments - faults, spent.as_secs_f64() * 1000.0 / moments.max(1) as f64));
 }
