@@ -43,6 +43,8 @@ mod live_checks;
 mod observe_checks;
 #[path = "a2a_checks.rs"]
 mod a2a_checks;
+#[path = "row_overlap_checks.rs"]
+mod row_overlap_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -369,6 +371,7 @@ pub fn start_check(name: &str, out: String) {
         "live" => live_checks::live_check(out),
         "observe" => observe_checks::observe_check(out),
         "a2a" => a2a_checks::a2a_check(out),
+        "row-overlap" => row_overlap_checks::row_overlap_check(out),
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
