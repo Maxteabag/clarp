@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 111
+_SCHEMA_VERSION = 112
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -1351,3 +1351,6 @@ _SCHEMA_SQL += "\n" + _HTML_REPORT_REVISIONS_SCHEMA + "\n"
 
 from .html_form_events import SCHEMA as _HTML_FORM_EVENTS_SCHEMA
 _SCHEMA_SQL += "\n" + _HTML_FORM_EVENTS_SCHEMA + "\n"
+
+from .goal_ledger import SCHEMA as _GOAL_LEDGER_SCHEMA
+_SCHEMA_SQL += "\n" + _GOAL_LEDGER_SCHEMA + "\n"

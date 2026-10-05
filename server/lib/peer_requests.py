@@ -113,7 +113,13 @@ def wait_on(requester: dict, plan_id: str, request_id: str, recipient: dict,
 
 
 def _arm(plan, requester, request_id, recipient, deadline_s, point, own, read):
+    from . import goal_ledger
     plan_id = plan["plan_id"]
+    with goal_ledger.acting_as("owner", requester["agent_id"]):
+        return _arm_wait(plan, plan_id, request_id, recipient, deadline_s, point, own, read)
+
+
+def _arm_wait(plan, plan_id, request_id, recipient, deadline_s, point, own, read):
     return task_plans._goal_mutate(plan_id, revision=plan["revision"], action="checkpoint", data={
         "progress": point.get("progress") or f"Asked {recipient['persona']} (request {request_id})",
         "next_work": "\n\n".join(own + [read]),
@@ -137,9 +143,11 @@ def abandon_wait(plan_id: str, request_id: str, error: str) -> bool:
         if not (cont.get("state") == "waiting" and cont.get("dependency_key") == dependency_key(request_id)):
             return False
         try:
-            task_plans._goal_mutate(plan_id, revision=plan["revision"], action="dependency", data={
-                "key": dependency_key(request_id), "outcome": "failed",
-                "evidence": f"request {request_id} {NOT_DELIVERED}: {error}"[:MAX_EVIDENCE]})
+            from . import goal_ledger
+            with goal_ledger.acting_as("owner", plan["agent_id"]):
+                task_plans._goal_mutate(plan_id, revision=plan["revision"], action="dependency", data={
+                    "key": dependency_key(request_id), "outcome": "failed",
+                    "evidence": f"request {request_id} {NOT_DELIVERED}: {error}"[:MAX_EVIDENCE]})
             return True
         except ValueError:
             continue
@@ -160,6 +168,10 @@ def find_request(replier: dict, request_id: str) -> dict:
         raise RequestError(f"the agent that sent request {request_id} no longer exists")
     if requester.get("archived_at"):
         raise RequestError(f"{requester['persona']}, who sent request {request_id}, is archived")
+    from . import goal_ledger
+    if goal_ledger.is_delegate_of(replier["agent_id"], requester["agent_id"]):
+        # Bookkeeping records beside the principal's goal; it never answers into it.
+        raise RequestError("a bookkeeping delegate does not reply into its principal's goal")
     return requester
 
 
@@ -252,8 +264,10 @@ def plan_message(replier: dict, request_id: str, kind: str, text: str, *,
 
 
 def record_result(plan: dict, data: dict, *, replier: dict | None = None) -> dict:
-    result = task_plans._goal_mutate(plan["plan_id"], revision=plan["revision"],
-                                     action="dependency", data=data)
+    from . import goal_ledger
+    with goal_ledger.acting_as("peer", (replier or {}).get("agent_id", "")):
+        result = task_plans._goal_mutate(plan["plan_id"], revision=plan["revision"],
+                                         action="dependency", data=data)
     if replier:
         # A helper answering its parent reports, as a message to it would.
         from . import helper_agents

@@ -13,6 +13,7 @@ from pathlib import Path
 import signal
 import sys
 import threading
+import urllib.request
 from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[2]
@@ -94,8 +95,9 @@ def main():
     allowed_get = {'/status', '/agents/snapshot', '/artifacts', '/attention',
         '/automation-settings', '/clips/recoverable', '/events', '/log', '/server-info',
         '/task-plan', '/task-plans', '/task-plan/document', '/teams', '/transcription-capabilities', '/transcription-providers',
-        '/voice-catalog', '/turn-queue'}
-    allowed_post = {'/send', '/select', '/focus', '/clog', '/clips/ack', '/devices', '/stop', '/turn-queue/resume', '/task-plan/action'}
+        '/voice-catalog', '/turn-queue', '/goal-ledger', '/goal-ledger/delegations'}
+    allowed_post = {'/send', '/select', '/focus', '/clog', '/clips/ack', '/devices', '/stop', '/turn-queue/resume', '/task-plan/action',
+        '/goal-ledger/delegations', '/goal-ledger/delegations/stop'}
     for method, allowed in [('GET', allowed_get), ('POST', allowed_post), ('PUT', set()), ('DELETE', set())]:
         original = getattr(module.Handler, 'do_' + method)
         def scoped(self, original=original, allowed=allowed):
@@ -103,12 +105,35 @@ def main():
                 return self._send(403, b'QA route is outside the deterministic turn lane')
             return original(self)
         setattr(module.Handler, 'do_' + method, scoped)
+    metadata = {}
+    # Bookkeeping listeners run in this process, never as real user services:
+    # a unit left behind would outlive this disposable root.
+    from lib import bookkeeping_listener
+    bookkeeping_listener.POLL_SECONDS, bookkeeping_listener.QUIET_MS = .1, 500
+    bookkeeping_listener.MAX_DELAY_MS = 3000
+
+    def self_send(session, text, wake_id):
+        request = urllib.request.Request(
+            metadata['url'] + '/send', method='POST',
+            data=json.dumps({'session': session, 'text': text, 'client_msg_id': wake_id,
+                             'origin': 'automation', 'queue_if_busy': True,
+                             'synthesize_audio': False}).encode(),
+            headers={'Authorization': f'Bearer {args.token}', 'Content-Type': 'application/json'})
+        urllib.request.urlopen(request, timeout=10).read()
+
+    def launch_in_process(delegation_id):
+        threading.Thread(target=bookkeeping_listener.main, args=(delegation_id,),
+                         kwargs={'send': self_send}, daemon=True).start()
+        return {'unit': 'in-process', 'started': True, 'error': ''}
+    bookkeeping_listener.launch = launch_in_process
+    bookkeeping_listener.unit_active = lambda delegation_id: False
+    bookkeeping_listener.stop_unit = lambda delegation_id: {'unit': 'in-process', 'stopped': True}
     # Exercise the production goal reconciler promptly in disposable tests.
     schedule_runner = module.AgentScheduleRunner
     module.AgentScheduleRunner = lambda **kwargs: schedule_runner(check_interval_sec=.05, **kwargs)
     server = module.build_server(ctx, args.port, bind_addr='127.0.0.1')
-    metadata = {'url': f'http://127.0.0.1:{server.server_address[1]}', 'pid': os.getpid(),
-                'state_dir': str(root), 'provider': 'deterministic-codex-process'}
+    metadata.update({'url': f'http://127.0.0.1:{server.server_address[1]}', 'pid': os.getpid(),
+                'state_dir': str(root), 'provider': 'deterministic-codex-process'})
     (root / 'host.json').write_text(json.dumps(metadata, indent=2) + '\n')
     print(json.dumps(metadata), flush=True)
     for sig in (signal.SIGTERM, signal.SIGINT):

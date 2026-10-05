@@ -3683,7 +3683,7 @@ def test_build_server_starts_the_worker_registry_in_order(fake_ctx, monkeypatch)
             "state-log-watcher", "background-job-watcher", "runtime-event-watcher",
             "live-hub", "live-relay",
             "tts-worker", "maintenance", "usage-refresh", "resource-telemetry",
-            "cache-warmup", "decision-delivery", "transcript-streamer", "team-leader", "heartbeat",
+            "cache-warmup", "bookkeeping-listeners", "decision-delivery", "transcript-streamer", "team-leader", "heartbeat",
             "autonomy-janitors", "dreaming", "agent-scheduler", "janitor-runner",
             "local-https",
         ]

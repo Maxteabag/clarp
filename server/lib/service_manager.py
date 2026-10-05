@@ -442,8 +442,12 @@ def launch_detached(
     command: list[str], *, unit: str, delay_seconds: int = 0,
     environment: dict[str, str] | None = None,
     runner: Runner = subprocess.run,
+    properties: tuple[str, ...] = (),
 ) -> tuple[bool, str]:
-    """Launch work independently of the server service on Linux or macOS."""
+    """Launch work independently of the server service on Linux or macOS.
+
+    `properties` are extra systemd unit properties (e.g. ``Restart=on-failure``);
+    the fallback without systemd has no supervisor and ignores them."""
     if (platform_kind() == "linux"
             and os.environ.get("CLARP_DEPLOYMENT_MODE") != "container"):
         args = ["systemd-run", "--user", "--collect", f"--unit={unit}"]
@@ -455,6 +459,7 @@ def launch_detached(
             args.extend([f"--on-calendar={deadline}", "--timer-property=AccuracySec=1s"])
         else:
             args.append("--property=Type=exec")
+        args.extend(f"--property={p}" for p in properties)
         if environment:
             for name, value in sorted(environment.items()):
                 args.append(f"--setenv={name}={value}")

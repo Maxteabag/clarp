@@ -87,6 +87,25 @@ criteria, limits and `enroll:true`; do not infer missing evidence or mass-enroll
 old commitments. On an older Host without `clarp-goal`, use `clarp-tasks` plus
 `clarp-self-prompt`/background jobs and retain honest checkpoints until upgraded.
 
+## Subgoals and the ledger
+
+Give a goal explicit subgoals when the outcome has parts with their own reason and
+evidence. They are retired, never deleted, and each change needs the subgoal's
+current revision:
+
+```sh
+clarp-goal subgoal PLAN_ID add \
+  '{"subgoal_id":"phone","title":"Works on Peter's phone","intent":"The original acceptance","criteria":["Real events from his play"]}'
+clarp-goal subgoal PLAN_ID update \
+  '{"subgoal_id":"phone","expected_revision":1,"fields":{"current_action":"Waiting for build 2741"},"reason":"Install not verified"}'
+clarp-goal ledger PLAN_ID
+```
+
+Every goal change you make is also kept in the append-only ledger with its
+reason and the state before and after; `ledger` reads it. If a bookkeeping
+delegate keeps your books (`clarp-goal-bookkeeping`), its observations and
+claims appear there too, marked as its own; they never complete or change your goal.
+
 ## Working context belongs to the goal
 
 Keep evolving instructions, architecture reasoning, constraints and next-slice

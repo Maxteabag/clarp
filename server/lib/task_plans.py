@@ -306,6 +306,8 @@ def cancel_for_agent(agent_id: str) -> None:
         "SELECT plan_id FROM task_plans WHERE agent_id=? AND status='active'",
         (agent_id,),
     ).fetchall()
+    from . import goal_ledger
+
     for row in rows:
         plan_id = str(row["plan_id"])
         _close_running_items(con, plan_id, "cancelled", now)
@@ -314,6 +316,9 @@ def cancel_for_agent(agent_id: str) -> None:
             "WHERE plan_id=?",
             (now, now, plan_id),
         )
+        if con.execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()[0] not in ("", "{}"):
+            goal_ledger.record_status_change(con, plan_id, kind="cancelled", status="cancelled",
+                                             reason="Owner agent deleted")
 
 
 def get(plan_id: str) -> dict | None:
@@ -351,7 +356,10 @@ def get(plan_id: str) -> dict | None:
     data["goal"] = json.loads(data.pop("goal_json") or "{}") or None
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
+        from . import goal_ledger
+
         data["goal"]["documents"] = goal_documents(plan_id)
+        data.update(goal_ledger.summary(data))
     data["legacy"] = data["goal"] is None
     data["completion_verified"] = bool(data["goal"] and data["status"] == "completed")
     counts = {
@@ -386,10 +394,16 @@ def _goal_check_revision(plan, revision):
 
 
 def _goal_save(con, plan_id, goal):
+    from . import goal_ledger
+
+    row = con.execute("SELECT goal_json FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
+    old = json.loads(row[0] or "{}") if row else {}
     con.execute(
         "UPDATE task_plans SET goal_json=? WHERE plan_id=?",
         (json.dumps(goal, ensure_ascii=False), plan_id),
     )
+    # Every appended history entry also lands in the append-only ledger.
+    goal_ledger.record_goal_save(con, plan_id, old, goal)
 
 
 def _goal_initialize(con, plan_id, agent, title, raw, now):

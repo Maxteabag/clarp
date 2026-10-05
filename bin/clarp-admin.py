@@ -1856,6 +1856,26 @@ def _uncertain(args, request_id: str, reason: str) -> int:
     return 5
 
 
+def cmd_bookkeeping(args) -> int:
+    """Admin control of a bookkeeping delegation (the delegate itself uses clarp-goal)."""
+    try:
+        if args.books_action == "enable":
+            result = api_request("POST", "/goal-ledger/delegations", {
+                "principal": args.principal, "delegate": args.delegate, "reason": args.reason})
+        elif args.books_action == "stop":
+            result = api_request("POST", "/goal-ledger/delegations/stop", {
+                "delegation_id": args.delegation, "reason": args.reason})
+        else:
+            result = api_request(
+                "GET", "/goal-ledger/delegations?" + urllib.parse.urlencode({"session": args.session}))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode(errors="replace")
+        print(f"clarp-admin bookkeeping: HTTP {error.code}: {detail}", file=sys.stderr)
+        return 4 if 400 <= error.code < 500 else 5
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_reply(args) -> int:
     """Return a result, a blocker or progress to whoever sent a request."""
     pr = _peer_requests()
@@ -2678,6 +2698,19 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     reply_cmd.add_argument("--kind", required=True, choices=("result", "blocked", "progress"))
     reply_cmd.add_argument("--text", required=True)
     reply_cmd.set_defaults(func=cmd_reply)
+    books_cmd = sub.add_parser(
+        "bookkeeping", help="enable, stop or inspect a helper keeping its parent's goal books")
+    books_sub = books_cmd.add_subparsers(dest="books_action", required=True)
+    books_enable = books_sub.add_parser("enable", help="make a helper its parent's bookkeeping delegate")
+    books_enable.add_argument("--principal", required=True)
+    books_enable.add_argument("--delegate", required=True)
+    books_enable.add_argument("--reason", required=True)
+    books_stop = books_sub.add_parser("stop", help="stop a delegation and its listener")
+    books_stop.add_argument("--delegation", required=True)
+    books_stop.add_argument("--reason", required=True)
+    books_status = books_sub.add_parser("status", help="delegations and listener health for an agent")
+    books_status.add_argument("--session", required=True)
+    books_cmd.set_defaults(func=cmd_bookkeeping)
     model_cmd = sub.add_parser(
         "model", help="show or set an agent's model and effort (default: own session)")
     model_cmd.add_argument(
