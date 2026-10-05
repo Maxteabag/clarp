@@ -589,10 +589,15 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
             if action in {"pause", "block"} and state.get("state") == "waiting":
                 state["paused_dependency_due_at"] = state.get("due_at")
             awaited = (action == "resume" and state.get("dependency_key")
-                       and "paused_dependency_due_at" in state)
+                       and "paused_dependency_due_at" in state
+                       and not state.get("dependency_result"))
             paused_due = (state.pop("paused_dependency_due_at", None)
                           if action in {"resume", "cancel", "supersede"} else None)
             resumed = ("waiting" if awaited else "ready")
+            # A result held through the pause is delivered now, not after the
+            # usual resume delay.
+            held_result = (action == "resume" and paused_due is not None
+                           and bool(state.get("dependency_result")))
             state.update(
                 generation=state["generation"] + 1,
                 state=resumed if action == "resume" else status,
@@ -600,7 +605,8 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 observed_state=resumed if action == "resume" else status,
                 observed_reason=reason,
                 observed_at=now,
-                due_at=(max(paused_due or 0, now + 15000) if awaited else now + 15000)
+                due_at=(max(paused_due or 0, now + 15000) if awaited
+                        else now if held_result else now + 15000)
                 if action == "resume" else None,
                 lease_until=None,
                 request_id="",
@@ -701,7 +707,12 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 attempts=0,
             )
         elif action == "dependency":
-            if state.get("state") != "waiting" or data.get("key") != state.get(
+            # A result that arrives while the user has the goal paused or
+            # blocked is kept for the resume, which then delivers it.
+            held = (state.get("state") in {"paused", "blocked"}
+                    and "paused_dependency_due_at" in state
+                    and not state.get("dependency_result"))
+            if (state.get("state") != "waiting" and not held) or data.get("key") != state.get(
                 "dependency_key"
             ):
                 raise ValueError("dependency is stale or does not belong to this goal")
@@ -709,13 +720,16 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
                 "evidence"
             ):
                 raise ValueError("external result requires outcome and evidence")
-            state.update(
-                state="ready",
-                due_at=now,
-                reason="External work " + data["outcome"],
-                dependency_result=data,
-                request_id="",
-            )
+            if held:
+                state["dependency_result"] = data
+            else:
+                state.update(
+                    state="ready",
+                    due_at=now,
+                    reason="External work " + data["outcome"],
+                    dependency_result=data,
+                    request_id="",
+                )
         elif action == "replan":
             if not reason:
                 raise ValueError("replanning requires a discovery or reason")
