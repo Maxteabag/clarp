@@ -454,18 +454,162 @@ mod tests {
         assert!(hints("composer", &none, all()).iter().any(|b| b.action == "queue"));
     }
 
+    fn peter() -> Overrides {
+        // Ctrl+J is next attention's: taking it over leaves N for that.
+        let clash = add(&Overrides::new(), "next-agent", "main", "Ctrl+J").unwrap_err();
+        let Refusal::Clash(clashes) = clash else { panic!("Ctrl+J is next attention's: {clash:?}") };
+        assert!(clashes.iter().any(|c| c.actions.contains(&"next-attention") && c.state == "main"), "{clashes:?}");
+        let taken = take_over(&Overrides::new(), "next-agent", "main", "Ctrl+J").unwrap();
+        add(&taken, "next-agent", "main", "Right Right").unwrap()
+    }
+
     #[test]
-    fn rebinding_is_validated_and_round_trips() {
-        let overrides = set_binding(&Overrides::new(), "switcher", "Ctrl+P").unwrap();
-        assert_eq!(action_for("pane", "Ctrl+P", &overrides, all()), Some("switcher"));
-        assert_eq!(action_for("pane", "Ctrl+K", &overrides, all()), None, "the default key is replaced");
-        assert_eq!(import(&export(&overrides)).unwrap(), overrides);
-        assert!(set_binding(&overrides, "mute", "Ctrl+Q").is_err(), "not editable");
-        assert!(set_binding(&overrides, "zoom", "Ctrl+V").unwrap_err().contains("Reserved"));
-        assert!(set_binding(&overrides, "zoom", "Alt+Z").is_err(), "one Ctrl chord");
-        assert!(set_binding(&overrides, "zoom", "Ctrl+B").unwrap_err().contains("Conflict"), "Ctrl+B is the sidebar");
-        assert!(set_binding(&overrides, "switcher", "").unwrap().is_empty(), "an empty key resets");
-        assert!(import(r#"{"version": 2, "bindings": {}}"#).is_err());
+    fn keys_parse_and_spell_doubles() {
+        assert_eq!(parse_key("ctrl+j").as_deref(), Ok("Ctrl+J"));
+        assert_eq!(parse_key("Shift+Ctrl+alt+v").as_deref(), Ok("Ctrl+Alt+Shift+V"), "modifiers in the map's order");
+        assert_eq!(parse_key("Right Right").as_deref(), Ok("Right Right"));
+        assert_eq!(parse_key(" right   right ").as_deref(), Ok("Right Right"));
+        assert_eq!(parse_key("Enter").as_deref(), Ok("Return"));
+        assert_eq!(parse_key("Ctrl+=").as_deref(), Ok("Ctrl+="));
+        assert_eq!(parse_key("F7").as_deref(), Ok("F7"));
+        assert!(parse_key("Right Left").is_err(), "a double press is one key twice");
+        assert!(parse_key("J J J").is_err());
+        assert!(parse_key("Ctrl+").is_err());
+        assert!(parse_key("Ctrl+Banana").is_err());
+        assert!(parse_key("").is_err());
+        assert_eq!(display("Right Right"), "Right ×2");
+        assert_eq!(display("Ctrl+Return"), "Ctrl+Enter");
+        assert_eq!(display("Escape"), "Esc");
+    }
+
+    #[test]
+    fn several_bindings_per_action_save_and_load() {
+        let overrides = peter();
+        assert_eq!(keys_in("pane", "next-agent", &overrides), ["Ctrl+J", "Right Right"]);
+        assert_eq!(from_settings(&to_settings(&overrides)), overrides, "kept in settings as is");
+        assert_eq!(import(&export(&overrides)).unwrap(), overrides, "and in an exported profile");
+        assert!(export(&overrides).contains("\"version\": 2"));
+        // A one-chord profile from before still loads: its key replaces the default.
+        let old = import(r#"{"version": 1, "bindings": {"switcher": "Ctrl+P"}}"#).unwrap();
+        assert_eq!(action_for("pane", "Ctrl+P", &old, all()), Some("switcher"));
+        assert_eq!(action_for("pane", "Ctrl+K", &old, all()), None, "the default key is replaced");
+        assert_eq!(action_for("launch", "Ctrl+P", &old, all()), Some("switcher"));
+        assert_eq!(from_settings(&json!({"switcher": "Ctrl+P"})), old, "the old setting too");
+        assert!(import(r#"{"version": 3, "bindings": {}}"#).is_err());
+        assert!(import(r#"{"version": 2, "bindings": {"no-such-action": {"main": {"add": ["Ctrl+Q"]}}}}"#).is_err());
+        assert!(import(r#"{"version": 2, "bindings": {"mute": {"nowhere": {"add": ["Ctrl+Q"]}}}}"#).is_err());
+        assert!(import(r#"{"version": 2, "bindings": {"mute": {"main": {"add": ["Right Left"]}}}}"#).is_err());
+    }
+
+    #[test]
+    fn user_bindings_reach_child_contexts_and_add_to_defaults() {
+        let overrides = peter();
+        for state in ["main", "workspace", "navigation", "pane", "sidebar", "settings", "updates", "composer"] {
+            assert_eq!(action_for(state, "Ctrl+J", &overrides, all()), Some("next-agent"), "Ctrl+J in {state}");
+        }
+        assert_eq!(action_for("pane", "N", &overrides, all()), Some("next-attention"), "N is still next attention");
+        assert_eq!(action_for("launch", "Ctrl+J", &overrides, all()), None, "dialogs are not everywhere");
+        // A binding in the explorer is the explorer's alone.
+        let explorer = add(&Overrides::new(), "mute", "sidebar", "Shift+M").unwrap();
+        assert_eq!(action_for("sidebar", "Shift+M", &explorer, all()), Some("mute"));
+        assert_eq!(action_for("pane", "Shift+M", &explorer, all()), None);
+        // Any action, not only a few; removing a default and resetting it.
+        let gone = remove(&Overrides::new(), "next-attention", "navigation", "N");
+        assert_eq!(action_for("sidebar", "N", &gone, all()), None);
+        assert_eq!(action_for("sidebar", "Ctrl+J", &gone, all()), Some("next-attention"));
+        assert!(reset(&gone, "next-attention", "navigation").is_empty());
+        let both = remove(&peter(), "next-agent", "main", "Ctrl+J");
+        assert_eq!(keys_in("pane", "next-agent", &both), ["Right Right"]);
+        // The user's own keys come first, for the bar.
+        let extra = add(&Overrides::new(), "switcher", "main", "Ctrl+P").unwrap();
+        assert_eq!(keys_in("pane", "switcher", &extra), ["Ctrl+P", "Space", "Ctrl+K"]);
+        assert_eq!(hints("pane", &extra, all()).iter().find(|b| b.action == "switcher").unwrap().keys[0], "Ctrl+P");
+    }
+
+    #[test]
+    fn typing_keys_from_outside_never_reach_the_composer() {
+        let overrides = peter();
+        assert!(!keys_in("composer", "next-agent", &overrides).contains(&"Right Right".to_owned()));
+        assert_eq!(double_action("composer", "Right", &overrides, all()), None, "Right Right moves the cursor twice");
+        let letters = add(&Overrides::new(), "mute", "main", "M").unwrap();
+        assert_eq!(action_for("pane", "M", &letters, all()), Some("mute"));
+        assert_eq!(action_for("composer", "M", &letters, all()), None, "M types");
+        assert_eq!(action_for("search", "M", &letters, all()), None);
+        // Bound there on purpose, it works there.
+        let there = add(&overrides, "next-agent", "composer", "Right Right").unwrap();
+        assert_eq!(double_action("composer", "Right", &there, all()), Some("next-agent"));
+    }
+
+    #[test]
+    fn clashes_are_found_refused_and_taken_over() {
+        let clash = add(&Overrides::new(), "next-agent", "main", "J").unwrap_err();
+        let Refusal::Clash(clashes) = clash else { panic!("{clash:?}") };
+        let states: Vec<&str> = clashes.iter().map(|c| c.state).collect();
+        assert!(states.contains(&"sidebar") && states.contains(&"pane"), "J is the explorer's next and the chat's next card: {states:?}");
+        let taken = take_over(&Overrides::new(), "next-agent", "main", "J").unwrap();
+        assert!(clashes(&taken).is_empty());
+        assert_eq!(action_for("sidebar", "J", &taken, all()), Some("next-agent"));
+        assert_eq!(action_for("sidebar", "Down", &taken, all()), Some("agent-next"), "the other keys stay");
+        assert!(matches!(add(&Overrides::new(), "zoom", "main", "Ctrl+V"), Err(Refusal::Reserved(_))));
+        assert!(matches!(add(&Overrides::new(), "zoom", "main", "Ctrl+C Ctrl+C"), Err(Refusal::Reserved(_))));
+        assert!(take_over(&Overrides::new(), "zoom", "main", "Ctrl+Z").is_err(), "reserved cannot be taken over");
+        assert!(matches!(add(&Overrides::new(), "zoom", "main", "Banana"), Err(Refusal::Invalid(_))));
+        // A double press is not its single press.
+        assert!(add(&Overrides::new(), "next-agent", "sidebar", "Right Right").is_ok());
+        assert!(clashes(&Overrides::new()).is_empty(), "the defaults agree");
+        let clash = add(&peter(), "mute", "pane", "Right Right").unwrap_err();
+        assert!(matches!(clash, Refusal::Clash(_)), "inherited from everywhere: {clash:?}");
+        assert!(import(&export(&add_unchecked(&peter(), "mute", "pane", "Right Right"))).unwrap_err().contains("Right ×2"), "a clashing profile is refused");
+    }
+
+    #[test]
+    fn a_double_press_is_its_second_press_within_the_window() {
+        let window = std::time::Duration::from_millis(300);
+        let t0 = std::time::Instant::now();
+        let ms = |n| t0 + std::time::Duration::from_millis(n);
+        let mut presses = Presses::default();
+        assert!(!presses.press("Right", t0, window, false));
+        assert!(presses.press("Right", ms(200), window, false), "the second in time");
+        assert!(!presses.press("Right", ms(300), window, false), "a third starts again");
+        assert!(!presses.press("Right", ms(700), window, false), "too late");
+        assert!(!presses.press("Left", ms(750), window, false));
+        assert!(!presses.press("Right", ms(800), window, false), "another key between");
+        assert!(!presses.press("Right", ms(820), window, true), "a held key repeating is not a double press");
+        assert!(!presses.press("Right", ms(900), window, false));
+        assert!(presses.press("Right", ms(1199), window, false));
+    }
+
+    #[test]
+    fn a_single_press_keeps_its_meaning() {
+        let overrides = peter();
+        let nothing = Facts { rows: true, ..Facts::default() };
+        // Nothing is on Right in the chat: the second Right is the next agent.
+        assert_eq!(action_for("pane", "Right", &overrides, nothing), None);
+        assert_eq!(double_action("pane", "Right", &overrides, nothing), Some("next-agent"));
+        // On a gallery or a clip Right steps or seeks, each press, at once.
+        let card = Facts { artifact: true, artifacts: true, ..nothing };
+        assert_eq!(action_for("pane", "Right", &overrides, card), Some("artifact-forward"));
+        assert_eq!(double_action("pane", "Right", &overrides, card), None, "seeking twice is not a jump");
+        // The explorer's Right unfolds; with nothing to unfold it is free.
+        assert_eq!(double_action("sidebar", "Right", &overrides, Facts { folds: true, ..nothing }), None);
+        assert_eq!(double_action("sidebar", "Right", &overrides, nothing), Some("next-agent"));
+        // Bound in the explorer itself, the first Right unfolds and the second jumps.
+        let there = add(&overrides, "next-agent", "sidebar", "Right Right").unwrap();
+        assert_eq!(action_for("sidebar", "Right", &there, Facts { folds: true, ..nothing }), Some("unfold"));
+        assert_eq!(double_action("sidebar", "Right", &there, Facts { folds: true, ..nothing }), Some("next-agent"));
+        assert_eq!(double_action("pane", "Left", &overrides, nothing), None);
+    }
+
+    #[test]
+    fn every_action_can_be_bound_but_not_a_control_s_own_keys() {
+        let actions: Vec<&str> = actions().iter().map(|(a, _)| *a).collect();
+        for action in ["next-agent", "previous-agent", "mute", "next-attention", "agent-next", "orchestrator", "escape"] {
+            assert!(actions.contains(&action), "{action}");
+        }
+        for action in ["send", "newline", "hint-digit", "artifact-choose", "launch-model"] {
+            assert!(!actions.contains(&action), "{action} is the control's");
+        }
+        assert!(matches!(add(&Overrides::new(), "send", "composer", "Ctrl+Q"), Err(Refusal::Invalid(_))));
     }
 
     #[test]
