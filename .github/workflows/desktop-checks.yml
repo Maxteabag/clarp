@@ -51,7 +51,11 @@ jobs:
           shared-key: desktop-debug
       - name: Unit and contract tests
         working-directory: desktop-rs
-        run: cargo test --locked -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint 2>&1 | tee /tmp/cargo-test.log
+        # pipefail: without it the job takes tee's exit code and a failing
+        # test passes.
+        run: |
+          set -o pipefail
+          cargo test --locked -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint 2>&1 | tee /tmp/cargo-test.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
