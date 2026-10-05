@@ -50,29 +50,212 @@ pub fn html_escaped(text: &str) -> String {
 
 const FILLER: char = '\u{E000}';
 const PAUSE: char = '\u{E001}';
+const SOFT_MARKS: &str = ",;:—–";
+const END_MARKS: &str = ".!?…";
+const WORD_STOPS: &str = "—–,;:!?…()[]\"“”<";
+
+/// A pause marker sits where a `<break/>` was; around a filler it counts as
+/// the space it will become.
+fn is_blank(c: char) -> bool {
+    c == ' ' || c == '\t' || c == PAUSE
+}
+
+fn gap_text(gap: &[char]) -> String {
+    if gap.contains(&PAUSE) {
+        PAUSE.to_string()
+    } else if gap.is_empty() {
+        String::new()
+    } else {
+        " ".to_owned()
+    }
+}
+
+/// Only a plain lowercase word: "iOS", "npm" in backticks, file.py stay as written.
+fn capitalize_sentence(rest: &[char]) -> Vec<char> {
+    let end = rest
+        .iter()
+        .position(|c| c.is_whitespace() || WORD_STOPS.contains(*c))
+        .unwrap_or(rest.len());
+    let mut word = &rest[..end];
+    while let [head @ .., last] = word {
+        if !".'’*_".contains(*last) {
+            break;
+        }
+        word = head;
+    }
+    let plain = word.first().is_some_and(|c| c.is_lowercase())
+        && word.iter().all(|c| c.is_lowercase() || "'’-".contains(*c));
+    if !plain {
+        return rest.to_vec();
+    }
+    rest[0]
+        .to_uppercase()
+        .chain(rest[1..].iter().copied())
+        .collect()
+}
+
+/// Remove the filler marker at `i` with the punctuation that only it needed.
+/// Mirrors `server/lib/voice_markup.py`; `contract/fixtures/voice-display.json`
+/// is the contract every client runs.
+fn close_vox_gap(s: &[char], i: usize) -> Vec<char> {
+    static LINE_OPENING: LazyLock<Regex> = LazyLock::new(|| {
+        re(
+            r"^[ \t\x{E001}]*(?:(?:[-*+>]|\d+[.)]|#{1,6})[ \t\x{E001}]+)*(?:\*\*|__|\*|_)?[ \t\x{E001}]*$",
+        )
+    });
+    let blank_at = |k: usize| s.get(k).is_some_and(|c| is_blank(*c));
+    let mut j = i;
+    while j > 0 && is_blank(s[j - 1]) {
+        j -= 1;
+    }
+    let mut m = i + 1;
+    while blank_at(m) {
+        m += 1;
+    }
+    let space: Vec<char> = gap_text(&[&s[j..i], &s[i + 1..m]].concat())
+        .chars()
+        .collect();
+    let right = s.get(m).copied();
+    let mut after = m + 1;
+    enum Kind {
+        Soft,
+        EndMark,
+        LineEnd,
+        Word,
+    }
+    let kind = match right {
+        Some(c)
+            if SOFT_MARKS.contains(c) || (c == '-' && (after >= s.len() || blank_at(after))) =>
+        {
+            while blank_at(after) {
+                after += 1;
+            }
+            Kind::Soft
+        }
+        Some(c) if END_MARKS.contains(c) => Kind::EndMark,
+        None | Some('\n') => Kind::LineEnd,
+        Some(_) => Kind::Word,
+    };
+    let left = j.checked_sub(1).map(|k| s[k]);
+    let line_start = s[..i].iter().rposition(|c| *c == '\n').map_or(0, |k| k + 1);
+    let line_before: String = s[line_start..i].iter().collect();
+    let mut out: Vec<char>;
+    if LINE_OPENING.is_match(&line_before).unwrap_or(false)
+        || left.is_some_and(|c| ".!?".contains(c))
+    {
+        // The filler opened a sentence: its comma or stop goes with it and
+        // the next word starts the sentence.
+        if matches!(kind, Kind::EndMark) {
+            while s
+                .get(after)
+                .is_some_and(|c| END_MARKS.contains(*c) || is_blank(*c))
+            {
+                after += 1;
+            }
+        }
+        let rest = if matches!(kind, Kind::Soft | Kind::EndMark) {
+            &s[after.min(s.len())..]
+        } else {
+            &s[m..]
+        };
+        out = s[..j].to_vec();
+        if j < i && rest.first().is_some_and(|c| *c != '\n') {
+            out.extend(gap_text(&s[j..i]).chars());
+        }
+        out.extend(capitalize_sentence(rest));
+        return out;
+    }
+    if left.is_some_and(|c| SOFT_MARKS.contains(c))
+        || (left == Some('-') && j > 1 && is_blank(s[j - 2]))
+    {
+        if matches!(kind, Kind::EndMark | Kind::LineEnd) {
+            // A comma left dangling before a stop or a line end goes too.
+            let mut k = j - 1;
+            while k > 0 && is_blank(s[k - 1]) {
+                k -= 1;
+            }
+            out = s[..k].to_vec();
+            out.extend_from_slice(&s[m..]);
+            return out;
+        }
+        // The mark before the filler is the sentence's own; keep it and drop
+        // the filler's second one.
+        out = s[..j].to_vec();
+        out.push(' ');
+        out.extend_from_slice(if matches!(kind, Kind::Soft) {
+            &s[after..]
+        } else {
+            &s[m..]
+        });
+        return out;
+    }
+    let rest = if matches!(kind, Kind::Soft) && right == Some(',') {
+        &s[after..]
+    } else {
+        &s[m..]
+    };
+    out = s[..j].to_vec();
+    if rest
+        .first()
+        .is_some_and(|c| *c != '\n' && !",;:.!?…".contains(*c))
+    {
+        out.extend(space);
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// Hide `<vox>` fillers from the written text, with the punctuation only the
+/// filler needed.
+fn drop_vox_for_display(text: &str) -> String {
+    static VOX_CONTENT: LazyLock<Regex> = LazyLock::new(|| re(r"(?is)<vox\b[^>]*>(.*?)</vox>"));
+    static VOX_EDGE: LazyLock<Regex> =
+        LazyLock::new(|| re(r"(?s)^([\s,.;:!?…—–-]*)(.*?)([\s,.;:!?…—–-]*)$"));
+    static VOX_RUN: LazyLock<Regex> =
+        LazyLock::new(|| re(r"\x{E000}(?:[ \t\x{E001}]*[,;:—–]?[ \t\x{E001}]*\x{E000})+"));
+    let marked = VOX_CONTENT
+        .replace_all(text, |caps: &Captures| {
+            // Punctuation written inside the filler ("<vox>um,</vox>") belongs
+            // to the sentence around it, so it moves outside the hidden part.
+            let edge = VOX_EDGE
+                .captures(&caps[1])
+                .ok()
+                .flatten()
+                .expect("edge pattern matches anything");
+            if edge[2].is_empty() {
+                format!("{}{}", &edge[1], &edge[3])
+            } else {
+                format!("{}{FILLER}{}", &edge[1], &edge[3])
+            }
+        })
+        .into_owned();
+    if !marked.contains(FILLER) {
+        return marked;
+    }
+    let mut s: Vec<char> = replace_all(&VOX_RUN, &marked, &FILLER.to_string())
+        .chars()
+        .collect();
+    while let Some(i) = s.iter().position(|c| *c == FILLER) {
+        s = close_vox_gap(&s, i);
+    }
+    s.into_iter().collect()
+}
 
 /// The written form of a reply: voice markup removed, and the gaps a spoken
 /// pause or filler leaves closed only where they were. A still-streaming
 /// reply also hides a voice tag that has not finished arriving.
 pub fn cleaned_display_text(text: &str, streaming: bool) -> String {
-    static VOX_BLOCK: LazyLock<Regex> = LazyLock::new(|| re(r"(?is)<vox\b[^>]*>.*?</vox>"));
     static SPEAK_TAG: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)</?speak\b[^>]*>"));
     static AUDIO_TAG: LazyLock<Regex> =
         LazyLock::new(|| re(r"(?i)</?(?:break|speed|volume|emotion)\b[^>]*/?>"));
-    // Spoken-only parts leave gaps in the written text: a pause often
-    // stands in for a comma ("Sure <break/> here's") and a filler sits
-    // between two ("lines, <vox>um</vox>, comma"). Mark where they were,
-    // then close the gap there only; spacing elsewhere (code, tables) stays.
+    // A spoken pause often stands in for a comma ("Sure <break/> here's"):
+    // mark where it was, then close the gap there only; spacing elsewhere
+    // (code, tables) stays.
     static PAUSE_TAG: LazyLock<Regex> = LazyLock::new(|| re(r"(?i)[ \t]*<break\b[^>]*/?>[ \t]*"));
-    static SPOKEN_BLOCK: LazyLock<Regex> =
-        LazyLock::new(|| re(r"(?is)[ \t]*<vox\b[^>]*>.*?</vox>[ \t]*"));
-    static DOUBLED_MARK: LazyLock<Regex> = LazyLock::new(|| re(r"([,;:])\x{E000}[,;:]"));
-    static BEFORE_MARK: LazyLock<Regex> =
-        LazyLock::new(|| re(r"(?<=\S)[\x{E000}\x{E001}]+(?=[,.;:!?)])"));
-    static WORD_PAUSE: LazyLock<Regex> = LazyLock::new(|| {
-        re(r"(?<=[\p{L}\p{N}])[\x{E000}\x{E001}]*\x{E001}[\x{E000}\x{E001}]*(?=[\p{L}\p{N}])")
-    });
-    static BETWEEN: LazyLock<Regex> = LazyLock::new(|| re(r"(?<=\S)[\x{E000}\x{E001}]+(?=\S)"));
+    static BEFORE_MARK: LazyLock<Regex> = LazyLock::new(|| re(r"(?<=\S)\x{E001}+(?=[,.;:!?)])"));
+    static WORD_PAUSE: LazyLock<Regex> =
+        LazyLock::new(|| re(r"(?<=[\p{L}\p{N}])\x{E001}+(?=[\p{L}\p{N}])"));
+    static BETWEEN: LazyLock<Regex> = LazyLock::new(|| re(r"(?<=\S)\x{E001}+(?=\S)"));
     static LEFTOVER: LazyLock<Regex> = LazyLock::new(|| re(r"[\x{E000}\x{E001}]+"));
 
     // Most text has no markup: skip the passes (previews, a streaming
@@ -80,16 +263,7 @@ pub fn cleaned_display_text(text: &str, streaming: bool) -> String {
     if !text.contains('<') && !text.contains([FILLER, PAUSE]) {
         return text.trim().to_owned();
     }
-    let mut text = replace_all(&SPOKEN_BLOCK, text, &FILLER.to_string());
-    text = replace_all(&PAUSE_TAG, &text, &PAUSE.to_string());
-    text = replace_all(&VOX_BLOCK, &text, "");
-    text = replace_all(&SPEAK_TAG, &text, "");
-    text = replace_all(&AUDIO_TAG, &text, "");
-    text = replace_all(&DOUBLED_MARK, &text, "$1");
-    text = replace_all(&BEFORE_MARK, &text, "");
-    text = replace_all(&WORD_PAUSE, &text, ", ");
-    text = replace_all(&BETWEEN, &text, " ");
-    text = replace_all(&LEFTOVER, &text, "");
+    let mut text = text.to_owned();
     if streaming {
         let lower = text.to_ascii_lowercase();
         let open_vox = lower.rfind("<vox");
@@ -100,16 +274,36 @@ pub fn cleaned_display_text(text: &str, streaming: bool) -> String {
         if let Some(marker) = text.rfind('<') {
             let tail = text[marker..].to_lowercase();
             const PREFIXES: [&str; 12] = [
-                "<speak", "</speak", "<vox", "</vox", "<break", "</break", "<speed", "</speed",
-                "<volume", "</volume", "<emotion", "</emotion",
+                "<speak",
+                "</speak",
+                "<vox",
+                "</vox",
+                "<break",
+                "</break",
+                "<speed",
+                "</speed",
+                "<volume",
+                "</volume",
+                "<emotion",
+                "</emotion",
             ];
             let incomplete = !tail.contains('>')
-                && PREFIXES.iter().any(|p| p.starts_with(&tail) || tail.starts_with(p));
+                && PREFIXES
+                    .iter()
+                    .any(|p| p.starts_with(&tail) || tail.starts_with(p));
             if incomplete {
                 text.truncate(marker);
             }
         }
     }
+    text = replace_all(&PAUSE_TAG, &text, &PAUSE.to_string());
+    text = replace_all(&SPEAK_TAG, &text, "");
+    text = replace_all(&AUDIO_TAG, &text, "");
+    text = drop_vox_for_display(&text);
+    text = replace_all(&BEFORE_MARK, &text, "");
+    text = replace_all(&WORD_PAUSE, &text, ", ");
+    text = replace_all(&BETWEEN, &text, " ");
+    text = replace_all(&LEFTOVER, &text, "");
     text.trim().to_owned()
 }
 

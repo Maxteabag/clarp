@@ -44,7 +44,6 @@ _HIDDEN_OPEN_TAIL_RE = re.compile(
 
 _SPEAK_TAG_RE = re.compile(r"</?speak\b[^>]*>", re.IGNORECASE)
 _VOX_TAG_RE = re.compile(r"</?vox\b[^>]*>", re.IGNORECASE)
-_VOX_BLOCK_RE = re.compile(r"<vox\b[^>]*>.*?</vox>", re.DOTALL | re.IGNORECASE)
 _SSML_RE = re.compile(r"</?(?:break|speed|volume|emotion)\b[^>]*/?>", re.IGNORECASE)
 # Lowercase words in square brackets, not a markdown link or reference:
 # [laughing], [short pause]. Kept narrow so [x] checkboxes and [1] citations
@@ -60,25 +59,94 @@ _TEAM_BLOCK_RE = re.compile(r"<team\b[^>]*>.*?</team>", re.DOTALL | re.IGNORECAS
 _INLINE_WS_RE = re.compile(r"[ \t]{2,}")
 _SPACE_BEFORE_PUNCT_RE = re.compile(r"[ \t]+([,.;:!?])")
 _VOX_SENTINEL = "\ue000"
-_VOX_BOUNDARY_RE = re.compile(
-    rf"[ \t]*[,;:—–-]?[ \t]*{_VOX_SENTINEL}"
-    rf"[ \t]*[,.;:!?…—–-]?[ \t]*"
-)
-_LEADING_VOX_RE = re.compile(
-    rf"(^[ \t]*|[.!?][ \t]+|\n[ \t]*){_VOX_SENTINEL}[ \t]*([a-z])"
-)
+_VOX_CONTENT_RE = re.compile(r"<vox\b[^>]*>(.*?)</vox>", re.DOTALL | re.IGNORECASE)
+_VOX_EDGE_RE = re.compile(r"^([\s,.;:!?…—–-]*)(.*?)([\s,.;:!?…—–-]*)$", re.DOTALL)
+_VOX_RUN_RE = re.compile(rf"{_VOX_SENTINEL}(?:[ \t]*[,;:—–]?[ \t]*{_VOX_SENTINEL})+")
+# What may sit between the start of a line and a filler that opens a sentence:
+# list and quote markers, a heading, an opening bold or italic marker.
+_LINE_OPENING_RE = re.compile(
+    r"[ \t]*(?:(?:[-*+>]|\d+[.)]|#{1,6})[ \t]+)*(?:\*\*|__|\*|_)?[ \t]*")
+_SOFT_MARKS = ",;:—–"
+_END_MARKS = ".!?…"
+_WORD_STOPS = "—–,;:!?…()[]\"“”<"
 TTS_CHUNK_MAX_CHARS = 1_800
 
 
+def _vox_marker(match: re.Match[str]) -> str:
+    # Punctuation written inside the filler ("<vox>um,</vox>") belongs to the
+    # sentence around it, so it moves outside the hidden part.
+    lead, core, trail = _VOX_EDGE_RE.match(match.group(1)).groups()
+    return lead + _VOX_SENTINEL + trail if core else lead + trail
+
+
+def _capitalize_sentence(rest: str) -> str:
+    # Only a plain lowercase word: "iOS", "npm" in backticks, file.py stay as written.
+    end = 0
+    while end < len(rest) and not rest[end].isspace() and rest[end] not in _WORD_STOPS:
+        end += 1
+    word = rest[:end].rstrip(".'’*_")
+    if word and word[0].islower() and all(c.islower() or c in "'’-" for c in word):
+        return rest[0].upper() + rest[1:]
+    return rest
+
+
+def _close_vox_gap(s: str, i: int) -> str:
+    """Remove the filler marker at `i` with the punctuation that only it
+    needed. Mirrored by voice-markup.js, desktop text.rs and iOS
+    MarkdownParser; contract/fixtures/voice-display.json is the contract."""
+    j = i
+    while j > 0 and s[j - 1] in " \t":
+        j -= 1
+    m = i + 1
+    while m < len(s) and s[m] in " \t":
+        m += 1
+    space = " " if j < i or m > i + 1 else ""
+    right = s[m] if m < len(s) else ""
+    after = m + 1
+    if right and right in _SOFT_MARKS or (right == "-" and s[m + 1:m + 2] in ("", " ", "\t")):
+        while after < len(s) and s[after] in " \t":
+            after += 1
+        kind = "soft"
+    elif right and right in _END_MARKS:
+        kind = "end-mark"
+    elif right in ("", "\n"):
+        kind = "line-end"
+    else:
+        kind = "word"
+    left = s[j - 1] if j > 0 else ""
+    line_start = s.rfind("\n", 0, i) + 1
+    if _LINE_OPENING_RE.fullmatch(s, line_start, i) or (left and left in ".!?"):
+        # The filler opened a sentence: its comma or stop goes with it and
+        # the next word starts the sentence.
+        if kind == "end-mark":
+            while after < len(s) and s[after] in _END_MARKS + " \t":
+                after += 1
+        rest = s[after:] if kind in ("soft", "end-mark") else s[m:]
+        sep = " " if j < i and rest[:1] not in ("", "\n") else ""
+        return s[:j] + sep + _capitalize_sentence(rest)
+    if left and left in _SOFT_MARKS or (left == "-" and s[j - 2:j - 1] in (" ", "\t")):
+        if kind in ("end-mark", "line-end"):
+            # A comma left dangling before a stop or a line end goes too.
+            k = j - 1
+            while k > 0 and s[k - 1] in " \t":
+                k -= 1
+            return s[:k] + s[m:]
+        # The mark before the filler is the sentence's own; keep it and
+        # drop the filler's second one.
+        return s[:j] + " " + (s[after:] if kind == "soft" else s[m:])
+    rest = s[after:] if kind == "soft" and right == "," else s[m:]
+    sep = "" if rest[:1] in ("", "\n") or rest[0] in ",;:.!?…" else space
+    return s[:j] + sep + rest
+
+
 def _drop_vox_for_display(text: str) -> str:
-    marked = _VOX_BLOCK_RE.sub(_VOX_SENTINEL, text)
-    marked = _VOX_BOUNDARY_RE.sub(f" {_VOX_SENTINEL} ", marked)
-
-    def capitalize_after_boundary(match: re.Match[str]) -> str:
-        return f"{match.group(1)}{match.group(2).upper()}"
-
-    marked = _LEADING_VOX_RE.sub(capitalize_after_boundary, marked)
-    return marked.replace(_VOX_SENTINEL, " ")
+    s = _VOX_CONTENT_RE.sub(_vox_marker, text)
+    if _VOX_SENTINEL not in s:
+        return s
+    s = _VOX_RUN_RE.sub(_VOX_SENTINEL, s)
+    while (i := s.find(_VOX_SENTINEL)) >= 0:
+        s = _close_vox_gap(s, i)
+    return s
 
 
 def _drop_spoken_emotion_tags(text: str) -> str:
