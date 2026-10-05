@@ -430,3 +430,92 @@ fn a_streaming_message_never_shows_voice_markup() {
     assert_eq!(message.text, clarp_core::text::cleaned_display_text(&full, false));
     assert_eq!(message.text, "Sure Here it is, the plan step one and two.");
 }
+
+/// A stale live turn (tests/fixtures/live-real-stale-turn.json): GET /live
+/// kept the first turn running while two newer prompts started turns of
+/// their own in /log, and labelled every later item with the first turn.
+fn stale_turn() -> (LiveView, Vec<Message>, Value) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/live-real-stale-turn.json");
+    let body: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut view = LiveView::new();
+    view.apply_snapshot(body["live"].as_object().unwrap());
+    let rows = body["log"]["turns"].as_array().unwrap().iter().map(|r| row(r.clone())).collect();
+    (view, rows, body)
+}
+
+/// The chat as the window shows it: the rows entries do not stand for,
+/// each entry at its anchor (a durable row that took over an entry shows
+/// there, as the entry).
+fn shown_order(p: &Presented, rows: &[Message]) -> Vec<String> {
+    let taken: HashSet<&str> = p.entries.iter().map(|e| e.row.as_str()).filter(|r| !r.is_empty()).collect();
+    let rest: Vec<&Message> = rows
+        .iter()
+        .filter(|r| !taken.contains(r.id.as_str()) && !p.absorbed_rows.contains(&r.id) && !p.hidden_rows.contains(&r.id))
+        .collect();
+    let anchors = p.anchors(&rest);
+    assert_eq!(anchors.len(), p.entries.len());
+    assert!(anchors.windows(2).all(|w| w[0] <= w[1]), "entries keep their order: {anchors:?}");
+    let mut order: Vec<String> = Vec::new();
+    let mut next = 0;
+    for (index, row) in rest.iter().enumerate() {
+        while next < anchors.len() && anchors[next] == index {
+            order.push(p.entries[next].key.clone());
+            next += 1;
+        }
+        order.push(row.id.clone());
+    }
+    order.extend(p.entries[next..].iter().map(|e| e.key.clone()));
+    order
+}
+
+#[test]
+fn a_stale_turn_splits_at_the_newer_prompts() {
+    let (view, rows, body) = stale_turn();
+    let now = body["live"]["server_now_ms"].as_i64().unwrap();
+    let p = present(&view, &rows, &options(&[], now));
+    let order = shown_order(&p, &rows);
+    assert_eq!(
+        order,
+        [
+            "u-stale-first",
+            "live:cl:msg_a1:0",
+            "live:cl:toolu_a1",
+            "live:cl:msg_a2:0",
+            "live:cl:toolu_a3",
+            "u-stale-second",
+            "live:cl:msg_b1:0",
+            "live:explore:cl:toolu_b1",
+            "live:cl:toolu_b3",
+            "live:cl:msg_b4:0",
+            "u-stale-third",
+            "live:cl:msg_c1:0",
+            "live:cl:toolu_c1",
+            "live:cl:toolu_c2",
+            "live:cl:msg_c3:0",
+        ],
+        "each newer prompt above the items that started after it"
+    );
+    // The answers /log took over still show in their items' places.
+    let answer = p.entries.iter().find(|e| e.key == "live:cl:msg_b4:0").unwrap();
+    assert_eq!(answer.row, "msg-b4");
+    // The status line keeps working.
+    let line = status_line(&view, now).expect("busy");
+    assert_eq!((line.text.as_str(), line.busy), ("● git push · 0:14", true));
+}
+
+#[test]
+fn a_live_item_never_goes_above_a_row_written_before_it_started() {
+    // Any row not the turn's own, not only a prompt: the items that started
+    // after it go below it, the ones from before it stay above.
+    let (view, mut rows, body) = stale_turn();
+    let started = body["live"]["turn"]["started_at_ms"].as_i64().unwrap();
+    let mut note = user_at("u-note", started + 43_000);
+    note.role = "assistant".into();
+    let at = rows.iter().position(|r| r.id == "msg-a3").unwrap();
+    rows.insert(at, note);
+    let p = present(&view, &rows, &options(&[], 0));
+    let order = shown_order(&p, &rows);
+    let place = |id: &str| order.iter().position(|o| o == id).unwrap_or_else(|| panic!("{id} in {order:?}"));
+    assert!(place("live:cl:msg_a2:0") < place("u-note") && place("u-note") < place("live:cl:toolu_a3"), "{order:?}");
+    assert!(place("u-stale-second") < place("live:cl:msg_b1:0"), "{order:?}");
+}

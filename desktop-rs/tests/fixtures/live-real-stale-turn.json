@@ -1,0 +1,637 @@
+{
+ "title": "A stale live turn as a real Host showed it (2026-10-05, anonymised): GET /live kept the first turn running after its agent's process was killed twice, while two newer prompts started new turns in /log (their rows carry the new trace_ids). Every item, including the ones that started after each newer prompt, carries the first turn's turn_id. The desktop must keep each newer prompt above the items that started after it.",
+ "prompts": {
+  "first": "u-stale-first",
+  "second": "u-stale-second",
+  "third": "u-stale-third"
+ },
+ "live": {
+  "conv": "c-stale",
+  "session": "stale",
+  "agent_id": "agent-stale",
+  "epoch": "5a1e7e000001",
+  "lseq": 120,
+  "server_now_ms": 1791199855907,
+  "activity": {
+   "tool": {
+    "name": "Bash",
+    "call_id": "toolu_c2",
+    "label": "git push",
+    "item_id": "cl:toolu_c2",
+    "started_at_ms": 1791199841907
+   },
+   "running_tools": 1,
+   "headline": null,
+   "item_id": "cl:toolu_c2",
+   "since_ms": 1791199841907,
+   "turn_id": "73894fe2fee39d82",
+   "turn_started_ms": 1791199582140,
+   "state": "tool"
+  },
+  "turn": {
+   "turn_id": "73894fe2fee39d82",
+   "status": "running",
+   "started_at_ms": 1791199582140,
+   "ended_at_ms": null,
+   "worked_ms": null,
+   "tool_count": 0
+  },
+  "items": [
+   {
+    "id": "cl:msg_a1:0",
+    "kind": "reasoning",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 1,
+    "started_at_ms": 1791199584140,
+    "ended_at_ms": 1791199587140,
+    "title": "Looking at the parser first",
+    "text": "Looking at the parser first\n"
+   },
+   {
+    "id": "cl:toolu_a1",
+    "kind": "tool",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 2,
+    "started_at_ms": 1791199587240,
+    "ended_at_ms": 1791199623140,
+    "tool": {
+     "name": "Bash",
+     "call_id": "toolu_a1",
+     "category": "exec",
+     "group": null,
+     "label": "cargo test -p parser",
+     "command": "cargo test -p parser",
+     "explain": {
+      "text": "Runs cargo test -p parser.",
+      "level": 2,
+      "status": "ready"
+     },
+     "output": {
+      "tail": [
+       "ok"
+      ],
+      "total_lines": 1,
+      "truncated": false,
+      "exit_code": 0
+     },
+     "diff": null
+    }
+   },
+   {
+    "id": "cl:msg_a2:0",
+    "kind": "message",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 3,
+    "started_at_ms": 1791199624140,
+    "ended_at_ms": 1791199625140,
+    "row_id": "msg-a2",
+    "text": "The parser test fails on empty input; fixing it.",
+    "phase": "commentary"
+   },
+   {
+    "id": "cl:toolu_a3",
+    "kind": "tool",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "running",
+    "ordinal": 4,
+    "started_at_ms": 1791199626140,
+    "ended_at_ms": null,
+    "tool": {
+     "name": "Bash",
+     "call_id": "toolu_a3",
+     "category": "exec",
+     "group": null,
+     "label": "cargo build --release",
+     "command": "cargo build --release",
+     "explain": {
+      "text": "Runs cargo build --release.",
+      "level": 2,
+      "status": "ready"
+     },
+     "output": null,
+     "diff": null
+    }
+   },
+   {
+    "id": "cl:msg_b1:0",
+    "kind": "reasoning",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 5,
+    "started_at_ms": 1791199788312,
+    "ended_at_ms": 1791199791312,
+    "title": "Skipping the release build",
+    "text": "Skipping the release build\n"
+   },
+   {
+    "id": "cl:toolu_b1",
+    "kind": "tool",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 6,
+    "started_at_ms": 1791199791412,
+    "ended_at_ms": 1791199794312,
+    "tool": {
+     "name": "Bash",
+     "call_id": "toolu_b1",
+     "category": "read",
+     "group": "explore:cl:toolu_b1",
+     "label": "src/parser.rs",
+     "command": "src/parser.rs",
+     "explain": {
+      "text": "Runs src/parser.rs.",
+      "level": 2,
+      "status": "ready"
+     },
+     "output": {
+      "tail": [
+       "ok"
+      ],
+      "total_lines": 1,
+      "truncated": false,
+      "exit_code": 0
+     },
+     "diff": null
+    }
+   },
+   {
+    "id": "cl:toolu_b2",
+    "kind": "tool",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 7,
+    "started_at_ms": 1791199795412,
+    "ended_at_ms": 1791199798312,
+    "tool": {
+     "name": "Bash",
+     "call_id": "toolu_b2",
+     "category": "read",
+     "group": "explore:cl:toolu_b1",
+     "label": "tests/parser.rs",
+     "command": "tests/parser.rs",
+     "explain": {
+      "text": "Runs tests/parser.rs.",
+      "level": 2,
+      "status": "ready"
+     },
+     "output": {
+      "tail": [
+       "ok"
+      ],
+      "total_lines": 1,
+      "truncated": false,
+      "exit_code": 0
+     },
+     "diff": null
+    }
+   },
+   {
+    "id": "cl:toolu_b3",
+    "kind": "tool",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 8,
+    "started_at_ms": 1791199799412,
+    "ended_at_ms": 1791199802312,
+    "tool": {
+     "name": "Bash",
+     "call_id": "toolu_b3",
+     "category": "exec",
+     "group": null,
+     "label": "cargo test --lib",
+     "command": "cargo test --lib",
+     "explain": {
+      "text": "Runs cargo test --lib.",
+      "level": 2,
+      "status": "ready"
+     },
+     "output": {
+      "tail": [
+       "ok"
+      ],
+      "total_lines": 1,
+      "truncated": false,
+      "exit_code": 0
+     },
+     "diff": null
+    }
+   },
+   {
+    "id": "cl:msg_b4:0",
+    "kind": "message",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 9,
+    "started_at_ms": 1791199825312,
+    "ended_at_ms": 1791199826312,
+    "row_id": "msg-b4",
+    "text": "The unit tests pass.",
+    "phase": "final"
+   },
+   {
+    "id": "cl:msg_c1:0",
+    "kind": "reasoning",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 10,
+    "started_at_ms": 1791199837907,
+    "ended_at_ms": 1791199839907,
+    "title": "Committing the parser fix",
+    "text": "Committing the parser fix\n"
+   },
+   {
+    "id": "cl:toolu_c1",
+    "kind": "tool",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "completed",
+    "ordinal": 11,
+    "started_at_ms": 1791199840007,
+    "ended_at_ms": 1791199840907,
+    "tool": {
+     "name": "Bash",
+     "call_id": "toolu_c1",
+     "category": "exec",
+     "group": null,
+     "label": "git commit -am 'fix(parser): empty input'",
+     "command": "git commit -am 'fix(parser): empty input'",
+     "explain": {
+      "text": "Runs git commit -am 'fix(parser): empty input'.",
+      "level": 2,
+      "status": "ready"
+     },
+     "output": {
+      "tail": [
+       "ok"
+      ],
+      "total_lines": 1,
+      "truncated": false,
+      "exit_code": 0
+     },
+     "diff": null
+    }
+   },
+   {
+    "id": "cl:toolu_c2",
+    "kind": "tool",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "running",
+    "ordinal": 12,
+    "started_at_ms": 1791199841907,
+    "ended_at_ms": null,
+    "tool": {
+     "name": "Bash",
+     "call_id": "toolu_c2",
+     "category": "exec",
+     "group": null,
+     "label": "git push",
+     "command": "git push",
+     "explain": {
+      "text": "Runs git push.",
+      "level": 2,
+      "status": "ready"
+     },
+     "output": null,
+     "diff": null
+    }
+   },
+   {
+    "id": "cl:msg_c3:0",
+    "kind": "message",
+    "rev": 3,
+    "conv": "c-stale",
+    "turn_id": "73894fe2fee39d82",
+    "status": "running",
+    "ordinal": 13,
+    "started_at_ms": 1791199842907,
+    "ended_at_ms": null,
+    "row_id": "live-c3",
+    "text": "Pushing the commit",
+    "phase": "commentary"
+   }
+  ]
+ },
+ "log": {
+  "conversation_id": "c-stale",
+  "turns": [
+   {
+    "id": "u-stale-first",
+    "role": "user",
+    "timestamp": "2026-10-05T11:26:22.136Z",
+    "text": "Fix the parser and run the tests.",
+    "kind": null,
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "user",
+    "trace_id": "73894fe2fee39d82",
+    "revision": 2000001,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "msg-a1",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:26:27.240Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "cargo test -p parser",
+      "action": "running command",
+      "file_path": "",
+      "status": "ok",
+      "id": "toolu_a1",
+      "command": "cargo test -p parser",
+      "description": "cargo test -p parser",
+      "result": ""
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "73894fe2fee39d82",
+    "revision": 2000002,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "msg-a2",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:27:04.140Z",
+    "text": "The parser test fails on empty input; fixing it.",
+    "kind": null,
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "73894fe2fee39d82",
+    "revision": 2000003,
+    "automated": false,
+    "automation_kind": "",
+    "phase": "commentary"
+   },
+   {
+    "id": "msg-a3",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:27:06.140Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "cargo build --release",
+      "action": "running command",
+      "file_path": "",
+      "status": "running",
+      "id": "toolu_a3",
+      "command": "cargo build --release",
+      "description": "cargo build --release",
+      "result": ""
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "73894fe2fee39d82",
+    "revision": 2000004,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "u-stale-second",
+    "role": "user",
+    "timestamp": "2026-10-05T11:29:45.312Z",
+    "text": "Stop that build, it is stuck. Just run the unit tests.",
+    "kind": null,
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "user",
+    "trace_id": "11b1a361ba20c946",
+    "revision": 2000005,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "msg-b1",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:29:51.412Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "src/parser.rs",
+      "action": "running command",
+      "file_path": "",
+      "status": "ok",
+      "id": "toolu_b1",
+      "command": "src/parser.rs",
+      "description": "src/parser.rs",
+      "result": ""
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "11b1a361ba20c946",
+    "revision": 2000006,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "msg-b2",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:29:55.412Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "tests/parser.rs",
+      "action": "running command",
+      "file_path": "",
+      "status": "ok",
+      "id": "toolu_b2",
+      "command": "tests/parser.rs",
+      "description": "tests/parser.rs",
+      "result": ""
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "11b1a361ba20c946",
+    "revision": 2000007,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "msg-b3",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:29:59.412Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "cargo test --lib",
+      "action": "running command",
+      "file_path": "",
+      "status": "ok",
+      "id": "toolu_b3",
+      "command": "cargo test --lib",
+      "description": "cargo test --lib",
+      "result": ""
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "11b1a361ba20c946",
+    "revision": 2000008,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "msg-b4",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:30:25.312Z",
+    "text": "The unit tests pass.",
+    "kind": null,
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "11b1a361ba20c946",
+    "revision": 2000009,
+    "automated": false,
+    "automation_kind": "",
+    "phase": "final"
+   },
+   {
+    "id": "u-stale-third",
+    "role": "user",
+    "timestamp": "2026-10-05T11:30:35.907Z",
+    "text": "Now commit it and tell me the hash.",
+    "kind": null,
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "user",
+    "trace_id": "255d8ac0c53f952d",
+    "revision": 2000010,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "msg-c1",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:30:40.007Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "git commit -am 'fix(parser): empty input'",
+      "action": "running command",
+      "file_path": "",
+      "status": "ok",
+      "id": "toolu_c1",
+      "command": "git commit -am 'fix(parser): empty input'",
+      "description": "git commit -am 'fix(parser): empty input'",
+      "result": ""
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "255d8ac0c53f952d",
+    "revision": 2000011,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "msg-c2",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:30:41.907Z",
+    "text": "",
+    "kind": null,
+    "tool_name": null,
+    "tools": [
+     {
+      "name": "Bash",
+      "summary": "git push",
+      "action": "running command",
+      "file_path": "",
+      "status": "running",
+      "id": "toolu_c2",
+      "command": "git push",
+      "description": "git push",
+      "result": ""
+     }
+    ],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "255d8ac0c53f952d",
+    "revision": 2000012,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   },
+   {
+    "id": "live-c3",
+    "role": "assistant",
+    "timestamp": "2026-10-05T11:30:42.907Z",
+    "text": "Pushing the commit",
+    "kind": "live",
+    "tool_name": null,
+    "tools": [],
+    "display_cells": [],
+    "origin": "agent",
+    "trace_id": "255d8ac0c53f952d",
+    "revision": 2000013,
+    "automated": false,
+    "automation_kind": "",
+    "phase": null
+   }
+  ]
+ }
+}

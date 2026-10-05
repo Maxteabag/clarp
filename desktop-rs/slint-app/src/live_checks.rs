@@ -105,6 +105,9 @@ pub fn live_check(out: String) {
     let (anchor1, anchor2) = (anchor.clone(), anchor.clone());
     let (height1, height2) = (height.clone(), height.clone());
     let (before1, before2) = (rows_before.clone(), rows_before.clone());
+    let stale: Rc<RefCell<(usize, usize)>> = Rc::default();
+    let (stale1, stale2) = (stale.clone(), stale.clone());
+    let out17 = out.clone();
     let fetched: Rc<std::cell::Cell<usize>> = Rc::default();
     let (fetched1, fetched2) = (fetched.clone(), fetched.clone());
     let stages: Vec<Stage> = vec![
@@ -673,6 +676,50 @@ pub fn live_check(out: String) {
             let order = anchor_order(&[REAL_PROMPT, REAL_ANSWER_ROW, ANCHOR_NEXT, ANCHOR_TOOL, ANCHOR_QUEUED]);
             check(in_order(&order), &format!("the queued message is below the running turn: {order:?}"));
             shot(&out13, "live-12-anchor-queued");
+            // A stale live turn: GET /live kept the first turn running while
+            // two newer prompts started turns of their own in /log.
+            control("/__control/live-load", &json!({"session": "stale", "fixture": "live-real-stale-turn.json", "agent_id": "agent-stale"})).is_ok()
+        })),
+        ("stale listed", Box::new(move |app, _window, _| {
+            if app.engine.borrow().roster().find("stale").is_none() {
+                return false;
+            }
+            app.engine.borrow_mut().select("stale");
+            true
+        })),
+        ("stale turn", Box::new(move |app, _window, elapsed| {
+            let open = app.engine.borrow().selected_session() == "stale" && app.engine.borrow().conversation("stale").is_some_and(|c| c.index_of(STALE_THIRD).is_some());
+            if !open || live_row(STALE_LAST).is_none() || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            let order = anchor_order(&STALE_ORDER);
+            check(in_order(&order), &format!("each newer prompt is above the items that started after it: {order:?}"));
+            check(status().starts_with("● git push · "), &format!("the status line keeps working: {:?}", status()));
+            check(report().follows, "the chat follows");
+            let (visible, detail) = last_row_visible();
+            check(visible, &format!("a follower stays at the end: {detail}"));
+            shot(&out17, "live-16-stale-turn");
+            *stale1.borrow_mut() = crate::view::sync_stats();
+            // The stale turn goes on: one more item, after the third prompt.
+            control("/__control/live-event", &json!({"session": "stale", "event": {"conv": "c-stale", "server_now_ms": STALE_THIRD_MS + 22_000, "ops": [
+                {"op": "upsert", "conv": "c-stale", "id": "cl:msg_c4:0", "kind": "message", "rev": 1, "item": {"id": "cl:msg_c4:0", "kind": "message", "rev": 1, "conv": "c-stale",
+                    "turn_id": "73894fe2fee39d82", "status": "running", "ordinal": 14, "started_at_ms": STALE_THIRD_MS + 21_000, "ended_at_ms": null, "text": "Pushed.", "phase": "final"}},
+            ]}}))
+            .is_ok()
+        })),
+        ("stale goes on", Box::new(move |_, _window, elapsed| {
+            if live_row(STALE_NEWEST).is_none() || elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            let mut ids = STALE_ORDER.to_vec();
+            ids.push(STALE_NEWEST);
+            let order = anchor_order(&ids);
+            check(in_order(&order), &format!("the new item goes at the end, nothing else moves: {order:?}"));
+            let (_, inserted_before) = *stale2.borrow();
+            check(crate::view::sync_stats().1 == inserted_before + 1, &format!("only the new row inserted ({inserted_before} → {})", crate::view::sync_stats().1));
+            check(report().follows, "the chat still follows");
+            let (visible, detail) = last_row_visible();
+            check(visible, &format!("a follower stays at the end: {detail}"));
             true
         })),
     ];
@@ -698,6 +745,24 @@ const ANCHOR_TURN: &str = "tr-anchor-2";
 const ANCHOR_TOOL: &str = "live:x:anchor-1";
 /// 2026-10-03T11:49:30Z, when the next message was written.
 const ANCHOR_STARTED: i64 = 1791028170000;
+
+const STALE_THIRD: &str = "u-stale-third";
+/// 2026-10-05T11:30:35.907Z, when the third prompt was written.
+const STALE_THIRD_MS: i64 = 1791199835907;
+const STALE_LAST: &str = "live:cl:msg_c3:0";
+const STALE_NEWEST: &str = "live:cl:msg_c4:0";
+/// The stale turn as it must read: each prompt above what started after it.
+const STALE_ORDER: [&str; 9] = [
+    "u-stale-first",
+    "live:cl:toolu_a1",
+    "live:cl:toolu_a3",
+    "u-stale-second",
+    "live:cl:msg_b1:0",
+    "msg-b4",
+    STALE_THIRD,
+    "live:cl:toolu_c2",
+    STALE_LAST,
+];
 
 /// Where each row (by id or live key) shows in the window.
 fn anchor_order(ids: &[&str]) -> Vec<Option<usize>> {
