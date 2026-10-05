@@ -30,6 +30,8 @@ pub struct PaneState {
     shown: Vec<Shown>,
     /// Built rows reused while their source is unchanged.
     rows: RowCache,
+    /// The rows' measured heights (the scrollbar's).
+    book: crate::scroll_book::HeightBook,
     /// The presentation settings the rows were last presented with; a
     /// preference change re-presents only when these moved.
     presented_with: Option<(i32, bool, bool)>,
@@ -53,13 +55,21 @@ pub struct PaneState {
 impl PaneState {
     fn new(id: &str) -> Self {
         let messages = Rc::new(VecModel::default());
+        let book = crate::scroll_book::HeightBook::new();
         Self {
             id: id.to_owned(),
             session: String::new(),
-            view: PaneView { id: id.into(), messages: ModelRc::from(messages.clone()), ..PaneView::default() },
+            view: PaneView {
+                id: id.into(),
+                messages: ModelRc::from(messages.clone()),
+                measure: ModelRc::from(book.measure.clone()),
+                before: ModelRc::from(book.before.clone()),
+                ..PaneView::default()
+            },
             messages,
             shown: Vec::new(),
             rows: RowCache::default(),
+            book,
             presented_with: None,
             report: Report { follows: true, at_end: true, ..Report::default() },
             draft: String::new(),
@@ -108,6 +118,65 @@ fn live_source(entry: &clarp_core::live_present::Entry) -> Shown {
 }
 
 impl App {
+    /// Brings every pane's scroll book up to its rows; true while rows
+    /// remain to be measured. A pane busy elsewhere is left for next time.
+    pub fn measure_rows(&self) -> bool {
+        let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return true };
+        let mut busy = false;
+        for pane in panes.iter_mut() {
+            busy |= pane.book.update(&pane.messages);
+        }
+        busy
+    }
+
+    /// A row the transcript measured off screen.
+    pub fn row_measured(&self, pane: &str, batch: i32, id: &str, height: f32, width: f32) {
+        let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return };
+        if let Some(pane) = panes.iter_mut().find(|p| p.id == pane) {
+            pane.book.measured(batch, id, height, width);
+            crate::scroll_book::measure_soon();
+        }
+    }
+
+    /// A row the transcript drew.
+    pub fn row_shown(&self, pane: &str, id: &str, height: f32, width: f32) {
+        let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return };
+        if let Some(pane) = panes.iter_mut().find(|p| p.id == pane)
+            && pane.book.shown(&pane.messages, id, height, width)
+        {
+            crate::scroll_book::measure_soon();
+        }
+    }
+
+    /// A transcript's width or text size changed: its rows are measured again.
+    pub fn relayout(&self, pane: &str) {
+        let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return };
+        if let Some(pane) = panes.iter_mut().find(|p| p.id == pane) {
+            pane.book.relayout();
+            crate::scroll_book::measure_soon();
+        }
+    }
+
+    /// The row `y` px down a pane's chat falls on.
+    pub fn row_at(&self, pane: &str, y: f32) -> i32 {
+        let Ok(panes) = self.pane_state.try_borrow() else { return 0 };
+        panes.iter().find(|p| p.id == pane).map_or(0, |p| p.book.row_at(y) as i32)
+    }
+
+    /// The active chat's measured height of row `id`, and its rows measured
+    /// and waiting (for the checks).
+    pub fn measured_height(&self, id: &str) -> (Option<f32>, (usize, usize)) {
+        let Some(index) = self.active_index() else { return (None, (0, 0)) };
+        let panes = self.pane_state.borrow();
+        (panes[index].book.height(id), panes[index].book.progress())
+    }
+
+    /// How long the active chat's last measuring pass took (for the checks).
+    pub fn measuring_took(&self) -> Option<std::time::Duration> {
+        let index = self.active_index()?;
+        self.pane_state.borrow()[index].book.last_pass()
+    }
+
     /// Index of the active pane in `pane_state`.
     pub fn active_index(&self) -> Option<usize> {
         let engine = self.engine.borrow();
@@ -134,8 +203,10 @@ impl App {
             pane.cards.clear();
             pane.slots.clear();
             pane.messages.set_vec(Vec::new());
+            pane.book.clear();
             pane.to_latest += 1;
         }
+        crate::scroll_book::measure_soon();
     }
 
     /// Panes and transcript rows the window holds, for the memory line.
@@ -473,6 +544,7 @@ impl App {
         }
         pane.rows.keep_live(&kept.iter().map(String::as_str).collect());
         sync_rows(&pane.messages, &mut pane.shown, fresh, rows);
+        crate::scroll_book::measure_soon();
     }
 
     /// What a transcript's rows depend on among the preferences.
@@ -593,6 +665,7 @@ impl App {
                     pane.shown[at].2 = signature;
                     let row = pane.rows.live_row(entry);
                     pane.messages.set_row_data(at, row);
+                    crate::scroll_book::measure_soon();
                 }
             }
             drop(engine);
@@ -637,6 +710,7 @@ impl App {
                     pane.cards.clear();
                             pane.slots.clear();
                     pane.messages.set_vec(Vec::new());
+                    pane.book.clear();
                     pane.draft = self.engine.borrow().draft(&session);
                     pane.draft_set += 1;
                     pane.to_latest += 1;

@@ -1,6 +1,6 @@
 import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
 import { Composer, Attachment } from "composer.slint";
-import { Transcript, MessageRow } from "transcript.slint";
+import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
 import { TypingIndicator } from "cells.slint";
 import { ProfileBridge } from "profile.slint";
@@ -37,6 +37,9 @@ export struct PaneView {
     shown: bool,
     active: bool,
     messages: [MessageRow],
+    // The scroll book's: rows to measure, and where each row starts (px).
+    measure: [MeasureRow],
+    before: [float],
     draft: string,
     // Bumped when `draft` should replace what the composer holds (another
     // chat, a send, the same chat typed in another pane).
@@ -176,6 +179,9 @@ export component Pane inherits Rectangle {
             width: parent.width - 2 * Frame.side;
             height: parent.height - Frame.top - Frame.bottom;
             rows: root.pane.messages;
+            pane-id: root.pane.id;
+            measure: root.pane.measure;
+            before: root.pane.before;
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }

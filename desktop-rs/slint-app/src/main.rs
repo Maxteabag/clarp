@@ -16,6 +16,7 @@ mod live_view;
 mod launch;
 mod panes;
 mod perf;
+mod scroll_book;
 mod scroll_journal;
 mod preview_view;
 mod platform;
@@ -728,6 +729,23 @@ fn main() {
         let session = app.session_of(&pane);
         platform::audio::with(|audio| audio.cancel_transcriptions_for_session(&session));
     }));
+    let book = window.global::<ScrollBook>();
+    book.on_measured(|pane, batch, id, height, width| {
+        if let Some(app) = app() {
+            app.row_measured(&pane, batch, &id, height, width);
+        }
+    });
+    book.on_shown(|pane, id, height, width| {
+        if let Some(app) = app() {
+            app.row_shown(&pane, &id, height, width);
+        }
+    });
+    book.on_relayout(|pane| {
+        if let Some(app) = app() {
+            app.relayout(&pane);
+        }
+    });
+    book.on_row_at(|pane, y| app().map_or(0, |app| app.row_at(&pane, y)));
     window.on_scroll_journal(|pane, cause, old, new, old_place, new_place, content, viewport, at_end, follow, rows| {
         scroll_journal::record(scroll_journal::Move { pane: pane.into(), cause: cause.into(), old, new, old_place, new_place, content, viewport, at_end, follow, rows });
     });

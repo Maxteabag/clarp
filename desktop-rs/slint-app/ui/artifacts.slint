@@ -331,6 +331,8 @@ component OptionRow inherits Rectangle {
 // the composer (Enter sends, Escape goes back to the chat).
 component OwnAnswer inherits HorizontalLayout {
     in property <ArtifactItem> artifact;
+    // A copy measured off screen never takes the keyboard.
+    in property <bool> measuring;
     in property <int> number;
     property <bool> chosen: root.artifact.chosen == root.artifact.options.length;
     height: 30px;
@@ -395,7 +397,7 @@ component OwnAnswer inherits HorizontalLayout {
         }
         Timer {
             interval: 30ms;
-            running: root.artifact.editing && !root.asked;
+            running: root.artifact.editing && !root.asked && !root.measuring;
             triggered => {
                 root.asked = true;
                 field.focus();
@@ -419,6 +421,7 @@ component OwnAnswer inherits HorizontalLayout {
 // how it was answered), with the send's status beside them.
 component DecisionBody inherits VerticalLayout {
     in property <ArtifactItem> artifact;
+    in property <bool> measuring;
     property <bool> question: !root.artifact.approval;
     // Its digits work while it is selected and the chat has the keyboard.
     property <bool> live: root.artifact.selected && Focus.mode == "pane";
@@ -450,6 +453,7 @@ component DecisionBody inherits VerticalLayout {
         if root.artifact.allow-custom: OwnAnswer {
             artifact: root.artifact;
             number: root.artifact.options.length + 1;
+            measuring: root.measuring;
         }
     }
     if root.artifact.question != "" || root.artifact.resolved != "": HorizontalLayout {
@@ -608,6 +612,9 @@ component ProgressBody inherits VerticalLayout {
 
 export component ArtifactCard inherits Rectangle {
     in property <ArtifactItem> artifact;
+    // A copy measured off screen (the transcript's): it reports nothing and
+    // takes no keyboard.
+    in property <bool> measuring;
     // The chat's visible band, in window coordinates: the keyboard only
     // reaches cards in it. The card reports where it is a few times a
     // second (read fresh: its absolute position is not tracked through the
@@ -616,7 +623,7 @@ export component ArtifactCard inherits Rectangle {
     in property <length> view-bottom;
     Timer {
         interval: 150ms;
-        running: true;
+        running: !root.measuring;
         triggered => { ArtifactBridge.card-shown(root.artifact.id, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
     }
     property <color> tint: ArtifactLook.tint(root.artifact.kind, root.artifact.failed);
@@ -671,7 +678,7 @@ export component ArtifactCard inherits Rectangle {
             }
         }
         if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
-        if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; }
+        if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; measuring: root.measuring; }
         // The body's first lines (iOS shows four), always four lines tall.
         // The body's first lines (iOS: four for a document, five for
         // research), as tall as they are up to that.
