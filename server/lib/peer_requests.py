@@ -260,8 +260,17 @@ def plan_message(replier: dict, request_id: str, kind: str, text: str, *,
     retried or duplicated reply is the same message."""
     requester = requester or find_request(replier, request_id)
     digest = hashlib.sha256(f"{kind}\0{text}".encode()).hexdigest()[:12]
-    client_id = f"peer-res-{request_id}" if kind == "result" else f"peer-{kind}-{request_id}-{digest}"
-    return {"session": requester["session"], "text": reply_text(request_id, replier, kind, text),
+    body = reply_text(request_id, replier, kind, text)
+    client_id = f"peer-{kind}-{request_id}-{digest}"
+    if kind == "result":
+        client_id = f"peer-res-{request_id}"
+        first = conn().execute("SELECT text FROM messages WHERE agent_id=? AND message_id=?",
+                               (requester["agent_id"], "u-" + client_id)).fetchone()
+        if first and first[0] != body:
+            # A later, different result is a new message; under the first one's
+            # id the Host would drop it as a duplicate of that first answer.
+            client_id = f"peer-res-{request_id}-{digest}"
+    return {"session": requester["session"], "text": body,
             "force_session": True, "synthesize_audio": False, "hands_free": False,
             "origin": "agent", "sender": replier["session"], "client_msg_id": client_id}
 
