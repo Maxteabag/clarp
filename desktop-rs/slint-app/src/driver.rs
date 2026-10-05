@@ -68,6 +68,7 @@ fn check(ok: bool, what: &str) {
 }
 
 fn finish() {
+    row_overlap_checks::watch_verdict();
     println!("{}", if exit_code() == 0 { "E2E_PASS" } else { "E2E_FAIL" });
     if let Err(error) = slint::quit_event_loop() {
         eprintln!("clarp-slint: {error}");
@@ -303,6 +304,7 @@ fn run_stages(mut stages: Vec<Stage>) {
             finish();
             return;
         }
+        row_overlap_checks::watched(name);
         if stage(app, &window, elapsed) {
             index.set(index.get() + 1);
             since.set(Instant::now());
@@ -333,8 +335,14 @@ fn view() -> crate::PaneView {
 /// rows arrive, and End resumes it. Needs the fake Host.
 pub fn start_check(name: &str, out: String) {
     match name {
-        "transcript" => transcript_check(out),
-        "scroll" => scroll_checks::scroll_check(out),
+        "transcript" => {
+            row_overlap_checks::watch();
+            transcript_check(out)
+        }
+        "scroll" => {
+            row_overlap_checks::watch();
+            scroll_checks::scroll_check(out)
+        }
         "scroll-jump" => scroll_checks::scroll_jump_check(out),
         "startup" => startup_checks::startup_check(out),
         "composer" => composer_check(out),
@@ -362,16 +370,28 @@ pub fn start_check(name: &str, out: String) {
         "overview" => profile_checks::overview_check(out),
         "extras" => profile_checks::extras_check(out),
         "artifacts" => artifact_checks::artifacts_check(out),
-        "receipts" => artifact_checks::receipts_check(out),
+        "receipts" => {
+            row_overlap_checks::watch();
+            artifact_checks::receipts_check(out)
+        }
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         "link-hints" => link_hint_checks::link_hints_check(out),
-        "live" => live_checks::live_check(out),
+        "live" => {
+            row_overlap_checks::watch();
+            live_checks::live_check(out)
+        }
         "observe" => observe_checks::observe_check(out),
-        "a2a" => a2a_checks::a2a_check(out),
-        "row-overlap" => row_overlap_checks::row_overlap_check(out),
+        "a2a" => {
+            row_overlap_checks::watch();
+            a2a_checks::a2a_check(out)
+        }
+        "row-overlap" => {
+            row_overlap_checks::watch();
+            row_overlap_checks::row_overlap_check(out)
+        }
         _ => {
             check(false, &format!("no check named {name}"));
             finish();
