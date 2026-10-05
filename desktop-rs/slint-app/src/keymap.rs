@@ -295,7 +295,7 @@ pub const CONTEXTS: &[(&str, &str)] = &[
 ];
 
 pub fn context_name(state: &str) -> &str {
-    CONTEXTS.iter().find(|(s, _)| *s == state).map_or(state, |(_, name)| name)
+    CONTEXTS.iter().find(|(s, _)| *s == state).map_or(state, |(_, name)| *name)
 }
 
 /// Text fields, where a key without Ctrl or Alt types.
@@ -536,9 +536,9 @@ pub fn parse_key(text: &str) -> Result<String, String> {
     }
 }
 
-/// A key as people read it: "Enter", "Esc", "Right ×2".
+/// A key as people read it: "Enter", "Esc", "Del", "Right ×2".
 pub fn display(key: &str) -> String {
-    let one = |k: &str| k.replace("Return", "Enter").replace("Escape", "Esc");
+    let one = |k: &str| k.replace("Return", "Enter").replace("Escape", "Esc").replace("Delete", "Del");
     match key.split_once(' ') {
         Some((first, _)) => format!("{} ×2", one(first)),
         None => one(key),
@@ -569,7 +569,7 @@ pub fn clashes(overrides: &Overrides) -> Vec<Clash> {
                 match seen.get(key) {
                     Some((_, true)) => continue,
                     Some((other, false)) if *other != entry.action => {
-                        found.push(Clash { state: name, key: key.clone(), actions: [other, entry.action] });
+                        found.push(Clash { state: *name, key: key.clone(), actions: [*other, entry.action] });
                     }
                     _ => {
                         seen.insert(key.clone(), (entry.action, entry.native));
@@ -623,13 +623,18 @@ fn tidy(mut overrides: Overrides) -> Overrides {
     overrides
 }
 
-fn checked(action: &str, context: &str, key: &str) -> Result<String, Refusal> {
+fn checked_place(action: &str, context: &str) -> Result<(), Refusal> {
     if !bindable(action) {
         return Err(Refusal::Invalid(format!("{action} keeps its own keys")));
     }
     if !CONTEXTS.iter().any(|(c, _)| *c == context) {
         return Err(Refusal::Invalid(format!("No context {context}")));
     }
+    Ok(())
+}
+
+fn checked(action: &str, context: &str, key: &str) -> Result<String, Refusal> {
+    checked_place(action, context)?;
     let key = parse_key(key).map_err(Refusal::Invalid)?;
     if reserved(&key) {
         return Err(Refusal::Reserved(key));
@@ -650,7 +655,7 @@ fn add_unchecked(overrides: &Overrides, action: &str, context: &str, key: &str) 
 pub fn add(overrides: &Overrides, action: &str, context: &str, key: &str) -> Result<Overrides, Refusal> {
     let key = checked(action, context, key)?;
     let next = add_unchecked(overrides, action, context, &key);
-    let new: Vec<Clash> = clashes(&next).into_iter().filter(|c| c.key == key && c.actions.contains(&definition(action).map_or("", |d| d.action))).collect();
+    let new: Vec<Clash> = clashes(&next).into_iter().filter(|c| c.key == key && c.actions.contains(&action)).collect();
     if new.is_empty() { Ok(next) } else { Err(Refusal::Clash(new)) }
 }
 
@@ -659,7 +664,7 @@ pub fn add(overrides: &Overrides, action: &str, context: &str, key: &str) -> Res
 pub fn take_over(overrides: &Overrides, action: &str, context: &str, key: &str) -> Result<Overrides, String> {
     let key = checked(action, context, key).map_err(|r| r.to_string())?;
     let mut next = add_unchecked(overrides, action, context, &key);
-    for _ in 0..STATES.len() {
+    for _ in 0..64 {
         let Some(clash) = clashes(&next).into_iter().find(|c| c.key == key && c.actions.contains(&action)) else { return Ok(next) };
         let other = if clash.actions[0] == action { clash.actions[1] } else { clash.actions[0] };
         next = remove(&next, other, clash.state, &key);
@@ -767,8 +772,9 @@ pub fn import(text: &str) -> Result<Overrides, String> {
             for key in &change.add {
                 keys.add.push(checked(action, context, key).map_err(|r| r.to_string())?);
             }
+            // A default may be taken away, reserved or not (Ctrl+C stops an agent).
             for key in &change.remove {
-                checked(action, context, key).map_err(|r| r.to_string())?;
+                checked_place(action, context).map_err(|r| r.to_string())?;
                 keys.remove.push(parse_key(key)?);
             }
             canonical.entry(action.clone()).or_default().insert(context.clone(), keys);
@@ -896,8 +902,8 @@ mod tests {
     fn peter() -> Overrides {
         // Ctrl+J is next attention's: taking it over leaves N for that.
         let clash = add(&Overrides::new(), "next-agent", "main", "Ctrl+J").unwrap_err();
-        let Refusal::Clash(clashes) = clash else { panic!("Ctrl+J is next attention's: {clash:?}") };
-        assert!(clashes.iter().any(|c| c.actions.contains(&"next-attention") && c.state == "main"), "{clashes:?}");
+        let Refusal::Clash(found) = clash.clone() else { panic!("Ctrl+J is next attention's: {clash:?}") };
+        assert!(found.iter().any(|c| c.actions.contains(&"next-attention") && c.state == "main"), "{found:?}");
         let taken = take_over(&Overrides::new(), "next-agent", "main", "Ctrl+J").unwrap();
         add(&taken, "next-agent", "main", "Right Right").unwrap()
     }
@@ -982,8 +988,8 @@ mod tests {
     #[test]
     fn clashes_are_found_refused_and_taken_over() {
         let clash = add(&Overrides::new(), "next-agent", "main", "J").unwrap_err();
-        let Refusal::Clash(clashes) = clash else { panic!("{clash:?}") };
-        let states: Vec<&str> = clashes.iter().map(|c| c.state).collect();
+        let Refusal::Clash(found) = clash.clone() else { panic!("{clash:?}") };
+        let states: Vec<&str> = found.iter().map(|c| c.state).collect();
         assert!(states.contains(&"sidebar") && states.contains(&"pane"), "J is the explorer's next and the chat's next card: {states:?}");
         let taken = take_over(&Overrides::new(), "next-agent", "main", "J").unwrap();
         assert!(clashes(&taken).is_empty());

@@ -22,7 +22,7 @@ export component Modal inherits Rectangle {
         // Clicks on the card stay on it.
         TouchArea { }
         @children
-        FocusRing { shown: Focus.mode == "modal" || Focus.mode == "launch"; }
+        FocusRing { shown: Focus.mode == "modal" || Focus.mode == "launch" || Focus.mode == "keymap"; }
     }
 }
 
@@ -59,7 +59,8 @@ export component KeymapEditor inherits Modal {
     card-width: 760px;
     card-height: 640px;
     dismissed => { root.done(); }
-    list := FocusScope { }
+    // Holds the keyboard while no field has it (the window reads the keys).
+    list := FocusScope { width: 0; height: 0; }
     VerticalLayout {
         padding: 22px;
         spacing: 10px;

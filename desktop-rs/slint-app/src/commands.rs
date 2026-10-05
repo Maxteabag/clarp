@@ -64,7 +64,10 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
 
 /// The user's own key bindings, from settings.
 pub fn overrides(app: &App) -> keymap::Overrides {
-    let engine = app.engine.borrow();
+    overrides_of(&app.engine.borrow())
+}
+
+pub fn overrides_of(engine: &clarp_engine::Engine) -> keymap::Overrides {
     engine.settings().get("keymap/bindings").map(keymap::from_settings).unwrap_or_default()
 }
 
@@ -89,9 +92,8 @@ pub fn show_hints(app: &App, window: &AppWindow) {
                     n => format!("1-{n}").into(),
                 }
             } else {
-                // The user's own key first; a second where there is room.
-                let keys: Vec<String> = b.keys.iter().take(if b.keys.len() == 2 { 2 } else { 1 }).map(|k| keymap::display(k)).collect();
-                keys.join("/").into()
+                // The user's own key leads.
+                b.keys.first().map(|k| keymap::display(k)).unwrap_or_default().into()
             },
             label: if b.action == "toggle-preview" {
                 if app.engine.borrow().settings().boolean("explorer/livePreview", false) { "Preview: on".into() } else { "Preview: off".into() }
@@ -307,7 +309,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         // keyboard stays where it was.
         "next-agent" | "previous-agent" => {
             let sessions = sidebar_sessions(window);
-            let Some(at) = sessions.iter().position(|s| *s == selected).or((!sessions.is_empty()).then_some(sessions.len() - 1)) else { return false };
+            let Some(at) = sessions.iter().position(|s| *s == selected).or_else(|| sessions.len().checked_sub(1)) else { return false };
             let step = if action == "next-agent" { 1 } else { sessions.len() - 1 };
             let next = sessions[(at + step) % sessions.len()].clone();
             let (composer, sidebar) = (app.active_report().composer_focused, window.get_sidebar_focused());

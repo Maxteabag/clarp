@@ -59,15 +59,15 @@ pub(crate) fn history(engine: &Engine, session: &str, rows: &[Message], expanded
 pub(crate) fn status(engine: &Engine, session: &str) -> (String, bool, String) {
     let Some(view) = engine.live_view(session).filter(|_| engine.live_active(session)) else { return Default::default() };
     match clarp_core::live_present::status_line(view, view.host_now_ms(now_ms())) {
-        Some(line) => (line.text, line.busy, if line.busy { stop_key() } else { String::new() }),
+        Some(line) => (line.text, line.busy, if line.busy { stop_key(engine) } else { String::new() }),
         None => Default::default(),
     }
 }
 
-/// The key that interrupts the agent, as the keymap has it (Ctrl+. today).
-pub(crate) fn stop_key() -> String {
-    let overrides = crate::app().map(|app| crate::commands::overrides(&app)).unwrap_or_default();
-    crate::keymap::shown("composer", "stop-agent", &overrides).unwrap_or_default()
+/// The key that interrupts the agent, as the user's keymap has it (Ctrl+.
+/// by default).
+pub(crate) fn stop_key(engine: &Engine) -> String {
+    crate::keymap::shown("composer", "stop-agent", &crate::commands::overrides_of(engine)).unwrap_or_default()
 }
 
 /// Whether anything shown ticks (a running item, a busy status line).

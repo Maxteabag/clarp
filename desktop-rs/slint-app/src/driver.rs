@@ -1020,11 +1020,29 @@ fn settings_check(out: String) {
     run_stages(stages);
 }
 
-/// `--check keymap --out DIR`: Ctrl+Alt+, opens the editor, a rebinding
-/// is validated and saved, Escape closes it, and the new key works.
+/// `--check keymap --out DIR`: Ctrl+Alt+, opens the editor; from its keys
+/// alone, next agent gets Ctrl+J (taken over from next attention) and a
+/// double press of Right, a reserved key is refused, and both work: Ctrl+J
+/// from the composer, Right Right from the chat, while a single Right
+/// keeps moving the composer's cursor. The second pass (`restart`) is the
+/// app started again on the same settings.
 fn keymap_check(out: String) {
     use slint::platform::Key;
+    if std::env::var("CLARP_CHECK_PASS").as_deref() == Ok("restart") {
+        return keymap_restart_check();
+    }
     let out2 = out.clone();
+    fn current(window: &crate::AppWindow) -> Option<crate::KeymapRow> {
+        window.get_keymap_rows().iter().find(|r| r.current)
+    }
+    fn bar(window: &crate::AppWindow) -> Vec<String> {
+        window.get_hints().iter().map(|h| format!("{} {}", h.keys, h.label).trim().to_owned()).collect()
+    }
+    fn selected() -> String {
+        app_now().engine.borrow().selected_session().to_owned()
+    }
+    let first = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let (first2, first3, first4, first5) = (first.clone(), first.clone(), first.clone(), first.clone());
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _window, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -1034,46 +1052,159 @@ fn keymap_check(out: String) {
             headless::press_with(&[Key::Control, Key::Alt], ",");
             true
         })),
-        ("open", Box::new(move |_, window, elapsed| {
+        ("open", Box::new(|_, window, elapsed| {
             if window.get_overlay() != "keymap" || elapsed < Duration::from_millis(200) {
                 return false;
             }
-            check(window.get_keymap_actions().row_count() == 7 && window.get_keymap_profile().contains("\"version\": 1"), "Ctrl+Alt+, opens the key bindings with the profile");
-            window.invoke_keymap_apply("zoom".into(), "Ctrl+V".into());
-            check(window.get_keymap_error().contains("Reserved"), &format!("a text editing key is refused: {}", window.get_keymap_error()));
-            window.invoke_keymap_apply("switcher".into(), "Ctrl+P".into());
-            check(window.get_keymap_error().is_empty() && window.get_keymap_profile().contains("Ctrl+P"), "a valid chord is saved into the profile");
+            check(window.get_keymap_rows().row_count() > 0 && window.get_keymap_context() == "Everywhere", "Ctrl+Alt+, opens the key bindings, everywhere first");
+            check(window.get_keymap_profile().contains("\"version\": 2"), "with the profile");
+            check(bar(window).iter().any(|h| h == "Enter Add key") && !bar(window).iter().any(|h| h.ends_with("Reset")), &format!("the bar has the editor's keys that work: {:?}", bar(window)));
+            headless::press("/");
+            headless::type_text("next agent");
+            headless::press(Key::Return);
             true
         })),
-        ("drawn", Box::new(move |_, _window, elapsed| {
-            if elapsed < Duration::from_millis(200) {
+        ("found", Box::new(|_, window, _| {
+            if current(window).is_none_or(|r| r.action != "next-agent") {
                 return false;
             }
+            check(true, "/ finds Next agent");
+            headless::press(Key::Return);
+            true
+        })),
+        ("capturing", Box::new(|_, window, _| {
+            if !window.get_keymap_status().contains("Press a key") {
+                return false;
+            }
+            check(bar(window).iter().any(|h| h == "Esc Cancel"), "Enter waits for a key");
+            headless::press_with(&[Key::Control], "j");
+            true
+        })),
+        ("clash", Box::new(|_, window, _| {
+            if window.get_keymap_error().is_empty() {
+                return false;
+            }
+            let error = window.get_keymap_error();
+            check(error.contains("Ctrl+J already runs Next attention in Everywhere"), &format!("the clash is shown: {error}"));
+            check(bar(window).iter().any(|h| h == "Enter Take it over"), "and how to resolve it");
+            headless::press(Key::Return);
+            true
+        })),
+        ("taken", Box::new(|_, window, _| {
+            if current(window).is_none_or(|r| !r.keys.contains("Ctrl+J")) {
+                return false;
+            }
+            check(window.get_keymap_error().is_empty() && current(window).is_some_and(|r| r.custom), "Enter takes Ctrl+J over");
+            headless::press(Key::Return);
+            true
+        })),
+        ("capture double", Box::new(|_, window, _| {
+            if !window.get_keymap_status().contains("Press a key") {
+                return false;
+            }
+            headless::press(Key::RightArrow);
+            headless::press(Key::RightArrow);
+            true
+        })),
+        ("double", Box::new(|_, window, _| {
+            if current(window).is_none_or(|r| !r.keys.contains("Right ×2")) {
+                return false;
+            }
+            let keys = current(window).map(|r| r.keys.to_string()).unwrap_or_default();
+            check(keys == "Ctrl+J  ·  Right ×2", &format!("Right twice quickly is a double press, kept beside Ctrl+J: {keys}"));
+            headless::press(Key::Return);
+            true
+        })),
+        ("reserved capture", Box::new(|_, window, _| {
+            if !window.get_keymap_status().contains("Press a key") {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "v");
+            true
+        })),
+        ("reserved", Box::new(move |_, window, elapsed| {
+            if !window.get_keymap_error().contains("reserved") || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(true, &format!("a text editing key is refused: {}", window.get_keymap_error()));
             shot(&out2, "keymap-01");
             headless::press(Key::Escape);
             true
         })),
-        ("closed", Box::new(|app, window, _| {
+        ("closed", Box::new(move |app, window, _| {
             if !window.get_overlay().is_empty() || !report().composer_focused {
                 return false;
             }
-            check(app.engine.borrow().settings().get("keymap/bindings").is_some_and(|b| b["switcher"] == "Ctrl+P"), "the binding is kept in settings");
+            let saved = app.engine.borrow().settings().get("keymap/bindings").cloned().unwrap_or_default();
+            check(saved["next-agent"]["main"]["add"] == serde_json::json!(["Ctrl+J", "Right Right"]), &format!("both bindings are kept in settings: {saved}"));
+            check(saved["next-attention"]["main"]["remove"] == serde_json::json!(["Ctrl+J"]), "next attention gave Ctrl+J up");
+            *first.borrow_mut() = selected();
+            headless::press_with(&[Key::Control], "j");
+            true
+        })),
+        ("ctrl+j", Box::new(move |_, _window, _| {
+            if selected() == *first2.borrow() {
+                return false;
+            }
+            check(report().composer_focused, &format!("Ctrl+J goes from {} to the next agent, {}, the keyboard still in the composer", first2.borrow(), selected()));
+            headless::type_text("ab");
+            headless::press(Key::LeftArrow);
+            headless::type_text("X");
+            headless::press(Key::RightArrow);
+            headless::type_text("Y");
+            true
+        })),
+        ("typed", Box::new(|_, _window, _| {
+            if app_now().active_draft() != "aXbY" {
+                return false;
+            }
+            check(true, "a single Right moves the composer's cursor, at once");
+            headless::press(Key::RightArrow);
+            headless::press(Key::RightArrow);
+            true
+        })),
+        ("composer double", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(selected() != *first3.borrow() && app_now().active_draft() == "aXbY", "Right Right in the composer only moves the cursor");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("chat", Box::new(|_, window, _| {
+            if window.get_keyboard_mode() != "CHAT" {
+                return false;
+            }
+            headless::press(Key::RightArrow);
+            true
+        })),
+        ("single right", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "CHAT" && selected() != *first4.borrow(), "a single Right in the chat jumps nowhere");
+            headless::press(Key::RightArrow);
+            headless::press(Key::RightArrow);
+            true
+        })),
+        ("right right", Box::new(move |_, window, _| {
+            if selected() != *first5.borrow() {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "CHAT", "Right Right in the chat goes to the next agent, the keyboard still in the chat");
             headless::press_with(&[Key::Control], "k");
             true
         })),
-        ("old key", Box::new(|_, window, elapsed| {
-            if elapsed < Duration::from_millis(300) {
-                return false;
-            }
-            check(!window.get_switcher_open(), "the old key no longer opens the switcher");
-            headless::press_with(&[Key::Control], "p");
-            true
-        })),
-        ("new key", Box::new(|_, window, _| {
+        ("switcher", Box::new(|_, window, _| {
             if !window.get_switcher_open() {
                 return false;
             }
-            check(true, "the new key does");
+            headless::type_text("next agent");
+            true
+        })),
+        ("switcher key", Box::new(|_, window, _| {
+            let Some(row) = window.get_switcher_rows().iter().find(|r| r.label == "Next agent") else { return false };
+            check(row.key == "Ctrl+J", &format!("the switcher shows the user's key: {:?}", row.key));
             headless::press(Key::Escape);
             true
         })),
@@ -1098,6 +1229,52 @@ fn keymap_check(out: String) {
                 return false;
             }
             check(true, "Ctrl+0 resets it to the Qt app's 1.15");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// The keymap check's second pass: the same settings, a new app.
+fn keymap_restart_check() {
+    use slint::platform::Key;
+    let first = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let (first2, first3) = (first.clone(), first.clone());
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(move |app, _window, _| {
+            let engine = app.engine.borrow();
+            let open = engine.conversation(engine.selected_session()).is_some_and(|c| !c.rows().is_empty());
+            if !open || !report().composer_focused {
+                return false;
+            }
+            let saved = engine.settings().get("keymap/bindings").cloned().unwrap_or_default();
+            check(saved["next-agent"]["main"]["add"] == serde_json::json!(["Ctrl+J", "Right Right"]), &format!("the bindings survive a restart: {saved}"));
+            *first.borrow_mut() = engine.selected_session().to_owned();
+            drop(engine);
+            headless::press_with(&[Key::Control], "j");
+            true
+        })),
+        ("ctrl+j", Box::new(move |app, _window, _| {
+            if app.engine.borrow().selected_session() == first2.borrow().as_str() {
+                return false;
+            }
+            check(true, "Ctrl+J goes to the next agent after a restart");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("chat", Box::new(|_, window, _| {
+            if window.get_keyboard_mode() != "CHAT" {
+                return false;
+            }
+            headless::press(Key::RightArrow);
+            headless::press(Key::RightArrow);
+            true
+        })),
+        ("right right", Box::new(move |app, _window, _| {
+            if app.engine.borrow().selected_session() != first3.borrow().as_str() {
+                return false;
+            }
+            check(true, "and Right Right back again");
             true
         })),
     ];

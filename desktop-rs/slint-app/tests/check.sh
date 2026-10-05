@@ -26,9 +26,12 @@ for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
 # cache and then with the one the first run filled (a usual launch).
 # CLARP_CHECK_PROFILE=release runs the release build.
 passes=(once); [ "$name" = startup ] && passes=(cold warm)
+# keymap saves its bindings to a scratch settings file and starts again
+# (restart) to find them; the others keep settings in memory.
+settings=off; [ "$name" = keymap ] && { passes=(once restart); settings="$scratch/settings.json"; }
 for pass in "${passes[@]}"; do
 [ "$pass" = once ] || echo "perf pass: $pass"
-CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS=off \
+CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS="$settings" \
     HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/run" \
     XDG_CONFIG_HOME="$scratch/c" XDG_CACHE_HOME="$scratch/k" XDG_DATA_HOME="$scratch/d" XDG_STATE_HOME="$scratch/s" \
     CLARP_AUDIO_OUTPUT=null CLARP_AUDIO_INPUT="file:$scratch/voice.wav" CLARP_KEYRING=off \
