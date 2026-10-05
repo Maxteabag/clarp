@@ -112,3 +112,16 @@ a row at the top of `docs/compatibility.md`. Bump `MIN_IOS_CONTRACT` only when
 old apps genuinely stop working; it puts a red banner in front of every user
 below it. `tests/unit/test_client_contract.py` fails when the table and the
 constants disagree; keep them in step in the same commit.
+
+## The Rust desktop compiles only in GitHub Actions
+
+Never run `cargo build`, `cargo test`, `cargo check`, `clippy` or
+`desktop-rs/slint-app/tests/check.sh` (it builds) on the owner's machines
+(laptopstudio included): parallel Rust builds there pushed the load to ~97 and
+starved the live Host. Push your branch instead; `.github/workflows/desktop-checks.yml`
+runs the unit tests, the headless checks (with one rerun for load-sensitive
+ones) and a release build, and uploads `cargo-test-log`, `checks` (logs and
+screenshots) and `clarp-slint-x86_64-linux` as artifacts
+(`gh run download <run> -R Maxteabag/clarp -n checks`). Run a subset by hand
+with `gh workflow run desktop-checks.yml -R Maxteabag/clarp --ref <branch> -f checks="live a2a"`.
+Main's `desktop.yml` publishes the binary clarpd installs.
