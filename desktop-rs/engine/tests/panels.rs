@@ -81,7 +81,7 @@ impl Driver {
     fn new(base: &str) -> Self {
         let woken = Arc::new((Mutex::new(false), Condvar::new()));
         let signal = woken.clone();
-        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: None, keyring: false, transcript_cache: None };
+        let config = Config { base_url: base.into(), token: "probe-token".into(), settings: Settings::in_memory(), workspace_store: None, keyring: false, transcript_cache: None, form_events: None };
         let engine = Engine::new(config, move || {
             let (flag, condvar) = &*signal;
             *flag.lock().unwrap() = true;

@@ -6,6 +6,10 @@
 //!
 //! Each form gets a random path; requests naming another Host (DNS
 //! rebinding) or coming from another origin are refused.
+//!
+//! On a Host that keeps form events, `window.clarpForm.log(event)` posts to
+//! the page too: the event is in the form's journal on disk before the page
+//! hears "queued", and the engine sends it on (`clarp_engine::FormEvents`).
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -24,6 +28,45 @@ struct Form {
     html: String,
     /// The latest draft the page saved, restored when it opens again.
     draft: Value,
+    /// Where its events are queued; None on a Host without them.
+    events: Option<Events>,
+}
+
+/// A form's event journal, and the Host its events belong to.
+#[derive(Clone)]
+pub struct Events {
+    pub store: clarp_engine::FormEventStore,
+    pub key: String,
+    pub origin: String,
+}
+
+fn lock_events(store: &clarp_engine::FormEventStore) -> std::sync::MutexGuard<'_, clarp_engine::FormEvents> {
+    store.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The engine sends what the page queued (it is on disk either way).
+fn events_changed(key: String) {
+    let handed = slint::invoke_from_event_loop(move || {
+        if let Some(app) = crate::app() {
+            app.engine.borrow_mut().form_events_changed(&key);
+            crate::pump_now(&app);
+        }
+    });
+    if let Err(error) = handed {
+        eprintln!("clarp-slint: queued form events wait for the next start: {error}");
+    }
+}
+
+fn show_status(artifact: String, status: String) {
+    let handed = slint::invoke_from_event_loop(move || {
+        if let Some(app) = crate::app() {
+            app.engine.borrow_mut().set_artifact_status(&artifact, &status);
+            crate::pump_now(&app);
+        }
+    });
+    if let Err(error) = handed {
+        eprintln!("clarp-slint: {error}");
+    }
 }
 
 fn forms() -> &'static Mutex<HashMap<String, Form>> {
@@ -60,7 +103,7 @@ fn port() -> Result<u16, String> {
 
 /// The page for `artifact_id`'s form, kept for the window's life: opening
 /// it again returns the same page with its draft.
-pub fn serve(artifact_id: &str, version: Value, html: &str) -> Result<String, String> {
+pub fn serve(artifact_id: &str, version: Value, html: &str, events: Option<Events>) -> Result<String, String> {
     let port = port()?;
     let mut forms = forms().lock().map_err(|_| "the form list is poisoned".to_owned())?;
     let token = match forms.iter().find(|(_, f)| f.artifact_id == artifact_id).map(|(t, _)| t.clone()) {
@@ -68,11 +111,12 @@ pub fn serve(artifact_id: &str, version: Value, html: &str) -> Result<String, St
             let form = forms.get_mut(&token).expect("found above");
             form.version = version;
             form.html = html.to_owned();
+            form.events = events;
             token
         }
         None => {
             let token = uuid::Uuid::new_v4().simple().to_string();
-            forms.insert(token.clone(), Form { artifact_id: artifact_id.to_owned(), version, html: html.to_owned(), draft: json!({}) });
+            forms.insert(token.clone(), Form { artifact_id: artifact_id.to_owned(), version, html: html.to_owned(), draft: json!({}), events });
             token
         }
     };
@@ -153,9 +197,31 @@ fn handle(stream: TcpStream, port: u16) {
     let Some(form) = forms.get_mut(token) else { return respond(&stream, 404, "text/plain", "not found") };
     match (request.method.as_str(), action) {
         ("GET", "") => {
-            let page = page(&form.html, &form.draft);
+            let page = page(&form.html, &form.draft, form.events.is_some());
             drop(forms);
             respond(&stream, 200, "text/html; charset=utf-8", &page);
+        }
+        ("POST", "log") => {
+            let Some(events) = form.events.clone() else {
+                drop(forms);
+                return respond(&stream, 400, "application/json", &json!({"error": "This Host does not keep form events."}).to_string());
+            };
+            drop(forms);
+            let body: Value = serde_json::from_slice(&request.body).unwrap_or(Value::Null);
+            let (Some(event_id), Some(event)) = (body["request_id"].as_str(), body.get("event")) else {
+                return respond(&stream, 400, "application/json", r#"{"error":"a log needs a request_id and an event"}"#);
+            };
+            let logged = lock_events(&events.store).log(&events.key, event, event_id, &events.origin);
+            match logged {
+                Ok(()) => {
+                    events_changed(events.key);
+                    respond(&stream, 200, "application/json", &json!({"event_id": event_id, "queued": true, "synced": false}).to_string());
+                }
+                Err(error) => {
+                    eprintln!("clarp-slint: a form event was not queued: {error}");
+                    respond(&stream, 400, "application/json", &json!({"error": error}).to_string());
+                }
+            }
         }
         ("POST", "draft" | "submit") => {
             let answers: Value = match serde_json::from_slice(&request.body) {
@@ -163,6 +229,17 @@ fn handle(stream: TcpStream, port: u16) {
                 _ => return respond(&stream, 400, "application/json", r#"{"error":"answers must be a JSON object"}"#),
             };
             form.draft = answers.clone();
+            if let Some(events) = form.events.clone() {
+                // A draft array the Host follows is imported as events.
+                match lock_events(&events.store).draft(&events.key, &answers, &events.origin) {
+                    Ok(0) => {}
+                    Ok(_) => events_changed(events.key),
+                    Err(error) => {
+                        eprintln!("clarp-slint: a form's draft events were not queued: {error}");
+                        show_status(form.artifact_id.clone(), format!("Event log: {error}"));
+                    }
+                }
+            }
             if action == "submit" {
                 let (artifact, version) = (form.artifact_id.clone(), form.version.clone());
                 drop(forms);
@@ -190,7 +267,7 @@ fn handle(stream: TcpStream, port: u16) {
 
 /// The form with iOS's policy (no network but this page, no frames, no
 /// navigation) and its bridge, answers posted to this page.
-fn page(html: &str, draft: &Value) -> String {
+fn page(html: &str, draft: &Value, event_log: bool) -> String {
     // Inside a script, "</" could close it early.
     let saved = draft.to_string().replace("</", "<\\/");
     let policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'self'; frame-src 'none'; form-action 'none'; base-uri 'none'";
@@ -211,7 +288,32 @@ fn page(html: &str, draft: &Value) -> String {
   const post = (type, answers) => fetch(location.pathname + '/' + type, {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(answers)}})
     .then((r) => {{ if (type === 'submit') say(r.ok ? 'Sent to Clarp. The chat shows whether the agent got them.' : 'Clarp did not take the answers.'); }})
     .catch(() => say('Clarp is not running.'));
-  window.clarpForm = {{collect, getDraft: () => saved,
+  function uuid() {{
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0'));
+    return [hex.slice(0, 4), hex.slice(4, 6), hex.slice(6, 8), hex.slice(8, 10), hex.slice(10)].map((p) => p.join('')).join('-');
+  }}
+  let logging = 0;
+  // Resolves once Clarp has the event on disk (queued, not yet synced).
+  function log(event) {{
+    if (!event || typeof event !== 'object' || Array.isArray(event)) return Promise.reject(new Error('Event must be an object.'));
+    if (!{event_log}) return Promise.reject(new Error('This Host does not keep form events.'));
+    if (logging >= 128) return Promise.reject(new Error('Too many pending log calls.'));
+    let body;
+    try {{ body = JSON.stringify({{request_id: uuid(), event}}); }} catch (error) {{ return Promise.reject(error); }}
+    logging++;
+    const promise = fetch(location.pathname + '/log', {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body}})
+      .then(async (r) => {{
+        const result = await r.json().catch(() => ({{}}));
+        if (r.ok && result.queued === true) return result;
+        throw new Error(result.error || 'Event was not recorded.');
+      }}, () => {{ throw new Error('Clarp is not running; the event was not recorded.'); }})
+      .finally(() => {{ logging--; }});
+    promise.catch(() => {{}});
+    return promise;
+  }}
+  window.clarpForm = {{capabilities: {{eventLog: {event_log}}}, collect, getDraft: () => saved, log,
     setAnswers: (answers) => {{ custom = answers; saved = answers; post('draft', answers); }},
     submit: (answers) => {{ if (answers !== undefined) custom = answers; post('draft', collect()); post('submit', collect()); }}}};
   document.addEventListener('DOMContentLoaded', () => {{
@@ -240,8 +342,14 @@ mod tests {
 
     #[test]
     fn a_draft_cannot_close_the_bridge_script() {
-        let page = page("<form></form>", &json!({"note": "</script><script>alert(1)"}));
+        let page = page("<form></form>", &json!({"note": "</script><script>alert(1)"}), false);
         assert!(!page.contains("</script><script>alert"), "{page}");
         assert!(page.contains("connect-src 'self'"));
+    }
+
+    #[test]
+    fn the_bridge_offers_the_event_log_only_on_a_host_that_keeps_events() {
+        assert!(page("", &json!({}), true).contains("capabilities: {eventLog: true}"));
+        assert!(page("", &json!({}), false).contains("capabilities: {eventLog: false}"));
     }
 }

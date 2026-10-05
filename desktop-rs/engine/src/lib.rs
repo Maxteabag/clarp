@@ -12,6 +12,8 @@ mod avatars;
 pub mod blocks;
 mod composer;
 mod connection;
+mod form_events;
+pub use form_events::{FormEventStore, FormEvents};
 mod voice;
 mod narrator;
 mod host_status;
@@ -130,6 +132,8 @@ enum Message {
     PortraitsCached(Vec<avatars::Cached>),
     /// A chat's transcript is due to be cached.
     CacheSaveDue(String),
+    /// A form's queued events are due to be sent.
+    FormEventsDue { key: String, token: u64 },
 }
 
 pub struct Config {
@@ -144,6 +148,8 @@ pub struct Config {
     pub keyring: bool,
     /// Where chats are cached between runs; None keeps nothing.
     pub transcript_cache: Option<std::path::PathBuf>,
+    /// Where HTML forms' events wait for the Host; None logs none.
+    pub form_events: Option<std::path::PathBuf>,
 }
 
 impl Config {
@@ -154,7 +160,7 @@ impl Config {
         let base_url = normalized_base_url(&std::env::var("CLARP_BASE_URL").unwrap_or(saved));
         let token = std::env::var("CLARP_TOKEN").unwrap_or_default();
         let keyring = std::env::var("CLARP_KEYRING").map_or(true, |v| v != "off");
-        Self { base_url, token, settings, workspace_store: workspace::default_store_path(), keyring, transcript_cache: default_transcript_cache() }
+        Self { base_url, token, settings, workspace_store: workspace::default_store_path(), keyring, transcript_cache: default_transcript_cache(), form_events: form_events::default_root() }
     }
 }
 
@@ -251,6 +257,11 @@ pub struct Engine {
     profile: profile::Profile,
     avatars: avatars::Avatars,
     live: live::Live,
+    form_events: FormEventStore,
+    form_events_supported: bool,
+    form_event_token: u64,
+    /// The Host's `server_id` from `/server-info`.
+    server_id: String,
 }
 
 impl Engine {
@@ -355,6 +366,10 @@ impl Engine {
             profile: Default::default(),
             avatars: Default::default(),
             live: Default::default(),
+            form_events: form_events::store(config.form_events.clone()),
+            form_events_supported: false,
+            form_event_token: 0,
+            server_id: String::new(),
         })
     }
 
@@ -394,6 +409,7 @@ impl Engine {
                 Message::UpdatesDue => self.updates_due(),
                 Message::PortraitsCached(cached) => cached.into_iter().for_each(|c| self.portrait_cached(c)),
                 Message::CacheSaveDue(session) => self.cache_save_due(&session),
+                Message::FormEventsDue { key, token } => self.form_events_due(&key, token),
             }
         }
         let mut changes = std::mem::take(&mut self.changes);
@@ -606,6 +622,7 @@ impl Engine {
         self.reset_transient_state();
         // The features are read again from /server-info.
         self.reset_live();
+        self.reset_form_events();
         self.api.set_endpoint(endpoint, &self.token);
         self.changes.push(Change::Endpoint);
         self.set_error("");
@@ -1133,6 +1150,9 @@ impl Engine {
     }
 
     fn handle_json(&mut self, tag: &str, object: &Object) {
+        if self.form_events_json(tag, object) {
+            return;
+        }
         if self.lifecycle_json(tag, object) {
             return;
         }
@@ -1179,6 +1199,7 @@ impl Engine {
             self.set_connecting(false);
             self.request_snapshot();
             self.live_server_info(object);
+            self.form_events_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
             for session in open {
                 self.live_chat_opened(&session);
@@ -1208,7 +1229,7 @@ impl Engine {
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
-        if self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) {
+        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" {
