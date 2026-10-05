@@ -72,3 +72,40 @@ fn the_kept_themes_still_exist() {
         assert!(ids.iter().any(|i| i == id), "the {id} theme is missing");
     }
 }
+
+/// WCAG 2 contrast ratio of two #rrggbb colours.
+fn ratio(a: &str, b: &str) -> f64 {
+    let lum = |h: &str| {
+        let h = h.trim_start_matches('#');
+        let channel = |i: usize| {
+            let c = f64::from(u8::from_str_radix(&h[i..i + 2], 16).unwrap()) / 255.0;
+            if c <= 0.039_28 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        };
+        0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+    };
+    let (x, y) = (lum(a), lum(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// The focused pane's frame (the `focus` role, else the accent) must stand
+/// out from the window AND from the unfocused frames' border (WCAG 1.4.11,
+/// 3:1 for UI parts), so it is clear which pane has the keyboard.
+#[test]
+fn the_focused_frame_stands_out_from_the_others() {
+    let mut failures = Vec::new();
+    for theme in clarp_core::reading_theme::themes() {
+        let get = |k: &str| theme.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+        let id = get("id");
+        if KEPT_AS_THEY_WERE.contains(&id.as_str()) {
+            continue;
+        }
+        let focus = Some(get("focus")).filter(|f| !f.is_empty()).unwrap_or_else(|| get("accent"));
+        for (other, against) in [("window", get("window")), ("border", get("border"))] {
+            let r = ratio(&focus, &against);
+            if r < 3.0 {
+                failures.push(format!("{id}: focus {focus} vs {other} {against} is {r:.2}:1, needs 3:1"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
