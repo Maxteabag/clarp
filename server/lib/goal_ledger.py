@@ -849,7 +849,35 @@ def summary(plan: dict) -> dict:
     active = active_for_principal(plan["agent_id"], con)
     return {"subgoals": subgoals(plan["plan_id"], con),
             "ledger": {"event_count": count, "last_event_at": last,
-                       "delegation": public_delegation(active) if active else None}}
+                       "delegation": public_delegation(active) if active else None,
+                       "accounting": accounting(plan["plan_id"], con)}}
+
+
+ACCOUNTING_LIMIT = 50
+
+
+def accounting(plan_id: str, con=None) -> list[dict]:
+    """The delegate's current books on this goal: its latest entry for each
+    subject and kind (observation, claim, discrepancy, unknown), newest first.
+    Earlier entries stay in the ledger; this is the view a client shows."""
+    con = con or db.conn()
+    latest: dict[tuple[str, str], dict] = {}
+    for row in con.execute(
+            "SELECT * FROM goal_events WHERE plan_id=? AND actor_kind='delegate' "
+            f"AND kind IN ({','.join('?' * len(BOOKKEEPING_KINDS))}) ORDER BY event_id DESC LIMIT 500",
+            (plan_id, *BOOKKEEPING_KINDS)):
+        key = (row["subject"], row["kind"])
+        if key in latest:
+            continue
+        new = json.loads(row["new_json"] or "{}")
+        latest[key] = {"event_id": row["event_id"], "at": row["at"], "subject": row["subject"],
+                       "kind": row["kind"], "basis": row["basis"], "text": new.get("text", ""),
+                       "observed_at": new.get("observed_at"),
+                       "source_refs": json.loads(row["source_refs"] or "[]"),
+                       "actor_agent_id": row["actor_agent_id"], "delegation_id": row["delegation_id"]}
+        if len(latest) >= ACCOUNTING_LIMIT:
+            break
+    return list(latest.values())
 
 
 def guard_principal_plan(con, owner: str) -> None:

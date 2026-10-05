@@ -443,3 +443,15 @@ def test_delegations_need_backends_whose_turns_carry_identity(pilot, tmp_path):
     db.conn().execute("UPDATE agents SET backend='codex' WHERE agent_id=?", (ACC(pilot),))
     assert bl.tick(d, bl.Pending(), lambda *a: None) == "stopped"
     assert "turn identity" in ledger.delegation(d)["stopped_reason"]
+
+
+def test_the_plan_carries_the_delegates_current_books_and_the_ledger_keeps_the_rest(pilot):
+    d, token, plan_id = pilot["delegation"], pilot["token"], pilot["plan"]["plan_id"]
+    for wake, text in (("w1", "Phone build unknown"), ("w2", "Phone runs 2741")):
+        ledger.record(d, token, plan_id, caller=ACC(pilot), wake_id=wake, entries=[{
+            "type": "observation", "subject": "subgoal:phone", "text": text, "source_refs": ["m"]}])
+    books = task_plans.get(plan_id)["ledger"]["accounting"]
+    assert [(e["subject"], e["kind"], e["text"]) for e in books] == [
+        ("subgoal:phone", "observation", "Phone runs 2741")]
+    assert [e["new"]["text"] for e in _events(plan_id) if e["kind"] == "observation"] == [
+        "Phone build unknown", "Phone runs 2741"]

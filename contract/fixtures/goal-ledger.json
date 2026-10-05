@@ -802,6 +802,63 @@
       }
     ],
     "ledger": {
+      "accounting": [
+        {
+          "actor_agent_id": "agent-pip-accountant",
+          "at": 1791160040000,
+          "basis": "inferred",
+          "delegation_id": "dg0000000000000001",
+          "event_id": 14,
+          "kind": "unknown",
+          "observed_at": 1791160060000,
+          "source_refs": [],
+          "subject": "subgoal:phone",
+          "text": "Whether 2741 is installed on Peter's phone"
+        },
+        {
+          "actor_agent_id": "agent-pip-accountant",
+          "at": 1791160039000,
+          "basis": "claimed",
+          "delegation_id": "dg0000000000000001",
+          "event_id": 13,
+          "kind": "claim",
+          "observed_at": null,
+          "source_refs": [
+            "goal_event:2"
+          ],
+          "subject": "criterion:criterion-2",
+          "text": "Pip says Peter was told build 2741 is required"
+        },
+        {
+          "actor_agent_id": "agent-pip-accountant",
+          "at": 1791160038000,
+          "basis": "observed",
+          "delegation_id": "dg0000000000000001",
+          "event_id": 12,
+          "kind": "observation",
+          "observed_at": null,
+          "source_refs": [
+            "goal_event:4"
+          ],
+          "subject": "step:v6",
+          "text": "v6 replaces v5 publishing"
+        },
+        {
+          "actor_agent_id": "agent-pip-accountant",
+          "at": 1791160037000,
+          "basis": "observed",
+          "delegation_id": "dg0000000000000001",
+          "event_id": 11,
+          "kind": "discrepancy",
+          "observed_at": null,
+          "source_refs": [
+            "goal_event:1",
+            "goal_event:4"
+          ],
+          "subject": "criterion:criterion-1",
+          "text": "Criterion names v5 while the plan now publishes v6"
+        }
+      ],
       "delegation": {
         "created_at": 1791160025000,
         "created_reason": "Pilot bookkeeping for Pip",
