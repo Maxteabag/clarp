@@ -45,6 +45,12 @@ exists, so a bad value cannot silence the listener. A delegation starts at the
 principal's last 200 messages (`baseline_messages`) and every goal event. Deleting
 or archiving either agent stops it.
 
+Each plan's JSON carries `subgoals` and a `ledger` envelope: `event_count`,
+`last_event_at`, the active `delegation` with its health, and `accounting`, the
+delegate's current books (its latest observation, claim, discrepancy or unknown
+for each subject, newest first, at most 50). Earlier entries stay in
+`GET /goal-ledger`.
+
 ## Who may do what
 
 | actor | may | may not |
