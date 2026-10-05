@@ -481,9 +481,10 @@ impl App {
         (engine.activity_mode(), engine.show_when_ready(), self.prefs.borrow().timestamps)
     }
 
-    /// Puts the live rows where the turn happened (`Presented::anchor`):
-    /// after its prompt, before any row written after it began, and before
-    /// unsent messages of one's own. A durable row that took over a message shows in that
+    /// Puts the live rows where the turn happened (`Presented::anchors`):
+    /// after its prompt, before any row written after it began, below every
+    /// row written before an entry began, and before unsent messages of
+    /// one's own. A durable row that took over a message shows in that
     /// entry's place under the entry's key, so it is updated there, not
     /// inserted, and keeps that key while the chat is shown.
     fn splice_live(&self, pane: &mut PaneState, live: &clarp_core::live_present::Presented, fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>) {
@@ -497,7 +498,9 @@ impl App {
         // it, before anything written once it began; unsent messages last.
         let messages: Vec<&clarp_core::protocol::Message> = fresh.iter().map(|(row, ..)| &row.message).collect();
         let sent = fresh.iter().rposition(|(row, ..)| !(row.message.pending || row.message.delivery_failed)).map_or(0, |i| i + 1);
-        let at = live.anchor(&messages).min(sent);
+        // Each entry at its own place: a turn the Host never settled splits
+        // at the newer prompts its later items started after.
+        let anchors: Vec<usize> = live.anchors(&messages).into_iter().map(|at| at.min(sent)).collect();
         let built: Vec<(Shown, MessageRow)> = live
             .entries
             .iter()
@@ -517,10 +520,13 @@ impl App {
                 shown.3 = slot.clone();
             }
         }
-        let at = at.min(fresh.len());
-        let (sources, live_rows): (Vec<Shown>, Vec<MessageRow>) = built.into_iter().unzip();
-        fresh.splice(at..at, sources);
-        rows.splice(at..at, live_rows);
+        // Last first, so the earlier places still hold; equal places keep
+        // the entries' order.
+        for ((source, row), at) in built.into_iter().zip(anchors).rev() {
+            let at = at.min(fresh.len());
+            fresh.insert(at, source);
+            rows.insert(at, row);
+        }
     }
 
     /// Puts each finished turn's fold where the turn is: its entries after
