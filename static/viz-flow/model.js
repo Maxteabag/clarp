@@ -3,6 +3,7 @@ const {hash}=require('./model-util.js');
 const work=require('./work.js');
 const journey=require('./journey.js');
 const lantern=require('./lantern.js');
+const components=require('./components.js');
 exports.hash=hash;
 exports.stateAt=(e,t)=>e.finished_at!=null&&t>=e.finished_at?(e.outcome||'unknown'):(e.finished_at!=null||e.outcome==='running'?'running':'unknown');
 const slots=new Map();
@@ -37,20 +38,26 @@ exports.build=(scene,_selection,time)=>{
  // Shared Git metadata supplies families, not a name-based guess. Each family
  // grows connected working-copy lobes; silhouettes and spacing remain source design.
  const grouped=new Map();
- for(const r of repos){const id=r.project_id||r.id;let g=grouped.get(id);if(!g){g={id,label:r.label,members:[],kind:r.kind};grouped.set(id,g);}g.members.push(r);}
+ for(const r of repos){
+  const clarp=scene.relations?.some(rel=>rel.from===r.id&&rel.kind==='remote'&&rel.label==='origin'&&['github:Maxteabag/clarp','github:Maxteabag/clarp-ios'].includes(rel.to));
+  const id=clarp?'project:Maxteabag/clarp-suite':r.project_id||r.id;let g=grouped.get(id);if(!g){g={id,label:clarp?'Clarp':r.label,members:[],kind:r.kind};grouped.set(id,g);}g.members.push(r);
+ }
  const projects=[],regions=[];
+ const descriptions=new Map(repos.map(r=>[r.id,components.describe(r,scene.entities.filter(e=>e.kind==='file'&&ancestor(e.id)===r.id&&latest.has(e.id)))]));
  for(const g of [...grouped.values()].sort((a,b)=>a.id.localeCompare(b.id))){
   g.members.sort((a,b)=>Number(a.is_worktree)-Number(b.is_worktree)||a.id.localeCompare(b.id));
-  const main=g.members.find(r=>r.path===r.main_path)|| (g.members.length===1?g.members[0]:null);
+  const main=(g.id==='project:Maxteabag/clarp-suite'?g.members.find(r=>!r.is_worktree&&scene.relations?.some(rel=>rel.from===r.id&&rel.to==='github:Maxteabag/clarp'&&rel.label==='origin')):null)||g.members.find(r=>r.path===r.main_path)|| (g.members.length===1?g.members[0]:null);
   const satellites=g.members.filter(r=>r!==main);
   const local=[];
   for(const r of g.members){
    const i=satellites.indexOf(r),angle=-.55+i/Math.max(3,satellites.length)*Math.PI*2;
-   const core=r===main,distance=core?0:330+Math.floor(i/6)*230;
+   const expanded=(descriptions.get(r.id)?.groups.length||0)>0;
+   const groupSpacing=Math.max(330,...g.members.map(m=>{const n=descriptions.get(m.id)?.groups.length||0;return n?Math.max(740,Math.ceil(n/2)*260+300):330;}));
+   const core=r===main,distance=core?0:groupSpacing+Math.floor(i/6)*groupSpacing;
    const x=Math.cos(angle)*distance,y=Math.sin(angle)*distance*.86;
    const n=[...history.values()].filter(h=>groupFor(h.at(-1))===r.id).length;
    const carries=(slatesFor.get(r.id)||[]).length;
-   local.push({...r,x,y,rx:core?190:142+Math.min(3,n)*7,ry:(core?143:112)+(carries?34+(carries>1&&core?12:0):0),project:g.id,core,
+   local.push({...r,x,y,rx:expanded?330:core?190:142+Math.min(3,n)*7,ry:expanded?Math.ceil(descriptions.get(r.id).groups.length/2)*122.5+110:(core?143:112)+(carries?34+(carries>1&&core?12:0):0),project:g.id,core,expanded,
     displayName:core?'':r.path?.split('/').filter(Boolean).at(-1)||r.label,carries});
   }
   const extent={left:Math.min(-110,...local.map(r=>r.x-r.rx-30)),right:Math.max(110,...local.map(r=>r.x+r.rx+30)),
@@ -77,18 +84,32 @@ exports.build=(scene,_selection,time)=>{
   if(n>4){a.x=r.x+Math.cos(i/n*6.28)*90;a.y=r.y+Math.sin(i/n*6.28)*60;}
  }
  const actorMap=new Map(actors.map(a=>[a.id,a]));
- const files=[];
+ const files=[],componentAreas=[];
  for(const region of regions){
+  if(region.expanded){
+   const layout=components.layout(region,descriptions.get(region.id));componentAreas.push(...layout.areas);
+   region.rootY=layout.rootY;region.rootCount=layout.rootCount;
+   files.push(...layout.files.map(f=>({...f,event:latest.get(f.id)})));
+   region.totalFiles=scene.entities.filter(e=>e.kind==='file'&&ancestor(e.id)===region.id&&latest.has(e.id)).length;
+   continue;
+  }
   const anchors=region.core?[[55,-30],[118,-2],[140,-62]]:[[40,-52],[112,-22]];
   const candidates=scene.entities.filter(e=>e.kind==='file'&&ancestor(e.id)===region.id);
   candidates.sort((a,b)=>(latest.get(b.id)?.ts||0)-(latest.get(a.id)?.ts||0)||a.id.localeCompare(b.id));
   region.totalFiles=candidates.length;
   candidates.slice(0,anchors.length).forEach((e,i)=>files.push({...e,workspace:region.id,x:region.x+anchors[i][0],y:region.y+anchors[i][1],event:latest.get(e.id)}));
  }
+ const componentOccupancy=new Map();
+ for(const a of actors){const r=regionMap.get(a.workspace);if(!r?.expanded)continue;
+  const target=byId.get(a.event.world_target),relative=components.relative(r.path,target?.path||a.event.evidence?.path);
+  const area=relative?componentAreas.find(c=>c.workspace===r.id&&c.name===relative.split('/')[0]):null;
+  const key=area?.id||r.id,n=componentOccupancy.get(key)||0;componentOccupancy.set(key,n+1);
+  a.component=area?.id||null;a.x=(area?area.x-75:r.x-200)+(n%3)*62;a.y=(area?area.y+75:r.rootY+55)+Math.floor(n/3)*45;
+ }
  // Slates: active work first, then recent finished work; the rest is counted.
  const slates=[];
  for(const region of regions){
-  const list=slatesFor.get(region.id)||[],anchors=slateSlots(region,counts.get(region.id)||0);
+  const list=slatesFor.get(region.id)||[],anchors=region.expanded?(region.core&&(counts.get(region.id)||0)<=2?[[region.rx-65,region.ry-85],[region.rx-175,region.ry-85]]:[[region.rx-65,region.ry-85]]):slateSlots(region,counts.get(region.id)||0);
   region.hiddenWork=Math.max(0,list.length-anchors.length);region.validation=validation.get(region.id)||null;
   list.slice(0,anchors.length).forEach((o,i)=>slates.push({...o,x:region.x+anchors[i][0],y:region.y+anchors[i][1],region:region.id}));
  }
@@ -123,7 +144,7 @@ exports.build=(scene,_selection,time)=>{
  const threads=assembled.threads.filter(th=>actorMap.has(th.from)&&actorMap.has(th.to)&&th.from!==th.to);
  const minX=Math.min(-280,...regions.map(r=>r.x-r.rx-40),...posts.map(p=>p.x-30)),minY=Math.min(-240,...regions.map(r=>r.y-r.ry-60),...posts.map(p=>p.y-40));
  const maxX=Math.max(right+60,...ownerGroups.map(o=>o.x+o.w+55),...posts.map(p=>p.x+30)),maxY=Math.max(240,ownerY+20,...regions.map(r=>r.y+r.ry+65),...posts.map(p=>p.y+40));
- return {projects,regions,regionMap,repos,actors,actorMap,files,fileMap:new Map(files.map(f=>[f.id,f])),ownerGroups,remoteMap,structural,history,latest,
+ return {projects,regions,regionMap,repos,actors,actorMap,files,componentAreas,fileMap:new Map(files.map(f=>[f.id,f])),ownerGroups,remoteMap,structural,history,latest,
   slates,slateMap,work:assembled,threads,posts,waits:assembled.waits.filter(w=>w.anchor),
   bounds:{x:minX,y:minY,w:maxX-minX,h:maxY-minY},github:{x:right+140,y:-205,w:360,h:ownerY+230}};
 };
