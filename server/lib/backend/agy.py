@@ -516,7 +516,7 @@ class AgyBackend(StreamJsonBackend):
                 f"agy-backed agents")
         cwd = pathlib.Path(os.path.expanduser(str(cwd)))
         # Every agy turn is app-dispatched: always prepend the
-        # no-interactive-questions rule, plus the <speak> voice guidance on
+        # Clarp-skills guidance, plus the <speak> voice guidance on
         # spoken turns. (Same instruction block as the Codex backend.)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""

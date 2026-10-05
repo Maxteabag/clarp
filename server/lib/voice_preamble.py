@@ -8,6 +8,7 @@ transcript parsers strip the block back off with ``strip_voice_preamble``.
 from __future__ import annotations
 
 from . import settings_store
+from .clarp_guidance import CLARP_SKILLS_GUIDANCE
 from .config import persona_personality
 from .personalities import KEY_ENABLED as PERSONALITIES_ENABLED_KEY
 
@@ -20,9 +21,8 @@ from .personalities import KEY_ENABLED as PERSONALITIES_ENABLED_KEY
 _VOICE_PREAMBLE_HEAD = "[voice-mode]"
 _VOICE_PREAMBLE_SPLIT = "\n\n--- user message ---\n"
 
-# Always-on for app-dispatched turns: CLI question UIs are unavailable,
-# while supporting Hosts can publish durable questions to the native inbox.
-_NO_INTERACTIVE_QUESTIONS = "Pay special attention to Clarp skills."
+# Always-on for app-dispatched turns (lib.clarp_guidance).
+_APP_TURN_GUIDANCE = CLARP_SKILLS_GUIDANCE
 
 # Added only for spoken turns: how the <speak> voice gating works.
 _VOICE_INSTRUCTION = (
@@ -108,12 +108,18 @@ def app_turn_instructions(*, voice: bool, session: str = "") -> str:
     `session` selects that agent's own narration level; omitting it keeps the
     quiet default, so a caller with no session in hand is unchanged.
     """
-    body = _NO_INTERACTIVE_QUESTIONS
+    body = _APP_TURN_GUIDANCE
     if voice:
-        body = f"{body}\n\n{_VOICE_INSTRUCTION}\n\n{_natural_speech(session)}"
-        narration = _narration_clause(session)
-        if narration:
-            body = f"{body}\n\n{narration}"
+        body = f"{body}\n\n{voice_instructions(session)}"
+    return body
+
+
+def voice_instructions(session: str = "") -> str:
+    """Only the spoken-turn part, for a turn that already has the rest."""
+    body = f"{_VOICE_INSTRUCTION}\n\n{_natural_speech(session)}"
+    narration = _narration_clause(session)
+    if narration:
+        body = f"{body}\n\n{narration}"
     return body
 
 
@@ -143,8 +149,7 @@ def apply_voice_preamble(text: str, *, voice: bool = True,
                          persona: str = "", session: str = "") -> str:
     """Prepend the app-turn instruction block to a prompt.
 
-    The CLI-question restriction is always included (native question artifacts
-    remain available on supporting Hosts); the <speak> voice guidance is added
+    The Clarp-skills guidance is always included; the <speak> voice guidance is added
     only when `voice` is True (a spoken turn). `voice` defaults True so existing callers keep the
     full block."""
     identity = persona_identity_instruction(persona, session)

@@ -10,6 +10,14 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 
+def record(method, params):
+    """What a turn actually received, for tests of Host-supplied context."""
+    root = os.environ.get("CLARP_QA_PROVIDER_ROOT")
+    if root:
+        with (Path(root) / "turn-requests.jsonl").open("a") as log:
+            log.write(json.dumps({"method": method, **params}) + "\n")
+
+
 def emit(event):
     print(json.dumps(event), flush=True)
 
@@ -191,6 +199,7 @@ def app_server():
             result = {"thread": {"id": thread_id, "forkedFromId": source}}
         elif method == "turn/start":
             thread_id = params.get("threadId") or current_thread
+            record("turn/start", params)
             cancelled = threading.Event()
             turn_id = str(uuid.uuid4())
             cancel_by_turn[turn_id] = cancelled
@@ -204,6 +213,7 @@ def app_server():
             if ev is not None:
                 ev.set()
         elif method == "turn/steer":
+            record("turn/steer", params)
             result = {}
         elif method == "thread/goal/set":
             thread_id = params.get("threadId") or current_thread
