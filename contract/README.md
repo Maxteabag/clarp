@@ -23,6 +23,13 @@ these files are the parts a computer can verify.
   (`tests/state/voice-markup.test.js`), desktop (`desktop-rs/core/tests/voice_display.rs`)
   and iOS (`VoiceDisplayFixtureTests`) all run it; the Host skips the
   `streaming` cases because it never renders a reply still arriving.
+- `fixtures/goal-ledger.json` with `schemas/goal-ledger.json` — the goal
+  ledger payloads (contract 52, `goal_ledger`): a plan with its subgoals and
+  ledger summary, a `GET /goal-ledger` page and `GET /goal-ledger/delegations`,
+  produced by the real Host from one pinned scenario
+  (`tests/contract/test_goal_ledger_fixture.py` fails when the Host stops
+  emitting exactly this). Regenerate with `CLARP_UPDATE_FIXTURES=1` only for an
+  additive change, and tell the native clients.
 - `live/` — recorded `live` SSE streams plus the state a client must reach
   (docs/live-items.md). Desktop, web and iOS replay them through their own
   reducers; `tests/contract/test_live_fixtures.py` validates them against

@@ -1,0 +1,910 @@
+{
+  "delegations": {
+    "delegations": [
+      {
+        "created_at": 1791160025000,
+        "created_reason": "Pilot bookkeeping for Pip",
+        "delegate_agent_id": "agent-pip-accountant",
+        "delegate_session": "pip-accountant",
+        "delegation_id": "dg0000000000000001",
+        "dispatched_goal_event_through": 10,
+        "dispatched_message_through": 1,
+        "goal_event_through": 10,
+        "in_flight": false,
+        "job_handle": "",
+        "lag_ms": 13000,
+        "last_applied_at": 1791160045000,
+        "last_error": "",
+        "last_heartbeat_at": 1791160046000,
+        "last_source_at": 1791160046000,
+        "last_wake_at": 1791160034000,
+        "last_wake_id": "bookkeeping-dg0000000000000001-m1-e10",
+        "message_through": 1,
+        "principal_agent_id": "agent-pip",
+        "principal_session": "pip",
+        "status": "active",
+        "stopped_at": null,
+        "stopped_reason": "",
+        "unapplied_since": 1791160046000
+      }
+    ]
+  },
+  "description": "Representative goal-ledger payloads (Host contract 52, feature goal_ledger), produced by the real Host from one scenario in tests/contract/test_goal_ledger_fixture.py; ids and clock are pinned. plan = one element of GET /task-plans (or GET /task-plan .plan); ledger = GET /goal-ledger?plan_id=...; delegations = GET /goal-ledger/delegations?session=pip. Schema: contract/schemas/goal-ledger.json. Prose: docs/architecture/goal-ledger.md.",
+  "ledger": {
+    "events": [
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160001000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 1,
+        "kind": "created",
+        "new": {
+          "detail": {
+            "outcome": "Peter's Number Ninja form (v5) logs events live to the Host"
+          },
+          "goal": {
+            "criteria": [
+              {
+                "evidence": "",
+                "id": "criterion-1",
+                "text": "form-events for v5 returns real events from Peter's play"
+              },
+              {
+                "evidence": "",
+                "id": "criterion-2",
+                "text": "Peter has the corrected status without asking"
+              }
+            ],
+            "limits": "No tests, probes or redeploys",
+            "native_session_id": "native-pip",
+            "outcome": "Peter's Number Ninja form (v5) logs events live to the Host"
+          }
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 0,
+        "prior": {
+          "criteria": null,
+          "limits": null,
+          "native_session_id": null,
+          "outcome": null
+        },
+        "reason": "",
+        "source_refs": [],
+        "subject": "goal"
+      },
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160005000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 2,
+        "kind": "checkpoint",
+        "new": {
+          "detail": {
+            "evidence": {
+              "criterion-2": "Told Peter build 2741 is required"
+            },
+            "next_work": "Wait for Peter to play on build 2741",
+            "progress": "v5 published with draft-key capture"
+          },
+          "goal": {
+            "checkpoint": {
+              "at": 1791160005000,
+              "evidence": {
+                "criterion-2": "Told Peter build 2741 is required"
+              },
+              "next_work": "Wait for Peter to play on build 2741",
+              "progress": "v5 published with draft-key capture"
+            },
+            "criteria": [
+              {
+                "evidence": "",
+                "id": "criterion-1",
+                "text": "form-events for v5 returns real events from Peter's play"
+              },
+              {
+                "evidence": "Told Peter build 2741 is required",
+                "id": "criterion-2",
+                "text": "Peter has the corrected status without asking"
+              }
+            ]
+          }
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 1,
+        "prior": {
+          "checkpoint": null,
+          "criteria": [
+            {
+              "evidence": "",
+              "id": "criterion-1",
+              "text": "form-events for v5 returns real events from Peter's play"
+            },
+            {
+              "evidence": "",
+              "id": "criterion-2",
+              "text": "Peter has the corrected status without asking"
+            }
+          ]
+        },
+        "reason": "",
+        "source_refs": [],
+        "subject": "goal"
+      },
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160008000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 3,
+        "kind": "prior_steps",
+        "new": {
+          "detail": {
+            "items": [
+              {
+                "active_ms": 0,
+                "completed_at": null,
+                "created_at": 1791160001000,
+                "detail": "",
+                "item_id": "agent-pip:number-ninja:0000000a:v5",
+                "parent_id": null,
+                "plan_id": "agent-pip:number-ninja:0000000a",
+                "position": 0,
+                "required": 1,
+                "started_at": null,
+                "status": "pending",
+                "title": "Publish v5 with draft-key events"
+              },
+              {
+                "active_ms": 0,
+                "completed_at": null,
+                "created_at": 1791160001000,
+                "detail": "",
+                "item_id": "agent-pip:number-ninja:0000000a:report",
+                "parent_id": null,
+                "plan_id": "agent-pip:number-ninja:0000000a",
+                "position": 1,
+                "required": 1,
+                "started_at": null,
+                "status": "pending",
+                "title": "Report to Peter"
+              }
+            ]
+          }
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 2,
+        "prior": null,
+        "reason": "",
+        "source_refs": [],
+        "subject": "goal"
+      },
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160008000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 4,
+        "kind": "replan",
+        "new": {
+          "detail": {
+            "reason": "v6 logs with clarpForm.log directly; v5 draft keys duplicate it",
+            "steps": [
+              {
+                "id": "v6",
+                "title": "Publish v6 with clarpForm.log"
+              },
+              {
+                "id": "report",
+                "title": "Report to Peter"
+              }
+            ]
+          }
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 2,
+        "prior": null,
+        "reason": "v6 logs with clarpForm.log directly; v5 draft keys duplicate it",
+        "source_refs": [],
+        "subject": "goal"
+      },
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160012000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 5,
+        "kind": "subgoal_added",
+        "new": {
+          "criteria": [
+            "Build 2741 or later is installed",
+            "form-events returns his rows"
+          ],
+          "intent": "The original acceptance is real play on his phone",
+          "owner": "",
+          "status": "active",
+          "title": "Events arrive from Peter's phone"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 2,
+        "prior": null,
+        "reason": "",
+        "source_refs": [],
+        "subject": "subgoal:phone"
+      },
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160014000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 6,
+        "kind": "subgoal_added",
+        "new": {
+          "criteria": [],
+          "intent": "First logging path",
+          "owner": "",
+          "status": "active",
+          "title": "v5 draft-key capture"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 2,
+        "prior": null,
+        "reason": "",
+        "source_refs": [],
+        "subject": "subgoal:v5-draft"
+      },
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160016000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 7,
+        "kind": "subgoal_updated",
+        "new": {
+          "status": "retired"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 2,
+        "prior": {
+          "status": "active"
+        },
+        "reason": "Replaced by v6 clarpForm.log",
+        "source_refs": [],
+        "subject": "subgoal:v5-draft"
+      },
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160018000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 8,
+        "kind": "subgoal_updated",
+        "new": {
+          "current_action": "Waiting for Peter to install 2741 and play v6",
+          "next_dependency": "Peter updates Clarp on his phone"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 2,
+        "prior": {
+          "current_action": "",
+          "next_dependency": ""
+        },
+        "reason": "Install not verified",
+        "source_refs": [],
+        "subject": "subgoal:phone"
+      },
+      {
+        "actor_agent_id": "",
+        "actor_kind": "user",
+        "actor_session": "",
+        "at": 1791160019000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 9,
+        "kind": "pause",
+        "new": {
+          "detail": {
+            "reason": "User paused this goal"
+          },
+          "status": "paused"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 3,
+        "prior": {
+          "status": "retired"
+        },
+        "reason": "User paused this goal",
+        "source_refs": [],
+        "subject": "goal"
+      },
+      {
+        "actor_agent_id": "",
+        "actor_kind": "user",
+        "actor_session": "",
+        "at": 1791160022000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 10,
+        "kind": "resume",
+        "new": {
+          "detail": {
+            "reason": "User explicitly resumed this goal"
+          },
+          "status": "active"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 4,
+        "prior": {
+          "status": "paused"
+        },
+        "reason": "User explicitly resumed this goal",
+        "source_refs": [],
+        "subject": "goal"
+      },
+      {
+        "actor_agent_id": "agent-pip-accountant",
+        "actor_kind": "delegate",
+        "actor_session": "pip-accountant",
+        "at": 1791160037000,
+        "basis": "observed",
+        "delegation_id": "dg0000000000000001",
+        "event_id": 11,
+        "kind": "discrepancy",
+        "new": {
+          "text": "Criterion names v5 while the plan now publishes v6"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 4,
+        "prior": null,
+        "reason": "",
+        "source_refs": [
+          "goal_event:1",
+          "goal_event:4"
+        ],
+        "subject": "criterion:criterion-1"
+      },
+      {
+        "actor_agent_id": "agent-pip-accountant",
+        "actor_kind": "delegate",
+        "actor_session": "pip-accountant",
+        "at": 1791160038000,
+        "basis": "observed",
+        "delegation_id": "dg0000000000000001",
+        "event_id": 12,
+        "kind": "observation",
+        "new": {
+          "text": "v6 replaces v5 publishing"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 4,
+        "prior": null,
+        "reason": "",
+        "source_refs": [
+          "goal_event:4"
+        ],
+        "subject": "step:v6"
+      },
+      {
+        "actor_agent_id": "agent-pip-accountant",
+        "actor_kind": "delegate",
+        "actor_session": "pip-accountant",
+        "at": 1791160039000,
+        "basis": "claimed",
+        "delegation_id": "dg0000000000000001",
+        "event_id": 13,
+        "kind": "claim",
+        "new": {
+          "text": "Pip says Peter was told build 2741 is required"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 4,
+        "prior": null,
+        "reason": "",
+        "source_refs": [
+          "goal_event:2"
+        ],
+        "subject": "criterion:criterion-2"
+      },
+      {
+        "actor_agent_id": "agent-pip-accountant",
+        "actor_kind": "delegate",
+        "actor_session": "pip-accountant",
+        "at": 1791160040000,
+        "basis": "inferred",
+        "delegation_id": "dg0000000000000001",
+        "event_id": 14,
+        "kind": "unknown",
+        "new": {
+          "observed_at": 1791160060000,
+          "text": "Whether 2741 is installed on Peter's phone"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 4,
+        "prior": null,
+        "reason": "",
+        "source_refs": [],
+        "subject": "subgoal:phone"
+      },
+      {
+        "actor_agent_id": "agent-pip-accountant",
+        "actor_kind": "delegate",
+        "actor_session": "pip-accountant",
+        "at": 1791160042000,
+        "basis": "observed",
+        "delegation_id": "dg0000000000000001",
+        "event_id": 15,
+        "kind": "subgoal_updated",
+        "new": {
+          "evidence": [
+            {
+              "basis": "observed",
+              "source_refs": [
+                "message:u-peter-asks@1"
+              ],
+              "text": "Last phone report was build 2738"
+            }
+          ],
+          "last_observed_at": 1791160060000,
+          "status": "unknown"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 4,
+        "prior": {
+          "evidence": [],
+          "last_observed_at": null,
+          "status": "active"
+        },
+        "reason": "No install receipt seen",
+        "source_refs": [],
+        "subject": "subgoal:phone"
+      },
+      {
+        "actor_agent_id": "agent-pip-accountant",
+        "actor_kind": "delegate",
+        "actor_session": "pip-accountant",
+        "at": 1791160044000,
+        "basis": "claimed",
+        "delegation_id": "dg0000000000000001",
+        "event_id": 16,
+        "kind": "subgoal_proposed",
+        "new": {
+          "criteria": [],
+          "intent": "Criterion 2",
+          "owner": "pip",
+          "status": "proposed",
+          "title": "Peter hears the corrected status"
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 4,
+        "prior": null,
+        "reason": "",
+        "source_refs": [],
+        "subject": "subgoal:report"
+      },
+      {
+        "actor_agent_id": "",
+        "actor_kind": "system",
+        "actor_session": "",
+        "at": 1791160067000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 17,
+        "kind": "wake_claim",
+        "new": {
+          "detail": {
+            "generation": 4,
+            "request_id": "task-goal-00000000000000000000000000000000"
+          }
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 4,
+        "prior": null,
+        "reason": "",
+        "source_refs": [],
+        "subject": "goal"
+      },
+      {
+        "actor_agent_id": "agent-pip",
+        "actor_kind": "owner",
+        "actor_session": "pip",
+        "at": 1791160052000,
+        "basis": "",
+        "delegation_id": "",
+        "event_id": 18,
+        "kind": "checkpoint",
+        "new": {
+          "detail": {
+            "continuation": {
+              "due_at": 1791163600000,
+              "key": "peer:r0123456789ab",
+              "kind": "dependency",
+              "reason": "Waiting for Avana to answer"
+            },
+            "next_work": "Read her answer, then report",
+            "progress": "Asked Avana which build Peter runs"
+          },
+          "goal": {
+            "checkpoint": {
+              "at": 1791160052000,
+              "evidence": {},
+              "next_work": "Read her answer, then report",
+              "progress": "Asked Avana which build Peter runs"
+            }
+          }
+        },
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "plan_revision": 5,
+        "prior": {
+          "checkpoint": {
+            "at": 1791160005000,
+            "evidence": {
+              "criterion-2": "Told Peter build 2741 is required"
+            },
+            "next_work": "Wait for Peter to play on build 2741",
+            "progress": "v5 published with draft-key capture"
+          }
+        },
+        "reason": "",
+        "source_refs": [],
+        "subject": "goal"
+      }
+    ],
+    "has_more": false,
+    "next_after": 18,
+    "plan_id": "agent-pip:number-ninja:0000000a"
+  },
+  "plan": {
+    "agent_id": "agent-pip",
+    "completed_at": null,
+    "completed_count": 0,
+    "completion_verified": false,
+    "counts": {
+      "blocked": 0,
+      "completed": 0,
+      "deferred": 0,
+      "in_progress": 0,
+      "pending": 2,
+      "removed": 1,
+      "skipped": 0
+    },
+    "created_at": 1791160001000,
+    "goal": {
+      "checkpoint": {
+        "at": 1791160052000,
+        "evidence": {},
+        "next_work": "Read her answer, then report",
+        "progress": "Asked Avana which build Peter runs"
+      },
+      "continuation": {
+        "attempts": 0,
+        "dependency_key": "peer:r0123456789ab",
+        "dependency_result": null,
+        "due_at": 1791163600000,
+        "generation": 5,
+        "job_handle": "",
+        "lease_until": null,
+        "observed_at": 1791160067000,
+        "observed_reason": "Owner is idle",
+        "observed_state": "idle",
+        "plan_revision": 4,
+        "reason": "Waiting for Avana to answer",
+        "request_id": "",
+        "resume_queue_revision": 0,
+        "state": "waiting"
+      },
+      "criteria": [
+        {
+          "evidence": "",
+          "id": "criterion-1",
+          "text": "form-events for v5 returns real events from Peter's play"
+        },
+        {
+          "evidence": "Told Peter build 2741 is required",
+          "id": "criterion-2",
+          "text": "Peter has the corrected status without asking"
+        }
+      ],
+      "documents": [],
+      "history": [
+        {
+          "at": 1791160001000,
+          "detail": {
+            "outcome": "Peter's Number Ninja form (v5) logs events live to the Host"
+          },
+          "kind": "created",
+          "revision": 0
+        },
+        {
+          "at": 1791160005000,
+          "detail": {
+            "evidence": {
+              "criterion-2": "Told Peter build 2741 is required"
+            },
+            "next_work": "Wait for Peter to play on build 2741",
+            "progress": "v5 published with draft-key capture"
+          },
+          "kind": "checkpoint",
+          "revision": 1
+        },
+        {
+          "at": 1791160008000,
+          "detail": {
+            "items": [
+              {
+                "active_ms": 0,
+                "completed_at": null,
+                "created_at": 1791160001000,
+                "detail": "",
+                "item_id": "agent-pip:number-ninja:0000000a:v5",
+                "parent_id": null,
+                "plan_id": "agent-pip:number-ninja:0000000a",
+                "position": 0,
+                "required": 1,
+                "started_at": null,
+                "status": "pending",
+                "title": "Publish v5 with draft-key events"
+              },
+              {
+                "active_ms": 0,
+                "completed_at": null,
+                "created_at": 1791160001000,
+                "detail": "",
+                "item_id": "agent-pip:number-ninja:0000000a:report",
+                "parent_id": null,
+                "plan_id": "agent-pip:number-ninja:0000000a",
+                "position": 1,
+                "required": 1,
+                "started_at": null,
+                "status": "pending",
+                "title": "Report to Peter"
+              }
+            ]
+          },
+          "kind": "prior_steps",
+          "revision": 2
+        },
+        {
+          "at": 1791160008000,
+          "detail": {
+            "reason": "v6 logs with clarpForm.log directly; v5 draft keys duplicate it",
+            "steps": [
+              {
+                "id": "v6",
+                "title": "Publish v6 with clarpForm.log"
+              },
+              {
+                "id": "report",
+                "title": "Report to Peter"
+              }
+            ]
+          },
+          "kind": "replan",
+          "revision": 2
+        },
+        {
+          "at": 1791160019000,
+          "detail": {
+            "reason": "User paused this goal"
+          },
+          "kind": "pause",
+          "revision": 3
+        },
+        {
+          "at": 1791160022000,
+          "detail": {
+            "reason": "User explicitly resumed this goal"
+          },
+          "kind": "resume",
+          "revision": 4
+        },
+        {
+          "at": 1791160067000,
+          "detail": {
+            "generation": 4,
+            "request_id": "task-goal-00000000000000000000000000000000"
+          },
+          "kind": "wake_claim",
+          "revision": 4
+        },
+        {
+          "at": 1791160052000,
+          "detail": {
+            "continuation": {
+              "due_at": 1791163600000,
+              "key": "peer:r0123456789ab",
+              "kind": "dependency",
+              "reason": "Waiting for Avana to answer"
+            },
+            "next_work": "Read her answer, then report",
+            "progress": "Asked Avana which build Peter runs"
+          },
+          "kind": "checkpoint",
+          "revision": 5
+        }
+      ],
+      "limits": "No tests, probes or redeploys",
+      "native_session_id": "native-pip",
+      "outcome": "Peter's Number Ninja form (v5) logs events live to the Host",
+      "owner_agent_id": "agent-pip",
+      "recovery_limit": 5
+    },
+    "history": [],
+    "items": [
+      {
+        "active_ms": 0,
+        "completed_at": 1791160008000,
+        "created_at": 1791160001000,
+        "detail": "v6 logs with clarpForm.log directly; v5 draft keys duplicate it",
+        "elapsed_ms": 0,
+        "item_id": "agent-pip:number-ninja:0000000a:v5",
+        "parent_id": null,
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "position": 0,
+        "required": 1,
+        "started_at": null,
+        "status": "removed",
+        "subtasks": [],
+        "title": "Publish v5 with draft-key events"
+      },
+      {
+        "active_ms": 0,
+        "completed_at": null,
+        "created_at": 1791160008000,
+        "detail": "",
+        "elapsed_ms": 0,
+        "item_id": "agent-pip:number-ninja:0000000a:v6",
+        "parent_id": null,
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "position": 0,
+        "required": 1,
+        "started_at": null,
+        "status": "pending",
+        "subtasks": [],
+        "title": "Publish v6 with clarpForm.log"
+      },
+      {
+        "active_ms": 0,
+        "completed_at": null,
+        "created_at": 1791160001000,
+        "detail": "",
+        "elapsed_ms": 0,
+        "item_id": "agent-pip:number-ninja:0000000a:report",
+        "parent_id": null,
+        "plan_id": "agent-pip:number-ninja:0000000a",
+        "position": 1,
+        "required": 1,
+        "started_at": null,
+        "status": "pending",
+        "subtasks": [],
+        "title": "Report to Peter"
+      }
+    ],
+    "ledger": {
+      "delegation": {
+        "created_at": 1791160025000,
+        "created_reason": "Pilot bookkeeping for Pip",
+        "delegate_agent_id": "agent-pip-accountant",
+        "delegate_session": "pip-accountant",
+        "delegation_id": "dg0000000000000001",
+        "dispatched_goal_event_through": 10,
+        "dispatched_message_through": 1,
+        "goal_event_through": 10,
+        "in_flight": false,
+        "job_handle": "",
+        "lag_ms": 12000,
+        "last_applied_at": 1791160045000,
+        "last_error": "",
+        "last_heartbeat_at": 1791160046000,
+        "last_source_at": 1791160046000,
+        "last_wake_at": 1791160034000,
+        "last_wake_id": "bookkeeping-dg0000000000000001-m1-e10",
+        "message_through": 1,
+        "principal_agent_id": "agent-pip",
+        "principal_session": "pip",
+        "status": "active",
+        "stopped_at": null,
+        "stopped_reason": "",
+        "unapplied_since": 1791160046000
+      },
+      "event_count": 18,
+      "last_event_at": 1791160067000
+    },
+    "legacy": false,
+    "plan_id": "agent-pip:number-ninja:0000000a",
+    "recovery_enabled": 1,
+    "revision": 5,
+    "server_now": 1791160057000,
+    "session": "pip",
+    "status": "active",
+    "subgoals": [
+      {
+        "created_at": 1791160011000,
+        "created_by": {
+          "actor_kind": "owner",
+          "agent_id": "agent-pip"
+        },
+        "criteria": [
+          "Build 2741 or later is installed",
+          "form-events returns his rows"
+        ],
+        "current_action": "Waiting for Peter to install 2741 and play v6",
+        "evidence": [
+          {
+            "basis": "observed",
+            "source_refs": [
+              "message:u-peter-asks@1"
+            ],
+            "text": "Last phone report was build 2738"
+          }
+        ],
+        "intent": "The original acceptance is real play on his phone",
+        "last_observed_at": 1791160060000,
+        "next_dependency": "Peter updates Clarp on his phone",
+        "owner": "",
+        "revision": 3,
+        "status": "unknown",
+        "subgoal_id": "phone",
+        "title": "Events arrive from Peter's phone",
+        "updated_at": 1791160041000
+      },
+      {
+        "created_at": 1791160013000,
+        "created_by": {
+          "actor_kind": "owner",
+          "agent_id": "agent-pip"
+        },
+        "criteria": [],
+        "current_action": "",
+        "evidence": [],
+        "intent": "First logging path",
+        "last_observed_at": null,
+        "next_dependency": "",
+        "owner": "",
+        "revision": 2,
+        "status": "retired",
+        "subgoal_id": "v5-draft",
+        "title": "v5 draft-key capture",
+        "updated_at": 1791160015000
+      },
+      {
+        "created_at": 1791160043000,
+        "created_by": {
+          "actor_kind": "delegate",
+          "agent_id": "agent-pip-accountant"
+        },
+        "criteria": [],
+        "current_action": "",
+        "evidence": [],
+        "intent": "Criterion 2",
+        "last_observed_at": null,
+        "next_dependency": "",
+        "owner": "pip",
+        "revision": 1,
+        "status": "proposed",
+        "subgoal_id": "report",
+        "title": "Peter hears the corrected status",
+        "updated_at": 1791160043000
+      }
+    ],
+    "title": "Number Ninja logs events",
+    "total_count": 3,
+    "updated_at": 1791160052000
+  }
+}
