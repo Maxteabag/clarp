@@ -216,21 +216,15 @@ const SESSION: &str = "overlap";
 /// A reply like the one in the owner's photo: headings, bullets with bold
 /// leads, a wrapped quote, code and a table, every line long enough to wrap.
 fn long_reply() -> String {
-    let mut text = String::from("My first instinct was to delegate every code edit, so the routing note now matches each skill's actual scope.\n\n");
-    text.push_str("## Evidence\n\n");
-    text.push_str("- A new QA-host test drives typed, spoken, peer, goal-continuation and resumed prompts through a fake Codex provider. It checks the text arrives exactly once and in order, on the new text and on the old steer code.\n");
-    text.push_str("- The full test gate passed apart from four load-sensitive dashboard projections that pass alone; a second review was clean.\n");
-    text.push_str("- No paid inference was used, so whether agents actually follow the new guidance is unmeasured.\n\n");
-    text.push_str("## When it takes effect\n\n");
-    text.push_str("- **Claude:** now. Each Claude turn loads the hook from the installed skills directory and reads the new text.\n");
-    text.push_str("- **Codex, AGY, Grok and OpenCode:** at the runtime's next start, which reads the instructions and builds their context itself.\n\n");
-    text.push_str("### Known gaps, left as they are for now because neither blocks the rollout\n\n");
-    text.push_str("- Claude dreaming turns get no guidance, while the other backends' dreaming turns do, through their own prompt.\n");
-    text.push_str("- Codex's own goal-continuation turns don't go through Clarp's prompt path, so they keep the old text until the thread restarts.\n\n");
-    text.push_str("> A quoted note from the review that is long enough to wrap over two or three lines at the chat's width, the way the earlier readability report found one measured a line short.\n\n");
-    text.push_str("```sh\nmake test\npytest tests/unit/test_dashboard_projection.py -k projection\n```\n\n");
-    text.push_str("| Backend | When | Note |\n|---|---|---|\n| Claude | now | the hook reads the installed skill text on every turn |\n| Codex | next start | builds its own context from the instructions file |\n\n");
-    text.push_str("My goal is complete with evidence, and the worktree is removed.");
+    // The reply in the photo, as the agent wrote it: its quote is six lines
+    // at the chat's width.
+    let mut text = String::from("Every app-dispatched Clarp turn now carries an explicit instruction to prefer the relevant clarp-* skills over native equivalents. It's deployed (f08e4c8f, cleared by Dagger first, no runtime restart forced), and I've sent Solu the result through `clarp-admin reply`; it was recorded in Solu's goal.\n\n");
+    text.push_str("**Final prompt text**\n> You are running inside Clarp. When a relevant clarp-* skill and a native or provider workflow cover the same task, follow the Clarp skill: read it before acting. When you hand work to a sub-agent and it runs longer than a few minutes or edits code, use clarp-sub-agents instead of session-bound native Agent/Task or Codex sub-agents; a quick read-only lookup may stay native. Track processes that outlive this turn with clarp-background-jobs, and when their completion must wake you, start them with its durable launcher and your goal: native background tools and hand-written nohup or setsid neither survive a runtime restart nor wake you. How you approach the work stays yours, native tools remain available inside those workflows and wherever no Clarp skill applies, and explicit user instructions come first.\n\n");
+    text.push_str("**What changed**\n- There is now one source of truth, `server/lib/clarp_guidance.py`. It replaces \"Pay special attention to Clarp skills.\" on all three routes:\n  - Claude: the prompt hook adds it to every app turn.\n  - Codex app-server: it goes in each turn's context.\n  - Codex exec, AGY, Grok and OpenCode: it goes at the head of the prompt, new or resumed.\n- The first review caught two problems, both fixed:\n  - A spoken message steered into a running Codex turn repeated the whole block. It now adds only the voice part.\n  - My first wording read as \"delegate every code edit\" and overstated what the background-jobs skill requires. The text now matches each skill's actual scope.\n\n");
+    text.push_str("**Evidence**\n- A new QA-host test drives typed, spoken, peer, goal-continuation, resumed and steered turns through the real Host to the fake Codex provider. It checks the text arrives exactly once and is never repeated inside the message. It fails on the old text and on the old steer code.\n- The full test gate passed apart from four load-sensitive tests in unrelated areas; each passes when rerun on its own. The second review was clean.\n- No paid inference was used, so whether agents actually behave differently hasn't been observed yet.\n\n");
+    text.push_str("**When it takes effect**\n- **Claude:** now. Each Claude turn loads the hook from the current release, and I checked the installed hook produces the new text.\n- **Codex, AGY, Grok and OpenCode:** at the runtime's next idle handoff. The runtime has been on 79b1425d since 03:13:55 and builds their context itself.\n\n");
+    text.push_str("**Known gaps, left as they are**\n- Claude dreaming turns get no guidance, while the other backends' dreaming turns do.\n- Codex's own goal-continuation turns don't go through Clarp's per-turn context, so they only see it from earlier turns in the thread.\n\n");
+    text.push_str("My goal is complete with evidence and the worktree is removed. The Stop-pause question for you is still open.");
     text
 }
 
@@ -256,6 +250,29 @@ fn history() -> serde_json::Value {
         let trace = format!("t-early-{i}");
         turns.push(serde_json::json!({"id": format!("early-u{i}"), "role": "user", "timestamp": "2026-10-05T09:00:00Z", "text": format!("Earlier question {i}: how does the dashboard projection pick its window?"), "origin": "user", "trace_id": trace}));
         turns.push(summed(text_row(&format!("early-a{i}"), "2026-10-05T09:00:05Z", &trace, "final", &format!("Answer {i}. The projection takes the last full hour, then rounds down to the minute so two reads agree.")), &trace, 4_000, 0));
+    }
+    // One Markdown feature a row, so a fault names the one that is measured wrong.
+    let probes = [
+        ("p-prose", "A plain paragraph long enough to wrap at the chat's width several times over. ".repeat(4)),
+        ("p-bullets", "- **Claude:** now. Each Claude turn loads the hook from the installed skills directory and reads the new text.\n- **Codex, AGY, Grok and OpenCode:** at the runtime's next start, which reads the instructions and builds their context itself.".to_owned()),
+        ("p-heading", "### Known gaps, left as they are for now because neither blocks the rollout and both are tracked\n\nOne line under it.".to_owned()),
+        ("p-quote", "> A quoted note from the review that is long enough to wrap over two or three lines at the chat's width, the way the earlier readability report found one measured a line short.".to_owned()),
+        ("p-code", "```sh\nmake test\npytest tests/unit/test_dashboard_projection.py -k projection\n```".to_owned()),
+        ("p-code-long", format!("```sh\n{}\n```", "cargo test -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint -- --test-threads 1 --nocapture ".repeat(3))),
+        ("p-user", String::new()),
+        ("p-table", "| Backend | When | Note |\n|---|---|---|\n| Claude | now | the hook reads the installed skill text on every turn |\n| Codex | next start | builds its own context from the instructions file |".to_owned()),
+    ];
+    for (i, (id, text)) in probes.into_iter().enumerate() {
+        let trace = format!("t-probe-{i}");
+        if id == "p-user" {
+            // The user's own long message, in its bubble.
+            turns.push(serde_json::json!({"id": id, "role": "user", "timestamp": "2026-10-05T09:30:00Z", "origin": "user", "trace_id": trace,
+                "text": "A long message of the user's own that wraps inside its bubble, which is narrower than the chat, over three or four lines, so its height must be measured at the bubble's width and not the chat's. ".repeat(2)}));
+            turns.push(summed(text_row(&format!("{id}-a"), "2026-10-05T09:30:05Z", &trace, "final", "Noted."), &trace, 3_000, 0));
+            continue;
+        }
+        turns.push(serde_json::json!({"id": format!("{id}-u"), "role": "user", "timestamp": "2026-10-05T09:30:00Z", "text": "Show me.", "origin": "user", "trace_id": trace}));
+        turns.push(summed(text_row(id, "2026-10-05T09:30:05Z", &trace, "final", &text), &trace, 3_000, 0));
     }
     turns.push(serde_json::json!({"id": "a-prompt", "role": "user", "timestamp": "2026-10-05T10:00:00Z", "text": "Route the Clarp skills and tell me when it takes effect.", "origin": "user", "trace_id": "t-a"}));
     turns.push(tool_row("a-tool-1", "2026-10-05T10:00:02Z", "t-a", "make test"));
@@ -319,6 +336,39 @@ fn moment(label: &'static str, ms: u64, ready: impl Fn() -> bool + 'static, act:
     }))
 }
 
+/// A reader pages through the whole chat from its top with Page Down; the
+/// rows tile on every page. Ends back at the end, following.
+fn read_through(label: &'static str) -> super::Stage {
+    use slint::platform::Key;
+    let step = std::cell::Cell::new(0usize);
+    let since = std::cell::Cell::new(std::time::Instant::now());
+    (label, Box::new(move |_, _, _| {
+        let n = step.get();
+        if n == 0 {
+            app_now().focus_transcript();
+        } else if n == 1 {
+            if !super::report().transcript_focused {
+                return false;
+            }
+            crate::headless::press(Key::Home);
+        } else if since.get().elapsed() < std::time::Duration::from_millis(400) {
+            return false;
+        } else {
+            let at_end = super::report().at_end;
+            assert_tiled(&format!("{label}, page {}", n - 1));
+            if at_end || n > 60 {
+                crate::headless::press(Key::End);
+                step.set(0);
+                return true;
+            }
+            crate::headless::press(Key::PageDown);
+        }
+        step.set(n + 1);
+        since.set(std::time::Instant::now());
+        false
+    }))
+}
+
 /// `--check row-overlap --out DIR`.
 pub(super) fn row_overlap_check(out: String) {
     use std::time::Duration;
@@ -349,6 +399,9 @@ pub(super) fn row_overlap_check(out: String) {
         })),
         moment("a long Markdown reply under its folded turn", 1500, || has_row("a-final"), move |_, _| {
             shot1();
+        }),
+        read_through("reading the history"),
+        moment("back at the end", 800, || true, move |_, _| {
             upsert(dagger_prompt());
             agent_state("thinking");
         }),
