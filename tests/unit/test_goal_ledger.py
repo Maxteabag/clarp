@@ -579,3 +579,16 @@ def test_references_are_the_principals_own_and_say_what_is_kept(pilot, tmp_path)
             f"message:{own['id']}@{own['revision']}", "job:bg1:1:x"]}])
     sources = [e for e in _events(plan_id) if e["kind"] == "observation"][0]["new"]["sources"]
     assert [s["status"] for s in sources] == ["unavailable", "unpinned", "invalid", "unavailable", "unverified"]
+
+
+def test_a_goal_status_change_after_a_subgoal_retires_records_the_goals_own_prior_status(pilot):
+    plan_id = pilot["plan"]["plan_id"]
+    with OWNER(pilot):
+        ledger.owner_subgoal(plan_id, "add", {"subgoal_id": "old", "title": "Old path"})
+        ledger.owner_subgoal(plan_id, "update", {"subgoal_id": "old", "expected_revision": 1,
+                                                 "fields": {"status": "retired"}, "reason": "Replaced"})
+    plan = task_plans.get(plan_id)
+    with ledger.acting_as("user"):
+        goals.mutate(plan_id, revision=plan["revision"], action="pause", data={"reason": "User paused"})
+    pause = _events(plan_id)[-1]
+    assert (pause["kind"], pause["prior"]["status"], pause["new"]["status"]) == ("pause", "active", "paused")
