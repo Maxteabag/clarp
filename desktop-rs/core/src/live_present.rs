@@ -118,6 +118,11 @@ impl Presented {
         let later = |row: &Message| crate::time_format::epoch_ms(&row.timestamp).is_some_and(|ms| ms > started);
         rows.iter().skip(from).position(|r| !own(r) && !r.pending && later(r)).map_or(rows.len(), |i| from + i)
     }
+
+    /// Where each entry goes among the chat's rows, in entry order.
+    pub fn anchors(&self, rows: &[&Message]) -> Vec<usize> {
+        vec![self.anchor(rows); self.entries.len()]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
