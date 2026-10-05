@@ -2207,3 +2207,66 @@ pub(super) fn form_events_check(_out: String) {
         }
     }
 }
+
+/// `--check form-log`: on whatever Host CLARP_BASE_URL names (a real one
+/// included), opens the form `CLARP_FORM_ARTIFACT`, logs
+/// `CLARP_FORM_LOG_COUNT` (default 3) events through its page as
+/// `window.clarpForm.log` does, and waits until the Host acknowledged them.
+/// It writes nothing else to the Host.
+pub(super) fn form_log_check(_out: String) {
+    let artifact = std::env::var("CLARP_FORM_ARTIFACT").unwrap_or_default();
+    let count: usize = std::env::var("CLARP_FORM_LOG_COUNT").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+    let (artifact2, artifact3) = (artifact.clone(), artifact.clone());
+    let before = Rc::new(Cell::new(0));
+    let before2 = before.clone();
+    run_stages(vec![
+        ("Host keeps form events", Box::new(|app, _, elapsed| {
+            let ready = app.engine.borrow().connected() && app.engine.borrow().form_events_supported();
+            if !ready {
+                if elapsed > Duration::from_secs(10) {
+                    check(false, &format!("the Host keeps form events ({})", app.engine.borrow().connection_state()));
+                    return true;
+                }
+                return false;
+            }
+            app.engine.borrow_mut().load_updates();
+            true
+        })),
+        ("form listed", Box::new(move |app, window, elapsed| {
+            if fixture(app, &artifact).is_null() {
+                if elapsed > Duration::from_secs(10) {
+                    check(false, &format!("{artifact} is among the Host's latest artifacts"));
+                    return true;
+                }
+                return false;
+            }
+            before.set(opened().len());
+            crate::artifacts_view::open(app, window, &artifact);
+            true
+        })),
+        ("events logged", Box::new(move |_, _, elapsed| {
+            let Some(url) = opened().into_iter().skip(before2.get()).find(|u| u.contains("/form/")) else {
+                if elapsed > Duration::from_secs(3) {
+                    check(false, &format!("{artifact2} opens as a page"));
+                    return true;
+                }
+                return false;
+            };
+            let page = fetch("GET", &url, "", None).map(|(_, body)| body).unwrap_or_default();
+            check(page.contains("capabilities: {eventLog: true}"), "the page offers the event log");
+            for n in 0..count {
+                let id = uuid::Uuid::new_v4().to_string();
+                let reply = log_event(&url, &id, &json!({"type": "desktop_event_log_probe", "n": n, "client": "clarp-slint"}));
+                check(reply.as_ref().is_ok_and(|(status, body)| *status == 200 && body["queued"] == true), &format!("log {id} queued: {reply:?}"));
+            }
+            true
+        })),
+        ("events synced", Box::new(move |_, _, elapsed| {
+            if journal_lines() > 0 && elapsed < Duration::from_secs(12) {
+                return false;
+            }
+            check(journal_lines() == 0 && !journals().is_empty(), &format!("the Host acknowledged every event logged for {artifact3}"));
+            true
+        })),
+    ]);
+}
