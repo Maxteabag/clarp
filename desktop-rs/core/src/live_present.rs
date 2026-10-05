@@ -74,6 +74,9 @@ pub struct Entry {
     /// The durable `/log` row that took over this message: it shows here,
     /// in the item's place.
     pub row: String,
+    /// When the earliest of its items began (Host time): no row written
+    /// before then goes below it.
+    pub started_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -113,16 +116,40 @@ impl Presented {
         // The prompt carries the turn's id: whatever its time, the turn
         // goes after it.
         let from = rows.iter().position(|r| r.role == "user" && !self.turn_id.is_empty() && r.trace_id == self.turn_id).map_or(0, |i| i + 1);
-        let own = |row: &Message| self.own_rows.contains(&row.id) || (!self.turn_id.is_empty() && row.trace_id == self.turn_id);
-        // Rows without a Host time (unsent ones) never push it up.
-        let later = |row: &Message| crate::time_format::epoch_ms(&row.timestamp).is_some_and(|ms| ms > started);
-        rows.iter().skip(from).position(|r| !own(r) && !r.pending && later(r)).map_or(rows.len(), |i| from + i)
+        rows.iter().skip(from).position(|r| self.pushes(r) && written(r).is_some_and(|ms| ms > started)).map_or(rows.len(), |i| from + i)
     }
 
-    /// Where each entry goes among the chat's rows, in entry order.
+    /// Where each entry goes among the chat's rows, in entry order: at the
+    /// turn's place, and below every row not its own written before the
+    /// entry began. A turn the Host never settled (its agent died) whose
+    /// items go on under newer prompts splits at them.
     pub fn anchors(&self, rows: &[&Message]) -> Vec<usize> {
-        vec![self.anchor(rows); self.entries.len()]
+        let mut at = self.anchor(rows);
+        if self.started_at_ms.is_none() {
+            return vec![at; self.entries.len()];
+        }
+        self.entries
+            .iter()
+            .map(|entry| {
+                if let Some(began) = entry.started_at_ms {
+                    let earlier = rows.iter().rposition(|r| self.pushes(r) && written(r).is_some_and(|ms| ms <= began));
+                    at = at.max(earlier.map_or(0, |i| i + 1));
+                }
+                at
+            })
+            .collect()
     }
+
+    /// A row that pushes the turn's place: not its own and sent.
+    fn pushes(&self, row: &Message) -> bool {
+        let own = self.own_rows.contains(&row.id) || (!self.turn_id.is_empty() && row.trace_id == self.turn_id);
+        !own && !row.pending
+    }
+}
+
+/// A row's Host time; rows without one (unsent ones) never push the turn.
+fn written(row: &Message) -> Option<i64> {
+    crate::time_format::epoch_ms(&row.timestamp)
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -361,6 +388,7 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
             let fold = Entry {
                 items: folded.iter().flat_map(|i| entries[*i].items.clone()).collect(),
                 rev: folded.iter().map(|i| entries[*i].rev).sum(),
+                started_at_ms: folded.iter().filter_map(|i| entries[*i].started_at_ms).min(),
                 key,
                 kind: Kind::Fold,
                 status: text(turn, "status").to_owned(),
@@ -429,6 +457,7 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
         items: vec![id.to_owned()],
         status: status.clone(),
         rev: int(item, "rev").unwrap_or(0),
+        started_at_ms: int(item, "started_at_ms"),
         expanded,
         key,
         ..Entry::default()
@@ -609,6 +638,7 @@ fn explore_entry(group: &str, members: &[&Object], options: &Options) -> Entry {
         expandable: true,
         expanded,
         rev: members.iter().map(|m| int(m, "rev").unwrap_or(0)).sum(),
+        started_at_ms: members.iter().filter_map(|m| int(m, "started_at_ms")).min(),
         meta: if running { members.iter().filter_map(|m| int(m, "started_at_ms")).min().filter(|_| options.host_now_ms > 0).map(|s| clock(options.host_now_ms - s)).unwrap_or_default() } else { String::new() },
         ..Entry::default()
     }

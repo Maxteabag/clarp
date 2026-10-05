@@ -372,6 +372,9 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
    `trace_id` is the `turn_id`) and every row from before `turn.started_at_ms`,
    before the first other row written after it (a message sent once it
    settled, or queued while it runs); the turn's own rows never move it.
+   No item goes above another row written before the item began: a turn
+   whose items go on after newer prompts (one the Host failed to settle)
+   splits at them, each prompt above what started after it.
 4. Status line from `activity`: `● Running npm test · 0:12 +1`, `◌ Thinking:
    <reasoning title>`, `Responding`, `Compacting`, nothing when `idle`. Tick
    elapsed from `tool.started_at_ms` / `turn_started_ms`; never start a timer
