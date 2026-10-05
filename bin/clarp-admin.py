@@ -159,6 +159,10 @@ def api_request(method: str, path: str, body=None, *, retries: int = 0,
             base + path, data=data, method=method,
             headers={"Content-Type": "application/json"})
         if token: request.add_header("Authorization", f"Bearer {token}")
+        # The Host-issued identity of the turn running this command, so the
+        # Host can tell which agent is acting (lib.turn_identity).
+        if os.environ.get("CLARP_PROVIDER_TURN"):
+            request.add_header("X-Clarp-Turn", os.environ["CLARP_PROVIDER_TURN"])
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw = response.read()

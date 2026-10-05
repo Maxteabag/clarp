@@ -103,6 +103,14 @@ def tick(delegation_id: str, pending: Pending, send, *, now: int | None = None) 
     if not goal_ledger.agents_live(db.conn(), row):
         goal_ledger.stop(delegation_id, "principal or delegate deleted or archived")
         return "stopped"
+    from .turn_identity import IDENTITY_BACKENDS
+    backends = [r[0] for r in db.conn().execute(
+        "SELECT backend FROM agents WHERE agent_id IN (?,?)",
+        (row["principal_agent_id"], row["delegate_agent_id"]))]
+    if any(b not in IDENTITY_BACKENDS for b in backends):
+        # Without turn identity the scope could not be enforced; stop rather than trust.
+        goal_ledger.stop(delegation_id, "principal or delegate moved to a backend without turn identity")
+        return "stopped"
     if not row["last_heartbeat_at"] or now - row["last_heartbeat_at"] >= 5_000:
         _update(delegation_id, last_heartbeat_at=now)
     marker = source_marker(row)

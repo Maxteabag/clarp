@@ -11,6 +11,9 @@ job is an honest record: what the goal is, which subgoals exist and why, what is
 happening now, what was claimed and what was actually seen. You do not do,
 steer or judge the work.
 
+Run these commands from your own Clarp turn: the Host checks the turn identity
+it gave you as well as the delegation credential, and refuses anything else.
+
 ## Each wake
 
 ```sh
@@ -66,8 +69,9 @@ rather than rewriting what came before.
 - Message your principal (the Host refuses it), coach it, or prompt anyone to work.
 - Complete, approve, pause, resume, cancel, block or redefine a goal, record
   criterion evidence, or touch jobs, builds, deployments or accounts.
-- Use the owner commands (`clarp-goal checkpoint`, `step`, `complete`, …) on your
-  principal's goals.
+- Use the owner commands (`clarp-goal checkpoint`, `step`, `complete`, …) or
+  `clarp-admin request`/`reply` on your principal's goals; the Host refuses them
+  from your turn.
 
 Completion stays with the owner and its criterion evidence. Your records are
 claims and observations beside it.

@@ -179,6 +179,29 @@ def new_turn_token() -> str:
     return secrets.token_hex(12)
 
 
+def identity_env(agent_id: str) -> tuple[str, dict[str, str]]:
+    """A fresh turn token and the environment that carries it into the turn.
+
+    The token is the turn's Host-issued identity: Clarp tools inside the turn
+    present it, and the goal store checks it before a delegated principal's
+    goal changes (lib.turn_identity). No agent, no token."""
+    if not agent_id:
+        return "", {}
+    token = new_turn_token()
+    return token, {TURN_ENV: token}
+
+
+def record_identity(token: str, *, agent_id: str, provider: str, pid: int) -> None:
+    """Record a non-Claude turn's token; never fail the spawn over it."""
+    if not token:
+        return
+    try:
+        turn_started(token, agent_id=agent_id, provider=provider, pid=pid)
+    except Exception as exc:  # noqa: BLE001
+        from .log import log_exception
+        log_exception("turnIdentityRecordFail", exc, detail=agent_id)
+
+
 def turn_started(token: str, *, agent_id: str, provider: str, pid: int) -> None:
     """Record one provider process: its token and the identity of its pid."""
     if not (agent_id and _TOKEN.fullmatch(token or '')):

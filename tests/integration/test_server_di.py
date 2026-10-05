@@ -4016,3 +4016,37 @@ def test_server_home_terminal_runs_shell_in_home_without_resuming_an_agent(
         stream.close()
     after = [tuple(r) for r in db.conn().execute("SELECT agent_id,backend_session_id FROM runtimes")]
     assert after == before
+
+
+def test_a_bookkeeping_delegate_cannot_start_agents_whatever_parent_it_names(running_server):
+    import os
+    base, ctx, _srv = running_server
+    from lib import agents as agents_db, goal_ledger, provider_background_jobs as turns
+    boss_id = agents_db.create_agent(persona="Boss", voice_id="v", cwd=str(ctx.root), session="boss")
+    books_id = agents_db.create_agent(persona="Books", voice_id="v", cwd=str(ctx.root), session="books")
+    agents_db.set_lineage(books_id, parent_agent_id=boss_id, role="helper")
+    goal_ledger.enable(agents_db.get_by_agent_id(boss_id), agents_db.get_by_agent_id(books_id), "Pilot")
+
+    def token(agent_id):
+        value = turns.new_turn_token()
+        turns.turn_started(value, agent_id=agent_id, provider="claude", pid=os.getpid())
+        return value
+
+    def create(session, parent, turn=""):
+        body = {"name": session.title(), "session": session, "cwd": str(ctx.root),
+                "parent": parent, "role": "helper"}
+        try:
+            return _post_with_headers(base + "/agents", body, {"X-Clarp-Turn": turn} if turn else {})[0]
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    # From the delegate's turn, naming its principal as the parent.
+    assert create("ghost-a", "boss", token(books_id)) == 409
+    # Naming the delegate as the parent.
+    assert create("ghost-b", "books") == 409
+    with pytest.raises(urllib.error.HTTPError) as fork:
+        _post(base + "/agents/books/fork", {"tasks": ["anything"]})
+    assert fork.value.code == 409
+    assert not agents_db.get_by_session("ghost-a") and not agents_db.get_by_session("ghost-b")
+    # The principal's own turn still starts helpers.
+    assert create("helper-c", "boss", token(boss_id)) == 200

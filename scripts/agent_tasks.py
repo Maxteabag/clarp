@@ -38,13 +38,10 @@ def main(argv: list[str]) -> int:
             print(json.dumps(goal_ledger.events(argv[2], after=int(argv[3]) if len(argv) == 4 else 0),
                              ensure_ascii=False))
             return 0
-        if command in {"checkpoint", "replan", "pause", "resume", "cancel", "block", "supersede",
-                       "dependency", "enroll", "add_step", "document", "rebind", "act", "step",
-                       "complete", "subgoal", "update", "finish"} and len(argv) > 2:
-            _refuse_delegate(plan_id=argv[2])
-        elif command in {"goal", "create"} and len(argv) > 2:
-            _refuse_delegate(session=argv[2])
-        with goal_ledger.acting_as("owner"):
+        from lib import turn_identity
+        caller = turn_identity.caller_agent_id()
+        # The owner path acts as whoever this turn's Host identity says it is.
+        with goal_ledger.acting_as("owner", caller, verified=bool(caller)):
             return _owner(argv, usage)
     except goal_ledger.DelegationDenied as exc:
         print(f"agent_tasks: {exc}", file=sys.stderr)
@@ -54,60 +51,19 @@ def main(argv: list[str]) -> int:
         return 1
 
 
-def _refuse_delegate(*, plan_id: str = "", session: str = "") -> None:
-    """A bookkeeping delegate keeps its principal's books only through
-    `bookkeeping record`; the owner path is not its to use.
-
-    Only a Claude caller is checked: its turn sets the session variable. The
-    shared Codex app-server sets it once for all Codex agents, so there it could
-    name the wrong agent and lock a real owner out; a Codex delegate is held to
-    its scope by the credential path and its instructions instead."""
-    from lib import agents, db, goal_ledger
-
-    me = agents.get_by_session(os.environ.get("CLAUDE_PWA_SESSION", "")) or {}
-    if not me or me.get("backend") != "claude" or _under_codex_app_server():
-        return
-    if plan_id:
-        row = db.conn().execute("SELECT agent_id FROM task_plans WHERE plan_id=?", (plan_id,)).fetchone()
-        owner = row["agent_id"] if row else ""
-    else:
-        owner = (agents.get_by_session(session) or {}).get("agent_id", "")
-    if owner and goal_ledger.is_delegate_of(me["agent_id"], owner):
-        raise goal_ledger.DelegationDenied(
-            "a bookkeeping delegate cannot change its principal's goal through the owner path; "
-            "use `clarp-goal bookkeeping record`")
-
-
-def _under_codex_app_server() -> bool:
-    """True when an ancestor is a Codex app-server, whose session variable belongs
-    to whichever agent started it rather than to this caller."""
-    pid = os.getppid()
-    for _ in range(32):
-        if pid <= 1:
-            return False
-        try:
-            argv = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-            stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
-        except OSError:
-            return False
-        if b"app-server" in argv and any(b"codex" in part for part in argv):
-            return True
-        pid = int(stat.rsplit(")", 1)[1].split()[1])
-    return False
-
-
 def _bookkeeping(args: list[str], usage: str) -> int:
-    from lib import goal_ledger
+    from lib import goal_ledger, turn_identity
 
+    caller = turn_identity.caller_agent_id()
     if len(args) in {2, 3} and args[0] == "observe":
         options = json.loads(args[2]) if len(args) == 3 else {}
         token = goal_ledger.read_token(args[1], os.environ.get("CLARP_DELEGATION_TOKEN_FILE", ""))
-        result = goal_ledger.observe(args[1], token, **options)
+        result = goal_ledger.observe(args[1], token, caller=caller, **options)
     elif len(args) == 5 and args[0] == "record":
         batch = json.loads(args[4])
         token = goal_ledger.read_token(args[1], os.environ.get("CLARP_DELEGATION_TOKEN_FILE", ""))
         result = goal_ledger.record(
-            args[1], token, args[2], wake_id=args[3], entries=batch.get("entries") or [],
+            args[1], token, args[2], caller=caller, wake_id=args[3], entries=batch.get("entries") or [],
             message_through=batch.get("message_through"),
             goal_event_through=batch.get("goal_event_through"))
     else:
