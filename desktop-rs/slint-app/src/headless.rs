@@ -145,6 +145,32 @@ pub fn press_with(modifiers: &[slint::platform::Key], key: impl Into<SharedStrin
     }
 }
 
+/// Puts one key down and leaves it there (no release), as when the window
+/// loses the keyboard while the key is still held.
+pub fn hold(key: impl Into<SharedString>) {
+    let Some(window) = window() else { return };
+    window.dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+}
+
+/// The window system gives the keyboard to another window (false) or back
+/// to this one (true), as winit's `Focused` does.
+pub fn set_active(active: bool) {
+    let Some(window) = window() else { return };
+    window.dispatch_event(WindowEvent::WindowActiveChanged(active));
+}
+
+/// The pointer leaves the window.
+pub fn pointer_exit() {
+    let Some(window) = window() else { return };
+    window.dispatch_event(WindowEvent::PointerExited);
+}
+
+/// The pointer moves to a logical position (entering the window).
+pub fn pointer_move(x: f32, y: f32) {
+    let Some(window) = window() else { return };
+    window.dispatch_event(WindowEvent::PointerMoved { position: slint::LogicalPosition::new(x, y) });
+}
+
 /// A left click at a logical position, as a mouse sends it.
 pub fn click(x: f32, y: f32) {
     use slint::platform::PointerEventButton;
