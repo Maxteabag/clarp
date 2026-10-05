@@ -215,11 +215,16 @@ impl App {
         let queue = engine.attention_queue();
         laps.lap("queue");
         let mut folded_under: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
+        // Of those, the helpers still at work.
+        let mut working_under: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
         let mut shown = Vec::new();
         for row in &visible {
             let chain = if tree_active { ancestors(row) } else { Vec::new() };
             if let Some(first) = chain.first() {
                 *folded_under.entry(first.clone()).or_default() += 1;
+                if !clarp_core::sidebar::finished_helper_state(&row.helper_state) {
+                    *working_under.entry(first.clone()).or_default() += 1;
+                }
             }
             if chain.iter().all(|a| unfolded.contains(a)) {
                 shown.push(*row);
@@ -231,6 +236,7 @@ impl App {
             .map(|row| {
                 let mut chat = chat_row(row, sidebar.depth(&row.session), selected);
                 chat.fold_count = folded_under.get(&row.session).copied().unwrap_or(0);
+                (chat.running_helpers, chat.running_processes) = view::running_work(&chat, working_under.get(&row.session).copied().unwrap_or(0));
                 chat.queue = queue.iter().position(|s| *s == row.session).map_or(0, |i| i as i32 + 1);
                 if row.busy {
                     let letters: Vec<slint::SharedString> = row.name.chars().map(|c| c.to_string().into()).collect();

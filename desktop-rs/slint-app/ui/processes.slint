@@ -82,6 +82,45 @@ export component ProcessIndicator inherits Rectangle {
     }
 }
 
+// The compact explorer's mark for one kind of running work: its glyph (the
+// agent mark for helpers, the hourglass for processes) and how many run, as
+// narrow as it can be. Clicking asks for the list, as ProcessIndicator does.
+export component CompactWork inherits Rectangle {
+    // "agent" or "hourglass".
+    in property <string> kind;
+    in property <int> count;
+    callback clicked();
+    property <string> what: root.kind == "agent"
+        ? (root.count == 1 ? " sub-agent" : " sub-agents")
+        : (root.count == 1 ? " background process" : " background processes");
+    width: layout.preferred-width;
+    height: 14px;
+    accessible-role: button;
+    accessible-id: root.kind == "agent" ? "compact-helpers" : "compact-processes";
+    accessible-label: root.count + root.what + " running";
+    accessible-value: root.count;
+    accessible-action-default => { root.clicked(); }
+    layout := HorizontalLayout {
+        spacing: 1px;
+        ProcessGlyph { y: 1px; glyph-size: 12px; kind: root.kind; }
+        Text {
+            text: root.count > 9 ? "9+" : root.count;
+            color: Palette.chrome-text;
+            font-size: 10px;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+    TouchArea {
+        x: -2px;
+        y: -4px;
+        width: parent.width + 4px;
+        height: parent.height + 8px;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
 // ProcessPopover.qml: what an agent runs right now, one line per active
 // job and one per running helper (choosing a helper opens its chat), placed
 // under the indicator that opened it. Escape and a click outside close it.
