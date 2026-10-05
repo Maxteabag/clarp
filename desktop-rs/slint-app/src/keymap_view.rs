@@ -6,7 +6,6 @@
 //! another action has is shown as a clash: Enter takes it over.
 
 use std::cell::RefCell;
-use std::time::Instant;
 
 use slint::{ModelRc, VecModel};
 
