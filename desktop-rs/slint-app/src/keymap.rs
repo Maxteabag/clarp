@@ -642,11 +642,19 @@ fn checked(action: &str, context: &str, key: &str) -> Result<String, Refusal> {
     Ok(key)
 }
 
+/// Adds `key` in `context` itself: a key this context had taken away
+/// comes back; any other is kept as the context's own, even one inherited
+/// from further out (bound here on purpose, it outranks this context's
+/// single presses and reaches its text field).
 fn add_unchecked(overrides: &Overrides, action: &str, context: &str, key: &str) -> Overrides {
     let mut next = overrides.clone();
-    change_mut(&mut next, action, context).remove.retain(|k| k != key);
-    if !keys_in(context, action, &next).iter().any(|k| k == key) {
-        change_mut(&mut next, action, context).add.push(key.to_owned());
+    let change = change_mut(&mut next, action, context);
+    let restored = change.remove.iter().any(|k| k == key);
+    change.remove.retain(|k| k != key);
+    let back = restored && keys_in(context, action, &next).iter().any(|k| k == key);
+    let change = change_mut(&mut next, action, context);
+    if !back && !change.add.iter().any(|k| k == key) {
+        change.add.push(key.to_owned());
     }
     tidy(next)
 }
