@@ -14,6 +14,7 @@ pub mod delivery;
 pub mod diagnostics;
 pub mod directory;
 pub mod endpoint;
+pub mod form_events;
 pub mod jobs;
 pub mod json;
 pub mod instance;

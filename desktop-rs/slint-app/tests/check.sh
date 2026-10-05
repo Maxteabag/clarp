@@ -29,6 +29,9 @@ passes=(once); [ "$name" = startup ] && passes=(cold warm)
 # keymap saves its bindings to a scratch settings file and starts again
 # (restart) to find them; the others keep settings in memory.
 settings=off; [ "$name" = keymap ] && { passes=(once restart); settings="$scratch/settings.json"; }
+# form-events runs it twice too: what the first run queued is delivered by
+# the second (the scratch data folder and the fake Host outlive the app).
+[ "$name" = form-events ] && passes=(first second)
 for pass in "${passes[@]}"; do
 [ "$pass" = once ] || echo "perf pass: $pass"
 CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS="$settings" \

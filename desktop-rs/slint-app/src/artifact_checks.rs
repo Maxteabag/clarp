@@ -1964,3 +1964,242 @@ pub(super) fn artifacts_check(out: String) {
     stages.extend(scroll_stages(&out));
     run_stages(stages);
 }
+
+// ---- form events
+
+/// An authenticated request to the fake Host, as the app makes them.
+fn host_call(method: &str, path: &str, body: &Value) -> Result<(u16, Value), String> {
+    use std::io::{Read, Write};
+    let base = std::env::var("CLARP_BASE_URL").map_err(|e| e.to_string())?;
+    let authority = base.trim_start_matches("http://").trim_end_matches('/').to_owned();
+    let body = if body.is_null() { String::new() } else { body.to_string() };
+    let mut stream = std::net::TcpStream::connect(&authority).map_err(|e| e.to_string())?;
+    stream.set_read_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
+    let token = std::env::var("CLARP_TOKEN").unwrap_or_default();
+    let request = format!(
+        "{method} {path} HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).map_err(|e| e.to_string())?;
+    let mut reply = String::new();
+    stream.read_to_string(&mut reply).map_err(|e| e.to_string())?;
+    let status = reply.split(' ').nth(1).and_then(|s| s.parse().ok()).ok_or_else(|| format!("no status: {reply:?}"))?;
+    let json = reply.split_once("\r\n\r\n").and_then(|(_, b)| serde_json::from_str(b).ok()).unwrap_or(Value::Null);
+    Ok((status, json))
+}
+
+/// The rows the fake Host's journal holds for `artifact`, in its order.
+fn host_events(artifact: &str) -> Vec<Value> {
+    host_call("GET", &format!("/artifacts/{artifact}/events"), &Value::Null)
+        .ok()
+        .and_then(|(_, body)| body["events"].as_array().cloned())
+        .unwrap_or_default()
+}
+
+/// The event ids of every batch the app sent for `artifact`, in order.
+fn sent_batches(artifact: &str) -> Vec<Vec<String>> {
+    posts(&format!("/artifacts/{artifact}/events"))
+        .iter()
+        .map(|post| post["body"]["events"].as_array().into_iter().flatten().filter_map(|e| e["event_id"].as_str().map(str::to_owned)).collect())
+        .collect()
+}
+
+/// The app's event journals (`$XDG_DATA_HOME/clarp/form-events/*`).
+fn journals() -> Vec<std::path::PathBuf> {
+    let root = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).unwrap_or_default().join("clarp").join("form-events");
+    std::fs::read_dir(root).into_iter().flatten().flatten().map(|e| e.path().join("events-outbox.jsonl")).filter(|p| p.exists()).collect()
+}
+
+fn journal_lines() -> usize {
+    journals().iter().map(|p| std::fs::read_to_string(p).unwrap_or_default().lines().count()).sum()
+}
+
+/// The page's `window.clarpForm.log(event)`: its request to the loopback page.
+fn log_event(url: &str, request_id: &str, event: &Value) -> Result<(u16, Value), String> {
+    let (status, body) = fetch("POST", &format!("{url}/log"), &json!({"request_id": request_id, "event": event}).to_string(), None)?;
+    Ok((status, serde_json::from_str(&body).unwrap_or(Value::Null)))
+}
+
+/// The first run: the form logs while the Host loses a receipt and then
+/// refuses, and the app quits with the events still queued.
+fn form_events_first_stages() -> Vec<Stage> {
+    let form_url: Rc<RefCell<String>> = Rc::default();
+    let (url2, url3) = (form_url.clone(), form_url.clone());
+    let logged: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (logged2, logged3) = (logged.clone(), logged.clone());
+    let mut stages = load_chat("art-events", &["html_form"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("events form card", Box::new(move |_, window, elapsed| {
+            if !placed(window, &["form-trip"], elapsed) {
+                return false;
+            }
+            check(control("/__control/form-events", &json!({"lose_receipts": 1})).is_ok(), "the Host will lose the first receipt");
+            window.global::<ArtifactBridge>().invoke_open("form-trip".into());
+            true
+        })),
+        ("events form opens", Box::new(move |_, _, elapsed| {
+            let Some(url) = opened().into_iter().find(|u| u.contains("/form/")) else {
+                if elapsed > Duration::from_secs(3) {
+                    check(false, &format!("the form opens: {:?}", opened()));
+                    return true;
+                }
+                return false;
+            };
+            let page = fetch("GET", &url, "", None).map(|(_, body)| body).unwrap_or_default();
+            check(page.contains("capabilities") && page.contains("eventLog: true"), "the bridge offers the event log on a Host that has it");
+            for n in 0..3 {
+                let id = uuid::Uuid::new_v4().to_string();
+                let reply = log_event(&url, &id, &json!({"type": "number_shown", "number": n, "elapsed_ms": 1000 * n}));
+                let queued = reply.as_ref().is_ok_and(|(status, body)| *status == 200 && *body == json!({"event_id": id, "queued": true, "synced": false}));
+                check(queued, &format!("log({n}) resolves once the event is queued, not synced: {reply:?}"));
+                logged.borrow_mut().push(id);
+            }
+            let again = log_event(&url, &logged.borrow()[0], &json!({"type": "number_shown", "number": 0, "elapsed_ms": 0}));
+            check(again.as_ref().is_ok_and(|(status, _)| *status == 200), &format!("the same log again is the same event: {again:?}"));
+            let conflict = log_event(&url, &logged.borrow()[0], &json!({"type": "other"}));
+            check(conflict.as_ref().is_ok_and(|(status, body)| *status == 400 && body["error"].as_str().is_some_and(|e| e.contains("already"))), &format!("its id with another event is refused: {conflict:?}"));
+            let array = fetch("POST", &format!("{url}/log"), &json!({"request_id": uuid::Uuid::new_v4().to_string(), "event": [1, 2]}).to_string(), None);
+            check(array.as_ref().is_ok_and(|(status, _)| *status == 400), &format!("an event must be an object: {array:?}"));
+            let big = log_event(&url, &uuid::Uuid::new_v4().to_string(), &json!({"t": "x".repeat(20_000)}));
+            check(big.as_ref().is_ok_and(|(status, body)| *status == 400 && body["error"].as_str().is_some_and(|e| e.contains("16 KiB"))), &format!("an event over 16 KiB is refused visibly: {big:?}"));
+            check(journal_lines() == 3, &format!("the three events are on disk: {} lines in {:?}", journal_lines(), journals()));
+            *url2.borrow_mut() = url;
+            true
+        })),
+        ("receipt lost", Box::new(move |_, _, elapsed| {
+            let batches = sent_batches("form-trip");
+            if batches.is_empty() {
+                if elapsed > Duration::from_secs(5) {
+                    check(false, "the app sends the queued events without a Send");
+                    return true;
+                }
+                return false;
+            }
+            check(batches[0] == *logged2.borrow(), &format!("one batch carries the three events: {batches:?}"));
+            check(host_events("form-trip").len() == 3, "the Host stored them before its receipt was lost");
+            let failing = control("/__control/fail", &json!({"path": "/artifacts/form-trip/events", "status": 503, "count": 1000}));
+            check(failing.is_ok(), "the Host goes away");
+            let id = uuid::Uuid::new_v4().to_string();
+            let reply = log_event(&url3.borrow(), &id, &json!({"type": "number_shown", "number": 3, "elapsed_ms": 3000}));
+            check(reply.as_ref().is_ok_and(|(status, _)| *status == 200), &format!("logging carries on while the Host is away: {reply:?}"));
+            logged2.borrow_mut().push(id);
+            true
+        })),
+        ("events retried", Box::new(move |_, _, elapsed| {
+            let batches = sent_batches("form-trip");
+            if batches.len() < 2 {
+                if elapsed > Duration::from_secs(8) {
+                    check(false, &format!("the app retries after the lost receipt: {batches:?}"));
+                    return true;
+                }
+                return false;
+            }
+            check(batches[1] == *logged3.borrow(), &format!("the retry sends the same ids, and the new event: {batches:?}"));
+            check(journal_lines() == 4, &format!("all four stay queued: {}", journal_lines()));
+            true
+        })),
+    ]);
+    stages
+}
+
+/// The second run: the restarted app sends what the first left queued, the
+/// Host has each event once, and a followed draft array is imported.
+fn form_events_second_stages() -> Vec<Stage> {
+    let mut stages: Vec<Stage> = vec![
+        ("Host back", Box::new(|app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/fail", &json!({"path": "/artifacts/form-trip/events", "status": 503, "count": 0})).is_ok(), "the Host is back");
+            true
+        })),
+        ("queued events delivered", Box::new(|_, _, elapsed| {
+            let rows = host_events("form-trip");
+            let drained = journal_lines() == 0;
+            if (rows.len() < 4 || !drained) && elapsed < Duration::from_secs(12) {
+                return false;
+            }
+            let first_run: Vec<String> = sent_batches("form-trip").into_iter().flatten().fold(Vec::new(), |mut ids, id| {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+                ids
+            });
+            let ids: Vec<String> = rows.iter().filter_map(|r| r["event_id"].as_str().map(str::to_owned)).collect();
+            check(rows.len() == 4 && ids == first_run, &format!("after the restart the Host has each logged event exactly once: {ids:?} (sent {first_run:?})"));
+            let seqs: Vec<i64> = rows.iter().filter_map(|r| r["client_seq"].as_i64()).collect();
+            check(seqs == [1, 2, 3, 4], &format!("in the order they were logged: {seqs:?}"));
+            let numbers: Vec<i64> = rows.iter().filter_map(|r| r["event"]["number"].as_i64()).collect();
+            check(numbers == [0, 1, 2, 3] && rows.iter().all(|r| r["version"] == 3 && r["client_at"].as_i64().is_some_and(|t| t > 1_700_000_000_000)), &format!("with their events, the form's version and client times: {rows:?}"));
+            check(drained, &format!("and the app's journal is compacted: {} lines", journal_lines()));
+            let followed = host_call("POST", "/artifacts/form-trip/events-config", &json!({"draft_key": "events"}));
+            check(followed.as_ref().is_ok_and(|(status, _)| *status == 200), &format!("the agent follows the form's draft events: {followed:?}"));
+            true
+        })),
+    ];
+    stages.extend(load_chat("art-events", &["html_form"]));
+    let form_url: Rc<RefCell<String>> = Rc::default();
+    let url2 = form_url.clone();
+    stages.extend::<Vec<Stage>>(vec![
+        ("events form again", Box::new(move |_, window, elapsed| {
+            if !placed(window, &["form-trip"], elapsed) {
+                return false;
+            }
+            window.global::<ArtifactBridge>().invoke_open("form-trip".into());
+            true
+        })),
+        ("draft events", Box::new(move |_, _, elapsed| {
+            let Some(url) = opened().into_iter().find(|u| u.contains("/form/")) else {
+                if elapsed > Duration::from_secs(3) {
+                    check(false, &format!("the form opens again: {:?}", opened()));
+                    return true;
+                }
+                return false;
+            };
+            let draft = json!({"run": 2, "events": [{"type": "tap", "i": 0}, {"type": "tap", "i": 1}]});
+            let saved = fetch("POST", &format!("{url}/draft"), &draft.to_string(), None);
+            check(saved.as_ref().is_ok_and(|(status, _)| *status == 200), &format!("the page saves a draft with an event array: {saved:?}"));
+            *form_url.borrow_mut() = url;
+            true
+        })),
+        ("draft events delivered", Box::new(move |_, _, elapsed| {
+            let rows = host_events("form-trip");
+            if rows.len() < 6 && elapsed < Duration::from_secs(8) {
+                return false;
+            }
+            let taps: Vec<Value> = rows.iter().skip(4).map(|r| r["event"].clone()).collect();
+            check(taps == [json!({"type": "tap", "i": 0}), json!({"type": "tap", "i": 1})], &format!("the followed array's entries reach the Host: {taps:?}"));
+            let draft = json!({"run": 2, "events": [{"type": "tap", "i": 0}, {"type": "tap", "i": 1}, {"type": "tap", "i": 2}]});
+            let saved = fetch("POST", &format!("{}/draft", url2.borrow()), &draft.to_string(), None);
+            check(saved.as_ref().is_ok_and(|(status, _)| *status == 200), "the array grows by one");
+            true
+        })),
+        ("draft delta delivered", Box::new(|_, _, elapsed| {
+            let rows = host_events("form-trip");
+            if (rows.len() < 7 || journal_lines() > 0) && elapsed < Duration::from_secs(8) {
+                return false;
+            }
+            // A little longer, so a second copy would have arrived.
+            if elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            let rows = host_events("form-trip");
+            let ids: std::collections::HashSet<&str> = rows.iter().filter_map(|r| r["event_id"].as_str()).collect();
+            check(rows.len() == 7 && ids.len() == 7 && rows[6]["event"] == json!({"type": "tap", "i": 2}), &format!("only the new entry is sent: {} rows {:?}", rows.len(), rows.last()));
+            true
+        })),
+    ]);
+    stages
+}
+
+/// `--check form-events` (run twice by check.sh, as `first` and `second`).
+pub(super) fn form_events_check(_out: String) {
+    match std::env::var("CLARP_CHECK_PASS").as_deref() {
+        Ok("first") => run_stages(form_events_first_stages()),
+        Ok("second") => run_stages(form_events_second_stages()),
+        pass => {
+            check(false, &format!("form-events runs as two passes, not {pass:?}"));
+            super::finish();
+        }
+    }
+}

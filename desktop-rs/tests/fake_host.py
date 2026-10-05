@@ -17,6 +17,7 @@ import copy
 import json
 import pathlib
 import queue
+import re
 import sys
 import threading
 import time
@@ -97,6 +98,12 @@ outage_until = 0.0
 # Path -> [status, count]: the next `count` requests to `path` fail with
 # `status` (a Host behind a proxy that timed out).
 failures = {}
+# HTML form event journals (server/lib/html_form_events.py): artifact id ->
+# rows in Host order, the draft-key policy per artifact, and how many more
+# accepted batches lose their receipt (stored, then answered 503).
+form_events = {}
+form_event_config = {}
+form_event_lost_receipts = 0
 # Seconds an older page (/log?before=) takes; /__control/older-delay sets it.
 older_delay = 0.0
 CLOSE = object()
@@ -182,6 +189,65 @@ def fill_roster(count):
         if i % 6 == 0:
             jobs.append({"job_id": f"job-{i}", "agent_id": agent["agent_id"], "status": "running",
                          "title": f"Watch build {i}", "kind": "sub-agent" if i % 12 == 0 else "watcher"})
+
+
+def interactive_form(artifact_id):
+    """The listed html_form an event may be logged against (not a report)."""
+    return next((a for a in artifacts if a.get("artifact_id") == artifact_id and a.get("type") == "html_form"
+                 and a.get("read_only") is not True), None)
+
+
+def append_form_events(artifact_id, data):
+    """POST /artifacts/{id}/events as server/lib/html_form_events.append has
+    it: 1-32 records, stable ids, 16 KiB per event, the form's version; the
+    same id with the same event is its first row again, with another event
+    the whole batch is refused."""
+    if not isinstance(data, dict):
+        raise ValueError("JSON object required")
+    version, rows = data.get("version"), data.get("events")
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 32:
+        raise ValueError("events must contain 1 to 32 records")
+    normalized = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("event record must be an object")
+        event_id = row.get("event_id")
+        if not isinstance(event_id, str) or not re.fullmatch(r"[A-Za-z0-9-]{16,80}", event_id):
+            raise ValueError("invalid event_id")
+        for key in ("client_seq", "client_at"):
+            if type(row.get(key)) is not int or not 0 <= row[key] <= 9007199254740991:
+                raise ValueError(key + " must be a safe nonnegative integer")
+        event = row.get("event")
+        if not isinstance(event, dict):
+            raise ValueError("event must be an object")
+        encoded = json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        if len(encoded.encode()) > 16384:
+            raise ValueError("event exceeds 16 KiB")
+        normalized.append((event_id, row["client_seq"], row["client_at"], encoded))
+    with state_lock:
+        form = interactive_form(artifact_id)
+        if not form:
+            raise ValueError("interactive form not found")
+        if version != form.get("version"):
+            raise ValueError("form version mismatch")
+        journal = form_events.setdefault(artifact_id, [])
+        known = {row["event_id"]: row for row in journal}
+        added, accepted = [], []
+        for event_id, client_seq, client_at, encoded in normalized:
+            old = known.get(event_id)
+            if old:
+                if json.dumps(old["event"], ensure_ascii=False, sort_keys=True, separators=(",", ":")) != encoded or old["version"] != version:
+                    raise ValueError("event ID already used for different data")
+                accepted.append({"event_id": event_id, "seq": old["seq"]})
+                continue
+            row = {"seq": sum(len(j) for j in form_events.values()) + len(added) + 1, "artifact_id": artifact_id,
+                   "version": version, "event_id": event_id, "client_seq": client_seq, "client_at": client_at,
+                   "received_at": int(time.time() * 1000), "event": json.loads(encoded)}
+            added.append(row)
+            known[event_id] = row
+            accepted.append({"event_id": event_id, "seq": row["seq"]})
+        journal.extend(added)
+    return {"artifact_id": artifact_id, "version": version, "accepted": True, "events": accepted}
 
 
 def record(entry):
@@ -584,9 +650,10 @@ class Handler(BaseHTTPRequestHandler):
             # As the real Host and contract/schemas/server-info.json have it:
             # feature flags under capabilities.features.
             features = ["live_items", "tool_explanation_setting"] if live_features else []
+            features.append("html_form_events")
             if turn_summaries:
                 features.append("log_turn_summary")
-            info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp",
+            info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": "fake-host-1",
                     "capabilities": {"version": 1, "features": features}}
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
@@ -633,6 +700,24 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/artifacts":
             with state_lock:
                 return self.reply(200, {"artifacts": artifacts})
+        if url.path.startswith("/artifacts/") and url.path.endswith("/events"):
+            artifact_id = url.path.split("/")[2]
+            with state_lock:
+                if not interactive_form(artifact_id):
+                    return self.reply(400, {"error": "interactive form not found"})
+                after = int(query.get("after", "0"))
+                rows = [row for row in form_events.get(artifact_id, []) if row["seq"] > after]
+                through = form_events[artifact_id][-1]["seq"] if form_events.get(artifact_id) else 0
+            return self.reply(200, {"artifact_id": artifact_id, "events": rows, "next_seq": rows[-1]["seq"] if rows else after,
+                                    "snapshot_seq": through, "has_more": False})
+        if url.path.startswith("/artifacts/") and url.path.endswith("/events-config"):
+            artifact_id = url.path.split("/")[2]
+            with state_lock:
+                form = interactive_form(artifact_id)
+                if not form:
+                    return self.reply(400, {"error": "interactive form not found"})
+                return self.reply(200, {"artifact_id": artifact_id, "version": form.get("version"),
+                                        "draft_key": form_event_config.get(artifact_id)})
         if url.path == "/message-tool-details":
             return self.reply(200, {"tools": [{"name": "Bash", "input": {"command": "ls"}}], "display_cells": []})
         if url.path == "/agent-model-options":
@@ -809,6 +894,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/__control/fail":
             # Test control: the next `count` GETs to `path` answer `status`.
             failures[body["path"]] = [int(body.get("status", 504)), int(body.get("count", 1))]
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/form-events":
+            # Test control: the next `lose_receipts` accepted event batches
+            # are stored but answered 503, as if the reply never arrived.
+            global form_event_lost_receipts
+            form_event_lost_receipts = int(body.get("lose_receipts", 0))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/outage":
             # Test control, outside the protocol: drop every stream and refuse
@@ -1194,6 +1285,30 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403, {"error": "pairing code expired"})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
+        if url.path.startswith("/artifacts/") and url.path.endswith("/events"):
+            failure = failures.get(url.path)
+            if failure and failure[1] > 0:
+                failure[1] -= 1
+                return self.reply(failure[0], {"error": "Service Unavailable"})
+            try:
+                receipt = append_form_events(url.path.split("/")[2], body)
+            except ValueError as exc:
+                return self.reply(409, {"error": str(exc)})
+            if form_event_lost_receipts > 0:
+                form_event_lost_receipts -= 1
+                return self.reply(503, {"error": "the receipt was lost"})
+            return self.reply(200, receipt)
+        if url.path.startswith("/artifacts/") and url.path.endswith("/events-config"):
+            artifact_id = url.path.split("/")[2]
+            key = body.get("draft_key")
+            if "draft_key" not in body or (key is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", str(key))):
+                return self.reply(400, {"error": "invalid draft_key"})
+            with state_lock:
+                form = interactive_form(artifact_id)
+                if not form:
+                    return self.reply(400, {"error": "interactive form not found"})
+                form_event_config[artifact_id] = key
+            return self.reply(200, {"artifact_id": artifact_id, "version": form.get("version"), "draft_key": key})
         if url.path == "/tool-explanations/settings":
             for key in ("enabled", "detail_level"):
                 if key in body:
