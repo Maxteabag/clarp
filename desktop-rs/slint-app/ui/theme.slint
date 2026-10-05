@@ -12,6 +12,8 @@ export global Palette {
     in property <color> muted: #8f96bc;
     in property <color> faint: #8085a0;
     in property <color> accent: #bb9af7;
+    // The focused pane's frame (the theme's "focus", else its accent).
+    in property <color> focus: #bb9af7;
     in property <color> accent-text: #1a1b26;
     in property <color> bubble: #20212e;
     in property <color> success: #9ece6a;
@@ -36,8 +38,8 @@ export global Focus {
 // takes no input.
 export component FocusRing inherits Rectangle {
     in property <bool> shown;
-    border-width: root.shown ? 1px : 0px;
-    border-color: Palette.accent;
+    border-width: root.shown ? 2px : 0px;
+    border-color: Palette.focus;
     border-radius: 6px;
 }
 
@@ -62,13 +64,15 @@ export component PaneFrame inherits Rectangle {
     in property <string> info-name;
     in property <string> info;
     callback info-clicked();
-    property <color> tone: root.active ? Palette.accent : Palette.border;
+    property <color> tone: root.active ? Palette.focus : Palette.border;
+    // Thicker when focused, so which pane has the keyboard shows by width
+    // as well as colour.
     Rectangle {
         x: 0;
         y: 7px;
         width: root.width;
         height: root.height - 7px;
-        border-width: 1px;
+        border-width: root.active ? 2.5px : 1.5px;
         border-color: root.tone;
         border-radius: 6px;
     }
@@ -82,7 +86,7 @@ export component PaneFrame inherits Rectangle {
             x: 4px;
             height: parent.height;
             text: "[" + root.key + "] " + root.label;
-            color: root.active ? Palette.accent : Palette.muted;
+            color: root.active ? Palette.focus : Palette.muted;
             font-size: 11px;
             font-weight: root.active ? 700 : 400;
             vertical-alignment: center;
