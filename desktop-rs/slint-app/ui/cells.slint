@@ -86,18 +86,25 @@ export component DisplayCellCard inherits Rectangle {
         }
         if root.open: VerticalLayout {
             padding-left: 15px;
+            // As tall as its text wraps at the width it is drawn at (laid out,
+            // a repeated line was measured at its one-line width and the
+            // chat's next row was drawn over it).
             for line in root.cell.lines: Rectangle {
                 border-radius: 2px;
                 background: line.kind == "diff_old" ? Palette.danger-surface : line.kind == "diff_new" ? Palette.success.with-alpha(0.16) : transparent;
-                VerticalLayout {
-                    padding: 2px;
-                    Text {
-                        text: line.text;
-                        color: line.kind == "error" ? Palette.danger : Palette.chrome-text;
-                        font-family: "JetBrains Mono";
-                        font-size: 12px;
-                        wrap: word-wrap;
-                    }
+                min-width: line-text.min-width + 4px;
+                preferred-width: line-text.preferred-width + 4px;
+                height: line-text.preferred-height + 4px;
+                line-text := Text {
+                    x: 2px;
+                    y: 2px;
+                    width: parent.width - 4px;
+                    height: parent.height - 4px;
+                    text: line.text;
+                    color: line.kind == "error" ? Palette.danger : Palette.chrome-text;
+                    font-family: "JetBrains Mono";
+                    font-size: 12px;
+                    wrap: word-wrap;
                 }
             }
             if root.cell.more > 0: Text {
