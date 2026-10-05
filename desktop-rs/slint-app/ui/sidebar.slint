@@ -20,6 +20,10 @@ export struct ChatRow {
     jobs: int,
     sub-agents: int,
     children: int,
+    // What runs, as both views count it (view.rs `running_work`): running
+    // sub-agents and helpers, and background processes.
+    running-helpers: int,
+    running-processes: int,
     // The agent's portrait (empty until cached); a pair room's two.
     portrait: image,
     portrait2: image,

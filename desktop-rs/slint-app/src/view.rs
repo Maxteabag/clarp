@@ -145,6 +145,12 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
     }
 }
 
+/// What an explorer row shows running: (sub-agents and helpers, background
+/// processes).
+pub(crate) fn running_work(_chat: &ChatRow) -> (i32, i32) {
+    (0, 0)
+}
+
 /// Inline Markdown as Slint styled text; plain text if Slint cannot parse it.
 /// Bare web addresses are links, in literal text too (the user's own
 /// words), so a click or a link hint opens them.
@@ -548,6 +554,19 @@ mod tests {
         let chat = super::chat_row(&row, 0, "");
         assert_eq!(chat.activity.as_str(), "helper: python3 - <<'EOF' p = 'core/tests/x.rs' assert_eq!(a, b)");
         assert_eq!(chat.preview.as_str(), "First line second line");
+    }
+
+    /// The compact explorer's marks count what the full row's badges count:
+    /// nothing, a helper (its mirror job and its running child are one), two
+    /// processes, or both.
+    #[test]
+    fn running_work_counts_helpers_and_processes() {
+        let row = |jobs, sub_agents, children, fold_count| crate::ChatRow { jobs, sub_agents, children, fold_count, ..Default::default() };
+        assert_eq!(super::running_work(&row(0, 0, 0, 0)), (0, 0), "nothing runs");
+        assert_eq!(super::running_work(&row(1, 1, 1, 0)), (1, 0), "one helper");
+        assert_eq!(super::running_work(&row(0, 0, 0, 1)), (1, 0), "one helper folded under the row");
+        assert_eq!(super::running_work(&row(2, 0, 0, 0)), (0, 2), "two processes");
+        assert_eq!(super::running_work(&row(3, 1, 0, 2)), (2, 2), "both");
     }
 
     use clarp_core::protocol::Message;
