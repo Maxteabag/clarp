@@ -76,7 +76,9 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     let state = context(app, window);
     let overrides = overrides(app);
     let card_keys = if state == "pane" { crate::artifacts_view::selected_hints(app) } else { None };
-    let shown = |action: &str| keymap::shown(state, action, &overrides).unwrap_or_default();
+    // Runs on every scroll report: the defaults are spelled without
+    // resolving the map again.
+    let shown = |action: &str, default: &str| keymap::shown_or(state, action, &overrides, default);
     let mut hints: Vec<Hint> = keymap::hints(state, &overrides, facts(app, window))
         .into_iter()
         // The keyboard's card says what its keys do (below).
@@ -85,7 +87,7 @@ pub fn show_hints(app: &App, window: &AppWindow) {
         .map(|b| Hint {
             // J and K both walk the cards; the hints' digits are their numbers.
             keys: if b.action == "artifact-previous" {
-                format!("{}/{}", shown("artifact-next"), shown("artifact-previous")).trim_matches('/').into()
+                format!("{}/{}", shown("artifact-next", "J"), shown("artifact-previous", "K")).trim_matches('/').into()
             } else if b.action == "hint-digit" {
                 match crate::link_hints::count() {
                     1 => "1".into(),
@@ -110,7 +112,7 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     }
     // From the composer, the way onto the chat's cards.
     if state == "composer" && crate::artifacts_view::has_cards(app) && !window.global::<crate::ArtifactBridge>().get_editing() {
-        let keys = format!("{} {}", shown("escape"), keymap::shown("pane", "artifact-previous", &overrides).unwrap_or_default());
+        let keys = format!("{} {}", shown("escape", "Esc"), keymap::shown_or("pane", "artifact-previous", &overrides, "K"));
         hints.push(Hint { keys: keys.trim().into(), label: "Cards".into() });
     }
     if state == "keymap" {
