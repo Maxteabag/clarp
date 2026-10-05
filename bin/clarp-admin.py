@@ -1802,6 +1802,105 @@ def cmd_prompt(args) -> int:
     return 0
 
 
+def _peer_requests():
+    from lib import peer_requests
+    return peer_requests
+
+
+def cmd_request(args) -> int:
+    """A prompt that comes back: the recipient answers with ``reply``, and the
+    requester's goal (``--goal``) waits on it with a deadline."""
+    pr = _peer_requests()
+    try:
+        if args.deadline is not None and not args.goal:
+            raise pr.RequestError("--deadline needs --goal: without a goal nothing waits")
+        deadline = pr.check_deadline(args.deadline if args.deadline is not None else pr.DEFAULT_DEADLINE_S)
+        requester = pr._agent(args.from_session, "requester")
+        recipient = pr._agent(args.to, "recipient")
+        request_id = pr.new_id()
+        if args.goal:
+            pr.wait_on(requester, args.goal, request_id, recipient, deadline_s=deadline)
+    except pr.RequestError as error:
+        print(f"clarp-admin request: {error}; nothing was sent", file=sys.stderr)
+        return 4
+    payload = {"session": recipient["session"], "text": pr.request_text(request_id, requester, args.text),
+               "force_session": True, "synthesize_audio": False, "hands_free": False,
+               "origin": "agent", "sender": requester["session"],
+               "client_msg_id": pr.request_client_id(request_id)}
+    try:
+        result = api_request("POST", "/send", payload, retries=SEND_RETRIES)
+    except urllib.error.HTTPError as error:
+        if 400 <= error.code < 500:  # refused: it certainly did not arrive
+            settled = args.goal and pr.abandon_wait(args.goal, request_id, f"HTTP {error.code}")
+            print(f"clarp-admin request: request {request_id} was refused (HTTP {error.code}); "
+                  + ("your goal records it as not delivered" if settled else "nothing waits on it"),
+                  file=sys.stderr)
+            return 1
+        return _uncertain(args, request_id, f"HTTP {error.code}")
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as error:
+        return _uncertain(args, request_id, str(error))
+    print(json.dumps({"request_id": request_id, "to": recipient["session"],
+                      "goal": args.goal or None, "trace_id": result.get("trace_id"),
+                      "queued": result.get("queued")}, indent=2))
+    if not args.goal:
+        print("clarp-admin request: no goal waits on it; the result arrives as a message, "
+              "and nothing wakes you if none comes", file=sys.stderr)
+    return 0
+
+
+def _uncertain(args, request_id: str, reason: str) -> int:
+    """The request may or may not have arrived: keep the wait, say so."""
+    print(f"clarp-admin request: delivery of request {request_id} is uncertain ({reason}); it may have "
+          "arrived. " + ("Your goal keeps waiting until its deadline; do not resend the same request."
+                         if args.goal else "Check the recipient's chat before resending."), file=sys.stderr)
+    return 5
+
+
+def cmd_reply(args) -> int:
+    """Return a result, a blocker or progress to whoever sent a request."""
+    pr = _peer_requests()
+    force_message = False
+    for attempt in range(4):
+        try:
+            replier = pr._agent(args.from_session, "replier")
+            decision = pr.plan_reply(replier, args.request, args.kind, args.text)
+            if decision["action"] == "dependency" and not force_message:
+                pr.record_result(decision["plan"], decision["data"], replier=replier)
+                via = f"goal {decision['plan']['plan_id']}"
+            elif decision["action"] == "delivered":
+                via = f"goal {decision['plan']['plan_id']} (already recorded)"
+            else:
+                payload = decision.get("payload") or pr.plan_message(replier, args.request, args.kind, args.text)
+                result = api_request("POST", "/send", payload, retries=SEND_RETRIES)
+                via = "message"
+        except pr.RequestError as error:
+            print(f"clarp-admin reply: {error}; nothing was delivered", file=sys.stderr)
+            return 4
+        except ValueError as error:
+            if "plan changed" in str(error):
+                continue  # someone else wrote the goal: decide again
+            # The goal will not take it (stale, closed): deliver as a message.
+            force_message = True
+            continue
+        except urllib.error.HTTPError as error:
+            if 400 <= error.code < 500:
+                print(f"clarp-admin reply: the Host refused the reply (HTTP {error.code}); "
+                      "nothing was delivered", file=sys.stderr)
+                return 4
+            print(f"clarp-admin reply: delivery is uncertain (HTTP {error.code}); send the same "
+                  "reply again later (it is deduplicated)", file=sys.stderr)
+            return 5
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as error:
+            print(f"clarp-admin reply: delivery is uncertain ({error}); send the same reply again "
+                  "later (it is deduplicated)", file=sys.stderr)
+            return 5
+        print(json.dumps({"request_id": args.request, "kind": args.kind,
+                          "to": decision["requester"]["session"], "via": via}, indent=2))
+        return 0
+    print("clarp-admin reply: the requester's goal kept changing; try again", file=sys.stderr)
+    return 1
+
+
 def cmd_model(args) -> int:
     """Show or set an agent's model/effort override. Defaults to the calling
     agent's own session, so an agent can switch itself; the change is read on
@@ -2557,6 +2656,22 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     prompt_cmd.add_argument("--origin", choices=("automation", "watcher"))
     prompt_cmd.add_argument("--server", help="explicit configured peer name")
     prompt_cmd.set_defaults(func=cmd_prompt)
+    request_cmd = sub.add_parser(
+        "request", help="ask another agent for something that must come back to you")
+    request_cmd.add_argument("--to", required=True)
+    request_cmd.add_argument("--from", dest="from_session", required=True)
+    request_cmd.add_argument("--text", required=True)
+    request_cmd.add_argument("--goal", help="your goal that waits for the result (recommended)")
+    request_cmd.add_argument("--deadline", type=int,
+                             help="with --goal: seconds until it wakes you without a result (default 6 h)")
+    request_cmd.set_defaults(func=cmd_request)
+    reply_cmd = sub.add_parser(
+        "reply", help="return a result, blocker or progress to whoever sent a request")
+    reply_cmd.add_argument("--request", required=True)
+    reply_cmd.add_argument("--from", dest="from_session", required=True)
+    reply_cmd.add_argument("--kind", required=True, choices=("result", "blocked", "progress"))
+    reply_cmd.add_argument("--text", required=True)
+    reply_cmd.set_defaults(func=cmd_reply)
     model_cmd = sub.add_parser(
         "model", help="show or set an agent's model and effort (default: own session)")
     model_cmd.add_argument(
