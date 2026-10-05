@@ -1370,22 +1370,25 @@ fn hint_clicked(app: &App, window: &AppWindow, id: &str, action: &str) {
 /// The keys of what the keyboard is on, for the shortcut bar.
 pub fn selected_hints(app: &App) -> Option<Vec<(String, String)>> {
     let id = selected(app)?;
+    // The keys as the user bound them.
+    let overrides = crate::commands::overrides(app);
+    let key = |action: &str| crate::keymap::shown("pane", action, &overrides).unwrap_or_default();
     if id.starts_with("live:") {
         let open = live_row(app, &id).is_some_and(|r| r.live.expanded);
-        return Some(vec![("O".to_owned(), if open { "Collapse" } else { "Expand" }.to_owned())]);
+        return Some(vec![(key("artifact-open"), if open { "Collapse" } else { "Expand" }.to_owned())]);
     }
     if id.starts_with("receipt:") {
-        return Some(if receipt(app, &id).is_some_and(|r| r.linked) { vec![("O".to_owned(), "Show decision".to_owned())] } else { Vec::new() });
+        return Some(if receipt(app, &id).is_some_and(|r| r.linked) { vec![(key("artifact-open"), "Show decision".to_owned())] } else { Vec::new() });
     }
     if id.starts_with(clarp_core::agent_prompt::PREFIX) {
         let open = app.active_messages()?.iter().any(|r| r.prompt.key == id && r.prompt.expanded);
-        return Some(vec![("O".to_owned(), if open { "Collapse" } else { "Expand" }.to_owned())]);
+        return Some(vec![(key("artifact-open"), if open { "Collapse" } else { "Expand" }.to_owned())]);
     }
     if id.starts_with("img:") {
         let gallery = image_block(app, &id).is_some_and(|i| i.len() > 1);
-        let mut hints = vec![("O".to_owned(), "Enlarge".to_owned())];
+        let mut hints = vec![(key("artifact-open"), "Enlarge".to_owned())];
         if gallery {
-            hints.push(("←/→".into(), "Tile".into()));
+            hints.push((format!("{}/{}", key("artifact-back"), key("artifact-forward")).replace("Left/Right", "←/→"), "Tile".into()));
         }
         return Some(hints);
     }

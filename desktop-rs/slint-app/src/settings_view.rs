@@ -45,6 +45,9 @@ fn providers(tts: &clarp_core::json::Object, with_none: bool) -> Vec<(String, St
 }
 
 pub fn rows(app: &App) -> Vec<SettingRow> {
+    // The keys as the user bound them.
+    let overrides = crate::commands::overrides(app);
+    let key = |action: &str| crate::keymap::shown("pane", action, &overrides).unwrap_or_default();
     let engine = app.engine.borrow();
     let prefs = *app.prefs.borrow();
     let settings = engine.settings();
@@ -107,12 +110,13 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         choice("voice-provider", "Voice provider", &label_of(&provider, false)),
         choice("voice-fallback", "Voice fallback", &label_of(if fallback.is_empty() { "none" } else { &fallback }, true)),
         section("KEYBOARD"),
-        info("Command palette", "Ctrl+K"),
-        info("Settings", "Ctrl+,"),
+        info("Key bindings", &key("edit-keymap")),
+        info("Command palette", &key("switcher")),
+        info("Settings", &key("settings")),
         info("Navigate settings", "↑↓ / Tab · Home / End"),
-        info("Open native CLI", "Ctrl+Alt+T"),
-        info("Start idle contact", "Ctrl+Alt+N"),
-        info("Show / hide sidebar", "Ctrl+B"),
+        info("Open native CLI", &key("agent-terminal")),
+        info("Start idle contact", &key("new-contact")),
+        info("Show / hide sidebar", &key("sidebar")),
         info("Move between panes", "Ctrl+Alt+Arrow"),
         info("Split right / down", "Ctrl+Alt+V / S"),
         info("Zoom / close / balance", "Ctrl+Alt+Z / X / ="),

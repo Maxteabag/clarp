@@ -7,7 +7,8 @@ import { MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow }
 import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
-import { KeymapEditor, ConnectionPage } from "dialogs.slint";
+import { KeymapEditor, KeymapRow, ConnectionPage } from "dialogs.slint";
+export { KeymapRow }
 import { PreviewPanel, PreviewBanner, PreviewWindow, PreviewVersion } from "preview.slint";
 // ---- updates and teams
 import { Updates, AttentionView, JobView, ArtifactView } from "updates.slint";
@@ -137,7 +138,7 @@ export component AppWindow inherits Window {
     callback link-clicked(string);
     callback dismiss-error();
     // Every key reaches the keyboard map first; true when it ran a command.
-    callback shortcut(string, bool, bool, bool) -> bool;
+    callback shortcut(string, bool, bool, bool, bool) -> bool;
     // Tells the map where the keyboard went.
     callback focus-moved();
     // Pane events carry the pane's id.
@@ -245,15 +246,22 @@ export component AppWindow inherits Window {
     // ---- launch dialogs: the switcher's contacts-only mode
     in property <string> switcher-placeholder: "Agent, contact, setting or command";
     in property <string> switcher-empty: "No matching agent or contact";
-    in property <[string]> keymap-actions;
+    in property <[KeymapRow]> keymap-rows;
+    in property <string> keymap-context;
+    in property <string> keymap-count;
+    in property <string> keymap-filter;
+    in property <string> keymap-status;
     in property <string> keymap-error;
     in-out property <string> keymap-profile;
-    callback keymap-apply(string, string);
+    out property <bool> keymap-json-focused: keymap.json-focused;
+    callback keymap-clicked(string);
     callback keymap-import(string);
     callback keymap-export();
     callback keymap-reset();
     callback overlay-closed();
     public function open-keymap() { keymap.open(); }
+    public function keymap-focus-list() { keymap.focus-list(); }
+    public function keymap-focus-json() { keymap.focus-json(); }
     in property <string> base-url;
     in property <bool> connecting;
     in property <bool> stored-credential;
@@ -293,7 +301,7 @@ export component AppWindow inherits Window {
         height: root.height;
         focus-on-click: false;
         capture-key-pressed(event) => {
-            if (root.shortcut(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift)) {
+            if (root.shortcut(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.repeat)) {
                 return accept;
             }
             reject
@@ -498,10 +506,14 @@ export component AppWindow inherits Window {
             visible: root.overlay == "keymap";
             width: parent.width;
             height: parent.height;
-            actions: root.keymap-actions;
+            rows: root.keymap-rows;
+            context: root.keymap-context;
+            count: root.keymap-count;
+            filter: root.keymap-filter;
+            status: root.keymap-status;
             error: root.keymap-error;
             profile <=> root.keymap-profile;
-            apply(action, key) => { root.keymap-apply(action, key); }
+            clicked(action) => { root.keymap-clicked(action); }
             import-profile(text) => { root.keymap-import(text); }
             export-profile => { root.keymap-export(); }
             reset => { root.keymap-reset(); }

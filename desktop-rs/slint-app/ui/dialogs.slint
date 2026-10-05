@@ -1,4 +1,4 @@
-import { Button, ComboBox } from "std-widgets.slint";
+import { Button } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing } from "theme.slint";
 
@@ -26,44 +26,109 @@ export component Modal inherits Rectangle {
     }
 }
 
-// KeymapEditor.qml: rebind the editable actions to one Ctrl chord each, or
-// edit the whole profile as JSON.
+// One action in the key bindings editor: its keys in the chosen context.
+export struct KeymapRow {
+    action: string,
+    label: string,
+    keys: string,
+    // The user changed it in this context.
+    custom: bool,
+    current: bool,
+}
+
+// The key bindings: every action's keys in one context at a time, from
+// the keyboard (the window hands the editor its keys; the shortcut bar
+// says which work now), or the whole profile as JSON.
 export component KeymapEditor inherits Modal {
-    in property <[string]> actions;
+    in property <[KeymapRow]> rows;
+    in property <string> context;
+    in property <string> count;
+    in property <string> filter;
+    in property <string> status;
     in property <string> error;
     in-out property <string> profile;
-    callback apply(string, string);
+    out property <bool> json-focused: json.has-focus;
+    callback clicked(string);
     callback import-profile(string);
     callback export-profile();
     callback reset();
     callback done();
-    public function open() { sequence.text = ""; json.focus(); }
-    card-width: 720px;
-    card-height: 600px;
+    public function open() { list.focus(); }
+    public function focus-list() { list.focus(); }
+    public function focus-json() { json.focus(); }
+    card-width: 760px;
+    card-height: 640px;
     dismissed => { root.done(); }
+    list := FocusScope { }
     VerticalLayout {
         padding: 22px;
-        spacing: 12px;
-        Text { text: "Key bindings"; color: Palette.text; font-size: 20px; }
-        Text { text: "Choose a command. Empty shortcut restores its default."; color: Palette.muted; }
+        spacing: 10px;
         HorizontalLayout {
-            spacing: 8px;
-            command := ComboBox {
-                model: root.actions;
-                horizontal-stretch: 1;
-                accessible-label: "Command";
-            }
-            sequence := Field {
-                placeholder-text: "Ctrl+Alt+K";
-                width: 180px;
-                accessible-label: "Shortcut";
-            }
-            Button { text: "Apply"; clicked => { root.apply(command.current-value, sequence.text); } }
+            spacing: 12px;
+            Text { text: "Key bindings"; color: Palette.text; font-size: 20px; }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: "‹ " + root.context + " ›"; color: Palette.accent; font-size: 14px; font-weight: 700; vertical-alignment: center; accessible-label: "Context " + root.context; }
         }
-        if root.error != "": Text { text: root.error; color: Palette.danger; wrap: word-wrap; }
-        Text { text: "Profile JSON"; color: Palette.muted; }
-        json := Editor {
+        HorizontalLayout {
+            spacing: 12px;
+            Text {
+                text: "A binding here reaches the contexts inside this one. Typing keys bound further out never reach a text field.";
+                color: Palette.muted;
+                font-size: 11px;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+            Text { text: root.filter != "" ? root.filter + "  " + root.count : root.count; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+        }
+        Rectangle {
             vertical-stretch: 1;
+            min-height: 200px;
+            border-width: 1px;
+            border-color: Palette.faint;
+            border-radius: 3px;
+            clip: true;
+            VerticalLayout {
+                padding: 4px;
+                alignment: start;
+                for row in root.rows: Rectangle {
+                    height: 30px;
+                    border-radius: 3px;
+                    background: row.current ? Palette.accent.with-alpha(0.16) : area.has-hover ? Palette.hover : transparent;
+                    accessible-role: list-item;
+                    accessible-label: row.label + ": " + row.keys;
+                    area := TouchArea { clicked => { root.clicked(row.action); } }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 12px;
+                        Text {
+                            text: row.label;
+                            color: row.current ? Palette.text : Palette.muted;
+                            font-weight: row.current ? 600 : 400;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: row.keys;
+                            color: row.custom ? Palette.accent : Palette.text;
+                            font-family: "JetBrains Mono";
+                            font-size: 12px;
+                            font-weight: row.custom ? 700 : 400;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                }
+            }
+        }
+        if root.status != "": Text { text: root.status; color: Palette.text; wrap: word-wrap; }
+        if root.error != "": Text { text: root.error; color: Palette.danger; wrap: word-wrap; }
+        Text { text: "Profile JSON"; color: Palette.muted; font-size: 11px; }
+        json := Editor {
+            height: 110px;
             text <=> root.profile;
             font-family: "JetBrains Mono";
             accessible-label: "Keymap JSON";
