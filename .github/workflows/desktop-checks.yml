@@ -1,0 +1,132 @@
+name: Desktop checks
+
+# The Rust desktop's gate for work branches, so nothing compiles on the
+# owner's machines: unit tests, the headless behaviour checks against the fake
+# Host, and a release binary to run locally, all as artifacts. Push a branch
+# (not main) that touches desktop-rs, or run it by hand with a branch and a
+# list of checks.
+
+on:
+  push:
+    branches-ignore: [main]
+    paths:
+      - "desktop-rs/**"
+      - "static/icon.png"
+      - ".github/workflows/desktop-checks.yml"
+  workflow_dispatch:
+    inputs:
+      checks:
+        description: "Space-separated check names (empty = the default set)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEFAULT_CHECKS: >-
+    transcript scroll scroll-jump row-overlap composer live a2a receipts
+    artifacts artifact-keys link-hints keymap switcher panes sidebar banner
+    layout-warning updates settings themes startup
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
+            libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-rs
+          shared-key: desktop-debug
+      - name: Unit and contract tests
+        working-directory: desktop-rs
+        run: cargo test --locked -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint 2>&1 | tee /tmp/cargo-test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cargo-test-log
+          path: /tmp/cargo-test.log
+
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and check dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
+            libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev \
+            dbus python3 fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-rs
+          shared-key: desktop-debug
+      - name: Build the app
+        working-directory: desktop-rs
+        run: cargo build --locked -p clarp-slint
+      - name: Headless checks
+        working-directory: desktop-rs
+        env:
+          CHECKS: ${{ github.event.inputs.checks }}
+        run: |
+          set -u
+          list="${CHECKS:-$DEFAULT_CHECKS}"
+          mkdir -p /tmp/checks
+          failed=""
+          for c in $list; do
+            echo "::group::check $c"
+            if slint-app/tests/check.sh "$c" "/tmp/checks/$c" > "/tmp/checks/$c.log" 2>&1; then
+              echo "$c: E2E_PASS"
+            else
+              # One rerun: some checks are load-sensitive; a second failure counts.
+              if slint-app/tests/check.sh "$c" "/tmp/checks/$c-rerun" > "/tmp/checks/$c-rerun.log" 2>&1; then
+                echo "$c: passed on rerun"
+              else
+                echo "$c: FAILED"; failed="$failed $c"
+              fi
+            fi
+            grep -E "^FAIL" "/tmp/checks/$c.log" | head -20 || true
+            echo "::endgroup::"
+          done
+          echo "failed:${failed:- none}" | tee /tmp/checks/summary.txt
+          [ -z "$failed" ]
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checks
+          path: /tmp/checks
+
+  binary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
+            libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-rs
+      - name: Release build
+        working-directory: desktop-rs
+        run: cargo build --release --locked -p clarp-slint && strip -o /tmp/clarp-slint target/release/clarp-slint
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clarp-slint-x86_64-linux
+          path: /tmp/clarp-slint
