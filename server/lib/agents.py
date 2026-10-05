@@ -289,6 +289,8 @@ def set_archived(agent_id: str, archived: bool) -> None:
     )
     if archived:
         abandon_children(agent_id)
+        from . import goal_ledger
+        goal_ledger.stop_for_agent(agent_id, "agent archived")
 
 
 # ---- lineage: parent, role and the helper lifecycle --------------------
@@ -495,6 +497,8 @@ def soft_delete(agent_id: str) -> None:
     artifacts.cancel_for_agent(agent_id)
     end_current_runtime(agent_id)
     abandon_children(agent_id)
+    from . import goal_ledger
+    goal_ledger.stop_for_agent(agent_id, "agent deleted")
     turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.AGENT_DELETED,
                               {"reason": "deleted"})
 

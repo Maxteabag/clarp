@@ -137,6 +137,14 @@ class SendRequest:
         queue_if_busy = data.get("queue_if_busy", False) is True
         force_session = (data.get("force_session", False) is True) or (not hands_free)
         sender_agent_id = resolve_sender((data.get("sender") or "").strip())
+        if sender_agent_id:
+            from . import goal_ledger, identity
+            target = identity.lookup(session) or {}
+            if goal_ledger.is_delegate_of(sender_agent_id, target.get("agent_id", "")):
+                # Bookkeeping observes its principal; it never steers the work.
+                raise SendRequestError(
+                    403, "a bookkeeping delegate does not message its principal",
+                    trace_id=trace_id)
         origin = (data.get("origin") or "").strip().lower()
         if origin not in origins.CLIENT_SETTABLE_ORIGINS:
             origin = "agent" if sender_agent_id else "user"

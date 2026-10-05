@@ -442,6 +442,8 @@ class Handler(BaseHTTPRequestHandler):
         "/task-plan": "_handle_task_plan",
         "/task-plans": "_handle_task_plans",
         "/task-plan/document": "_handle_task_goal_document",
+        "/goal-ledger": "_handle_goal_ledger",
+        "/goal-ledger/delegations": "_handle_goal_delegations",
         "/artifacts": "_handle_artifacts_list",
         "/attention": "_handle_attention",
         "/attention/inbox": "_handle_attention_inbox",
@@ -547,6 +549,8 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-mcp": "_handle_agent_mcp",
         "/agent-heartbeat": "_handle_agent_heartbeat",
         "/task-plan/action": "_handle_task_plan_action",
+        "/goal-ledger/delegations": "_handle_goal_delegation_enable",
+        "/goal-ledger/delegations/stop": "_handle_goal_delegation_stop",
         "/agent-goal": "_handle_agent_goal_start",
         "/agent-goal/pause": "_handle_agent_goal_pause",
         "/agent-goal/resume": "_handle_agent_goal_resume",
@@ -2598,11 +2602,71 @@ class Handler(BaseHTTPRequestHandler):
             revision = body.get("revision")
             if not isinstance(revision, int):
                 raise ValueError("revision required")
-            result = task_goal_state.mutate(plan_id, revision=revision,
-                action=str(body.get("action") or ""), data=body.get("data") or {})
+            from lib import goal_ledger
+            # The apps call this on the user's behalf; agents use clarp-goal.
+            with goal_ledger.acting_as("user"):
+                result = task_goal_state.mutate(plan_id, revision=revision,
+                    action=str(body.get("action") or ""), data=body.get("data") or {})
             self._json_ok({"plan": result})
         except (ValueError, TypeError) as exc:
             self._json_error(409, str(exc))
+
+    def _handle_goal_ledger(self):
+        from lib import goal_ledger
+        query = self._query()
+        plan_id = (query.get("plan_id", [""])[0] or "").strip()
+        if not plan_id:
+            return self._json_error(400, "plan_id required")
+        try:
+            after = int(query.get("after", ["0"])[0] or 0)
+            limit = int(query.get("limit", ["200"])[0] or 200)
+        except ValueError:
+            return self._json_error(400, "after and limit are integers")
+        self._json_ok(goal_ledger.events(plan_id, after=after, limit=limit))
+
+    def _handle_goal_delegations(self):
+        from lib import goal_ledger
+        session = (self._query().get("session", [""])[0] or "").strip()
+        agent = identity.lookup(session) if session else None
+        if not agent:
+            return self._json_error(404, "agent not found")
+        self._json_ok({"delegations": goal_ledger.delegations_for(agent["agent_id"])})
+
+    def _handle_goal_delegation_enable(self):
+        """Make a helper the bookkeeping delegate of its parent and start its listener."""
+        from lib import agents as agents_db, bookkeeping_listener, goal_ledger
+        body = self._read_json()
+        if body is None:
+            return
+        principal = identity.lookup(str(body.get("principal") or ""))
+        delegate = identity.lookup(str(body.get("delegate") or ""))
+        if not principal or not delegate:
+            return self._json_error(404, "principal or delegate not found")
+        try:
+            result = goal_ledger.enable(
+                agents_db.get_by_agent_id(principal["agent_id"]) or principal,
+                agents_db.get_by_agent_id(delegate["agent_id"]) or delegate,
+                str(body.get("reason") or ""))
+        except goal_ledger.LedgerError as exc:
+            return self._json_error(409, str(exc))
+        result["listener"] = bookkeeping_listener.launch(result["delegation_id"])
+        log("bookkeepingEnabled", f"delegation={result['delegation_id']} "
+            f"principal={principal['session']} delegate={delegate['session']}")
+        self._json_ok(result)
+
+    def _handle_goal_delegation_stop(self):
+        from lib import bookkeeping_listener, goal_ledger
+        body = self._read_json()
+        if body is None:
+            return
+        try:
+            result = goal_ledger.stop(str(body.get("delegation_id") or ""),
+                                      str(body.get("reason") or ""))
+        except goal_ledger.LedgerError as exc:
+            return self._json_error(409, str(exc))
+        result["listener"] = bookkeeping_listener.stop_unit(result["delegation_id"])
+        log("bookkeepingStopped", f"delegation={result['delegation_id']}")
+        self._json_ok(result)
 
     def _handle_task_plan(self):
         from lib import task_plans
@@ -4384,8 +4448,9 @@ class Handler(BaseHTTPRequestHandler):
             # Durable user-requested queue entries remain visible and paused;
             # stopping work must never silently delete acknowledged messages.
             try:
-                from lib import task_plans
-                task_plans.pause_recovery_for_agent(agent_id, "User stopped this agent")
+                from lib import goal_ledger, task_plans
+                with goal_ledger.acting_as("user"):
+                    task_plans.pause_recovery_for_agent(agent_id, "User stopped this agent")
                 turn_lifecycle.try_transition(
                     agent_id, TurnEvent.STOP_REQUESTED,
                     {"source": "user_stop", "message": "Turn stopped"})
@@ -6004,6 +6069,22 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
             return None
         return srv.local_transport
 
+    def start_bookkeeping_listeners():
+        # A listener is its own user service; after a reboot or a crash that
+        # exhausted its restarts, bring back the one each active delegation needs.
+        from lib import bookkeeping_listener
+
+        def ensure():
+            try:
+                started = bookkeeping_listener.ensure_running()
+                if started:
+                    log("bookkeepingListenersStarted", ",".join(started))
+            except Exception as error:  # noqa: BLE001 - never block serving
+                log_exception("bookkeepingListenersFail", error)
+        thread = threading.Thread(target=ensure, name="bookkeeping-listeners", daemon=True)
+        thread.start()
+        return thread
+
     def has_runtime_client() -> bool:
         return getattr(ctx, "runtime_client", None) is not None
 
@@ -6039,6 +6120,8 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         # catalogue, artifacts) once the listeners are up, so the first client
         # after a restart does not pay for a cold page cache on the request path.
         Worker("cache-warmup", lambda: started(CacheWarmupWorker()), stage=SERVING),
+        Worker("bookkeeping-listeners", start_bookkeeping_listeners,
+               stop=lambda thread: None, stage=SERVING),
         Worker("decision-delivery", lambda: started(
             DecisionDeliveryWorker(lambda: _deliver_decision_rows(ctx)))),
         # Transcript streamer: tails ~/.claude/projects/.../<uuid>.jsonl via
