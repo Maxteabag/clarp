@@ -52,6 +52,9 @@ def popen_turn(cmd: list[str], *, cwd: Any, session: str,
     the CLI can identify the owning agent.
     """
     env = {**os.environ, "CLAUDE_PWA_SESSION": session}
+    # A turn's identity is only the one its spawn issues, never one the Host
+    # itself happened to inherit (a Host started from inside another turn).
+    env.pop("CLARP_PROVIDER_TURN", None)
     if env_extra:
         env.update(env_extra)
     return subprocess.Popen(

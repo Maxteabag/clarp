@@ -550,11 +550,16 @@ class AgyBackend(StreamJsonBackend):
         owner_gate = run_if_owned or (lambda action: (action(), True)[1])
         process: list[subprocess.Popen] = []
 
+        from .. import provider_background_jobs as provider_jobs
+        turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
+
         def admit_spawn() -> None:
             if runtime_agent_id:
                 self._transition(runtime_agent_id, TurnEvent.SPAWN_STARTED,
                                    {"dispatch": self.runner, "trace_id": trace_id})
-            process.append(popen_turn(cmd, cwd=cwd, session=session))
+            process.append(popen_turn(cmd, cwd=cwd, session=session, env_extra=identity))
+            provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
+                                          provider=self.id, pid=process[0].pid)
         try:
             admitted = owner_gate(admit_spawn)
             if not admitted or not process:

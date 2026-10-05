@@ -5049,10 +5049,28 @@ class Handler(BaseHTTPRequestHandler):
                 log_exception("backgroundJobCancelPromptFail", exc, detail=job_id)
         return self._json_ok({"ok": True, **receipt})
 
+    def _bookkeeping_lineage_refusal(self, *names: str) -> str:
+        """Why an agent may not be created or forked here, or "".
+
+        A bookkeeping delegate is held to its scope; an agent it starts would not
+        be. The creator is the turn identity the CLI sent (X-Clarp-Turn), not a
+        name in the request; the named parent or fork source is checked too."""
+        from lib import goal_ledger, turn_identity
+        from lib.provider_background_jobs import TURN_ENV
+        creator = turn_identity.caller_agent_id(
+            {TURN_ENV: self.headers.get("X-Clarp-Turn", "")})
+        candidates = [creator] + [(identity.lookup(n) or {}).get("agent_id", "") for n in names if n]
+        if any(goal_ledger.descends_from_active_delegate(a) for a in candidates if a):
+            return "a bookkeeping delegate does not start helpers or forks"
+        return ""
+
     def _handle_create_agent(self):
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
+        refusal = self._bookkeeping_lineage_refusal(str(data.get("parent") or ""))
+        if refusal:
+            return self._json_error(409, refusal)
         try:
             result = AgentLifecycleService(self.ctx).create(data)
         except AgentLifecycleError as e:
@@ -5085,6 +5103,9 @@ class Handler(BaseHTTPRequestHandler):
         data = self._read_json()
         if data is None:
             return self._json_error(400, "bad json")
+        refusal = self._bookkeeping_lineage_refusal(session)
+        if refusal:
+            return self._json_error(409, refusal)
         try:
             result = agent_fork.fork(self.ctx, session, data)
         except agent_fork.ForkError as e:

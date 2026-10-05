@@ -133,11 +133,19 @@ class DelegationDenied(LedgerError):
 
 
 @contextmanager
-def acting_as(kind: str, agent_id: str = "", delegation_id: str = ""):
-    """Attribute the goal changes made inside this block."""
+def acting_as(kind: str, agent_id: str = "", delegation_id: str = "", *, verified: bool = False,
+              caller: str = ""):
+    """Attribute the goal changes made inside this block.
+
+    `verified` means `agent_id` comes from the Host-issued turn identity
+    (lib.turn_identity), not from a name the caller supplied."""
     if kind not in ACTOR_KINDS:
         raise ValueError(f"unknown actor kind {kind!r}")
-    token = _actor.set({"kind": kind, "agent_id": agent_id, "delegation_id": delegation_id})
+    if caller and caller != agent_id:
+        # A verified caller typed someone else's name: record who it really is.
+        agent_id, verified = caller, True
+    token = _actor.set({"kind": kind, "agent_id": agent_id, "delegation_id": delegation_id,
+                        "verified": bool(verified and agent_id), "caller": caller})
     try:
         yield
     finally:
@@ -185,21 +193,26 @@ def record_goal_save(con, plan_id: str, old_goal: dict, new_goal: dict) -> None:
         start = 0   # rewritten history: keys dedupe what is already recorded
     prior = {f: old_goal.get(f) for f in TRACKED_FIELDS if old_goal.get(f) != new_goal.get(f)}
     new = {f: new_goal.get(f) for f in prior}
-    actor = _actor.get()
     owner = new_goal.get("owner_agent_id", "")
+    actor = _attribute(_actor.get(), owner)
     status = _last_status(con, plan_id)
+    entries = []
     for index in range(start, len(new_history)):
-        entry = new_history[index]
-        kind = str(entry.get("kind") or "change")
+        kind = str(new_history[index].get("kind") or "change")
         system = kind in SYSTEM_KINDS or (
             kind == "dependency_result" and actor["kind"] == "unattributed")
-        this_actor = ({"kind": "system"} if system
-                      else {**actor, "agent_id": actor.get("agent_id") or (
-                          owner if actor["kind"] == "owner" else "")})
+        entries.append((index, kind, system))
+    if prior or any(not system for _, _, system in entries):
+        guard_principal_goal(con, owner, actor)
+    for index, kind, system in entries:
+        entry = new_history[index]
+        this_actor = {"kind": "system"} if system else actor
         detail = entry.get("detail") or {}
         first = index == len(new_history) - 1 or index == start
         before = dict(prior) if (first and prior) else {}
         after = {"detail": detail, **({"goal": new} if first and prior else {})}
+        if not system and this_actor["kind"] in ("owner", "peer", "unattributed"):
+            after["actor_verified"] = this_actor.get("verified", False)
         if kind in STATUS_KINDS:
             before["status"], after["status"] = status, STATUS_KINDS[kind]
             status = STATUS_KINDS[kind]
@@ -208,6 +221,72 @@ def record_goal_save(con, plan_id: str, old_goal: dict, new_goal: dict) -> None:
                reason=str(detail.get("reason") or ""), prior=before or None, new=after,
                plan_revision=entry.get("revision"), at=entry.get("at"))
         prior = {}
+
+
+def _attribute(actor: dict, owner: str) -> dict:
+    """Who a goal change is recorded as. A verified caller is named as itself:
+    the owner when it is the owner, otherwise a peer, whatever the path."""
+    actor = dict(actor)
+    if actor["kind"] == "owner":
+        if actor.get("verified") and actor.get("agent_id") and actor["agent_id"] != owner:
+            actor["kind"] = "peer"
+        elif not actor.get("verified"):
+            actor["agent_id"] = owner
+    return actor
+
+
+def guard_principal_goal(con, owner: str, actor: dict) -> None:
+    """While `owner` has a bookkeeping delegate, its goal changes only through
+    the user (the apps), the Host itself, or a caller whose turn identity
+    proves it is not the delegate. The delegate keeps books beside the goal."""
+    row = active_for_principal(owner, con)
+    if not row or actor["kind"] in ("user", "system", "legacy"):
+        return
+    if actor["kind"] == "delegate":
+        raise DelegationDenied("a bookkeeping delegate cannot change its principal's goal")
+    if actor["kind"] == "peer" and not actor.get("verified") and not actor.get("caller"):
+        # Only an agent that cannot carry a turn identity (the shared Codex
+        # app-server) may answer unverified; anyone else must show its token.
+        from .turn_identity import IDENTITY_BACKENDS
+        claimed = con.execute("SELECT backend FROM agents WHERE agent_id=?",
+                              (actor.get("agent_id") or "",)).fetchone()
+        if claimed and claimed[0] not in IDENTITY_BACKENDS and \
+                not _descends_from(con, actor["agent_id"], row["delegate_agent_id"]):
+            return
+        raise DelegationDenied("this goal has a bookkeeping delegate; the reply must come "
+                               "from the replier's own Clarp turn")
+    if not actor.get("verified"):
+        raise DelegationDenied(
+            "this goal has a bookkeeping delegate, so changes need the caller's Clarp turn "
+            "identity; run the command from the owner's own turn")
+    if _descends_from(con, actor["agent_id"], row["delegate_agent_id"]):
+        raise DelegationDenied("a bookkeeping delegate (or an agent it started) cannot change "
+                               "its principal's goal; use `clarp-goal bookkeeping record`")
+
+
+def _descends_from(con, agent_id: str, delegate_id: str) -> bool:
+    """The delegate itself, or a helper or fork it started (at any depth)."""
+    seen = set()
+    while agent_id and agent_id not in seen:
+        if agent_id == delegate_id:
+            return True
+        seen.add(agent_id)
+        row = con.execute("SELECT parent_agent_id FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        agent_id = str(row[0] or "") if row else ""
+    return False
+
+
+def descends_from_active_delegate(agent_id: str) -> bool:
+    """`agent_id` is an active delegate or an agent one started."""
+    con = db.conn()
+    return any(_descends_from(con, agent_id, r[0]) for r in con.execute(
+        "SELECT delegate_agent_id FROM goal_delegations WHERE status='active'").fetchall())
+
+
+def is_active_delegate(agent_id: str) -> bool:
+    return bool(agent_id) and db.conn().execute(
+        "SELECT 1 FROM goal_delegations WHERE status='active' AND delegate_agent_id=?",
+        (agent_id,)).fetchone() is not None
 
 
 def _last_status(con, plan_id: str) -> str:
@@ -389,13 +468,15 @@ OWNER_SUBGOAL_FIELDS = frozenset({"title", "intent", "criteria", "owner", "statu
 
 def owner_subgoal(plan_id: str, action: str, data: dict, *, actor: dict | None = None) -> dict:
     """Owner (or user) adds or changes a subgoal; conflicts are refused."""
-    actor = actor or {"kind": "owner"}
+    actor = actor or _actor.get()
+    if actor["kind"] == "unattributed":
+        actor = {"kind": "owner"}
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
         plan = _durable_plan(con, plan_id)
-        actor = {**actor, "agent_id": actor.get("agent_id") or (
-            plan["agent_id"] if actor["kind"] == "owner" else "")}
+        actor = _attribute({"verified": False, **actor}, plan["agent_id"])
+        guard_principal_goal(con, plan["agent_id"], actor)
         key = f"subgoal:{action}:{secrets.token_hex(8)}"
         if action == "add":
             _add_subgoal(con, plan_id, data, status="active", actor=actor, key=key,
@@ -447,6 +528,11 @@ def enable(principal: dict, delegate: dict, reason: str, *, baseline_messages: i
         raise LedgerError("the delegate must be a helper whose parent is the principal")
     if delegate.get("archived_at") or delegate.get("deleted_at"):
         raise LedgerError("the delegate is archived")
+    from .turn_identity import IDENTITY_BACKENDS
+    for role, agent in (("principal", principal), ("delegate", delegate)):
+        if agent.get("backend") not in IDENTITY_BACKENDS:
+            raise LedgerError(f"the {role} runs on {agent.get('backend')}, whose turns carry no "
+                              "Clarp identity; the scope could not be enforced")
     delegation_id = "dg" + secrets.token_hex(8)
     token = secrets.token_urlsafe(32)
     con = db.conn()
@@ -563,11 +649,14 @@ def is_delegate_of(sender_agent_id: str, target_agent_id: str) -> bool:
 
 
 
-def _authorize(con, delegation_id: str, token: str):
+def _authorize(con, delegation_id: str, token: str, caller: str):
+    """The credential and the caller's turn identity must both be the delegate's."""
     row = con.execute("SELECT * FROM goal_delegations WHERE delegation_id=?",
                       (delegation_id,)).fetchone()
     if not row or not token or not secrets.compare_digest(row["token_hash"], _hash(token)):
         raise DelegationDenied("unknown delegation or wrong credential")
+    if caller != row["delegate_agent_id"]:
+        raise DelegationDenied("only the delegate's own Clarp turn can keep these books")
     if row["status"] != "active":
         raise DelegationDenied("this delegation is stopped")
     if not agents_live(con, row):
@@ -590,11 +679,11 @@ def _principal_plan(con, row, plan_id):
     return plan
 
 
-def observe(delegation_id: str, token: str, *, after_message: int | None = None,
+def observe(delegation_id: str, token: str, *, caller: str, after_message: int | None = None,
             after_goal_event: int | None = None, limit: int = 200) -> dict:
     """What the principal did since the delegate's applied cursors."""
     con = db.conn()
-    row = _authorize(con, delegation_id, token)
+    row = _authorize(con, delegation_id, token, caller)
     principal, delegate = row["principal_agent_id"], row["delegate_agent_id"]
     after_message = row["message_through"] if after_message is None else int(after_message)
     after_goal_event = row["goal_event_through"] if after_goal_event is None else int(after_goal_event)
@@ -633,7 +722,7 @@ def observe(delegation_id: str, token: str, *, after_message: int | None = None,
     }
 
 
-def record(delegation_id: str, token: str, plan_id: str, *, wake_id: str,
+def record(delegation_id: str, token: str, plan_id: str, *, caller: str, wake_id: str,
            entries: list, message_through: int | None = None,
            goal_event_through: int | None = None) -> dict:
     """Apply one batch of delegate bookkeeping and advance its cursors atomically."""
@@ -643,7 +732,7 @@ def record(delegation_id: str, token: str, plan_id: str, *, wake_id: str,
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
-        row = _authorize(con, delegation_id, token)
+        row = _authorize(con, delegation_id, token, caller)
         plan = _principal_plan(con, row, plan_id) if entries else None
         actor = {"kind": "delegate", "agent_id": row["delegate_agent_id"],
                  "delegation_id": delegation_id}
@@ -761,3 +850,8 @@ def summary(plan: dict) -> dict:
     return {"subgoals": subgoals(plan["plan_id"], con),
             "ledger": {"event_count": count, "last_event_at": last,
                        "delegation": public_delegation(active) if active else None}}
+
+
+def guard_principal_plan(con, owner: str) -> None:
+    """The same rule for a principal's plans that carry no durable goal."""
+    guard_principal_goal(con, owner, _attribute(_actor.get(), owner))

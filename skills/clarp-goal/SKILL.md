@@ -105,6 +105,9 @@ Every goal change you make is also kept in the append-only ledger with its
 reason and the state before and after; `ledger` reads it. If a bookkeeping
 delegate keeps your books (`clarp-goal-bookkeeping`), its observations and
 claims appear there too, marked as its own; they never complete or change your goal.
+While a delegate keeps your books, the Host accepts changes to your goals only from
+your own turn (its Clarp identity), the apps, or verified peers, so run
+`clarp-goal` from your turn or a worker it launched.
 
 ## Working context belongs to the goal
 

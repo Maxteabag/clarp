@@ -313,9 +313,13 @@ class OpenCodeBackend(StreamJsonBackend):
             on_error=on_error, stream=stream,
             enqueue=enqueue or tts_queue.enqueue,
         )
+        from .. import provider_background_jobs as provider_jobs
+        turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
         if not live:
             proc, handle = self.launch(run_cmd, cwd=cwd, session=session,
-                                       env_extra=self.turn_env())
+                                       env_extra={**self.turn_env(), **identity})
+            provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
+                                          provider=self.id, pid=proc.pid)
             self.register_handle(runtime_agent_id, handle)
             self.start_drain(handle, self._drain_stdout, proc=proc,
                              handle=handle, **callbacks)
@@ -324,7 +328,9 @@ class OpenCodeBackend(StreamJsonBackend):
         proc = popen_turn(
             opencode_serve.serve_cmd(opencode_bin), cwd=cwd, session=session,
             stdin=subprocess.PIPE,
-            env_extra={**self.turn_env(), "OPENCODE_SERVER_PASSWORD": password})
+            env_extra={**self.turn_env(), **identity, "OPENCODE_SERVER_PASSWORD": password})
+        provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
+                                      provider=self.id, pid=proc.pid)
         attach_stderr_drain(proc)
         handle = OpenCodeTurnHandle(
             proc=proc, drain_thread=None,
@@ -752,8 +758,12 @@ class OpenCodeBackend(StreamJsonBackend):
                           cwd: pathlib.Path, session: str, **callbacks: Any) -> None:
         """Run the turn with ``opencode run`` on the same handle, so a stop
         and the registry keep working."""
+        from .. import provider_background_jobs as provider_jobs
+        agent_id = callbacks.get("agent_id") or ""
+        turn_token, identity = provider_jobs.identity_env(agent_id)
         proc = popen_turn(run_cmd, cwd=cwd, session=session,
-                          env_extra=self.turn_env())
+                          env_extra={**self.turn_env(), **identity})
+        provider_jobs.record_identity(turn_token, agent_id=agent_id, provider=self.id, pid=proc.pid)
         attach_stderr_drain(proc)
         handle.proc = proc
         handle.process_group = proc.pid if os.name == "posix" else None

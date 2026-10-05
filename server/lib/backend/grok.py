@@ -204,8 +204,12 @@ class GrokBackend(StreamJsonBackend):
         log("grokSpawn", f"cwd={cwd} {flag}={backend_session_id or '∅'} "
                          f"text_len={len(text)} trace={trace_id or '∅'} "
                          f"agent={agent_id or '∅'}")
-        proc, handle = self.launch(cmd, cwd=cwd, session=session)
         runtime_agent_id = "" if isolated else agent_id
+        from .. import provider_background_jobs as provider_jobs
+        turn_token, identity = provider_jobs.identity_env(runtime_agent_id)
+        proc, handle = self.launch(cmd, cwd=cwd, session=session, env_extra=identity)
+        provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
+                                      provider=self.id, pid=proc.pid)
         self.register_handle(runtime_agent_id, handle)
         self.start_drain(
             handle, self._drain_stdout,

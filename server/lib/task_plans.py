@@ -61,6 +61,8 @@ def create(
     con = db.conn()
     con.execute("BEGIN IMMEDIATE")
     try:
+        from . import goal_ledger
+        goal_ledger.guard_principal_plan(con, agent["agent_id"])   # any plan, goal or not
         con.execute(
             "INSERT INTO task_plans(plan_id,agent_id,session,title,status,created_at,updated_at) "
             "VALUES(?,?,?,?, 'active',?,?)",
@@ -456,6 +458,8 @@ def _goal_initialize(con, plan_id, agent, title, raw, now):
 def _goal_record(con, plan, kind, detail, now):
     goal = json.loads(plan["goal_json"] or "{}")
     if not goal:
+        from . import goal_ledger
+        goal_ledger.guard_principal_plan(con, plan["agent_id"])
         # Preserve observed changes, without inventing historical evidence.
         history = json.loads(plan["history_json"] or "[]")
         history.append(

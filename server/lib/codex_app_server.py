@@ -105,6 +105,7 @@ class _Client:
         self.refresh_requested = False
         self.rate_limits = {}
         env = {**os.environ, "CLAUDE_PWA_SESSION": session}
+        env.pop("CLARP_PROVIDER_TURN", None)   # one shared server has no turn identity
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,

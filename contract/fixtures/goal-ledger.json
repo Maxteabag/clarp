@@ -42,6 +42,7 @@
         "event_id": 1,
         "kind": "created",
         "new": {
+          "actor_verified": true,
           "detail": {
             "outcome": "Peter's Number Ninja form (v5) logs events live to the Host"
           },
@@ -85,6 +86,7 @@
         "event_id": 2,
         "kind": "checkpoint",
         "new": {
+          "actor_verified": true,
           "detail": {
             "evidence": {
               "criterion-2": "Told Peter build 2741 is required"
@@ -146,6 +148,7 @@
         "event_id": 3,
         "kind": "prior_steps",
         "new": {
+          "actor_verified": true,
           "detail": {
             "items": [
               {
@@ -196,6 +199,7 @@
         "event_id": 4,
         "kind": "replan",
         "new": {
+          "actor_verified": true,
           "detail": {
             "reason": "v6 logs with clarpForm.log directly; v5 draft keys duplicate it",
             "steps": [
@@ -530,6 +534,7 @@
         "event_id": 18,
         "kind": "checkpoint",
         "new": {
+          "actor_verified": true,
           "detail": {
             "continuation": {
               "due_at": 1791163600000,

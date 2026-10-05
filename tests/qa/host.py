@@ -126,6 +126,10 @@ def main():
                          kwargs={'send': self_send}, daemon=True).start()
         return {'unit': 'in-process', 'started': True, 'error': ''}
     bookkeeping_listener.launch = launch_in_process
+    # The deterministic lane runs every agent on the fake Codex provider; tests
+    # present Host turn tokens explicitly, so delegations may name these agents.
+    from lib import turn_identity
+    turn_identity.IDENTITY_BACKENDS = turn_identity.IDENTITY_BACKENDS | {'codex'}
     bookkeeping_listener.unit_active = lambda delegation_id: False
     bookkeeping_listener.stop_unit = lambda delegation_id: {'unit': 'in-process', 'stopped': True}
     # Exercise the production goal reconciler promptly in disposable tests.

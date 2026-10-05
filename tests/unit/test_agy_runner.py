@@ -156,6 +156,10 @@ def _install_fake_agy(tmp_bin: pathlib.Path, stdout: str, *, rc: int = 0) -> Non
         if dump:
             with open(dump, "w") as f:
                 json.dump(argv, f)
+        turn = os.environ.get("AGY_FAKE_TURN_OUT")
+        if turn:
+            with open(turn, "w") as f:
+                f.write(os.environ.get("CLARP_PROVIDER_TURN", ""))
         sys.stdout.write({stdout!r})
         sys.stdout.flush()
         sys.exit({rc})
@@ -1127,3 +1131,15 @@ def test_file_tool_rows_name_the_file_agy_touched(fake_agy, tmp_path):
     assert ("Edit", {"file_path": "/w/src/app.py"}) in shown
     assert ("Grep", {"pattern": "def main", "path": "/w/src"}) in shown
     assert ("LS", {"path": "/w/docs"}) in shown
+
+
+def test_each_agy_turn_carries_a_host_issued_identity(fake_agy, tmp_path, monkeypatch):
+    from lib import turn_identity
+    monkeypatch.setenv("AGY_FAKE_TURN_OUT", str(tmp_path / "turn.txt"))
+    agent_id = _make_agy_agent()
+    trace_id = _open_owned_turn(agent_id, "identity")
+    fake_agy(_stream("done\n"))
+    AGY.start_turn(text="hi", cwd=tmp_path, agent_id=agent_id, session="elli",
+                   trace_id=trace_id).wait(timeout=8.0)
+    token = (tmp_path / "turn.txt").read_text()
+    assert turn_identity.caller_agent_id({"CLARP_PROVIDER_TURN": token}) == agent_id

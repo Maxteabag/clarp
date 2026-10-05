@@ -56,10 +56,11 @@ def _scenario(monkeypatch, tmp_path) -> dict:
 
     def act(action, data, actor="owner"):
         nonlocal plan
-        with ledger.acting_as(actor):
+        with (ledger.acting_as("owner", pip["agent_id"], verified=True) if actor == "owner"
+              else ledger.acting_as(actor)):
             plan = goals.mutate(plan["plan_id"], revision=plan["revision"], action=action, data=data)
 
-    with ledger.acting_as("owner"):
+    with ledger.acting_as("owner", pip["agent_id"], verified=True):
         plan = task_plans.create(
             session="pip", title="Number Ninja logs events", plan_id="number-ninja",
             items=[{"id": "v5", "title": "Publish v5 with draft-key events"},
@@ -100,9 +101,9 @@ def _scenario(monkeypatch, tmp_path) -> dict:
     for _ in range(12):
         if listener.tick(d, pending, lambda s, t, w: wakes.append(w)) == "dispatched":
             break
-    seen = ledger.observe(d, token)
+    seen = ledger.observe(d, token, caller=accountant["agent_id"])
     asked = next(m for m in seen["messages"] if m["message_id"] == "u-peter-asks")
-    ledger.record(d, token, plan["plan_id"], wake_id=wakes[0],
+    ledger.record(d, token, plan["plan_id"], caller=accountant["agent_id"], wake_id=wakes[0],
                   message_through=seen["message_through"],
                   goal_event_through=seen["goal_event_through"], entries=[
         {"type": "discrepancy", "subject": "criterion:criterion-1",

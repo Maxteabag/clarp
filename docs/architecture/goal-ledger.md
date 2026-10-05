@@ -36,7 +36,7 @@ change carries the subgoal's expected revision and appends an event with the pri
 and new state, so concurrent edits conflict instead of overwriting.
 
 `goal_delegations` records one delegate for one principal: status
-(`active`/`stopped`), the hash of its credential, the applied cursors
+(`active`/`stopped`), the hash of its credential (one of two checks, with the delegate's turn identity), the applied cursors
 (`message_through`, `goal_event_through`), the dispatched cursors
 (`dispatched_message_through`, `dispatched_goal_event_through`) and listener health
 (`last_source_at`, `last_wake_id`, `last_wake_at`, `last_applied_at`,
@@ -53,15 +53,43 @@ or archiving either agent stops it.
 | delegate (credential) | read the principal's goals and conversation since its cursor; append observations, claims, discrepancies and unknowns with source refs; propose subgoals; update a subgoal's bookkeeping fields (`current_action`, `next_dependency`, `last_observed_at`, accumulating evidence, status `unknown` or `blocked` unless retired or done) | change outcome, criteria or limits; record criterion evidence; complete, pause, resume, cancel, block or supersede; approve; touch continuation or jobs; write any other agent's goals; message its principal or reply into its goal |
 | system (Host recovery) | as today | — |
 
-Identity: agents on one Host share a Unix user and the Host API token, and the
-Codex app-server is shared, so no caller identity is cryptographic. The delegate
-credential is a per-delegation secret in a 0600 file; its value is that only the
-delegated path is told to use it and that what it can do is narrow and recorded.
-Owner-path writes are recorded as `owner` because that path writes as the owner;
-it does not prove which process called it. The goal CLI refuses owner commands
-from a Claude caller that is its principal's delegate; it does not check Codex
-callers, because the shared app-server's session variable can name another agent
-and would lock a real owner out.
+Identity: every per-turn provider process (Claude, AGY, Grok, OpenCode, Codex
+exec) gets a fresh Host-issued token in `CLARP_PROVIDER_TURN`, recorded in
+`provider_turns` with its agent (`lib.turn_identity`). Clarp tools inside the
+turn, and workers it launches, inherit it. The goal store decides who is acting
+from that token, not from a session name the caller types:
+
+- A goal change through the goal CLI is recorded as `owner` when the token is the
+  owner's, as `peer` under the caller's own id when it is another agent's, and as
+  `owner` with `new.actor_verified: false` when there is no token.
+- While a principal has an active delegation, every meaningful change to its goals
+  (checkpoint, step, replan, pause, complete, create, subgoal edit, a peer-request
+  wait or reply) is refused unless it comes from the user (the apps), the Host, or a
+  caller whose token proves it is neither the delegate nor an agent the delegate
+  started. This covers plans without a goal too. The owner path needs a token; a
+  peer reply without one is kept, marked unverified, only when the replier runs
+  on a backend that cannot carry a token (the shared Codex app-server). A caller
+  whose token names someone other than the name it typed is recorded as itself.
+- The Host refuses to create or fork an agent when the creator (the turn identity
+  `clarp-admin` sends as `X-Clarp-Turn`), the named parent or the fork source is
+  an active delegate or an agent it started, before anything is written.
+- `bookkeeping observe` and `record` need both the delegation credential and the
+  delegate's own token.
+- A delegation needs both agents on a backend whose turns carry tokens, and stops
+  if either moves off one.
+
+Limits, stated rather than hidden: agents share one Unix user and the Host API
+token, so a process that deliberately reads another process's environment, writes
+the database directly, or calls the HTTP API as the user is not stopped by this.
+The Codex app-server serves all Codex agents from one process and has no per-turn
+token, so an unverified reply claiming a Codex replier cannot be told apart. A
+token stays valid after its turn exits (workers it launched need it) until
+`provider_turns` retention removes it after 7 days; a worker running longer, or a
+turn whose token failed to record, is refused while a delegation is active; a
+refused `clarp-admin reply` falls back to a plain message, so the answer reaches
+the principal's chat but its goal keeps waiting until the deadline. An agent
+creation request that carries no turn identity is treated like the user's, the
+same HTTP limit as above.
 
 ## Listener
 
