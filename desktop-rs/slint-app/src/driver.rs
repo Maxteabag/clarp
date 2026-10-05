@@ -417,6 +417,7 @@ pub fn start_check(name: &str, out: String) {
             row_overlap_checks::watch();
             artifact_checks::receipts_check(out)
         }
+        "form-events" => artifact_checks::form_events_check(out),
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),
