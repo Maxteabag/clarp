@@ -2024,7 +2024,7 @@ fn log_event(url: &str, request_id: &str, event: &Value) -> Result<(u16, Value),
 /// refuses, and the app quits with the events still queued.
 fn form_events_first_stages() -> Vec<Stage> {
     let form_url: Rc<RefCell<String>> = Rc::default();
-    let (url2, url3) = (form_url.clone(), form_url.clone());
+    let (url2, url3) = (form_url.clone(), form_url);
     let logged: Rc<RefCell<Vec<String>>> = Rc::default();
     let (logged2, logged3) = (logged.clone(), logged.clone());
     let mut stages = load_chat("art-events", &["html_form"]);
@@ -2068,7 +2068,7 @@ fn form_events_first_stages() -> Vec<Stage> {
         })),
         ("receipt lost", Box::new(move |_, _, elapsed| {
             let batches = sent_batches("form-trip");
-            if batches.is_empty() {
+            if batches.is_empty() || host_events("form-trip").len() < 3 {
                 if elapsed > Duration::from_secs(5) {
                     check(false, "the app sends the queued events without a Send");
                     return true;
@@ -2140,16 +2140,20 @@ fn form_events_second_stages() -> Vec<Stage> {
     stages.extend(load_chat("art-events", &["html_form"]));
     let form_url: Rc<RefCell<String>> = Rc::default();
     let url2 = form_url.clone();
+    // The first run's pages are in the same list; this run's come after.
+    let earlier = Rc::new(Cell::new(0));
+    let earlier2 = earlier.clone();
     stages.extend::<Vec<Stage>>(vec![
         ("events form again", Box::new(move |_, window, elapsed| {
             if !placed(window, &["form-trip"], elapsed) {
                 return false;
             }
+            earlier.set(opened().len());
             window.global::<ArtifactBridge>().invoke_open("form-trip".into());
             true
         })),
         ("draft events", Box::new(move |_, _, elapsed| {
-            let Some(url) = opened().into_iter().find(|u| u.contains("/form/")) else {
+            let Some(url) = opened().into_iter().skip(earlier2.get()).find(|u| u.contains("/form/")) else {
                 if elapsed > Duration::from_secs(3) {
                     check(false, &format!("the form opens again: {:?}", opened()));
                     return true;
