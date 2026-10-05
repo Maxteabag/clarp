@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from . import db, prompt_admissions
+from .log import log
 
 def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
             trace_id: str, client_msg_id: str, synthesize_audio: bool,
@@ -122,7 +123,7 @@ def mark_started(queue_id: str) -> None:
     """
     if queue_id:
         row = db.conn().execute(
-            "SELECT agent_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
+            "SELECT agent_id, origin FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
             (queue_id,),
         ).fetchone()
         cursor = db.conn().execute(
@@ -133,8 +134,11 @@ def mark_started(queue_id: str) -> None:
             (db.now_ms(), queue_id))
         if cursor.rowcount and row:
             _bump_revision(str(row["agent_id"]))
-            if pending_count(str(row["agent_id"])) == 0:
-                set_paused(str(row["agent_id"]), False)
+            if pending_count(str(row["agent_id"])) == 0 and set_paused(str(row["agent_id"]), False):
+                # Nothing is held any more, so a Stop's pause ends here. Say
+                # which item ended it: a peer message or goal wake can do so.
+                log("queuePauseEndedByDrain",
+                    f"agent={row['agent_id']} queue={queue_id} origin={row['origin']}")
 
 
 def remove(queue_id: str) -> bool:

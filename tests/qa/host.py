@@ -90,7 +90,7 @@ def main():
         '/automation-settings', '/clips/recoverable', '/events', '/log', '/server-info',
         '/task-plan', '/task-plans', '/task-plan/document', '/teams', '/transcription-capabilities', '/transcription-providers',
         '/voice-catalog', '/turn-queue'}
-    allowed_post = {'/send', '/select', '/focus', '/clog', '/clips/ack', '/devices', '/stop', '/task-plan/action'}
+    allowed_post = {'/send', '/select', '/focus', '/clog', '/clips/ack', '/devices', '/stop', '/turn-queue/resume', '/task-plan/action'}
     for method, allowed in [('GET', allowed_get), ('POST', allowed_post), ('PUT', set()), ('DELETE', set())]:
         original = getattr(module.Handler, 'do_' + method)
         def scoped(self, original=original, allowed=allowed):

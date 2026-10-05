@@ -415,7 +415,14 @@ Rules:
   `queue_if_busy` is true, in which case it queues and a `queue-updated`
   event follows. A message from another agent (`origin: "agent"` with a
   `sender`) never preempts: it steers a steerable turn (Codex) and otherwise
-  queues as if `queue_if_busy` were true.
+  queues as if `queue_if_busy` were true. `/stop` pauses the queue to
+  hold its backlog. A plain user send runs past the pause and leaves it.
+  A peer message, a queued user or Oracle send, and a goal wake the user
+  resumed also run past it, but they go through the queue, so when nothing
+  else is held each ends the pause as it starts (logged as
+  `queuePauseEndedByDrain` with its origin). Every other `queue_if_busy`
+  send, including an agent send that asks for the queue, waits for
+  `/turn-queue/resume`.
 - While a turn process of the agent is still running, no second one starts:
   every send waits until it exits, even after the Host recorded that turn as
   finished.
