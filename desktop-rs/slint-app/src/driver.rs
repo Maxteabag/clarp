@@ -369,7 +369,10 @@ pub fn start_check(name: &str, out: String) {
         "profile" => profile_checks::profile_check(out),
         "overview" => profile_checks::overview_check(out),
         "extras" => profile_checks::extras_check(out),
-        "artifacts" => artifact_checks::artifacts_check(out),
+        "artifacts" => {
+            row_overlap_checks::watch();
+            artifact_checks::artifacts_check(out)
+        }
         "receipts" => {
             row_overlap_checks::watch();
             artifact_checks::receipts_check(out)
