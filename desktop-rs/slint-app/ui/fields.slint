@@ -90,7 +90,8 @@ export component PlainEditor inherits Rectangle {
     // The text's own height: the composer grows with it.
     out property <length> text-height: input.preferred-height;
     // Where the cursor is, in bytes (the composer's @-mentions).
-    in-out property <int> cursor <=> input.cursor-position-byte-offset;
+    out property <int> cursor: input.cursor-position-byte-offset;
+    public function set-cursor(at: int) { input.set-selection-offsets(at, at); }
     callback edited(string);
     callback cursor-moved(int);
     forward-focus: input;
