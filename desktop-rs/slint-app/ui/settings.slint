@@ -105,7 +105,7 @@ export component Settings inherits Rectangle {
             }
             search := Field {
                 height: 34px;
-                font-size: 13px;
+                font-size: 13 * Look.unit;
                 placeholder-text: "Search settings (/): hide, theme, voice…";
                 accessible-label: "Search settings";
                 edited(text) => { root.searched(text); }
@@ -113,7 +113,7 @@ export component Settings inherits Rectangle {
             if root.query != "" && root.rows.length == 0: Text {
                 text: "No setting matches";
                 color: Palette.faint;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
             }
             list := ListView {
                 vertical-stretch: 1;

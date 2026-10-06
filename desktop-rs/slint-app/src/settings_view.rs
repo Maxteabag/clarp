@@ -107,6 +107,11 @@ pub fn filter(rows: Vec<SettingRow>, query: &str) -> Vec<SettingRow> {
             Some((actionable(&row), score, crate::catalogue::order(&row.id), row))
         })
         .collect();
+    // A typo is forgiven while nothing matches as typed.
+    let typed = crate::catalogue::as_typed(query);
+    if scored.iter().any(|s| s.1 >= typed) {
+        scored.retain(|s| s.1 >= typed);
+    }
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
     scored.into_iter().map(|(.., row)| row).collect()
 }
