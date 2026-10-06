@@ -389,6 +389,23 @@ fn compact_marks() -> Vec<(String, String, Rect)> {
     marks
 }
 
+/// The drawn process spinners, turning or still: their boxes.
+fn spinners(turning: bool) -> Vec<Rect> {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return Vec::new() };
+    let id = if turning { "spinner-turning" } else { "spinner-still" };
+    ElementQuery::from_root(&window)
+        .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id) && e.size().width > 0.0)
+        .find_all()
+        .into_iter()
+        .map(|e| rect(&e))
+        .collect()
+}
+
+fn within(inner: &Rect, outer: &Rect) -> bool {
+    inner.0 >= outer.0 - 1.0 && inner.0 + inner.2 <= outer.0 + outer.2 + 1.0 && inner.1 >= outer.1 - 1.0 && inner.1 + inner.3 <= outer.1 + outer.3 + 1.0
+}
+
 /// The explorer row named `name`, as drawn.
 fn explorer_row(name: &str) -> Option<Rect> {
     use i_slint_backend_testing::{AccessibleRole, ElementQuery};
@@ -2220,6 +2237,9 @@ fn sidebar_check(out: String) {
             let inside = |m: &Rect| m.0 >= row.0 && m.0 + m.2 <= row.0 + row.2 && m.1 >= row.1 && m.1 + m.3 <= row.1 + row.3;
             check(row.3 <= 40.0 && marks.iter().all(|m| inside(&m.2)), &format!("the marks fit inside the compact row {row:?}: {marks:?}"));
             check(window.get_explorer_compact_width() == width_before(), "the marks leave the compact explorer's width as it was");
+            let turning = spinners(true);
+            check(turning.iter().any(|s| within(s, &marks[1].2)), &format!("the processes mark is a turning spinner, not an hourglass: {turning:?} in {:?}", marks[1].2));
+            check(!turning.iter().chain(spinners(false).iter()).any(|s| within(s, &marks[0].2)), "the helpers mark keeps the agent glyph");
             let processes = marks[1].2;
             click_at(window, processes.0 + processes.2 / 2.0, processes.1 + processes.3 / 2.0);
             let titles: Vec<String> = window.get_process_jobs().iter().map(|j| j.title.to_string()).collect();
@@ -2239,6 +2259,7 @@ fn sidebar_check(out: String) {
             }
             match theme.as_str() {
                 "paper" => {
+                    check(!spinners(true).is_empty(), "the spinner turns in the light theme");
                     shot(&out5, "sidebar-02b-compact-work-light");
                     app.engine.borrow_mut().set_reading_theme("night");
                     crate::pump();
@@ -2247,6 +2268,7 @@ fn sidebar_check(out: String) {
                 "night" if elapsed > Duration::from_millis(1200) => {
                     shot(&out5, "sidebar-02c-compact-work-dark");
                     check(compact_marks().len() == 2, "the marks stay in the light and the dark theme");
+                    check(!spinners(true).is_empty(), "and the spinner turns in the dark theme too");
                     let done = serde_json::json!({"session": "mike", "set": {"helper_state": "done"}});
                     let sent = control("/__control/agent", &done).and_then(|()| control("/__control/jobs", &serde_json::json!({"jobs": [],
                         "event": {"type": "background-job-updated", "job": {"job_id": "w1", "agent_id": "a1", "status": "completed"}}})));
@@ -2532,7 +2554,9 @@ fn click_at(window: &crate::AppWindow, x: f32, y: f32) {
 /// the next chat that wants the user.
 fn updates_check(out: String) {
     use slint::platform::Key;
-    let (out1, out2, out3, out4) = (out.clone(), out.clone(), out.clone(), out);
+    let (out1, out2, out3, out5, out6, out4) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
+    let spinner_theme: Rc<RefCell<String>> = Rc::default();
+    let spinner_theme2 = spinner_theme.clone();
     let attention_gets = Rc::new(Cell::new(0usize));
     let gets = attention_gets.clone();
     let stages: Vec<Stage> = vec![
@@ -2567,6 +2591,7 @@ fn updates_check(out: String) {
             click_at(window, 297.0, 128.0);
             let jobs: Vec<crate::ProcessJob> = window.get_process_jobs().iter().collect();
             check(window.get_overlay() == "processes", "clicking the row's indicator opens the process popover");
+            check(!spinners(true).is_empty(), "Rachel's row shows a turning spinner for the job");
             check(
                 jobs.len() == 1 && jobs[0].title == "Index the docs" && jobs[0].detail == "watch · 12 of 48 files" && jobs[0].elapsed != "",
                 &format!("it lists the job with its kind, detail and running time: {:?}", jobs.first().map(|j| (j.detail.clone(), j.elapsed.clone()))),
@@ -2578,6 +2603,7 @@ fn updates_check(out: String) {
             if elapsed < Duration::from_millis(300) {
                 return false;
             }
+            check(spinners(true).len() >= 2, &format!("the popover's job turns a spinner too: {} turning", spinners(true).len()));
             shot(&out1, "updates-01-processes");
             headless::press(Key::Escape);
             true
@@ -2613,6 +2639,86 @@ fn updates_check(out: String) {
                 artifacts.iter().filter(|a| a.readable).count() == 2 && artifacts[1].title == "Findings" && artifacts[1].kind == "DOCUMENT",
                 "the artifacts list, the document and the page readable",
             );
+            true
+        })),
+        ("spinning", Box::new(move |_, _window, elapsed| {
+            if spinners(true).len() < 2 {
+                return elapsed > Duration::from_secs(3) && {
+                    check(false, &format!("the running job turns a spinner in the Updates and in Rachel's row: {} turning", spinners(true).len()));
+                    true
+                };
+            }
+            check(true, "the running job turns a spinner in the Updates and in Rachel's row");
+            live_checks::mark();
+            true
+        })),
+        ("spinner frames", Box::new(move |app, _window, elapsed| {
+            if elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            let (fps, cpu, over) = live_checks::since_mark();
+            check(fps >= 2.0 * live_checks::NO_SHIMMER_FPS, &format!("the spinners turn: {fps:.0} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            shot(&out5, "updates-03-spinner-terminal");
+            *spinner_theme.borrow_mut() = app.engine.borrow().reading_theme();
+            app.engine.borrow_mut().set_reading_theme("word");
+            crate::pump();
+            true
+        })),
+        ("spinner word", Box::new(move |app, _window, elapsed| {
+            if elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            check(spinners(true).len() >= 2, "they turn in Word too");
+            shot(&out6, "updates-04-spinner-word");
+            let theme = spinner_theme2.borrow().clone();
+            app.engine.borrow_mut().set_reading_theme(&theme);
+            crate::pump();
+            live_checks::set_reduced_motion(true);
+            true
+        })),
+        ("spinner still", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(spinners(true).is_empty() && spinners(false).len() >= 2, &format!("Reduce Motion: the spinners stand still as a running mark ({} still)", spinners(false).len()));
+            live_checks::mark();
+            true
+        })),
+        ("still frames", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (fps, cpu, over) = live_checks::since_mark();
+            check(fps <= live_checks::NO_SHIMMER_FPS, &format!("and draw no frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            live_checks::set_reduced_motion(false);
+            crate::window().expect("window").global::<crate::ChatLook>().set_window_shown(false);
+            true
+        })),
+        ("spinner hidden", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(spinners(true).is_empty(), "a covered window turns no spinner");
+            live_checks::mark();
+            true
+        })),
+        ("hidden frames", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (fps, cpu, over) = live_checks::since_mark();
+            check(fps <= live_checks::NO_SHIMMER_FPS, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            crate::window().expect("window").global::<crate::ChatLook>().set_window_shown(true);
+            true
+        })),
+        ("spinner back", Box::new(move |_, _window, elapsed| {
+            if spinners(true).len() < 2 {
+                return elapsed > Duration::from_secs(3) && {
+                    check(false, "shown again, the spinners turn again");
+                    true
+                };
+            }
+            check(true, "shown again, the spinners turn again");
             true
         })),
         ("drawn", Box::new(move |_, window, _| {
