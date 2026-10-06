@@ -147,7 +147,8 @@ fn distance(a: &[char], b: &[char]) -> usize {
     rows[a.len()][b.len()]
 }
 
-/// A typo of `word` or of how it starts: within one edit, two from seven letters.
+/// A typo of `word` or of how it starts (as long as the term or one letter
+/// longer): within one edit, two from seven letters.
 fn near(term: &str, word: &str) -> bool {
     let term: Vec<char> = term.chars().collect();
     if term.len() < 4 {
@@ -155,7 +156,7 @@ fn near(term: &str, word: &str) -> bool {
     }
     let word: Vec<char> = word.chars().collect();
     let allowed = if term.len() >= 7 { 2 } else { 1 };
-    let lengths = [term.len().saturating_sub(1), term.len(), term.len() + 1, word.len()];
+    let lengths = [term.len(), term.len() + 1, word.len()];
     lengths.iter().filter(|n| **n > 0 && **n <= word.len()).any(|n| distance(&term, &word[..*n]) <= allowed)
 }
 
@@ -271,5 +272,6 @@ mod tests {
         assert!(near("timstamps", "timestamps"));
         assert!(!near("hid", "hide"), "three letters are matched exactly");
         assert!(!near("zebra", "theme"));
+        assert!(!near("hide", "identity"), "a shorter start is not a typo");
     }
 }
