@@ -404,7 +404,8 @@ impl App {
         let error = if engine.error().is_empty() { conversation_error.unwrap_or_default() } else { engine.error().to_owned() };
         window.set_error(SharedString::from(error));
         drop(engine);
-        if changes.iter().any(|c| matches!(c, Change::Selection | Change::Panes | Change::Composer(_))) {
+        // Live items say when the agent works: the bar names Stop.
+        if changes.iter().any(|c| matches!(c, Change::Selection | Change::Panes | Change::Composer(_)) || matches!(c, Change::Live(s) if *s == selected)) {
             commands::show_hints(self, &window);
         }
         whole.lap("status");

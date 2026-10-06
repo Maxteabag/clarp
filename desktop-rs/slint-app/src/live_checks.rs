@@ -316,6 +316,8 @@ pub fn live_check(out: String) {
             let command = live_row("live:cl:toolu_03").unwrap_or_default();
             check(command.live.explaining && command.live.secondary.is_empty(), "the explanation line says Explaining… until it lands");
             shot(&out7, "live-00-explaining");
+            let bar: Vec<String> = crate::window().map(|w| w.get_hints().iter().map(|h| format!("{} {}", h.keys, h.label)).collect()).unwrap_or_default();
+            check(bar.iter().any(|h| h == "Ctrl+. Stop"), &format!("with the status line hidden, the shortcut bar names the stop key: {bar:?}"));
             check(command.live.shimmer == "accent", &format!("the running command shimmers in the accent: {:?}", command.live.shimmer));
             check(titles().contains(&"Explored 1 file, 1 search".to_owned()) && live_rows().iter().filter(|r| r.live.title.starts_with("Explored")).all(|r| r.live.shimmer.is_empty()), "the settled explore group does not");
             *place1.borrow_mut() = place_of("live:cl:toolu_03");

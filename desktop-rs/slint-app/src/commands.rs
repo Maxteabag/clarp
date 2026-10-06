@@ -57,7 +57,9 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         agent: !selected.is_empty() && !selected.starts_with("pair:"),
         rows: window.get_chats().row_count() > 0,
         can_send: engine.can_send(selected),
-        busy: engine.roster().find(selected).is_some_and(|a| matches!(a.latest_state.as_str(), "thinking" | "tool" | "compacting")),
+        // The Host's word, or its live items' while they say it works.
+        busy: engine.roster().find(selected).is_some_and(|a| matches!(a.latest_state.as_str(), "thinking" | "tool" | "compacting"))
+            || crate::live_view::status(&engine, selected).1,
         playing: crate::platform::audio::with(|audio| audio.playing()).unwrap_or(false),
         behind: !app.active_report().at_end,
         folds: window.get_chats().iter().any(|c| c.fold_count > 0),
