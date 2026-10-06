@@ -900,8 +900,6 @@ fn apply_setting(app: &App, window: &AppWindow, action: &str) {
         app.engine.borrow_mut().set_activity_mode(mode);
     } else if let Some(theme) = setting.strip_prefix("reading:") {
         app.engine.borrow_mut().set_reading_theme(theme);
-    } else if let Some(size) = setting.strip_prefix("avatar:") {
-        crate::avatar_view::set(app, window, Some(size), 0);
     } else {
         match setting {
             "showWhenReady" => {
