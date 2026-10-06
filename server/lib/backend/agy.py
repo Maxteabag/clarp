@@ -133,6 +133,36 @@ def _handle_result(result: Any, evidence: dict[str, Any], st: _TurnState, *,
     _finish_result(event, st, on_result=on_result)
 
 
+RESTORE_MAX_CHARS = 60_000
+
+
+def _restore_prompt(agent_id: str, conversation_id: str, text: str) -> str:
+    """The new turn, preceded by the most recent part of the pruned
+    conversation as Clarp recorded it (at most RESTORE_MAX_CHARS)."""
+    from .. import db
+    from ..voice_markup import clean_for_display
+    blocks: list[str] = []
+    for row in db.conn().execute(
+            "SELECT role, text FROM messages WHERE agent_id=? AND backend_session_id=? "
+            "AND role IN ('user','assistant') ORDER BY timestamp, seq",
+            (agent_id, conversation_id)):
+        body = clean_for_display(str(row["text"] or "")).strip()
+        if body:
+            blocks.append(f"{'User' if row['role'] == 'user' else 'Assistant'}: {body[:4000]}")
+    kept, size = [], 0
+    for block in reversed(blocks):
+        if size + len(block) + 2 > RESTORE_MAX_CHARS:
+            break
+        kept.append(block)
+        size += len(block) + 2
+    if not kept:
+        return text
+    return ("[Antigravity no longer has this conversation (it prunes old ones), so it "
+            "continues in a new one. Below is Clarp's record of it, most recent last; "
+            "carry on from it.]\n\n" + "\n\n".join(reversed(kept))
+            + "\n\n[The new message follows.]\n\n" + text)
+
+
 def _runner_error(detail: str) -> str:
     # error_classify checks quota/transient before runner-exit, so generic 429
     # remains transient while otherwise-unknown parser/provider errors surface.
@@ -535,6 +565,15 @@ class AgyBackend(StreamJsonBackend):
                 f"`{agy_bin}` not on PATH — install the antigravity CLI to run "
                 f"agy-backed agents")
         cwd = pathlib.Path(os.path.expanduser(str(cwd)))
+        if (backend_session_id and not is_new_session and agent_id
+                and not agy_transcript.conversation_exists(backend_session_id)):
+            # agy pruned this conversation; resuming it would silently start an
+            # empty one (and Clarp would then refuse the changed id). Start a new
+            # conversation that carries Clarp's own record of the old one.
+            log("agyConversationRestored",
+                f"agent={agent_id} pruned={backend_session_id} trace={trace_id or '∅'}")
+            text = _restore_prompt(agent_id, backend_session_id, text)
+            backend_session_id, is_new_session = "", True
         # Every agy turn is app-dispatched: always prepend the
         # Clarp-skills guidance, plus the <speak> voice guidance on
         # spoken turns. (Same instruction block as the Codex backend.)
@@ -963,6 +1002,33 @@ class AgyBackend(StreamJsonBackend):
             cmd += ["--effort", effort]
         cmd.append(f"--print={prompt}")
         return cmd
+
+    # agy keeps every conversation under $HOME/.gemini and prunes its store to
+    # roughly the newest 500. Clarp's one-shot requests (tool explanations, model
+    # fallbacks, janitor decisions, the orchestrator) made over a thousand a day,
+    # pruning real agents' conversations within hours; a resumed conversation
+    # that was pruned silently restarts empty. One-shots therefore run with a
+    # private HOME that shares only agy's login.
+    _ONESHOT_SHARED = (".gemini/oauth_creds.json", ".gemini/google_accounts.json",
+                       ".gemini/installation_id",
+                       ".gemini/antigravity-cli/antigravity-oauth-token",
+                       ".gemini/antigravity-cli/installation_id")
+
+    def routing_env(self) -> dict[str, str]:
+        from ..deployment import LAYOUT
+        real_home = pathlib.Path.home()
+        home = LAYOUT.data_root / "agy-oneshot-home"
+        for relative in self._ONESHOT_SHARED:
+            source, link = real_home / relative, home / relative
+            if not source.exists():
+                continue
+            link.parent.mkdir(parents=True, exist_ok=True)
+            if link.is_symlink() and os.readlink(link) == str(source):
+                continue
+            if link.is_symlink() or not link.exists():
+                link.unlink(missing_ok=True)
+                link.symlink_to(source)
+        return {"HOME": str(home)}
 
     def routing_text(self, stdout: str) -> str:
         """The reply text of a ``routing_cmd`` run."""

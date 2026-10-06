@@ -53,6 +53,18 @@ def _agy_home(brain_root: pathlib.Path | None = None) -> pathlib.Path:
     return pathlib.Path(base) / "brain"
 
 
+def conversation_exists(conversation_id: str) -> bool:
+    """Whether agy still holds this conversation. agy prunes its store to
+    roughly the newest 500 conversations, and resuming a pruned one silently
+    starts an empty one. Unknown (no agy store here at all) counts as present."""
+    base = pathlib.Path(os.environ.get("CLAUDE_PWA_AGY_HOME") or str(
+        pathlib.Path.home() / ".gemini" / "antigravity-cli"))
+    store = base / "conversations"
+    if not store.is_dir():
+        return True
+    return (store / f"{conversation_id}.db").exists() or (base / "brain" / conversation_id).is_dir()
+
+
 def _cache_file() -> pathlib.Path:
     base = os.environ.get("CLAUDE_PWA_AGY_HOME") or str(
         pathlib.Path.home() / ".gemini" / "antigravity-cli")

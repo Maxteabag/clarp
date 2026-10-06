@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import json
 import pathlib
+from dataclasses import replace
 import stat
 import sys
 import textwrap
@@ -1195,3 +1196,46 @@ def test_a_dispatched_turns_tool_calls_reach_its_final_row(fake_agy, tmp_path, m
     revision = row["revision"]
     _load_agy_conversation(session)      # importing again changes nothing
     assert final()["revision"] == revision
+
+
+def test_one_shot_requests_use_a_private_home_sharing_only_the_login(tmp_path, monkeypatch):
+    from lib import deployment
+    real = tmp_path / "home"
+    (real / ".gemini/antigravity-cli").mkdir(parents=True)
+    (real / ".gemini/oauth_creds.json").write_text("creds")
+    (real / ".gemini/antigravity-cli/antigravity-oauth-token").write_text("token")
+    (real / ".gemini/antigravity-cli/conversation_summaries.db").write_text("real store")
+    monkeypatch.setenv("HOME", str(real))
+    monkeypatch.setattr(deployment, "LAYOUT", replace(deployment.LAYOUT, data_root=tmp_path / "data"))
+    env = AGY.routing_env()
+    private = pathlib.Path(env["HOME"])
+    assert private == tmp_path / "data/agy-oneshot-home"
+    assert (private / ".gemini/antigravity-cli/antigravity-oauth-token").read_text() == "token"
+    assert (private / ".gemini/oauth_creds.json").read_text() == "creds"
+    # agy's own conversation store is never shared, so one-shots cannot prune it.
+    assert not (private / ".gemini/antigravity-cli/conversation_summaries.db").exists()
+    assert AGY.routing_env() == env      # idempotent
+
+
+def test_a_pruned_conversation_continues_in_a_new_one_carrying_clarps_record(
+        fake_agy, tmp_path, monkeypatch):
+    from lib import message_store
+    agy_home = tmp_path / "agy-home"
+    (agy_home / "conversations").mkdir(parents=True)     # agy's store, without the old one
+    monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(agy_home))
+    agent_id = _make_agy_agent(persona="Books", session="books")
+    agents_db.bind_backend_session(agent_id, "pruned-conv")
+    message_store.record_user_message(agent_id=agent_id, backend_session_id="pruned-conv",
+                                      client_msg_id="old", text="Track the v6 publish")
+    trace_id = _open_owned_turn(agent_id, "restore")
+    fake_agy(_stream("Continuing."))
+    sids, results = [], []
+    AGY.start_turn(text="Any news?", cwd=tmp_path, backend_session_id="pruned-conv",
+                   agent_id=agent_id, session="books", trace_id=trace_id,
+                   on_session_init=sids.append, on_result=results.append).wait(timeout=8.0)
+    assert _wait_for(lambda: len(results) == 1)
+    argv = json.loads((tmp_path / "argv.json").read_text())
+    assert "--conversation" not in argv                      # a new conversation, not a resume
+    prompt = next(a for a in argv if a.startswith("--print="))
+    assert "Track the v6 publish" in prompt and prompt.endswith("Any news?")
+    assert sids == [_FAKE_CONV]                               # bound to the new one

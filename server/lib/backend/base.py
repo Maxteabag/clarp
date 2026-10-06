@@ -271,6 +271,10 @@ class Backend:
         """The answer text from a ``routing_cmd`` run's stdout."""
         raise NotImplementedError(f"{self.id}: routing_text")
 
+    def routing_env(self) -> dict[str, str]:
+        """Extra environment for a ``routing_cmd`` run (none by default)."""
+        return {}
+
     # --- sessions and transcripts -----------------------------------------
 
     def resume_target(self, session_id: str, cwd: str,
