@@ -117,6 +117,7 @@ fn apply_scale() {
     }
     let scale = MONITOR_SCALE.with(|s| s.get()) * UI_SCALE.with(|s| s.get());
     window.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+    crate::avatar_view::remake();
 }
 
 fn start_now() {
@@ -166,6 +167,7 @@ fn watch_window() {
                     if let Some(window) = crate::window() {
                         use slint::ComponentHandle;
                         window.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+                        crate::avatar_view::remake();
                     }
                 }) {
                     eprintln!("clarp-slint: dropped a scale change: {error}");

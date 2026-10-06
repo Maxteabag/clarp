@@ -2,6 +2,7 @@ import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
 import { CompactWork, ProcessIndicator } from "processes.slint";
 import { ProfileBridge } from "profile.slint";
+import { AgentAvatar, AvatarArt } from "avatar.slint";
 
 export struct ChatRow {
     session: string,
@@ -24,9 +25,8 @@ export struct ChatRow {
     // sub-agents and helpers, and background processes.
     running-helpers: int,
     running-processes: int,
-    // The agent's portrait (empty until cached); a pair room's two.
+    // The agent's portrait (empty until made), a pair room's two in one.
     portrait: image,
-    portrait2: image,
     // Finished helpers folded under this row ("N helpers done").
     done-parent: string,
     done-count: int,
@@ -102,9 +102,11 @@ component Row inherits Rectangle {
     callback done-toggled(string);
     callback fold-toggled();
     callback restore();
+    // The avatar's line: room for the avatar size chosen.
+    property <length> top-height: root.compact ? Math.max(40px, AvatarArt.compact + 8px) : Math.max(58px, AvatarArt.row + 16px);
     height: root.compact
-        ? 40px
-        : (root.chat.activity != "" ? 72px : 58px) + (root.chat.done-count > 0 ? 22px : 0px);
+        ? root.top-height
+        : root.top-height + (root.chat.activity != "" ? 14px : 0px) + (root.chat.done-count > 0 ? 22px : 0px);
     opacity: root.chat.archived ? 0.65 : 1;
     background: root.cursor ? Focus.cursor : root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
     accessible-role: list-item;
@@ -114,32 +116,20 @@ component Row inherits Rectangle {
         padding-left: 10px + root.chat.depth * 18px;
         padding-right: 10px;
         spacing: 10px;
-        Rectangle {
-            width: root.compact ? 28px : 36px;
-            height: self.width;
-            y: root.compact ? 6px : 10px;
-            border-radius: self.width / 2;
-            border-width: 1px;
-            border-color: Palette.border;
-            clip: true;
-            Text { text: root.chat.initial; color: Palette.chrome-text; font-size: 15px; }
-            if root.chat.portrait.width > 0: Image {
-                source: root.chat.portrait;
-                width: root.chat.portrait2.width > 0 ? parent.width / 2 : parent.width;
-                x: 0;
-                height: parent.height;
-                image-fit: cover;
-            }
-            if root.chat.portrait2.width > 0: Image {
-                source: root.chat.portrait2;
-                width: parent.width / 2;
-                x: parent.width / 2;
-                height: parent.height;
-                image-fit: cover;
-            }
+        // Made round at its device size in Rust (a pair room's two in one).
+        AgentAvatar {
+            size: root.compact ? AvatarArt.compact : AvatarArt.row;
+            y: (root.top-height - self.height) / 2;
+            portrait: root.chat.portrait;
+            name: root.chat.name;
+            initial: root.chat.initial;
+            initial-color: Palette.chrome-text;
+            // Working, or next in the attention queue.
+            ringed: root.chat.busy || root.chat.queue > 0;
+            ring-color: root.chat.queue > 0 ? Palette.accent : Palette.success;
         }
         VerticalLayout {
-            padding-top: root.compact ? 10px : 8px;
+            padding-top: root.compact ? (root.top-height - 20px) / 2 : 8px;
             spacing: 2px;
             HorizontalLayout {
                 spacing: 6px;

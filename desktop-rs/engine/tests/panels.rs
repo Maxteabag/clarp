@@ -324,7 +324,7 @@ fn the_orchestrator_loads_and_saves_clamped_settings() {
 }
 
 #[test]
-fn portraits_are_fetched_once_rounded_and_cached() {
+fn portraits_are_fetched_once_cropped_square_and_cached() {
     let host = Host::start("avatars");
     let mut d = Driver::live(&host);
     let cache = host.dir.join("portraits");
@@ -338,7 +338,9 @@ fn portraits_are_fetched_once_rounded_and_cached() {
     // A PNG's IHDR holds its width and height.
     let png = std::fs::read(&path).unwrap();
     let side = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
-    assert_eq!((side(16), side(20)), (192, 192), "rounded to the sidebar's size");
+    // The UI rounds it at each size it draws: the source keeps the
+    // Host's resolution (64×48 here), cropped to its centred square.
+    assert_eq!((side(16), side(20)), (48, 48), "the Host's portrait, square");
     assert_eq!(host.requests("GET", "/static/avatars/rachel.png").len(), 1, "asked for once");
     assert_eq!(d.engine.avatar_revision(), 1);
     assert!(d.engine.avatar_source("nobody").is_none());

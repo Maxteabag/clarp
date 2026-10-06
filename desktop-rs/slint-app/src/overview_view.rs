@@ -36,6 +36,7 @@ fn fill(app: &App, window: &AppWindow) {
     let bridge = window.global::<OverviewBridge>();
     let rows = app.engine.borrow().roster().rows();
     let selected = app.engine.borrow().selected_session().to_owned();
+    let card = crate::avatar_view::sizes(app).card;
     let cards: Vec<OverviewCard> = rows
         .iter()
         .map(|row| {
@@ -55,7 +56,7 @@ fn fill(app: &App, window: &AppWindow) {
                 name: row.name.as_str().into(),
                 initial: crate::view::initial(&row.name),
                 symbol: row.avatar_symbol.as_str().into(),
-                portrait: crate::profile_view::portrait(app, &row.session),
+                portrait: crate::avatar_view::portrait(app, &row.session, card),
                 preview: preview.into(),
                 state: row.state.as_str().into(),
                 backend: row.backend.as_str().into(),

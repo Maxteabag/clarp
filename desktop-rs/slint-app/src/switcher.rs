@@ -51,6 +51,8 @@ pub struct Toggles {
     pub detail_level: i32,
     /// The Host's tool explanations, on a Host with live items.
     pub tool_explanations: Option<bool>,
+    /// The avatar size setting's id (`avatar_view::CHOICES`).
+    pub avatar_size: &'static str,
 }
 
 fn toggle(on: bool, label: &str, action: &str, key: &str, keywords: &'static str) -> Item {
@@ -125,6 +127,19 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
         let current = if toggles.activity_mode == mode as i32 { " (current)" } else { "" };
         rows.push(command(&format!("Tool activity: {label}{current}"), &format!("setting:activity:{mode}"), if mode == 1 { "Ctrl+Shift+T" } else { "" }, "settings", "tool calls collapse expand grouping"));
     }
+    for (id, label, sizes) in crate::avatar_view::CHOICES {
+        let current = if *id == toggles.avatar_size { " (current)" } else { "" };
+        rows.push(Item {
+            detail: format!("{} px in the explorer, {} px compact", sizes.row, sizes.compact),
+            ..command(
+                &format!("Agent picture size: {label}{current}"),
+                &format!("setting:avatar:{id}"),
+                "",
+                "settings",
+                "avatar avatars portrait portraits profile picture photo image face bigger smaller larger explorer sidebar",
+            )
+        });
+    }
     rows.retain(|c| c.target != "preview-versions" || toggles.preview_versions);
     for (level, name) in clarp_engine::Engine::narrator_detail_levels().iter().enumerate() {
         let level = level as i32;
@@ -153,7 +168,7 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
 /// Rows the list above already covers by hand are skipped.
 pub fn settings(rows: &[(String, String, String, String, bool)]) -> Vec<Item> {
     const COVERED: &[&str] =
-        &["timestamps", "show-when-ready", "workspace-bar", "shared-filesystem", "activity", "tool-detail", "reading-theme", "font", "reset-font", "spoken-replies", "narration", "connection", "orchestrator"];
+        &["timestamps", "show-when-ready", "workspace-bar", "shared-filesystem", "activity", "tool-detail", "reading-theme", "font", "reset-font", "spoken-replies", "narration", "connection", "orchestrator", "avatar-size"];
     let keywords = "setting settings preference option";
     let mut items = Vec::new();
     for (kind, id, label, detail, on) in rows {
@@ -287,6 +302,9 @@ mod tests {
         assert!(rows.iter().any(|c| c.label == "Hide sidebar"));
         assert!(rows.iter().any(|c| c.label == "Enable voice replies"));
         assert!(rows.iter().any(|c| c.label == "Tool activity: Always visible (current)"));
+        let sized = commands(Toggles { avatar_size: "large", ..Toggles::default() }, "paper");
+        assert!(sized.iter().any(|c| c.target == "setting:avatar:large" && c.label == "Agent picture size: Large (current)" && c.keywords.contains("avatar")));
+        assert!(sized.iter().any(|c| c.target == "setting:avatar:small" && c.keywords.contains("portrait")));
         assert!(rows.iter().any(|c| c.target == "setting:reading:paper" && c.label.ends_with("(current)")));
         let keep = |item: &Item, terms: &[&str]| {
             let searchable = format!("{} {} {} {}", item.label, item.group, item.key, item.keywords).to_lowercase();

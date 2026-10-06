@@ -1,7 +1,7 @@
 import { Palette } from "theme.slint";
 import { ListView, ScrollView } from "std-widgets.slint";
 import { Modal } from "dialogs.slint";
-import { AvatarActivity, ActivitySweep, StatusPill } from "avatar.slint";
+import { AvatarActivity, ActivitySweep, StatusPill, AvatarArt } from "avatar.slint";
 import { IconButton, TextButton } from "agent_controls.slint";
 
 export struct OverviewSchedule {
@@ -101,8 +101,7 @@ component Card inherits Rectangle {
                 name: root.card.name;
                 initial: root.card.initial;
                 symbol: root.card.symbol;
-                size: 34px;
-                radius: 8px;
+                size: AvatarArt.card;
                 working: root.card.busy;
                 reduced-motion: OverviewBridge.reduced-motion;
             }
