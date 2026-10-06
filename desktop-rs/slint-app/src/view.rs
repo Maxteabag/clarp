@@ -2,6 +2,7 @@
 //! and the reading theme's palette.
 
 use clarp_core::presentation::PresentedRow;
+use clarp_core::reading_theme::{FontFamily, FontOverride, ResolvedFont};
 use slint::{ModelRc, SharedString, VecModel};
 
 use crate::{AppWindow, Attachment, ChatRow, MessageBlock, MessageRow, Palette, TableRow, ToolRow, WidgetPalette};
@@ -17,32 +18,57 @@ pub(crate) fn color(value: &str) -> Option<slint::Color> {
     })
 }
 
+/// The installed fonts, as `fc-list` lists them.
+pub(crate) struct Fonts {
+    /// Every name a family answers to (its other names too).
+    names: std::collections::HashSet<String>,
+    /// The families, once each, for the font picker.
+    list: Vec<FontFamily>,
+}
+
 thread_local! {
     /// Installed font families, once `fc-list` has answered.
-    static FONTS: std::cell::RefCell<Option<std::collections::HashSet<String>>> = const { std::cell::RefCell::new(None) };
+    static FONTS: std::cell::RefCell<Option<Fonts>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Asks fontconfig for the installed families and whether they are
+/// monospace.
+fn list_fonts() -> Result<Fonts, String> {
+    let output = std::process::Command::new("fc-list")
+        .args(["-f", "%{family}\\t%{spacing}\\n"])
+        .output()
+        .map_err(|error| format!("cannot list fonts: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("fc-list failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let names = text
+        .lines()
+        .flat_map(|line| line.split('\t').next().unwrap_or_default().split(',').map(|f| f.trim().to_owned()).collect::<Vec<_>>())
+        .filter(|f| !f.is_empty())
+        .collect();
+    Ok(Fonts { names, list: clarp_core::reading_theme::parse_font_list(&text) })
 }
 
 /// Reads the installed families off the UI thread, then applies the theme
-/// again with the family it can really use.
-pub(crate) fn load_fonts(theme: String) {
+/// again with the family it can really use (`chosen` is the reader's own,
+/// for a window without its app yet).
+pub(crate) fn load_fonts(theme: String, chosen: Option<FontOverride>) {
     let spawned = std::thread::Builder::new().name("font-list".into()).spawn(move || {
-        let listed = std::process::Command::new("fc-list").args([":", "family"]).output();
-        let families: std::collections::HashSet<String> = match listed {
-            Ok(output) => String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .flat_map(|line| line.split(',').map(|f| f.trim().to_owned()).collect::<Vec<_>>())
-                .filter(|f| !f.is_empty())
-                .collect(),
+        let fonts = match list_fonts() {
+            Ok(fonts) => fonts,
             Err(error) => {
-                eprintln!("clarp-slint: cannot list fonts: {error}");
+                eprintln!("clarp-slint: {error}");
                 return;
             }
         };
         let applied = slint::invoke_from_event_loop(move || {
-            FONTS.with(|fonts| *fonts.borrow_mut() = Some(families));
+            FONTS.with(|f| *f.borrow_mut() = Some(fonts));
             if let Some(window) = crate::window() {
-                let current = crate::app().map(|app| app.engine.borrow().reading_theme()).unwrap_or(theme);
-                apply_theme(&window, &current);
+                match crate::app() {
+                    Some(app) => apply_app_theme(&app, &window),
+                    None => apply_theme(&window, &theme, chosen.as_ref()),
+                }
             }
         });
         if let Err(error) = applied {
@@ -54,16 +80,56 @@ pub(crate) fn load_fonts(theme: String) {
     }
 }
 
+/// The installed families for the font picker; listed now if the
+/// background listing has not answered yet.
+pub(crate) fn font_list() -> Vec<FontFamily> {
+    if let Some(list) = FONTS.with(|f| f.borrow().as_ref().map(|fonts| fonts.list.clone())) {
+        return list;
+    }
+    match list_fonts() {
+        Ok(fonts) => {
+            let list = fonts.list.clone();
+            FONTS.with(|f| *f.borrow_mut() = Some(fonts));
+            list
+        }
+        Err(error) => {
+            eprintln!("clarp-slint: {error}");
+            Vec::new()
+        }
+    }
+}
+
+fn installed(family: &str) -> bool {
+    FONTS.with(|fonts| fonts.borrow().as_ref().is_none_or(|f| f.names.contains(family)))
+}
+
+/// Whether `family` is a monospace family (unknown until the list loads).
+fn monospace(family: &str) -> bool {
+    family == "monospace" || FONTS.with(|fonts| fonts.borrow().as_ref().is_some_and(|f| f.list.iter().any(|l| l.monospace && l.name == family)))
+}
+
 /// The theme's first installed family (its first choice until the font
 /// list is known).
 pub(crate) fn theme_font(theme: &clarp_core::json::Object) -> String {
-    FONTS.with(|fonts| match fonts.borrow().as_ref() {
-        Some(installed) => clarp_core::reading_theme::resolve_font(theme, |family| installed.contains(family)),
-        None => clarp_core::reading_theme::resolve_font(theme, |_| true),
-    })
+    clarp_core::reading_theme::resolve_font(theme, installed)
 }
 
-pub(crate) fn apply_theme(window: &AppWindow, id: &str) {
+/// The font `theme` draws in with the reader's `chosen` one over it.
+pub(crate) fn resolved_font(theme: &clarp_core::json::Object, chosen: Option<&FontOverride>) -> ResolvedFont {
+    clarp_core::reading_theme::resolve(theme, chosen, installed)
+}
+
+/// The app's theme with the font the reader sees: the picker's while it is
+/// open, else the theme's saved one.
+pub(crate) fn apply_app_theme(app: &crate::App, window: &AppWindow) {
+    let engine = app.engine.borrow();
+    let theme = engine.reading_theme();
+    let chosen = crate::font_view::previewed().or_else(|| engine.font_override(&theme));
+    drop(engine);
+    apply_theme(window, &theme, chosen.as_ref());
+}
+
+pub(crate) fn apply_theme(window: &AppWindow, id: &str, chosen: Option<&FontOverride>) {
     let theme = clarp_core::reading_theme::theme(id);
     let pick = |key: &str| theme.get(key).and_then(|v| v.as_str()).and_then(color);
     let palette = window.global::<Palette>();
@@ -103,10 +169,12 @@ pub(crate) fn apply_theme(window: &AppWindow, id: &str) {
     // The standard widgets follow the theme's light or dark scheme.
     let light = theme.get("light").and_then(|v| v.as_bool()).unwrap_or(false);
     window.global::<WidgetPalette>().set_color_scheme(if light { slint::language::ColorScheme::Light } else { slint::language::ColorScheme::Dark });
-    if let Some(size) = theme.get("fontPixelSize").and_then(|v| v.as_f64()) {
-        palette.set_body_size(size as f32);
-    }
-    palette.set_body_family(theme_font(theme).into());
+    let font = resolved_font(theme, chosen);
+    palette.set_body_size(font.size as f32);
+    // Code keeps JetBrains Mono unless the reader chose a monospace family.
+    let own = chosen.is_some_and(|c| !c.family.is_empty()) && font.missing.is_none();
+    palette.set_code_family(if own && monospace(&font.family) { font.family.as_str() } else { "JetBrains Mono" }.into());
+    palette.set_body_family(font.family.into());
 }
 
 pub(crate) fn stamp(epoch_millis: i64) -> String {

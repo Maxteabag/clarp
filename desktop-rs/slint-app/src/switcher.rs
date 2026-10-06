@@ -60,6 +60,8 @@ fn toggle(on: bool, label: &str, action: &str, key: &str, keywords: &'static str
 pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
     let mut rows: Vec<Item> = vec![
         command("Customize key bindings", "edit-keymap", "Ctrl+Alt+,", "view", ""),
+        command("Choose font…", "choose-font", "", "settings", "typeface reading theme text monospace family size"),
+        command("Reset font to theme default", "reset-font", "", "settings", "typeface reading theme text family size revert"),
         command("Next workspace", "next-workspace", "Ctrl+Alt+W", "view", ""),
         command("New contact & chat", "quick-new-agent", "Ctrl+Shift+N", "agent", "new session hub create"),
         command("Rename contact", "rename-agent", "F2", "agent", "rename name title relabel persona"),
@@ -151,7 +153,7 @@ pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
 /// Rows the list above already covers by hand are skipped.
 pub fn settings(rows: &[(String, String, String, String, bool)]) -> Vec<Item> {
     const COVERED: &[&str] =
-        &["timestamps", "show-when-ready", "workspace-bar", "shared-filesystem", "activity", "tool-detail", "reading-theme", "spoken-replies", "narration", "connection", "orchestrator"];
+        &["timestamps", "show-when-ready", "workspace-bar", "shared-filesystem", "activity", "tool-detail", "reading-theme", "font", "reset-font", "spoken-replies", "narration", "connection", "orchestrator"];
     let keywords = "setting settings preference option";
     let mut items = Vec::new();
     for (kind, id, label, detail, on) in rows {

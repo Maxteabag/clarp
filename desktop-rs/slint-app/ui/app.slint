@@ -26,6 +26,8 @@ import { MediaItem } from "media.slint";
 import { AgentOverview, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact } from "overview.slint";
 import { VoiceDialog, VoiceBridge, VoiceItem } from "voice.slint";
 import { OrchestratorDialog, OrchestratorBridge } from "orchestrator.slint";
+import { FontPicker, FontBridge, FontItem, FontKey } from "fonts.slint";
+export { FontBridge, FontItem, FontKey }
 import { DisplayCell, CellLine } from "cells.slint";
 import { ArtifactItem, ArtifactBridge, CardHint } from "artifacts.slint";
 import { LinkHints, LinkBadge, LinkHintLayer } from "link_hints.slint";
@@ -271,6 +273,7 @@ export component AppWindow inherits Window {
     callback pair-host(string, string);
     callback forget-host();
     public function open-connection-page() { connection-page.open(); }
+    public function open-font-picker() { font-picker.open(); }
     // ---- preview versions
     in property <bool> preview-enabled;
     in property <[PreviewVersion]> preview-versions;
@@ -655,6 +658,12 @@ export component AppWindow inherits Window {
         }
         OrchestratorDialog {
             visible: root.overlay == "orchestrator";
+            width: parent.width;
+            height: parent.height;
+        }
+        // Beside the chat, which previews the current family.
+        font-picker := FontPicker {
+            visible: root.overlay == "fonts";
             width: parent.width;
             height: parent.height;
         }

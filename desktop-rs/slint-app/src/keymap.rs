@@ -86,6 +86,8 @@ fn state(name: &str) -> Vec<Binding> {
             b("next-agent", &[], "Next agent", false, Rows, false),
             b("previous-agent", &[], "Previous agent", false, Rows, false),
             b("orchestrator", &[], "Orchestrator settings", false, Always, false),
+            b("choose-font", &[], "Choose font…", false, Always, false),
+            b("reset-font", &[], "Reset font to theme default", false, Always, false),
             b("connection", &[], "Host connection", false, Always, false),
             b("list-all", &[], "Agents: all chats", false, Always, false),
             b("list-unread", &[], "Agents: unread only", false, Always, false),

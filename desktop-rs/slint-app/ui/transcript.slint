@@ -181,7 +181,7 @@ component ToolCard inherits Rectangle {
         }
         if root.open: Text {
             text: root.tool.detail;
-            font-family: "JetBrains Mono";
+            font-family: Palette.code-family;
             font-size: 11px;
             color: Palette.text;
             wrap: word-wrap;
@@ -417,7 +417,7 @@ component LiveItem inherits Rectangle {
                             width: parent.width;
                             height: parent.height;
                             text: line;
-                            font-family: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.body-family : "JetBrains Mono";
+                            font-family: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.body-family : Palette.code-family;
                             font-size: root.live.kind == "plan" || root.live.kind == "reasoning" ? 13px : 11px;
                             color: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.muted : Palette.text;
                             wrap: root.live.kind == "plan" || root.live.kind == "reasoning" ? word-wrap : no-wrap;
@@ -556,7 +556,7 @@ export component Block inherits VerticalLayout {
             width: parent.width - 20px;
             height: parent.height - 20px;
             text: root.block.text;
-            font-family: "JetBrains Mono";
+            font-family: Palette.code-family;
             font-size: root.body-size * 0.9;
             color: Palette.text;
             wrap: word-wrap;
