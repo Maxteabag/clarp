@@ -53,6 +53,9 @@ def orphaned_turn(agent: dict) -> dict[str, Any] | None:
     detail = latest.get("detail") or {}
     if not isinstance(detail, dict):
         detail = {}
+    if detail.get("source") == "agy_hook":
+        # agy run from a terminal: a Host restart did not touch it.
+        return None
     backend_session_id = str(
         detail.get("backend_session_id")
         or agents_db.live_backend_session(agent_id)

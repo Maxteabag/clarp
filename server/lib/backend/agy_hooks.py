@@ -16,6 +16,27 @@ from uuid import UUID
 
 from .. import agents, agy_transcript, turn_lifecycle
 from ..protocol import AgentState
+from ..provider_background_jobs import TURN_ENV
+
+_FAILED_REASONS = frozenset({"ERROR", "USER_CANCELED"})
+# PreInvocation fires on every model call, so a working terminal turn keeps
+# its state fresh; one this old lost its Stop (a hook killed by its timeout).
+LIVE_STATE_MAX_AGE_MS = 15 * 60 * 1000
+
+
+def _started_by_clarp_for(agent_id: str, token: str) -> bool:
+    """Whether the process carrying this turn token is Clarp's turn for the
+    agent. The runner records the token just after agy starts, so a token
+    not recorded yet is taken as the agent's own."""
+    if not token:
+        return False
+    try:
+        row = agents.conn().execute(
+            "SELECT agent_id FROM provider_turns WHERE turn_token = ?",
+            (token,)).fetchone()
+    except Exception:  # noqa: BLE001 - no table yet: nothing recorded
+        return True
+    return row is None or row[0] == agent_id
 
 
 def record_event(event: str, payload: object) -> None:
@@ -34,21 +55,24 @@ def record_event(event: str, payload: object) -> None:
     if not agent or not isinstance(
             backends.by_id(backends.normalize(agent.get("backend"))), AgyBackend):
         return
-    # Clarp starts every agy it runs with the agent's session exported; that
-    # turn is Clarp's even from a runtime older than CLARP_AGY_MANAGED_TURN.
-    # agy run by hand from another agent's shell carries that agent's session.
-    if os.environ.get("CLAUDE_PWA_SESSION") == agent.get("session"):
+    # Every agy turn Clarp starts carries its Host-issued turn token, also
+    # from a runtime older than CLARP_AGY_MANAGED_TURN. The desktop's "open in
+    # terminal" exports the agent's session but no token, so it is reported;
+    # agy run from another agent's turn carries that agent's token.
+    if _started_by_clarp_for(agent["agent_id"], os.environ.get(TURN_ENV, "")):
         return
     detail = {"source": "agy_hook",
               "backend_session_id": conversation_id}
     event_name = turn_lifecycle.TurnEvent.PROMPT_ADMITTED
     if event == "Stop":
+        # agy 1.3 ends a turn for many ordinary reasons (NO_TOOL_CALL,
+        # TERMINAL_STEP_TYPE, MAX_INVOCATIONS, ...); only these are failures.
+        # Background work agy still runs ends with the CLI, which no hook
+        # reports, so a settled turn is done rather than "background".
         reason = str(payload.get("terminationReason") or "").upper()
-        if payload.get("error") or reason not in {"NO_TOOL_CALL", "MODEL_STOP"}:
+        if payload.get("error") or reason in _FAILED_REASONS:
             event_name = turn_lifecycle.TurnEvent.PROCESS_EXITED_FAILED
             detail["message"] = "Antigravity turn interrupted — send again to resume"
-        elif payload.get("fullyIdle") is False:
-            event_name = turn_lifecycle.TurnEvent.BACKGROUND_DECLARED
         else:
             event_name = turn_lifecycle.TurnEvent.HOOK_STOP
     turn_lifecycle.hook_transition(agent["agent_id"], event_name, detail)
@@ -59,6 +83,9 @@ def has_live_work(agent_id: str) -> bool:
     detail = state.get("detail") or {}
     if (state.get("kind") not in AgentState.busy_states()
             or not isinstance(detail, dict) or detail.get("source") != "agy_hook"):
+        return False
+    from ..db import now_ms
+    if now_ms() - int(state.get("ts") or 0) > LIVE_STATE_MAX_AGE_MS:
         return False
     conversation_id = agents.live_backend_session(agent_id)
     if not conversation_id or conversation_id != detail.get("backend_session_id"):

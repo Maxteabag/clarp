@@ -204,7 +204,7 @@ def test_default_model_effort_and_clean_effort_match_the_facade():
 COMPACTION = {
     "claude": CompactionStrategy(("claude", "--dangerously-skip-permissions", "--resume"), "/compact", True),
     "codex": CompactionStrategy(("codex", "resume"), "/compact", False),
-    "agy": CompactionStrategy(("agy", "--dangerously-skip-permissions", "--conversation"), "/compress", False),
+    "agy": CompactionStrategy(("env", "CLARP_AGY_MANAGED_TURN=1", "agy", "--dangerously-skip-permissions", "--conversation"), "/compress", False),
     "grok": CompactionStrategy(("grok", "--resume"), "/compact", False),
 }
 

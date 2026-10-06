@@ -1175,6 +1175,10 @@ class AgyBackend(StreamJsonBackend):
 
     def compaction(self, session: str) -> CompactionStrategy:
         """``/compress`` typed into an interactive ``--conversation`` resume."""
+        # Clarp's own run: the lifecycle hooks (agy_hooks) must not report it
+        # as a terminal turn. tmux takes its environment from its server, so
+        # the marker goes on the command itself.
         return CompactionStrategy(
-            launch=(self.required_binary, "--dangerously-skip-permissions", "--conversation"),
+            launch=("env", "CLARP_AGY_MANAGED_TURN=1", self.required_binary,
+                    "--dangerously-skip-permissions", "--conversation"),
             command="/compress")
