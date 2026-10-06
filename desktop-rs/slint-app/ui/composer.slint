@@ -160,8 +160,8 @@ export component Composer inherits FocusScope {
     in property <[MentionRow]> mentions;
     in property <int> mention-current;
     in property <string> route;
-    // The editor's cursor (bytes), set with the draft after a completion.
-    in-out property <int> cursor <=> editor.cursor;
+    // Puts the editor's cursor at `at` (bytes): after a completed mention.
+    public function set-cursor(at: int) { editor.set-cursor(at); }
     callback send(string, bool);
     callback stop();
     callback edited(string);

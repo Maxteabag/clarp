@@ -129,7 +129,7 @@ export component Pane inherits Rectangle {
             root.draft-set-seen = root.pane.draft-set;
             composer.draft = root.pane.draft;
             if (root.pane.draft-cursor > 0) {
-                composer.cursor = root.pane.draft-cursor - 1;
+                composer.set-cursor(root.pane.draft-cursor - 1);
             }
         }
         if (root.focus-composer-seen != root.pane.focus-composer) {
