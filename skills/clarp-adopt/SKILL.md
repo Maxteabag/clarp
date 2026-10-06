@@ -1,6 +1,6 @@
 ---
 name: clarp-adopt
-description: Resume an existing Claude, Codex, Grok, or OpenCode terminal conversation as a Clarp agent with its history. Use for "make this session Theo", "move this conversation into Clarp", "continue this on my phone", or adopting a past CLI session.
+description: Resume an existing Claude, Codex, Grok, OpenCode, or Antigravity (agy) terminal conversation as a Clarp agent with its history. Use for "make this session Theo", "move this conversation into Clarp", "continue this on my phone", or adopting a past CLI session.
 ---
 
 # Clarp Adopt
@@ -24,8 +24,8 @@ running it:
 - It looks up its process ancestry for the nearest CLI, because session
   variables are inherited: Grok started from inside a Claude session sees both
   ids, and the innermost CLI is the one that asked.
-- Claude, Codex and Grok export their id (`CLAUDE_CODE_SESSION_ID`,
-  `CODEX_THREAD_ID`, `GROK_SESSION_ID`).
+- Claude, Codex, Grok and Antigravity export their id (`CLAUDE_CODE_SESSION_ID`,
+  `CODEX_THREAD_ID`, `GROK_SESSION_ID`, `ANTIGRAVITY_CONVERSATION_ID`).
 - OpenCode exports none. It records each tool call in its database as `running`
   with the command before the command starts, so the conversation currently
   running `clarp-adopt` is the one adopted.
@@ -35,6 +35,10 @@ ids from two CLIs with no recognisable CLI above it, or a CLI that exported
 nothing all exit `1` and ask for the picker (`--all`, `--pick N`) or `--id`.
 The picker marks sessions a live agent already owns; choosing one reuses that
 agent.
+
+The picker lists Antigravity conversations from agy's own catalogue, with the
+titles agy gave them. agy prunes old conversations, so only ones whose history
+is still on disk are offered.
 
 Exit status: `0` the agent exists and its history was verified through `/log`;
 `2` the agent exists but the history was not verified; `1` nothing was changed.

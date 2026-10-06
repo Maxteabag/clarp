@@ -21,6 +21,9 @@ import json
 import os
 import pathlib
 import re
+import sqlite3
+import tempfile
+import urllib.parse
 from typing import Any
 
 from .log import log_exception
@@ -351,19 +354,83 @@ def find_latest_jsonl(
     return p if p.is_file() else None
 
 
+def _summaries_file() -> pathlib.Path:
+    base = os.environ.get("CLAUDE_PWA_AGY_HOME") or str(
+        pathlib.Path.home() / ".gemini" / "antigravity-cli")
+    return pathlib.Path(base) / "conversation_summaries.db"
+
+
+def _clarp_scratch(workspace: str) -> bool:
+    """A temporary folder Clarp made for one of its own one-shot requests."""
+    path = pathlib.Path(workspace)
+    return path.name.startswith("clarp-") and str(path.parent) in {
+        "/tmp", "/var/tmp", tempfile.gettempdir()}
+
+
+def _sessions_from_summaries(path: pathlib.Path, want: str, limit: int,
+                             brain_root: pathlib.Path | None) -> list[dict] | None:
+    """Every top-level conversation agy still holds, newest first, with the
+    title agy gave it. None when the catalogue cannot be read."""
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)
+        try:
+            rows = con.execute(
+                "SELECT conversation_id, title, preview, workspace_uris "
+                "FROM conversation_summaries WHERE nesting_depth = 0 "
+                "ORDER BY last_modified_time DESC").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None
+    out = []
+    for conv_id, title, preview, uris in rows:
+        try:
+            workspaces = [urllib.parse.unquote(urllib.parse.urlsplit(uri).path)
+                          for uri in json.loads(uris or "[]")
+                          if isinstance(uri, str) and uri.startswith("file://")]
+        except (TypeError, json.JSONDecodeError):
+            workspaces = []
+        if any(_clarp_scratch(ws) for ws in workspaces):
+            continue
+        if want and want not in workspaces:
+            continue
+        # agy prunes old conversations but keeps their summaries; only one
+        # with its history on disk can be resumed.
+        jsonl = find_latest_jsonl(str(conv_id), brain_root)
+        if jsonl is None:
+            continue
+        try:
+            mtime = int(jsonl.stat().st_mtime)
+        except OSError:
+            mtime = 0
+        out.append({"id": str(conv_id), "mtime": mtime,
+                    "preview": str(preview or "")[:240], "title": str(title or ""),
+                    "cwd": workspaces[0] if workspaces else ""})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def list_sessions(
     cwd: str,
     limit: int = 20,
     cache_file: pathlib.Path | None = None,
     brain_root: pathlib.Path | None = None,
+    summaries_file: pathlib.Path | None = None,
 ) -> list[dict]:
-    """List resumable agy conversations for a cwd.
+    """List resumable agy conversations for a cwd ("" for every folder).
 
-    agy's last_conversations.json maps each cwd to its most-recent
-    conversation id, so we surface that one (matching `--continue`
-    semantics). Returns [{id, mtime, preview}] or []."""
-    cf = cache_file or _cache_file()
+    agy 1.2+ keeps a catalogue of its conversations with their titles and
+    folders; older ones only map each cwd to its most-recent conversation
+    (last_conversations.json, `--continue` semantics), which stays the
+    fallback. Returns [{id, mtime, preview, title, cwd}] or []."""
     want = str(pathlib.Path(os.path.expanduser(cwd))) if cwd else ""
+    summaries = summaries_file or (None if cache_file else _summaries_file())
+    if summaries is not None and summaries.exists():
+        found = _sessions_from_summaries(summaries, want, limit, brain_root)
+        if found is not None:
+            return found
+    cf = cache_file or _cache_file()
     try:
         mapping = json.loads(cf.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

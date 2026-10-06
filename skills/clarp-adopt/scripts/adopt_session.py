@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resume a native CLI conversation (Claude, Codex, Grok, OpenCode) as a Clarp agent.
+"""Resume a native CLI conversation (Claude, Codex, Grok, OpenCode, Antigravity) as a Clarp agent.
 
 Binds the existing native session id to a new Clarp agent on this machine's
 Host through POST /agents, then verifies the history through GET /log. The
@@ -21,15 +21,16 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-BACKENDS = ('claude', 'codex', 'grok', 'opencode')
+BACKENDS = ('claude', 'codex', 'grok', 'opencode', 'agy')
 # Environment variables a running CLI exports for its own conversation.
 # OpenCode exports none; see opencode_running_session.
 SELF_ID_ENV = {'codex': ('CODEX_THREAD_ID', 'CODEX_SESSION_ID'),
                'claude': ('CLAUDE_CODE_SESSION_ID',),
-               'grok': ('GROK_SESSION_ID',)}
+               'grok': ('GROK_SESSION_ID',),
+               'agy': ('ANTIGRAVITY_CONVERSATION_ID',)}
 # `grok` resolves to a versioned binary (grok-1.0.34-linux-x86_64); a file that
 # merely starts with a CLI's name (claude-notes.md) must not match.
-_CLI_NAME = re.compile(r'^(claude|codex|grok|opencode)(?:-\d[\w.-]*)?$')
+_CLI_NAME = re.compile(r'^(claude|codex|grok|opencode|agy)(?:-\d[\w.-]*)?$')
 # How long ago the CLI may have started the tool call that is running us.
 _RUNNING_WINDOW_MS = 10 * 60 * 1000
 
