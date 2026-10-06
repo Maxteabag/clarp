@@ -128,3 +128,35 @@ pub fn argb_icon(png: &[u8], side: u32) -> Option<(i32, i32, Vec<u8>)> {
     let data = rgba.pixels().flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
     Some((side as i32, side as i32, data))
 }
+
+// ---- portraits drawn at their device size (test first: not yet)
+
+pub const PORTRAIT_SOURCE_MAX: u32 = 1024;
+
+pub fn device_side(_logical: f32, _scale: f32) -> u32 {
+    unimplemented!("device_side")
+}
+
+pub fn sized_portrait_path(_sources: &[&std::path::Path], _side: u32) -> std::path::PathBuf {
+    unimplemented!("sized_portrait_path")
+}
+
+pub fn is_sized_portrait(_path: &std::path::Path) -> bool {
+    unimplemented!("is_sized_portrait")
+}
+
+pub fn square_portrait(_bytes: &[u8]) -> Option<Vec<u8>> {
+    unimplemented!("square_portrait")
+}
+
+pub fn round_portrait(_source: &image::RgbaImage, _side: u32) -> image::RgbaImage {
+    unimplemented!("round_portrait")
+}
+
+pub fn pair_portrait(_left: &image::RgbaImage, _right: &image::RgbaImage, _side: u32) -> image::RgbaImage {
+    unimplemented!("pair_portrait")
+}
+
+pub fn ring_mask(_side: u32, _stroke: f32) -> image::RgbaImage {
+    unimplemented!("ring_mask")
+}

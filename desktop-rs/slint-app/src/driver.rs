@@ -53,6 +53,9 @@ mod scrollbar_checks;
 // ---- the reader's own font per theme
 #[path = "font_checks.rs"]
 mod font_checks;
+// ---- agent portraits at their device size
+#[path = "avatar_checks.rs"]
+mod avatar_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -437,6 +440,7 @@ pub fn start_check(name: &str, out: String) {
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         "fonts" => font_checks::fonts_check(out),
+        "avatars" => avatar_checks::avatars_check(out),
         "link-hints" => link_hint_checks::link_hints_check(out),
         "live" => {
             row_overlap_checks::watch();
