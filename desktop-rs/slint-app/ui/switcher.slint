@@ -8,16 +8,23 @@ export struct SwitcherRow {
     detail: string,
     key: string,
     group: string,
+    // A setting's current value ("On", "Paper"); "Current" in a picker.
+    value: string,
 }
 
 // The quick switcher (QuickSwitcher.qml): type to find an agent, command or
 // setting; Up/Down move, Enter chooses, Escape or a click outside closes.
+// Each row says what it does under its name; a setting shows its value,
+// and Enter on a setting with choices lists them here.
 export component Switcher inherits Rectangle {
     in property <[SwitcherRow]> rows;
     in-out property <int> current;
     in property <string> placeholder: "Agent, contact, setting or command";
     in property <string> empty-text: "No matching agent or contact";
+    // What the keys do, under the list.
+    in property <string> hint: "↑↓ move · Enter run or switch · Esc close";
     out property <string> query: search.text;
+    property <length> row-height: 46px;
     callback edited(string);
     callback chosen(int);
     callback moved(int);
@@ -60,6 +67,7 @@ export component Switcher inherits Rectangle {
                 spacing: 4px;
                 search := Field {
                     height: 43px;
+                    accessible-label: root.placeholder;
                     font-size: 14px;
                     placeholder-text: root.placeholder;
                     edited(text) => { root.edited(text); }
@@ -73,7 +81,7 @@ export component Switcher inherits Rectangle {
                 list := ListView {
                     vertical-stretch: 1;
                     for row[index] in root.rows: Rectangle {
-                        height: 38px;
+                        height: root.row-height;
                         border-radius: 3px;
                         background: index == root.current ? Palette.control : touch.has-hover ? Palette.hover : transparent;
                         touch := TouchArea { clicked => { root.chosen(index); } }
@@ -93,6 +101,20 @@ export component Switcher inherits Rectangle {
                                 Text { text: row.label; color: Palette.text; overflow: elide; }
                                 if row.detail != "": Text { text: row.detail; color: Palette.muted; font-size: 11px; overflow: elide; }
                             }
+                            if row.value != "": Rectangle {
+                                y: (parent.height - self.height) / 2;
+                                height: 20px;
+                                width: value-text.preferred-width + 14px;
+                                border-radius: 10px;
+                                background: row.value == "On" || row.value == "Current" ? Palette.accent : Palette.sunken;
+                                value-text := Text {
+                                    text: row.value;
+                                    color: row.value == "On" || row.value == "Current" ? Palette.accent-text : Palette.text;
+                                    font-size: 11px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
                             if row.key != "": Text {
                                 text: row.key;
                                 color: Palette.accent;
@@ -102,6 +124,13 @@ export component Switcher inherits Rectangle {
                         }
                     }
                 }
+                if root.hint != "": Text {
+                    text: root.hint;
+                    color: Palette.faint;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                    overflow: elide;
+                }
             }
         }
         FocusRing { shown: Focus.mode == "modal"; }
@@ -109,7 +138,7 @@ export component Switcher inherits Rectangle {
     // Keep the chosen row in view as Up/Down move it.
     changed current => {
         if (root.current >= 0) {
-            list.content-y = Math.min(Math.max(list.content-y, -root.current * 38px), list.visible-height - (root.current + 1) * 38px);
+            list.content-y = Math.min(Math.max(list.content-y, -root.current * root.row-height), list.visible-height - (root.current + 1) * root.row-height);
         }
     }
 }

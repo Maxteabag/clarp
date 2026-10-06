@@ -768,6 +768,7 @@ pub fn open_contacts(app: &Rc<App>, window: &AppWindow, restore_composer: Option
     }
     window.set_switcher_placeholder("Start an idle contact".into());
     window.set_switcher_empty("No idle contacts".into());
+    window.set_switcher_hint("↑↓ move · Enter open · Esc close".into());
     crate::commands::refresh_switcher(app, window);
 }
 

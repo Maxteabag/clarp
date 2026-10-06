@@ -841,6 +841,9 @@ fn switcher_check(out: String) {
     use slint::platform::Key;
     let out2 = out.clone();
     let out3 = out.clone();
+    let out4 = out.clone();
+    let theme_before = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
+    let theme_before2 = theme_before.clone();
     fn first(window: &crate::AppWindow) -> String {
         window.get_switcher_rows().row_data(0).map(|r| format!("{}:{}", r.kind, r.label)).unwrap_or_default()
     }
@@ -934,7 +937,8 @@ fn switcher_check(out: String) {
             let at = top.iter().position(|l| l == "Activity bar");
             check(at.is_some(), &format!("\"hide\" finds the activity bar in the top three: {top:?}"));
             let row = window.get_switcher_rows().iter().find(|r| r.label == "Activity bar");
-            check(row.is_some_and(|r| r.detail.contains("far left")), "with its description under it");
+            check(row.as_ref().is_some_and(|r| r.detail.contains("far left")), "with its description under it");
+            check(row.as_ref().is_some_and(|r| r.value == "On"), &format!("and its value: {:?}", row.as_ref().map(|r| r.value.clone())));
             shot(&out3, "switcher-02-hide");
             window.invoke_switcher_moved(at.unwrap_or(0) as i32);
             headless::press(Key::Return);
@@ -961,6 +965,8 @@ fn switcher_check(out: String) {
             }
             let top: Vec<String> = window.get_switcher_rows().iter().take(3).map(|r| r.label.to_string()).collect();
             check(top.iter().any(|l| l == "Activity bar"), &format!("the typo \"colapse\" still finds it: {top:?}"));
+            let value = window.get_switcher_rows().iter().find(|r| r.label == "Activity bar").map(|r| r.value.to_string());
+            check(value.as_deref() == Some("Off"), &format!("now off: {value:?}"));
             headless::press(Key::Escape);
             true
         })),
@@ -991,6 +997,67 @@ fn switcher_check(out: String) {
                 return false;
             }
             check(true, "the setting applies at once");
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("theme", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("reading theme");
+            true
+        })),
+        ("picker", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "reading theme" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(first(window) == "command:Reading theme", &format!("a setting with choices: {}", first(window)));
+            let value = window.get_switcher_rows().row_data(0).map(|r| r.value.to_string()).unwrap_or_default();
+            check(!value.is_empty(), &format!("shows the chosen one: {value:?}"));
+            headless::press(Key::Return);
+            true
+        })),
+        ("choices", Box::new(move |_, window, elapsed| {
+            if !window.get_switcher_placeholder().starts_with("Reading theme") || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(window.get_switcher_open(), "Enter on it lists its choices in the switcher");
+            let current = window.get_switcher_rows().row_data(window.get_switcher_current().max(0) as usize).map(|r| r.value.to_string());
+            check(current.as_deref() == Some("Current"), &format!("starting on the current one: {current:?}"));
+            shot(&out4, "switcher-03-picker");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("picker escape", Box::new(|_, window, elapsed| {
+            if window.get_switcher_placeholder().starts_with("Reading theme") || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(window.get_switcher_open(), "Escape in the choices goes back to everything, still open");
+            headless::type_text("reading theme");
+            true
+        })),
+        ("picker again", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "reading theme" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press(Key::Return);
+            true
+        })),
+        ("choose", Box::new(move |app, window, elapsed| {
+            if !window.get_switcher_placeholder().starts_with("Reading theme") || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            *theme_before.borrow_mut() = app.engine.borrow().reading_theme();
+            let last = window.get_switcher_current() + 1 >= window.get_switcher_rows().row_count() as i32;
+            headless::press(if last { Key::UpArrow } else { Key::DownArrow });
+            headless::press(Key::Return);
+            true
+        })),
+        ("theme chosen", Box::new(move |app, window, _| {
+            if window.get_switcher_open() || app.engine.borrow().reading_theme() == *theme_before2.borrow() {
+                return false;
+            }
+            check(true, "Enter on another choice applies it");
             headless::press_with(&[Key::Control], "k");
             true
         })),
@@ -1027,6 +1094,7 @@ fn switcher_check(out: String) {
 fn settings_check(out: String) {
     use slint::platform::Key;
     let out2 = out.clone();
+    let out3 = out.clone();
     fn row(window: &crate::AppWindow, label: &str) -> Option<crate::SettingRow> {
         window.get_setting_rows().iter().find(|r| r.label == label)
     }
@@ -1052,6 +1120,16 @@ fn settings_check(out: String) {
             check(row(window, "Voice provider").is_some_and(|r| r.detail == "elevenlabs"), "and its voice provider");
             check(row(window, "TTS queue").is_some_and(|r| r.detail.contains("pending")), "and its speech queue");
             check(current(window) == "Timestamps", &format!("the first row that does something is current: {}", current(window)));
+            let undescribed: Vec<String> = window
+                .get_setting_rows()
+                .iter()
+                .filter(|r| r.kind != "section" && r.kind != "info" && (r.description.is_empty() || !crate::settings_view::IDS.contains(&r.id.as_str())))
+                .map(|r| r.label.to_string())
+                .collect();
+            check(undescribed.is_empty(), &format!("every setting says what it does: {undescribed:?}"));
+            for id in ["nav-rail", "explorer", "shortcut-bar", "live-preview", "ui-scale", "double-press"] {
+                check(window.get_setting_rows().iter().any(|r| r.id == id), &format!("{id} is a setting"));
+            }
             shot(&out2, "settings-01");
             headless::press(" ");
             true
@@ -1079,6 +1157,79 @@ fn settings_check(out: String) {
                 return false;
             }
             check(row(window, "Tool activity").is_some_and(|r| r.detail == "Always visible"), "Right steps a choice");
+            headless::press("/");
+            true
+        })),
+        ("search", Box::new(|_, window, _| {
+            if !window.get_settings_search_focused() {
+                return false;
+            }
+            check(window.get_keyboard_mode() == "SETTINGS-SEARCH", "/ goes to the search");
+            headless::type_text("hide");
+            true
+        })),
+        ("found", Box::new(move |_, window, elapsed| {
+            if window.get_settings_query() != "hide" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let labels: Vec<String> = window.get_setting_rows().iter().map(|r| r.label.to_string()).collect();
+            check(labels.first().map(String::as_str) == Some("Activity bar"), &format!("\"hide\" puts the activity bar first: {labels:?}"));
+            check(labels.len() < 12, &format!("and leaves out what does not match: {} rows", labels.len()));
+            shot(&out3, "settings-02-search");
+            headless::press(Key::Return);
+            true
+        })),
+        ("results", Box::new(|_, window, _| {
+            if !window.get_settings_focused() {
+                return false;
+            }
+            check(current(window) == "Activity bar", &format!("Enter goes to the best match: {}", current(window)));
+            headless::press(" ");
+            true
+        })),
+        ("rail toggled", Box::new(|_, window, _| {
+            if window.get_nav_rail_visible() {
+                return false;
+            }
+            check(row(window, "Activity bar").is_some_and(|r| !r.on), "Space hides the activity bar, the search kept");
+            window.invoke_focus_settings_search();
+            true
+        })),
+        ("clear", Box::new(|_, window, _| {
+            if !window.get_settings_search_focused() {
+                return false;
+            }
+            headless::press(Key::Escape);
+            true
+        })),
+        ("cleared", Box::new(|_, window, _| {
+            if !window.get_settings_query().is_empty() || !window.get_settings_focused() {
+                return false;
+            }
+            check(row(window, "Diagnostics").is_some(), "Escape in the search brings every row back");
+            headless::press("/");
+            true
+        })),
+        ("colapse", Box::new(|_, window, _| {
+            if !window.get_settings_search_focused() {
+                return false;
+            }
+            headless::type_text("colapse");
+            true
+        })),
+        ("forgiven", Box::new(|_, window, elapsed| {
+            if window.get_settings_query() != "colapse" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let labels: Vec<String> = window.get_setting_rows().iter().take(3).map(|r| r.label.to_string()).collect();
+            check(labels.iter().any(|l| l == "Activity bar"), &format!("the typo \"colapse\" finds it too: {labels:?}"));
+            headless::press(Key::Escape);
+            true
+        })),
+        ("list", Box::new(|_, window, _| {
+            if !window.get_settings_focused() {
+                return false;
+            }
             headless::press(Key::Escape);
             true
         })),

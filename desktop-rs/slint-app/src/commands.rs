@@ -33,6 +33,7 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     match window.get_surface().as_str() {
         "updates" => return "updates",
         "teams" => return "teams",
+        "settings" if window.get_settings_search_focused() => return "settings-search",
         "settings" => return "settings",
         _ => {}
     }
@@ -282,8 +283,10 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             app.switcher.borrow_mut().recent_only = true;
             window.set_switcher_placeholder("Recent agents".into());
             window.set_switcher_empty("No other agents yet".into());
+            window.set_switcher_hint("↑↓ move · Enter open · Esc close".into());
             refresh_switcher(app, window);
         }
+        "escape" if app.switcher.borrow().open && !app.switcher.borrow().picker.is_empty() => close_picker(app, window),
         "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
         // The font picker: Escape puts the font back.
         "escape" if crate::font_view::is_open() => crate::font_view::act(app, window, "cancel"),
@@ -557,6 +560,15 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
                 app.engine.borrow_mut().set_narrator_detail_level(level);
             }
         }
+        _ if action.starts_with("settingpick:") => {
+            if let Some((id, value)) = action.trim_start_matches("settingpick:").split_once(':') {
+                crate::settings_view::pick(app, window, id, value);
+            }
+        }
+        // ---- the settings page's search
+        "settings-search" if window.get_surface() == "settings" => window.invoke_focus_settings_search(),
+        "settings-results" => crate::settings_view::to_results(app, window),
+        "settings-search-cancel" => crate::settings_view::cancel_search(app, window),
         _ if action.starts_with("settingrow:") => {
             let rest = action.trim_start_matches("settingrow:");
             if let Some((id, delta)) = rest.rsplit_once(':') {
@@ -599,23 +611,8 @@ fn focus_sidebar(app: &App, window: &AppWindow) {
 
 // ---- the quick switcher ------------------------------------------------------
 
-fn toggles(app: &App, window: &AppWindow) -> switcher::Toggles {
-    let engine = app.engine.borrow();
-    let prefs = *app.prefs.borrow();
-    switcher::Toggles {
-        sidebar_visible: window.get_sidebar_visible(),
-        muted: engine.muted(),
-        show_when_ready: engine.show_when_ready(),
-        timestamps_visible: prefs.timestamps,
-        workspace_bar: prefs.workspace_bar,
-        shared_filesystem: engine.shared_filesystem(),
-        activity_mode: engine.activity_mode(),
-        narration: engine.narrator_enabled(),
-        preview_versions: crate::preview_view::enabled(),
-        detail_level: engine.narrator_detail_level(),
-        tool_explanations: engine.tool_explanation_setting().then(|| engine.tool_explanations_enabled(engine.selected_session())),
-        avatar_size: crate::avatar_view::current(app),
-    }
+fn toggles() -> switcher::Toggles {
+    switcher::Toggles { preview_versions: crate::preview_view::enabled() }
 }
 
 /// Ctrl+Shift+X, its command and its setting: the Host's tool explanations
@@ -640,10 +637,47 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
         state.restore_composer = app.active_report().composer_focused;
         state.contacts_only = false;
         state.recent_only = false;
+        state.picker.clear();
     }
     window.set_switcher_placeholder("Agent, contact, setting or command".into());
     window.set_switcher_empty("No matching agent or contact".into());
+    window.set_switcher_hint("↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close".into());
     window.set_switcher_open(true);
+    window.invoke_show_switcher();
+    refresh_switcher(app, window);
+}
+
+/// Enter on a setting with choices: the switcher lists its options, the
+/// current one marked; Escape goes back to everything.
+fn open_picker(app: &App, window: &AppWindow, id: &str) {
+    let label = crate::catalogue::find(id).map_or(id, |e| e.label);
+    {
+        let mut state = app.switcher.borrow_mut();
+        state.open = true;
+        state.query.clear();
+        state.selected.clear();
+        state.picker = id.to_owned();
+    }
+    window.set_switcher_placeholder(format!("{label}: choose one").into());
+    window.set_switcher_empty("No matching choice".into());
+    window.set_switcher_hint("↑↓ move · Enter chooses · Esc back to everything".into());
+    window.set_switcher_open(true);
+    window.invoke_show_switcher();
+    refresh_switcher(app, window);
+    // The current option is where the keyboard starts.
+    let current = app.switcher.borrow().items.iter().position(|i| i.value == "Current");
+    if let Some(index) = current {
+        switcher_moved(app, window, index as i32);
+    }
+}
+
+/// Escape in a picker: back to the whole list.
+fn close_picker(app: &App, window: &AppWindow) {
+    app.switcher.borrow_mut().picker.clear();
+    window.set_switcher_placeholder("Agent, contact, setting or command".into());
+    window.set_switcher_empty("No matching agent or contact".into());
+    app.switcher.borrow_mut().query.clear();
+    window.set_switcher_hint("↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close".into());
     window.invoke_show_switcher();
     refresh_switcher(app, window);
 }
@@ -653,13 +687,18 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     if !app.switcher.borrow().open {
         return;
     }
-    let toggles = toggles(app, window);
-    let (query, contacts_only) = (app.switcher.borrow().query.clone(), app.switcher.borrow().contacts_only);
-    let settings: Vec<(String, String, String, String, bool)> = crate::settings_view::rows(app)
+    let toggles = toggles();
+    let (query, contacts_only, picker) = {
+        let state = app.switcher.borrow();
+        (state.query.clone(), state.contacts_only, state.picker.clone())
+    };
+    let settings: Vec<switcher::SettingRow> = crate::settings_view::rows(app)
         .into_iter()
         .map(|r| (r.kind.to_string(), r.id.to_string(), r.label.to_string(), r.detail.to_string(), r.on))
         .collect();
-    let items = if app.switcher.borrow().recent_only {
+    let items = if !picker.is_empty() {
+        switcher::picker(&picker, &crate::settings_view::choices(app, &picker), &query)
+    } else if app.switcher.borrow().recent_only {
         switcher::recent(&app.engine.borrow(), &app.recent.borrow(), &query)
     } else {
         switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings))
@@ -671,6 +710,11 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
         .map(|mut item| {
             if item.kind == switcher::Kind::Command && overrides.contains_key(&item.target) {
                 item.key = ["pane", "main"].iter().find_map(|s| keymap::shown(s, &item.target, &overrides)).unwrap_or_default();
+            }
+            // A setting shows the keys of the actions that change it.
+            if item.target.starts_with("settingrow:") || item.target.starts_with("settingpicker:") {
+                let actions = crate::catalogue::find(item.entry).map_or(&[][..], |e| e.actions);
+                item.key = actions.iter().find_map(|a| ["pane", "sidebar"].iter().find_map(|s| keymap::shown(s, a, &overrides))).unwrap_or_default();
             }
             item
         })
@@ -687,9 +731,11 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
                 switcher::Kind::Command => "command".into(),
             },
             label: item.label.clone().into(),
-            detail: item.detail.clone().into(),
+            // Under the label: an agent's state, else what it does.
+            detail: if item.detail.is_empty() { item.description.clone() } else { item.detail.clone() }.into(),
             key: item.key.clone().into(),
             group: item.group.into(),
+            value: item.value.clone().into(),
         })
         .collect();
     state.items = items;
@@ -747,6 +793,10 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
         // The picker keeps the keyboard in its search.
         switcher::Kind::Command if item.target == "choose-font" => {
             crate::font_view::open(app, window);
+            return;
+        }
+        switcher::Kind::Command if item.target.starts_with("settingpicker:") => {
+            open_picker(app, window, item.target.trim_start_matches("settingpicker:"));
             return;
         }
         switcher::Kind::Command if item.target == "new-contact" => {

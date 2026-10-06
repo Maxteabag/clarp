@@ -23,7 +23,13 @@ pub struct Item {
     pub detail: String,
     pub key: String,
     pub group: &'static str,
-    keywords: &'static str,
+    /// What it does, one line (commands and settings).
+    pub description: String,
+    pub aliases: &'static [&'static str],
+    /// A setting's current value ("On", "Paper").
+    pub value: String,
+    /// The catalogue id it is described by; its place breaks ties.
+    pub entry: &'static str,
 }
 
 impl Item {
@@ -32,161 +38,160 @@ impl Item {
     }
 }
 
-fn command(label: &str, action: &str, key: &str, group: &'static str, keywords: &'static str) -> Item {
-    Item { kind: Kind::Command, target: action.into(), label: label.into(), detail: String::new(), key: key.into(), group, keywords }
+/// A command or setting `id` as the catalogue describes it.
+fn described(id: &str, target: String, key: &str) -> Item {
+    let entry = crate::catalogue::find(id);
+    Item {
+        kind: Kind::Command,
+        target,
+        label: entry.map_or(id, |e| e.label).into(),
+        detail: String::new(),
+        key: key.into(),
+        group: entry.map_or("view", |e| e.group),
+        description: entry.map_or("", |e| e.description).into(),
+        aliases: entry.map_or(&[][..], |e| e.aliases),
+        value: String::new(),
+        entry: entry.map_or("", |e| e.id),
+    }
 }
 
-/// What the commands' labels depend on.
+fn command(action: &str, key: &str) -> Item {
+    described(action, action.into(), key)
+}
+
+/// What the commands depend on.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Toggles {
-    pub sidebar_visible: bool,
-    pub muted: bool,
-    pub show_when_ready: bool,
-    pub timestamps_visible: bool,
-    pub workspace_bar: bool,
-    pub shared_filesystem: bool,
-    pub activity_mode: i32,
-    pub narration: bool,
     pub preview_versions: bool,
-    pub detail_level: i32,
-    /// The Host's tool explanations, on a Host with live items.
-    pub tool_explanations: Option<bool>,
-    /// The avatar size setting's id (`avatar_view::CHOICES`).
-    pub avatar_size: &'static str,
 }
 
-fn toggle(on: bool, label: &str, action: &str, key: &str, keywords: &'static str) -> Item {
-    command(&format!("{} · {label}", if on { "On → Off" } else { "Off → On" }), action, key, "settings", keywords)
-}
-
-pub fn commands(toggles: Toggles, reading_theme: &str) -> Vec<Item> {
-    let mut rows: Vec<Item> = vec![
-        command("Customize key bindings", "edit-keymap", "Ctrl+Alt+,", "view", ""),
-        command("Choose font…", "choose-font", "", "settings", "typeface reading theme text monospace family size"),
-        command("Reset font to theme default", "reset-font", "", "settings", "typeface reading theme text family size revert"),
-        command("Next workspace", "next-workspace", "Ctrl+Alt+W", "view", ""),
-        command("New contact & chat", "quick-new-agent", "Ctrl+Shift+N", "agent", "new session hub create"),
-        command("Rename contact", "rename-agent", "F2", "agent", "rename name title relabel persona"),
-        command("New session", "new", "Ctrl+N", "agent", "new agent start chat provider contact hub"),
-        command("Preview versions · update or roll back", "preview-versions", "", "settings", "previous installs rollback downgrade"),
-        command("Start an idle contact", "new-contact", "Ctrl+Alt+N", "agent", "new session hub"),
-        command("Open agent in terminal", "agent-terminal", "Ctrl+Alt+T", "agent", ""),
-        command(
-            if toggles.narration { "Disable plain-English tools" } else { "Enable plain-English tools (Spark · extra usage)" },
-            "tool-narration",
-            "",
-            "experiment",
-            "",
-        ),
-        command("Split right", "split-right", "Ctrl+Alt+V", "layout", ""),
-        command("Split down", "split-down", "Ctrl+Alt+S", "layout", ""),
-        command("Close pane", "close-pane", "Ctrl+Alt+X", "layout", ""),
-        command("Zoom pane", "zoom", "Ctrl+Alt+Z", "layout", ""),
-        command("Balance panes", "balance", "Ctrl+Alt+=", "layout", ""),
-        command(if toggles.sidebar_visible { "Hide sidebar" } else { "Show sidebar" }, "sidebar", "Ctrl+B", "view", ""),
-        command("Show/hide keybindings", "shortcut-bar", "Ctrl+Shift+K", "view", ""),
-        command("Larger interface", "ui-larger", "Ctrl+=", "view", ""),
-        command("Smaller interface", "ui-smaller", "Ctrl+-", "view", ""),
-        command("Reset interface size", "ui-reset", "Ctrl+0", "view", ""),
-        command("Agents: all chats", "list-all", "", "view", "sidebar list scope everything back"),
-        command("Agents: unread only", "list-unread", "", "view", "sidebar list scope filter new"),
-        command("Agent conversations (agent to agent)", "list-rooms", "", "view", "pairs rooms sidebar"),
-        command("Archived agents", "list-archive", "", "view", "archive restore old sidebar"),
-        command("Open a link", "link-hints", "F", "view", "links hints url urls browser follow number numbers vimium web"),
-        command("Jump to latest", "jump-latest", "Ctrl+End", "view", "bottom newest scroll follow"),
-        command("Retry latest failed message", "retry-message", "Ctrl+Alt+R", "view", "resend send delivery not delivered"),
-        command("Dismiss conversation error", "dismiss-error", "Esc", "view", "clear close error warning banner voice synthesis failed"),
-        command("Dismiss layout warning", "dismiss-layout-warning", "Esc", "view", "another window saved newer layout conflict recovery"),
-        command("Keep this window's layout", "keep-layout", "Ctrl+Shift+S", "view", "another window saved newer layout conflict recovery save instead"),
-        command("Change directory", "change-directory", "Ctrl+Alt+D", "agent", "folder workspace cwd new chat"),
-        command("Recent agents", "recent-agents", "Ctrl+R", "agent", "last previous switch back mru history"),
-        command("Refresh conversation", "refresh", "F5", "view", ""),
-        command("Agent overview", "overview", "Ctrl+Shift+O", "view", ""),
-        command("Chats", "chats", "Ctrl+1", "destination", ""),
-        command("Updates", "updates", "Ctrl+2", "destination", ""),
-        command("Teams", "teams", "Ctrl+3", "destination", ""),
-        command("Settings", "settings", "Ctrl+,", "destination", ""),
-        command("Host connection", "connection", "", "settings", ""),
-        command("Orchestrator settings", "orchestrator", "", "view", ""),
-        command("Next agent needing attention", "next-attention", "Ctrl+J", "agent", ""),
-        command("Next agent", "next-agent", "", "agent", "following chat switch forward"),
-        command("Previous agent", "previous-agent", "", "agent", "back chat switch"),
-        command("Release agent", "release-agent", "Ctrl+Shift+R", "agent", ""),
-        command("Stop agent", "stop-agent", "Ctrl+.", "agent", ""),
-        command(if toggles.muted { "Enable voice replies" } else { "Mute voice replies" }, "mute", "Ctrl+M", "settings", ""),
-        command("Talk", "talk", "Ctrl+Shift+Space", "audio", ""),
-        toggle(toggles.workspace_bar, "Workspace bar", "setting:workspaceBarVisible", "", "hide show workspaces tabs top strip"),
-        toggle(toggles.timestamps_visible, "Timestamps", "setting:timestampsVisible", "", "date time messages"),
-        toggle(toggles.show_when_ready, "Show when ready", "setting:showWhenReady", "", "stream streaming answers typing"),
-        toggle(toggles.shared_filesystem, "Shared filesystem access (trusted Host)", "setting:sharedFilesystem", "", "files local folders"),
-    ];
-    if let Some(on) = toggles.tool_explanations {
-        rows.push(toggle(on, "Tool explanations (Host)", "toggle-explanations", "Ctrl+Shift+X", "explain plain english tool rows command label narration"));
-    }
-    for (mode, label) in ["Grouped", "Always visible", "Group old"].iter().enumerate() {
-        let current = if toggles.activity_mode == mode as i32 { " (current)" } else { "" };
-        rows.push(command(&format!("Tool activity: {label}{current}"), &format!("setting:activity:{mode}"), if mode == 1 { "Ctrl+Shift+T" } else { "" }, "settings", "tool calls collapse expand grouping"));
-    }
-    for (id, label, sizes) in crate::avatar_view::CHOICES {
-        let current = if *id == toggles.avatar_size { " (current)" } else { "" };
-        rows.push(Item {
-            detail: format!("{} px in the explorer, {} px compact", sizes.row, sizes.compact),
-            ..command(
-                &format!("Agent picture size: {label}{current}"),
-                &format!("setting:avatar:{id}"),
-                "",
-                "settings",
-                "avatar avatars portrait portraits profile picture photo image face bigger smaller larger explorer sidebar",
-            )
-        });
-    }
+/// The commands; the settings come from the settings page (`settings`).
+pub fn commands(toggles: Toggles) -> Vec<Item> {
+    let mut rows: Vec<Item> = [
+        ("edit-keymap", "Ctrl+Alt+,"),
+        ("choose-font", ""),
+        ("reset-font", ""),
+        ("next-workspace", "Ctrl+Alt+W"),
+        ("quick-new-agent", "Ctrl+Shift+N"),
+        ("rename-agent", "F2"),
+        ("new", "Ctrl+N"),
+        ("preview-versions", ""),
+        ("new-contact", "Ctrl+Alt+N"),
+        ("agent-terminal", "Ctrl+Alt+T"),
+        ("split-right", "Ctrl+Alt+V"),
+        ("split-down", "Ctrl+Alt+S"),
+        ("close-pane", "Ctrl+Alt+X"),
+        ("zoom", "Ctrl+Alt+Z"),
+        ("balance", "Ctrl+Alt+="),
+        ("ui-larger", "Ctrl+="),
+        ("ui-smaller", "Ctrl+-"),
+        ("ui-reset", "Ctrl+0"),
+        ("list-all", ""),
+        ("list-unread", ""),
+        ("list-rooms", ""),
+        ("list-archive", ""),
+        ("link-hints", "F"),
+        ("jump-latest", "Ctrl+End"),
+        ("retry-message", "Ctrl+Alt+R"),
+        ("dismiss-error", "Esc"),
+        ("dismiss-layout-warning", "Esc"),
+        ("keep-layout", "Ctrl+Shift+S"),
+        ("change-directory", "Ctrl+Alt+D"),
+        ("recent-agents", "Ctrl+R"),
+        ("refresh", "F5"),
+        ("overview", "Ctrl+Shift+O"),
+        ("chats", "Ctrl+1"),
+        ("updates", "Ctrl+2"),
+        ("teams", "Ctrl+3"),
+        ("settings", "Ctrl+,"),
+        ("next-attention", "Ctrl+J"),
+        ("next-agent", ""),
+        ("previous-agent", ""),
+        ("release-agent", "Ctrl+Shift+R"),
+        ("stop-agent", "Ctrl+."),
+        ("talk", "Ctrl+Shift+Space"),
+    ]
+    .into_iter()
+    .map(|(action, key)| command(action, key))
+    .collect();
     rows.retain(|c| c.target != "preview-versions" || toggles.preview_versions);
-    for (level, name) in clarp_engine::Engine::narrator_detail_levels().iter().enumerate() {
-        let level = level as i32;
-        let note = if toggles.detail_level == level { " (current)" } else if level > 0 { " (uses AI)" } else { " (no AI)" };
-        rows.push(command(&format!("Tool detail: {name}{note}"), &format!("setting:detail:{level}"), "", "settings", "explanation explanations narration audience"));
-    }
-    for theme in clarp_core::reading_theme::themes() {
-        let text = |key: &str| theme.get(key).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
-        let current = if text("id") == reading_theme { " (current)" } else { "" };
-        rows.push(Item {
-            detail: text("detail"),
-            ..command(
-                &format!("Reading theme: {} · {}{current}", text("label"), crate::view::theme_font(theme)),
-                &format!("setting:reading:{}", text("id")),
-                "",
-                "settings",
-                "font typeface text contrast readable legible eyes appearance colours",
-            )
-        });
-    }
     rows
 }
 
-/// Every row of the settings page that does something, as commands, so
-/// Ctrl+K reaches all settings (`(kind, id, label, detail, on)` per row).
-/// Rows the list above already covers by hand are skipped.
-pub fn settings(rows: &[(String, String, String, String, bool)]) -> Vec<Item> {
-    const COVERED: &[&str] =
-        &["timestamps", "show-when-ready", "workspace-bar", "shared-filesystem", "activity", "tool-detail", "reading-theme", "font", "reset-font", "spoken-replies", "narration", "connection", "orchestrator", "avatar-size"];
-    let keywords = "setting settings preference option";
+/// One row of the settings page: `(kind, id, label, detail, on)`.
+pub type SettingRow = (String, String, String, String, bool);
+
+/// Every row of the settings page that does something, as a switcher row
+/// with its current value: Enter switches a toggle, opens a choice's picker
+/// (`settingpicker:ID`) and runs an action.
+pub fn settings(rows: &[SettingRow]) -> Vec<Item> {
+    // The font rows are the commands Choose font… and Reset font.
+    const COMMANDS: &[&str] = &["font", "reset-font"];
     let mut items = Vec::new();
     for (kind, id, label, detail, on) in rows {
-        if id.is_empty() || COVERED.contains(&id.as_str()) {
+        if id.is_empty() || COMMANDS.contains(&id.as_str()) {
             continue;
         }
-        let target = |delta: i32| format!("settingrow:{id}:{delta}");
-        match kind.as_str() {
-            "toggle" => items.push(Item { keywords, ..toggle(*on, label, &target(1), "", "") }),
-            "choice" => {
-                items.push(Item { detail: detail.clone(), keywords, ..command(&format!("{label}: next (now {detail})"), &target(1), "", "settings", "") });
-                items.push(Item { detail: detail.clone(), keywords, ..command(&format!("{label}: previous"), &target(-1), "", "settings", "") });
-            }
-            "action" => items.push(Item { detail: detail.clone(), keywords, ..command(label, &target(1), "", "settings", "") }),
-            _ => {}
+        let (target, value) = match kind.as_str() {
+            "toggle" => (format!("settingrow:{id}:1"), if *on { "On" } else { "Off" }.to_owned()),
+            "choice" => (format!("settingpicker:{id}"), detail.clone()),
+            "action" => (format!("settingrow:{id}:1"), String::new()),
+            _ => continue,
+        };
+        let mut item = described(id, target, "");
+        // The page's own label (the Host's name for its connection).
+        if crate::catalogue::find(id).is_none() || kind == "action" {
+            item.label = label.clone();
         }
+        item.value = value;
+        if kind == "action" {
+            item.detail = detail.clone();
+        }
+        items.push(item);
     }
     items
+}
+
+/// A choice's options as rows (`settingpick:ID:VALUE`), the current marked.
+pub fn picker(id: &str, options: &[(String, String, String, bool)], query: &str) -> Vec<Item> {
+    let mut rows: Vec<(u32, Item)> = options
+        .iter()
+        .filter_map(|(value, label, description, current)| {
+            let score = crate::catalogue::score(query, label, &[], description)?;
+            let item = Item {
+                kind: Kind::Command,
+                target: format!("settingpick:{id}:{value}"),
+                label: label.clone(),
+                detail: String::new(),
+                key: String::new(),
+                group: "settings",
+                description: description.clone(),
+                aliases: &[],
+                value: if *current { "Current".into() } else { String::new() },
+                entry: "",
+            };
+            Some((score, item))
+        })
+        .collect();
+    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.into_iter().map(|(_, item)| item).collect()
+}
+
+/// Commands and settings matching `query`, best first; ties keep the
+/// catalogue's order. An empty query keeps them all in their own order.
+pub fn rank(items: Vec<Item>, query: &str) -> Vec<Item> {
+    if query.trim().is_empty() {
+        return items;
+    }
+    let mut scored: Vec<(u32, usize, Item)> = items
+        .into_iter()
+        .filter_map(|item| {
+            let score = crate::catalogue::score(query, &item.label, item.aliases, &format!("{} {}", item.description, item.group))?;
+            Some((score, crate::catalogue::order(item.entry), item))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.into_iter().map(|(_, _, item)| item).collect()
 }
 
 /// Agents matching `query`, best first (C++ `matchingAgents`).
@@ -212,7 +217,10 @@ pub fn agents(engine: &Engine, query: &str) -> Vec<Item> {
                 detail: format!("{} · {state}", agent.backend),
                 key: String::new(),
                 group: "agent",
-                keywords: "",
+                description: String::new(),
+                aliases: &[],
+                value: String::new(),
+                entry: "",
             };
             (rank, item)
         })
@@ -254,7 +262,10 @@ pub fn contacts(engine: &Engine, query: &str) -> Vec<Item> {
             detail: format!("New session · {backend} · ~"),
             key: String::new(),
             group: "contact",
-            keywords: "",
+            description: String::new(),
+            aliases: &[],
+            value: String::new(),
+            entry: "",
         })
         .collect()
 }
@@ -265,18 +276,10 @@ pub fn results(engine: &Engine, query: &str, toggles: Toggles, contacts_only: bo
     if contacts_only {
         return contacts(engine, query);
     }
-    let terms: Vec<String> = query.trim().to_lowercase().split_whitespace().map(str::to_owned).collect();
-    let commands: Vec<Item> = commands(toggles, &engine.reading_theme())
-        .into_iter()
-        .chain(settings)
-        .filter(|c| {
-            let searchable = format!("{} {} {} {}", c.label, c.group, c.key, c.keywords).to_lowercase();
-            terms.iter().all(|term| searchable.contains(term))
-        })
-        .collect();
+    let commands = rank(commands(toggles).into_iter().chain(settings).collect(), query);
     let agents = agents(engine, query);
     let contacts = contacts(engine, query);
-    if terms.is_empty() {
+    if query.trim().is_empty() {
         commands.into_iter().chain(agents).chain(contacts).collect()
     } else {
         agents.into_iter().chain(contacts).chain(commands).collect()
@@ -296,28 +299,23 @@ pub fn keep_selection(results: &[Item], selected_key: &str) -> i32 {
 mod tests {
     use super::*;
 
+    fn row(kind: &str, id: &str, label: &str, detail: &str, on: bool) -> SettingRow {
+        (kind.to_owned(), id.to_owned(), label.to_owned(), detail.to_owned(), on)
+    }
+
     #[test]
-    fn commands_filter_by_every_term_and_label_their_state() {
-        let rows = commands(Toggles { sidebar_visible: true, muted: true, activity_mode: 1, ..Toggles::default() }, "paper");
-        assert!(rows.iter().any(|c| c.label == "Hide sidebar"));
-        assert!(rows.iter().any(|c| c.label == "Enable voice replies"));
-        assert!(rows.iter().any(|c| c.label == "Tool activity: Always visible (current)"));
-        let sized = commands(Toggles { avatar_size: "large", ..Toggles::default() }, "paper");
-        assert!(sized.iter().any(|c| c.target == "setting:avatar:large" && c.label == "Agent picture size: Large (current)" && c.keywords.contains("avatar")));
-        assert!(sized.iter().any(|c| c.target == "setting:avatar:small" && c.keywords.contains("portrait")));
-        assert!(rows.iter().any(|c| c.target == "setting:reading:paper" && c.label.ends_with("(current)")));
-        let keep = |item: &Item, terms: &[&str]| {
-            let searchable = format!("{} {} {} {}", item.label, item.group, item.key, item.keywords).to_lowercase();
-            terms.iter().all(|t| searchable.contains(t))
-        };
-        let split: Vec<_> = rows.iter().filter(|c| keep(c, &["split", "right"])).collect();
+    fn commands_filter_by_every_term() {
+        let rows = commands(Toggles::default());
+        let split = rank(rows.clone(), "split right");
         assert_eq!(split.len(), 1);
         assert_eq!(split[0].target, "split-right");
+        assert!(rows.iter().all(|c| c.target != "preview-versions"), "only where previews can install");
+        assert!(commands(Toggles { preview_versions: true }).iter().any(|c| c.target == "preview-versions"));
     }
 
     #[test]
     fn the_font_commands_are_in_the_palette() {
-        let rows = commands(Toggles::default(), "hacker");
+        let rows = commands(Toggles::default());
         let find = |target: &str| rows.iter().find(|c| c.target == target).map(|c| c.label.clone());
         assert_eq!(find("choose-font").as_deref(), Some("Choose font…"));
         assert_eq!(find("reset-font").as_deref(), Some("Reset font to theme default"));
@@ -325,31 +323,68 @@ mod tests {
 
     #[test]
     fn every_command_is_described_with_aliases() {
-        let all = Toggles { preview_versions: true, tool_explanations: Some(true), ..Toggles::default() };
-        for item in commands(all, "paper") {
+        for item in commands(Toggles { preview_versions: true }) {
             let entry = crate::catalogue::find(&item.target);
             assert!(entry.is_some_and(|e| !e.description.is_empty() && e.aliases.len() >= 2), "{} ({}) needs a catalogue entry", item.label, item.target);
+            assert_eq!(item.description, entry.map(|e| e.description).unwrap_or_default());
         }
     }
 
     #[test]
-    fn every_settings_row_becomes_a_command() {
-        let row = |kind: &str, id: &str, label: &str, on: bool| (kind.to_owned(), id.to_owned(), label.to_owned(), "Kokoro".to_owned(), on);
+    fn every_settings_row_becomes_a_described_row_with_its_value() {
         let items = settings(&[
-            row("section", "", "APPEARANCE", false),
-            row("toggle", "minimal-ui", "Minimal UI", false),
-            row("toggle", "timestamps", "Timestamps", true),
-            row("choice", "voice-provider", "Voice provider", false),
-            row("info", "", "Host version", false),
+            row("section", "", "APPEARANCE", "", false),
+            row("toggle", "nav-rail", "Activity bar", "", true),
+            row("toggle", "timestamps", "Timestamps", "", false),
+            row("choice", "voice-provider", "Voice provider", "Kokoro", false),
+            row("action", "connection", "studio", "http://host  ·  connected", false),
+            row("info", "", "Host version", "1.0", false),
         ]);
-        let targets: Vec<&str> = items.iter().map(|i| i.target.as_str()).collect();
-        assert_eq!(targets, ["settingrow:minimal-ui:1", "settingrow:voice-provider:1", "settingrow:voice-provider:-1"], "sections, info and hand-covered rows are left out");
-        assert_eq!(items[0].label, "Off → On · Minimal UI");
+        let shown: Vec<(&str, &str, &str)> = items.iter().map(|i| (i.target.as_str(), i.label.as_str(), i.value.as_str())).collect();
+        assert_eq!(
+            shown,
+            [
+                ("settingrow:nav-rail:1", "Activity bar", "On"),
+                ("settingrow:timestamps:1", "Timestamps", "Off"),
+                ("settingpicker:voice-provider", "Voice provider", "Kokoro"),
+                ("settingrow:connection:1", "studio", ""),
+            ],
+            "sections and information are left out; a choice opens its picker"
+        );
+        assert!(items[0].description.contains("far left"));
+        assert_eq!(items[3].detail, "http://host  ·  connected", "an action keeps its detail");
+    }
+
+    #[test]
+    fn hide_ranks_the_activity_bar_among_the_commands() {
+        let rows: Vec<Item> = commands(Toggles::default())
+            .into_iter()
+            .chain(settings(&[
+                row("toggle", "timestamps", "Timestamps", "", false),
+                row("toggle", "workspace-bar", "Workspace bar", "", true),
+                row("toggle", "explorer", "Explorer", "", true),
+                row("toggle", "nav-rail", "Activity bar", "", true),
+                row("choice", "activity", "Tool activity", "Grouped", false),
+            ]))
+            .collect();
+        for query in ["hide", "collapse", "toggle", "colapse", "left bar", "icons", "rail"] {
+            let top: Vec<String> = rank(rows.clone(), query).into_iter().take(3).map(|i| i.label).collect();
+            assert!(top.iter().any(|l| l == "Activity bar"), "{query:?}: {top:?}");
+        }
+    }
+
+    #[test]
+    fn a_picker_lists_the_options_and_marks_the_current() {
+        let options = [("paper".into(), "Paper".into(), "Warm light".into(), true), ("night".into(), "Night".into(), "Dark blue".into(), false)];
+        let all = picker("reading-theme", &options, "");
+        assert_eq!(all.iter().map(|i| i.target.as_str()).collect::<Vec<_>>(), ["settingpick:reading-theme:paper", "settingpick:reading-theme:night"]);
+        assert_eq!(all[0].value, "Current");
+        assert_eq!(picker("reading-theme", &options, "dark")[0].label, "Night", "the options' descriptions are searched too");
     }
 
     #[test]
     fn the_selection_survives_a_rebuild() {
-        let a = Item { kind: Kind::Agent, target: "rachel".into(), label: "Rachel".into(), detail: String::new(), key: String::new(), group: "agent", keywords: "" };
+        let a = Item { kind: Kind::Agent, target: "rachel".into(), label: "Rachel".into(), ..command("new", "") };
         let b = Item { target: "mike".into(), label: "Mike".into(), ..a.clone() };
         assert_eq!(keep_selection(&[a.clone(), b.clone()], &b.key_of()), 1);
         assert_eq!(keep_selection(&[b.clone(), a.clone()], &b.key_of()), 0, "the row moved; the selection follows it");

@@ -119,6 +119,8 @@ pub struct SwitcherState {
     pub contacts_only: bool,
     /// Ctrl+R: recent agents only, the last opened first.
     pub recent_only: bool,
+    /// The setting whose choices are listed (Enter on a choice), if any.
+    pub picker: String,
 }
 
 pub fn app() -> Option<Rc<App>> {
@@ -775,6 +777,11 @@ fn main() {
     window.on_setting_changed(|id, delta| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             settings_view::change(&app, &window, &id, delta);
+        }
+    });
+    window.on_settings_searched(|text| {
+        if let (Some(app), Some(window)) = (app(), crate::window()) {
+            settings_view::searched(&app, &window, &text);
         }
     });
     window.on_surface_chosen(|surface| {
