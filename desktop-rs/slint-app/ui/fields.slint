@@ -89,7 +89,10 @@ export component PlainEditor inherits Rectangle {
     out property <bool> has-focus: input.has-focus;
     // The text's own height: the composer grows with it.
     out property <length> text-height: input.preferred-height;
+    // Where the cursor is, in bytes (the composer's @-mentions).
+    in-out property <int> cursor <=> input.cursor-position-byte-offset;
     callback edited(string);
+    callback cursor-moved(int);
     forward-focus: input;
     accessible-role: text-input;
     accessible-value: root.text;
@@ -109,6 +112,7 @@ export component PlainEditor inherits Rectangle {
             accessible-role: none;
             edited => { root.edited(self.text); }
             cursor-position-changed(cpos) => {
+                root.cursor-moved(self.cursor-position-byte-offset);
                 if (cpos.y + scroll.content-y < 0px) {
                     scroll.content-y = min(0px, -cpos.y);
                 } else if (cpos.y + scroll.content-y > scroll.height - 20px) {

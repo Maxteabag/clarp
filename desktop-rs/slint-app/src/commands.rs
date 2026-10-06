@@ -295,6 +295,17 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             let theme = app.engine.borrow().reading_theme();
             app.engine.borrow_mut().set_font_override(&theme, None);
         }
+        // The composer's mention list closes before the composer is left.
+        "escape" if crate::mention_view::is_open(app) => crate::mention_view::dismiss_active(app),
+        // Ctrl+F: message search, in the switcher.
+        "search-messages" => {
+            open_switcher(app, window);
+            app.switcher.borrow_mut().messages_only = true;
+            window.set_switcher_placeholder("Search messages in every chat".into());
+            window.set_switcher_empty("No message matches".into());
+            window.set_switcher_hint("↑↓ move · Enter opens the chat at the message · Esc close".into());
+            refresh_switcher(app, window);
+        }
         // ---- profile and overview
         "escape" if crate::profile_view::owns(app) => crate::profile_view::escape(app, window),
         "overview" => crate::overview_view::open(app, window),
@@ -638,7 +649,9 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
         state.contacts_only = false;
         state.recent_only = false;
         state.picker.clear();
+        state.messages_only = false;
     }
+    window.set_switcher_note("".into());
     window.set_switcher_placeholder("Agent, contact, setting or command".into());
     window.set_switcher_empty("No matching agent or contact".into());
     window.set_switcher_hint("↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close".into());
@@ -696,13 +709,31 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
         .into_iter()
         .map(|r| (r.kind.to_string(), r.id.to_string(), r.label.to_string(), r.detail.to_string(), r.on))
         .collect();
+    let (recent_only, messages_only) = (app.switcher.borrow().recent_only, app.switcher.borrow().messages_only);
+    let mut note = String::new();
     let items = if !picker.is_empty() {
         switcher::picker(&picker, &crate::settings_view::choices(app, &picker), &query)
-    } else if app.switcher.borrow().recent_only {
+    } else if messages_only {
+        // Ctrl+F: messages alone, and what was searched.
+        let (items, results) = crate::search_view::items(&mut app.engine.borrow_mut(), &query, crate::search_view::LIMIT);
+        note = crate::search_view::note(&results);
+        items
+    } else if recent_only {
         switcher::recent(&app.engine.borrow(), &app.recent.borrow(), &query)
     } else {
-        switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings))
+        let mut items = switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings));
+        // Ctrl+K: the best few messages after the agents and contacts.
+        if !contacts_only && query.trim().chars().count() >= crate::search_view::MIXED_FROM {
+            let (found, results) = crate::search_view::items(&mut app.engine.borrow_mut(), &query, crate::search_view::MIXED);
+            if !found.is_empty() {
+                note = format!("{} Ctrl+F searches messages alone.", crate::search_view::note(&results));
+            }
+            let at = items.iter().take_while(|i| matches!(i.kind, switcher::Kind::Agent | switcher::Kind::Contact)).count();
+            items.splice(at..at, found);
+        }
+        items
     };
+    window.set_switcher_note(note.into());
     // The commands' keys as the user bound them.
     let overrides = overrides(app);
     let items: Vec<switcher::Item> = items
@@ -729,7 +760,9 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
                 switcher::Kind::Agent => "agent".into(),
                 switcher::Kind::Contact => "contact".into(),
                 switcher::Kind::Command => "command".into(),
+                switcher::Kind::Message => "message".into(),
             },
+            snippet: if item.kind == switcher::Kind::Message { crate::view::styled(&item.detail, false) } else { slint::StyledText::default() },
             label: item.label.clone().into(),
             // Under the label: an agent's state, else what it does.
             detail: if item.detail.is_empty() { item.description.clone() } else { item.detail.clone() }.into(),
@@ -798,6 +831,12 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
         switcher::Kind::Command if item.target.starts_with("settingpicker:") => {
             open_picker(app, window, item.target.trim_start_matches("settingpicker:"));
             return;
+        }
+        // A message: its chat, scrolled to it, the transcript keeping the
+        // keyboard to read around it.
+        switcher::Kind::Message => {
+            crate::search_view::jump(app, &item.target);
+            restore = false;
         }
         switcher::Kind::Command if item.target == "new-contact" => {
             crate::launch_view::open_contacts(app, window, Some(restore));

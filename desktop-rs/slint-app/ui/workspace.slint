@@ -1,5 +1,5 @@
 import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
-import { Composer, Attachment } from "composer.slint";
+import { Composer, Attachment, MentionRow } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
 import { TypingIndicator } from "cells.slint";
@@ -58,6 +58,19 @@ export struct PaneView {
     // a card into view: an explicit keypress, never activity).
     scroll-request: int,
     scroll-amount: float,
+    // Message search: the row drawn marked, and a request (bumped) to
+    // bring the row at `reveal-index` into view.
+    marked: string,
+    reveal-request: int,
+    reveal-index: int,
+    // @-mentions: the agents matching the `@` being typed, the chosen one,
+    // and the agent Enter sends to ("" for this chat).
+    mentions: [MentionRow],
+    mention-current: int,
+    route: string,
+    // One more than where the cursor goes when `draft-set` replaces the
+    // draft (a completed mention); 0 leaves it.
+    draft-cursor: int,
 }
 
 export struct SplitView {
@@ -109,12 +122,15 @@ export component Pane inherits Rectangle {
     }
     // A pane made for a request (a split's focus) acts on it at once.
     // An old scroll request is not replayed into a pane made later.
-    init => { root.scroll-request-seen = root.pane.scroll-request; root.apply-requests(); }
+    init => { root.scroll-request-seen = root.pane.scroll-request; root.reveal-request-seen = root.pane.reveal-request; root.apply-requests(); }
     changed pane => { root.apply-requests(); }
     function apply-requests() {
         if (root.draft-set-seen != root.pane.draft-set) {
             root.draft-set-seen = root.pane.draft-set;
             composer.draft = root.pane.draft;
+            if (root.pane.draft-cursor > 0) {
+                composer.cursor = root.pane.draft-cursor - 1;
+            }
         }
         if (root.focus-composer-seen != root.pane.focus-composer) {
             root.focus-composer-seen = root.pane.focus-composer;
@@ -131,6 +147,10 @@ export component Pane inherits Rectangle {
         if (root.scroll-request-seen != root.pane.scroll-request) {
             root.scroll-request-seen = root.pane.scroll-request;
             transcript.scroll-by(root.pane.scroll-amount * 1px, "seek");
+        }
+        if (root.reveal-request-seen != root.pane.reveal-request) {
+            root.reveal-request-seen = root.pane.reveal-request;
+            transcript.reveal(root.pane.reveal-index);
         }
     }
     // Focus moves once the pane is live: a new pane's composer, or one just
@@ -149,6 +169,7 @@ export component Pane inherits Rectangle {
     property <int> focus-transcript-seen;
     property <int> to-latest-seen;
     property <int> scroll-request-seen;
+    property <int> reveal-request-seen;
     property <bool> follows: transcript.follow;
     property <bool> at-end: transcript.at-end;
     property <length> offset: transcript.offset;
@@ -182,6 +203,7 @@ export component Pane inherits Rectangle {
             pane-id: root.pane.id;
             measure: root.pane.measure;
             before: root.pane.before;
+            marked: root.pane.marked;
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }
@@ -270,6 +292,10 @@ export component Pane inherits Rectangle {
             paste-image => { return root.paste-image(); }
             active: root.pane.session != "";
             agent-name: root.pane.name;
+            pane-id: root.pane.id;
+            mentions: root.pane.mentions;
+            mention-current: root.pane.mention-current;
+            route: root.pane.route;
             send(text, queue) => { root.send(text, queue); }
             stop => { root.stop(); }
             edited(text) => { root.draft-edited(text); }

@@ -10,6 +10,8 @@ export struct SwitcherRow {
     group: string,
     // A setting's current value ("On", "Paper"); "Current" in a picker.
     value: string,
+    // A message search result: the words around the match, matches bold.
+    snippet: styled-text,
 }
 
 // The quick switcher (QuickSwitcher.qml): type to find an agent, command or
@@ -23,6 +25,8 @@ export component Switcher inherits Rectangle {
     in property <string> empty-text: "No matching agent or contact";
     // What the keys do, under the list.
     in property <string> hint: "↑↓ move · Enter run or switch · Esc close";
+    // Under the results: what message search searched.
+    in property <string> note;
     out property <string> query: search.text;
     property <length> row-height: 46px;
     callback edited(string);
@@ -90,7 +94,7 @@ export component Switcher inherits Rectangle {
                             padding-right: 12px;
                             spacing: 10px;
                             Text {
-                                text: row.kind == "agent" ? "●" : row.kind == "contact" ? "+" : "›";
+                                text: row.kind == "agent" ? "●" : row.kind == "contact" ? "+" : row.kind == "message" ? "❞" : "›";
                                 color: row.kind == "agent" ? Palette.success : Palette.faint;
                                 vertical-alignment: center;
                                 width: 12px;
@@ -98,8 +102,21 @@ export component Switcher inherits Rectangle {
                             VerticalLayout {
                                 alignment: center;
                                 horizontal-stretch: 1;
-                                Text { text: row.label; color: Palette.text; overflow: elide; }
-                                if row.detail != "": Text { text: row.detail; color: Palette.muted; font-size: 11px; overflow: elide; }
+                                if row.kind != "message": Text { text: row.label; color: Palette.text; overflow: elide; }
+                                if row.kind == "message": Text { text: row.label; color: Palette.muted; font-size: 11px; overflow: elide; }
+                                if row.kind == "message": Rectangle {
+                                    height: 16px;
+                                    clip: true;
+                                    StyledText {
+                                        x: 0;
+                                        y: 0;
+                                        width: parent.width;
+                                        text: row.snippet;
+                                        default-color: Palette.text;
+                                        default-font-size: 12px;
+                                    }
+                                }
+                                if row.detail != "" && row.kind != "message": Text { text: row.detail; color: Palette.muted; font-size: 11px; overflow: elide; }
                             }
                             if row.value != "": Rectangle {
                                 y: (parent.height - self.height) / 2;
@@ -123,6 +140,15 @@ export component Switcher inherits Rectangle {
                             }
                         }
                     }
+                }
+                if root.note != "": Text {
+                    text: root.note;
+                    color: Palette.faint;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                    accessible-role: text;
+                    accessible-id: "switcher-note";
+                    accessible-label: root.note;
                 }
                 if root.hint != "": Text {
                     text: root.hint;

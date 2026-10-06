@@ -36,13 +36,23 @@ pub struct PaneState {
     /// preference change re-presents only when these moved.
     presented_with: Option<(i32, bool, bool)>,
     pub report: Report,
-    draft: String,
+    pub draft: String,
     draft_set: i32,
     focus_composer: i32,
     focus_transcript: i32,
     to_latest: i32,
     scroll_request: i32,
     scroll_amount: f32,
+    /// Message search's mark (chat, row id) and its reveal request.
+    marked: (String, String),
+    reveal_request: i32,
+    reveal_index: i32,
+    /// The `@` being typed and the agents it may name.
+    pub mention: Option<crate::mention_view::Open>,
+    /// A mention closed with Escape stays closed while its `@` is typed on.
+    pub mention_dismissed: Option<usize>,
+    /// One more than where the cursor goes with the next `draft_set`.
+    draft_cursor: i32,
     view: PaneView,
     /// Each reply's artifact cards, updated in place: a card is never
     /// rebuilt under a click or a field that has the keyboard.
@@ -79,6 +89,12 @@ impl PaneState {
             to_latest: 0,
             scroll_request: 0,
             scroll_amount: 0.0,
+            marked: (String::new(), String::new()),
+            reveal_request: 0,
+            reveal_index: 0,
+            mention: None,
+            mention_dismissed: None,
+            draft_cursor: 0,
             cards: std::collections::HashMap::new(),
             slots: std::collections::HashMap::new(),
         }
@@ -266,6 +282,68 @@ impl App {
         });
     }
 
+    /// Marks message `message_id` of `session` in the active pane and
+    /// brings it into view; false while the pane does not show it (yet).
+    pub fn reveal_message(&self, session: &str, message_id: &str) -> bool {
+        let Some(index) = self.active_index() else { return false };
+        let mut panes = self.pane_state.borrow_mut();
+        let pane = &mut panes[index];
+        if pane.session != session {
+            return false;
+        }
+        let Some(at) = pane.shown.iter().position(|s| s.0.message.id == message_id || s.3 == message_id) else { return false };
+        let Some(row) = pane.messages.row_data(at) else { return false };
+        pane.marked = (session.to_owned(), row.id.to_string());
+        pane.reveal_request += 1;
+        pane.reveal_index = at as i32;
+        let view = self.pane_view(pane);
+        pane.view = view.clone();
+        self.panes.set_row_data(index, view);
+        true
+    }
+
+    /// The row message search marked in the active pane (for the checks).
+    pub fn marked_row(&self) -> String {
+        self.active_index().map(|i| self.pane_state.borrow()[i].view.marked.to_string()).unwrap_or_default()
+    }
+
+    /// Changes pane `id` and shows it again.
+    pub fn with_pane<R>(&self, id: &str, change: impl FnOnce(&mut PaneState) -> R) -> Option<R> {
+        let mut panes = self.pane_state.borrow_mut();
+        let index = panes.iter().position(|p| p.id == id)?;
+        let result = change(&mut panes[index]);
+        let view = self.pane_view(&panes[index]);
+        panes[index].view = view.clone();
+        self.panes.set_row_data(index, view);
+        Some(result)
+    }
+
+    /// Changes pane `id`, and shows it again when `change` says it changed.
+    pub fn change_pane(&self, id: &str, change: impl FnOnce(&mut PaneState) -> bool) {
+        let mut panes = self.pane_state.borrow_mut();
+        let Some(index) = panes.iter().position(|p| p.id == id) else { return };
+        if change(&mut panes[index]) {
+            let view = self.pane_view(&panes[index]);
+            panes[index].view = view.clone();
+            self.panes.set_row_data(index, view);
+        }
+    }
+
+    /// Puts `text` in pane `id`'s composer with the cursor at `cursor`
+    /// (bytes), and in the chat's draft (and other panes on it).
+    pub fn set_draft_at(&self, id: &str, text: &str, cursor: usize) {
+        let Some(session) = self.with_pane(id, |pane| {
+            pane.draft = text.to_owned();
+            pane.draft_set += 1;
+            pane.draft_cursor = cursor as i32 + 1;
+            pane.session.clone()
+        }) else {
+            return;
+        };
+        self.engine.borrow_mut().set_draft(&session, text);
+        self.replace_draft(&session, text, Some(id));
+    }
+
     /// A pane's report, from its transcript and composer.
     pub fn reported(&self, id: &str, report: Report) {
         if let Some(pane) = self.pane_state.borrow_mut().iter_mut().find(|p| p.id == id) {
@@ -315,6 +393,11 @@ impl App {
         view.to_latest = pane.to_latest;
         view.scroll_request = pane.scroll_request;
         view.scroll_amount = pane.scroll_amount;
+        view.marked = if pane.marked.0 == pane.session { pane.marked.1.clone() } else { String::new() }.into();
+        view.reveal_request = pane.reveal_request;
+        view.reveal_index = pane.reveal_index;
+        view.draft_cursor = pane.draft_cursor;
+        crate::mention_view::apply(self, pane, &mut view);
         view
     }
 
@@ -409,6 +492,7 @@ impl App {
         let session_artifacts = self.engine.borrow().artifacts_for_session(&pane.session);
         let artifacts = crate::cells_view::artifacts_by_row(&presented, &session_artifacts);
         let agent_name = self.engine.borrow().roster().find(&pane.session).map(|a| clarp_core::protocol::display_name(a).to_owned()).unwrap_or_default();
+        let mentionable = crate::mention_view::candidates(&self.engine.borrow());
         let cursor = self.artifact_cursor.borrow().clone();
         // Image blocks show the keyboard's place from the bridge.
         if let Some(window) = crate::window() {
@@ -439,6 +523,10 @@ impl App {
             .map(|((row, artifacts), mut shown)| {
                 if !stamps {
                     shown.stamp = SharedString::new();
+                }
+                // A message addressed to this chat's agent by an @-mention.
+                if shown.author == "user" {
+                    shown.meta = crate::mention_view::sent_to(&mentionable, &pane.session, &row.message.text).into();
                 }
                 // A receipt names whose question it was and goes to its card
                 // when the card is in the chat.
@@ -713,6 +801,9 @@ impl App {
                     pane.book.clear();
                     pane.draft = self.engine.borrow().draft(&session);
                     pane.draft_set += 1;
+                    pane.draft_cursor = 0;
+                    pane.mention = None;
+                    pane.mention_dismissed = None;
                     pane.to_latest += 1;
                     rebound.push(id.clone());
                 }

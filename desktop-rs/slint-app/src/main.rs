@@ -23,6 +23,8 @@ mod preview_view;
 mod platform;
 mod settings_view;
 mod switcher;
+mod search_view;
+mod mention_view;
 mod view;
 // ---- updates and teams
 mod teams_view;
@@ -121,6 +123,8 @@ pub struct SwitcherState {
     pub recent_only: bool,
     /// The setting whose choices are listed (Enter on a choice), if any.
     pub picker: String,
+    /// Ctrl+F: messages only (message search).
+    pub messages_only: bool,
 }
 
 pub fn app() -> Option<Rc<App>> {
@@ -404,7 +408,7 @@ impl App {
             commands::show_hints(self, &window);
         }
         whole.lap("status");
-        if changes.iter().any(|c| matches!(c, Change::Roster | Change::Preferences)) {
+        if changes.iter().any(|c| matches!(c, Change::Roster | Change::Preferences | Change::Search)) {
             commands::refresh_switcher(self, &window);
         }
         whole.lap("switcher");
@@ -666,15 +670,29 @@ fn main() {
     window.on_send(|pane, text, queue| {
         if let Some(app) = app() {
             let session = app.session_of(&pane);
-            let sent = app.engine.borrow_mut().send_composer(&session, &text, queue);
+            // A draft naming another agent goes to that agent's chat, which
+            // then opens with it.
+            let route = mention_view::route(&mention_view::candidates(&app.engine.borrow()), &session, &text);
+            let target = route.as_ref().map_or(session.as_str(), |c| c.session.as_str()).to_owned();
+            let sent = app.engine.borrow_mut().send_composer_to(&session, &target, &text, queue);
             if sent {
                 app.replace_draft(&session, "", None);
+                if target != session {
+                    app.engine.borrow_mut().select(&target);
+                }
                 // Your own message always brings the latest into view.
                 app.to_latest();
             }
             pump_now(&app);
         }
     });
+    {
+        let bridge = window.global::<MentionBridge>();
+        bridge.on_scan(|pane, text, cursor| with_window(|app, _| mention_view::scan(app, &pane, &text, cursor)));
+        bridge.on_select(|pane, index| with_window(|app, _| mention_view::moved(app, &pane, index)));
+        bridge.on_accept(|pane, index| with_window(|app, _| mention_view::accept(app, &pane, index)));
+        bridge.on_dismiss(|pane| with_window(|app, _| mention_view::dismiss(app, &pane)));
+    }
     window.on_draft_edited(|pane, text| {
         if let Some(app) = app() {
             app.draft_edited(&pane, &text);
