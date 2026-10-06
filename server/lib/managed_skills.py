@@ -17,6 +17,31 @@ INSTALL_STATE = Path(os.environ.get(
 CLAUDE_SKILLS = Path(os.environ.get("CLARP_CLAUDE_SKILLS", HOME / ".claude/skills"))
 CODEX_SKILLS = Path(os.environ.get(
     "CLARP_CODEX_SKILLS", Path(os.environ.get("CODEX_HOME", HOME / ".codex")) / "skills"))
+# Antigravity (agy) reads global skills from ~/.gemini/config/skills.
+AGY_SKILLS = Path(os.environ.get("CLARP_AGY_SKILLS", HOME / ".gemini/config/skills"))
+
+
+def skill_roots(claude: Path, codex: Path, agy: Path) -> list[tuple[str, Path]]:
+    """Where provider CLIs read skills: Claude and Codex always, agy only where
+    its config directory exists. Roots that are the same directory (a shared
+    symlinked skills folder) are written once."""
+    roots = [("claude", claude), ("codex", codex)]
+    if agy.parent.is_dir():
+        roots.append(("agy", agy))
+    unique, seen = [], set()
+    for name, root in roots:
+        try:
+            real = root.resolve()
+        except OSError:
+            real = root
+        if real not in seen:
+            seen.add(real)
+            unique.append((name, root))
+    return unique
+
+
+def _roots() -> list[tuple[str, Path]]:
+    return skill_roots(CLAUDE_SKILLS, CODEX_SKILLS, AGY_SKILLS)
 _ADJACENT_ROOT = Path(__file__).resolve().parents[1]
 RELEASE_ROOT = (_ADJACENT_ROOT if (_ADJACENT_ROOT / "skills").is_dir()
                 else _ADJACENT_ROOT.parent)
@@ -104,6 +129,8 @@ def status() -> list[dict]:
                     "claude": _link_status(CLAUDE_SKILLS / skill_id, source),
                     "codex": _link_status(CODEX_SKILLS / skill_id, source),
                 }
+                if AGY_SKILLS.parent.is_dir():
+                    links["agy"] = _link_status(AGY_SKILLS / skill_id, source)
                 enabled = skill_id in active
                 requirements_ok, missing_requirements = _requirements(item)
                 if not (source / "SKILL.md").is_file():
@@ -149,7 +176,7 @@ def _set_enabled_locked(skill_id: str, enabled: bool) -> dict:
         raise ValueError(f"skill source is missing: {skill_id}")
     state = _read_json(INSTALL_STATE, {})
     active = set(state.get("skills") or [])
-    destinations = [root / skill_id for root in (CLAUDE_SKILLS, CODEX_SKILLS)]
+    destinations = [root / skill_id for _name, root in _roots()]
     link_states = {destination: _link_status(destination, source)
                    for destination in destinations}
     if enabled:

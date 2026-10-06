@@ -18,6 +18,13 @@ CLAUDE_SKILLS = pathlib.Path(os.environ.get(
     "CLARP_CLAUDE_SKILLS", LAYOUT.claude_home / "skills"))
 CODEX_SKILLS = pathlib.Path(os.environ.get(
     "CLARP_CODEX_SKILLS", LAYOUT.codex_home / "skills"))
+AGY_SKILLS = pathlib.Path(os.environ.get(
+    "CLARP_AGY_SKILLS", pathlib.Path.home() / ".gemini/config/skills"))
+
+
+def _roots() -> list[pathlib.Path]:
+    from .managed_skills import skill_roots
+    return [root for _name, root in skill_roots(CLAUDE_SKILLS, CODEX_SKILLS, AGY_SKILLS)]
 
 
 def _safe_id(value: str) -> str:
@@ -65,7 +72,7 @@ def _validate_skill_tree(skill: pathlib.Path) -> None:
 
 
 def _link(skill: pathlib.Path) -> None:
-    for root in (CLAUDE_SKILLS, CODEX_SKILLS):
+    for root in _roots():
         root.mkdir(parents=True, exist_ok=True)
         destination = root / skill.name
         if destination.exists() or destination.is_symlink():
@@ -92,7 +99,7 @@ def import_path(source: pathlib.Path, *, replace: bool = False) -> list[str]:
             raise ValueError(f"duplicate skill id in import: {skill_id}")
         seen.add(skill_id)
         destination = IMPORTED / skill_id
-        link_paths = [root / skill_id for root in (CLAUDE_SKILLS, CODEX_SKILLS)]
+        link_paths = [root / skill_id for root in _roots()]
         if destination.exists():
             if not replace:
                 raise ValueError(f"skill already imported: {skill_id}")
@@ -157,13 +164,13 @@ def add_git(url: str, name: str = "", ref: str = "") -> dict:
         for skill in staged_skills: _validate_skill_tree(skill)
         published = [destination / skill.relative_to(staging) for skill in staged_skills]
         for skill in published:
-            for root in (CLAUDE_SKILLS, CODEX_SKILLS):
+            for root in _roots():
                 link = root / skill.name
                 if link.exists() or link.is_symlink():
                     raise ValueError(f"preserving existing skill at {link}")
         staging.rename(destination)
         for skill in published:
-            for root in (CLAUDE_SKILLS, CODEX_SKILLS):
+            for root in _roots():
                 link = root / skill.name
                 link.parent.mkdir(parents=True, exist_ok=True)
                 link.symlink_to(skill, target_is_directory=True)
@@ -210,7 +217,7 @@ def update_git(source_id: str) -> dict:
         published = [destination / skill.relative_to(staging) for skill in staged_skills]
         old_skills = _skill_dirs(destination)
         for skill in old_skills + published:
-            for root in (CLAUDE_SKILLS, CODEX_SKILLS):
+            for root in _roots():
                 link = root / skill.name
                 if link.exists() or link.is_symlink():
                     if not link.is_symlink():
@@ -227,7 +234,7 @@ def update_git(source_id: str) -> dict:
         for link in original_links:
             link.unlink(missing_ok=True)
         for skill in published:
-            for root in (CLAUDE_SKILLS, CODEX_SKILLS):
+            for root in _roots():
                 link = root / skill.name
                 link.parent.mkdir(parents=True, exist_ok=True)
                 link.symlink_to(skill, target_is_directory=True)
@@ -292,7 +299,7 @@ def repair_links() -> None:
     for row in status():
         source = pathlib.Path(str(row.get("source") or ""))
         if source.is_dir():
-            for root in (CLAUDE_SKILLS, CODEX_SKILLS):
+            for root in _roots():
                 destination = root / source.name
                 if destination.is_symlink() and destination.resolve() == source.resolve():
                     continue

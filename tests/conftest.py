@@ -98,6 +98,19 @@ def _forbid_live_service_control(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_agy_skills(monkeypatch, tmp_path):
+    """Skill links for Antigravity default to ~/.gemini/config/skills, which
+    tests do not fake via HOME. Point it at a temp path whose parent does not
+    exist, so agy linking stays off unless a test turns it on."""
+    target = tmp_path / "no-agy" / "config" / "skills"
+    monkeypatch.setenv("CLARP_AGY_SKILLS", str(target))
+    for module in ("lib.managed_skills", "lib.personal_skills"):
+        loaded = __import__("sys").modules.get(module)
+        if loaded is not None:
+            monkeypatch.setattr(loaded, "AGY_SKILLS", target)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_xdg(monkeypatch):
     """Clear the XDG base-dir variables for every test.
 
