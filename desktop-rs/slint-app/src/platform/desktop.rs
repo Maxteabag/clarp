@@ -6,8 +6,9 @@
 //! and, as in the Qt and C++ clients, no notifications.
 //!
 //! For checks: `CLARP_TEST_NOTIFY_LOG` records notifications in a file
-//! instead of sending them, and `CLARP_TEST_FOREGROUND=1` treats the
-//! headless window as the one in front.
+//! instead of sending them, `CLARP_TEST_FOREGROUND=1` treats the
+//! headless window as the one in front, and `CLARP_TEST_LOGIN=unlocked`
+//! (or `locked`) stands in for the login session logind would report.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -425,6 +426,11 @@ async fn session_state(bus: &zbus::Connection, session: &str) -> zbus::Result<Lo
 async fn watch_login_session() {
     use futures_util::StreamExt;
     let send = |state: LoginState| later(move || login_state(state));
+    // A check's login session ("unlocked" or "locked"), never the machine's.
+    if let Ok(test) = std::env::var("CLARP_TEST_LOGIN") {
+        send(LoginState::Session { available: true, unlocked: test == "unlocked" });
+        return;
+    }
     let bus = match zbus::Connection::system().await {
         Ok(bus) => bus,
         Err(error) => {
