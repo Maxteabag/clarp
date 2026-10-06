@@ -250,3 +250,28 @@ fn the_time_format_setting_switches_the_clock() {
     clarp_core::time_format::set_clock_24h(false);
     assert_eq!(clarp_core::time_format::chat_stamp(evening, &now), "6:10 PM");
 }
+
+#[test]
+fn chat_zoom_is_a_setting_of_its_own_from_60_to_250_percent() {
+    let spec = prefs::find("chatzoom").expect("chat zoom is a setting");
+    assert_eq!(spec.key, "conversation/chatZoom");
+    for words in ["zoom", "magnify", "Chat zoom", "zoom in", "zoom out"] {
+        assert_eq!(prefs::find(words).map(|s| s.name), Some("chatzoom"), "{words}");
+    }
+    assert_eq!(prefs::find("interface scale").map(|s| s.name), Some("uiscale"), "the window's scale is another setting");
+    let mut settings = Settings::in_memory();
+    let theme = prefs::theme_of(&settings);
+    assert_eq!(prefs::number_of(&settings, "chatzoom"), 100.0);
+    assert_eq!(prefs::adjust(&mut settings, spec, &theme, 1), Some(json!(110.0)), "a step is 10%");
+    for _ in 0..30 {
+        prefs::adjust(&mut settings, spec, &theme, 1);
+    }
+    assert_eq!(prefs::number_of(&settings, "chatzoom"), 250.0, "at most 250%");
+    for _ in 0..30 {
+        prefs::adjust(&mut settings, spec, &theme, -1);
+    }
+    assert_eq!(prefs::number_of(&settings, "chatzoom"), 60.0, "at least 60%");
+    assert!(prefs::set_text(&mut settings, "zoom", "300").is_err());
+    prefs::reset(&mut settings, spec, &theme);
+    assert!(settings.get("conversation/chatZoom").is_none(), "reset leaves 100% and nothing stored");
+}

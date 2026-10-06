@@ -904,6 +904,17 @@ mod tests {
         assert_eq!(pane.iter().find(|b| b.action == "split-right").unwrap().keys, ["Alt+V", "Ctrl+Alt+V", "Ctrl+Shift+V"]);
         assert!(pane.iter().any(|b| b.action == "settings"), "main's bindings reach a pane");
         assert_eq!(action_for("pane", "E", &none, all()), Some("focus-sidebar"));
+        // Ctrl+= / Ctrl+- / Ctrl+0 zoom the chat, from the chat and the
+        // composer alike; the window's scale is Ctrl+Alt+PageUp/PageDown/0.
+        for state in ["pane", "composer", "sidebar"] {
+            assert_eq!(action_for(state, "Ctrl+=", &none, all()), Some("chat-zoom-in"), "{state}");
+            assert_eq!(action_for(state, "Ctrl++", &none, all()), Some("chat-zoom-in"), "{state}: = needs Shift on some layouts");
+            assert_eq!(action_for(state, "Ctrl+-", &none, all()), Some("chat-zoom-out"), "{state}");
+            assert_eq!(action_for(state, "Ctrl+0", &none, all()), Some("chat-zoom-reset"), "{state}");
+            assert_eq!(action_for(state, "Ctrl+Alt+PageUp", &none, all()), Some("ui-larger"), "{state}");
+            assert_eq!(action_for(state, "Ctrl+Alt+PageDown", &none, all()), Some("ui-smaller"), "{state}");
+            assert_eq!(action_for(state, "Ctrl+Alt+0", &none, all()), Some("ui-reset"), "{state}");
+        }
         assert_eq!(action_for("sidebar", "Left", &none, all()), Some("fold"));
         assert_eq!(action_for("sidebar", "H", &none, all()), Some("focus-pane"), "H is the chat everywhere");
         assert_eq!(action_for("sidebar", "P", &none, all()), Some("toggle-preview"));

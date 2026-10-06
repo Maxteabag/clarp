@@ -62,6 +62,9 @@ mod search_checks;
 // ---- every preference (Ctrl+K, Settings, :set, the settings file)
 #[path = "customize_checks.rs"]
 mod customize_checks;
+// ---- the chat's own zoom
+#[path = "zoom_checks.rs"]
+mod zoom_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -495,6 +498,10 @@ pub fn start_check(name: &str, out: String) {
         "customize" => {
             row_overlap_checks::watch();
             customize_checks::customize_check(out)
+        }
+        "chat-zoom" => {
+            row_overlap_checks::watch();
+            zoom_checks::zoom_check(out)
         }
         _ => {
             check(false, &format!("no check named {name}"));
@@ -1529,7 +1536,8 @@ fn keymap_check(out: String) {
             if window.get_switcher_open() || elapsed < Duration::from_millis(200) {
                 return false;
             }
-            headless::press_with(&[Key::Control], "=");
+            // Ctrl+= zooms the chat; the window's scale is Ctrl+Alt+PageUp.
+            headless::press_with(&[Key::Control, Key::Alt], Key::PageUp);
             true
         })),
         ("scaled", Box::new(|app, window, _| {
@@ -1537,15 +1545,15 @@ fn keymap_check(out: String) {
             if (scale - 1.2).abs() > 0.01 {
                 return false;
             }
-            check(app.engine.borrow().settings().get("appearance/uiScale").and_then(|v| v.as_f64()) == Some(1.2), "Ctrl+= scales the interface up a step, and keeps it");
-            headless::press_with(&[Key::Control], "0");
+            check(app.engine.borrow().settings().get("appearance/uiScale").and_then(|v| v.as_f64()) == Some(1.2), "Ctrl+Alt+PageUp scales the interface up a step, and keeps it");
+            headless::press_with(&[Key::Control, Key::Alt], "0");
             true
         })),
         ("reset", Box::new(|_, window, _| {
             if (window.window().scale_factor() - 1.15).abs() > 0.01 {
                 return false;
             }
-            check(true, "Ctrl+0 resets it to the Qt app's 1.15");
+            check(true, "Ctrl+Alt+0 resets it to the Qt app's 1.15");
             true
         })),
     ];

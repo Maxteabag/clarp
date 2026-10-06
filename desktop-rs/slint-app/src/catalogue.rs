@@ -554,7 +554,12 @@ mod tests {
         top3("sidebar", "explorer");
         top3("notifications", "pause-mobile-push");
         top3("double tap", "double-press");
-        top3("zoom", "ui-scale");
+        // Zoom is the chat's; the window's own size is its scale.
+        assert_eq!(ranked("zoom in")[0], "chat-zoom-in");
+        assert_eq!(ranked("zoom out")[0], "chat-zoom-out");
+        assert_eq!(ranked("reset zoom")[0], "chat-zoom-reset");
+        top3("magnify", "chat-zoom-in");
+        top3("interface scale", "ui-scale");
         assert_eq!(ranked("avatar")[0], "avatar-size");
         assert_eq!(ranked("font size")[0], "font-size");
         assert_eq!(ranked("text size")[0], "font-size");

@@ -168,6 +168,12 @@ fn drawn() -> Option<((f32, f32), Vec<Drawn>)> {
     Some(((top, bottom), rows))
 }
 
+/// The active chat's drawn rows from the top of its viewport down, by id,
+/// with how far each starts below the viewport's top.
+pub(super) fn rows_from_top() -> Vec<(String, f32)> {
+    drawn().map(|((top, _), rows)| rows.into_iter().map(|row| (row.id, row.top - top)).collect()).unwrap_or_default()
+}
+
 /// Whether the active chat's drawn rows tile: Ok with how many, or the
 /// rows that overlap, leave a gap, or hold a text taller than its place,
 /// with the numbers.

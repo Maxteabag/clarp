@@ -152,6 +152,12 @@ pub fn hold(key: impl Into<SharedString>) {
     window.dispatch_event(WindowEvent::KeyPressed { text: key.into() });
 }
 
+/// Lets go of a key put down with `hold`.
+pub fn release(key: impl Into<SharedString>) {
+    let Some(window) = window() else { return };
+    window.dispatch_event(WindowEvent::KeyReleased { text: key.into() });
+}
+
 /// The window system gives the keyboard to another window (false) or back
 /// to this one (true), as winit's `Focused` does.
 pub fn set_active(active: bool) {
