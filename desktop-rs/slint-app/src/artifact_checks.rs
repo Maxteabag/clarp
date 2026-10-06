@@ -1715,16 +1715,25 @@ fn scroll_stages(out: &str) -> Vec<Stage> {
             true
         })),
         ("selection off screen", Box::new(|app, window, elapsed| {
-            // A card the list dropped lapses 600 ms after its last report.
-            if elapsed < Duration::from_millis(1200) {
+            // A card the list dropped lapses once the cards still drawn
+            // have reported a few times since.
+            let gone = !crate::artifacts_view::on_screen(app).contains(&app.artifact_cursor.borrow());
+            if (!gone || elapsed < Duration::from_millis(600)) && elapsed < Duration::from_secs(5) {
                 return false;
             }
             let before = (opened().len(), window.get_overlay().to_string());
-            let gone = !crate::artifacts_view::on_screen(app).contains(&app.artifact_cursor.borrow());
             headless::press("o");
             let after = (opened().len(), window.get_overlay().to_string());
             check(gone && crate::artifacts_view::selected(app).is_none() && before == after, &format!("a selected card scrolled off screen is not acted on: off {gone}, {before:?} then {after:?}"));
-            check(selected(window).is_empty(), "and shows no selection");
+            true
+        })),
+        // The app lets go of a card that scrolled away on its next clock
+        // tick (every 250 ms).
+        ("selection let go", Box::new(|app, window, elapsed| {
+            if !selected(window).is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(selected(window).is_empty(), &format!("and shows no selection: {:?}", selected(window)));
             headless::press("k");
             let shown = crate::artifacts_view::on_screen(app);
             check(shown.last() == Some(&selected(window)), &format!("K then picks the lowest card now on screen: {:?} of {shown:?}", selected(window)));
@@ -1833,12 +1842,14 @@ fn resolved_prompt(decision: &str, artifact: &str, question: &str, outcome: &str
 fn receipt_stages(out: &str) -> Vec<Stage> {
     let (out, out2, out3) = (out.to_owned(), out.to_owned(), out.to_owned());
     const SESSION: &str = "art-receipt";
+    // Its cards' ids are its own (`-r`): the question chat before it has a
+    // q-click too, and the keyboard's card there must not be one here.
     let receipts = [
-        ("dec-approved", "Upgrade to Postgres 17?", "The user chose: accepted. Approval applies only to the described action. Revalidate it before acting.", "Approved", "success", "DECISION"),
-        ("dec-declined", "Delete staging data?", "The user chose: rejected. Do not perform the protected action.", "Declined", "danger", "DECISION"),
-        ("q-picked", "Which database?", "The user answered this clarification: {\"option_id\": \"lite\", \"label\": \"SQLite\"}. Continue using this answer. This does not grant approval for unrelated protected actions.", "SQLite", "answer", "QUESTION"),
-        ("dec-discard", "Archive the 40 merged branches?", "The user discarded this request. This is not an answer or approval. Do not guess permission or repeat the unchanged request. Continue independent work only.", "Discarded", "muted", "DECISION"),
-        ("dec-expired", "Book it before Friday?", "The request expired without an answer or approval. Do not infer a choice or perform the protected action. Continue independent work only.", "Expired", "muted", "DECISION"),
+        ("dec-approved-r", "Upgrade to Postgres 17?", "The user chose: accepted. Approval applies only to the described action. Revalidate it before acting.", "Approved", "success", "DECISION"),
+        ("dec-declined-r", "Delete staging data?", "The user chose: rejected. Do not perform the protected action.", "Declined", "danger", "DECISION"),
+        ("q-picked-r", "Which database?", "The user answered this clarification: {\"option_id\": \"lite\", \"label\": \"SQLite\"}. Continue using this answer. This does not grant approval for unrelated protected actions.", "SQLite", "answer", "QUESTION"),
+        ("dec-discard-r", "Archive the 40 merged branches?", "The user discarded this request. This is not an answer or approval. Do not guess permission or repeat the unchanged request. Continue independent work only.", "Discarded", "muted", "DECISION"),
+        ("dec-expired-r", "Book it before Friday?", "The request expired without an answer or approval. Do not infer a choice or perform the protected action. Continue independent work only.", "Expired", "muted", "DECISION"),
     ];
     let mut turns: Vec<Value> = receipts
         .iter()
@@ -1851,7 +1862,7 @@ fn receipt_stages(out: &str) -> Vec<Stage> {
             if app.engine.borrow().connection_state() != "live" {
                 return false;
             }
-            let loaded = control("/__control/artifact-chat", &json!({"session": SESSION, "persona": "Rachel", "types": ["decision", "question"], "turns": turns}));
+            let loaded = control("/__control/artifact-chat", &json!({"session": SESSION, "persona": "Rachel", "types": ["decision", "question"], "suffix": "-r", "turns": turns}));
             check(loaded.is_ok(), &format!("the Host takes a chat with resolved decisions {}", loaded.err().unwrap_or_default()));
             true
         })),
@@ -1918,10 +1929,10 @@ fn receipt_stages(out: &str) -> Vec<Stage> {
         })),
         ("receipt opens its decision", Box::new(move |app, window, elapsed| {
             let selected = crate::artifacts_view::selected(app).unwrap_or_default();
-            if selected != "dec-expired" && elapsed < Duration::from_secs(4) {
+            if selected != "dec-expired-r" && elapsed < Duration::from_secs(4) {
                 return false;
             }
-            check(selected == "dec-expired", &format!("O goes to the decision card it answers, in view: {selected:?}"));
+            check(selected == "dec-expired-r", &format!("O goes to the decision card it answers, in view: {selected:?}"));
             crate::view::apply_theme(window, "paper", None);
             headless::press(slint::platform::Key::End);
             true
