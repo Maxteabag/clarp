@@ -28,6 +28,9 @@ def run_hook(event, payload):
 
 def make_agent(tmp_path, monkeypatch, backend="agy"):
     monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path / "agy"))
+    # A test run inside a Clarp turn inherits that turn's token.
+    monkeypatch.delenv("CLARP_PROVIDER_TURN", raising=False)
+    monkeypatch.delenv("CLARP_AGY_MANAGED_TURN", raising=False)
     agent_id = agents.create_agent(
         persona="Marcus", voice_id="", cwd=str(tmp_path),
         session="marcus", backend=backend)
@@ -118,12 +121,23 @@ def test_old_presence_file_and_rebound_session_do_not_keep_busy(tmp_path, monkey
         assert build_agent_snapshot(None)["agents"][0]["busy"] is False
 
 
-def test_background_work_is_distinct_from_completed_turn(tmp_path, monkeypatch):
+def test_a_turn_leaving_background_work_is_done(tmp_path, monkeypatch):
+    # No hook reports when agy's background work ends (it ends with the CLI),
+    # so "background" would never clear.
     make_agent(tmp_path, monkeypatch)
+    run_hook("PreInvocation", {"conversationId": CONVERSATION})
     run_hook("Stop", {"conversationId": CONVERSATION, "terminationReason": "NO_TOOL_CALL",
                       "fullyIdle": False})
-    assert build_agent_snapshot(None)["agents"][0]["latest_state"] == "background"
+    assert build_agent_snapshot(None)["agents"][0]["latest_state"] == "done"
 
+
+@pytest.mark.parametrize("reason", ["TERMINAL_STEP_TYPE", "MAX_INVOCATIONS", "HALTED_STEP"])
+def test_ordinary_endings_are_done_not_interrupted(tmp_path, monkeypatch, reason):
+    make_agent(tmp_path, monkeypatch)
+    run_hook("PreInvocation", {"conversationId": CONVERSATION})
+    run_hook("Stop", {"conversationId": CONVERSATION, "terminationReason": reason,
+                      "error": "", "fullyIdle": True})
+    assert build_agent_snapshot(None)["agents"][0]["latest_state"] == "done"
 
 def test_install_and_uninstall_preserve_other_hooks(tmp_path):
     from lib.backend.agy_hooks import configure_hooks, hook_configuration
@@ -236,20 +250,68 @@ def test_generated_command_uses_managed_python_and_survives_old_release(tmp_path
 
 
 def test_agy_clarp_started_is_never_reported_by_the_hook(tmp_path, monkeypatch):
-    # A runtime older than the managed-turn marker starts agy without it, but
-    # always with the agent's session exported.
+    from lib import provider_background_jobs as jobs
     agent_id = make_agent(tmp_path, monkeypatch)
+    other = agents.create_agent(persona="Other", voice_id="", cwd=str(tmp_path),
+                                session="other", backend="claude")
 
     def states():
         return db.conn().execute("SELECT COUNT(*) FROM state_log WHERE agent_id=?",
                                  (agent_id,)).fetchone()[0]
-    before = states()
-    stop = {"conversationId": CONVERSATION, "terminationReason": "NO_TOOL_CALL",
-            "fullyIdle": True}
-    monkeypatch.setenv("CLAUDE_PWA_SESSION", "marcus")
-    run_hook("Stop", stop)
-    assert states() == before
-    # agy run by hand from another agent's shell is an external turn.
-    monkeypatch.setenv("CLAUDE_PWA_SESSION", "someone-else")
+
+    def reported(env):
+        before = states()
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        run_hook("PreInvocation", {"conversationId": CONVERSATION})
+        for name in env:
+            monkeypatch.delenv(name)
+        return states() > before
+    own, theirs = jobs.new_turn_token(), jobs.new_turn_token()
+    jobs.record_identity(own, agent_id=agent_id, provider="agy", pid=os.getpid())
+    jobs.record_identity(theirs, agent_id=other, provider="claude", pid=os.getpid())
+    # Clarp's turn for this agent, also one whose token is not recorded yet.
+    assert not reported({"CLARP_PROVIDER_TURN": own})
+    assert not reported({"CLARP_PROVIDER_TURN": jobs.new_turn_token()})
+    # agy run from another agent's turn, and the desktop's "open in terminal"
+    # (the agent's session, no token), are terminal turns.
+    assert reported({"CLARP_PROVIDER_TURN": theirs})
+    assert reported({"CLAUDE_PWA_SESSION": "marcus"})
+
+
+def test_a_terminal_turn_that_lost_its_stop_is_repaired_eventually(tmp_path, monkeypatch):
+    from lib.backend import agy_hooks
+    agent_id = make_agent(tmp_path, monkeypatch)
+    presence = tmp_path / "agy/presence"
+    presence.mkdir(parents=True)
+    lock = (presence / f"{CONVERSATION}.lock").open("wb")
+    fcntl.flock(lock, fcntl.LOCK_EX)     # the agy CLI is still open
     run_hook("PreInvocation", {"conversationId": CONVERSATION})
-    assert states() == before + 1
+    assert agy_hooks.has_live_work(agent_id)
+    db.conn().execute("UPDATE state_log SET ts = ts - ? WHERE agent_id = ?",
+                      (agy_hooks.LIVE_STATE_MAX_AGE_MS + 1000, agent_id))
+    assert not agy_hooks.has_live_work(agent_id)
+    lock.close()
+
+
+def test_a_host_restart_does_not_mark_a_terminal_turn_interrupted(tmp_path, monkeypatch):
+    from lib import interrupted_turns
+    agent_id = make_agent(tmp_path, monkeypatch)
+    run_hook("PreInvocation", {"conversationId": CONVERSATION})
+    assert interrupted_turns.orphaned_turn(agents.get_by_agent_id(agent_id)) is None
+
+
+def test_agy_runs_outside_clarp_never_load_clarp(tmp_path, monkeypatch):
+    # Every model call of every agy on the machine runs the hook; one whose
+    # conversation no Clarp agent owns stops at a read-only lookup.
+    make_agent(tmp_path, monkeypatch)
+    env = {**os.environ, "CLAUDE_PWA_DB": str(db.DB_PATH)}
+    probe = (f"import runpy, sys, io; sys.path.insert(0, {str(ROOT / 'plugin/hooks')!r});"
+             "sys.argv=['agy_state.py','PreInvocation'];"
+             "sys.stdin=io.StringIO('{\"conversationId\": \"someone-elses\"}');"
+             f"runpy.run_path({str(ROOT / 'plugin/hooks/agy_state.py')!r}, run_name='__main__');"
+             "print(any(m == 'lib' or m.startswith('lib.') for m in sys.modules), file=sys.stderr)")
+    result = subprocess.run([sys.executable, "-c", probe], env=env, text=True,
+                            capture_output=True, timeout=10)
+    assert json.loads(result.stdout) == {}
+    assert result.stderr.strip().endswith("False")
