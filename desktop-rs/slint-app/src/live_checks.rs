@@ -19,7 +19,7 @@ use slint::{ComponentHandle, Model};
 use slint::platform::Key;
 
 use super::scroll_checks::{anchor_now, anchor_moved, last_row_visible, place_of, row_height, wheel_up};
-use super::{Stage, app_now, check, control, posts, report, requests, rows, run_stages, shot, view};
+use super::{Stage, app_now, check, control, posts, quiet, report, requests, rows, run_stages, shot, view};
 use crate::headless;
 
 /// Step indices in turn-full.json: replay up to (not including) them.
@@ -149,12 +149,16 @@ thread_local! {
     static MARK: std::cell::Cell<(usize, Duration, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, Duration::ZERO, None)) };
 }
 
+/// Starts counting the frames the app draws by itself (the stages stop
+/// asking for them until `since_mark`).
 fn mark() {
+    quiet(true);
     MARK.with(|m| m.set((crate::perf::stats().frames.len(), cpu_time(), Some(std::time::Instant::now()))));
 }
 
 /// Frames per second and CPU (% of a core) since `mark`, and over how long.
 fn since_mark() -> (f64, f64, Duration) {
+    quiet(false);
     let (frames, cpu, at) = MARK.with(std::cell::Cell::get);
     let elapsed = at.map(|a| a.elapsed()).unwrap_or_default();
     let seconds = elapsed.as_secs_f64().max(0.001);
@@ -221,6 +225,22 @@ pub fn live_check(out: String) {
             check(status().is_empty(), &format!("no status line while idle: {:?}", status()));
             check(!crate::profile_view::live_status_line(app), "the live status line is off by default");
             check(crate::settings_view::rows(app).iter().any(|r| r.id == "live-status-line" && r.label == "Live status line" && !r.on), "Settings list Live status line, off");
+            true
+        })),
+        ("settled", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_secs(1) {
+                return false;
+            }
+            mark();
+            true
+        })),
+        ("idle", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (fps, cpu, over) = since_mark();
+            check(fps <= 1.0, &format!("idle, the window draws (almost) nothing: {fps:.1} frames/s over {over:.1?}"));
+            check(cpu <= 25.0, &format!("and uses little CPU: {cpu:.0}% of a core (a debug build)"));
             replay(AFTER_THINKING_TITLE)
         })),
         ("thinking", Box::new(move |_, _window, elapsed| {
@@ -354,7 +374,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             let (fps, cpu, over) = since_mark();
-            check(fps <= 6.0, &format!("Reduce Motion draws only what changes (the clock): {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            check(fps <= 4.0, &format!("Reduce Motion draws only what changes (the clock): {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             set_reduced_motion(false);
             crate::window().expect("window").global::<crate::ChatLook>().set_window_shown(false);
             true
@@ -372,7 +392,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             let (fps, cpu, over) = since_mark();
-            check(fps <= 6.0, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            check(fps <= 4.0, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             crate::window().expect("window").global::<crate::ChatLook>().set_window_shown(true);
             true
         })),
@@ -452,7 +472,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             let (fps, cpu, over) = since_mark();
-            check(fps <= 6.0, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            check(fps <= 4.0, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             headless::press(Key::End);
             replay(AFTER_FAILED)
         })),
@@ -515,15 +535,6 @@ pub fn live_check(out: String) {
             shot(&out4, "live-04-folded");
             check(live_rows().iter().all(|r| r.live.shimmer.is_empty()) && !any_shimmering(), "nothing shimmers once the turn settled");
             check(!view().working, "and no typing dots");
-            mark();
-            true
-        })),
-        ("idle", Box::new(move |app, _window, elapsed| {
-            if elapsed < Duration::from_millis(1500) {
-                return false;
-            }
-            let (fps, cpu, over) = since_mark();
-            check(fps <= 3.0, &format!("idle, the window draws (almost) nothing: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             // On the failed command, K is the row above it: the fold.
             *app.artifact_cursor.borrow_mut() = "live:cl:toolu_03".into();
             true
