@@ -30,7 +30,10 @@ export component ProcessSpinner inherits Rectangle {
     property <length> dot: Math.max(2px, root.size * 0.2);
     width: root.size;
     height: root.size;
-    accessible-id: root.turning ? "spinner-turning" : "spinner-still";
+    // What the checks find it by (no accessible node of its own: the
+    // badge's label says what runs).
+    if root.turning: turning := Rectangle { width: root.size; height: root.size; }
+    if !root.turning: still := Rectangle { width: root.size; height: root.size; }
     for i in 10: Rectangle {
         property <angle> at: i * 36deg - 90deg;
         // How far the dot is behind the arc's head, as a share of a turn.

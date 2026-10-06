@@ -393,9 +393,9 @@ fn compact_marks() -> Vec<(String, String, Rect)> {
 fn spinners(turning: bool) -> Vec<Rect> {
     use i_slint_backend_testing::ElementQuery;
     let Some(window) = crate::window() else { return Vec::new() };
-    let id = if turning { "spinner-turning" } else { "spinner-still" };
+    let id = if turning { "ProcessSpinner::turning" } else { "ProcessSpinner::still" };
     ElementQuery::from_root(&window)
-        .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id) && e.size().width > 0.0)
+        .match_predicate(move |e| e.id().is_some_and(|a| a == id) && e.size().width > 0.0)
         .find_all()
         .into_iter()
         .map(|e| rect(&e))
