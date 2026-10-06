@@ -2289,6 +2289,7 @@ fn sidebar_check(out: String) {
                 return false;
             }
             check(true, "the marks go when the helper and the processes finish, though the finished helper stays listed under its open \"helpers done\" line");
+            check(spinners(true).is_empty() && spinners(false).is_empty(), "and no spinner is left turning or standing once the processes finish");
             let back = serde_json::json!({"session": "mike", "set": {"role": "agent", "parent_agent_id": "", "helper_state": ""}});
             check(control("/__control/agent", &back).is_ok(), "Mike is a chat again");
             let theme = THEME_BEFORE.with(|t| t.borrow().clone());
