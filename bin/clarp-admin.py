@@ -43,6 +43,29 @@ CODEX_SKILLS = Path(os.environ.get(
 _INSTALL_STATE_LOCK_DEPTH = 0
 
 
+def agy_skills() -> Path:
+    """Where Antigravity (agy) reads global skills. Read when used, not at load,
+    so a test that sets CLARP_AGY_SKILLS is always obeyed."""
+    return Path(os.environ.get("CLARP_AGY_SKILLS", HOME / ".gemini/config/skills"))
+
+
+def skill_roots() -> list[Path]:
+    """Same rule as lib.managed_skills.skill_roots: agy only where its config
+    exists, and one write per real directory."""
+    agy = agy_skills()
+    roots = [CLAUDE_SKILLS, CODEX_SKILLS] + ([agy] if agy.parent.is_dir() else [])
+    unique, seen = [], set()
+    for root in roots:
+        try:
+            real = root.resolve()
+        except OSError:
+            real = root
+        if real not in seen:
+            seen.add(real)
+            unique.append(root)
+    return unique
+
+
 def run(*args: str, cwd: Path | None = None, check: bool = True,
         env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(args, cwd=cwd, check=check, text=True, env=env)
@@ -210,8 +233,12 @@ def link_skill(skill_id: str) -> None:
     source = skill_source(skill_id)
     if not (source / "SKILL.md").is_file():
         raise SystemExit(f"skill has no SKILL.md: {skill_id}")
-    for root in (CLAUDE_SKILLS, CODEX_SKILLS):
-        root.mkdir(parents=True, exist_ok=True)
+    for root in skill_roots():
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as error:   # e.g. a dangling symlinked skills folder
+            print(f"WARNING: cannot use skills folder {root}: {error}")
+            continue
         destination = root / skill_id
         if destination.exists() or destination.is_symlink():
             if managed_link(destination) or (destination.is_symlink()
@@ -225,7 +252,7 @@ def link_skill(skill_id: str) -> None:
 
 
 def unlink_skill(skill_id: str) -> None:
-    for root in (CLAUDE_SKILLS, CODEX_SKILLS):
+    for root in skill_roots():
         destination = root / skill_id
         if managed_link(destination):
             destination.unlink()
@@ -983,7 +1010,7 @@ def cmd_doctor(_args) -> int:
     failures += not network_ok
     print(f"{'OK' if network_ok else 'FAIL':<5} phone network: {network_mode}")
     for skill_id in selected_skills():
-        for root in (CLAUDE_SKILLS, CODEX_SKILLS):
+        for root in skill_roots():
             path = root / skill_id
             ok = path.is_symlink() and (path / "SKILL.md").is_file()
             failures += not ok

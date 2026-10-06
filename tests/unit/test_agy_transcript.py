@@ -109,3 +109,42 @@ def test_agy_1_3_calls_are_read_from_their_step_and_answered_in_order(tmp_path):
     assert [c["kind"] for c in cells] == ["reasoning", "exploration", "command"]
     assert [line["text"] for line in cells[0]["lines"]] == [
         "The user wants a check.", "Read the readme first."]
+
+
+def test_each_call_takes_the_result_at_its_own_step(tmp_path):
+    p = _write_transcript(tmp_path / "brain", "conv-pair", [
+        {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>wait</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Waiting.",
+         "tool_calls": [{"name": "run_command", "args": {"CommandLine": "sleep 999"}}]},
+        # Cancelled: step 2 never came, and the user moved on.
+        {"step_index": 3, "type": "USER_INPUT", "content": "<USER_REQUEST>say hi</USER_REQUEST>"},
+        {"step_index": 4, "type": "PLANNER_RESPONSE", "content": "Saying hi.", "tool_calls": [
+            {"name": "run_command", "args": {"CommandLine": "echo hi"}},
+            {"name": "run_command", "args": {"CommandLine": "make build"}}]},
+        {"step_index": 5, "type": "GENERIC", "content": "The command exited with code 0.\nOutput:\nhi\n"},
+        {"step_index": 6, "type": "GENERIC", "status": "RUNNING",
+         "content": "Tool is running as a background task. Its output is at /x/.system_generated/tasks/task-7.log\nYOU MUST ..."},
+        {"step_index": 7, "type": "SYSTEM_MESSAGE",
+         "content": "<SYSTEM_MESSAGE>[Message] sender=conv/task-7 content=Task id \"conv/task-7\" finished with result:\n\nThe command exited with code 2.\nOutput:\nfailed\n"},
+        {"step_index": 8, "type": "PLANNER_RESPONSE", "content": "Done."},
+    ])
+    turns = agy_transcript.parse_turns(p)
+    sleep = turns[1]["tools"][0]
+    echo, build = turns[3]["tools"]
+    # The live stream names a call by the step that answers it: step-<N+1+i>.
+    assert [t["id"] for t in (sleep, echo, build)] == ["step-2", "step-5", "step-6"]
+    assert (sleep["status"], sleep["result"]) == ("error", "No result was recorded")
+    assert (echo["status"], echo["result"]) == ("ok", "hi")
+    assert (build["status"], build["result"]) == ("error", "failed")
+
+
+def test_a_1_1_call_recorded_as_its_own_step_is_not_counted_twice(tmp_path):
+    p = _write_transcript(tmp_path / "brain", "conv-11", [
+        {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>ls</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "",
+         "tool_calls": [{"name": "run_command", "args": {"CommandLine": "ls"}}]},
+        {"step_index": 2, "type": "RUN_COMMAND", "content": "Created At: t\nOutput:\na"},
+        {"step_index": 3, "type": "PLANNER_RESPONSE", "content": "One file."},
+    ])
+    tools = agy_transcript.parse_turns(p)[1]["tools"]
+    assert [(t["name"], t["id"], t["status"]) for t in tools] == [("Bash", "step-2", "ok")]

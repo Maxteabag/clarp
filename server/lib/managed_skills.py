@@ -21,6 +21,10 @@ CODEX_SKILLS = Path(os.environ.get(
 AGY_SKILLS = Path(os.environ.get("CLARP_AGY_SKILLS", HOME / ".gemini/config/skills"))
 
 
+# Folders linked only when their CLI is installed; a conflict there skips just that link.
+OPTIONAL_ROOTS = frozenset({"agy"})
+
+
 def skill_roots(claude: Path, codex: Path, agy: Path) -> list[tuple[str, Path]]:
     """Where provider CLIs read skills: Claude and Codex always, agy only where
     its config directory exists. Roots that are the same directory (a shared
@@ -176,12 +180,18 @@ def _set_enabled_locked(skill_id: str, enabled: bool) -> dict:
         raise ValueError(f"skill source is missing: {skill_id}")
     state = _read_json(INSTALL_STATE, {})
     active = set(state.get("skills") or [])
-    destinations = [root / skill_id for _name, root in _roots()]
+    roots = _roots()
+    destinations = [root / skill_id for _name, root in roots]
     link_states = {destination: _link_status(destination, source)
                    for destination in destinations}
+    # A user's own skill of the same name in an optional folder (agy's) is left
+    # alone there, without holding back the Claude and Codex links.
+    agy_conflicts = {root / skill_id for name, root in roots
+                     if name in OPTIONAL_ROOTS and link_states[root / skill_id] == "modified"}
+    destinations = [d for d in destinations if d not in agy_conflicts]
     if enabled:
         conflicts = [destination for destination, link_state in link_states.items()
-                     if link_state == "modified"]
+                     if link_state == "modified" and destination not in agy_conflicts]
         if conflicts:
             raise ValueError(f"preserving non-Clarp skill at {conflicts[0]}")
     originals = {

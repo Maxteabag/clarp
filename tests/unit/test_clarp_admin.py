@@ -1408,3 +1408,22 @@ def test_model_requires_a_session(monkeypatch):
 
     with pytest.raises(SystemExit, match="no session"):
         args.func(args)
+
+
+def test_skill_links_reach_antigravity_where_it_is_installed(tmp_path, monkeypatch):
+    source = tmp_path / "release/skills/clarp-x"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("x")
+    monkeypatch.setattr(admin, "skill_source", lambda _id: source)
+    monkeypatch.setattr(admin, "SHARE", tmp_path / "release")
+    monkeypatch.setattr(admin, "CLAUDE_SKILLS", tmp_path / "claude")
+    monkeypatch.setattr(admin, "CODEX_SKILLS", tmp_path / "codex")
+    agy = tmp_path / "gemini/config/skills"
+    monkeypatch.setenv("CLARP_AGY_SKILLS", str(agy))
+    admin.link_skill("clarp-x")
+    assert not (tmp_path / "gemini").exists()       # agy not installed: nothing created
+    agy.parent.mkdir(parents=True)
+    admin.link_skill("clarp-x")
+    assert (agy / "clarp-x").resolve() == source.resolve()
+    admin.unlink_skill("clarp-x")
+    assert not (agy / "clarp-x").exists()

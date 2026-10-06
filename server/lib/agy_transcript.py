@@ -82,6 +82,8 @@ def _tool_from(ev: dict) -> dict:
     # agy tool content is prefixed with "Created At:…/Completed At:…"; the
     # useful part (Output / result) follows. Keep a short tail for the UI.
     out: dict[str, Any] = {
+        # The id the live stream gives the same step, so the saved row replaces it.
+        "id": f"step-{ev.get('step_index')}",
         "name": name,
         "summary": etype.replace("_", " ").lower(),
         "action": name.lower(),
@@ -94,20 +96,11 @@ def _tool_from(ev: dict) -> dict:
 
 
 # agy 1.2+/1.3: tool calls are `tool_calls` [{name, args}] on PLANNER_RESPONSE
-# steps, each answered in order by one GENERIC step holding its result.
-_CALL_NAMES = {
-    "run_command": "Bash", "view_file": "Read", "list_dir": "LS",
-    "grep_search": "Grep", "find_by_name": "Glob", "write_to_file": "Write",
-    "replace_file_content": "Edit", "multi_replace_file_content": "Edit",
-    "search_web": "WebSearch", "read_url_content": "WebFetch",
-}
-_CALL_ARGS = {
-    "CommandLine": "command", "Cwd": "cwd", "AbsolutePath": "file_path",
-    "TargetFile": "file_path", "SearchPath": "path", "DirectoryPath": "path",
-    "Query": "pattern", "Url": "url",
-}
+# steps. Call i of step N is answered by step N+1+i (a GENERIC; in 1.1 files a
+# typed tool step), which is also the step the live stream names `step-<N+1+i>`.
 _RESULT_HEADER_RE = re.compile(r"\A(?:(?:Created|Completed) At:[^\n]*\n)*\n?")
 _EXIT_RE = re.compile(r"exited with code (-?\d+)")
+_TASK_RE = re.compile(r"tasks/(task-\d+)\.log")
 
 
 def _plain(value: Any) -> Any:
@@ -120,32 +113,40 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def _call_tool(call: dict, call_id: str) -> dict:
+def _call_tool(call: dict, result_step: int) -> dict:
+    # The live path's own mapping and redaction, so a saved call shows (and
+    # hides) exactly what its live item did.
+    from .backend.agy import _canonical_tool_input, _canonical_tool_name
     from .claude_transcript import summarise_tool
     raw = str(call.get("name") or "tool")
     args_in = call.get("args") if isinstance(call.get("args"), dict) else {}
-    args = {_CALL_ARGS.get(k, k): _plain(v) for k, v in args_in.items()
-            if k not in ("toolAction", "toolSummary")}
-    name = _CALL_NAMES.get(raw, raw.replace("_", " ").title())
-    tool = summarise_tool(name, args, call_id)
-    own = _plain(args_in.get("toolSummary"))
+    args = {k: _plain(v) for k, v in args_in.items()}
+    name = _canonical_tool_name(raw)
+    if name == raw:
+        name = raw.replace("_", " ").title()
+    safe = _canonical_tool_input(name, args)
+    tool = summarise_tool(name, safe, f"step-{result_step}")
+    own = args.get("toolSummary")
     if isinstance(own, str) and own.strip():
-        tool["summary"] = own.strip()   # agy's own words for what the call does
+        tool["summary"] = truncate(own.strip(), 200)   # agy's own words for the call
     tool["status"] = "running"
-    tool["input"] = {k: truncate(v, 400) if isinstance(v, str) else v for k, v in args.items()}
+    tool["input"] = safe
     tool["_raw"] = raw
     return tool
 
 
-def _settle(tool: dict, content: str) -> None:
+def _settle(tool: dict, content: str, status: str = "") -> None:
     body = _RESULT_HEADER_RE.sub("", content or "", count=1)
-    code = _EXIT_RE.search(body[:200])
+    code = _EXIT_RE.search(body[:300])
     tool["exit_code"] = int(code.group(1)) if code else None
-    if tool["_raw"] == "run_command" and "Output:\n" in body:
+    if "Output:\n" in body:
         body = body.split("Output:\n", 1)[1]
     tool["result"] = truncate(body.strip(), 300)
     tool["_output"] = body
-    tool["status"] = "error" if tool["exit_code"] not in (None, 0) else "ok"
+    if status.upper() == "RUNNING":
+        tool["status"] = "running"
+    else:
+        tool["status"] = "error" if tool["exit_code"] not in (None, 0) else "ok"
 
 
 def _cell(tool: dict) -> dict:
@@ -218,8 +219,10 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
 
     turns: list[dict] = []
     pending_tools: list[dict] = []
-    awaiting: list[dict] = []   # calls in order, each answered by the next GENERIC
     pending_order: list[tuple[str, dict]] = []   # thinking cells and calls, in step order
+    by_index = {r.get("step_index"): r for r in rows if isinstance(r.get("step_index"), int)}
+    background: dict[str, dict] = {}   # background task id -> its call, until it finishes
+    last_user = max((i for i, r in by_index.items() if r.get("type") == "USER_INPUT"), default=-1)
 
     def _flush_tools_onto_assistant(ts: str) -> None:
         if not pending_tools and not pending_order:
@@ -249,12 +252,26 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                               "timestamp": ts})
         elif etype == "PLANNER_RESPONSE":
             content = (ev.get("content") or "").strip()
-            # 1.2+ calls carry their args; 1.1 listed bare names and recorded
-            # each tool as its own typed step instead (handled below).
-            calls = [_call_tool(c, f"agy-{ev.get('step_index', 0)}-{i}")
-                     for i, c in enumerate(ev.get("tool_calls") or [])
-                     if isinstance(c, dict) and isinstance(c.get("args"), dict)]
-            awaiting.extend(calls)
+            calls = []
+            step = ev.get("step_index", 0) if isinstance(ev.get("step_index"), int) else 0
+            for i, call in enumerate(ev.get("tool_calls") or []):
+                answer = by_index.get(step + 1 + i) or {}
+                # 1.1 recorded each call as its own typed step (handled below),
+                # with or without args: never count such a call twice.
+                if not isinstance(call, dict) or not isinstance(call.get("args"), dict) \
+                        or str(answer.get("type") or "") in _TOOL_TYPES:
+                    continue
+                tool = _call_tool(call, step + 1 + i)
+                if answer.get("type") == "GENERIC":
+                    _settle(tool, str(answer.get("content") or ""), str(answer.get("status") or ""))
+                    if tool["status"] == "running":   # handed to a background task
+                        task = _TASK_RE.search(tool["_output"] or "")
+                        if task:
+                            background[task.group(1)] = tool
+                elif step + 1 + i < last_user:
+                    # The conversation moved on without an answer (a cancelled turn).
+                    tool.update(status="error", result="No result was recorded")
+                calls.append(tool)
             thinking = _thinking_cell(ev.get("thinking"), ev.get("step_index", 0))
             if thinking:
                 pending_order.append(("cell", thinking))
@@ -269,8 +286,12 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                               "_order": list(pending_order)})
                 pending_tools.clear()
                 pending_order.clear()
-        elif etype == "GENERIC" and awaiting:
-            _settle(awaiting.pop(0), str(ev.get("content") or ""))
+        elif etype == "SYSTEM_MESSAGE" and background:
+            content = str(ev.get("content") or "")
+            for task_id, tool in list(background.items()):
+                if re.search(rf"/{task_id}\b", content) and "finished" in content:
+                    _settle(tool, content.split("finished with result:", 1)[-1])
+                    background.pop(task_id)
         elif etype in _TOOL_TYPES or (
                 etype not in ("CONVERSATION_HISTORY", "SYSTEM_MESSAGE",
                               "GENERIC", "ERROR_MESSAGE") and ev.get("content")
