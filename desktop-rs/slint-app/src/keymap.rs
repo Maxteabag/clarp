@@ -128,9 +128,14 @@ fn state(name: &str) -> Vec<Binding> {
             b("overview", &["Ctrl+Shift+O"], "Overview", false, Always, false),
             b("tools", &["Ctrl+Shift+T"], "Tools", false, Always, false),
             b("toggle-explanations", &["Ctrl+Shift+X"], "Tool explanations", false, Always, false),
-            b("ui-larger", &["Ctrl+="], "Larger", false, Always, false),
-            b("ui-smaller", &["Ctrl+-"], "Smaller", false, Always, false),
-            b("ui-reset", &["Ctrl+0"], "Reset scale", false, Always, false),
+            // The chat's zoom on the browser's keys; the whole window's
+            // scale (the chats with it) on Ctrl+Alt+PageUp/PageDown/0.
+            b("chat-zoom-in", &["Ctrl+=", "Ctrl++"], "Zoom in", false, Always, false),
+            b("chat-zoom-out", &["Ctrl+-"], "Zoom out", false, Always, false),
+            b("chat-zoom-reset", &["Ctrl+0"], "Reset zoom", false, Always, false),
+            b("ui-larger", &["Ctrl+Alt+PageUp"], "Larger", false, Always, false),
+            b("ui-smaller", &["Ctrl+Alt+PageDown"], "Smaller", false, Always, false),
+            b("ui-reset", &["Ctrl+Alt+0"], "Reset scale", false, Always, false),
         ],
         "workspace" => vec![
             // Ctrl+E / Ctrl+H reach the explorer and the chat from anywhere,

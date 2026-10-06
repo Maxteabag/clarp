@@ -165,14 +165,14 @@ component ToolCard inherits Rectangle {
                 border-radius: 3px;
                 background: root.tool.status == "error" ? Palette.danger : root.tool.status == "running" ? Palette.warning : Palette.success;
             }
-            if !root.tool.narrated: Text { text: root.tool.name; color: Palette.chrome-text; font-size: 12 * Look.unit; font-weight: 600; }
-            if !root.tool.narrated: Text { text: root.tool.summary; color: Palette.muted; font-size: 12 * Look.unit; overflow: elide; horizontal-stretch: 1; }
+            if !root.tool.narrated: Text { text: root.tool.name; color: Palette.chrome-text; font-size: 12 * Look.unit * Look.zoom; font-weight: 600; }
+            if !root.tool.narrated: Text { text: root.tool.summary; color: Palette.muted; font-size: 12 * Look.unit * Look.zoom; overflow: elide; horizontal-stretch: 1; }
             // ActivityExplanation.qml: the explanation in place of the call,
             // dots until it arrives; a failed one falls back to the call.
             if root.tool.narrated: Text {
                 text: root.tool.explanation != "" ? root.tool.explanation : "…";
                 color: Palette.text;
-                font-size: 12 * Look.unit;
+                font-size: 12 * Look.unit * Look.zoom;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
                 accessible-label: root.tool.explanation != "" ? root.tool.explanation : "Explaining " + root.tool.name;
@@ -180,13 +180,13 @@ component ToolCard inherits Rectangle {
             if root.tool.detail != "": TouchArea {
                 width: 60px;
                 clicked => { root.open = !root.open; }
-                Text { text: root.open ? "Hide" : "Details"; color: Palette.link; font-size: 12 * Look.unit; }
+                Text { text: root.open ? "Hide" : "Details"; color: Palette.link; font-size: 12 * Look.unit * Look.zoom; }
             }
         }
         if root.open: Text {
             text: root.tool.detail;
             font-family: Palette.code-family;
-            font-size: 11 * Look.unit;
+            font-size: 11 * Look.unit * Look.zoom;
             color: Palette.text;
             wrap: word-wrap;
         }
@@ -245,14 +245,14 @@ component DecisionReceipt inherits Rectangle {
             Text {
                 text: "?";
                 color: Palette.warning;
-                font-size: 11 * Look.unit;
+                font-size: 11 * Look.unit * Look.zoom;
                 font-weight: 700;
                 vertical-alignment: center;
             }
             Text {
                 text: root.receipt.agent != "" ? root.receipt.kind + " · " + root.receipt.agent : root.receipt.kind;
                 color: Palette.faint;
-                font-size: 10 * Look.unit;
+                font-size: 10 * Look.unit * Look.zoom;
                 font-weight: 600;
                 letter-spacing: 0.8px;
                 overflow: elide;
@@ -269,7 +269,7 @@ component DecisionReceipt inherits Rectangle {
         Text {
             text: root.receipt.question;
             color: Palette.text;
-            font-size: 14 * Look.unit;
+            font-size: 14 * Look.unit * Look.zoom;
             font-weight: 600;
             wrap: word-wrap;
         }
@@ -293,14 +293,14 @@ component DecisionReceipt inherits Rectangle {
                     Text {
                         text: root.receipt.mark;
                         color: root.tone;
-                        font-size: 12 * Look.unit;
+                        font-size: 12 * Look.unit * Look.zoom;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
                     Text {
                         text: root.receipt.outcome;
                         color: root.tone;
-                        font-size: 12 * Look.unit;
+                        font-size: 12 * Look.unit * Look.zoom;
                         font-weight: 600;
                         wrap: word-wrap;
                         vertical-alignment: center;
@@ -374,7 +374,7 @@ component LiveItem inherits Rectangle {
                 color: root.live.shimmer == "accent" ? Palette.accent
                     : root.live.shimmer == "muted" || root.live.kind == "reasoning" || root.live.kind == "fold" ? Palette.muted
                     : Palette.chrome-text;
-                font-size: 13 * Look.unit;
+                font-size: 13 * Look.unit * Look.zoom;
                 font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
                 font-italic: root.live.kind == "reasoning";
                 overflow: elide;
@@ -401,7 +401,7 @@ component LiveItem inherits Rectangle {
                         property <float> glow: Math.max(0, 1 - Math.abs(self.at - shimmer.phase) * 4);
                         text: letter;
                         color: shimmer.high.mix(shimmer.low, self.glow);
-                        font-size: 13 * Look.unit;
+                        font-size: 13 * Look.unit * Look.zoom;
                         font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
                         font-italic: root.live.kind == "reasoning";
                         vertical-alignment: center;
@@ -411,14 +411,14 @@ component LiveItem inherits Rectangle {
             if root.live.meta != "": Text {
                 text: root.live.meta;
                 color: root.live.status == "failed" ? Palette.danger : Palette.faint;
-                font-size: 12 * Look.unit;
+                font-size: 12 * Look.unit * Look.zoom;
                 font-family: Palette.code-family;
                 vertical-alignment: center;
             }
             if root.live.expandable: Text {
                 text: root.live.expanded ? "▾" : "▸";
                 color: Palette.faint;
-                font-size: 12 * Look.unit;
+                font-size: 12 * Look.unit * Look.zoom;
                 vertical-alignment: center;
             }
             // Its key only while it works: selected, in the focused chat.
@@ -437,7 +437,7 @@ component LiveItem inherits Rectangle {
                 height: 17px;
                 text: root.live.secondary != "" ? root.live.secondary : root.live.explaining ? "Explaining…" : "";
                 color: root.live.secondary != "" ? Palette.muted : Palette.faint;
-                font-size: 12 * Look.unit;
+                font-size: 12 * Look.unit * Look.zoom;
                 font-italic: root.live.secondary == "";
                 overflow: elide;
             }
@@ -459,7 +459,7 @@ component LiveItem inherits Rectangle {
                             height: parent.height;
                             text: line;
                             font-family: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.body-family : Palette.code-family;
-                            font-size: root.live.kind == "plan" || root.live.kind == "reasoning" ? 13 * Look.unit : 11 * Look.unit;
+                            font-size: root.live.kind == "plan" || root.live.kind == "reasoning" ? 13 * Look.unit * Look.zoom : 11 * Look.unit * Look.zoom;
                             color: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.muted : Palette.text;
                             wrap: root.live.kind == "plan" || root.live.kind == "reasoning" ? word-wrap : no-wrap;
                             overflow: elide;
@@ -470,7 +470,7 @@ component LiveItem inherits Rectangle {
             if root.live.more != "": Text {
                 text: root.live.more;
                 color: Palette.faint;
-                font-size: 11 * Look.unit;
+                font-size: 11 * Look.unit * Look.zoom;
             }
         }
     }
@@ -515,21 +515,21 @@ component PromptLine inherits Rectangle {
         Text {
             text: root.prompt.sender;
             color: Palette.accent;
-            font-size: 12 * Look.unit;
+            font-size: 12 * Look.unit * Look.zoom;
             font-weight: 600;
             vertical-alignment: center;
         }
         Text {
             text: root.prompt.expanded || root.prompt.line == "" ? "prompted" : "prompted ·";
             color: Palette.muted;
-            font-size: 12 * Look.unit;
+            font-size: 12 * Look.unit * Look.zoom;
             vertical-alignment: center;
         }
         // The rest of the line: its first line, elided to the bubble.
         Text {
             text: root.prompt.expanded ? "" : root.prompt.line;
             color: Palette.text;
-            font-size: 13 * Look.unit;
+            font-size: 13 * Look.unit * Look.zoom;
             overflow: elide;
             horizontal-stretch: 1;
             min-width: 0px;
@@ -538,7 +538,7 @@ component PromptLine inherits Rectangle {
         Text {
             text: root.prompt.expanded ? "▾" : "▸";
             color: Palette.faint;
-            font-size: 12 * Look.unit;
+            font-size: 12 * Look.unit * Look.zoom;
             vertical-alignment: center;
         }
         // Its key only while it works: selected, in the focused chat.
@@ -710,7 +710,7 @@ export component Block inherits VerticalLayout {
                 height: parent.height;
                 text: picture.failed ? "Image unavailable" + (picture.alt != "" ? " · " + picture.alt : "") : picture.alt;
                 color: picture.failed ? Palette.warning : Palette.faint;
-                font-size: 12 * Look.unit;
+                font-size: 12 * Look.unit * Look.zoom;
                 wrap: word-wrap;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -744,13 +744,13 @@ component TranscriptRow inherits HorizontalLayout {
     // its one-line width, its height came out lines short and the
     // next row was drawn over it.
     // The measure (Settings → Line length) narrows every row's lane.
-    property <length> lane: Look.measure > 0px ? Math.min(root.list-width, Look.measure + 32px) : root.list-width;
+    property <length> lane: Look.measure > 0px ? Math.min(root.list-width, Look.measure * Look.zoom + 32px) : root.list-width;
     property <length> content-width: Math.min(root.lane - 32px, root.message.author == "user" ? root.list-width * Look.bubble-share : root.lane)
         - 2 * (root.message.receipt.key != "" ? 0px : root.message.prompt.key != "" && !root.message.prompt.expanded ? 5px : root.message.author == "user" ? 10px : 2px);
     padding-left: 16px;
     padding-right: 16px;
-    padding-top: Look.message-spacing / 2;
-    padding-bottom: Look.message-spacing / 2;
+    padding-top: Look.message-spacing * Look.zoom / 2;
+    padding-bottom: Look.message-spacing * Look.zoom / 2;
     alignment: root.message.author == "user" ? end : stretch;
     Rectangle {
         // One message of the list; the id finds it in the checks.
@@ -778,10 +778,10 @@ component TranscriptRow inherits HorizontalLayout {
         VerticalLayout {
             // A folded prompt is one line in a slim bubble.
             padding: root.message.receipt.key != "" ? 0px : root.message.prompt.key != "" && !root.message.prompt.expanded ? 5px : root.message.author == "user" ? 10px : 2px;
-            spacing: Look.paragraph-spacing;
+            spacing: Look.paragraph-spacing * Look.zoom;
             if root.message.receipt.key != "": DecisionReceipt {
                 receipt: root.message.receipt;
-                preferred-width: 420px;
+                preferred-width: 420px * Look.zoom;
                 view-top: root.view-top;
                 view-bottom: root.view-bottom;
                 measuring: root.measuring;
@@ -803,7 +803,7 @@ component TranscriptRow inherits HorizontalLayout {
                 view-top: root.view-top;
                 view-bottom: root.view-bottom;
                 measuring: root.measuring;
-                body-size: root.message.author == "activity" ? 13px : Palette.body-size;
+                body-size: root.message.author == "activity" ? 13px * Look.zoom : Palette.body-size * Look.zoom;
                 body-color: root.message.author == "activity" ? Palette.muted : Palette.text;
                 link-clicked(url) => { root.link-clicked(url); }
             }
@@ -811,7 +811,7 @@ component TranscriptRow inherits HorizontalLayout {
             if root.message.live.kind == "message" && root.message.live.meta != "": Text {
                 text: "■ " + root.message.live.meta;
                 color: Palette.warning;
-                font-size: 11 * Look.unit;
+                font-size: 11 * Look.unit * Look.zoom;
             }
             if root.message.activity-label != "": TouchArea {
                 height: 20px;
@@ -819,7 +819,7 @@ component TranscriptRow inherits HorizontalLayout {
                 Text {
                     text: (root.message.expanded ? "Hide · " : "Show · ") + root.message.activity-label;
                     color: Palette.faint;
-                    font-size: 12 * Look.unit;
+                    font-size: 12 * Look.unit * Look.zoom;
                     x: 0;
                 }
             }
@@ -831,12 +831,12 @@ component TranscriptRow inherits HorizontalLayout {
             }
             for artifact in root.message.artifacts: HorizontalLayout {
                 // Measured at the width the card is drawn at.
-                preferred-width: Math.min(640px, content-width);
+                preferred-width: Math.min(640px * Look.zoom, content-width);
                 alignment: start;
                 ArtifactCard {
                     artifact: artifact;
-                    preferred-width: 640px;
-                    max-width: 640px;
+                    preferred-width: 640px * Look.zoom;
+                    max-width: 640px * Look.zoom;
                     view-top: root.view-top;
                     view-bottom: root.view-bottom;
                     measuring: root.measuring;
@@ -846,7 +846,7 @@ component TranscriptRow inherits HorizontalLayout {
             if root.message.meta != "" && root.message.author == "user": Text {
                 text: root.message.meta;
                 color: Palette.accent;
-                font-size: 11 * Look.unit;
+                font-size: 11 * Look.unit * Look.zoom;
                 horizontal-alignment: right;
                 accessible-role: text;
                 accessible-id: root.measuring ? "" : "meta:" + root.message.id;
@@ -855,7 +855,7 @@ component TranscriptRow inherits HorizontalLayout {
             if (root.message.pending || root.message.failed || root.message.stamp != "") && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
                 text: root.message.failed ? "Not delivered" : root.message.pending ? "Sending…" : root.message.stamp;
                 color: root.message.failed ? Palette.danger : Palette.faint;
-                font-size: 11 * Look.unit;
+                font-size: 11 * Look.unit * Look.zoom;
                 horizontal-alignment: root.message.author == "user" ? right : left;
             }
         }
@@ -981,7 +981,7 @@ export component Transcript inherits FocusScope {
             changed report => { ScrollBook.measured(root.pane-id, m.batch, m.row.id, self.natural, list.visible-width); }
         }
     }
-    property <string> layout-key: (list.visible-width / 1px) + "/" + (Palette.body-size / 1px) + "/" + Look.generation;
+    property <string> layout-key: (list.visible-width / 1px) + "/" + (Palette.body-size * Look.zoom / 1px) + "/" + Look.generation;
     changed layout-key => { ScrollBook.relayout(root.pane-id); }
 
     // The scrollbar. The chat's height is the sum of its rows' measured
@@ -996,6 +996,41 @@ export component Transcript inherits FocusScope {
     property <length> above: root.measured ? root.before[Math.min(root.top-index, root.before.length - 1)] * 1px - root.top-y : -list.content-y;
     property <length> range: Math.max(1px, root.total - list.visible-height);
     property <float> scroll-place: root.at-end ? 1 : list.content-y >= 0 ? 0 : Math.clamp(root.above / root.range, 0, 1);
+    // Ctrl+wheel zooms the chats (Settings → Chat zoom). It takes the wheel
+    // only while Ctrl is held, so clicks and plain scrolling reach the rows.
+    TouchArea {
+        enabled: Look.ctrl-held;
+        // Ctrl let go while the window was away: the pointer says so.
+        pointer-event(event) => {
+            if (!event.modifiers.control) { Look.ctrl-held = false; }
+        }
+        scroll-event(event) => {
+            if (event.modifiers.control && event.delta-y != 0) {
+                Look.zoom-by(event.delta-y > 0 ? 1 : -1);
+                return accept;
+            }
+            reject
+        }
+    }
+    // The zoom as it changes, for a moment.
+    if Look.zoom-note != "": Rectangle {
+        x: (root.width - self.width) / 2;
+        y: 16px;
+        width: note.preferred-width + 24px;
+        height: note.preferred-height + 12px;
+        border-radius: 6px;
+        background: Palette.raised.with-alpha(0.92);
+        border-width: 1px;
+        border-color: Palette.border;
+        accessible-role: text;
+        accessible-label: "Zoom " + Look.zoom-note;
+        note := Text {
+            text: Look.zoom-note;
+            color: Palette.chrome-text;
+            font-size: 15 * Look.unit;
+            font-weight: 700;
+        }
+    }
     track := Rectangle {
         x: root.width - self.width;
         y: 4px;

@@ -79,6 +79,14 @@ export global Look {
     // Changes whenever something that changes a row's height does, so the
     // chat measures its rows again.
     in property <int> generation;
+    // Settings → Chat zoom: the chats' text, code, cards and spacing, apart
+    // from the window's own scale; "120%" for a moment as it changes.
+    in property <float> zoom: 1.0;
+    in property <string> zoom-note;
+    // Ctrl is down (Ctrl+wheel over a chat zooms it).
+    in-out property <bool> ctrl-held;
+    // Ctrl+wheel: a step in (1) or out (-1).
+    callback zoom-by(int);
 }
 
 // Where the keyboard is: the keyboard map's state (commands::context), set

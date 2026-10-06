@@ -44,6 +44,8 @@ thread_local! {
     static BROKEN: Cell<bool> = const { Cell::new(false) };
     /// The interface scale last applied.
     static SCALE: Cell<f32> = const { Cell::new(0.0) };
+    /// Clears the zoom's "120%" a moment after the last change.
+    static ZOOM_NOTE: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
 /// The settings file's problems and the last export or import, for the
@@ -158,6 +160,7 @@ pub fn apply(app: &App, window: &AppWindow) {
     look.set_scrollbar(choice("scrollbar").into());
     look.set_follow(flag("follow"));
     look.set_line_step(40.0 * n("scrollspeed") / 100.0);
+    look.set_zoom(n("chatzoom") / 100.0);
     // A row's height changed: the chats measure their rows again (without
     // rebuilding them, so nobody's place in a chat moves).
     let shape = ["chromesize", "codesize", "paragraphspacing", "headingscale", "measure", "bubblewidth", "messagespacing"]
@@ -199,6 +202,9 @@ fn changed(app: &Rc<App>, window: &AppWindow, spec: &Spec) {
     if spec.name == "uiscale" {
         rescale(app);
     }
+    if spec.name == "chatzoom" {
+        note_zoom(window, prefs::number_of(app.engine.borrow().settings(), "chatzoom"));
+    }
     // Portraits are made at their device size.
     if spec.name == "avatarsize" || spec.name == "compactexplorer" {
         crate::avatar_view::apply(app, window);
@@ -210,6 +216,18 @@ fn changed(app: &Rc<App>, window: &AppWindow, spec: &Spec) {
     app.refresh(&[Change::Panes, Change::Preferences]);
     crate::pump_now(app);
     refresh_views(app, window);
+}
+
+/// Shows the chat zoom ("120%") for a moment.
+fn note_zoom(window: &AppWindow, percent: f64) {
+    window.global::<Look>().set_zoom_note(format!("{percent:.0}%").into());
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(1200), || {
+        if let Some(window) = crate::window() {
+            window.global::<Look>().set_zoom_note("".into());
+        }
+    });
+    ZOOM_NOTE.with(|n| *n.borrow_mut() = Some(timer));
 }
 
 /// The interface scale, when it is not the one applied (the window starts
@@ -289,6 +307,10 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> Option<bool> {
         });
     }
     match action {
+        // The chat's zoom (Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+wheel).
+        "chat-zoom-in" => run(app, window, "pref:chatzoom:1"),
+        "chat-zoom-out" => run(app, window, "pref:chatzoom:-1"),
+        "chat-zoom-reset" => run(app, window, "pref-reset:chatzoom"),
         "pref-reset-all" => {
             let theme = theme();
             let count = prefs::reset_all(app.engine.borrow_mut().settings_mut(), &theme);
@@ -704,6 +726,11 @@ pub fn wire(app: &Rc<App>, window: &AppWindow) {
     });
     editor.on_reset(|| with_window(reset_editor));
     editor.on_confirmed(|| with_window(confirmed));
+    window.global::<Look>().on_zoom_by(|delta| {
+        with_window(|app, window| {
+            run(app, window, &format!("pref:chatzoom:{delta}"));
+        })
+    });
     let problems = prefs::problems(app.engine.borrow().settings());
     if !problems.is_empty() {
         notice(problems);
