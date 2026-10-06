@@ -420,7 +420,7 @@ impl App {
         if engine.live_active(session) {
             // The status line, or the working row's shimmer, stands in for
             // the typing dots.
-            view.working = false;
+            view.working = crate::live_view::dots(engine, session, busy, status_line(engine));
         }
         view.live_status = status.into();
         view.live_busy = busy;
@@ -762,7 +762,7 @@ impl App {
                     crate::scroll_book::measure_soon();
                 }
             }
-            let working = if engine.live_active(&session) { false } else { pane.view.working };
+            let working = if engine.live_active(&session) { crate::live_view::dots(&engine, &session, busy, status_line(&engine)) } else { pane.view.working };
             drop(engine);
             if pane.view.live_status != status.as_str() || pane.view.live_busy != busy || pane.view.working != working {
                 pane.view.live_status = status.into();

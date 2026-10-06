@@ -229,7 +229,7 @@ export component Pane inherits Rectangle {
         // and for how long by the Host's clock, and the key that stops it
         // while the agent works. Off unless Settings turn it on: the
         // running row shimmers in the chat and the shortcut bar names Stop.
-        if root.pane.live-status != "": Rectangle {
+        if root.pane.live-status != "" && ChatLook.live-status-line: Rectangle {
             background: Palette.window;
             height: 26px;
             accessible-role: text;

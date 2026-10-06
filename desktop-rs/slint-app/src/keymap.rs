@@ -62,7 +62,11 @@ fn binding(action: &'static str, keys: &[&str], label: &'static str, hint: bool,
     Binding { action, keys: keys.iter().map(|k| (*k).to_owned()).collect(), label, hint, guard, hint_guard: Guard::None, native }
 }
 
-
+impl Binding {
+    fn hinted_while(self, guard: Guard) -> Self {
+        Self { hint: true, hint_guard: guard, ..self }
+    }
+}
 
 /// Text editing keys no binding may take.
 const RESERVED: &[&str] = &["Ctrl+A", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Y"];
@@ -150,7 +154,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("agent-terminal", &["Ctrl+Alt+T"], "Terminal", false, Agent, false),
             b("release-agent", &["Ctrl+Shift+R"], "Release", false, Agent, false),
             // Stops the agent from anywhere; the bar names it while it works.
-            b("stop-agent", &["Ctrl+.", "Ctrl+C"], "Stop", false, Agent, false),
+            b("stop-agent", &["Ctrl+.", "Ctrl+C"], "Stop", false, Agent, false).hinted_while(Busy),
             b("talk", &["Ctrl+Shift+Space"], "Talk", false, Agent, false),
             // Link hints, from the composer too.
             b("link-hints", &["Ctrl+L"], "Open a link", false, Always, false),

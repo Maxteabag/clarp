@@ -109,8 +109,14 @@ pub(crate) fn signature(entry: &Entry) -> String {
 /// thinks (reasoning, compaction), "" once it settles. A streaming reply
 /// shows its text growing, and the fold is a settled turn: neither shimmers.
 pub(crate) fn shimmer(kind: Kind, status: &str) -> &'static str {
-    let _ = (kind, status);
-    ""
+    if !matches!(status, "running" | "pending") {
+        return "";
+    }
+    match kind {
+        Kind::Tool | Kind::Explore | Kind::Plan | Kind::Diff => "accent",
+        Kind::Reasoning | Kind::Compaction => "muted",
+        Kind::Message | Kind::Fold => "",
+    }
 }
 
 /// A theme's shimmer colours for `tone` (its key: "accent", "mutedText"),
