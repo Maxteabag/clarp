@@ -1,4 +1,4 @@
-import { Palette, Focus, ChatLook, Look } from "theme.slint";
+import { Palette, Focus, ChatLook, Look, VimBridge } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
@@ -764,6 +764,15 @@ component TranscriptRow inherits HorizontalLayout {
         // Hovering a message offers its copy button (Slint's rich text
         // cannot be selected: the message's text is copied whole).
         hover := TouchArea { }
+        // Vim mode's cursor: the row its jumps, search, y and zo act on.
+        if !root.measuring && VimBridge.mode != "" && VimBridge.cursor != "" && VimBridge.cursor == root.message.id: Rectangle {
+            x: -10px;
+            y: 2px;
+            width: 3px;
+            height: parent.height - 4px;
+            border-radius: 1.5px;
+            background: Focus.mode == "pane" ? Palette.accent : Palette.faint;
+        }
         if root.message.author != "activity" && root.message.author != "live" && root.message.receipt.key == "": Rectangle {
             x: parent.width - 20px;
             y: 2px;
@@ -879,6 +888,8 @@ export component Transcript inherits FocusScope {
     in property <string> marked;
     out property <length> offset: list.content-y;
     out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
+    // The row across the top of the view.
+    out property <int> top-row: root.top-index;
     callback link-clicked(string);
     callback toggle-activity(string, string);
     callback copy-message(string);
@@ -1186,6 +1197,7 @@ export component Transcript inherits FocusScope {
     function reader-scrolled() {
         ArtifactBridge.reader-moved();
         root.seeking-row = false;
+        root.goal-ticks = 0;
         root.holding = false;
         root.follow = false;
         if (!root.settling) { root.start-y = list.content-y; }
@@ -1271,6 +1283,7 @@ export component Transcript inherits FocusScope {
     public function scroll-to-latest() {
         ArtifactBridge.reader-moved();
         root.seeking-row = false;
+        root.goal-ticks = 0;
         root.holding = false;
         root.pin("jump-latest");
     }
@@ -1337,8 +1350,52 @@ export component Transcript inherits FocusScope {
             root.move-to(Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - page)), "reveal");
         }
     }
+    // Vim mode's half pages.
+    public function scroll-pages(pages: float) {
+        ArtifactBridge.reader-moved();
+        root.goal-ticks = 0;
+        root.scroll-by(list.visible-height * pages, "vim:pages");
+    }
+    // Brings row `index` to the top of the view (vim mode's gg, turns and
+    // search). The list places rows it has not drawn by its estimate, so
+    // the row is placed again over the next frames as the estimate settles.
+    public function go-to-row(index: int) {
+        ArtifactBridge.reader-moved();
+        root.holding = false;
+        root.goal-row = index;
+        root.goal-ticks = 20;
+        root.place-goal();
+    }
+    property <int> goal-row;
+    property <int> goal-ticks;
+    function place-goal() {
+        let lowest = list.visible-height - list.content-height;
+        if (root.measured && root.goal-row < root.before.length) {
+            let delta = root.before[root.goal-row] * 1px - root.above;
+            if (Math.abs(delta / 1px) >= 0.5) {
+                if (Math.abs(delta) <= list.visible-height) {
+                    root.move-to(Math.max(lowest, Math.min(0px, list.content-y - delta)), "vim:row");
+                } else {
+                    root.move-to(Math.max(lowest, Math.min(0px, -root.goal-row * list.content-height / Math.max(1, root.rows.length))), "vim:row");
+                }
+            }
+        } else {
+            root.move-to(Math.max(lowest, Math.min(0px, -root.goal-row * list.content-height / Math.max(1, root.rows.length))), "vim:row");
+        }
+        root.follow = root.at-end;
+    }
+    Timer {
+        interval: 16ms;
+        running: root.goal-ticks > 0;
+        triggered => {
+            root.goal-ticks -= 1;
+            root.place-goal();
+            if (root.goal-ticks == 0) { root.check-top(); }
+        }
+    }
     public function scroll-by(delta: length, cause: string) {
         root.seeking-row = false;
+        root.goal-ticks = 0;
         root.move-to(Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta)), cause);
         root.holding = false;
         root.follow = root.at-end;

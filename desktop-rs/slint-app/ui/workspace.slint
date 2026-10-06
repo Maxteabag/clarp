@@ -1,4 +1,4 @@
-import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge } from "theme.slint";
 import { Composer, Attachment, MentionRow } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
@@ -77,6 +77,9 @@ export struct PaneView {
     // One more than where the cursor goes when `draft-set` replaces the
     // draft (a completed mention); 0 leaves it.
     draft-cursor: int,
+    // What the amount counts: px (""), "pages" of the view, or the "row"
+    // to bring to the top (vim mode's jumps).
+    scroll-kind: string,
 }
 
 export struct SplitView {
@@ -115,7 +118,7 @@ export component Pane inherits Rectangle {
     callback paste-image() -> bool;
     // The transcript and composer tell the window where the keyboard is and
     // whether the reader follows, for shortcuts and checks.
-    callback reported(bool, bool, length, bool, bool);
+    callback reported(bool, bool, length, bool, bool, int);
     background: root.pane.active ? Palette.control : Palette.raised;
     border-width: 0px;
     border-radius: 3px;
@@ -124,7 +127,7 @@ export component Pane inherits Rectangle {
     animate opacity { duration: 120ms; }
 
     function report() {
-        root.reported(transcript.follow, transcript.at-end, transcript.offset, transcript.has-focus, composer.editor-focused);
+        root.reported(transcript.follow, transcript.at-end, transcript.offset, transcript.has-focus, composer.editor-focused, transcript.top-row);
     }
     // A pane made for a request (a split's focus) acts on it at once.
     // An old scroll request is not replayed into a pane made later.
@@ -152,7 +155,13 @@ export component Pane inherits Rectangle {
         }
         if (root.scroll-request-seen != root.pane.scroll-request) {
             root.scroll-request-seen = root.pane.scroll-request;
-            transcript.scroll-by(root.pane.scroll-amount * 1px, "seek");
+            if (root.pane.scroll-kind == "row") {
+                transcript.go-to-row(Math.round(root.pane.scroll-amount));
+            } else if (root.pane.scroll-kind == "pages") {
+                transcript.scroll-pages(root.pane.scroll-amount);
+            } else {
+                transcript.scroll-by(root.pane.scroll-amount * 1px, "seek");
+            }
         }
         if (root.seek-request-seen != root.pane.seek-request) {
             root.seek-request-seen = root.pane.seek-request;
@@ -189,6 +198,8 @@ export component Pane inherits Rectangle {
     changed follows => { root.report(); }
     changed at-end => { root.report(); }
     changed offset => { root.report(); }
+    property <int> top-row: transcript.top-row;
+    changed top-row => { root.report(); }
     changed transcript-focused => { root.report(); if (self.transcript-focused) { root.activate(); } }
     changed composer-focused => { root.report(); if (self.composer-focused) { root.activate(); } }
 
@@ -234,7 +245,10 @@ export component Pane inherits Rectangle {
                     : root.pane.default-effort != "" ? "effort " + root.pane.default-effort + " (default)" : "effort default")
                 + (root.pane.busy ? "  ·  working" : "");
             info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
-            key: root.pane.active && Focus.mode == "composer" ? "ctrl+h" : "h"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
+            // In vim mode the title says the mode, as Vim's last line does.
+            key: root.pane.active && Focus.mode == "composer" ? (VimBridge.mode != "" ? "esc" : "ctrl+h") : "h";
+            label: VimBridge.mode != "" && root.pane.active && Focus.mode == "pane" ? "Chat  -- " + VimBridge.mode + " --" : "Chat";
+            active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
         }
         // Live items' one status line (docs/live-items.md §7.4): what runs
         // and for how long by the Host's clock, and the key that stops it
@@ -317,7 +331,12 @@ export component Pane inherits Rectangle {
             jump-to-latest => { transcript.scroll-to-latest(); }
             queue-requested => { AgentDialogs.queue-open(root.pane.session); }
           }
-          PaneFrame { key: "i"; label: "Insert"; active: root.pane.active && Focus.mode == "composer"; surface: root.background; }
+          PaneFrame {
+            key: "i";
+            label: VimBridge.mode == "INSERT" && root.pane.active && Focus.mode == "composer" ? "Insert  -- INSERT --" : "Insert";
+            active: root.pane.active && Focus.mode == "composer";
+            surface: root.background;
+          }
         }
     }
 }
@@ -382,7 +401,7 @@ export component Workspace inherits Rectangle {
     callback silence();
     callback cancel-transcription(string);
     callback paste-image(string) -> bool;
-    callback reported(string, bool, bool, length, bool, bool);
+    callback reported(string, bool, bool, length, bool, bool, int);
     callback switch-workspace(string);
     callback create-workspace();
     callback save-layout-instead();
@@ -478,7 +497,7 @@ export component Workspace inherits Rectangle {
         silence => { root.silence(); }
         cancel-transcription => { root.cancel-transcription(pane.id); }
         paste-image => { return root.paste-image(pane.id); }
-        reported(follows, at-end, offset, transcript, composer) => { root.reported(pane.id, follows, at-end, offset, transcript, composer); }
+        reported(follows, at-end, offset, transcript, composer, top) => { root.reported(pane.id, follows, at-end, offset, transcript, composer, top); }
     }
     for split in root.splits: Handle {
         split: split;

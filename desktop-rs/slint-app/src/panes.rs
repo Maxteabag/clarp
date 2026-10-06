@@ -18,6 +18,8 @@ pub struct Report {
     pub offset: f32,
     pub transcript_focused: bool,
     pub composer_focused: bool,
+    /// The row across the top of the chat's view.
+    pub top: i32,
 }
 
 /// How many of a chat's latest rows get their tool calls explained.
@@ -56,6 +58,8 @@ pub struct PaneState {
     pub mention_dismissed: Option<usize>,
     /// One more than where the cursor goes with the next `draft_set`.
     draft_cursor: i32,
+    /// What `scroll_amount` counts: px (""), "pages" or a "row" to go to.
+    scroll_kind: &'static str,
     view: PaneView,
     /// Each reply's artifact cards, updated in place: a card is never
     /// rebuilt under a click or a field that has the keyboard.
@@ -91,6 +95,7 @@ impl PaneState {
             focus_transcript: 0,
             to_latest: 0,
             scroll_request: 0,
+            scroll_kind: "",
             scroll_amount: 0.0,
             seek_request: 0,
             seek_index: 0,
@@ -285,6 +290,23 @@ impl App {
         self.bump(|p| {
             p.scroll_request += 1;
             p.scroll_amount = delta;
+            p.scroll_kind = "";
+        });
+    }
+    /// Scrolls the active transcript by `pages` of its height.
+    pub fn scroll_pages(&self, pages: f32) {
+        self.bump(|p| {
+            p.scroll_request += 1;
+            p.scroll_amount = pages;
+            p.scroll_kind = "pages";
+        });
+    }
+    /// Brings row `index` of the active transcript to the top of its view.
+    pub fn scroll_to_row(&self, index: usize) {
+        self.bump(|p| {
+            p.scroll_request += 1;
+            p.scroll_amount = index as f32;
+            p.scroll_kind = "row";
         });
     }
 
@@ -417,6 +439,7 @@ impl App {
         view.reveal_index = pane.reveal_index;
         view.draft_cursor = pane.draft_cursor;
         crate::mention_view::apply(self, pane, &mut view);
+        view.scroll_kind = pane.scroll_kind.into();
         view
     }
 

@@ -478,7 +478,11 @@ pub fn sections() -> Vec<&'static str> {
 pub const ENTRIES: &[Entry] = &[
     e("choose-font", "Choose font…", "appearance", "Picks the chat's typeface and size for this reading theme, previewed in the chat.", &["font", "typeface", "font family", "monospace", "serif", "sans"]),
     e("edit-keymap", "Customize key bindings", "view", "Opens the editor for every keyboard shortcut.", &["keymap", "shortcuts", "hotkeys", "keyboard", "customise", "rebind", "bindings"]),
-    e("next-workspace", "Next workspace", "view", "Switches to the next workspace tab.", &["workspace", "tab", "cycle", "switch workspace"]),
+    e("new-workspace", "New tab", "layout", "Opens a new workspace tab with its own pane layout.", &["new workspace", "tabnew", "add tab", "open tab", "workspace"]),
+    e("next-workspace", "Next tab", "layout", "Switches to the next workspace tab.", &["next workspace", "tabnext", "cycle", "switch workspace", "tab"]),
+    e("previous-workspace", "Previous tab", "layout", "Switches to the workspace tab before this one.", &["previous workspace", "tabprevious", "back", "switch workspace", "tab"]),
+    e("close-workspace", "Close tab", "layout", "Closes this workspace tab; its chats stay in the explorer.", &["close workspace", "tabclose", "remove tab", "delete workspace", "tab"]),
+    e("help-keys", "Keys here", "view", "Shows the keys that matter where the keyboard is, your own bindings included.", &["help", "cheat sheet", "shortcuts", "which key", "keyboard help", "?"]),
     e("quick-new-agent", "New contact & chat", "agent", "Creates a new contact and opens a chat with it.", &["new session", "hub", "create", "add contact", "new persona"]),
     e("rename-agent", "Rename contact", "agent", "Changes the open contact's name.", &["rename", "name", "title", "relabel", "persona"]),
     e("new", "New session", "agent", "Opens the hub to start a new agent.", &["new agent", "start", "chat", "provider", "contact", "hub", "create"]),

@@ -490,6 +490,16 @@ pub static SPECS: &[Spec] = &[
         scope: G,
     },
     Spec {
+        name: "vim",
+        key: "keymap/vim",
+        label: "Vim mode",
+        description: "Use the window without Ctrl: Esc for Normal mode, then j/k, gg, /, : and Space for every action",
+        aliases: &["vi", "vim keys", "modal keys", "normal mode", "no ctrl", "leader key", "hjkl"],
+        section: BEHAVIOUR,
+        kind: toggle(true),
+        scope: G,
+    },
+    Spec {
         name: "doublepress",
         key: "keymap/doublePressMs",
         label: "Double-press window",

@@ -4,7 +4,8 @@
 //! with `y`, turns with `[` and `]`, the leader's which-key panel, splits
 //! and tabs from the leader and the command line, settings and back, and
 //! Insert typing letters as letters. Then the Ctrl keys for tabs (Ctrl+T,
-//! Ctrl+Tab, Ctrl+Shift+Tab) and Ctrl+B handing the explorer the keyboard.
+//! Ctrl+Tab, Ctrl+Shift+Tab) and Ctrl+B handing the explorer the keyboard,
+//! and ? showing the keys for the chat and for the explorer.
 //! Needs the fake Host.
 
 use std::time::Duration;
@@ -33,8 +34,19 @@ fn which(window: &crate::AppWindow) -> Vec<String> {
     window.get_vim_which().iter().map(|h| format!("{} {}", h.keys, h.label)).collect()
 }
 
+fn help(window: &crate::AppWindow) -> Vec<String> {
+    window.get_help_groups().iter().flat_map(|g| g.items.iter().map(|h| format!("{} {}", h.keys, h.label)).collect::<Vec<_>>()).collect()
+}
+
 fn clipboard() -> String {
     std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
+}
+
+/// Normal mode in the chat, settled: a focus move (Escape, a pane closed)
+/// lands a frame after its key, and a command line typed before it would
+/// go to the composer.
+fn normal(window: &crate::AppWindow, elapsed: Duration) -> bool {
+    window.get_vim_mode() == "NORMAL" && window.get_keyboard_mode() == "CHAT" && elapsed >= Duration::from_millis(300)
 }
 
 /// Types a command line's text and Enter.
@@ -45,11 +57,12 @@ fn ex(text: &str) {
 }
 
 pub fn vim_check(out: String) {
-    let (out2, out3, out4) = (out.clone(), out.clone(), out.clone());
+    let (out2, out3, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone());
     let offset = std::rc::Rc::new(std::cell::Cell::new(0.0f32));
-    let (offset2, offset3) = (offset.clone(), offset.clone());
+    let (offset2, offset3, offset4) = (offset.clone(), offset.clone(), offset.clone());
     let tabs = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
     let (tabs2, tabs3, tabs4) = (tabs.clone(), tabs.clone(), tabs.clone());
+    let (tabs5, tabs6, tabs7) = (tabs.clone(), tabs.clone(), tabs.clone());
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, window, _| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -89,33 +102,56 @@ pub fn vim_check(out: String) {
             headless::press("l");
             true
         })),
-        ("opened", Box::new(move |_, window, elapsed| {
+        ("opened", Box::new(|_, window, elapsed| {
             let rows = app_now().active_messages().map_or(0, |m| m.row_count());
             if selected() != "mike" || rows < 40 || window.get_keyboard_mode() != "CHAT" || !report().at_end || elapsed < Duration::from_millis(600) {
                 return false;
             }
             check(true, "l opens Mike's chat with the keyboard on the chat, no Ctrl");
-            offset.set(report().offset);
-            headless::type_text("3k");
+            headless::type_text("gg");
             true
         })),
-        ("3k", Box::new(move |_, _, elapsed| {
-            let moved = report().offset - offset2.get();
-            if moved < 100.0 && elapsed < Duration::from_secs(2) {
+        // From the top the offset holds still (at the end it moves as the
+        // rows above are measured).
+        ("gg", Box::new(move |_, _, elapsed| {
+            if report().offset < -2.0 || elapsed < Duration::from_millis(600) {
+                return elapsed > Duration::from_secs(4) && {
+                    check(false, &format!("gg goes to the top: {}", report().offset));
+                    true
+                };
+            }
+            check(true, "gg goes to the top");
+            check(crate::vim_view::cursor() == "mike-0", &format!("on the first row: {:?}", crate::vim_view::cursor()));
+            offset.set(report().offset);
+            headless::type_text("3j");
+            true
+        })),
+        ("3j", Box::new(move |_, _, elapsed| {
+            let moved = offset2.get() - report().offset;
+            if moved < 110.0 && elapsed < Duration::from_secs(2) {
                 return false;
             }
-            check((110.0..=130.0).contains(&moved), &format!("3k scrolls up three lines: {moved}px"));
-            check(!report().at_end, "and leaves the end");
+            check(moved >= 110.0, &format!("3j scrolls down (three lines or more as the list settles): {moved}px"));
             offset2.set(report().offset);
+            headless::press("d");
+            true
+        })),
+        ("d", Box::new(move |_, _, elapsed| {
+            let moved = offset3.get() - report().offset;
+            if moved < 150.0 && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(moved >= 150.0, &format!("d scrolls down half a page: {moved}px"));
+            offset3.set(report().offset);
             headless::press("u");
             true
         })),
         ("u", Box::new(move |_, _, elapsed| {
-            let moved = report().offset - offset3.get();
+            let moved = report().offset - offset4.get();
             if moved < 150.0 && elapsed < Duration::from_secs(2) {
                 return false;
             }
-            check(moved >= 150.0, &format!("u scrolls up half a page: {moved}px"));
+            check(moved >= 150.0, &format!("u scrolls back up half a page: {moved}px"));
             headless::press_with(&[Key::Shift], "G");
             true
         })),
@@ -124,15 +160,6 @@ pub fn vim_check(out: String) {
                 return false;
             }
             check(report().at_end, "G goes to the latest");
-            headless::type_text("gg");
-            true
-        })),
-        ("gg", Box::new(|_, _, elapsed| {
-            if report().offset < -2.0 && elapsed < Duration::from_secs(3) {
-                return false;
-            }
-            check(report().offset >= -2.0, &format!("gg goes to the top: {}", report().offset));
-            check(crate::vim_view::cursor() == "mike-0", &format!("on the first row: {:?}", crate::vim_view::cursor()));
             headless::press("/");
             true
         })),
@@ -211,25 +238,28 @@ pub fn vim_check(out: String) {
             headless::press("v");
             true
         })),
-        ("split", Box::new(|_, window, _| {
-            if panes() != 2 {
+        ("split", Box::new(|_, window, elapsed| {
+            if panes() != 2 || !normal(window, elapsed) {
                 return false;
             }
             check(window.get_vim_which().row_count() == 0, "Space w v splits the pane and the panel goes");
             ex("q");
             true
         })),
-        (":q", Box::new(|_, _, _| {
-            if panes() != 1 {
+        (":q", Box::new(|_, window, elapsed| {
+            if panes() != 1 || !normal(window, elapsed) {
                 return false;
             }
             check(true, ":q closes the pane");
             ex("vs");
             true
         })),
-        (":vs", Box::new(|_, _, _| {
+        (":vs", Box::new(|_, window, elapsed| {
             if panes() != 2 {
-                return false;
+                return elapsed > Duration::from_secs(4) && {
+                    check(false, &format!("vs splits it again (mode {:?}, line {:?}, message {:?}, keyboard {})", window.get_vim_mode(), window.get_vim_line(), window.get_vim_message(), window.get_keyboard_mode()));
+                    true
+                };
             }
             check(true, ":vs splits it again");
             headless::press(" ");
@@ -237,8 +267,8 @@ pub fn vim_check(out: String) {
             headless::press("q");
             true
         })),
-        ("closed", Box::new(move |_, _, _| {
-            if panes() != 1 {
+        ("closed", Box::new(move |_, window, elapsed| {
+            if panes() != 1 || !normal(window, elapsed) {
                 return false;
             }
             check(true, "Space w q closes it");
@@ -246,9 +276,9 @@ pub fn vim_check(out: String) {
             ex("tabnew Review");
             true
         })),
-        (":tabnew", Box::new(move |app, _, _| {
+        (":tabnew", Box::new(move |app, window, elapsed| {
             let (count, active) = workspaces();
-            if count != 2 || active == *tabs2.borrow() {
+            if count != 2 || active == *tabs2.borrow() || !normal(window, elapsed) {
                 return false;
             }
             let named = app.engine.borrow().panes().workspaces().iter().any(|w| w["name"] == "Review");
@@ -265,8 +295,8 @@ pub fn vim_check(out: String) {
             headless::press_with(&[Key::Shift], "T");
             true
         })),
-        ("gT", Box::new(move |_, _, _| {
-            if workspaces().1 == *tabs4.borrow() {
+        ("gT", Box::new(move |_, window, elapsed| {
+            if workspaces().1 == *tabs4.borrow() || !normal(window, elapsed) {
                 return false;
             }
             check(true, "gT goes to the previous tab");
@@ -296,8 +326,14 @@ pub fn vim_check(out: String) {
             }
             check(true, "Escape goes back to the chats");
             headless::press(Key::Escape);
+            true
+        })),
+        ("normal again", Box::new(|_, window, elapsed| {
+            if !normal(window, elapsed) {
+                return false;
+            }
             headless::press_with(&[Key::Shift], ":");
-            headless::type_text("theme h");
+            headless::type_text("theme hac");
             headless::press(Key::Tab);
             true
         })),
@@ -314,7 +350,7 @@ pub fn vim_check(out: String) {
             if app.engine.borrow().reading_theme() != "hacker" {
                 return false;
             }
-            check(window.get_vim_line().is_empty(), "Tab completes :theme hacker and Enter applies it");
+            check(window.get_vim_line().is_empty(), "Tab completes :theme hac to hacker and Enter applies it");
             headless::press("i");
             true
         })),
@@ -323,15 +359,68 @@ pub fn vim_check(out: String) {
                 return false;
             }
             check(window.get_vim_mode() == "INSERT", "i is Insert in the composer");
-            headless::type_text("jk gg:/");
+            headless::type_text("jk gg:/?");
             true
         })),
         ("typed", Box::new(|app, _, _| {
-            if app.active_draft() != "jk gg:/" {
+            if app.active_draft() != "jk gg:/?" {
                 return false;
             }
-            check(true, "in Insert vim keys type as letters");
+            check(true, "in Insert vim keys type as letters, ? too");
             headless::press(Key::Escape);
+            true
+        })),
+        // ---- ? : the keys that matter where the keyboard is.
+        ("help from the chat", Box::new(|_, window, elapsed| {
+            if !normal(window, elapsed) {
+                return false;
+            }
+            headless::press_with(&[Key::Shift], "?");
+            true
+        })),
+        ("chat help", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "help" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let shown = help(window);
+            check(window.get_help_title() == "Keys in the chat", &format!("? from the chat shows the chat's keys: {}", window.get_help_title()));
+            check(shown.iter().any(|h| h == "y Copy the message") && shown.iter().any(|h| h == "Space Every action (leader)"), &format!("with vim's keys: {shown:?}"));
+            check((8..=20).contains(&shown.len()), &format!("a short list: {} keys", shown.len()));
+            check(window.get_help_footer().contains("Ctrl+K"), &format!("and where the rest is: {}", window.get_help_footer()));
+            shot(&out5, "vim-05-help");
+            headless::press_with(&[Key::Shift], "?");
+            true
+        })),
+        ("chat help closed", Box::new(|_, window, elapsed| {
+            if !window.get_overlay().is_empty() || !normal(window, elapsed) {
+                return false;
+            }
+            check(true, "? again closes it, the keyboard back on the chat");
+            headless::press("h");
+            true
+        })),
+        ("help from the explorer", Box::new(|_, window, elapsed| {
+            if !window.get_sidebar_focused() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            headless::press_with(&[Key::Shift], "?");
+            true
+        })),
+        ("explorer help", Box::new(|_, window, elapsed| {
+            if window.get_overlay() != "help" || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let shown = help(window);
+            check(window.get_help_title() == "Keys in the explorer" && shown.iter().any(|h| h == "l Open (or unfold)"), &format!("? from the explorer shows the explorer's keys: {shown:?}"));
+            headless::press(Key::Escape);
+            true
+        })),
+        ("explorer help closed", Box::new(|_, window, elapsed| {
+            if !window.get_overlay().is_empty() || !window.get_sidebar_focused() || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(true, "Esc closes it, the keyboard back in the explorer");
+            headless::press("l");
             true
         })),
         // ---- the Ctrl keys for tabs, and Ctrl+B.
@@ -349,16 +438,33 @@ pub fn vim_check(out: String) {
             check(true, "Ctrl+T opens a new tab");
             true
         })),
-        ("ctrl+tab", Box::new(|_, _, elapsed| {
+        ("ctrl+shift+tab", Box::new(move |_, _, elapsed| {
             if elapsed < Duration::from_millis(300) {
                 return false;
             }
-            let before = workspaces().1;
+            *tabs5.borrow_mut() = workspaces().1;
             headless::press_with(&[Key::Control, Key::Shift], Key::Backtab);
-            let after = workspaces().1;
-            check(before != after, "Ctrl+Shift+Tab goes to the other tab");
+            true
+        })),
+        ("previous tab", Box::new(move |_, _, elapsed| {
+            if workspaces().1 == *tabs6.borrow() || elapsed < Duration::from_millis(300) {
+                return elapsed > Duration::from_secs(3) && {
+                    check(false, "Ctrl+Shift+Tab goes to the other tab");
+                    true
+                };
+            }
+            check(true, "Ctrl+Shift+Tab goes to the other tab");
             headless::press_with(&[Key::Control], Key::Tab);
-            check(workspaces().1 == before, "and Ctrl+Tab back");
+            true
+        })),
+        ("next tab", Box::new(move |_, _, elapsed| {
+            if workspaces().1 != *tabs7.borrow() || elapsed < Duration::from_millis(300) {
+                return elapsed > Duration::from_secs(3) && {
+                    check(false, "and Ctrl+Tab back");
+                    true
+                };
+            }
+            check(true, "and Ctrl+Tab back");
             headless::press_with(&[Key::Control], "w");
             true
         })),
@@ -401,6 +507,9 @@ pub fn vim_check(out: String) {
                     check(false, &format!("Ctrl+B hiding it gives the chat the keyboard: {}", window.get_keyboard_mode()));
                     true
                 };
+            }
+            if !normal(window, elapsed) {
+                return false;
             }
             check(true, "Ctrl+B hiding it gives the chat the keyboard");
             shot(&out4, "vim-04-explorer-hidden");
