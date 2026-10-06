@@ -1,5 +1,5 @@
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing, Frame, PaneFrame, Look } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook } from "theme.slint";
 import { CompactWork, ProcessIndicator } from "processes.slint";
 import { ProfileBridge } from "profile.slint";
 import { AgentAvatar, AvatarArt } from "avatar.slint";
@@ -93,6 +93,8 @@ component Row inherits Rectangle {
     // Compact explorer: the avatar and the name only.
     in property <bool> compact;
     in property <bool> reduced-motion;
+    // Shown and scrolled into view: its process spinner may turn.
+    in property <bool> on-screen: true;
     // The cursor landed here: its place in the list, to scroll it into view.
     callback reveal(length, length);
     changed cursor => { if (self.cursor) { root.reveal(self.y, self.height); } }
@@ -152,14 +154,14 @@ component Row inherits Rectangle {
                 }
                 // A working agent's name is green, and a glow travels through
                 // its letters (still green, with Reduce Motion).
-                if !root.chat.busy || root.reduced-motion || root.chat.letters.length == 0: Text {
+                if !root.chat.busy || root.reduced-motion || !ChatLook.window-shown || root.chat.letters.length == 0: Text {
                     text: root.chat.name;
                     color: root.chat.busy ? Palette.success : Palette.chrome-text;
                     font-weight: root.chat.unread || root.chat.busy ? 700 : 500;
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
-                if root.chat.busy && !root.reduced-motion && root.chat.letters.length > 0: shimmer := Rectangle {
+                if root.chat.busy && !root.reduced-motion && ChatLook.window-shown && root.chat.letters.length > 0: shimmer := Rectangle {
                     horizontal-stretch: 1;
                     min-width: 0px;
                     clip: true;
@@ -185,6 +187,7 @@ component Row inherits Rectangle {
                     y: 3px;
                     only: "jobs";
                     jobs: root.chat.running-processes;
+                    running: root.on-screen;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
                 if !root.compact: ProcessIndicator {
@@ -203,8 +206,9 @@ component Row inherits Rectangle {
                 }
                 if root.compact && root.chat.running-processes > 0: CompactWork {
                     y: (parent.height - self.height) / 2;
-                    kind: "hourglass";
+                    kind: "process";
                     count: root.chat.running-processes;
+                    running: root.on-screen;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
                 if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11 * Look.unit; }
@@ -358,6 +362,7 @@ export component Sidebar inherits Rectangle {
                     cursor: list.has-focus && row.session == root.cursor;
                     compact: root.compact;
                     reduced-motion: ProfileBridge.reduced-motion;
+                    on-screen: root.visible && self.y + self.height + flick.content-y > 0px && self.y + flick.content-y < flick.height;
                     // J/K keep the cursor's row in view.
                     reveal(y, h) => {
                         if (y + flick.content-y < 0px) {

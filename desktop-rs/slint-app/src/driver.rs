@@ -2587,7 +2587,7 @@ fn updates_check(out: String) {
                 return false;
             }
             check(true, "the job shows in Rachel's row and the rail counts two decisions");
-            // The hourglass on Rachel's row.
+            // The spinner on Rachel's row.
             click_at(window, 297.0, 128.0);
             let jobs: Vec<crate::ProcessJob> = window.get_process_jobs().iter().collect();
             check(window.get_overlay() == "processes", "clicking the row's indicator opens the process popover");
@@ -2645,6 +2645,7 @@ fn updates_check(out: String) {
             if spinners(true).len() < 2 {
                 return elapsed > Duration::from_secs(3) && {
                     check(false, &format!("the running job turns a spinner in the Updates and in Rachel's row: {} turning", spinners(true).len()));
+                    live_checks::mark();
                     true
                 };
             }

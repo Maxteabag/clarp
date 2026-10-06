@@ -1,5 +1,5 @@
 import { ListView } from "std-widgets.slint";
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, ChatLook } from "theme.slint";
 
 export struct ProcessJob {
     title: string,
@@ -16,15 +16,55 @@ export struct ProcessHelper {
     detail: string,
 }
 
-// ProcessGlyph.qml: the hourglass while an agent waits on a background job,
+// A running process: an indeterminate spinner, a ring of dots whose
+// brightness sweeps round as a fading arc (the software renderer draws no
+// paths). Only the dots' opacity changes, so nothing around it moves. It
+// turns only while `running` (its holder is shown and on screen), the window
+// shows and motion is not reduced; otherwise it is the same arc, still.
+export component ProcessSpinner inherits Rectangle {
+    in property <length> size: 14px;
+    in property <color> tone: Palette.link;
+    in property <bool> running: true;
+    out property <bool> turning: root.running && !ChatLook.reduced-motion && ChatLook.window-shown;
+    property <float> phase: root.turning ? Math.mod(animation-tick() / 900ms, 1.0) : 0.0;
+    property <length> dot: Math.max(2px, root.size * 0.2);
+    width: root.size;
+    height: root.size;
+    accessible-id: root.turning ? "spinner-turning" : "spinner-still";
+    for i in 10: Rectangle {
+        property <angle> at: i * 36deg - 90deg;
+        // How far the dot is behind the arc's head, as a share of a turn.
+        property <float> behind: Math.mod(root.phase - i / 10 + 1.0, 1.0);
+        x: (root.size - root.dot) / 2 * (1 + Math.cos(self.at));
+        y: (root.size - root.dot) / 2 * (1 + Math.sin(self.at));
+        width: root.dot;
+        height: root.dot;
+        border-radius: root.dot / 2;
+        background: root.tone;
+        opacity: self.behind < 0.75 ? 1.0 - self.behind / 0.75 * 0.8 : 0.12;
+    }
+}
+
+// ProcessGlyph.qml: the spinner while an agent waits on a background job,
 // the agent mark while a sub-agent or helper runs; both follow the theme.
-export component ProcessGlyph inherits Image {
-    in property <string> kind: "hourglass";
+export component ProcessGlyph inherits Rectangle {
+    // "agent" or "process".
+    in property <string> kind: "process";
     in property <length> glyph-size: 14px;
+    // The holder is shown and on screen: the spinner may turn.
+    in property <bool> running: true;
     width: root.glyph-size;
     height: root.glyph-size;
-    source: root.kind == "agent" ? @image-url("icons/agent.svg") : @image-url("icons/hourglass.svg");
-    colorize: Palette.link;
+    if root.kind == "agent": Image {
+        width: parent.width;
+        height: parent.height;
+        source: @image-url("icons/agent.svg");
+        colorize: Palette.link;
+    }
+    if root.kind != "agent": ProcessSpinner {
+        size: root.glyph-size;
+        running: root.running;
+    }
 }
 
 // ProcessIndicator.qml: one glyph for an agent's background work, with a
@@ -37,6 +77,8 @@ export component ProcessIndicator inherits Rectangle {
     // "jobs" or "agents" shows only that kind (the explorer gives each its
     // own icon); empty shows both as one glyph.
     in property <string> only;
+    // Shown and on screen: its spinner may turn.
+    in property <bool> running: true;
     callback clicked();
     property <int> plain: root.only == "agents" ? 0 : Math.max(0, root.jobs - root.sub-agents);
     property <int> agents: root.only == "jobs" ? 0 : Math.max(root.sub-agents, root.children, 0);
@@ -54,7 +96,8 @@ export component ProcessIndicator inherits Rectangle {
         x: 0;
         y: parent.height - self.height;
         glyph-size: root.glyph-size;
-        kind: root.agents > 0 ? "agent" : "hourglass";
+        kind: root.agents > 0 ? "agent" : "process";
+        running: root.running;
     }
     if root.total > 1: Rectangle {
         x: root.glyph-size * 0.8;
@@ -83,12 +126,13 @@ export component ProcessIndicator inherits Rectangle {
 }
 
 // The compact explorer's mark for one kind of running work: its glyph (the
-// agent mark for helpers, the hourglass for processes) and how many run, as
+// agent mark for helpers, the spinner for processes) and how many run, as
 // narrow as it can be. Clicking asks for the list, as ProcessIndicator does.
 export component CompactWork inherits Rectangle {
-    // "agent" or "hourglass".
+    // "agent" or "process".
     in property <string> kind;
     in property <int> count;
+    in property <bool> running: true;
     callback clicked();
     property <string> what: root.kind == "agent"
         ? (root.count == 1 ? " sub-agent" : " sub-agents")
@@ -102,7 +146,7 @@ export component CompactWork inherits Rectangle {
     accessible-action-default => { root.clicked(); }
     layout := HorizontalLayout {
         spacing: 1px;
-        ProcessGlyph { y: 1px; glyph-size: 12px; kind: root.kind; }
+        ProcessGlyph { y: 1px; glyph-size: 12px; kind: root.kind; running: root.running; }
         Text {
             text: root.count > 9 ? "9+" : root.count;
             color: Palette.chrome-text;
@@ -162,7 +206,7 @@ export component ProcessPopover inherits Rectangle {
                 padding-top: 6px;
                 padding-bottom: 6px;
                 spacing: 8px;
-                ProcessGlyph { y: 1px; glyph-size: 13px; kind: job.sub-agent ? "agent" : "hourglass"; }
+                ProcessGlyph { y: 1px; glyph-size: 13px; kind: job.sub-agent ? "agent" : "process"; running: root.visible; }
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 1px;

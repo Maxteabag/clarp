@@ -1,5 +1,6 @@
 import { Button, ScrollView, Spinner, ProgressIndicator } from "std-widgets.slint";
 import { Palette, Look } from "theme.slint";
+import { ProcessSpinner } from "processes.slint";
 
 // A decision waiting on the user (UpdatesPanel.qml's attention cards).
 export struct AttentionView {
@@ -228,12 +229,20 @@ export component Updates inherits Rectangle {
                 for job in root.jobs: HorizontalLayout {
                     padding: 8px;
                     spacing: 9px;
+                    // A running job turns a spinner; a finished one is a dot.
                     Rectangle {
-                        width: 6px;
-                        height: 6px;
-                        y: 8px;
-                        border-radius: 3px;
-                        background: job.active ? Palette.chrome-text : job.failed ? Palette.danger : Palette.muted;
+                        width: 12px;
+                        height: 12px;
+                        y: 5px;
+                        if job.active: ProcessSpinner { size: 12px; running: root.visible; }
+                        if !job.active: Rectangle {
+                            x: 3px;
+                            y: 3px;
+                            width: 6px;
+                            height: 6px;
+                            border-radius: 3px;
+                            background: job.failed ? Palette.danger : Palette.muted;
+                        }
                     }
                     VerticalLayout {
                         horizontal-stretch: 1;
