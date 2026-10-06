@@ -98,6 +98,13 @@ def _forbid_live_service_control(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_agy_cli(monkeypatch):
+    """Never run the developer's real Antigravity CLI from a test (its usage
+    check, say); a test that needs agy installs a fake via CLARP_AGY_BIN."""
+    monkeypatch.setenv("CLARP_AGY_BIN", "clarp-test-no-agy")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_agy_skills(monkeypatch, tmp_path):
     """Skill links for Antigravity default to ~/.gemini/config/skills, which
     tests do not fake via HOME. Point it at a temp path whose parent does not

@@ -879,3 +879,42 @@ def test_reconciling_limits_with_nothing_expired_takes_no_write_lock():
     finally:
         db.conn().set_trace_callback(None)
     assert statements and not [s for s in statements if s.startswith("BEGIN")]
+
+
+def test_antigravity_quota_comes_from_its_own_usage_command(tmp_path, monkeypatch):
+    import os, pathlib, stat, sys
+    fixture = pathlib.Path(__file__).resolve().parents[1] / "fixtures/agy/1.3.0-usage.json"
+    fake = tmp_path / "bin/agy"
+    fake.parent.mkdir()
+    fake.write_text(f"#!{sys.executable}\nimport sys\nassert sys.argv[1:] == "
+                    f"['--output-format', 'json', '-p', '/usage']\n"
+                    f"sys.stdout.write(open({str(fixture)!r}).read())\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
+    monkeypatch.setattr(backend_usage, "_claude_needs_refresh", lambda: False)
+    monkeypatch.setattr(backend_usage, "_codex_needs_refresh", lambda: False)
+    payload = backend_usage.get_backend_usage(refresh_codex=False)
+    agy = payload["providers"]["agy"]
+    assert agy["source"]["kind"] == "provider_reported"
+    windows = {(w["label"], w["kind"]): w for w in agy["windows"]}
+    assert set(windows) == {("Gemini Models", "seven_day"), ("Gemini Models", "five_hour"),
+                            ("Claude and GPT models", "seven_day"),
+                            ("Claude and GPT models", "five_hour")}
+    weekly = windows[("Gemini Models", "seven_day")]
+    assert weekly["scope"] == "model_group" and 0 <= weekly["used_percentage"] <= 100
+    assert weekly["resets_at"].endswith("Z")
+    # agy limits are per model group; one empty group does not mark agy exhausted.
+    assert "agy" not in backend_usage.exhausted_backends()
+
+
+def test_a_failed_antigravity_usage_check_keeps_the_last_reading(tmp_path, monkeypatch):
+    import os, stat
+    fake = tmp_path / "bin/agy"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\necho 'not signed in' >&2\nexit 1\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
+    monkeypatch.setattr(backend_usage, "_claude_needs_refresh", lambda: False)
+    agy = backend_usage.get_backend_usage(refresh_codex=False)["providers"]["agy"]
+    assert agy["windows"] == [] and agy["source"]["kind"] == "unavailable"
+    assert "not signed in" in (backend_usage._row("agy") or {}).get("error", "")
