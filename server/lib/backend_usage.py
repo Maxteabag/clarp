@@ -909,6 +909,14 @@ def _structured_provider(provider_id: str, now_ms: int) -> dict[str, Any]:
             "observed_at": _normalize_time(observed_at / 1000),
             "source": source, "windows": projected,
         }
+    if provider_id == AGY:
+        row = _row(AGY)
+        windows = _agy_windows(row, provider_instance_id, now_ms) if row else []
+        if not windows:
+            return base
+        return {**base, "freshness": _freshness(row, now_ms),
+                "observed_at": _normalize_time(int(row.get("fetched_at") or 0) / 1000),
+                "source": windows[0]["source"], "windows": windows}
     if provider_id != CODEX:
         return base
     database = db.conn()
@@ -1010,6 +1018,13 @@ def get_backend_usage(*, refresh_codex: bool = True,
                 _record_unknown(
                     CODEX, "codex-usage-endpoint",
                     f"direct: {exc}; app-server: {fallback_exc}")
+    if force_codex or _agy_needs_refresh():
+        if _agy_executable():
+            try:
+                fetch_agy_usage()
+            except Exception as exc:  # noqa: BLE001
+                log_exception("agyUsageRefreshFail", exc)
+                _record_unknown(AGY, "agy-usage-command", str(exc))
     now = _now_ms()
     limit_events.extend(_reconcile_expired_limits(now))
     return {
@@ -1131,6 +1146,80 @@ class UsageRefreshWorker:
             self._last = current
         except Exception as exc:  # noqa: BLE001
             log_exception("usageRefreshWorkerFail", exc)
+
+
+AGY_WINDOW_KINDS = {"5h": ("five_hour", 300), "weekly": ("seven_day", 10080)}
+
+
+def _agy_executable() -> str | None:
+    import shutil
+    return shutil.which(os.environ.get("CLARP_AGY_BIN", "agy"))
+
+
+def fetch_agy_usage(*, timeout: float = 20.0) -> dict[str, Any]:
+    """Antigravity's own quota report (`agy -p /usage`): per model group, a
+    weekly and a 5-hour window. It runs no model turn, so it costs nothing."""
+    executable = _agy_executable()
+    if not executable:
+        raise RuntimeError("agy is not installed")
+    result = subprocess.run(
+        [executable, "--output-format", "json", "-p", "/usage"],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
+        check=False, cwd=str(pathlib.Path.home()))
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "agy /usage failed").strip()[:300])
+    payload = json.loads(result.stdout)
+    groups = (((payload.get("command") or {}).get("data") or {}).get("groups"))
+    if not isinstance(groups, list) or not groups:
+        raise RuntimeError("agy /usage returned no quota groups")
+    buckets = [b for g in groups for b in (g.get("buckets") or [])
+               if isinstance(b, dict) and isinstance(b.get("remaining_fraction"), (int, float))]
+    # The row's single figure is the tightest window; every window is kept in raw.
+    tightest = min(buckets, key=lambda b: b["remaining_fraction"]) if buckets else {}
+    used = (round((1 - tightest["remaining_fraction"]) * 100, 1) if tightest else None)
+    _upsert(AGY, used_percentage=used, resets_at=str(tightest.get("reset_time") or ""),
+            source="agy-usage-command", raw={"groups": groups}, error="")
+    return {"groups": groups}
+
+
+def _agy_windows(row: dict[str, Any], provider_instance_id: str, now_ms: int) -> list[dict]:
+    """Every group's windows, each labelled with its group: agy's limits are per
+    model group (Gemini; Claude and GPT), not per account."""
+    freshness = _freshness(row, now_ms)
+    observed_at = int(row.get("fetched_at") or 0)
+    source = {"kind": "provider_reported", "detail": row.get("source") or "agy-usage-command"}
+    windows = []
+    for group in _decode_raw(row).get("groups") or []:
+        for bucket in group.get("buckets") or []:
+            fraction = bucket.get("remaining_fraction")
+            if not isinstance(fraction, (int, float)):
+                continue
+            kind, minutes = AGY_WINDOW_KINDS.get(str(bucket.get("window")), ("unknown", None))
+            resets_at = bucket.get("reset_time")
+            window_freshness = freshness
+            reset_ms = _iso_to_ms(resets_at)
+            if reset_ms is not None and now_ms >= reset_ms:
+                window_freshness = "stale"
+            used = round((1 - float(fraction)) * 100, 1)
+            windows.append({
+                "window_id": _window_id(
+                    provider_instance_id=provider_instance_id,
+                    auth_generation_id="agy-usage-command",
+                    account_scope_ref=str(bucket.get("id") or group.get("name") or ""),
+                    window_kind=kind, window_minutes=minutes, resets_at=resets_at),
+                "kind": kind, "scope": "model_group", "label": str(group.get("name") or ""),
+                "unit": "percent", "used_percentage": used, "resets_at": resets_at,
+                "observed_at": _normalize_time(observed_at / 1000),
+                "freshness": window_freshness, "source": source,
+                "limit": {"state": "normal" if window_freshness == "fresh" else "unknown",
+                          "episode_id": None, "provider_limit_event_id": None},
+            })
+    return windows
+
+
+def _agy_needs_refresh() -> bool:
+    row = _row(AGY)
+    return not row or _now_ms() - int(row.get("fetched_at") or 0) > CLAUDE_REFRESH_MS
 
 
 def _claude_needs_refresh() -> bool:
