@@ -1,0 +1,150 @@
+import { ListView } from "std-widgets.slint";
+import { Field } from "fields.slint";
+import { Palette, Focus, FocusRing } from "theme.slint";
+
+// One installed family, drawn in itself.
+export struct FontItem {
+    name: string,
+    monospace: bool,
+    // The theme's saved choice.
+    saved: bool,
+}
+
+// One of the picker's actions: its key and what it does (a click runs it).
+export struct FontKey {
+    keys: string,
+    label: string,
+    action: string,
+}
+
+// The font picker's state and commands (Rust sets and handles them).
+export global FontBridge {
+    in property <string> title;
+    in property <[FontItem]> fonts;
+    in property <int> current;
+    in property <bool> monospace-only;
+    in property <string> size-text;
+    in property <string> note;
+    in property <[FontKey]> actions;
+    callback edited(string);
+    callback moved(int);
+    callback act(string);
+}
+
+// Settings → Font: the installed families in a panel at the window's side,
+// so the chat beside it shows the current one. The window's keyboard map
+// sends the picker's keys to Rust; letters type into the search.
+export component FontPicker inherits Rectangle {
+    public function open() {
+        search.text = "";
+        search.focus();
+    }
+    // A click outside the panel cancels, as Escape does.
+    TouchArea { clicked => { FontBridge.act("cancel"); } }
+    panel := Rectangle {
+        width: Math.min(440px, root.width - 48px);
+        height: root.height - 48px;
+        x: root.width - self.width - 24px;
+        y: 24px;
+        border-radius: 3px;
+        background: Palette.raised;
+        border-width: 1px;
+        border-color: Palette.border;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000060;
+        TouchArea { }
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+            Text { text: FontBridge.title; color: Palette.chrome-text; font-size: 14px; font-weight: 700; }
+            search := Field {
+                height: 38px;
+                font-size: 14px;
+                placeholder-text: "Type to find a font";
+                edited(text) => { FontBridge.edited(text); }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                mono := TouchArea {
+                    width: mono-row.preferred-width;
+                    clicked => { FontBridge.act("monospace"); }
+                    mono-row := HorizontalLayout {
+                        spacing: 6px;
+                        Rectangle {
+                            width: 14px;
+                            height: 14px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 2px;
+                            border-width: 1px;
+                            border-color: FontBridge.monospace-only ? Palette.accent : Palette.border;
+                            background: FontBridge.monospace-only ? Palette.accent : transparent;
+                            accessible-role: checkbox;
+                            accessible-checked: FontBridge.monospace-only;
+                            accessible-label: "Monospace only";
+                            if FontBridge.monospace-only: Text { text: "✓"; color: Palette.accent-text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                        Text { text: "Monospace only"; color: mono.has-hover ? Palette.text : Palette.chrome-text; font-size: 12px; vertical-alignment: center; }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: FontBridge.size-text; color: Palette.muted; font-size: 12px; vertical-alignment: center; }
+            }
+            if FontBridge.note != "": Text { text: FontBridge.note; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
+            if FontBridge.fonts.length == 0: Text {
+                text: "No installed font matches";
+                color: Palette.faint;
+                font-size: 12px;
+                horizontal-alignment: center;
+            }
+            list := ListView {
+                vertical-stretch: 1;
+                for font[index] in FontBridge.fonts: Rectangle {
+                    height: 34px;
+                    border-radius: 3px;
+                    background: index == FontBridge.current ? Focus.cursor : touch.has-hover ? Palette.hover : transparent;
+                    accessible-role: list-item;
+                    accessible-label: font.name;
+                    touch := TouchArea {
+                        clicked => { FontBridge.moved(index); }
+                        double-clicked => { FontBridge.moved(index); FontBridge.act("choose"); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+                        Text {
+                            text: font.name;
+                            font-family: font.name;
+                            font-size: 15px;
+                            color: Palette.text;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                        if font.monospace: Text { text: "mono"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+                        if font.saved: Text { text: "✓"; color: Palette.accent; font-size: 13px; vertical-alignment: center; }
+                    }
+                }
+            }
+            // Every action with its key; a click runs it.
+            Rectangle { height: 1px; background: Palette.rule; }
+            for entry in FontBridge.actions: action := TouchArea {
+                height: 22px;
+                clicked => { FontBridge.act(entry.action); }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: entry.keys; color: Palette.accent; font-size: 12px; width: 76px; vertical-alignment: center; }
+                    Text { text: entry.label; color: action.has-hover ? Palette.text : Palette.chrome-text; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                }
+            }
+        }
+        FocusRing { shown: Focus.mode == "fonts"; }
+    }
+    // Keep the current family in view as the keys move it.
+    property <int> current: FontBridge.current;
+    changed current => {
+        if (root.current >= 0) {
+            list.content-y = Math.min(Math.max(list.content-y, -root.current * 34px), list.visible-height - (root.current + 1) * 34px);
+        }
+    }
+}

@@ -1922,7 +1922,7 @@ fn receipt_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             check(selected == "dec-expired", &format!("O goes to the decision card it answers, in view: {selected:?}"));
-            crate::view::apply_theme(window, "paper");
+            crate::view::apply_theme(window, "paper", None);
             headless::press(slint::platform::Key::End);
             true
         })),
@@ -1931,7 +1931,7 @@ fn receipt_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             shot(&out3, "artifacts-20c-receipts-light");
-            crate::view::apply_theme(window, "terminal");
+            crate::view::apply_theme(window, "terminal", None);
             true
         })),
     ]

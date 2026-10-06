@@ -65,6 +65,17 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
     let label_of = |id: &str, with_none: bool| {
         providers(tts, with_none).into_iter().find(|(p, _)| p == id).map(|(_, l)| l).unwrap_or_else(|| if id.is_empty() { "Unknown".into() } else { id.to_owned() })
     };
+    // The reader's own font for this theme, and where it falls back.
+    let chosen = engine.font_override(&theme_id);
+    let font = crate::view::resolved_font(theme, chosen.as_ref());
+    let font_detail = match (&chosen, &font.missing) {
+        (_, Some(missing)) => format!("{missing} is not installed · using {} · {} px", font.family, font.size),
+        (Some(_), None) => format!("{} · {} px · your choice", font.family, font.size),
+        (None, None) => format!("{} · {} px · theme default", font.family, font.size),
+    };
+    let theme_size = theme.get("fontPixelSize").and_then(Value::as_f64).unwrap_or(15.0);
+    let reset_detail =
+        if chosen.is_some() { format!("Back to {} · {theme_size} px", crate::view::theme_font(theme)) } else { "Already the theme default".to_owned() };
     let mut rows = vec![
         section("CHATS"),
         toggle("timestamps", "Timestamps", prefs.timestamps),
@@ -91,6 +102,8 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         toggle("nav-rail", "Navigation rail (Chats, Updates, Teams, Settings)", settings.boolean("appearance/navRail", true)),
         toggle("workspace-bar", "Workspace bar", prefs.workspace_bar),
         choice("reading-theme", "Reading theme", &format!("{} · {}", text(theme, "label"), crate::view::theme_font(theme))),
+        action("font", "Font", &font_detail),
+        action("reset-font", "Reset font to theme default", &reset_detail),
         section("VOICE & AUDIO"),
         toggle("spoken-replies", "Spoken replies", !engine.muted()),
         section("NOTIFICATIONS"),
@@ -221,6 +234,15 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
             if let Some(next) = step(&themes, &current, delta) {
                 app.engine.borrow_mut().set_reading_theme(&next);
             }
+        }
+        // The picker shows the font in the chat, so it opens over the chats.
+        "font" => {
+            crate::font_view::open(app, window);
+            return;
+        }
+        "reset-font" => {
+            let theme = app.engine.borrow().reading_theme();
+            app.engine.borrow_mut().set_font_override(&theme, None);
         }
         "spoken-replies" => {
             let muted = app.engine.borrow().muted();

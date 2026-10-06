@@ -493,7 +493,7 @@ pub fn link_hints_check(out: String) {
                 state.borrow_mut().opened = opened().len();
                 // A light theme: the badges keep the theme's accent roles.
                 if let Some(window) = crate::window() {
-                    crate::view::apply_theme(&window, "paper");
+                    crate::view::apply_theme(&window, "paper", None);
                 }
                 headless::press("f");
                 true
@@ -506,7 +506,7 @@ pub fn link_hints_check(out: String) {
             check(active(), "hints show in a light theme");
             shot(&out4, "link-hints-04-paper");
             headless::press(Key::Escape);
-            crate::view::apply_theme(window, "terminal");
+            crate::view::apply_theme(window, "terminal", None);
             // A second pane on the links chat: only the active pane's
             // links are numbered.
             headless::press_with(&[Key::Control, Key::Alt], "v");

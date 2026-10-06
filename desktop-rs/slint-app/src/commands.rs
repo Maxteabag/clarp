@@ -19,6 +19,10 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     if !app.switcher.borrow().open && *app.overlay.borrow() == "keymap" {
         return "keymap";
     }
+    // The font picker takes its keys; letters type into its search.
+    if !app.switcher.borrow().open && *app.overlay.borrow() == crate::font_view::OVERLAY {
+        return "fonts";
+    }
     if app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
         // ---- launch dialogs: the hub has its own keyboard state.
         if !app.switcher.borrow().open && *app.overlay.borrow() == crate::launch_view::HUB {
@@ -163,6 +167,9 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     if state == "keymap" {
         hints = crate::keymap_view::hints(app, window).into_iter().map(|(keys, label)| Hint { keys: keys.into(), label: label.into() }).collect();
     }
+    if state == "fonts" {
+        hints = crate::font_view::hints();
+    }
     if state == "hints" && crate::link_hints::count() == 0 {
         hints = vec![Hint { keys: "".into(), label: "No links on screen".into() }];
     }
@@ -171,6 +178,7 @@ pub fn show_hints(app: &App, window: &AppWindow) {
         "sidebar" => "EXPLORER".to_owned(),
         "pane" => "CHAT".to_owned(),
         "keymap" => "KEYS".to_owned(),
+        "fonts" => "FONT".to_owned(),
         other => other.to_uppercase(),
     };
     window.set_keyboard_mode(mode.into());
@@ -196,6 +204,11 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
     let state = context(&app, &window);
     if state == "keymap" {
         let used = crate::keymap_view::key(&app, &window, text, &chord, !control && !alt);
+        return used;
+    }
+    if state == "fonts" {
+        let used = crate::font_view::key(&app, &window, &chord);
+        show_hints(&app, &window);
         return used;
     }
     // A double press runs on its second press; the first did its own thing.
@@ -272,6 +285,13 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             refresh_switcher(app, window);
         }
         "escape" if app.switcher.borrow().open => close_switcher(app, window, None),
+        // The font picker: Escape puts the font back.
+        "escape" if crate::font_view::is_open() => crate::font_view::act(app, window, "cancel"),
+        "choose-font" => crate::font_view::open(app, window),
+        "reset-font" => {
+            let theme = app.engine.borrow().reading_theme();
+            app.engine.borrow_mut().set_font_override(&theme, None);
+        }
         // ---- profile and overview
         "escape" if crate::profile_view::owns(app) => crate::profile_view::escape(app, window),
         "overview" => crate::overview_view::open(app, window),
@@ -722,6 +742,11 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
             app.engine.borrow_mut().quick_start_contact(&item.target, "", "", "");
             pump_now(app);
             restore = true;
+        }
+        // The picker keeps the keyboard in its search.
+        switcher::Kind::Command if item.target == "choose-font" => {
+            crate::font_view::open(app, window);
+            return;
         }
         switcher::Kind::Command if item.target == "new-contact" => {
             crate::launch_view::open_contacts(app, window, Some(restore));

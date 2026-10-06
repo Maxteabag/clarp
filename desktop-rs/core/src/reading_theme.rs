@@ -60,15 +60,32 @@ pub struct FontOverride {
 
 /// `theme_id`'s override in the stored overrides, if it has one.
 pub fn font_override(overrides: Option<&Value>, theme_id: &str) -> Option<FontOverride> {
-    let _ = (overrides, theme_id);
-    unimplemented!()
+    let entry = overrides?.get(theme_id)?;
+    let family = entry.get("family").and_then(Value::as_str).unwrap_or_default().trim().to_owned();
+    let size = entry.get("size").and_then(Value::as_f64).filter(|s| *s > 0.0);
+    (!family.is_empty() || size.is_some()).then_some(FontOverride { family, size })
 }
 
 /// The stored overrides with `theme_id`'s set (or removed, for None); the
 /// other themes' stay as they were.
 pub fn with_font_override(overrides: Option<&Value>, theme_id: &str, value: Option<&FontOverride>) -> Value {
-    let _ = (overrides, theme_id, value);
-    unimplemented!()
+    let mut all = overrides.and_then(Value::as_object).cloned().unwrap_or_default();
+    match value.filter(|v| !v.family.is_empty() || v.size.is_some()) {
+        Some(chosen) => {
+            let mut entry = Map::new();
+            if !chosen.family.is_empty() {
+                entry.insert("family".into(), Value::from(chosen.family.clone()));
+            }
+            if let Some(size) = chosen.size {
+                entry.insert("size".into(), Value::from(size));
+            }
+            all.insert(theme_id.to_owned(), Value::Object(entry));
+        }
+        None => {
+            all.remove(theme_id);
+        }
+    }
+    Value::Object(all)
 }
 
 /// The font a theme draws in once the reader's override is applied.
@@ -84,8 +101,14 @@ pub struct ResolvedFont {
 /// The chosen family when it is installed, else the theme's first installed
 /// family; the chosen size, else the theme's.
 pub fn resolve(theme: &Object, chosen: Option<&FontOverride>, installed: impl Fn(&str) -> bool) -> ResolvedFont {
-    let _ = (theme, chosen, installed);
-    unimplemented!()
+    let size = chosen.and_then(|c| c.size).or_else(|| theme.get("fontPixelSize").and_then(Value::as_f64)).unwrap_or(15.0);
+    let wanted = chosen.map(|c| c.family.as_str()).filter(|f| !f.is_empty());
+    match wanted {
+        Some(family) if matches!(family, "serif" | "sans-serif" | "monospace") || installed(family) => {
+            ResolvedFont { family: family.to_owned(), size, missing: None }
+        }
+        _ => ResolvedFont { family: resolve_font(theme, installed), size, missing: wanted.map(str::to_owned) },
+    }
 }
 
 /// One installed family, as the font picker lists it.
@@ -98,15 +121,30 @@ pub struct FontFamily {
 /// `fc-list -f '%{family}\t%{spacing}\n'` as families, sorted and once each:
 /// a family is monospace when its faces are (fontconfig spacing 90 or more).
 pub fn parse_font_list(output: &str) -> Vec<FontFamily> {
-    let _ = output;
-    unimplemented!()
+    let mut families: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();
+    for line in output.lines() {
+        let (names, spacing) = line.split_once('\t').unwrap_or((line, ""));
+        let Some(name) = names.split(',').map(str::trim).find(|n| !n.is_empty()) else { continue };
+        let monospace = spacing.trim().parse::<i32>().is_ok_and(|s| s >= 90);
+        *families.entry(name.to_owned()).or_default() |= monospace;
+    }
+    let mut fonts: Vec<FontFamily> = families.into_iter().map(|(name, monospace)| FontFamily { name, monospace }).collect();
+    fonts.sort_by_cached_key(|f| (f.name.to_lowercase(), f.name.clone()));
+    fonts
 }
 
 /// The families whose names hold every word of `query`, monospace ones only
 /// if asked.
 pub fn filter_fonts<'a>(fonts: &'a [FontFamily], query: &str, monospace_only: bool) -> Vec<&'a FontFamily> {
-    let _ = (fonts, query, monospace_only);
-    unimplemented!()
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    fonts
+        .iter()
+        .filter(|f| !monospace_only || f.monospace)
+        .filter(|f| {
+            let name = f.name.to_lowercase();
+            words.iter().all(|w| name.contains(w.as_str()))
+        })
+        .collect()
 }
 
 /// Everything QML styles from: the palette plus the resolved font.

@@ -565,13 +565,23 @@ impl Engine {
 
     /// The reader's own font for `theme` (Settings → Font), if any.
     pub fn font_override(&self, theme: &str) -> Option<clarp_core::reading_theme::FontOverride> {
-        let _ = theme;
-        unimplemented!()
+        use clarp_core::reading_theme as reading;
+        reading::font_override(self.settings.get(reading::FONT_OVERRIDES_KEY), &reading::normalized_theme_id(theme))
     }
     /// Sets `theme`'s own font, or removes it (None: the theme's default).
     pub fn set_font_override(&mut self, theme: &str, value: Option<clarp_core::reading_theme::FontOverride>) {
-        let _ = (theme, value);
-        unimplemented!()
+        use clarp_core::reading_theme as reading;
+        let theme = reading::normalized_theme_id(theme);
+        if self.font_override(&theme) == value {
+            return;
+        }
+        let all = reading::with_font_override(self.settings.get(reading::FONT_OVERRIDES_KEY), &theme, value.as_ref());
+        if all.as_object().is_some_and(serde_json::Map::is_empty) {
+            self.settings.remove(reading::FONT_OVERRIDES_KEY);
+        } else {
+            self.settings.set(reading::FONT_OVERRIDES_KEY, all);
+        }
+        self.changes.push(Change::Preferences);
     }
 
     /// Voice replies on or off, remembered (C++ `setMuted`).

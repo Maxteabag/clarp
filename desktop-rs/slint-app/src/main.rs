@@ -37,6 +37,7 @@ mod orchestrator_view;
 mod overview_view;
 mod profile_view;
 mod voice_view;
+mod font_view;
 
 use view::{apply_theme, chat_row, initial, open_link};
 
@@ -296,7 +297,7 @@ impl App {
         let mut whole = perf::Laps::new();
         let engine = self.engine.borrow();
         if changes.contains(&Change::Preferences) {
-            apply_theme(&window, &engine.reading_theme());
+            view::apply_app_theme(self, &window);
         }
         let selected = engine.selected_session().to_owned();
         if changes.contains(&Change::Selection) && !selected.is_empty() {
@@ -582,8 +583,13 @@ fn main() {
         .skip_while(|a| a != "--theme")
         .nth(1)
         .unwrap_or_else(|| settings.string("appearance/readingTheme", clarp_core::reading_theme::default_theme_id()));
-    apply_theme(&window, &theme);
-    view::load_fonts(theme.clone());
+    // The reader's own font for the theme (Settings → Font).
+    let chosen = clarp_core::reading_theme::font_override(
+        settings.get(clarp_core::reading_theme::FONT_OVERRIDES_KEY),
+        &clarp_core::reading_theme::normalized_theme_id(&theme),
+    );
+    apply_theme(&window, &theme, chosen.as_ref());
+    view::load_fonts(theme.clone(), chosen);
     window.set_minimal_ui(settings.boolean("appearance/minimalUi", false));
     window.set_nav_rail_visible(settings.boolean("appearance/navRail", true));
     window.set_explorer_compact(settings.boolean("explorer/compact", false));
@@ -919,6 +925,7 @@ fn main() {
     profile_view::wire(&window);
     overview_view::wire(&window);
     voice_view::wire(&window);
+    font_view::wire(&window);
     orchestrator_view::wire(&window);
     commands::refresh_keys(&state, &window);
     window.on_dismiss_error(|| with_window(|app, window| {
