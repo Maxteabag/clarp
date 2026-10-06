@@ -65,7 +65,7 @@ const RESERVED: &[&str] = &["Ctrl+A", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "C
 fn parent(state: &str) -> Option<&'static str> {
     Some(match state {
         "main" => "root",
-        "workspace" | "settings" | "updates" | "teams" => "main",
+        "workspace" | "settings" | "settings-search" | "updates" | "teams" => "main",
         "navigation" | "composer" | "search" => "workspace",
         "pane" | "sidebar" => "navigation",
         "modal" | "launch" | "blocked" | "hints" => "root",
@@ -213,7 +213,13 @@ fn state(name: &str) -> Vec<Binding> {
         "settings" => vec![
             b("settings-move", &["Up", "Down"], "Move", true, Always, true),
             b("settings-open", &["Return"], "Change", true, Always, true),
+            b("settings-search", &["/"], "Search", true, Always, false),
             b("escape", &["Escape"], "Back", true, Always, false),
+        ],
+        // The settings page's search field.
+        "settings-search" => vec![
+            b("settings-results", &["Down", "Return"], "Results", true, Always, false),
+            b("settings-search-cancel", &["Escape"], "Clear", true, Always, false),
         ],
         "updates" => vec![b("refresh", &["F5"], "Refresh", true, Always, false), b("escape", &["Escape"], "Chats", true, Always, false)],
         "teams" => vec![b("escape", &["Escape"], "Chats", true, Always, false)],
@@ -243,7 +249,7 @@ fn state(name: &str) -> Vec<Binding> {
     }
 }
 
-pub const STATES: &[&str] = &["root", "main", "workspace", "navigation", "pane", "sidebar", "composer", "search", "settings", "updates", "teams", "launch", "modal", "blocked", "hints"];
+pub const STATES: &[&str] = &["root", "main", "workspace", "navigation", "pane", "sidebar", "composer", "search", "settings", "settings-search", "updates", "teams", "launch", "modal", "blocked", "hints"];
 
 /// What the guards test.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -291,6 +297,7 @@ pub const CONTEXTS: &[(&str, &str)] = &[
     ("composer", "Composer"),
     ("search", "Explorer search"),
     ("settings", "Settings"),
+    ("settings-search", "Settings search"),
     ("updates", "Updates"),
     ("teams", "Teams"),
     ("launch", "New agent hub"),
@@ -301,7 +308,7 @@ pub fn context_name(state: &str) -> &str {
 }
 
 /// Text fields, where a key without Ctrl or Alt types.
-const TYPING: &[&str] = &["composer", "search"];
+const TYPING: &[&str] = &["composer", "search", "settings-search"];
 
 /// Keys added to and taken from one action's defaults in one context.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

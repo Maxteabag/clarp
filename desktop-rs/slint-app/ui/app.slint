@@ -179,6 +179,11 @@ export component AppWindow inherits Window {
     out property <bool> settings-focused: settings.list-focused;
     public function focus-settings() { settings.focus-list(); }
     callback setting-changed(string, int);
+    // The settings page's search (`/`), with the switcher's matcher.
+    in-out property <string> settings-query;
+    out property <bool> settings-search-focused: settings.search-focused;
+    public function focus-settings-search() { settings.focus-search(); }
+    callback settings-searched(string);
     callback surface-chosen(string);
     callback sidebar-hide();
     callback run-command(string);
@@ -251,6 +256,7 @@ export component AppWindow inherits Window {
     // ---- launch dialogs: the switcher's contacts-only mode
     in property <string> switcher-placeholder: "Agent, contact, setting or command";
     in property <string> switcher-empty: "No matching agent or contact";
+    in property <string> switcher-hint: "↑↓ move · Enter run or switch · Esc close";
     in property <[KeymapRow]> keymap-rows;
     in property <string> keymap-context;
     in property <string> keymap-count;
@@ -439,6 +445,8 @@ export component AppWindow inherits Window {
                     moved(index) => { root.setting-current = index; }
                     activated(id) => { root.setting-changed(id, 1); }
                     adjusted(id, delta) => { root.setting-changed(id, delta); }
+                    query: root.settings-query;
+                    searched(text) => { root.settings-searched(text); }
                 }
                 // ---- updates and teams
                 updates := Updates {
@@ -481,7 +489,7 @@ export component AppWindow inherits Window {
                     remove-member(id) => { root.team-action("remove-member", id); }
                     open-chat(session) => { root.open-chat(session); }
                 }
-                FocusRing { shown: Focus.mode == "settings" || Focus.mode == "updates" || Focus.mode == "teams"; }
+                FocusRing { shown: Focus.mode == "settings" || Focus.mode == "settings-search" || Focus.mode == "updates" || Focus.mode == "teams"; }
                 }
             }
         }
@@ -681,6 +689,7 @@ export component AppWindow inherits Window {
             visible: root.switcher-open;
             placeholder: root.switcher-placeholder;
             empty-text: root.switcher-empty;
+            hint: root.switcher-hint;
             width: parent.width;
             height: parent.height;
             rows: root.switcher-rows;

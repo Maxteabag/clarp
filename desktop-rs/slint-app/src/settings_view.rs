@@ -6,27 +6,90 @@ use std::rc::Rc;
 
 use clarp_engine::Change;
 use serde_json::Value;
-use slint::{ModelRc, VecModel};
+use slint::{Model, ModelRc, VecModel};
 
 use crate::{App, AppWindow, SettingRow};
 
 fn section(label: &str) -> SettingRow {
     SettingRow { kind: "section".into(), id: String::new().into(), label: label.into(), ..SettingRow::default() }
 }
-fn toggle(id: &str, label: &str, on: bool) -> SettingRow {
-    SettingRow { kind: "toggle".into(), id: id.into(), label: label.into(), on, ..SettingRow::default() }
+/// A row that does something, named and described by the catalogue.
+fn described(kind: &str, id: &str) -> SettingRow {
+    debug_assert!(IDS.contains(&id), "{id} is missing from settings_view::IDS");
+    let entry = crate::catalogue::find(id);
+    SettingRow {
+        kind: kind.into(),
+        id: id.into(),
+        label: entry.map_or(id, |e| e.label).into(),
+        description: entry.map_or("", |e| e.description).into(),
+        ..SettingRow::default()
+    }
 }
-fn choice(id: &str, label: &str, detail: &str) -> SettingRow {
-    SettingRow { kind: "choice".into(), id: id.into(), label: label.into(), detail: detail.into(), ..SettingRow::default() }
+fn toggle(id: &str, on: bool) -> SettingRow {
+    SettingRow { on, ..described("toggle", id) }
+}
+fn choice(id: &str, detail: &str) -> SettingRow {
+    SettingRow { detail: detail.into(), ..described("choice", id) }
 }
 fn action(id: &str, label: &str, detail: &str) -> SettingRow {
-    SettingRow { kind: "action".into(), id: id.into(), label: label.into(), detail: detail.into(), ..SettingRow::default() }
+    SettingRow { label: label.into(), detail: detail.into(), ..described("action", id) }
 }
 fn info(label: &str, detail: &str) -> SettingRow {
     SettingRow { kind: "info".into(), id: String::new().into(), label: label.into(), detail: detail.into(), ..SettingRow::default() }
 }
 
 const ACTIVITY: [&str; 3] = ["Grouped", "Always visible", "Group old"];
+
+/// Every row that does something; each has a catalogue entry
+/// (`catalogue::tests` holds them to it).
+pub const IDS: &[&str] = &[
+    "timestamps",
+    "show-when-ready",
+    "reduced-motion",
+    "activity",
+    "tool-explanations",
+    "narration",
+    "tool-detail",
+    "new-agent-on-startup",
+    "anonymous-agents",
+    "nav-rail",
+    "explorer",
+    "compact-explorer",
+    "avatar-size",
+    "live-preview",
+    "workspace-bar",
+    "shortcut-bar",
+    "minimal-ui",
+    "reading-theme",
+    "font",
+    "reset-font",
+    "ui-scale",
+    "spoken-replies",
+    "voice-provider",
+    "voice-fallback",
+    "pause-mobile-push",
+    "double-press",
+    "connection",
+    "orchestrator",
+    "shared-filesystem",
+];
+
+/// The interface sizes offered, as scale factors (1.15 is the usual).
+const SCALES: [f64; 9] = [1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4];
+/// The double-press windows offered, in milliseconds.
+const DOUBLE_PRESS: [u64; 8] = [150, 200, 250, 300, 400, 500, 700, 1000];
+
+fn ui_scale(app: &App) -> f64 {
+    app.engine.borrow().settings().get("appearance/uiScale").and_then(Value::as_f64).unwrap_or(1.15)
+}
+
+fn percent(scale: f64) -> String {
+    format!("{}%", (scale * 100.0).round())
+}
+
+fn double_press(app: &App) -> u64 {
+    crate::keymap::double_press_window(app.engine.borrow().settings().get("keymap/doublePressMs").and_then(Value::as_i64)).as_millis() as u64
+}
 
 /// The voice providers the Host offers, as (id, label); `with_none` adds
 /// "No fallback" first.
@@ -78,41 +141,47 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         if chosen.is_some() { format!("Back to {} · {theme_size} px", crate::view::theme_font(theme)) } else { "Already the theme default".to_owned() };
     let mut rows = vec![
         section("CHATS"),
-        toggle("timestamps", "Timestamps", prefs.timestamps),
-        toggle("show-when-ready", "Show when ready", engine.show_when_ready()),
-        toggle("reduced-motion", "Reduce Motion", settings.boolean("appearance/reducedMotion", false)),
-        choice("activity", "Tool activity", ACTIVITY[engine.activity_mode().clamp(0, 2) as usize]),
+        toggle("timestamps", prefs.timestamps),
+        toggle("show-when-ready", engine.show_when_ready()),
+        toggle("reduced-motion", settings.boolean("appearance/reducedMotion", false)),
+        choice("activity", ACTIVITY[engine.activity_mode().clamp(0, 2) as usize]),
     ];
     // The Host's setting, on Hosts that send live items (§6).
     if engine.tool_explanation_setting() {
-        rows.push(toggle("tool-explanations", "Tool explanations (Host · Ctrl+Shift+X)", engine.tool_explanations_enabled(engine.selected_session())));
+        rows.push(toggle("tool-explanations", engine.tool_explanations_enabled(engine.selected_session())));
     }
     rows.extend(vec![
         section("EXPERIMENTS"),
-        toggle("narration", "Plain-English tools (Spark · extra usage)", engine.narrator_enabled()),
-        choice("tool-detail", "Tool detail", clarp_engine::Engine::narrator_detail_levels()[engine.narrator_detail_level().clamp(0, 4) as usize]),
+        toggle("narration", engine.narrator_enabled()),
+        choice("tool-detail", clarp_engine::Engine::narrator_detail_levels()[engine.narrator_detail_level().clamp(0, 4) as usize]),
         info(engine.narrator_level_description(), &engine.narrator_status()),
         section("STARTUP"),
-        toggle("new-agent-on-startup", "Start a new agent when opening Clarp", settings.boolean("launch/newAgentOnStartup", false)),
+        toggle("new-agent-on-startup", settings.boolean("launch/newAgentOnStartup", false)),
         section("AGENT IDENTITY"),
-        toggle("anonymous-agents", "Anonymous agents by default", settings.boolean("launch/anonymousAgents", true)),
+        toggle("anonymous-agents", settings.boolean("launch/anonymousAgents", true)),
         section("APPEARANCE"),
-        toggle("minimal-ui", "Minimal UI", settings.boolean("appearance/minimalUi", false)),
-        toggle("compact-explorer", "Compact explorer (avatar and name only)", settings.boolean("explorer/compact", false)),
-        choice("avatar-size", "Agent picture size", &crate::avatar_view::label(app)),
-        toggle("nav-rail", "Navigation rail (Chats, Updates, Teams, Settings)", settings.boolean("appearance/navRail", true)),
-        toggle("workspace-bar", "Workspace bar", prefs.workspace_bar),
-        choice("reading-theme", "Reading theme", &format!("{} · {}", text(theme, "label"), crate::view::theme_font(theme))),
+        toggle("nav-rail", settings.boolean("appearance/navRail", true)),
+        toggle("explorer", app.window.upgrade().is_some_and(|w| w.get_sidebar_visible())),
+        toggle("compact-explorer", settings.boolean("explorer/compact", false)),
+        choice("avatar-size", &crate::avatar_view::label(app)),
+        toggle("live-preview", settings.boolean("explorer/livePreview", false)),
+        toggle("workspace-bar", prefs.workspace_bar),
+        toggle("shortcut-bar", settings.boolean("appearance/shortcutsVisible", true)),
+        toggle("minimal-ui", settings.boolean("appearance/minimalUi", false)),
+        choice("reading-theme", &format!("{} · {}", text(theme, "label"), crate::view::theme_font(theme))),
         action("font", "Font", &font_detail),
         action("reset-font", "Reset font to theme default", &reset_detail),
+        choice("ui-scale", &percent(ui_scale(app))),
         section("VOICE & AUDIO"),
-        toggle("spoken-replies", "Spoken replies", !engine.muted()),
+        toggle("spoken-replies", !engine.muted()),
+        choice("voice-provider", &label_of(&provider, false)),
+        choice("voice-fallback", &label_of(if fallback.is_empty() { "none" } else { &fallback }, true)),
         section("NOTIFICATIONS"),
-        toggle("pause-mobile-push", "Pause phone alerts while active on desktop", settings.boolean("notifications/pauseMobileWhileDesktopActive", true)),
+        toggle("pause-mobile-push", settings.boolean("notifications/pauseMobileWhileDesktopActive", true)),
         section("HOST"),
         action("connection", if engine.server_name().is_empty() { "Clarp Host" } else { engine.server_name() }, &format!("{}  ·  {}", engine.base_url(), engine.connection_state())),
         action("orchestrator", "Orchestrator", "Open"),
-        toggle("shared-filesystem", "Shared filesystem", engine.shared_filesystem()),
+        toggle("shared-filesystem", engine.shared_filesystem()),
         section("HOST STATUS"),
         info("Diagnostics", if loading { "Loading…" } else if diagnostics.get("ready").and_then(Value::as_bool) == Some(true) { "Ready" } else { "Needs attention" }),
         info("Speech to text", if transcription.get("available").and_then(Value::as_bool) == Some(true) { "Available" } else { "Unavailable" }),
@@ -121,13 +190,12 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
             if model.is_empty() { "Unknown".to_owned() } else { model }
         }),
         info("TTS queue", &format!("{} pending · {} in flight", count("pending"), count("in_flight"))),
-        choice("voice-provider", "Voice provider", &label_of(&provider, false)),
-        choice("voice-fallback", "Voice fallback", &label_of(if fallback.is_empty() { "none" } else { &fallback }, true)),
         section("KEYBOARD"),
+        choice("double-press", &format!("{} ms", double_press(app))),
         info("Key bindings", &key("edit-keymap")),
         info("Command palette", &key("switcher")),
         info("Settings", &key("settings")),
-        info("Navigate settings", "↑↓ / Tab · Home / End"),
+        info("Navigate settings", "↑↓ / Tab · Home / End · / search"),
         info("Open native CLI", &key("agent-terminal")),
         info("Start idle contact", &key("new-contact")),
         info("Show / hide sidebar", &key("sidebar")),
@@ -142,23 +210,184 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
     rows
 }
 
-/// Shows the rows again (a setting or the Host status changed).
+/// The rows matching the search, best first and without section titles;
+/// all of them when there is none. The switcher's matcher ranks them.
+pub fn filter(rows: Vec<SettingRow>, query: &str) -> Vec<SettingRow> {
+    if query.trim().is_empty() {
+        return rows;
+    }
+    // Settings before the information rows (the keys listed under KEYBOARD).
+    let mut scored: Vec<(bool, u32, usize, SettingRow)> = rows
+        .into_iter()
+        .filter(|row| row.kind != "section")
+        .filter_map(|row| {
+            let aliases = crate::catalogue::find(&row.id).map_or(&[][..], |e| e.aliases);
+            let words = format!("{} {}", row.description, row.detail);
+            let score = crate::catalogue::score(query, &row.label, aliases, &words)?;
+            Some((actionable(&row), score, crate::catalogue::order(&row.id), row))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    scored.into_iter().map(|(.., row)| row).collect()
+}
+
+fn actionable(row: &SettingRow) -> bool {
+    row.kind != "section" && row.kind != "info"
+}
+
+/// Shows the rows again (a setting, the search or the Host status
+/// changed), the current row kept by its id.
 pub fn show(app: &App, window: &AppWindow) {
     if window.get_surface() != "settings" {
         return;
     }
-    window.set_setting_rows(ModelRc::new(VecModel::from(rows(app))));
+    let before = window.get_setting_rows().row_data(window.get_setting_current().max(0) as usize).map(|r| r.id.to_string()).unwrap_or_default();
+    let rows = filter(rows(app), &window.get_settings_query());
+    let current = rows
+        .iter()
+        .position(|r| !before.is_empty() && r.id == before.as_str())
+        .or_else(|| rows.iter().position(actionable))
+        .map_or(-1, |i| i as i32);
+    window.set_setting_rows(ModelRc::new(VecModel::from(rows)));
+    window.set_setting_current(current);
 }
 
 /// Opens the surface on its first actionable row and asks the Host how it is.
 pub fn open(app: &App, window: &AppWindow) {
     window.set_surface("settings".into());
+    window.set_settings_query("".into());
     app.engine.borrow_mut().load_host_status();
     show(app, window);
-    if window.get_setting_current() <= 0 {
-        window.set_setting_current(1);
-    }
     window.invoke_focus_settings();
+}
+
+/// The search typed (`/` from the list).
+pub fn searched(app: &App, window: &AppWindow, query: &str) {
+    window.set_settings_query(query.into());
+    window.set_setting_current(-1);
+    show(app, window);
+}
+
+/// Down or Enter in the search: the keyboard goes to the best match.
+pub fn to_results(app: &App, window: &AppWindow) {
+    window.set_setting_current(-1);
+    show(app, window);
+    window.invoke_focus_settings();
+}
+
+/// Escape in the search: it empties and the whole page comes back.
+pub fn cancel_search(app: &App, window: &AppWindow) {
+    window.set_settings_query("".into());
+    show(app, window);
+    window.invoke_focus_settings();
+}
+
+/// A choice's options: `(value, label, description, current)`.
+pub fn choices(app: &App, id: &str) -> Vec<(String, String, String, bool)> {
+    let option = |value: String, label: String, description: String, current: bool| (value, label, description, current);
+    let engine = app.engine.borrow();
+    match id {
+        "activity" => {
+            let mode = engine.activity_mode();
+            let notes = ["Tool calls fold into one row per turn.", "Every tool call shows as its own row.", "Recent tool calls show; older ones fold."];
+            ACTIVITY.iter().zip(notes).enumerate().map(|(i, (label, note))| option(i.to_string(), (*label).into(), note.into(), mode == i as i32)).collect()
+        }
+        "tool-detail" => {
+            let level = engine.narrator_detail_level();
+            clarp_engine::Engine::narrator_detail_levels()
+                .iter()
+                .enumerate()
+                .map(|(i, name)| option(i.to_string(), (*name).into(), if i == 0 { "No AI" } else { "Uses AI" }.into(), level == i as i32))
+                .collect()
+        }
+        "reading-theme" => {
+            let current = engine.reading_theme();
+            clarp_core::reading_theme::themes()
+                .iter()
+                .map(|theme| {
+                    let text = |key: &str| theme.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
+                    option(text("id"), format!("{} · {}", text("label"), crate::view::theme_font(theme)), text("detail"), text("id") == current)
+                })
+                .collect()
+        }
+        "voice-provider" | "voice-fallback" => {
+            let tts = engine.tts_provider_status();
+            let text = |key: &str| tts.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
+            let current = if id == "voice-provider" { text("provider") } else { Some(text("fallback")).filter(|f| !f.is_empty()).unwrap_or_else(|| "none".into()) };
+            providers(tts, id == "voice-fallback").into_iter().map(|(value, label)| option(value.clone(), label, String::new(), value == current)).collect()
+        }
+        "avatar-size" => {
+            drop(engine);
+            let now = crate::avatar_view::current(app);
+            crate::avatar_view::CHOICES
+                .iter()
+                .map(|(id, label, sizes)| option((*id).into(), format!("{label} · {} px", sizes.row), format!("{} px in the explorer, {} px compact", sizes.row, sizes.compact), *id == now))
+                .collect()
+        }
+        "ui-scale" => {
+            drop(engine);
+            let now = ui_scale(app);
+            SCALES
+                .iter()
+                .map(|scale| option(format!("{scale:.2}"), percent(*scale), if (*scale - 1.15).abs() < 0.001 { "The usual size" } else { "" }.into(), (scale - now).abs() < 0.001))
+                .collect()
+        }
+        "double-press" => {
+            drop(engine);
+            let now = double_press(app);
+            DOUBLE_PRESS.iter().map(|ms| option(ms.to_string(), format!("{ms} ms"), if *ms == 300 { "The usual" } else { "" }.into(), *ms == now)).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Chooses `value` for the choice `id` (the switcher's picker, Left/Right).
+pub fn pick(app: &Rc<App>, window: &AppWindow, id: &str, value: &str) {
+    match id {
+        "activity" => {
+            if let Ok(mode) = value.parse() {
+                app.engine.borrow_mut().set_activity_mode(mode);
+            }
+        }
+        "tool-detail" => {
+            if let Ok(level) = value.parse() {
+                app.engine.borrow_mut().set_narrator_detail_level(level);
+            }
+        }
+        "reading-theme" => {
+            app.engine.borrow_mut().set_reading_theme(value);
+        }
+        "voice-provider" | "voice-fallback" => {
+            let (provider, fallback) = {
+                let engine = app.engine.borrow();
+                let tts = engine.tts_provider_status();
+                let text = |key: &str| tts.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
+                (text("provider"), text("fallback"))
+            };
+            if id == "voice-provider" {
+                app.engine.borrow_mut().set_tts_providers(value, &fallback, "");
+            } else {
+                app.engine.borrow_mut().set_tts_providers(&provider, value, "");
+            }
+        }
+        "avatar-size" => crate::avatar_view::set(app, window, Some(value), 0),
+        "ui-scale" => match value.parse::<f64>() {
+            Ok(scale) => {
+                app.engine.borrow_mut().settings_mut().set("appearance/uiScale", scale);
+                crate::platform::desktop::set_ui_scale(scale as f32);
+            }
+            Err(error) => eprintln!("clarp-slint: not an interface size {value}: {error}"),
+        },
+        "double-press" => match value.parse::<i64>() {
+            Ok(ms) => {
+                app.engine.borrow_mut().settings_mut().set("keymap/doublePressMs", ms);
+            }
+            Err(error) => eprintln!("clarp-slint: not a double-press window {value}: {error}"),
+        },
+        other => eprintln!("clarp-slint: {other} has no choices"),
+    }
+    crate::pump_now(app);
+    show(app, window);
 }
 
 fn flip(app: &App, key: &str, default: bool) {
@@ -177,6 +406,16 @@ fn step(values: &[(String, String)], current: &str, delta: i32) -> Option<String
 
 /// Space/Enter (delta 1) or Left/Right on a row.
 pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
+    // A choice steps through its options.
+    let options = choices(app, id);
+    if !options.is_empty() {
+        let values: Vec<(String, String)> = options.iter().map(|(value, ..)| (value.clone(), String::new())).collect();
+        let current = options.iter().find(|o| o.3).map(|o| o.0.clone()).unwrap_or_default();
+        if let Some(next) = step(&values, &current, delta) {
+            pick(app, window, id, &next);
+        }
+        return;
+    }
     match id {
         "timestamps" | "workspace-bar" => {
             let (key, value) = {
@@ -198,19 +437,11 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
             app.engine.borrow_mut().set_show_when_ready(!value);
         }
         "reduced-motion" => flip(app, "appearance/reducedMotion", false),
-        "activity" => {
-            let mode = app.engine.borrow().activity_mode();
-            app.engine.borrow_mut().set_activity_mode((mode + delta).rem_euclid(3));
-        }
         "narration" => {
             let enabled = app.engine.borrow().narrator_enabled();
             app.engine.borrow_mut().set_narrator_enabled(!enabled);
         }
         "tool-explanations" => crate::commands::toggle_explanations(app),
-        "tool-detail" => {
-            let level = app.engine.borrow().narrator_detail_level();
-            app.engine.borrow_mut().set_narrator_detail_level((level + delta).rem_euclid(5));
-        }
         "new-agent-on-startup" => flip(app, "launch/newAgentOnStartup", false),
         "anonymous-agents" => flip(app, "launch/anonymousAgents", true),
         "compact-explorer" => {
@@ -218,7 +449,12 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
             window.set_explorer_compact(app.engine.borrow().settings().boolean("explorer/compact", false));
             crate::avatar_view::remake();
         }
-        "avatar-size" => crate::avatar_view::set(app, window, None, delta),
+        "explorer" | "shortcut-bar" => {
+            if !crate::commands::run(app, window, if id == "explorer" { "sidebar" } else { "shortcut-bar" }) {
+                eprintln!("clarp-slint: {id} could not change");
+            }
+        }
+        "live-preview" => flip(app, "explorer/livePreview", false),
         "nav-rail" => {
             flip(app, "appearance/navRail", true);
             window.set_nav_rail_visible(app.engine.borrow().settings().boolean("appearance/navRail", true));
@@ -227,16 +463,6 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
             flip(app, "appearance/minimalUi", false);
             let minimal = app.engine.borrow().settings().boolean("appearance/minimalUi", false);
             window.set_minimal_ui(minimal);
-        }
-        "reading-theme" => {
-            let themes: Vec<(String, String)> = clarp_core::reading_theme::themes()
-                .iter()
-                .map(|t| (t.get("id").and_then(Value::as_str).unwrap_or_default().to_owned(), String::new()))
-                .collect();
-            let current = app.engine.borrow().reading_theme();
-            if let Some(next) = step(&themes, &current, delta) {
-                app.engine.borrow_mut().set_reading_theme(&next);
-            }
         }
         // The picker shows the font in the chat, so it opens over the chats.
         "font" => {
@@ -255,21 +481,6 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
         "shared-filesystem" => {
             let shared = app.engine.borrow().shared_filesystem();
             app.engine.borrow_mut().set_shared_filesystem(!shared);
-        }
-        "voice-provider" | "voice-fallback" => {
-            let (provider, fallback, options) = {
-                let engine = app.engine.borrow();
-                let tts = engine.tts_provider_status();
-                let text = |key: &str| tts.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
-                (text("provider"), text("fallback"), providers(tts, id == "voice-fallback"))
-            };
-            if id == "voice-provider" {
-                if let Some(next) = step(&options, &provider, delta) {
-                    app.engine.borrow_mut().set_tts_providers(&next, &fallback, "");
-                }
-            } else if let Some(next) = step(&options, if fallback.is_empty() { "none" } else { &fallback }, delta) {
-                app.engine.borrow_mut().set_tts_providers(&provider, &next, "");
-            }
         }
         "connection" | "orchestrator" => {
             if !crate::commands::run(app, window, id) {

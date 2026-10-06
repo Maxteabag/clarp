@@ -37,6 +37,7 @@ pub const ENTRIES: &[Entry] = &[
     // ---- the window's parts, left to right
     e("nav-rail", "Activity bar", "layout", "The icon strip on the far left: Chats, Updates, Teams and Settings.", shown!["navigation rail", "nav rail", "rail", "left bar", "left side", "icons", "icon bar", "activity rail", "sidebar icons", "destinations"]),
     keyed(e("explorer", "Explorer", "layout", "The list of agents and chats beside the conversation.", shown!["sidebar", "side bar", "side panel", "panel", "agents list", "chat list", "left panel"]), &["sidebar"]),
+    e("avatar-size", "Agent picture size", "layout", "How large agents' portraits are in the explorer; opens a list of sizes.", &["avatar", "avatars", "portrait", "portraits", "profile picture", "photo", "face", "picture size", "bigger", "smaller"]),
     keyed(e("compact-explorer", "Compact explorer", "layout", "Shows only each chat's avatar and name in the explorer.", &["dense", "condensed", "small rows", "avatar only", "sidebar", "toggle", "density"]), &["toggle-compact"]),
     keyed(e("live-preview", "Explorer live preview", "layout", "Opens the chat under the explorer's cursor while you move through the list.", &["preview", "peek", "follow cursor", "sidebar", "toggle", "browse"]), &["toggle-preview"]),
     keyed(e("workspace-bar", "Workspace bar", "layout", "The strip of workspace tabs along the top.", shown!["workspaces", "tabs", "tab bar", "top bar", "strip"]), &["setting:workspaceBarVisible"]),
@@ -44,6 +45,9 @@ pub const ENTRIES: &[Entry] = &[
     e("minimal-ui", "Minimal UI", "layout", "Hides chips, switches and other chrome for a quieter window.", shown!["zen", "focus mode", "distraction free", "clean", "simple", "chrome", "declutter"]),
     keyed(e("timestamps", "Timestamps", "chats", "Shows the time beside each message.", shown!["time", "date", "clock", "message times", "stamps"]), &["setting:timestampsVisible"]),
     e("reading-theme", "Reading theme", "appearance", "The colours and typeface of the whole window; opens a list to pick one.", &["theme", "colours", "colors", "color scheme", "colour scheme", "dark mode", "light mode", "font", "typeface", "appearance", "skin", "contrast"]),
+    e("font", "Font", "appearance", "The chat's typeface and size for this reading theme; opens the font picker.", &["typeface", "font family", "font size", "text size", "monospace", "serif", "sans"]),
+    e("choose-font", "Choose font…", "appearance", "Picks the chat's typeface and size for this reading theme, previewed in the chat.", &["font", "typeface", "font family", "font size", "text size", "monospace", "serif", "sans"]),
+    e("reset-font", "Reset font to theme default", "appearance", "Goes back to the reading theme's own typeface and size.", &["font", "typeface", "revert", "default font", "undo font", "restore"]),
     e("ui-scale", "Interface size", "appearance", "How large the whole interface is drawn; opens a list of sizes.", &["zoom", "scale", "size", "bigger", "smaller", "larger", "font size", "text size", "dpi"]),
     e("reduced-motion", "Reduce Motion", "appearance", "Turns off animations and smooth scrolling.", &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still"]),
     // ---- chats
@@ -145,9 +149,6 @@ fn distance(a: &[char], b: &[char]) -> usize {
 
 /// A typo of `word` or of how it starts: within one edit, two from seven letters.
 fn near(term: &str, word: &str) -> bool {
-    if true {
-        return false; // not written yet
-    }
     let term: Vec<char> = term.chars().collect();
     if term.len() < 4 {
         return false;
@@ -192,9 +193,6 @@ fn term_score(term: &str, label: &str, aliases: &[String], description: &str) ->
 /// How well `query` matches: every word must match somewhere (higher is
 /// better); None when one does not. An empty query matches everything.
 pub fn score(query: &str, label: &str, aliases: &[&str], description: &str) -> Option<u32> {
-    if true {
-        return None; // not written yet
-    }
     let label = label.to_lowercase();
     let description = description.to_lowercase();
     let aliases: Vec<String> = aliases.iter().map(|a| a.to_lowercase()).collect();
@@ -231,6 +229,13 @@ mod tests {
     }
 
     #[test]
+    fn every_setting_on_the_page_is_described() {
+        for id in crate::settings_view::IDS {
+            assert!(find(id).is_some(), "the setting {id} needs a catalogue entry");
+        }
+    }
+
+    #[test]
     fn peters_words_find_the_activity_bar() {
         for query in ["hide", "collapse", "toggle", "left bar", "icons", "rail", "activity", "colapse", "hdie", "navigation rail"] {
             top3(query, "nav-rail");
@@ -248,6 +253,8 @@ mod tests {
         top3("notifications", "pause-mobile-push");
         top3("double tap", "double-press");
         top3("zoom", "ui-scale");
+        assert_eq!(ranked("avatar")[0], "avatar-size");
+        top3("portrait size", "avatar-size");
     }
 
     #[test]

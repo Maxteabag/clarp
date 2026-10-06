@@ -1,5 +1,6 @@
 import { ListView } from "std-widgets.slint";
 import { Palette, Focus, FocusRing } from "theme.slint";
+import { Field } from "fields.slint";
 
 // One line of the settings surface: a section title, a switch, a choice
 // that steps through values, an action, or read-only information.
@@ -9,19 +10,27 @@ export struct SettingRow {
     label: string,
     detail: string,
     on: bool,
+    // What it does, one line under the label.
+    description: string,
 }
 
 // SettingsPanel.qml: sections of switches and choices. Up/Down (or Tab)
 // move between the rows that do something, Space/Enter change the current
-// one, Left/Right step a choice, Escape goes back to the chats.
+// one, Left/Right step a choice, Escape goes back to the chats. `/` searches
+// the settings by name, alias or description (Rust filters the rows).
 export component Settings inherits Rectangle {
     in property <[SettingRow]> rows;
     in-out property <int> current;
     callback activated(string);
     callback adjusted(string, int);
     callback moved(int);
+    callback searched(string);
+    in property <string> query;
     public function focus-list() { keys.focus(); }
+    public function focus-search() { search.focus(); }
     out property <bool> list-focused: keys.has-focus;
+    out property <bool> search-focused: search.has-focus;
+    property <length> row-height: 48px;
     background: Palette.window;
 
     function actionable(index: int) -> bool {
@@ -68,16 +77,28 @@ export component Settings inherits Rectangle {
                 spacing: 16px;
                 Text { text: "SETTINGS"; color: Palette.chrome-text; font-size: 16px; font-weight: 700; }
                 Text {
-                    text: "↑↓ / Tab move · Space / Enter change · Esc back to chat";
+                    text: search.has-focus ? "↓ / Enter results · Esc clear" : "↑↓ / Tab move · Space / Enter change · / search · Esc back to chat";
                     color: Palette.muted;
                     font-size: 11px;
                     vertical-alignment: center;
                 }
             }
+            search := Field {
+                height: 34px;
+                font-size: 13px;
+                placeholder-text: "Search settings (/): hide, theme, voice…";
+                accessible-label: "Search settings";
+                edited(text) => { root.searched(text); }
+            }
+            if root.query != "" && root.rows.length == 0: Text {
+                text: "No setting matches";
+                color: Palette.faint;
+                font-size: 12px;
+            }
             list := ListView {
                 vertical-stretch: 1;
                 for row[index] in root.rows: Rectangle {
-                    height: row.kind == "section" ? 40px : 36px;
+                    height: row.kind == "section" ? 40px : row.description != "" ? root.row-height : 36px;
                     border-radius: 3px;
                     background: index == root.current && keys.has-focus ? Focus.cursor : touch.has-hover && root.actionable(index) ? Palette.hover : transparent;
                     touch := TouchArea {
@@ -100,7 +121,12 @@ export component Settings inherits Rectangle {
                         padding-left: 12px;
                         padding-right: 12px;
                         spacing: 12px;
-                        Text { text: row.label; color: Palette.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text { text: row.label; color: Palette.text; overflow: elide; }
+                            if row.description != "": Text { text: row.description; color: Palette.muted; font-size: 11px; overflow: elide; }
+                        }
                         if row.kind == "choice": Text {
                             text: "‹  " + row.detail + "  ›";
                             color: Palette.accent;
@@ -139,6 +165,10 @@ export component Settings inherits Rectangle {
         }
     }
     changed current => {
-        list.content-y = Math.min(Math.max(list.content-y, -root.current * 36px), list.visible-height - (root.current + 2) * 36px);
+        list.content-y = Math.min(Math.max(list.content-y, -root.current * root.row-height), list.visible-height - (root.current + 2) * root.row-height);
+    }
+    // Rust emptied the search (Escape, opening the page): the field follows.
+    changed query => {
+        if (search.text != root.query) { search.text = root.query; }
     }
 }
