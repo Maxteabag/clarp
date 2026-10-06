@@ -21,11 +21,27 @@ export global Palette {
     in property <color> danger: #c98a98;
     in property <color> danger-surface: #2b2028;
     in property <color> link: #7aa2f7;
+    // A working row's shimmer per tone (live_view::shimmer_colours): its
+    // letters rest at the low colour and the glow passing through brings
+    // them to the high one.
+    in property <color> shimmer-accent-low: #a587d9;
+    in property <color> shimmer-accent-high: #d4c2f0;
+    in property <color> shimmer-muted-low: #7980a2;
+    in property <color> shimmer-muted-high: #c0bdd0;
     in property <length> body-size: 15px;
     in property <string> body-family: "JetBrains Mono";
     // Code blocks and tool output: the reader's own font when it is
     // monospace, else JetBrains Mono.
     in property <string> code-family: "JetBrains Mono";
+}
+
+// What the chats show and animate, set from Rust: the live status line
+// (Settings, off by default), Reduce Motion, and whether the window is on
+// screen at all (covered or minimised: nothing animates).
+export global ChatLook {
+    in property <bool> live-status-line;
+    in property <bool> reduced-motion;
+    in property <bool> window-shown: true;
 }
 
 // Where the keyboard is: the keyboard map's state (commands::context), set

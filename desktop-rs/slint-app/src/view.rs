@@ -175,6 +175,17 @@ pub(crate) fn apply_theme(window: &AppWindow, id: &str, chosen: Option<&FontOver
     let own = chosen.is_some_and(|c| !c.family.is_empty()) && font.missing.is_none();
     palette.set_code_family(if own && monospace(&font.family) { font.family.as_str() } else { "JetBrains Mono" }.into());
     palette.set_body_family(font.family.into());
+    // A working row's shimmer, per tone.
+    let shimmer = |tone: &str| crate::live_view::shimmer_colours(theme, tone).and_then(|(low, high)| Some((color(&low)?, color(&high)?)));
+    match (shimmer("accent"), shimmer("mutedText")) {
+        (Some((accent_low, accent_high)), Some((muted_low, muted_high))) => {
+            palette.set_shimmer_accent_low(accent_low);
+            palette.set_shimmer_accent_high(accent_high);
+            palette.set_shimmer_muted_low(muted_low);
+            palette.set_shimmer_muted_high(muted_high);
+        }
+        _ => eprintln!("clarp-slint: theme {id} has no shimmer colours"),
+    }
 }
 
 pub(crate) fn stamp(epoch_millis: i64) -> String {

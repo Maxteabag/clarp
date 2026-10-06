@@ -6,13 +6,16 @@
 //! Explored N, tails, +N −M) without moving a reader who scrolled up,
 //! J/K and O reach and open them, the settled turn folds, a durable `/log`
 //! row takes over its items in place, and a gap recovers from GET /live.
+//! The status line is hidden unless Settings show it: the working row's
+//! label shimmers instead, without moving the chat, and only while it is on
+//! screen, the window shows and motion is not reduced.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use serde_json::json;
-use slint::Model;
+use slint::{ComponentHandle, Model};
 use slint::platform::Key;
 
 use super::scroll_checks::{anchor_now, anchor_moved, last_row_visible, place_of, row_height, wheel_up};
@@ -87,6 +90,78 @@ fn events_queries() -> Vec<serde_json::Value> {
     requests("GET", "/events").into_iter().map(|r| r["query"].clone()).collect()
 }
 
+/// A drawn element whose accessible id is `id`.
+fn drawn(id: &str) -> bool {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return false };
+    let id = id.to_owned();
+    ElementQuery::from_root(&window)
+        .match_predicate(move |e| e.accessible_id().is_some_and(|a| a == id.as_str()) && e.size().width > 0.0 && e.size().height > 0.0)
+        .find_first()
+        .is_some()
+}
+
+/// Whether row `key`'s label is drawn shimmering.
+fn shimmering(key: &str) -> bool {
+    drawn(&format!("shimmer:{key}"))
+}
+
+/// Any label drawn shimmering.
+fn any_shimmering() -> bool {
+    use i_slint_backend_testing::ElementQuery;
+    let Some(window) = crate::window() else { return false };
+    ElementQuery::from_root(&window).match_predicate(|e| e.accessible_id().is_some_and(|a| a.starts_with("shimmer:"))).find_first().is_some()
+}
+
+/// Whether the active pane's status line is drawn.
+fn status_line_drawn() -> bool {
+    drawn(&format!("live-status:{}", view().id))
+}
+
+fn set_status_line(on: bool) {
+    let app = app_now();
+    if crate::profile_view::live_status_line(&app) != on {
+        crate::settings_view::change(&app, &crate::window().expect("window"), "live-status-line", 1);
+    }
+}
+
+fn set_reduced_motion(on: bool) {
+    let app = app_now();
+    if crate::profile_view::reduced_motion(&app) != on {
+        crate::settings_view::change(&app, &crate::window().expect("window"), "reduced-motion", 1);
+    }
+}
+
+/// The process's CPU time so far (user and system).
+fn cpu_time() -> Duration {
+    // SAFETY: getrusage fills the zeroed struct it is given.
+    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) } != 0 {
+        check(false, &format!("getrusage: {}", std::io::Error::last_os_error()));
+        return Duration::ZERO;
+    }
+    let time = |t: libc::timeval| Duration::from_secs(t.tv_sec as u64) + Duration::from_micros(t.tv_usec as u64);
+    time(usage.ru_utime) + time(usage.ru_stime)
+}
+
+thread_local! {
+    /// Frames drawn, CPU time and when, at the start of a measurement.
+    static MARK: std::cell::Cell<(usize, Duration, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, Duration::ZERO, None)) };
+}
+
+fn mark() {
+    MARK.with(|m| m.set((crate::perf::stats().frames.len(), cpu_time(), Some(std::time::Instant::now()))));
+}
+
+/// Frames per second and CPU (% of a core) since `mark`, and over how long.
+fn since_mark() -> (f64, f64, Duration) {
+    let (frames, cpu, at) = MARK.with(std::cell::Cell::get);
+    let elapsed = at.map(|a| a.elapsed()).unwrap_or_default();
+    let seconds = elapsed.as_secs_f64().max(0.001);
+    let drawn = (crate::perf::stats().frames.len() - frames) as f64;
+    (drawn / seconds, (cpu_time() - cpu).as_secs_f64() * 100.0 / seconds, elapsed)
+}
+
 pub fn live_check(out: String) {
     let anchor: Rc<RefCell<Option<(String, f32)>>> = Rc::default();
     let height: Rc<RefCell<f32>> = Rc::default();
@@ -103,11 +178,16 @@ pub fn live_check(out: String) {
     let (running_at1, running_at2) = (running_at.clone(), running_at.clone());
     let (before3, before4) = (rows_before.clone(), rows_before.clone());
     let (anchor1, anchor2) = (anchor.clone(), anchor.clone());
-    let (height1, height2) = (height.clone(), height.clone());
+    let (height1, height2, height3) = (height.clone(), height.clone(), height.clone());
     let (before1, before2) = (rows_before.clone(), rows_before.clone());
     let stale: Rc<RefCell<(usize, usize)>> = Rc::default();
     let (stale1, stale2) = (stale.clone(), stale.clone());
     let out17 = out.clone();
+    let (out18, out19, out20, out21) = (out.clone(), out.clone(), out.clone(), out.clone());
+    let place: Rc<RefCell<Option<(String, f32)>>> = Rc::default();
+    let (place1, place2) = (place.clone(), place.clone());
+    let theme_before: Rc<RefCell<String>> = Rc::default();
+    let (theme1, theme2) = (theme_before.clone(), theme_before.clone());
     let fetched: Rc<std::cell::Cell<usize>> = Rc::default();
     let (fetched1, fetched2) = (fetched.clone(), fetched.clone());
     let stages: Vec<Stage> = vec![
@@ -139,6 +219,8 @@ pub fn live_check(out: String) {
             }
             check(requests("GET", "/live").iter().any(|r| r["query"]["session"] == "rachel"), "opening the chat asks GET /live?session=rachel");
             check(status().is_empty(), &format!("no status line while idle: {:?}", status()));
+            check(!crate::profile_view::live_status_line(app), "the live status line is off by default");
+            check(crate::settings_view::rows(app).iter().any(|r| r.id == "live-status-line" && r.label == "Live status line" && !r.on), "Settings list Live status line, off");
             replay(AFTER_THINKING_TITLE)
         })),
         ("thinking", Box::new(move |_, _window, elapsed| {
@@ -150,7 +232,33 @@ pub fn live_check(out: String) {
             check(view().live_busy, "the status line says the agent works");
             check(view().live_stop_key == "Ctrl+.", &format!("it names the interrupt key: {:?}", view().live_stop_key));
             check(titles() == ["Thinking: Finding the flaky test"], &format!("one reasoning row: {:?}", titles()));
+            check(!status_line_drawn(), "the status line is not drawn by default");
+            let thinking = live_rows().into_iter().next().unwrap_or_default();
+            check(thinking.live.shimmer == "muted", &format!("the reasoning row shimmers muted: {:?}", thinking.live.shimmer));
+            check(shimmering(&thinking.live.key), "and its label is drawn shimmering");
+            check(!view().working, "no typing dots under a working row");
             shot(&out1, "live-01-thinking");
+            set_status_line(true);
+            true
+        })),
+        ("status line on", Box::new(move |_, _window, elapsed| {
+            if !status_line_drawn() {
+                return elapsed > Duration::from_secs(3) && {
+                    check(false, "Settings bring the status line back");
+                    true
+                };
+            }
+            check(true, "Settings bring the status line back");
+            check(crate::settings_view::rows(app_now().as_ref()).iter().any(|r| r.id == "live-status-line" && r.on), "Settings show it on");
+            shot(&out18, "live-01-status-line");
+            set_status_line(false);
+            true
+        })),
+        ("status line off", Box::new(move |_, _window, _| {
+            if status_line_drawn() {
+                return false;
+            }
+            check(true, "and off again hides it");
             replay(AFTER_FIRST_CHUNK)
         })),
         ("streaming", Box::new(move |_, _window, elapsed| {
@@ -186,6 +294,96 @@ pub fn live_check(out: String) {
             let command = live_row("live:cl:toolu_03").unwrap_or_default();
             check(command.live.explaining && command.live.secondary.is_empty(), "the explanation line says Explaining… until it lands");
             shot(&out7, "live-00-explaining");
+            check(command.live.shimmer == "accent", &format!("the running command shimmers in the accent: {:?}", command.live.shimmer));
+            check(titles().contains(&"Explored 1 file, 1 search".to_owned()) && live_rows().iter().filter(|r| r.live.title.starts_with("Explored")).all(|r| r.live.shimmer.is_empty()), "the settled explore group does not");
+            *place1.borrow_mut() = place_of("live:cl:toolu_03");
+            mark();
+            true
+        })),
+        ("shimmering", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(1200) {
+                return false;
+            }
+            check(shimmering("live:cl:toolu_03"), "the running command's label is drawn shimmering");
+            let (fps, cpu, over) = since_mark();
+            check(fps >= 10.0, &format!("the shimmer animates: {fps:.0} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            let height = row_height("live:cl:toolu_03");
+            check((height - *height3.borrow()).abs() < 0.5, &format!("shimmering keeps the row's height: {} → {height}", height3.borrow()));
+            let (before, now) = (place2.borrow().clone(), place_of("live:cl:toolu_03"));
+            let kept = before.as_ref().zip(now.as_ref()).is_some_and(|(b, n)| (b.1 - n.1).abs() <= 1.0);
+            check(kept, &format!("and its place in the chat: {before:?} → {now:?}"));
+            shot(&out19, "live-07-shimmer-terminal");
+            *theme1.borrow_mut() = app_now().engine.borrow().reading_theme();
+            app_now().engine.borrow_mut().set_reading_theme("word");
+            crate::pump_now(&app_now());
+            true
+        })),
+        ("shimmer word", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(shimmering("live:cl:toolu_03"), "it shimmers in Word too");
+            shot(&out20, "live-08-shimmer-word");
+            app_now().engine.borrow_mut().set_reading_theme("hacker");
+            crate::pump_now(&app_now());
+            true
+        })),
+        ("shimmer hacker", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(shimmering("live:cl:toolu_03"), "and in Hacker");
+            shot(&out21, "live-09-shimmer-hacker");
+            let before = theme2.borrow().clone();
+            app_now().engine.borrow_mut().set_reading_theme(&before);
+            crate::pump_now(&app_now());
+            set_reduced_motion(true);
+            true
+        })),
+        ("reduced motion", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(!shimmering("live:cl:toolu_03"), "Reduce Motion: no shimmer");
+            check(live_row("live:cl:toolu_03").is_some_and(|r| r.live.shimmer == "accent"), "the label keeps its accent, still");
+            mark();
+            true
+        })),
+        ("still", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (fps, cpu, over) = since_mark();
+            check(fps <= 6.0, &format!("Reduce Motion draws only what changes (the clock): {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            set_reduced_motion(false);
+            crate::window().expect("window").global::<crate::ChatLook>().set_window_shown(false);
+            true
+        })),
+        ("window hidden", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            check(!shimmering("live:cl:toolu_03"), "a covered window does not shimmer");
+            mark();
+            true
+        })),
+        ("hidden still", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (fps, cpu, over) = since_mark();
+            check(fps <= 6.0, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            crate::window().expect("window").global::<crate::ChatLook>().set_window_shown(true);
+            true
+        })),
+        ("shown again", Box::new(move |_, _window, elapsed| {
+            if !shimmering("live:cl:toolu_03") {
+                return elapsed > Duration::from_secs(2) && {
+                    check(false, "shown again, it shimmers again");
+                    true
+                };
+            }
+            check(true, "shown again, it shimmers again");
             replay(AFTER_EXPLAIN)
         })),
         ("explained", Box::new(move |_, _window, elapsed| {
@@ -245,6 +443,16 @@ pub fn live_check(out: String) {
             check(still, &format!("rows updating in place do not move a reader who scrolled up: {detail}"));
             check(!report().follows, "the reader still reads the history");
             shot(&out2, "live-02-reader-up");
+            check(!any_shimmering(), "the running command, scrolled away, does not shimmer");
+            mark();
+            true
+        })),
+        ("off screen", Box::new(move |_, _window, elapsed| {
+            if elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (fps, cpu, over) = since_mark();
+            check(fps <= 6.0, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             headless::press(Key::End);
             replay(AFTER_FAILED)
         })),
@@ -255,6 +463,7 @@ pub fn live_check(out: String) {
             let tool = live_row("live:cl:toolu_03").unwrap_or_default();
             check(tool.live.title == "Ran npm test" && tool.live.status == "failed", &format!("the command failed in place: {:?} {:?}", tool.live.title, tool.live.status));
             check(tool.live.meta == "exit 1 · 3.2s", &format!("its exit code and run time: {:?}", tool.live.meta));
+            check(tool.live.shimmer.is_empty() && !shimmering("live:cl:toolu_03"), "settled, it stops shimmering");
             check(report().follows, "End follows again");
             let (visible, detail) = last_row_visible();
             check(visible, &format!("a follower stays at the end: {detail}"));
@@ -304,6 +513,17 @@ pub fn live_check(out: String) {
             check(stopped.live.meta == "interrupted", "and says it was interrupted");
             app_now().focus_transcript();
             shot(&out4, "live-04-folded");
+            check(live_rows().iter().all(|r| r.live.shimmer.is_empty()) && !any_shimmering(), "nothing shimmers once the turn settled");
+            check(!view().working, "and no typing dots");
+            mark();
+            true
+        })),
+        ("idle", Box::new(move |app, _window, elapsed| {
+            if elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let (fps, cpu, over) = since_mark();
+            check(fps <= 3.0, &format!("idle, the window draws (almost) nothing: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             // On the failed command, K is the row above it: the fold.
             *app.artifact_cursor.borrow_mut() = "live:cl:toolu_03".into();
             true
@@ -396,6 +616,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             check(line.starts_with("● Running sleep 99 · 1:1"), &format!("elapsed from tool.started_at_ms: {line:?}"));
+            check(view().working, "working with no row at work and the status line hidden: the typing dots show");
             // The Host sums finished turns up in /log (§9).
             check(control("/__control/turn-summary", &json!({"on": true})).is_ok(), "the Host turns log_turn_summary on");
             app_now().engine.borrow_mut().reconnect();

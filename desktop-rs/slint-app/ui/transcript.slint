@@ -1,4 +1,4 @@
-import { Palette, Focus } from "theme.slint";
+import { Palette, Focus, ChatLook } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
@@ -67,6 +67,10 @@ export struct LiveRow {
     text: string,
     expandable: bool,
     expanded: bool,
+    // While it works, the tone its label shimmers in (accent, muted; ""
+    // for none) and the label letter by letter for the glow.
+    shimmer: string,
+    letters: [string],
 }
 
 // The Host's resolved-decision prompt, shown as what the user decided
@@ -320,6 +324,11 @@ component LiveItem inherits Rectangle {
     in property <bool> measuring;
     property <bool> selected: root.live.expandable && ArtifactBridge.cursor == root.live.key;
     property <bool> running: root.live.status == "running" || root.live.status == "pending";
+    // Only while it works, is drawn (not measured), the window shows and
+    // motion is not reduced: nothing else asks for frames. A row scrolled
+    // away is not drawn at all (the list keeps only those on screen).
+    property <bool> shimmering: root.live.shimmer != "" && root.live.letters.length > 0 && !root.measuring
+        && !ChatLook.reduced-motion && ChatLook.window-shown;
     property <color> mark: root.live.status == "failed" ? Palette.danger
         : root.live.status == "interrupted" ? Palette.warning
         : root.running ? Palette.accent : Palette.success;
@@ -357,15 +366,47 @@ component LiveItem inherits Rectangle {
                 border-width: 1px;
                 border-color: root.live.kind == "fold" ? Palette.faint : root.mark;
             }
-            Text {
+            // A working row's label takes its tone, and a glow travels
+            // through its letters as through a working agent's name in the
+            // explorer; only the colours change, so the chat never moves.
+            if !root.shimmering: Text {
                 text: root.live.title;
-                color: root.live.kind == "reasoning" || root.live.kind == "fold" ? Palette.muted : Palette.chrome-text;
+                color: root.live.shimmer == "accent" ? Palette.accent
+                    : root.live.shimmer == "muted" || root.live.kind == "reasoning" || root.live.kind == "fold" ? Palette.muted
+                    : Palette.chrome-text;
                 font-size: 13px;
                 font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
                 font-italic: root.live.kind == "reasoning";
                 overflow: elide;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
+            }
+            if root.shimmering: shimmer := Rectangle {
+                horizontal-stretch: 1;
+                min-width: 0px;
+                clip: true;
+                accessible-role: text;
+                accessible-id: "shimmer:" + root.live.key;
+                accessible-label: root.live.title;
+                // The glow's centre runs a little past both ends.
+                property <float> phase: Math.mod(animation-tick() / 1800ms, 1.0) * 1.6 - 0.3;
+                property <int> count: root.live.letters.length;
+                property <color> low: root.live.shimmer == "muted" ? Palette.shimmer-muted-low : Palette.shimmer-accent-low;
+                property <color> high: root.live.shimmer == "muted" ? Palette.shimmer-muted-high : Palette.shimmer-accent-high;
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 0px;
+                    for letter[i] in root.live.letters: Text {
+                        property <float> at: (i + 0.5) / shimmer.count;
+                        property <float> glow: Math.max(0, 1 - Math.abs(self.at - shimmer.phase) * 4);
+                        text: letter;
+                        color: shimmer.high.mix(shimmer.low, self.glow);
+                        font-size: 13px;
+                        font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
+                        font-italic: root.live.kind == "reasoning";
+                        vertical-alignment: center;
+                    }
+                }
             }
             if root.live.meta != "": Text {
                 text: root.live.meta;

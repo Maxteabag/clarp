@@ -101,6 +101,11 @@ impl PaneState {
     }
 }
 
+/// Whether Settings show the live status line under the chat.
+fn status_line(engine: &Engine) -> bool {
+    engine.settings().boolean(crate::profile_view::LIVE_STATUS_LINE, false)
+}
+
 fn number(row: &serde_json::Map<String, serde_json::Value>, key: &str) -> f32 {
     row.get(key).and_then(serde_json::Value::as_f64).unwrap_or(0.0) as f32
 }
@@ -413,7 +418,8 @@ impl App {
         view.working = crate::cells_view::working(engine, session);
         let (status, busy, key) = crate::live_view::status(engine, session);
         if engine.live_active(session) {
-            // The status line stands in for the typing dots.
+            // The status line, or the working row's shimmer, stands in for
+            // the typing dots.
             view.working = false;
         }
         view.live_status = status.into();
@@ -756,11 +762,13 @@ impl App {
                     crate::scroll_book::measure_soon();
                 }
             }
+            let working = if engine.live_active(&session) { false } else { pane.view.working };
             drop(engine);
-            if pane.view.live_status != status.as_str() || pane.view.live_busy != busy {
+            if pane.view.live_status != status.as_str() || pane.view.live_busy != busy || pane.view.working != working {
                 pane.view.live_status = status.into();
                 pane.view.live_busy = busy;
                 pane.view.live_stop_key = key.into();
+                pane.view.working = working;
                 let view = self.pane_view(pane);
                 pane.view = view.clone();
                 self.panes.set_row_data(index, view);

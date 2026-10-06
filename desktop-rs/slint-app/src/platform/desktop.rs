@@ -185,6 +185,16 @@ fn watch_window() {
                     later(regain_keyboard);
                 }
             }
+            // Covered or minimised (X11; on Wayland the compositor stops
+            // asking for frames instead): the chats stop animating.
+            WindowEvent::Occluded(occluded) => {
+                let shown = !*occluded;
+                later(move || {
+                    if let Some(window) = crate::window() {
+                        window.global::<crate::ChatLook>().set_window_shown(shown);
+                    }
+                });
+            }
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
                 super::keyboard::reported(super::keyboard::Modifiers {

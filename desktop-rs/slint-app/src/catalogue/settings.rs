@@ -74,7 +74,7 @@ fn chats() -> Vec<Setting> {
             |app, _, on| app.engine.borrow_mut().set_show_when_ready(on),
         ),
         Setting::stored_toggle(
-            e("reduced-motion", "Reduce Motion", "appearance", "Turns off animations and smooth scrolling.", &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still"]),
+            e("reduced-motion", "Reduce Motion", "appearance", "Turns off animations and smooth scrolling, the working row's shimmer among them.", &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still", "shimmer"]),
             "CHATS",
             "appearance/reducedMotion",
             false,
@@ -94,6 +94,20 @@ fn chats() -> Vec<Setting> {
             },
         )
         .default("0"),
+        // Off, the working row shimmers in the chat and the shortcut bar
+        // names the stop key.
+        Setting::stored_toggle(
+            e(
+                "live-status-line",
+                "Live status line",
+                "chats",
+                "Shows the line between the chat and the composer with the agent's current step, how long it has run and the Ctrl+. stop key. Off, the working row shimmers in the chat and the shortcut bar names Stop.",
+                &["status line", "stop hint", "activity bar under chat", "working indicator", "live status", "current tool", "progress line", "elapsed time"],
+            ),
+            "CHATS",
+            crate::profile_view::LIVE_STATUS_LINE,
+            false,
+        ),
         // The Host's setting, on Hosts that send live items (§6).
         Setting::toggle(
             keyed(
