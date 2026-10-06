@@ -361,10 +361,17 @@ def _summaries_file() -> pathlib.Path:
 
 
 def _clarp_scratch(workspace: str) -> bool:
-    """A temporary folder Clarp made for one of its own one-shot requests."""
+    """A temporary folder Clarp made for its own work: a one-shot request
+    (/tmp/clarp-model-fallback-x) or a dream (/var/tmp/clarp-dream-worktrees/run)."""
     path = pathlib.Path(workspace)
-    return path.name.startswith("clarp-") and str(path.parent) in {
-        "/tmp", "/var/tmp", tempfile.gettempdir()}
+    for root in {"/tmp", "/var/tmp", tempfile.gettempdir()}:
+        try:
+            first = path.relative_to(root).parts[0]
+        except (ValueError, IndexError):
+            continue
+        if first.startswith("clarp-"):
+            return True
+    return False
 
 
 def _sessions_from_summaries(path: pathlib.Path, want: str, limit: int,
@@ -394,10 +401,10 @@ def _sessions_from_summaries(path: pathlib.Path, want: str, limit: int,
             continue
         if want and want not in workspaces:
             continue
-        # agy prunes old conversations but keeps their summaries; only one
-        # with its history on disk can be resumed.
+        # agy prunes old conversations but keeps their summaries (and some
+        # brain folders); only one it still holds, with its history, resumes.
         jsonl = find_latest_jsonl(str(conv_id), brain_root)
-        if jsonl is None:
+        if jsonl is None or not conversation_exists(str(conv_id)):
             continue
         try:
             mtime = int(jsonl.stat().st_mtime)
