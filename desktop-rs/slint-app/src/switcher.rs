@@ -210,6 +210,11 @@ pub fn rank(items: Vec<Item>, query: &str) -> Vec<Item> {
             Some((score, crate::catalogue::order(item.entry), item))
         })
         .collect();
+    // A typo is forgiven while nothing matches as typed.
+    let typed = crate::catalogue::as_typed(query);
+    if scored.iter().any(|s| s.0 >= typed) {
+        scored.retain(|s| s.0 >= typed);
+    }
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     scored.into_iter().map(|(_, _, item)| item).collect()
 }

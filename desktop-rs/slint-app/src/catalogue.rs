@@ -461,6 +461,12 @@ fn term_score(term: &str, label: &str, aliases: &[String], description: &str) ->
     Some(score)
 }
 
+/// The least score of a query matched as typed, every word of it (a typo
+/// alone scores less): once something matches as typed, the typos go.
+pub fn as_typed(query: &str) -> u32 {
+    200 * query.split_whitespace().count() as u32
+}
+
 /// How well `query` matches: every word must match somewhere (higher is
 /// better); None when one does not. An empty query matches everything.
 pub fn score(query: &str, label: &str, aliases: &[&str], description: &str) -> Option<u32> {
