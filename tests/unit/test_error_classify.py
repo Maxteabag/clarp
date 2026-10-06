@@ -34,6 +34,7 @@ def test_usage_limit_errors_are_user_visible_not_transient():
         "Usage limit reached for this account",
         "quota exceeded",
         "insufficient credits",
+        "agy exited rc=1: Your AI credits balance is too low to continue.",
         "credit balance depleted",
         "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
         "RESOURCE_EXHAUSTED: exceeded your current quota",
