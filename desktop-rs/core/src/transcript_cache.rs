@@ -57,8 +57,31 @@ impl TranscriptCache {
 
     /// Every chat cached for `base_url`, as (session, snapshot), by
     /// session; none when nothing was cached yet.
-    pub fn all(&self, _base_url: &str) -> Result<Vec<(String, Object)>, String> {
-        Ok(Vec::new())
+    pub fn all(&self, base_url: &str) -> Result<Vec<(String, Object)>, String> {
+        let entries = match std::fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(format!("{}: {error}", self.root.display())),
+        };
+        let mut chats = Vec::new();
+        for entry in entries {
+            let path = entry.map_err(|e| format!("{}: {e}", self.root.display()))?.path();
+            if path.extension().is_none_or(|e| e != "json") || std::fs::metadata(&path).map_or(0, |m| m.len()) > MAX_CACHE_BYTES {
+                continue;
+            }
+            let Ok(Value::Object(envelope)) = std::fs::read(&path).map_err(|_| ()).and_then(|b| serde_json::from_slice(&b).map_err(|_| ())) else {
+                continue;
+            };
+            let session = envelope.get("session").and_then(Value::as_str).unwrap_or_default();
+            if envelope.get("schema").and_then(Value::as_i64) != Some(1) || envelope.get("base_url").and_then(Value::as_str) != Some(base_url) || session.is_empty() {
+                continue;
+            }
+            if let Some(snapshot) = envelope.get("snapshot").and_then(Value::as_object) {
+                chats.push((session.to_owned(), snapshot.clone()));
+            }
+        }
+        chats.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(chats)
     }
 
     pub fn save(&self, base_url: &str, session: &str, snapshot: &Object) -> Result<(), String> {

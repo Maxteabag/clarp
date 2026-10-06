@@ -691,6 +691,8 @@ component TranscriptRow inherits HorizontalLayout {
     // A copy laid out off screen to measure: its cards, receipts and images
     // report nothing and take no keyboard, and it is no list item.
     in property <bool> measuring;
+    // The message search jumped to (drawn with a ring; it lays out the same).
+    in property <bool> marked;
     callback link-clicked(string);
     callback toggle-activity(string, string);
     callback copy-message(string);
@@ -711,7 +713,10 @@ component TranscriptRow inherits HorizontalLayout {
         // One message of the list; the id finds it in the checks.
         accessible-role: list-item;
         accessible-id: root.measuring ? "" : "row:" + root.message.id;
-        background: root.message.author == "user" && root.message.receipt.key == "" ? Palette.bubble : transparent;
+        accessible-selected: root.marked;
+        background: root.marked ? Palette.accent.with-alpha(0.14) : root.message.author == "user" && root.message.receipt.key == "" ? Palette.bubble : transparent;
+        border-width: root.marked ? 2px : 0px;
+        border-color: Palette.accent;
         border-radius: 2px;
         max-width: root.message.author == "user" ? root.list-width * 0.75 : root.list-width;
         // Hovering a message offers its copy button (Slint's rich text
@@ -795,6 +800,16 @@ component TranscriptRow inherits HorizontalLayout {
                     measuring: root.measuring;
                 }
             }
+            // Where a message was sent (an @-mention to another agent).
+            if root.message.meta != "" && root.message.author == "user": Text {
+                text: root.message.meta;
+                color: Palette.accent;
+                font-size: 11px;
+                horizontal-alignment: right;
+                accessible-role: text;
+                accessible-id: root.measuring ? "" : "meta:" + root.message.id;
+                accessible-label: root.message.meta;
+            }
             if (root.message.pending || root.message.failed || root.message.stamp != "") && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
                 text: root.message.failed ? "Not delivered" : root.message.pending ? "Sending…" : root.message.stamp;
                 color: root.message.failed ? Palette.danger : Palette.faint;
@@ -818,6 +833,8 @@ export component Transcript inherits FocusScope {
     in property <[MeasureRow]> measure;
     in property <[float]> before;
     in-out property <bool> follow: true;
+    // The row message search jumped to, by id.
+    in property <string> marked;
     out property <length> offset: list.content-y;
     out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
     callback link-clicked(string);
@@ -857,6 +874,7 @@ export component Transcript inherits FocusScope {
         vertical-scrollbar-policy: always-off;
         for row[index] in root.rows: TranscriptRow {
             message: row;
+            marked: row.id == root.marked;
             list-width: list.visible-width;
             view-top: root.absolute-position.y;
             view-bottom: root.absolute-position.y + root.height;
@@ -877,7 +895,18 @@ export component Transcript inherits FocusScope {
                     root.top-y = self.on-screen;
                 }
             }
-            changed on-screen => { self.mark(); }
+            changed on-screen => { self.mark(); self.report-marked(); }
+            changed marked => { self.report-marked(); }
+            // The marked row tells a reveal where it is drawn.
+            function report-marked() {
+                if (self.marked) {
+                    root.marked-y = self.on-screen;
+                    root.marked-height = self.height;
+                    root.marked-drawn = true;
+                } else if (root.marked-drawn && root.marked-y == self.on-screen) {
+                    root.marked-drawn = false;
+                }
+            }
             changed on-top => { self.mark(); }
             changed at => { self.mark(); }
             changed scrolled-to => { self.mark(); }
@@ -1105,6 +1134,68 @@ export component Transcript inherits FocusScope {
         ArtifactBridge.reader-moved();
         root.holding = false;
         root.pin("jump-latest");
+    }
+    // Message search: brings the row at `index` (the marked one) into view,
+    // a fifth down the chat, and stops following. The list knows where a
+    // row is only once it draws it, so this starts from its estimate and
+    // pages towards the row until it reports where it is drawn.
+    public function reveal(index: int) {
+        ArtifactBridge.reader-moved();
+        root.holding = false;
+        root.settling = false;
+        root.follow = false;
+        root.reveal-index = index;
+        root.reveal-ticks = 0;
+        root.reveal-still = 0;
+        root.reveal-idle = 0;
+        if (!root.marked-drawn) {
+            root.move-to(Math.max(list.visible-height - list.content-height, Math.min(0px, -(index + 0.5) * list.content-height / Math.max(1, root.rows.length) + list.visible-height / 5)), "reveal");
+        }
+        root.revealing = true;
+    }
+    out property <bool> revealing;
+    property <int> reveal-index;
+    property <int> reveal-ticks;
+    property <int> reveal-still;
+    property <int> reveal-idle;
+    property <length> marked-y;
+    property <length> marked-height;
+    property <bool> marked-drawn;
+    Timer {
+        interval: 32ms;
+        running: root.revealing;
+        triggered => {
+            root.reveal-ticks += 1;
+            if (root.reveal-ticks > 160) {
+                root.revealing = false;
+                return;
+            }
+            if (root.marked-drawn) {
+                root.reveal-idle = 0;
+                let want = root.marked-height > list.visible-height * 0.8 ? 8px : list.visible-height / 5;
+                let target = Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - (root.marked-y - want)));
+                if (Math.abs((target - list.content-y) / 1px) < 1) {
+                    // Held still there (or as near as the chat's ends let it be).
+                    root.reveal-still += 1;
+                    if (root.reveal-still >= 5) {
+                        root.revealing = false;
+                        root.follow = root.at-end;
+                    }
+                    return;
+                }
+                root.reveal-still = 0;
+                root.move-to(target, "reveal");
+                return;
+            }
+            // Not drawn: a page towards it once the list has settled a moment.
+            root.reveal-idle += 1;
+            if (root.reveal-idle < 3) {
+                return;
+            }
+            root.reveal-idle = 0;
+            let page = root.reveal-index < root.top-index ? -list.visible-height * 0.8 : list.visible-height * 0.8;
+            root.move-to(Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - page)), "reveal");
+        }
     }
     public function scroll-by(delta: length, cause: string) {
         root.move-to(Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta)), cause);

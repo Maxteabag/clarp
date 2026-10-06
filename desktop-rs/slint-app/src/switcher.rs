@@ -12,6 +12,9 @@ pub enum Kind {
     Command,
     /// An idle contact to start (launch dialogs).
     Contact,
+    /// A message found by message search (`search_view.rs`): the target is
+    /// its chat and id, the detail its snippet as Markdown.
+    Message,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +38,21 @@ pub struct Item {
 impl Item {
     pub fn key_of(&self) -> String {
         format!("{:?}:{}", self.kind, self.target)
+    }
+
+    pub fn message(target: String, label: String, snippet: String) -> Self {
+        Item {
+            kind: Kind::Message,
+            target,
+            label,
+            detail: snippet,
+            key: String::new(),
+            group: "message",
+            description: String::new(),
+            aliases: &[],
+            value: String::new(),
+            entry: "",
+        }
     }
 }
 
@@ -98,6 +116,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("keep-layout", "Ctrl+Shift+S"),
         ("change-directory", "Ctrl+Alt+D"),
         ("recent-agents", "Ctrl+R"),
+        ("search-messages", "Ctrl+F"),
         ("refresh", "F5"),
         ("overview", "Ctrl+Shift+O"),
         ("chats", "Ctrl+1"),

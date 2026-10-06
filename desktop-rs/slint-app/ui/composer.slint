@@ -8,6 +8,23 @@ export struct Attachment {
     thumbnail: image,
 }
 
+// An agent the `@` being typed may name (mention_view.rs).
+export struct MentionRow {
+    session: string,
+    name: string,
+    detail: string,
+}
+
+// The composer's @-mentions: the draft and cursor go to the app as they
+// change; the app lists the agents that match what follows the `@`, and
+// the list's keys choose one (the pane's id first in each).
+export global MentionBridge {
+    callback scan(string, string, int);
+    callback select(string, int);
+    callback accept(string, int);
+    callback dismiss(string);
+}
+
 component IconButton inherits Rectangle {
     in property <image> icon;
     in property <string> label;
@@ -78,6 +95,25 @@ export component Composer inherits FocusScope {
     forward-focus: editor;
     capture-key-pressed(event) => {
         if (!editor.has-focus) { return reject; }
+        // The mention list takes the arrows, Tab and Enter while it shows.
+        if (root.mentions.length > 0 && !event.modifiers.control && !event.modifiers.alt) {
+            if (event.text == Key.DownArrow) {
+                MentionBridge.select(root.pane-id, Math.min(root.mention-current + 1, root.mentions.length - 1));
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                MentionBridge.select(root.pane-id, Math.max(root.mention-current - 1, 0));
+                return accept;
+            }
+            if (event.text == Key.Tab || (event.text == Key.Return && !event.modifiers.shift)) {
+                MentionBridge.accept(root.pane-id, root.mention-current);
+                return accept;
+            }
+            if (event.text == Key.Escape) {
+                MentionBridge.dismiss(root.pane-id);
+                return accept;
+            }
+        }
         if (event.text == Key.Escape) {
             root.escape();
             return accept;
@@ -118,6 +154,14 @@ export component Composer inherits FocusScope {
     in property <bool> can-send: true;
     in property <bool> active: true;
     in property <string> agent-name;
+    // @-mentions: the pane, the agents matching the `@` being typed, the
+    // chosen one, and the agent a send goes to ("" for this chat).
+    in property <string> pane-id;
+    in property <[MentionRow]> mentions;
+    in property <int> mention-current;
+    in property <string> route;
+    // The editor's cursor (bytes), set with the draft after a completion.
+    in-out property <int> cursor <=> editor.cursor;
     callback send(string, bool);
     callback stop();
     callback edited(string);
@@ -185,6 +229,47 @@ export component Composer inherits FocusScope {
             // Opens the queue dialog (launch dialogs).
             TouchArea { mouse-cursor: pointer; clicked => { root.queue-requested(); } }
         }
+        if root.mentions.length > 0: Rectangle {
+          accessible-role: list;
+          accessible-label: "Agents to mention";
+          VerticalLayout {
+            for row[index] in root.mentions: Rectangle {
+                height: 26px;
+                border-radius: 3px;
+                background: index == root.mention-current ? Palette.control : touch.has-hover ? Palette.hover : transparent;
+                accessible-role: list-item;
+                accessible-id: "mention:" + row.session;
+                accessible-label: row.name;
+                accessible-selected: index == root.mention-current;
+                touch := TouchArea { clicked => { MentionBridge.accept(root.pane-id, index); } }
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    Text { text: "@" + row.name; color: Palette.text; font-size: 13px; vertical-alignment: center; }
+                    Text { text: row.detail; color: Palette.muted; font-size: 11px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    if index == root.mention-current: Text { text: "Tab"; color: Palette.accent; font-size: 11px; vertical-alignment: center; }
+                }
+            }
+          }
+        }
+        // Where Enter sends: another agent's chat, named in the draft.
+        if root.route != "": HorizontalLayout {
+            alignment: start;
+            Rectangle {
+                height: 22px;
+                border-radius: 11px;
+                background: Palette.accent.with-alpha(0.18);
+                accessible-role: text;
+                accessible-id: "route-chip";
+                accessible-label: "Sends to " + root.route;
+                HorizontalLayout {
+                    padding-left: 9px;
+                    padding-right: 9px;
+                    Text { text: "→ " + root.route + "  ·  Enter sends to " + root.route + "'s chat"; color: Palette.text; font-size: 12px; vertical-alignment: center; }
+                }
+            }
+        }
         if root.attachments.length > 0: HorizontalLayout {
             spacing: 5px;
             alignment: start;
@@ -203,7 +288,11 @@ export component Composer inherits FocusScope {
             // scrolls.
             height: clamp(self.text-height, Palette.body-size * 1.6, 240px);
             accessible-label: "Message to " + root.agent-name;
-            edited(text) => { root.edited(text); }
+            edited(text) => {
+                root.edited(text);
+                MentionBridge.scan(root.pane-id, text, self.cursor);
+            }
+            cursor-moved(at) => { MentionBridge.scan(root.pane-id, self.text, at); }
         }
     }
 }

@@ -156,18 +156,24 @@ impl Engine {
     /// nothing sent) while an attachment is not ready or there is nothing
     /// to send. `queue_if_busy` (Ctrl+Enter) waits for the running turn.
     pub fn send_composer(&mut self, session: &str, text: &str, queue_if_busy: bool) -> bool {
+        self.send_composer_to(session, session, text, queue_if_busy)
+    }
+
+    /// Sends `session`'s composer (its text and attachments) to `target`'s
+    /// chat: an @-mention of another agent (`/send` to its session).
+    pub fn send_composer_to(&mut self, session: &str, target: &str, text: &str, queue_if_busy: bool) -> bool {
         let Some(outbound) = clarp_core::attachments::outbound_text(text, &self.attachments(session)) else {
             self.set_error("Wait for attachments to finish uploading or remove them");
             return false;
         };
-        if session.is_empty() || outbound.is_empty() {
+        if session.is_empty() || target.is_empty() || outbound.is_empty() {
             return false;
         }
         self.set_draft(session, "");
         let key = self.attachments_key(session);
         self.settings.remove(&key);
         self.changes.push(Change::Composer(session.to_owned()));
-        self.send_to(session, &outbound, queue_if_busy);
+        self.send_to(target, &outbound, queue_if_busy);
         true
     }
 

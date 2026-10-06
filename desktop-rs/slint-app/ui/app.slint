@@ -2,7 +2,8 @@ import { Palette as WidgetPalette } from "std-widgets.slint";
 import { Palette, Focus, FocusRing } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
-import { Attachment } from "composer.slint";
+import { Attachment, MentionRow, MentionBridge } from "composer.slint";
+export { MentionRow, MentionBridge }
 import { MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, MeasureRow, ScrollBook } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
@@ -297,6 +298,8 @@ export component AppWindow inherits Window {
     public function open-preview() { preview-panel.open(); }
     in property <bool> switcher-open;
     in property <[SwitcherRow]> switcher-rows;
+    // What message search searched (it holds only this computer's chats).
+    in property <string> switcher-note;
     in property <int> switcher-current;
     out property <string> switcher-query: switcher.query;
     callback switcher-edited(string);
@@ -690,6 +693,7 @@ export component AppWindow inherits Window {
             placeholder: root.switcher-placeholder;
             empty-text: root.switcher-empty;
             hint: root.switcher-hint;
+            note: root.switcher-note;
             width: parent.width;
             height: parent.height;
             rows: root.switcher-rows;

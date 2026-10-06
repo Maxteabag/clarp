@@ -113,6 +113,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("updates", &["Ctrl+2"], "Updates", false, Always, false),
             b("teams", &["Ctrl+3"], "Teams", false, Always, false),
             b("recent-agents", &["Ctrl+R"], "Recent", true, Always, false),
+            b("search-messages", &["Ctrl+F"], "Search messages", false, Always, false),
             b("refresh", &["F5"], "Refresh", false, Always, false),
             b("mute", &["Ctrl+M"], "Mute", false, Always, false),
             b("overview", &["Ctrl+Shift+O"], "Overview", false, Always, false),
@@ -1092,5 +1093,14 @@ mod tests {
         assert_eq!(chord(" ", false, false, false).as_deref(), Some("Space"));
         assert_eq!(chord("=", true, false, true).as_deref(), Some("Ctrl+="), "a symbol keeps its own shift");
         assert_eq!(chord(&key(Key::Control), true, false, false), None);
+    }
+
+    #[test]
+    fn ctrl_f_searches_messages_from_anywhere_in_the_chats() {
+        let none = Overrides::new();
+        for state in ["composer", "pane", "sidebar"] {
+            assert_eq!(action_for(state, "Ctrl+F", &none, all()), Some("search-messages"), "{state}");
+        }
+        assert_eq!(action_for("sidebar", "/", &none, all()), Some("agent-search"), "/ still filters the explorer");
     }
 }

@@ -56,6 +56,9 @@ mod font_checks;
 // ---- agent portraits at their device size
 #[path = "avatar_checks.rs"]
 mod avatar_checks;
+// ---- message search and @-mentions
+#[path = "search_checks.rs"]
+mod search_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -447,6 +450,8 @@ pub fn start_check(name: &str, out: String) {
             live_checks::live_check(out)
         }
         "observe" => observe_checks::observe_check(out),
+        "message-search" => search_checks::message_search_check(out),
+        "mention" => search_checks::mention_check(out),
         "a2a" => {
             row_overlap_checks::watch();
             a2a_checks::a2a_check(out)
