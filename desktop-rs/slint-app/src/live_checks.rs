@@ -370,8 +370,11 @@ pub fn live_check(out: String) {
             set_reduced_motion(true);
             true
         })),
-        ("reduced motion", Box::new(move |_, _window, elapsed| {
-            if elapsed < Duration::from_millis(300) {
+        ("reduced motion", Box::new(move |app, _window, elapsed| {
+            // The theme put back re-measures every row (a frame a batch):
+            // what Reduce Motion draws is counted once that is done.
+            let measuring = app.measured_height("").1 .1 > 0;
+            if elapsed < Duration::from_millis(300) || measuring {
                 return false;
             }
             check(!shimmering("live:cl:toolu_03"), "Reduce Motion: no shimmer");
