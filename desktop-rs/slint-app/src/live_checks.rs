@@ -144,6 +144,10 @@ fn cpu_time() -> Duration {
     time(usage.ru_utime) + time(usage.ru_stime)
 }
 
+/// What a running tool's clock alone redraws, at most: its elapsed time and
+/// the hidden status line change twice a second. The shimmer draws 15–30.
+const NO_SHIMMER_FPS: f64 = 6.0;
+
 thread_local! {
     /// Frames per second and CPU % the window takes idle (no turn).
     static IDLE: std::cell::Cell<(f64, f64)> = const { std::cell::Cell::new((0.0, 0.0)) };
@@ -243,7 +247,7 @@ pub fn live_check(out: String) {
             let (fps, cpu, over) = since_mark();
             IDLE.with(|i| i.set((fps, cpu)));
             // The window's own baseline (the shimmer's bounds are relative to it).
-            check(fps <= 6.0, &format!("idle, the window draws little: {fps:.1} frames/s, CPU {cpu:.0}% of a core (debug build) over {over:.1?}"));
+            check(fps <= NO_SHIMMER_FPS, &format!("idle, the window draws little: {fps:.1} frames/s, CPU {cpu:.0}% of a core (debug build) over {over:.1?}"));
             replay(AFTER_THINKING_TITLE)
         })),
         ("thinking", Box::new(move |_, _window, elapsed| {
@@ -332,7 +336,7 @@ pub fn live_check(out: String) {
             check(shimmering("live:cl:toolu_03"), "the running command's label is drawn shimmering");
             let (fps, cpu, over) = since_mark();
             let (idle, idle_cpu) = IDLE.with(std::cell::Cell::get);
-            check(fps >= idle + 8.0, &format!("the shimmer animates: {fps:.0} frames/s (idle {idle:.1}), CPU {cpu:.0}% (idle {idle_cpu:.0}%) over {over:.1?}"));
+            check(fps >= (idle + 8.0).max(2.0 * NO_SHIMMER_FPS), &format!("the shimmer animates: {fps:.0} frames/s (idle {idle:.1}), CPU {cpu:.0}% (idle {idle_cpu:.0}%) over {over:.1?}"));
             let height = row_height("live:cl:toolu_03");
             check((height - *height3.borrow()).abs() < 0.5, &format!("shimmering keeps the row's height: {} → {height}", height3.borrow()));
             let (before, now) = (place2.borrow().clone(), place_of("live:cl:toolu_03"));
@@ -380,7 +384,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             let (fps, cpu, over) = since_mark();
-            check(fps <= IDLE.with(std::cell::Cell::get).0 + 1.5, &format!("Reduce Motion draws only what changes (the clock): {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            check(fps <= NO_SHIMMER_FPS, &format!("Reduce Motion draws only what changes (the clock): {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             set_reduced_motion(false);
             crate::window().expect("window").global::<crate::ChatLook>().set_window_shown(false);
             true
@@ -398,7 +402,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             let (fps, cpu, over) = since_mark();
-            check(fps <= IDLE.with(std::cell::Cell::get).0 + 1.5, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            check(fps <= NO_SHIMMER_FPS, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             crate::window().expect("window").global::<crate::ChatLook>().set_window_shown(true);
             true
         })),
@@ -478,7 +482,7 @@ pub fn live_check(out: String) {
                 return false;
             }
             let (fps, cpu, over) = since_mark();
-            check(fps <= IDLE.with(std::cell::Cell::get).0 + 1.5, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            check(fps <= NO_SHIMMER_FPS, &format!("nor draws frames for it: {fps:.1} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             headless::press(Key::End);
             replay(AFTER_FAILED)
         })),
