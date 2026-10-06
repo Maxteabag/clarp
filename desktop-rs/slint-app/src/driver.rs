@@ -1122,7 +1122,7 @@ fn switcher_check(out: String) {
             }
             check(first(window) == "command:Font size", &format!("Ctrl+K has the font size: {}", first(window)));
             let value = window.get_switcher_rows().row_data(0).map(|r| r.value.to_string()).unwrap_or_default();
-            check(value.starts_with("Theme default"), &format!("at the theme's size: {value:?}"));
+            check(value.ends_with("px · theme default"), &format!("at the theme's size: {value:?}"));
             headless::press(Key::Return);
             true
         })),
@@ -1150,6 +1150,27 @@ fn switcher_check(out: String) {
                 return false;
             }
             check(true, "choosing 18 px sets the chat's font size");
+            // A number steps from where it is: back to the theme's size, then +1.
+            let size = || {
+                let app = app_now();
+                let engine = app.engine.borrow();
+                let size = engine.font_override(&engine.reading_theme()).and_then(|f| f.size);
+                size
+            };
+            let theme_size = {
+                let engine = app.engine.borrow();
+                clarp_core::reading_theme::theme(&engine.reading_theme()).get("fontPixelSize").and_then(|v| v.as_f64()).unwrap_or(15.0)
+            };
+            let Some(setting) = crate::catalogue::setting("font-size") else {
+                check(false, "font-size is registered");
+                return true;
+            };
+            check(setting.reset(&app_now(), window) && size().is_none(), "Delete's reset goes back to the theme's own size");
+            setting.change(&app_now(), window, 1);
+            check(size() == Some(theme_size + 1.0), &format!("+ from the theme's {theme_size} px is one larger: {:?}", size()));
+            setting.change(&app_now(), window, -100);
+            check(size() == Some(11.0), &format!("and the bottom is clamped at 11 px: {:?}", size()));
+            setting.reset(&app_now(), window);
             headless::press_with(&[Key::Control], "k");
             true
         })),

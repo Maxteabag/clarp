@@ -21,7 +21,8 @@ const SCALES: [f64; 9] = [1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4];
 /// The double-press windows offered, in milliseconds.
 const DOUBLE_PRESS: [u64; 8] = [150, 200, 250, 300, 400, 500, 700, 1000];
 /// The chat's font sizes offered, in pixels.
-const FONT_SIZES: [u32; 13] = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 24, 28];
+const FONT_SIZE_MIN: f64 = 11.0;
+const FONT_SIZE_MAX: f64 = 28.0;
 
 pub(super) fn register() -> Vec<Setting> {
     let mut all = Vec::new();
@@ -191,6 +192,15 @@ fn font(app: &App) -> (String, Option<FontOverride>, reading_theme::ResolvedFont
     (theme_id, chosen, resolved, theme_size)
 }
 
+/// The reading theme's font size: `None` is the theme's own (the family
+/// the reader chose stays).
+fn set_font_size(app: &App, size: Option<f64>) {
+    let (theme_id, chosen, ..) = font(app);
+    let family = chosen.map(|c| c.family).unwrap_or_default();
+    let next = (size.is_some() || !family.is_empty()).then_some(FontOverride { family, size });
+    app.engine.borrow_mut().set_font_override(&theme_id, next);
+}
+
 fn ui_scale(app: &App) -> f64 {
     app.engine.borrow().settings().get("appearance/uiScale").and_then(Value::as_f64).unwrap_or(1.15)
 }
@@ -295,28 +305,28 @@ fn appearance() -> Vec<Setting> {
                 (None, None) => format!("{} · {} px · theme default", font.family, font.size),
             }
         }),
-        Setting::choice(
+        // From the theme's own size, + is one pixel larger; Delete goes back to it.
+        Setting::number(
             e("font-size", "Font size", "appearance", "How large the chat's text is for this reading theme; opens a list of sizes.", &["text size", "font size", "bigger text", "smaller text", "larger text", "type size", "letters", "reading size", "zoom text"]),
             "APPEARANCE",
             |app| {
-                let (.., theme_size) = font(app);
-                std::iter::once(Choice::new("", format!("Theme default · {theme_size} px")).about("The reading theme's own size"))
-                    .chain(FONT_SIZES.iter().map(|px| Choice::new(px.to_string(), format!("{px} px"))))
-                    .collect()
+                let (_, chosen, _, theme_size) = font(app);
+                chosen.and_then(|c| c.size).unwrap_or(theme_size)
             },
-            |app| {
-                let (_, chosen, ..) = font(app);
-                chosen.and_then(|c| c.size).map_or_else(String::new, |size| (size.round() as u32).to_string())
-            },
-            |app, _, value| {
-                let (theme_id, chosen, ..) = font(app);
-                let family = chosen.map(|c| c.family).unwrap_or_default();
-                let size = value.parse::<f64>().ok();
-                let next = (size.is_some() || !family.is_empty()).then_some(FontOverride { family, size });
-                app.engine.borrow_mut().set_font_override(&theme_id, next);
-            },
+            |app, _, size| set_font_size(app, Some(size)),
+            FONT_SIZE_MIN,
+            FONT_SIZE_MAX,
+            1.0,
+            "px",
         )
-        .default(""),
+        .detail(|app| {
+            let (_, chosen, _, theme_size) = font(app);
+            match chosen.and_then(|c| c.size) {
+                Some(size) => format!("{size} px"),
+                None => format!("{theme_size} px · theme default"),
+            }
+        })
+        .reset_with(|app, _| set_font_size(app, None)),
         Setting::action(
             e("reset-font", "Reset font to theme default", "appearance", "Goes back to the reading theme's own typeface and size.", &["font", "typeface", "revert", "default font", "undo font", "restore"]),
             "APPEARANCE",
