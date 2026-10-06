@@ -47,4 +47,6 @@ CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP
     timeout "$limit" dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
     "target/${CLARP_CHECK_PROFILE:-debug}/clarp-slint" --check "$name" --out "$out" 2>&1 | tee -a "$scratch/run.log" | grep -E "^(ok|FAIL|E2E|perf)|panicked"
 done
+# The app's whole log beside the shots, to read when a stage times out.
+cp "$scratch/run.log" "$out/app.log"
 grep -q "^E2E_PASS" "$scratch/run.log" && ! grep -q "^E2E_FAIL" "$scratch/run.log"
