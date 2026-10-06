@@ -81,3 +81,27 @@ def test_list_sessions_uses_cwd_mapping(tmp_path):
     assert got[0]["preview"] == "build the thing"
     # cwd with no mapping → empty
     assert agy_transcript.list_sessions("/other", cache_file=cache, brain_root=brain) == []
+
+
+def test_agy_1_3_calls_are_read_from_their_step_and_answered_in_order(tmp_path):
+    p = _write_transcript(tmp_path / "brain", "conv-13", [
+        {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>check</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Looking.", "tool_calls": [
+            {"name": "view_file", "args": {"AbsolutePath": '"/repo/README.md"', "toolSummary": "Read the readme"}},
+            {"name": "run_command", "args": {"CommandLine": "false", "Cwd": "/repo"}}]},
+        {"step_index": 2, "type": "GENERIC", "content": "Created At: x\n\nFile Path: /repo/README.md\n1: hi"},
+        {"step_index": 3, "type": "GENERIC", "content": "Created At: x\n\nThe command exited with code 1.\nOutput:\nboom\n"},
+        {"step_index": 4, "type": "PLANNER_RESPONSE", "content": "Done."},
+        # An exchange with calls but no text made no turn before, and still makes none.
+        {"step_index": 5, "type": "USER_INPUT", "content": "<USER_REQUEST>again</USER_REQUEST>"},
+        {"step_index": 6, "type": "PLANNER_RESPONSE", "content": "",
+         "tool_calls": [{"name": "run_command", "args": {"CommandLine": "ls"}}]},
+    ])
+    turns = agy_transcript.parse_turns(p)
+    assert [(t["role"], t["text"]) for t in turns] == [
+        ("user", "check"), ("assistant", "Looking."), ("assistant", "Done."), ("user", "again")]
+    read, run = turns[1]["tools"]
+    assert (read["name"], read["summary"], read["status"]) == ("Read", "Read the readme", "ok")
+    assert read["input"]["file_path"] == "/repo/README.md"
+    assert (run["name"], run["status"], run["result"]) == ("Bash", "error", "boom")
+    assert [c["kind"] for c in turns[1]["display_cells"]] == ["exploration", "command"]
