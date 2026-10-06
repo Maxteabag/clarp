@@ -1066,6 +1066,50 @@ fn switcher_check(out: String) {
             headless::press_with(&[Key::Control], "k");
             true
         })),
+        ("font size", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("font size");
+            true
+        })),
+        ("font size row", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "font size" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(first(window) == "command:Font size", &format!("Ctrl+K has the font size: {}", first(window)));
+            let value = window.get_switcher_rows().row_data(0).map(|r| r.value.to_string()).unwrap_or_default();
+            check(value.starts_with("Theme default"), &format!("at the theme's size: {value:?}"));
+            headless::press(Key::Return);
+            true
+        })),
+        ("font sizes", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_placeholder().starts_with("Font size") || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("18");
+            true
+        })),
+        ("18 px", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "18" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(first(window) == "command:18 px", &format!("its sizes are listed: {}", first(window)));
+            headless::press(Key::Return);
+            true
+        })),
+        ("sized", Box::new(|app, window, _| {
+            let size = {
+                let engine = app.engine.borrow();
+                engine.font_override(&engine.reading_theme()).and_then(|f| f.size)
+            };
+            if window.get_switcher_open() || size != Some(18.0) {
+                return false;
+            }
+            check(true, "choosing 18 px sets the chat's font size");
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
         ("escape", Box::new(|_, window, elapsed| {
             if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
                 return false;
@@ -1128,7 +1172,7 @@ fn settings_check(out: String) {
             let undescribed: Vec<String> = window
                 .get_setting_rows()
                 .iter()
-                .filter(|r| r.kind != "section" && r.kind != "info" && (r.description.is_empty() || !crate::settings_view::IDS.contains(&r.id.as_str())))
+                .filter(|r| r.kind != "section" && r.kind != "info" && (r.description.is_empty() || crate::catalogue::setting(&r.id).is_none()))
                 .map(|r| r.label.to_string())
                 .collect();
             check(undescribed.is_empty(), &format!("every setting says what it does: {undescribed:?}"));
@@ -1197,6 +1241,14 @@ fn settings_check(out: String) {
                 return false;
             }
             check(row(window, "Activity bar").is_some_and(|r| !r.on), "Space hides the activity bar, the search kept");
+            headless::press(Key::Delete);
+            true
+        })),
+        ("rail reset", Box::new(|_, window, _| {
+            if !window.get_nav_rail_visible() {
+                return false;
+            }
+            check(row(window, "Activity bar").is_some_and(|r| r.on), "Delete puts its default back: the activity bar shows");
             window.invoke_focus_settings_search();
             true
         })),
