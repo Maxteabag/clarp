@@ -36,6 +36,7 @@ mod cells_view;
 mod orchestrator_view;
 mod overview_view;
 mod profile_view;
+mod avatar_view;
 mod voice_view;
 mod font_view;
 
@@ -142,13 +143,13 @@ fn settings() -> Settings {
 /// The compact explorer's width: an average row (avatar and name), so most
 /// names fit and the longest are elided. The chrome is a monospace face,
 /// about 0.6 em per character.
-fn compact_width(window: &AppWindow, chats: &[ChatRow]) -> f32 {
+fn compact_width(window: &AppWindow, chats: &[ChatRow], avatar: f32) -> f32 {
     let names: Vec<usize> = chats.iter().map(|c| c.name.chars().count()).filter(|n| *n > 0).collect();
     let average = if names.is_empty() { 8.0 } else { names.iter().sum::<usize>() as f32 / names.len() as f32 };
     let char_width = window.global::<Palette>().get_body_size() * 0.6;
     let queue_badge = if chats.iter().any(|c| c.queue > 0) { 22.0 } else { 0.0 };
     // Sidebar and frame padding, row padding, the avatar and its gap.
-    let chrome = 16.0 + 12.0 + 20.0 + 28.0 + 10.0 + 12.0;
+    let chrome = 16.0 + 12.0 + 20.0 + avatar + 10.0 + 12.0;
     (chrome + queue_badge + average.ceil() * char_width).clamp(120.0, 320.0)
 }
 
@@ -272,8 +273,10 @@ impl App {
     }
 
     /// Portraits for the chat list: an agent's own, a pair room's two
-    /// agents' (from `pair:<agent>:<agent>`).
-    fn with_portraits(&self, mut rows: Vec<ChatRow>) -> Vec<ChatRow> {
+    /// agents' in one (from `pair:<agent>:<agent>`), at the explorer's size.
+    fn with_portraits(&self, window: &AppWindow, mut rows: Vec<ChatRow>) -> Vec<ChatRow> {
+        let sizes = avatar_view::sizes(self);
+        let logical = if window.get_explorer_compact() { sizes.compact } else { sizes.row };
         for row in &mut rows {
             let session = row.session.to_string();
             if let Some(pair) = session.strip_prefix("pair:") {
@@ -282,11 +285,10 @@ impl App {
                     pair.split(':').filter_map(|id| engine.roster().find_by_agent_id(id).map(|a| a.session.clone())).collect()
                 };
                 if let [first, second] = sessions.as_slice() {
-                    row.portrait = profile_view::portrait(self, first);
-                    row.portrait2 = profile_view::portrait(self, second);
+                    row.portrait = avatar_view::pair_portrait(self, first, second, logical);
                 }
             } else {
-                row.portrait = profile_view::portrait(self, &session);
+                row.portrait = avatar_view::portrait(self, &session, logical);
             }
         }
         rows
@@ -310,7 +312,7 @@ impl App {
         // New portraits alone: the list changes once they are decoded, at
         // most every 100 ms.
         let portraits_only = changes.iter().all(|c| !matches!(c, Change::Roster | Change::Selection | Change::Rooms | Change::Archive | Change::Updates));
-        if list_changed && portraits_only && !profile_view::portraits_due(self) {
+        if list_changed && portraits_only && !avatar_view::portraits_due(self, window.get_explorer_compact()) {
             list_changed = false;
         }
         if list_changed {
@@ -318,9 +320,9 @@ impl App {
             let mut laps = perf::Laps::new();
             let chats = self.chat_rows(&self.engine.borrow(), &window);
             laps.lap("chat rows");
-            let chats = self.with_portraits(chats);
+            let chats = self.with_portraits(&window, chats);
             laps.lap("portraits");
-            window.set_explorer_compact_width(compact_width(&window, &chats));
+            window.set_explorer_compact_width(compact_width(&window, &chats, avatar_view::sizes(self).compact));
             laps.lap("compact width");
             sync_rows(&self.chats, chats);
             laps.lap("set");
@@ -352,9 +354,9 @@ impl App {
                 .collect();
             window.set_unread_rooms(engine.unread_rooms() as i32);
             drop(engine);
-            let rooms = self.with_portraits(rooms);
+            let rooms = self.with_portraits(&window, rooms);
             sync_rows(&self.rooms, rooms);
-            let archived = self.with_portraits(archived);
+            let archived = self.with_portraits(&window, archived);
             sync_rows(&self.archived, archived);
             laps.lap("rooms and archive");
             laps.done("list");
@@ -945,7 +947,8 @@ fn main() {
     platform::audio::start(muted);
     platform::serve_mpris();
     platform::desktop::start();
-    profile_view::prewarm_portraits();
+    avatar_view::prewarm_portraits();
+    avatar_view::apply(&state, &window);
     preview_view::start(false);
     preview_view::wire(&window);
     preview_view::show();

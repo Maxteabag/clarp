@@ -1,7 +1,7 @@
 import { Palette } from "theme.slint";
 import { ComboBox, ScrollView, Switch } from "std-widgets.slint";
 import { Modal } from "dialogs.slint";
-import { AgentAvatar, StatusPill } from "avatar.slint";
+import { AgentAvatar, StatusPill, AvatarArt } from "avatar.slint";
 import { IconButton, TextButton, SectionTitle, InfoRow, ToggleRow, Busy } from "agent_controls.slint";
 import { MediaGallery, MediaItem, MediaViewer } from "media.slint";
 
@@ -163,8 +163,7 @@ export component AgentProfile inherits Modal {
                 name: root.info.name;
                 initial: root.info.initial;
                 symbol: root.info.symbol;
-                size: 34px;
-                radius: 8px;
+                size: AvatarArt.card;
             }
             VerticalLayout {
                 alignment: center;

@@ -1,6 +1,7 @@
 //! Avatars and chat media (C++ `AppController` avatar/media helpers and
-//! `PortraitImage`): which URL an agent's portrait comes from, the rounded
-//! 192 px portrait the sidebar shows, and `clarp-media://asset/<id>` links
+//! `PortraitImage`): which URL an agent's portrait comes from, the square
+//! source cached from the Host and the round portraits made from it at the
+//! device size they are drawn at, and `clarp-media://asset/<id>` links
 //! resolved to locally cached files.
 
 use std::collections::HashMap;
@@ -10,7 +11,8 @@ use fancy_regex::{Captures, Regex};
 
 pub const MAX_PORTRAIT_BYTES: usize = 20 * 1024 * 1024;
 pub const MAX_INLINE_MEDIA_BYTES: usize = 20 * 1024 * 1024;
-pub const PORTRAIT_SIDE: u32 = 192;
+/// The largest portrait source kept: Host portraits are 512 px.
+pub const PORTRAIT_SOURCE_MAX: u32 = 1024;
 
 /// Names with a portrait bundled on every Host.
 const BUNDLED: &[&str] = &[
@@ -38,11 +40,33 @@ pub fn cache_dir() -> Option<std::path::PathBuf> {
     Some(base.join("MaxTeaBag").join("ClarpRust"))
 }
 
-/// The cached rounded portrait for a Host-qualified avatar URL.
+/// The cached portrait source (the Host's, cropped square) for a
+/// Host-qualified avatar URL. Round portraits are made from it beside it
+/// (`sized_portrait_path`); the 192 px rounded files of earlier versions in
+/// `portraits/` are not read.
 pub fn portrait_cache_path(cache: &std::path::Path, url: &str) -> std::path::PathBuf {
     use sha2::{Digest, Sha256};
     let key: String = Sha256::digest(url.as_bytes()).iter().take(12).map(|b| format!("{b:02x}")).collect();
-    cache.join("portraits").join(format!("{key}.png"))
+    cache.join("portraits").join("sources").join(format!("{key}.png"))
+}
+
+/// The device pixels a portrait `logical` px wide covers at `scale` (the
+/// monitor's times the reader's interface scale).
+pub fn device_side(logical: f32, scale: f32) -> u32 {
+    (logical * scale).round().max(1.0) as u32
+}
+
+/// The round portrait of `sources` (one agent, or a pair room's two) made
+/// for `side` device pixels, cached beside the first source.
+pub fn sized_portrait_path(sources: &[&std::path::Path], side: u32) -> std::path::PathBuf {
+    let stems: Vec<String> = sources.iter().map(|p| p.file_stem().unwrap_or_default().to_string_lossy().into_owned()).collect();
+    let folder = sources.first().and_then(|p| p.parent()).unwrap_or_else(|| std::path::Path::new("."));
+    folder.join(format!("{}@{side}.png", stems.join("+")))
+}
+
+/// Whether `path` is a round portrait made for one size (not a source).
+pub fn is_sized_portrait(path: &std::path::Path) -> bool {
+    path.file_stem().is_some_and(|s| s.to_string_lossy().contains('@'))
 }
 
 /// The file a chat image is cached in: named by Host and asset, so assets
@@ -82,8 +106,6 @@ fn format_of(bytes: &[u8]) -> Option<image::ImageFormat> {
     }
 }
 
-/// The centred square of the image, scaled to 192 px and cut to a circle,
-/// as PNG. None when the bytes are not a readable image up to 4096 px.
 /// RGBA pixels as PNG (a pasted clipboard image).
 pub fn png_from_rgba(width: u32, height: u32, rgba: Vec<u8>) -> Option<Vec<u8>> {
     let image = image::RgbaImage::from_raw(width, height, rgba)?;
@@ -96,30 +118,6 @@ pub fn is_png(bytes: &[u8]) -> bool {
     bytes.starts_with(b"\x89PNG\r\n\x1a\n")
 }
 
-pub fn rounded_portrait(bytes: &[u8]) -> Option<Vec<u8>> {
-    let format = format_of(bytes)?;
-    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
-    reader.no_limits();
-    let (width, height) = reader.into_dimensions().ok()?;
-    if width == 0 || height == 0 || width > 4096 || height > 4096 {
-        return None;
-    }
-    let source = image::load_from_memory_with_format(bytes, format).ok()?;
-    let side = width.min(height);
-    let square = source.crop_imm((width - side) / 2, (height - side) / 2, side, side);
-    let mut portrait = square.resize_exact(PORTRAIT_SIDE, PORTRAIT_SIDE, image::imageops::FilterType::Triangle).to_rgba8();
-    // An antialiased circle: coverage by distance from the centre.
-    let radius = PORTRAIT_SIDE as f32 / 2.0;
-    for (x, y, pixel) in portrait.enumerate_pixels_mut() {
-        let (dx, dy) = (x as f32 + 0.5 - radius, y as f32 + 0.5 - radius);
-        let coverage = (radius - (dx * dx + dy * dy).sqrt() + 0.5).clamp(0.0, 1.0);
-        pixel[3] = (f32::from(pixel[3]) * coverage).round() as u8;
-    }
-    let mut png = Vec::new();
-    portrait.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
-    Some(png)
-}
-
 /// An icon for StatusNotifierItem hosts: `side` px square, ARGB32 in
 /// network byte order.
 pub fn argb_icon(png: &[u8], side: u32) -> Option<(i32, i32, Vec<u8>)> {
@@ -129,34 +127,119 @@ pub fn argb_icon(png: &[u8], side: u32) -> Option<(i32, i32, Vec<u8>)> {
     Some((side as i32, side as i32, data))
 }
 
-// ---- portraits drawn at their device size (test first: not yet)
-
-pub const PORTRAIT_SOURCE_MAX: u32 = 1024;
-
-pub fn device_side(_logical: f32, _scale: f32) -> u32 {
-    unimplemented!("device_side")
+/// The Host's portrait cropped to its centred square, as PNG, at its own
+/// resolution (at most `PORTRAIT_SOURCE_MAX`): the UI makes each size it
+/// draws from this. None when the bytes are not a readable image up to
+/// 4096 px.
+pub fn square_portrait(bytes: &[u8]) -> Option<Vec<u8>> {
+    let format = format_of(bytes)?;
+    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format);
+    reader.no_limits();
+    let (width, height) = reader.into_dimensions().ok()?;
+    if width == 0 || height == 0 || width > 4096 || height > 4096 {
+        return None;
+    }
+    // A square PNG small enough is kept as the Host sent it.
+    if format == image::ImageFormat::Png && width == height && width <= PORTRAIT_SOURCE_MAX {
+        return Some(bytes.to_vec());
+    }
+    let source = image::load_from_memory_with_format(bytes, format).ok()?;
+    let side = width.min(height);
+    let mut square = source.crop_imm((width - side) / 2, (height - side) / 2, side, side).to_rgba8();
+    if side > PORTRAIT_SOURCE_MAX {
+        square = image::imageops::resize(&square, PORTRAIT_SOURCE_MAX, PORTRAIT_SOURCE_MAX, image::imageops::FilterType::Lanczos3);
+    }
+    png(&square)
 }
 
-pub fn sized_portrait_path(_sources: &[&std::path::Path], _side: u32) -> std::path::PathBuf {
-    unimplemented!("sized_portrait_path")
+/// An image as PNG.
+pub fn png(image: &image::RgbaImage) -> Option<Vec<u8>> {
+    let mut png = Vec::new();
+    image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some(png)
 }
 
-pub fn is_sized_portrait(_path: &std::path::Path) -> bool {
-    unimplemented!("is_sized_portrait")
+/// `source`'s centred square at `side` px: Lanczos3 down (sharp, without
+/// the moiré of a plain sample), Catmull-Rom up when the Host's own
+/// portrait is smaller than the size it is drawn at.
+fn square_at(source: &image::RgbaImage, side: u32) -> image::RgbaImage {
+    let (width, height) = source.dimensions();
+    let small = width.min(height).max(1);
+    let square = image::imageops::crop_imm(source, (width - small.min(width)) / 2, (height - small.min(height)) / 2, small.min(width), small.min(height)).to_image();
+    if small == side {
+        return square;
+    }
+    let filter = if small > side { image::imageops::FilterType::Lanczos3 } else { image::imageops::FilterType::CatmullRom };
+    image::imageops::resize(&square, side, side, filter)
 }
 
-pub fn square_portrait(_bytes: &[u8]) -> Option<Vec<u8>> {
-    unimplemented!("square_portrait")
+/// How much of the pixel at (`x`, `y`) lies inside a circle of `radius`
+/// centred in a `side` px square: 4×4 samples per pixel, so the edge
+/// fades over its pixel the way the shape actually crosses it.
+fn coverage(side: u32, radius: f32, x: u32, y: u32) -> f32 {
+    let centre = side as f32 / 2.0;
+    let (dx, dy) = (x as f32 + 0.5 - centre, y as f32 + 0.5 - centre);
+    let distance = (dx * dx + dy * dy).sqrt();
+    // Wholly inside or outside: no need to sample.
+    if distance <= radius - 0.75 {
+        return 1.0;
+    }
+    if distance >= radius + 0.75 {
+        return 0.0;
+    }
+    let mut inside = 0;
+    for sy in 0..4 {
+        for sx in 0..4 {
+            let (px, py) = (x as f32 + (sx as f32 + 0.5) / 4.0 - centre, y as f32 + (sy as f32 + 0.5) / 4.0 - centre);
+            if px * px + py * py <= radius * radius {
+                inside += 1;
+            }
+        }
+    }
+    inside as f32 / 16.0
 }
 
-pub fn round_portrait(_source: &image::RgbaImage, _side: u32) -> image::RgbaImage {
-    unimplemented!("round_portrait")
+/// Cuts `image` (a square) to a circle with soft edges.
+fn cut_round(image: &mut image::RgbaImage) {
+    let side = image.width();
+    let radius = side as f32 / 2.0;
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        pixel[3] = (f32::from(pixel[3]) * coverage(side, radius, x, y)).round() as u8;
+    }
 }
 
-pub fn pair_portrait(_left: &image::RgbaImage, _right: &image::RgbaImage, _side: u32) -> image::RgbaImage {
-    unimplemented!("pair_portrait")
+/// The portrait to draw at `side` device pixels: downscaled from the
+/// source and cut round with antialiased edges, so the software renderer
+/// draws it pixel for pixel, with no scaling and no clip.
+pub fn round_portrait(source: &image::RgbaImage, side: u32) -> image::RgbaImage {
+    let mut portrait = square_at(source, side.max(1));
+    cut_round(&mut portrait);
+    portrait
 }
 
-pub fn ring_mask(_side: u32, _stroke: f32) -> image::RgbaImage {
-    unimplemented!("ring_mask")
+/// A pair room's portrait: the middle of `left`'s portrait on the left,
+/// of `right`'s on the right, in one soft-edged circle.
+pub fn pair_portrait(left: &image::RgbaImage, right: &image::RgbaImage, side: u32) -> image::RgbaImage {
+    let side = side.max(2);
+    let (a, b) = (square_at(left, side), square_at(right, side));
+    let half = side / 2;
+    let from = side / 4;
+    let mut pair = image::RgbaImage::from_fn(side, side, |x, y| {
+        if x < half { *a.get_pixel(from + x, y) } else { *b.get_pixel((from + x - half).min(side - 1), y) }
+    });
+    cut_round(&mut pair);
+    pair
+}
+
+/// A white ring `stroke` device pixels wide just inside a `side` px
+/// square, with soft edges both sides: drawn coloured (`colorize`) as an
+/// avatar's outline or its status ring, smooth in the software renderer.
+pub fn ring_mask(side: u32, stroke: f32) -> image::RgbaImage {
+    let side = side.max(1);
+    let outer = side as f32 / 2.0;
+    let inner = (outer - stroke.max(0.5)).max(0.0);
+    image::RgbaImage::from_fn(side, side, |x, y| {
+        let alpha = coverage(side, outer, x, y) - coverage(side, inner, x, y);
+        image::Rgba([255, 255, 255, (alpha.clamp(0.0, 1.0) * 255.0).round() as u8])
+    })
 }

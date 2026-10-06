@@ -1,7 +1,8 @@
 //! Agent portraits (the Qt controller's `avatarSource`): the agent's own
 //! avatar, else the Host's bundled portrait for its name, fetched once,
-//! rounded to 192 px and cached on disk. The UI asks for a session's file
-//! and gets None until it is there.
+//! cropped square at its own resolution and cached on disk. The UI asks for
+//! a session's file and gets None until it is there, and makes the round
+//! portraits it draws from it (`clarp_core::media::round_portrait`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -24,18 +25,18 @@ pub(crate) struct Avatars {
     revision: u64,
     /// Where portraits are cached; by default the Rust client's cache.
     directory: Option<std::path::PathBuf>,
-    /// The portrait rounder's queue (started with the first portrait).
+    /// The portrait cropper's queue (started with the first portrait).
     rounder: Option<Sender<Round>>,
 }
 
-/// A downloaded portrait to round and write to `path`.
+/// A downloaded portrait to crop square and write to `path`.
 struct Round {
     tag: String,
     path: PathBuf,
     bytes: Vec<u8>,
 }
 
-/// A rounded portrait written to `path`, or why not.
+/// A square portrait written to `path`, or why not.
 pub(crate) struct Cached {
     tag: String,
     path: PathBuf,
@@ -123,7 +124,7 @@ impl Engine {
             self.avatars.failures.insert(session, url);
             return true;
         };
-        // Decoding, scaling and encoding a Host portrait (512 px) takes
+        // Checking and cropping a Host portrait (512 px) can take
         // milliseconds, a hundred of them at a first launch: one thread
         // does them in turn, leaving the UI thread and the other cores be.
         let round = Round { tag: tag.to_owned(), path, bytes: bytes.to_vec() };
@@ -179,9 +180,15 @@ fn start_rounder(sender: Sender<crate::Message>, wake: std::sync::Arc<dyn Fn() +
             let (mut cached, mut since) = (Vec::new(), Instant::now());
             let mut next = Some(first);
             while let Some(Round { tag, path, bytes }) = next {
-                let portrait = clarp_core::media::rounded_portrait(&bytes).unwrap_or(bytes);
-                let result = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, portrait));
-                cached.push(Cached { tag, path, result: result.map_err(|e| e.to_string()) });
+                let result = match clarp_core::media::square_portrait(&bytes) {
+                    Some(portrait) => path
+                        .parent()
+                        .map_or(Ok(()), std::fs::create_dir_all)
+                        .and_then(|()| std::fs::write(&path, portrait))
+                        .map_err(|e| e.to_string()),
+                    None => Err(format!("not a readable image ({} bytes)", bytes.len())),
+                };
+                cached.push(Cached { tag, path, result });
                 if since.elapsed() >= HAND_OVER {
                     hand_over(&mut cached);
                     since = Instant::now();

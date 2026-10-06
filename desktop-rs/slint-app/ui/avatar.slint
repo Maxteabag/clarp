@@ -1,25 +1,49 @@
 import { Palette } from "theme.slint";
 
-// AgentAvatar.qml: the agent's portrait, else its symbol or initial in a
-// bordered square.
+// The avatar sizes (Settings: Agent picture size) and the soft rings
+// drawn round avatars. Rust sets the sizes and makes each ring at the
+// device size it is drawn at (`avatar_view.rs`): the software renderer
+// draws a round border or clip with hard edges.
+export global AvatarArt {
+    in property <length> row: 44px;
+    in property <length> compact: 32px;
+    in property <length> card: 40px;
+    // Bumped when the scale changes: the rings are made again.
+    in property <int> revision;
+    // A white ring `stroke` wide just inside a `size` square, antialiased,
+    // to colour (`colorize`) with the theme.
+    pure callback ring(/* size */ length, /* stroke */ length, /* revision */ int) -> image;
+}
+
+// AgentAvatar.qml: the agent's portrait (made round, with soft edges, at
+// exactly the size it is drawn), else its symbol or initial in a soft
+// outline; a status ring round it when asked for.
 export component AgentAvatar inherits Rectangle {
     in property <image> portrait;
     in property <string> name;
     in property <string> symbol;
     in property <length> size: 40px;
-    in property <length> radius: 2px;
+    // The first letter, upper-cased (set from Rust: Slint has no slicing).
+    in property <string> initial;
+    in property <color> initial-color: Palette.text;
+    // A ring round the avatar in `ring-color` (working, needs attention).
+    in property <bool> ringed;
+    in property <color> ring-color: Palette.success;
+    in property <float> ring-opacity: 1;
     width: root.size;
     height: root.size;
-    border-radius: root.radius;
-    clip: true;
     property <bool> has-portrait: root.portrait.width > 0;
-    border-width: root.has-portrait ? 0px : 1px;
-    border-color: Palette.border;
     accessible-role: image;
     accessible-label: root.name;
+    if !root.has-portrait: Image {
+        width: root.size;
+        height: root.size;
+        source: AvatarArt.ring(root.size, 1px, AvatarArt.revision);
+        colorize: Palette.border;
+    }
     if !root.has-portrait: Text {
         text: root.symbol != "" ? root.symbol : root.initial;
-        color: Palette.text;
+        color: root.initial-color;
         font-family: "JetBrains Mono";
         font-size: Math.max(9px, root.size * 0.38);
         font-weight: 600;
@@ -28,10 +52,18 @@ export component AgentAvatar inherits Rectangle {
         width: root.size;
         height: root.size;
         source: root.portrait;
-        image-fit: cover;
+        image-fit: fill;
     }
-    // The first letter, upper-cased (set from Rust: Slint has no slicing).
-    in property <string> initial;
+    // One clear pixel between the portrait and the ring.
+    if root.ringed: Image {
+        x: -3px;
+        y: -3px;
+        width: root.size + 6px;
+        height: root.size + 6px;
+        source: AvatarArt.ring(root.size + 6px, 2px, AvatarArt.revision);
+        colorize: root.ring-color;
+        opacity: root.ring-opacity;
+    }
 }
 
 // AvatarActivity.qml: an avatar with a breathing ring while its agent works.
@@ -42,7 +74,6 @@ export component AvatarActivity inherits Rectangle {
     in property <string> initial;
     in property <string> symbol;
     in property <length> size: 40px;
-    in property <length> radius: 2px;
     in property <bool> working;
     in property <bool> reduced-motion;
     // One breath every 1.6 s; only a working, moving avatar follows the clock.
@@ -55,17 +86,9 @@ export component AvatarActivity inherits Rectangle {
         initial: root.initial;
         symbol: root.symbol;
         size: root.size;
-        radius: root.radius;
-    }
-    if root.working: Rectangle {
-        x: -3px;
-        y: -3px;
-        width: root.size + 6px;
-        height: root.size + 6px;
-        border-width: 2px;
-        border-color: Palette.success;
-        border-radius: root.radius + 3px;
-        opacity: root.reduced-motion ? 0.6 : 0.35 + 0.65 * (1 + Math.cos(root.phase * 360deg)) / 2;
+        ringed: root.working;
+        ring-color: Palette.success;
+        ring-opacity: root.reduced-motion ? 0.6 : 0.35 + 0.65 * (1 + Math.cos(root.phase * 360deg)) / 2;
     }
 }
 

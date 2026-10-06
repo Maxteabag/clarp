@@ -99,6 +99,7 @@ pub fn rows(app: &App) -> Vec<SettingRow> {
         section("APPEARANCE"),
         toggle("minimal-ui", "Minimal UI", settings.boolean("appearance/minimalUi", false)),
         toggle("compact-explorer", "Compact explorer (avatar and name only)", settings.boolean("explorer/compact", false)),
+        choice("avatar-size", "Agent picture size", &crate::avatar_view::label(app)),
         toggle("nav-rail", "Navigation rail (Chats, Updates, Teams, Settings)", settings.boolean("appearance/navRail", true)),
         toggle("workspace-bar", "Workspace bar", prefs.workspace_bar),
         choice("reading-theme", "Reading theme", &format!("{} · {}", text(theme, "label"), crate::view::theme_font(theme))),
@@ -215,7 +216,9 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
         "compact-explorer" => {
             flip(app, "explorer/compact", false);
             window.set_explorer_compact(app.engine.borrow().settings().boolean("explorer/compact", false));
+            crate::avatar_view::remake();
         }
+        "avatar-size" => crate::avatar_view::set(app, window, None, delta),
         "nav-rail" => {
             flip(app, "appearance/navRail", true);
             window.set_nav_rail_visible(app.engine.borrow().settings().boolean("appearance/navRail", true));
