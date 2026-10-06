@@ -43,6 +43,9 @@ pub struct PaneState {
     to_latest: i32,
     scroll_request: i32,
     scroll_amount: f32,
+    seek_request: i32,
+    seek_index: i32,
+    seek_down: bool,
     /// Message search's mark (chat, row id) and its reveal request.
     marked: (String, String),
     reveal_request: i32,
@@ -89,6 +92,9 @@ impl PaneState {
             to_latest: 0,
             scroll_request: 0,
             scroll_amount: 0.0,
+            seek_request: 0,
+            seek_index: 0,
+            seek_down: false,
             marked: (String::new(), String::new()),
             reveal_request: 0,
             reveal_index: 0,
@@ -282,6 +288,16 @@ impl App {
         });
     }
 
+    /// Brings row `index` of the active transcript into view by the rows'
+    /// measured heights (`down`: its end to the bottom, when it fits).
+    pub fn seek_row(&self, index: usize, down: bool) {
+        self.bump(|p| {
+            p.seek_request += 1;
+            p.seek_index = index as i32;
+            p.seek_down = down;
+        });
+    }
+
     /// Marks message `message_id` of `session` in the active pane and
     /// brings it into view; false while the pane does not show it (yet).
     pub fn reveal_message(&self, session: &str, message_id: &str) -> bool {
@@ -393,6 +409,9 @@ impl App {
         view.to_latest = pane.to_latest;
         view.scroll_request = pane.scroll_request;
         view.scroll_amount = pane.scroll_amount;
+        view.seek_request = pane.seek_request;
+        view.seek_index = pane.seek_index;
+        view.seek_down = pane.seek_down;
         view.marked = if pane.marked.0 == pane.session { pane.marked.1.clone() } else { String::new() }.into();
         view.reveal_request = pane.reveal_request;
         view.reveal_index = pane.reveal_index;

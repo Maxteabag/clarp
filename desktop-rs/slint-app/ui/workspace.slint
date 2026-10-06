@@ -58,6 +58,12 @@ export struct PaneView {
     // a card into view: an explicit keypress, never activity).
     scroll-request: int,
     scroll-amount: float,
+    // Bumped to bring row `seek-index` into view by the rows' measured
+    // heights (J/K to a card the list has not drawn; `seek-down`: going
+    // down the chat).
+    seek-request: int,
+    seek-index: int,
+    seek-down: bool,
     // Message search: the row drawn marked, and a request (bumped) to
     // bring the row at `reveal-index` into view.
     marked: string,
@@ -122,7 +128,7 @@ export component Pane inherits Rectangle {
     }
     // A pane made for a request (a split's focus) acts on it at once.
     // An old scroll request is not replayed into a pane made later.
-    init => { root.scroll-request-seen = root.pane.scroll-request; root.reveal-request-seen = root.pane.reveal-request; root.apply-requests(); }
+    init => { root.scroll-request-seen = root.pane.scroll-request; root.seek-request-seen = root.pane.seek-request; root.reveal-request-seen = root.pane.reveal-request; root.apply-requests(); }
     changed pane => { root.apply-requests(); }
     function apply-requests() {
         if (root.draft-set-seen != root.pane.draft-set) {
@@ -148,6 +154,10 @@ export component Pane inherits Rectangle {
             root.scroll-request-seen = root.pane.scroll-request;
             transcript.scroll-by(root.pane.scroll-amount * 1px, "seek");
         }
+        if (root.seek-request-seen != root.pane.seek-request) {
+            root.seek-request-seen = root.pane.seek-request;
+            transcript.seek-row(root.pane.seek-index, root.pane.seek-down);
+        }
         if (root.reveal-request-seen != root.pane.reveal-request) {
             root.reveal-request-seen = root.pane.reveal-request;
             transcript.reveal(root.pane.reveal-index);
@@ -169,6 +179,7 @@ export component Pane inherits Rectangle {
     property <int> focus-transcript-seen;
     property <int> to-latest-seen;
     property <int> scroll-request-seen;
+    property <int> seek-request-seen;
     property <int> reveal-request-seen;
     property <bool> follows: transcript.follow;
     property <bool> at-end: transcript.at-end;
