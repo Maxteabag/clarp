@@ -593,7 +593,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "settings-reset" if window.get_surface() == "settings" => {
             let current = window.get_setting_rows().row_data(window.get_setting_current().max(0) as usize).map(|r| r.id.to_string()).unwrap_or_default();
             if !current.is_empty() {
-                crate::settings_view::reset(app, window, &current);
+                crate::settings_view::reset(app, window, &current, false);
             }
         }
         "settings-results" => crate::settings_view::to_results(app, window),
@@ -737,12 +737,7 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     } else if recent_only {
         switcher::recent(&app.engine.borrow(), &app.recent.borrow(), &query)
     } else {
-        let mut items = {
-            // Every preference the catalogue has no entry for, as its own row.
-            let mut settings = switcher::settings(&settings);
-            settings.extend(switcher::prefs(app.engine.borrow().settings()));
-            switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, settings)
-        };
+        let mut items = switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings));
         // Ctrl+K: the best few messages after the agents and contacts.
         if !contacts_only && query.trim().chars().count() >= crate::search_view::MIXED_FROM {
             let (found, results) = crate::search_view::items(&mut app.engine.borrow_mut(), &query, crate::search_view::MIXED);
@@ -790,7 +785,8 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
             key: item.key.clone().into(),
             group: item.group.into(),
             value: item.value.clone().into(),
-            adjustable: item.target.starts_with("pref:") && item.group == "setting",
+            // A setting with choices (a number's steps too): + and - step it.
+            adjustable: item.target.starts_with("settingpicker:"),
         })
         .collect();
     state.items = items;
@@ -829,8 +825,15 @@ pub fn close_switcher(app: &App, window: &AppWindow, restore: Option<bool>) {
 /// open on it with its new value.
 pub fn switcher_adjusted(app: &Rc<App>, window: &AppWindow, index: i32, delta: i32) {
     let Some(item) = usize::try_from(index).ok().and_then(|i| app.switcher.borrow().items.get(i).cloned()) else { return };
-    let Some(name) = item.target.strip_prefix("pref:") else { return };
-    crate::look::run(app, window, &format!("pref:{name}:{delta}"));
+    let Some(id) = item.target.strip_prefix("settingpicker:") else { return };
+    match crate::look::pref_of(id).filter(|spec| matches!(spec.kind, clarp_core::prefs::Kind::Number { .. })) {
+        // A number moves one step from where it is (the font size from the
+        // theme's own size, not from the top of its list).
+        Some(spec) => {
+            crate::look::run(app, window, &format!("pref:{}:{delta}", spec.name));
+        }
+        None => crate::settings_view::change(app, window, id, delta),
+    }
     refresh_switcher(app, window);
 }
 

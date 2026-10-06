@@ -289,7 +289,24 @@ impl Setting {
 
 /// The settings page's sections, in order; a setting in another section
 /// gets one of its own after these.
-pub const SECTIONS: &[&str] = &["CHATS", "EXPERIMENTS", "STARTUP", "AGENT IDENTITY", "APPEARANCE", "VOICE & AUDIO", "NOTIFICATIONS", "HOST", "HOST STATUS", "KEYBOARD", "ABOUT"];
+pub const SECTIONS: &[&str] = &[
+    "CHATS",
+    "EXPERIMENTS",
+    "STARTUP",
+    "AGENT IDENTITY",
+    "APPEARANCE",
+    "TYPOGRAPHY",
+    "LAYOUT",
+    "COLOURS",
+    "VOICE & AUDIO",
+    "NOTIFICATIONS",
+    "BEHAVIOUR",
+    "HOST",
+    "HOST STATUS",
+    "KEYBOARD",
+    "ALL SETTINGS",
+    "ABOUT",
+];
 
 thread_local! {
     static SETTINGS: Rc<Vec<Setting>> = Rc::new(settings::register());

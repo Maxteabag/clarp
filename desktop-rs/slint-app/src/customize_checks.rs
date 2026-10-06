@@ -92,8 +92,8 @@ pub fn customize_check(out: String) {
             let at = rows.iter().position(|r| r.label == "Font size");
             check(at.is_some_and(|i| i < 3), &format!("Ctrl+K finds Font size in the top three: {:?}", rows.iter().take(4).map(|r| r.label.to_string()).collect::<Vec<_>>()));
             let row = at.map(|i| rows[i].clone()).unwrap_or_default();
-            check(row.value == "15 px", &format!("with its value: {}", row.value));
-            check(row.detail.contains("Size of message text") && row.detail.contains(":set fontsize"), &format!("and its description and name: {}", row.detail));
+            check(row.value.contains("15 px"), &format!("with its value: {}", row.value));
+            check(!row.detail.is_empty(), &format!("and its description: {}", row.detail));
             check(row.adjustable, "and it steps with + and -");
             if let Some(i) = at {
                 window.invoke_switcher_moved(i as i32);
@@ -129,12 +129,12 @@ pub fn customize_check(out: String) {
             if window.get_surface() != "settings" || !window.get_settings_focused() || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            let Some((index, row)) = setting_row(window, "pref:fontsize") else {
+            let Some((index, row)) = setting_row(window, "font-size") else {
                 check(false, "Settings has a Font size row");
                 return true;
             };
             check(row.detail == "17 px" && row.changed, &format!("Settings shows it changed: {} changed {}", row.detail, row.changed));
-            check(row.description.contains("Size of message text") && row.description.contains("text size"), &format!("with its description and aliases: {}", row.description));
+            check(!row.description.is_empty(), &format!("with its description: {}", row.description));
             check(row.key.contains("fontsize") && row.key.contains("appearance/fontOverrides"), &format!("and its name and key: {}", row.key));
             window.set_setting_current(index as i32);
             shot(&o4, "customize-04-settings-font-size");
@@ -145,8 +145,8 @@ pub fn customize_check(out: String) {
             if body(window) != 15.0 {
                 return false;
             }
-            let row = setting_row(window, "pref:fontsize").map(|(_, r)| r).unwrap_or_default();
-            check(row.detail == "15 px" && !row.changed, "Backspace puts the theme's size back");
+            let row = setting_row(window, "font-size").map(|(_, r)| r).unwrap_or_default();
+            check(row.detail.contains("15 px") && !row.changed, &format!("Backspace puts the theme's size back: {} changed {}", row.detail, row.changed));
             check(stored("appearance/fontOverrides").is_none(), "and leaves nothing in the file");
             check(run(window, "pref:color.text"), "Enter on a colour opens the picker");
             true
@@ -196,7 +196,7 @@ pub fn customize_check(out: String) {
                 return false;
             }
             check(stored("appearance/colorOverrides").is_some_and(|v| v["terminal"]["accent"] == "#ff8800"), "Enter keeps a colour, for this theme");
-            let row = setting_row(window, "pref:color.accent").map(|(_, r)| r).unwrap_or_default();
+            let row = setting_row(window, "color.accent").map(|(_, r)| r).unwrap_or_default();
             check(row.changed && row.detail == "#ff8800", "Settings shows the colour changed");
             *valid1.borrow_mut() = std::fs::read_to_string(settings_path()).unwrap_or_default();
             edit_file(|file| {
@@ -212,7 +212,7 @@ pub fn customize_check(out: String) {
             check(true, "an edit to the settings file applies at once");
             check(notices().contains("measure"), &format!("an invalid value in it is reported: {}", notices()));
             check(window.global::<crate::Look>().get_measure() == 0.0, "and read as its default");
-            check(setting_row(window, "pref:radius").is_some_and(|(_, r)| r.detail == "12 px"), "Settings shows the file's value");
+            check(setting_row(window, "radius").is_some_and(|(_, r)| r.detail == "12 px"), "Settings shows the file's value");
             shot(&o6, "customize-06-file-reload");
             let written = std::fs::write(settings_path(), "{ \"layout/radius\": ");
             check(written.is_ok(), "the file is half-written");

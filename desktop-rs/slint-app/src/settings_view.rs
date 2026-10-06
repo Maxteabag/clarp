@@ -19,13 +19,47 @@ fn info(label: &str, detail: &str) -> SettingRow {
 /// A registered setting as a row: its label, description and value.
 fn row(app: &App, setting: &crate::catalogue::Setting) -> SettingRow {
     let kind = setting.kind();
-    SettingRow {
+    let row = SettingRow {
         kind: kind.into(),
         id: setting.id().into(),
         label: setting.label(app).into(),
         description: setting.entry.description.into(),
         detail: if kind == "toggle" { String::new() } else { setting.value(app) }.into(),
         on: setting.on(app),
+        ..SettingRow::default()
+    };
+    match crate::look::pref_of(setting.id()) {
+        Some(spec) => with_pref(app, row, spec),
+        None => row,
+    }
+}
+
+/// A preference's row also shows its `:set` name and file key, whether it
+/// differs from its default, a colour's swatch and the readability rule a
+/// chosen colour breaks.
+fn with_pref(app: &App, row: SettingRow, spec: &clarp_core::prefs::Spec) -> SettingRow {
+    use clarp_core::prefs::{self, Kind, Scope};
+    let engine = app.engine.borrow();
+    let settings = engine.settings();
+    let theme = prefs::theme_of(settings);
+    let value = prefs::current(settings, spec, &theme);
+    let file_key = match spec.scope {
+        Scope::Global => spec.key.to_owned(),
+        Scope::Theme { field } => format!("{}.{theme}.{field}", spec.key),
+    };
+    let changed = !prefs::is_default(settings, spec, &theme);
+    let (kind, warning) = match spec.kind {
+        Kind::Color { role } => ("color".to_owned(), if changed { prefs::readability_warnings(settings, &theme, role).into_iter().next().unwrap_or_default() } else { String::new() }),
+        Kind::Text { .. } => ("text".to_owned(), String::new()),
+        _ => (row.kind.to_string(), String::new()),
+    };
+    SettingRow {
+        kind: kind.into(),
+        key: format!("{} · {file_key}", spec.name).into(),
+        changed,
+        swatch: value.as_str().and_then(crate::view::color).unwrap_or_default(),
+        warning: warning.into(),
+        ..row
     }
 }
 
@@ -79,6 +113,12 @@ fn information(app: &App, section: &str) -> Vec<SettingRow> {
 pub fn rows(app: &App) -> Vec<SettingRow> {
     let settings = crate::catalogue::settings();
     let mut rows = Vec::new();
+    // The settings file's problems, an export's or import's result.
+    let notices = crate::look::notices();
+    if !notices.is_empty() {
+        rows.push(section("SETTINGS FILE"));
+        rows.extend(notices.iter().map(|line| info(line, "")));
+    }
     for name in crate::catalogue::sections() {
         let mut part: Vec<SettingRow> = settings.iter().filter(|s| s.section == name && s.is_shown(app)).map(|s| row(app, s)).collect();
         part.extend(information(app, name));
@@ -197,16 +237,38 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
         eprintln!("clarp-slint: unknown setting {id}");
         return;
     };
-    setting.change(app, window, delta);
+    let number = crate::look::pref_of(id).filter(|spec| matches!(spec.kind, clarp_core::prefs::Kind::Number { .. }));
+    match (number, delta) {
+        // Enter on a number: type it in the value editor.
+        (Some(spec), 0) => crate::look::open_editor(app, window, spec.name),
+        // Left/Right: a number moves one step from where it is.
+        (Some(spec), _) => {
+            crate::look::run(app, window, &format!("pref:{}:{delta}", spec.name));
+        }
+        (None, 0) => setting.change(app, window, 1),
+        (None, _) => setting.change(app, window, delta),
+    }
     crate::pump_now(app);
     show(app, window);
 }
 
 /// Delete on a row: the setting goes back to its default.
-pub fn reset(app: &Rc<App>, window: &AppWindow, id: &str) {
-    match crate::catalogue::setting(id) {
-        Some(setting) if setting.reset(app, window) => {}
-        _ => eprintln!("clarp-slint: {id} has no default to go back to"),
+pub fn reset(app: &Rc<App>, window: &AppWindow, id: &str, whole_section: bool) {
+    let Some(setting) = crate::catalogue::setting(id) else { return };
+    let targets: Vec<crate::catalogue::Setting> =
+        if whole_section { crate::catalogue::settings().iter().filter(|s| s.section == setting.section).cloned().collect() } else { vec![setting] };
+    for target in targets {
+        if target.reset(app, window) {
+            continue;
+        }
+        // A colour or font (no choices to go back to): its preference.
+        match crate::look::pref_of(target.id()) {
+            Some(spec) => {
+                crate::look::run(app, window, &format!("pref-reset:{}", spec.name));
+            }
+            None if !whole_section => eprintln!("clarp-slint: {id} has no default to go back to"),
+            None => {}
+        }
     }
     crate::pump_now(app);
     show(app, window);
