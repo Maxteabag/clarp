@@ -85,14 +85,19 @@ pub enum Control {
 
 /// `now` moved `delta` steps, kept within `min..=max`.
 pub fn stepped(now: f64, delta: i32, min: f64, max: f64, step: f64) -> f64 {
-    tidy(now + f64::from(delta) * step, step).clamp(min, max)
+    tidy(now + f64::from(delta) * step, places(now, step)).clamp(min, max)
 }
 
-/// Rounds away float noise at the step's precision (0.1 + 0.2 is 0.3).
-fn tidy(value: f64, step: f64) -> f64 {
-    let places = decimals(step);
+/// Rounds away float noise at `places` decimals (0.1 + 0.2 is 0.3).
+fn tidy(value: f64, places: usize) -> f64 {
     let scale = 10f64.powi(places as i32);
     (value * scale).round() / scale
+}
+
+/// The decimals a value needs: its step's, or its own when it falls
+/// between steps (12.5 with a step of 1).
+fn places(value: f64, step: f64) -> usize {
+    decimals(step).max(decimals(tidy(value, 6)))
 }
 
 /// How many decimals a step needs: 1 → 0, 0.05 → 2.
@@ -105,14 +110,15 @@ fn decimals(step: f64) -> usize {
 
 /// A number as stored and listed: as many decimals as its step needs.
 pub fn number_text(value: f64, step: f64) -> String {
-    format!("{:.*}", decimals(step), tidy(value, step))
+    let places = places(value, step);
+    format!("{:.*}", places, tidy(value, places))
 }
 
 /// The steps from `min` to `max`, with `now` among them when it falls between.
 pub fn steps(min: f64, max: f64, step: f64, now: f64) -> Vec<f64> {
     let count = ((max - min) / step).round().max(0.0) as usize;
-    let mut out: Vec<f64> = (0..=count).map(|i| tidy(min + i as f64 * step, step)).collect();
-    let now = tidy(now, step);
+    let mut out: Vec<f64> = (0..=count).map(|i| tidy(min + i as f64 * step, decimals(step))).collect();
+    let now = tidy(now, places(now, step));
     if now >= min && now <= max && !out.iter().any(|v| (v - now).abs() < 1e-9) {
         out.push(now);
         out.sort_by(f64::total_cmp);
@@ -715,6 +721,8 @@ mod tests {
         assert_eq!(stepped(1.1, 2, 1.0, 1.4, 0.1), 1.3);
         assert_eq!(number_text(1.2000000001, 0.05), "1.20");
         assert_eq!(number_text(16.0, 1.0), "16");
+        assert_eq!(number_text(12.5, 1.0), "12.5", "an off-step value keeps its own decimals");
+        assert_eq!(stepped(12.5, 1, 11.0, 28.0, 1.0), 13.5);
         assert_eq!(steps(1.0, 1.2, 0.1, 1.0), [1.0, 1.1, 1.2]);
         assert_eq!(steps(11.0, 13.0, 1.0, 12.5), [11.0, 12.0, 12.5, 13.0], "an off-step value is listed where it falls");
         assert_eq!(with_unit("16", "px"), "16 px");
