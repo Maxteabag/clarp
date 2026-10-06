@@ -30,7 +30,9 @@ fn selecting_focuses_the_host_and_server_focus_moves_with_other_clients() {
     d.connect();
     d.engine.select("mike");
     d.until("mike opens", |e| e.conversation("mike").is_some_and(|c| !c.rows().is_empty()));
-    assert_eq!(host.requests("POST", "/select").last().unwrap()["body"]["session"], "mike");
+    // The select and the transcript fetch go out together; either may land first.
+    let selected = || host.requests("POST", "/select").last().is_some_and(|r| r["body"]["session"] == "mike");
+    d.until("the Host is told mike is selected", |_| selected());
     // Another client focuses Rachel: the roster says so.
     host.control("/__control/event", json!({"type": "agent-focus", "session": "rachel"}));
     d.until("focus follows the Host", |e| e.roster().find("rachel").is_some_and(|a| a.focused) && e.roster().find("mike").is_some_and(|a| !a.focused));
