@@ -76,6 +76,13 @@ On first server startup, SQLite is created automatically at
 When that database has no live agents, setup transactionally seeds the twenty
 built-in personas and focuses Mike. Existing databases are never reseeded.
 
+For Antigravity terminal sessions, installation adds a `clarp-status` entry to
+`~/.gemini/config/hooks.json`. It reports working and stopped states only for
+conversations already registered in Clarp. Start a new CLI process after
+installation to load the hooks. Existing unrelated hooks are preserved; a
+customized `clarp-status` entry or a symlinked configuration is left untouched.
+Clarp-launched turns keep using their existing stream-json status reporting.
+
 The equivalent non-interactive command is:
 
 ```bash

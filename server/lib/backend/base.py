@@ -254,6 +254,12 @@ class Backend:
             return []
         return self._registry.active_handles(agent_id)
 
+    def external_live_work(self, agent_id: str) -> bool:
+        """Whether a turn Clarp did not start (the CLI run from a terminal on
+        the agent's conversation) is working right now. Reconciliation must
+        not repair such an agent to idle."""
+        return False
+
     def register_handle(self, agent_id: str, handle) -> None:
         """Register a live turn unless the run is isolated (empty agent id)."""
         if agent_id and self._registry is not None:
