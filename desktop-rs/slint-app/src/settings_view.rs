@@ -237,16 +237,13 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
         eprintln!("clarp-slint: unknown setting {id}");
         return;
     };
-    let number = crate::look::pref_of(id).filter(|spec| matches!(spec.kind, clarp_core::prefs::Kind::Number { .. }));
-    match (number, delta) {
+    match (setting.kind(), crate::look::pref_of(id), delta) {
         // Enter on a number: type it in the value editor.
-        (Some(spec), 0) => crate::look::open_editor(app, window, spec.name),
-        // Left/Right: a number moves one step from where it is.
-        (Some(spec), _) => {
-            crate::look::run(app, window, &format!("pref:{}:{delta}", spec.name));
-        }
-        (None, 0) => setting.change(app, window, 1),
-        (None, _) => setting.change(app, window, delta),
+        ("number", Some(spec), 0) => crate::look::open_editor(app, window, spec.name),
+        // Enter: a switch flips, a choice steps, an action runs.
+        (_, _, 0) => setting.change(app, window, 1),
+        // Left/Right (a number steps from where it is).
+        _ => setting.change(app, window, delta),
     }
     crate::pump_now(app);
     show(app, window);
@@ -255,20 +252,10 @@ pub fn change(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) {
 /// Delete on a row: the setting goes back to its default.
 pub fn reset(app: &Rc<App>, window: &AppWindow, id: &str, whole_section: bool) {
     let Some(setting) = crate::catalogue::setting(id) else { return };
-    let targets: Vec<crate::catalogue::Setting> =
-        if whole_section { crate::catalogue::settings().iter().filter(|s| s.section == setting.section).cloned().collect() } else { vec![setting] };
-    for target in targets {
-        if target.reset(app, window) {
-            continue;
-        }
-        // A colour or font (no choices to go back to): its preference.
-        match crate::look::pref_of(target.id()) {
-            Some(spec) => {
-                crate::look::run(app, window, &format!("pref-reset:{}", spec.name));
-            }
-            None if !whole_section => eprintln!("clarp-slint: {id} has no default to go back to"),
-            None => {}
-        }
+    if whole_section {
+        crate::catalogue::reset_section(app, window, setting.section);
+    } else if !setting.reset(app, window) {
+        eprintln!("clarp-slint: {id} has no default to go back to");
     }
     crate::pump_now(app);
     show(app, window);

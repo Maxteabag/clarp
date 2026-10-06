@@ -1,40 +1,14 @@
 //! Every preference in `clarp_core::prefs` the catalogue does not register
-//! itself, as catalogue settings: a switch, a choice (a number's steps are
-//! its choices), or an action that opens the value editor (a colour, a
+//! itself, as catalogue settings: a switch, a choice, a number, or an
+//! action that opens the value editor (a colour, a
 //! font); then the settings file's own actions. `look.rs` applies them to
 //! the window and keeps the editor, the file and `:set`.
 
-use clarp_core::prefs::{self, Kind, Spec};
+use clarp_core::prefs::{self, Kind};
 
-use super::{Choice, Entry, Setting, e};
+use super::{Choice, Entry, Setting, e, number_text};
 use crate::App;
 use crate::look;
-
-/// A number as a choice's value: "15", "1.5".
-fn num(value: f64) -> String {
-    let value = (value * 1000.0).round() / 1000.0;
-    if value.fract() == 0.0 { format!("{value:.0}") } else { format!("{value}") }
-}
-
-/// A number's steps as choices (and the current value, when it is off the
-/// grid after a hand edit).
-fn steps(spec: &Spec, current: f64) -> Vec<Choice> {
-    let Kind::Number { default, min, max, step, zero, .. } = spec.kind else { return Vec::new() };
-    let mut values: Vec<f64> = zero.map(|_| 0.0).into_iter().collect();
-    let count = ((max - min) / step).round() as i64;
-    values.extend((0..=count).map(|i| ((min + step * i as f64) * 1000.0).round() / 1000.0));
-    if !values.iter().any(|v| (v - current).abs() < 1e-9) {
-        values.push(current);
-        values.sort_by(f64::total_cmp);
-    }
-    values
-        .into_iter()
-        .map(|v| {
-            let choice = Choice::new(num(v), prefs::display(spec, &serde_json::json!(v)));
-            if (v - default).abs() < 1e-9 { choice.about("The default") } else { choice }
-        })
-        .collect()
-}
 
 /// The page's section and the catalogue group of a preference section.
 fn section_of(section: &str) -> (&'static str, &'static str) {
@@ -79,16 +53,28 @@ pub(super) fn register() -> Vec<Setting> {
                 move |app, window, value| look::set_pref(app, window, name, value),
             )
             .default(default),
-            Kind::Number { default, .. } => Setting::choice(
+            // A number steps from its value in the catalogue's own control; a
+            // 0 that means "off" (Line length's full width) sits below its
+            // least, with nothing in between.
+            Kind::Number { default, min, max, step, unit, zero } => Setting::number(
                 entry,
                 section,
-                move |app| steps(spec, prefs::number_of(app.engine.borrow().settings(), name)),
-                move |app| num(prefs::number_of(app.engine.borrow().settings(), name)),
-                move |app, window, value| look::set_pref(app, window, name, value),
+                move |app| prefs::number_of(app.engine.borrow().settings(), name),
+                move |app, window, value| {
+                    let now = prefs::number_of(app.engine.borrow().settings(), name);
+                    let value = if zero.is_some() && value > 0.0 && value < min { if now == 0.0 { min } else { 0.0 } } else { value };
+                    look::set_pref(app, window, name, &number_text(value, step));
+                },
+                if zero.is_some() { 0.0 } else { min },
+                max,
+                step,
+                unit,
             )
-            .default(num(default)),
+            .default(number_text(default, step))
+            .detail(move |app| prefs::shown(app.engine.borrow().settings(), spec)),
             Kind::Color { .. } | Kind::Text { .. } => Setting::action(entry, section, move |app, window| look::open_editor(app, window, name))
-                .detail(move |app| prefs::shown(app.engine.borrow().settings(), spec)),
+                .detail(move |app| prefs::shown(app.engine.borrow().settings(), spec))
+                .reset_with(move |app, window| look::reset_pref(app, window, name)),
         };
         out.push(setting);
     }
@@ -122,7 +108,7 @@ pub(super) fn register() -> Vec<Setting> {
         e("pref-reset-all", "Reset every setting", "settings", "Puts every preference back to its default; key bindings and chats stay.", &["defaults", "factory reset", "reset all", "restore defaults"]),
         "ALL SETTINGS",
         |app, window| {
-            look::run(app, window, "pref-reset-all");
+            look::reset_all(app, window);
         },
     ));
     out
