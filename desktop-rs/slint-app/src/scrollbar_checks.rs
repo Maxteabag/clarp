@@ -241,14 +241,14 @@ struct Pass {
 }
 
 /// A pass through the chat: act (a wheel notch, a key), wait until the
-/// offset holds for two polls, sample the thumb, and again, until the
-/// offset no longer moves. `down`: the direction the reader goes.
+/// offset holds for two polls with no row waiting to be measured, sample
+/// the thumb, and again, until the offset no longer moves. `down`: the direction the reader goes.
 fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool, first: bool) -> Vec<Stage> {
     let mut stages: Vec<Stage> = Vec::new();
     // A stage times out after 15 s: the pass spans several.
     for part in 0..10 {
         let state = state.clone();
-        stages.push((label, Box::new(move |_, window, elapsed| {
+        stages.push((label, Box::new(move |app, window, elapsed| {
             let mut st = state.borrow_mut();
             if st.done {
                 if part == 9 {
@@ -262,7 +262,11 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
             }
             let offset = report().offset;
             let count = rows(window).len();
-            if st.last_offset.is_some_and(|o| (o - offset).abs() < 0.5) && count == st.last_rows {
+            // A step is read once the rows that landed in it are measured:
+            // their heights move the thumb in the step they landed in, not
+            // in the next one, however long measuring takes.
+            let measuring = app.measured_height("").1 .1 > 0;
+            if st.last_offset.is_some_and(|o| (o - offset).abs() < 0.5) && count == st.last_rows && !measuring {
                 st.still += 1;
             } else {
                 st.still = 0;
