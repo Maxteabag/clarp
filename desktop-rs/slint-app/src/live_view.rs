@@ -77,14 +77,6 @@ pub(crate) fn ticking(engine: &Engine, session: &str) -> bool {
     busy || view.items().iter().any(|i| i.get("status").and_then(|s| s.as_str()) == Some("running"))
 }
 
-/// Whether the typing dots show for a chat with live items: while the agent
-/// works with the status line hidden and no item at work, whose row would
-/// show it (a shimmering label, a growing reply).
-pub(crate) fn dots(engine: &Engine, session: &str, busy: bool, status_line: bool) -> bool {
-    let Some(view) = engine.live_view(session).filter(|_| engine.live_active(session)) else { return false };
-    busy && !status_line && !view.items().iter().any(|i| matches!(i.get("status").and_then(|s| s.as_str()), Some("running" | "pending")))
-}
-
 /// What a live row is built from: an equal signature builds an equal row.
 pub(crate) fn signature(entry: &Entry) -> String {
     format!(
