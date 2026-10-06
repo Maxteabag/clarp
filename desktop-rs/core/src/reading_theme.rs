@@ -46,6 +46,69 @@ pub fn resolve_font(theme: &Object, installed: impl Fn(&str) -> bool) -> String 
         .map_or_else(|| "JetBrains Mono".to_owned(), |f| (*f).to_owned())
 }
 
+/// Where the reader's own fonts are kept: `{themeId: {"family", "size"}}`.
+pub const FONT_OVERRIDES_KEY: &str = "appearance/fontOverrides";
+
+/// The reader's own font for one theme (Settings → Font), over the theme's.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FontOverride {
+    /// Empty keeps the theme's family.
+    pub family: String,
+    /// None keeps the theme's size.
+    pub size: Option<f64>,
+}
+
+/// `theme_id`'s override in the stored overrides, if it has one.
+pub fn font_override(overrides: Option<&Value>, theme_id: &str) -> Option<FontOverride> {
+    let _ = (overrides, theme_id);
+    unimplemented!()
+}
+
+/// The stored overrides with `theme_id`'s set (or removed, for None); the
+/// other themes' stay as they were.
+pub fn with_font_override(overrides: Option<&Value>, theme_id: &str, value: Option<&FontOverride>) -> Value {
+    let _ = (overrides, theme_id, value);
+    unimplemented!()
+}
+
+/// The font a theme draws in once the reader's override is applied.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedFont {
+    pub family: String,
+    pub size: f64,
+    /// The chosen family, when it is not installed (the theme's own
+    /// fallbacks are used instead).
+    pub missing: Option<String>,
+}
+
+/// The chosen family when it is installed, else the theme's first installed
+/// family; the chosen size, else the theme's.
+pub fn resolve(theme: &Object, chosen: Option<&FontOverride>, installed: impl Fn(&str) -> bool) -> ResolvedFont {
+    let _ = (theme, chosen, installed);
+    unimplemented!()
+}
+
+/// One installed family, as the font picker lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontFamily {
+    pub name: String,
+    pub monospace: bool,
+}
+
+/// `fc-list -f '%{family}\t%{spacing}\n'` as families, sorted and once each:
+/// a family is monospace when its faces are (fontconfig spacing 90 or more).
+pub fn parse_font_list(output: &str) -> Vec<FontFamily> {
+    let _ = output;
+    unimplemented!()
+}
+
+/// The families whose names hold every word of `query`, monospace ones only
+/// if asked.
+pub fn filter_fonts<'a>(fonts: &'a [FontFamily], query: &str, monospace_only: bool) -> Vec<&'a FontFamily> {
+    let _ = (fonts, query, monospace_only);
+    unimplemented!()
+}
+
 /// Everything QML styles from: the palette plus the resolved font.
 pub fn style(id: &str, installed: impl Fn(&str) -> bool) -> Object {
     let theme = theme(id);

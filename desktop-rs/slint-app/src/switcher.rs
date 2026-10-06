@@ -296,6 +296,14 @@ mod tests {
     }
 
     #[test]
+    fn the_font_commands_are_in_the_palette() {
+        let rows = commands(Toggles::default(), "hacker");
+        let find = |target: &str| rows.iter().find(|c| c.target == target).map(|c| c.label.clone());
+        assert_eq!(find("choose-font").as_deref(), Some("Choose font…"));
+        assert_eq!(find("reset-font").as_deref(), Some("Reset font to theme default"));
+    }
+
+    #[test]
     fn every_settings_row_becomes_a_command() {
         let row = |kind: &str, id: &str, label: &str, on: bool| (kind.to_owned(), id.to_owned(), label.to_owned(), "Kokoro".to_owned(), on);
         let items = settings(&[

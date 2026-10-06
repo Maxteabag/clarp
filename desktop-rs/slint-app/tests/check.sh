@@ -26,9 +26,9 @@ for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
 # cache and then with the one the first run filled (a usual launch).
 # CLARP_CHECK_PROFILE=release runs the release build.
 passes=(once); [ "$name" = startup ] && passes=(cold warm)
-# keymap saves its bindings to a scratch settings file and starts again
-# (restart) to find them; the others keep settings in memory.
-settings=off; [ "$name" = keymap ] && { passes=(once restart); settings="$scratch/settings.json"; }
+# keymap saves its bindings (fonts its font) to a scratch settings file and
+# starts again (restart) to find them; the others keep settings in memory.
+settings=off; case $name in keymap|fonts) passes=(once restart); settings="$scratch/settings.json" ;; esac
 # form-events runs it twice too: what the first run queued is delivered by
 # the second (the scratch data folder and the fake Host outlive the app).
 [ "$name" = form-events ] && passes=(first second)
