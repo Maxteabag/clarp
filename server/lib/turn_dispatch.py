@@ -1696,9 +1696,12 @@ class TurnDispatchService:
                 except JanitorDispatchError:
                     return False
                 try:
+                    # The conversation bound at init: a backend that continued a
+                    # lost conversation in a new one carried the goal over to it.
                     task_goal_recovery.validate_dispatch(
                         agents_db.get_by_agent_id(spec.agent_id) or {}, spec.client_msg_id,
-                        native_session_id=spec.backend_session_id)
+                        native_session_id=state.get("backend_session_id")
+                        or spec.backend_session_id)
                 except ValueError:
                     return False
                 action()

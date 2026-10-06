@@ -1156,19 +1156,29 @@ def _agy_executable() -> str | None:
     return shutil.which(os.environ.get("CLARP_AGY_BIN", "agy"))
 
 
-def fetch_agy_usage(*, timeout: float = 20.0) -> dict[str, Any]:
+# One /usage run at a time, and after any attempt (failed ones too) the next
+# waits a refresh interval: agy is a 200 MB binary, not an HTTP call.
+_AGY_FETCH_LOCK = threading.Lock()
+_AGY_LAST_ATTEMPT_MS = [0]
+
+
+def fetch_agy_usage(*, timeout: float = 20.0) -> dict[str, Any] | None:
     """Antigravity's own quota report (`agy -p /usage`): per model group, a
-    weekly and a 5-hour window. It runs no model turn, so it costs nothing."""
+    weekly and a 5-hour window. It runs no model turn, so it costs nothing.
+    Returns None when another refresh is already running."""
     executable = _agy_executable()
     if not executable:
         raise RuntimeError("agy is not installed")
-    result = subprocess.run(
-        [executable, "--output-format", "json", "-p", "/usage"],
-        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
-        check=False, cwd=str(pathlib.Path.home()))
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or "agy /usage failed").strip()[:300])
-    payload = json.loads(result.stdout)
+    if not _AGY_FETCH_LOCK.acquire(blocking=False):
+        return None
+    try:
+        _AGY_LAST_ATTEMPT_MS[0] = _now_ms()
+        stdout, stderr, returncode = _run_agy_usage(executable, timeout)
+    finally:
+        _AGY_FETCH_LOCK.release()
+    if returncode != 0:
+        raise RuntimeError((stderr or stdout or "agy /usage failed").strip()[:300])
+    payload = json.loads(stdout)
     groups = (((payload.get("command") or {}).get("data") or {}).get("groups"))
     if not isinstance(groups, list) or not groups:
         raise RuntimeError("agy /usage returned no quota groups")
@@ -1180,6 +1190,32 @@ def fetch_agy_usage(*, timeout: float = 20.0) -> dict[str, Any]:
     _upsert(AGY, used_percentage=used, resets_at=str(tightest.get("reset_time") or ""),
             source="agy-usage-command", raw={"groups": groups}, error="")
     return {"groups": groups}
+
+
+def _run_agy_usage(executable: str, timeout: float) -> tuple[str, str, int]:
+    """Run `agy -p /usage` in its own process group, so a timeout also ends any
+    helper agy started (one holding the output pipes would hang the wait), and
+    in the private HOME Clarp's other agy one-shots use."""
+    import signal
+    from . import backends
+    proc = subprocess.Popen(
+        [executable, "--output-format", "json", "-p", "/usage"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, cwd=str(pathlib.Path.home()), start_new_session=True,
+        env={**os.environ, **backends.by_id(AGY).routing_env()})
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+        raise RuntimeError(f"agy /usage timed out after {timeout:g}s")
+    return stdout or "", stderr or "", proc.returncode
 
 
 def _agy_windows(row: dict[str, Any], provider_instance_id: str, now_ms: int) -> list[dict]:
@@ -1206,7 +1242,10 @@ def _agy_windows(row: dict[str, Any], provider_instance_id: str, now_ms: int) ->
                     provider_instance_id=provider_instance_id,
                     auth_generation_id="agy-usage-command",
                     account_scope_ref=str(bucket.get("id") or group.get("name") or ""),
-                    window_kind=kind, window_minutes=minutes, resets_at=resets_at),
+                    window_kind=kind, window_minutes=minutes,
+                    # An unused window's reset slides with the clock; it is
+                    # fixed once the window has been used.
+                    resets_at=resets_at if used > 0 else None),
                 "kind": kind, "scope": "model_group", "label": str(group.get("name") or ""),
                 "unit": "percent", "used_percentage": used, "resets_at": resets_at,
                 "observed_at": _normalize_time(observed_at / 1000),
@@ -1218,8 +1257,11 @@ def _agy_windows(row: dict[str, Any], provider_instance_id: str, now_ms: int) ->
 
 
 def _agy_needs_refresh() -> bool:
+    now = _now_ms()
+    if now - _AGY_LAST_ATTEMPT_MS[0] <= CLAUDE_REFRESH_MS:
+        return False
     row = _row(AGY)
-    return not row or _now_ms() - int(row.get("fetched_at") or 0) > CLAUDE_REFRESH_MS
+    return not row or now - int(row.get("fetched_at") or 0) > CLAUDE_REFRESH_MS
 
 
 def _claude_needs_refresh() -> bool:

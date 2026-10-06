@@ -36,6 +36,7 @@ from .message_writes import (  # noqa: F401
     has_interruption_marker,
     record_interruption_marker,
     record_dream_digest,
+    carry_conversation,
     IMPORT_COMMIT_EVERY,
     IMPORT_WRITE_BUDGET_SECONDS,
     IMPORT_WRITER_YIELD_SECONDS,

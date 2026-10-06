@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -47,6 +48,8 @@ class _TurnState:
     usage_refs: list[str] = field(default_factory=list)
     conversation_id: str = ""
     expected_conversation_id: str = ""
+    # The pruned conversation this turn continues (see AgyBackend.start_turn).
+    restored_from: str = ""
     live_text: str = ""
     persisted_live_text: str = ""
     last_live_write_at: float = 0.0
@@ -133,22 +136,75 @@ def _handle_result(result: Any, evidence: dict[str, Any], st: _TurnState, *,
     _finish_result(event, st, on_result=on_result)
 
 
+_PRIVATE_HOME_LOGS_PRUNED = [0.0]
+
+
+def _private_home() -> pathlib.Path:
+    """The HOME for agy runs that must not touch the real conversation store
+    (see AgyBackend._ONESHOT_LINKED). Links are swapped in atomically, so
+    concurrent one-shots never see the login missing, and a file agy wrote in
+    place of a link is relinked, so a re-login reaches one-shots too."""
+    from ..deployment import LAYOUT
+    real_home = pathlib.Path.home()
+    home = pathlib.Path(os.environ.get("CLARP_CACHE_DIR") or LAYOUT.cache_dir) / "agy-oneshot-home"
+    for relative in AgyBackend._ONESHOT_LINKED:
+        source, link = real_home / relative, home / relative
+        if not source.exists() or (link.is_symlink() and os.readlink(link) == str(source)):
+            continue
+        link.parent.mkdir(parents=True, exist_ok=True)
+        staged = link.with_name(f".{link.name}.{os.getpid()}.{threading.get_ident()}")
+        staged.unlink(missing_ok=True)
+        staged.symlink_to(source)
+        os.replace(staged, link)
+    for relative in AgyBackend._ONESHOT_COPIED:
+        source, copy = real_home / relative, home / relative
+        try:
+            if copy.exists() and copy.stat().st_mtime >= source.stat().st_mtime:
+                continue
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            staged = copy.with_name(f".{copy.name}.{os.getpid()}.{threading.get_ident()}")
+            shutil.copy2(source, staged)
+            os.replace(staged, copy)
+        except OSError:
+            continue
+    now = time.time()
+    if now - _PRIVATE_HOME_LOGS_PRUNED[0] > 3600:
+        _PRIVATE_HOME_LOGS_PRUNED[0] = now
+        cutoff = now - AgyBackend._ONESHOT_LOG_DAYS * 86400
+        for old in (home / ".gemini/antigravity-cli/log").glob("cli-*.log"):
+            try:
+                if old.stat().st_mtime < cutoff:
+                    old.unlink()
+            except OSError:
+                pass
+    return home
+
+
 RESTORE_MAX_CHARS = 60_000
+RESTORE_BLOCK_CHARS = 4_000
 
 
-def _restore_prompt(agent_id: str, conversation_id: str, text: str) -> str:
+def _restore_prompt(agent_id: str, conversation_id: str, text: str,
+                    trace_id: str = "") -> str:
     """The new turn, preceded by the most recent part of the pruned
-    conversation as Clarp recorded it (at most RESTORE_MAX_CHARS)."""
+    conversation as Clarp recorded it (at most RESTORE_MAX_CHARS). The record
+    sits in an injected-context block, so the chat shows only the new turn."""
     from .. import db
+    from ..message_context import RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE
     from ..voice_markup import clean_for_display
     blocks: list[str] = []
     for row in db.conn().execute(
             "SELECT role, text FROM messages WHERE agent_id=? AND backend_session_id=? "
-            "AND role IN ('user','assistant') ORDER BY timestamp, seq",
-            (agent_id, conversation_id)):
+            "AND role IN ('user','assistant') AND COALESCE(trace_id, '') != ? "
+            "ORDER BY timestamp, seq",
+            (agent_id, conversation_id, trace_id or "\0")):
         body = clean_for_display(str(row["text"] or "")).strip()
         if body:
-            blocks.append(f"{'User' if row['role'] == 'user' else 'Assistant'}: {body[:4000]}")
+            if len(body) > RESTORE_BLOCK_CHARS:
+                # Keep both ends: a long reply's conclusion matters most.
+                half = RESTORE_BLOCK_CHARS // 2
+                body = body[:half] + "\n[…]\n" + body[-half:]
+            blocks.append(f"{'User' if row['role'] == 'user' else 'Assistant'}: {body}")
     kept, size = [], 0
     for block in reversed(blocks):
         if size + len(block) + 2 > RESTORE_MAX_CHARS:
@@ -157,10 +213,31 @@ def _restore_prompt(agent_id: str, conversation_id: str, text: str) -> str:
         size += len(block) + 2
     if not kept:
         return text
-    return ("[Antigravity no longer has this conversation (it prunes old ones), so it "
-            "continues in a new one. Below is Clarp's record of it, most recent last; "
-            "carry on from it.]\n\n" + "\n\n".join(reversed(kept))
-            + "\n\n[The new message follows.]\n\n" + text)
+    return (f"{RESTORED_CONTEXT_OPEN}\n[Antigravity no longer has this conversation "
+            "(it prunes old ones), so it continues in a new one. Below is Clarp's "
+            "record of it, most recent last; carry on from it. The new message "
+            "follows the record.]\n\n" + "\n\n".join(reversed(kept))
+            + f"\n{RESTORED_CONTEXT_CLOSE}\n\n" + text)
+
+
+def _carry_restored(agent_id: str, pruned: str, conversation_id: str,
+                    trace_id: str) -> None:
+    """Move the pruned conversation's chat rows and goals onto the new one."""
+    from .. import message_store, task_plans
+    try:
+        moved = message_store.carry_conversation(
+            agent_id=agent_id, from_session_id=pruned,
+            to_session_id=conversation_id, current_trace_id=trace_id)
+        goals = task_plans.carry_native_session(
+            agent_id, pruned, conversation_id,
+            "Antigravity pruned the conversation; Clarp continued it in a new one "
+            "that opens with its record of the old one")
+        log("agyConversationCarried",
+            f"agent={agent_id} from={pruned} to={conversation_id} rows={moved} "
+            f"goals={len(goals)} trace={trace_id or '∅'}")
+    except Exception as e:
+        log_exception("agyConversationCarryFail", e,
+                      detail=f"agent={agent_id} from={pruned} to={conversation_id}")
 
 
 def _runner_error(detail: str) -> str:
@@ -297,6 +374,8 @@ def _bind_session(conversation_id: str, st: _TurnState, *, trace_id: str,
             st.conversation_id = ""
             raise ValueError("conversation binding rejected")
     agent_id = st.evidence_scope.get("agent_id") or ""
+    if agent_id and st.restored_from:
+        _carry_restored(agent_id, st.restored_from, conversation_id, trace_id)
     if agent_id:
         observed_assistant_count = 0
         transcript = agy_transcript.find_latest_jsonl(conversation_id)
@@ -572,8 +651,11 @@ class AgyBackend(StreamJsonBackend):
             # conversation that carries Clarp's own record of the old one.
             log("agyConversationRestored",
                 f"agent={agent_id} pruned={backend_session_id} trace={trace_id or '∅'}")
-            text = _restore_prompt(agent_id, backend_session_id, text)
+            text = _restore_prompt(agent_id, backend_session_id, text, trace_id)
+            restored_from = backend_session_id
             backend_session_id, is_new_session = "", True
+        else:
+            restored_from = ""
         # Every agy turn is app-dispatched: always prepend the
         # Clarp-skills guidance, plus the <speak> voice guidance on
         # spoken turns. (Same instruction block as the Codex backend.)
@@ -616,7 +698,10 @@ class AgyBackend(StreamJsonBackend):
             if runtime_agent_id:
                 self._transition(runtime_agent_id, TurnEvent.SPAWN_STARTED,
                                    {"dispatch": self.runner, "trace_id": trace_id})
-            process.append(popen_turn(cmd, cwd=cwd, session=session, env_extra=identity))
+            # An isolated turn (a dream) is a one-shot: keep it out of agy's
+            # real conversation store, as routing_env does.
+            env_extra = {**identity, **self.routing_env()} if isolated else identity
+            process.append(popen_turn(cmd, cwd=cwd, session=session, env_extra=env_extra))
             provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
                                           provider=self.id, pid=process[0].pid)
         try:
@@ -642,6 +727,7 @@ class AgyBackend(StreamJsonBackend):
             expected_conversation_id=(
                 backend_session_id if backend_session_id and not is_new_session
                 else ""),
+            restored_from=restored_from,
             run_if_owned=owner_gate,
         )
         return handle
@@ -652,9 +738,11 @@ class AgyBackend(StreamJsonBackend):
         on_session_init, on_result, on_error, stream, enqueue,
         expected_conversation_id: str,
         run_if_owned,
+        restored_from: str = "",
     ) -> None:
         """Drain NDJSON with a strict exactly-one terminal callback latch."""
-        st = _TurnState(expected_conversation_id=expected_conversation_id)
+        st = _TurnState(expected_conversation_id=expected_conversation_id,
+                        restored_from=restored_from)
         try:
             st.evidence_scope = _turn_evidence_scope(agent_id, trace_id)
             revision = 0
@@ -1005,30 +1093,22 @@ class AgyBackend(StreamJsonBackend):
 
     # agy keeps every conversation under $HOME/.gemini and prunes its store to
     # roughly the newest 500. Clarp's one-shot requests (tool explanations, model
-    # fallbacks, janitor decisions, the orchestrator) made over a thousand a day,
-    # pruning real agents' conversations within hours; a resumed conversation
-    # that was pruned silently restarts empty. One-shots therefore run with a
-    # private HOME that shares only agy's login.
-    _ONESHOT_SHARED = (".gemini/oauth_creds.json", ".gemini/google_accounts.json",
+    # fallbacks, janitor decisions, the orchestrator) and dreams made over a
+    # thousand a day, pruning real agents' conversations within hours; a resumed
+    # conversation that was pruned silently restarts empty. They therefore run
+    # with a private HOME in Clarp's cache that links agy's login and copies
+    # its settings (the default model, onboarding), and nothing else.
+    _ONESHOT_LINKED = (".gemini/oauth_creds.json", ".gemini/google_accounts.json",
                        ".gemini/installation_id",
                        ".gemini/antigravity-cli/antigravity-oauth-token",
                        ".gemini/antigravity-cli/installation_id")
+    _ONESHOT_COPIED = (".gemini/antigravity-cli/settings.json",
+                       ".gemini/antigravity-cli/cache/onboarding.json")
+    # agy never prunes its own CLI logs; the private HOME keeps two days.
+    _ONESHOT_LOG_DAYS = 2
 
     def routing_env(self) -> dict[str, str]:
-        from ..deployment import LAYOUT
-        real_home = pathlib.Path.home()
-        home = LAYOUT.data_root / "agy-oneshot-home"
-        for relative in self._ONESHOT_SHARED:
-            source, link = real_home / relative, home / relative
-            if not source.exists():
-                continue
-            link.parent.mkdir(parents=True, exist_ok=True)
-            if link.is_symlink() and os.readlink(link) == str(source):
-                continue
-            if link.is_symlink() or not link.exists():
-                link.unlink(missing_ok=True)
-                link.symlink_to(source)
-        return {"HOME": str(home)}
+        return {"HOME": str(_private_home())}
 
     def routing_text(self, stdout: str) -> str:
         """The reply text of a ``routing_cmd`` run."""

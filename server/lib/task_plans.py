@@ -883,6 +883,54 @@ def pause_recovery_for_agent(agent_id: str, reason: str) -> None:
         )
 
 
+def carry_native_session(agent_id: str, from_session_id: str, to_session_id: str,
+                         reason: str) -> list[str]:
+    """Follow a native conversation the Host itself continued in a new one.
+
+    A goal is bound to its owner's native conversation and stops when that
+    changes, because a silent swap means the agent lost its context. When the
+    Host carries the conversation over (agy prunes old ones, and Clarp opens
+    the new one with its record of the old), the goal follows it instead, and
+    a wake already running stays valid. Returns the plans that moved.
+    """
+    from . import artifacts, goal_ledger
+
+    if not agent_id or not from_session_id or not to_session_id:
+        return []
+    con = db.conn()
+    now = db.now_ms()
+    moved = []
+    with goal_ledger.acting_as("system"):
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            for plan in con.execute(
+                    "SELECT * FROM task_plans WHERE agent_id=? AND goal_json!='{}' "
+                    "AND status NOT IN ('completed','cancelled','superseded')",
+                    (agent_id,)).fetchall():
+                goal = json.loads(plan["goal_json"])
+                if goal.get("native_session_id") != from_session_id:
+                    continue
+                goal["native_session_id"] = to_session_id
+                state = goal["continuation"]
+                if state.get("plan_revision") == plan["revision"]:
+                    state["plan_revision"] = plan["revision"] + 1
+                goal["history"].append(dict(
+                    at=now, kind="rebind", revision=plan["revision"] + 1,
+                    detail={"reason": reason, "from_native_session_id": from_session_id,
+                            "native_session_id": to_session_id}))
+                _goal_save(con, plan["plan_id"], goal)
+                con.execute(
+                    "UPDATE task_plans SET revision=revision+1,updated_at=? WHERE plan_id=?",
+                    (now, plan["plan_id"]))
+                artifacts.sync_plan(plan["plan_id"])
+                moved.append(plan["plan_id"])
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    return moved
+
+
 def _write_goal_documents(con, plan_id, documents, now):
     if not isinstance(documents, list) or len(documents) > 32:
         raise ValueError("checkpoint supports at most 32 document changes")

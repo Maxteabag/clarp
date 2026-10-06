@@ -2283,3 +2283,33 @@ def test_no_second_process_starts_while_the_agents_last_turn_process_still_runs(
     backends.spawned[1][1]["on_result"]({"duration_ms": 5})
     assert [call["text"] for _, call in backends.spawned] == [
         "first", "queued follow-up", "direct follow-up"]
+
+
+def test_a_goal_wake_keeps_running_when_its_conversation_is_carried_over(tmp_path):
+    from lib import db, task_plans, task_goal_recovery
+    _td.reset_for_tests()
+    service, backends, agent_id = _make_service(tmp_path)
+    agents_db.bind_backend_session(agent_id, "native-goal-test")
+    transcript = tmp_path / ".claude" / "projects" / "-goal"
+    transcript.mkdir(parents=True)
+    (transcript / "native-goal-test.jsonl").write_text("{}\n")
+    task_plans.create(
+        session="mike", title="Finish the outcome", items=[{"id": "probe", "title": "Probe"}],
+        goal={"criteria": ["Verified result"], "limits": "No deployment", "enroll": True})
+
+    def dispatch(session, text, request):
+        return service.dispatch(
+            text=text, requested_session=session, trace_id=request,
+            client_msg_id=request, origin="automation", queue_if_busy=True,
+            synthesize_audio=False)
+
+    assert task_goal_recovery.tick(dispatch, now=db.now_ms() + 130000) == 1
+    _backend, spawn = backends.spawned[-1]
+    owned = spawn["run_if_owned"]
+    # The backend lost the conversation and continued it in a new one, which
+    # it binds and carries the goal over to (agy after a prune).
+    assert owned(lambda: spawn["on_session_init"]("continued-native"))
+    task_plans.carry_native_session(agent_id, "native-goal-test", "continued-native",
+                                    "pruned")
+    ran = []
+    assert owned(lambda: ran.append("event")) and ran == ["event"]

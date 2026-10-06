@@ -213,3 +213,12 @@ def test_schema_is_created_once_per_database(env,monkeypatch,tmp_path):
     db.reset_for_tests(tmp_path/'other.sqlite')
     service.setup()
     assert len(scripts)==2
+
+def test_a_quota_warning_names_the_model_group_it_is_about(env):
+    notifications=[]
+    import datetime
+    stamp=datetime.datetime.now(datetime.timezone.utc).isoformat()
+    # agy's limits are per model group; "agy: 15% remaining" would not say which.
+    usage={'providers':{'agy':{'provider_instance_id':'opaque','windows':[{'window_id':'w','label':'Gemini Models','used_percentage':85,'observed_at':stamp,'freshness':'fresh'}]}}}
+    service.AutonomyJanitors(lambda *_:True,lambda p:notifications.append(p)or {'sent':1},usage_read=lambda:usage).quota_once()
+    assert notifications[0]['preview']=='agy Gemini Models: 15% quota remaining'
