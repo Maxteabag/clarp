@@ -326,9 +326,21 @@ fn run_stages(mut stages: Vec<Stage>) {
             index.set(index.get() + 1);
             since.set(Instant::now());
         }
-        window.window().request_redraw();
+        if !QUIET.with(Cell::get) {
+            window.window().request_redraw();
+        }
     });
     TIMER.with(|t| *t.borrow_mut() = Some(timer));
+}
+
+thread_local! {
+    /// The stages stop asking for frames: what is drawn is the app's own.
+    static QUIET: Cell<bool> = const { Cell::new(false) };
+}
+
+/// While a check counts the frames the app draws by itself.
+fn quiet(on: bool) {
+    QUIET.with(|q| q.set(on));
 }
 
 fn rows(_window: &crate::AppWindow) -> Vec<crate::MessageRow> {
