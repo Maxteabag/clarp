@@ -992,8 +992,10 @@ fn switcher_check(out: String) {
             headless::press(Key::Return);
             true
         })),
-        ("rail hidden", Box::new(|_, window, _| {
-            if window.get_switcher_open() || window.get_nav_rail_visible() {
+        // Ctrl+K again once the composer has the keyboard back: a key pressed
+        // while the switcher is still handing it over has nowhere to go.
+        ("rail hidden", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || window.get_nav_rail_visible() || !report().composer_focused || elapsed < Duration::from_millis(200) {
                 return false;
             }
             check(true, "Enter on it hides the activity bar");
@@ -1040,8 +1042,8 @@ fn switcher_check(out: String) {
             headless::press(Key::Return);
             true
         })),
-        ("stamps", Box::new(|_, window, _| {
-            if window.get_switcher_open() || rows(window).iter().all(|r| r.stamp.is_empty()) {
+        ("stamps", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || rows(window).iter().all(|r| r.stamp.is_empty()) || !report().composer_focused || elapsed < Duration::from_millis(200) {
                 return false;
             }
             check(true, "the setting applies at once");
@@ -1101,8 +1103,8 @@ fn switcher_check(out: String) {
             headless::press(Key::Return);
             true
         })),
-        ("theme chosen", Box::new(move |app, window, _| {
-            if window.get_switcher_open() || app.engine.borrow().reading_theme() == *theme_before2.borrow() {
+        ("theme chosen", Box::new(move |app, window, elapsed| {
+            if window.get_switcher_open() || app.engine.borrow().reading_theme() == *theme_before2.borrow() || !report().composer_focused || elapsed < Duration::from_millis(200) {
                 return false;
             }
             check(true, "Enter on another choice applies it");
@@ -1141,12 +1143,12 @@ fn switcher_check(out: String) {
             headless::press(Key::Return);
             true
         })),
-        ("sized", Box::new(|app, window, _| {
+        ("sized", Box::new(|app, window, elapsed| {
             let size = {
                 let engine = app.engine.borrow();
                 engine.font_override(&engine.reading_theme()).and_then(|f| f.size)
             };
-            if window.get_switcher_open() || size != Some(18.0) {
+            if window.get_switcher_open() || size != Some(18.0) || !report().composer_focused || elapsed < Duration::from_millis(200) {
                 return false;
             }
             check(true, "choosing 18 px sets the chat's font size");
