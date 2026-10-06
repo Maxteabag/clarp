@@ -73,7 +73,7 @@ def decision_model(packet,run):
         cmd=adapter.routing_cmd(prompt,model=model['model'],effort=model.get('effort',''))
         if not shutil.which(cmd[0]):raise model_fallbacks.ProviderFailure('Decision CLI unavailable')
         from .launch_paths import existing_workspace_path
-        p=subprocess.run(cmd,cwd=str(existing_workspace_path(None)),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=120,check=False)
+        p=subprocess.run(cmd,cwd=str(existing_workspace_path(None)),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=120,check=False,env={**os.environ,**adapter.routing_env()})
         if p.returncode:raise model_fallbacks.provider_error((p.stderr or '')[:500])
         return orchestrator._extract_json(adapter.routing_text(p.stdout))
     return model_fallbacks.execute(run['agent_id'],run['run_id']+':decision',primary,invoke,current=lambda:janitor_builtins.is_current(run['run_id']))

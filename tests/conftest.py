@@ -98,10 +98,12 @@ def _forbid_live_service_control(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_real_agy_cli(monkeypatch):
-    """Never run the developer's real Antigravity CLI from a test (its usage
-    check, say); a test that needs agy installs a fake via CLARP_AGY_BIN."""
+def _no_real_agy_cli(monkeypatch, tmp_path):
+    """Never run, or read the state of, the developer's real Antigravity CLI from
+    a test; a test that needs agy installs a fake via CLARP_AGY_BIN and its own
+    store via CLAUDE_PWA_AGY_HOME."""
     monkeypatch.setenv("CLARP_AGY_BIN", "clarp-test-no-agy")
+    monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path / "no-agy-home"))
 
 
 @pytest.fixture(autouse=True)

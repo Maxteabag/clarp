@@ -15,6 +15,7 @@ cancellation, user interrupts and permission failures never grant a retry.
 
 from __future__ import annotations
 import json
+import os
 import re
 from contextlib import contextmanager
 
@@ -294,6 +295,7 @@ def json_call(model, prompt, schema, *, current=lambda: True, timeout=45):
             stderr=subprocess.PIPE,
             text=True,
             start_new_session=True,
+            env={**os.environ, **runner.routing_env()},
         )
         deadline = time.monotonic() + timeout
         try:

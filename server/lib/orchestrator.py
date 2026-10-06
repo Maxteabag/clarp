@@ -1390,7 +1390,7 @@ def call_model(packet: dict[str, Any], settings: OrchestratorSettings) -> dict[s
         stderr=subprocess.PIPE,
         text=True,
         timeout=max(0.25, settings.timeout_ms / 1000.0),
-        env={**os.environ},
+        env={**os.environ, **runner.routing_env()},
         check=False,
     )
     if proc.returncode != 0:
