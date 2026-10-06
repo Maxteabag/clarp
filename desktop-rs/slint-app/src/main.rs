@@ -6,6 +6,7 @@
 //! Slint's software renderer (for checks), and `--e2e-out DIR` drives it like
 //! a person would, saving a screenshot per stage (see `driver.rs`).
 
+mod catalogue;
 mod commands;
 mod driver;
 mod headless;

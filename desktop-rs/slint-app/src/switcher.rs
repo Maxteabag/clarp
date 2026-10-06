@@ -324,6 +324,15 @@ mod tests {
     }
 
     #[test]
+    fn every_command_is_described_with_aliases() {
+        let all = Toggles { preview_versions: true, tool_explanations: Some(true), ..Toggles::default() };
+        for item in commands(all, "paper") {
+            let entry = crate::catalogue::find(&item.target);
+            assert!(entry.is_some_and(|e| !e.description.is_empty() && e.aliases.len() >= 2), "{} ({}) needs a catalogue entry", item.label, item.target);
+        }
+    }
+
+    #[test]
     fn every_settings_row_becomes_a_command() {
         let row = |kind: &str, id: &str, label: &str, on: bool| (kind.to_owned(), id.to_owned(), label.to_owned(), "Kokoro".to_owned(), on);
         let items = settings(&[

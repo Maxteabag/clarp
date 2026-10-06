@@ -840,6 +840,7 @@ fn panes_check(out: String) {
 fn switcher_check(out: String) {
     use slint::platform::Key;
     let out2 = out.clone();
+    let out3 = out.clone();
     fn first(window: &crate::AppWindow) -> String {
         window.get_switcher_rows().row_data(0).map(|r| format!("{}:{}", r.kind, r.label)).unwrap_or_default()
     }
@@ -918,7 +919,59 @@ fn switcher_check(out: String) {
             headless::press_with(&[Key::Control], "k");
             true
         })),
+        ("hide", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("hide");
+            true
+        })),
+        ("activity bar", Box::new(move |_, window, elapsed| {
+            if window.get_switcher_query() != "hide" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let top: Vec<String> = window.get_switcher_rows().iter().take(3).map(|r| r.label.to_string()).collect();
+            let at = top.iter().position(|l| l == "Activity bar");
+            check(at.is_some(), &format!("\"hide\" finds the activity bar in the top three: {top:?}"));
+            let row = window.get_switcher_rows().iter().find(|r| r.label == "Activity bar");
+            check(row.is_some_and(|r| r.detail.contains("far left")), "with its description under it");
+            shot(&out3, "switcher-02-hide");
+            window.invoke_switcher_moved(at.unwrap_or(0) as i32);
+            headless::press(Key::Return);
+            true
+        })),
+        ("rail hidden", Box::new(|_, window, _| {
+            if window.get_switcher_open() || window.get_nav_rail_visible() {
+                return false;
+            }
+            check(true, "Enter on it hides the activity bar");
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("typo", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("colapse");
+            true
+        })),
+        ("forgiven", Box::new(|_, window, elapsed| {
+            if window.get_switcher_query() != "colapse" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let top: Vec<String> = window.get_switcher_rows().iter().take(3).map(|r| r.label.to_string()).collect();
+            check(top.iter().any(|l| l == "Activity bar"), &format!("the typo \"colapse\" still finds it: {top:?}"));
+            headless::press(Key::Escape);
+            true
+        })),
         ("settings", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "k");
+            true
+        })),
+        ("timestamps", Box::new(|_, window, elapsed| {
             if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
                 return false;
             }
@@ -929,7 +982,7 @@ fn switcher_check(out: String) {
             if window.get_switcher_query() != "timestamps" || elapsed < Duration::from_millis(200) {
                 return false;
             }
-            check(first(window) == "command:Off → On · Timestamps", &format!("a setting says what it will do: {}", first(window)));
+            check(first(window) == "command:Timestamps", &format!("a setting is found by its name: {}", first(window)));
             headless::press(Key::Return);
             true
         })),
