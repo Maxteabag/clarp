@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 import { KeyHint } from "artifacts.slint";
 import { MessageImage } from "transcript.slint";
 
@@ -50,7 +50,7 @@ export component ImageView inherits Rectangle {
             Text {
                 text: root.shown.alt + (root.images.length > 1 ? "  ·  " + (root.index + 1) + " / " + root.images.length : "");
                 color: Palette.text;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
                 vertical-alignment: center;
             }
             if root.images.length > 1: KeyHint { key: "←/→"; label: "Move"; emphasised: true; clicked => { root.moved(1); } }

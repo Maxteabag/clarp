@@ -44,6 +44,43 @@ export global ChatLook {
     in property <bool> window-shown: true;
 }
 
+// The reader's own look (Settings → Typography and Layout; clarp_core::prefs),
+// set from Rust (look.rs). The defaults are the window as it was before any
+// of it was a setting.
+export global Look {
+    // Interface text: a label written "12 * Look.unit" is 12px at 100%.
+    in property <length> unit: 1px;
+    // Code blocks' size relative to the message text.
+    in property <float> code-scale: 0.9;
+    // Between a message's paragraphs, lists, code and headings.
+    in property <length> paragraph-spacing: 8px;
+    // A top-level heading's size relative to the text (smaller levels follow).
+    in property <float> heading-scale: 1.4;
+    // The longest line of message text, 0px for the pane's width.
+    in property <length> measure: 0px;
+    in property <int> weight: 400;
+    // Extra padding per side of list rows: compact < 0 < spacious.
+    in property <length> density-pad: 0px;
+    in property <length> explorer-width: 320px;
+    // The widest your own bubble gets, as a share of the chat.
+    in property <float> bubble-share: 0.75;
+    in property <length> message-spacing: 14px;
+    in property <length> pane-gap: 4px;
+    in property <length> border-width: 1.5px;
+    in property <length> focus-border-width: 2.5px;
+    in property <length> radius: 6px;
+    in property <length> scrollbar-width: 3px;
+    // "auto", "always" or "never".
+    in property <string> scrollbar: "auto";
+    // New rows keep the chat at its end while the reader is there.
+    in property <bool> follow: true;
+    // Up/Down's step in the chat.
+    in property <length> line-step: 40px;
+    // Changes whenever something that changes a row's height does, so the
+    // chat measures its rows again.
+    in property <int> generation;
+}
+
 // Where the keyboard is: the keyboard map's state (commands::context), set
 // from Rust with the shortcut bar. Every region that owns a state draws the
 // one FocusRing when it is the one; lists mark their cursor with Cursor.
@@ -57,9 +94,9 @@ export global Focus {
 // takes no input.
 export component FocusRing inherits Rectangle {
     in property <bool> shown;
-    border-width: root.shown ? 2px : 0px;
+    border-width: root.shown ? Math.max(1px, Look.focus-border-width - 0.5px) : 0px;
     border-color: Palette.focus;
-    border-radius: 6px;
+    border-radius: Look.radius;
 }
 
 // A keyboard region as sqlit draws its panes: a rounded grey outline with
@@ -91,9 +128,9 @@ export component PaneFrame inherits Rectangle {
         y: 7px;
         width: root.width;
         height: root.height - 7px;
-        border-width: root.active ? 2.5px : 1.5px;
+        border-width: root.active ? Look.focus-border-width : Look.border-width;
         border-color: root.tone;
-        border-radius: 6px;
+        border-radius: Look.radius;
     }
     Rectangle {
         x: 10px;
@@ -106,7 +143,7 @@ export component PaneFrame inherits Rectangle {
             height: parent.height;
             text: "[" + root.key + "] " + root.label;
             color: root.active ? Palette.focus : Palette.muted;
-            font-size: 11px;
+            font-size: 11 * Look.unit;
             font-weight: root.active ? 700 : 400;
             vertical-alignment: center;
         }
@@ -132,7 +169,7 @@ export component PaneFrame inherits Rectangle {
         width: Math.min(self.preferred-width, root.info-room);
         text: root.info-name;
         color: name-touch.has-hover ? Palette.accent : Palette.chrome-text;
-        font-size: 11px;
+        font-size: 11 * Look.unit;
         font-weight: 700;
         vertical-alignment: center;
         overflow: elide;
@@ -148,7 +185,7 @@ export component PaneFrame inherits Rectangle {
         width: Math.max(0px, root.width - 10px - 4px - self.x);
         text: root.info;
         color: Palette.muted;
-        font-size: 11px;
+        font-size: 11 * Look.unit;
         vertical-alignment: center;
         overflow: elide;
     }

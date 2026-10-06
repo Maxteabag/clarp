@@ -1,4 +1,4 @@
-import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look } from "theme.slint";
 import { Composer, Attachment, MentionRow } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
@@ -242,7 +242,7 @@ export component Pane inherits Rectangle {
                 Text {
                     text: root.pane.live-status;
                     color: root.pane.live-busy ? Palette.chrome-text : root.pane.live-status == "■ Interrupted" ? Palette.warning : Palette.muted;
-                    font-size: 12px;
+                    font-size: 12 * Look.unit;
                     overflow: elide;
                     horizontal-stretch: 1;
                     vertical-alignment: center;
@@ -378,7 +378,7 @@ export component Workspace inherits Rectangle {
     callback dismiss-save-warning();
     callback resize-split(string, float);
     callback balance();
-    property <length> gap: 4px;
+    property <length> gap: Look.pane-gap;
     property <length> bar-height: root.bar-visible ? 36px : 0px;
     property <length> top: root.bar-height + (root.save-warning != "" ? 40px : 0px);
     property <length> area-height: root.height - root.top;
@@ -399,7 +399,7 @@ export component Workspace inherits Rectangle {
             tab-label := Text {
                 text: tab.name;
                 color: tab.active ? Palette.text : Palette.muted;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
             }
             tab-touch := TouchArea { clicked => { root.switch-workspace(tab.id); } }
         }
@@ -434,15 +434,15 @@ export component Workspace inherits Rectangle {
         // Key hints, as the shortcut bar spells keys; a click does the same.
         HorizontalLayout {
             spacing: 4px;
-            Text { text: root.save-warning-keep-key; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
-            Text { text: "Keep this layout"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+            Text { text: root.save-warning-keep-key; color: Palette.accent; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
+            Text { text: "Keep this layout"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
             TouchArea { clicked => { root.save-layout-instead(); } }
         }
         HorizontalLayout {
             spacing: 4px;
             padding-left: 8px;
-            Text { text: root.save-warning-dismiss-key; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
-            Text { text: "Dismiss"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+            Text { text: root.save-warning-dismiss-key; color: Palette.accent; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
+            Text { text: "Dismiss"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
             TouchArea { clicked => { root.dismiss-save-warning(); } }
         }
     }

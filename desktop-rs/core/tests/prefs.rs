@@ -238,3 +238,15 @@ fn the_schema_and_reference_document_every_setting() {
     assert!(properties.contains_key("appearance/colorOverrides") && properties.contains_key("appearance/fontOverrides"));
     assert_eq!(schema["properties"]["layout/radius"]["maximum"], Value::from(20.0));
 }
+
+#[test]
+fn the_time_format_setting_switches_the_clock() {
+    use chrono::{FixedOffset, TimeZone};
+    let zone = FixedOffset::east_opt(2 * 3600).unwrap();
+    let now = zone.with_ymd_and_hms(2026, 9, 17, 20, 0, 0).unwrap();
+    let evening = zone.with_ymd_and_hms(2026, 9, 17, 18, 10, 0).unwrap().timestamp_millis();
+    clarp_core::time_format::set_clock_24h(true);
+    assert_eq!(clarp_core::time_format::chat_stamp(evening, &now), "18:10");
+    clarp_core::time_format::set_clock_24h(false);
+    assert_eq!(clarp_core::time_format::chat_stamp(evening, &now), "6:10 PM");
+}

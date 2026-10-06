@@ -262,6 +262,14 @@ fn sidebar_sessions(window: &AppWindow) -> Vec<String> {
 /// Runs `action`; false for one this app does not do yet, so the key
 /// reaches the focused control instead.
 pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
+    // Settings → Confirm stop and release asks first.
+    if crate::look::confirm_first(app, window, action) {
+        return true;
+    }
+    // Every preference: `pref:NAME`, `pref:NAME:+1`, resets, the file.
+    if let Some(ran) = crate::look::run(app, window, action) {
+        return ran;
+    }
     // ---- launch dialogs
     if let Some(ran) = crate::launch_view::run(app, window, action).or_else(|| crate::agent_dialogs_view::run(app, window, action)) {
         return ran;
@@ -320,6 +328,8 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             crate::launch_view::open_start_agent(app, window, &selected, &name);
         }
         "manage-queue" if !selected.is_empty() => crate::agent_dialogs_view::open_queue(app, window, &selected),
+        // The value editor puts the old value back.
+        "escape" if matches!(app.overlay.borrow().as_str(), crate::look::EDITOR | crate::look::CONFIRM) => crate::look::cancel_editor(app, window),
         "escape" if !app.overlay.borrow().is_empty() => close_overlay(app, window),
         "connection" => {
             open_overlay(app, window, "connection");
@@ -596,16 +606,14 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         _ if action.starts_with("setting:") => apply_setting(app, window, action),
         "settings" => crate::settings_view::open(app, window),
+        // Settings → Interface scale, a step at a time.
         "ui-larger" | "ui-smaller" | "ui-reset" => {
-            let current = app.engine.borrow().settings().get("appearance/uiScale").and_then(serde_json::Value::as_f64).unwrap_or(1.15);
-            let next = match action {
-                "ui-larger" => current + 0.05,
-                "ui-smaller" => current - 0.05,
-                _ => 1.15,
+            let pref = match action {
+                "ui-larger" => "pref:uiscale:1",
+                "ui-smaller" => "pref:uiscale:-1",
+                _ => "pref-reset:uiscale",
             };
-            let next = ((next * 20.0).round() / 20.0).clamp(1.0, 1.4);
-            app.engine.borrow_mut().settings_mut().set("appearance/uiScale", next);
-            crate::platform::desktop::set_ui_scale(next as f32);
+            crate::look::run(app, window, pref);
         }
         "chats" => {
             window.set_surface("chats".into());
@@ -729,7 +737,12 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     } else if recent_only {
         switcher::recent(&app.engine.borrow(), &app.recent.borrow(), &query)
     } else {
-        let mut items = switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings));
+        let mut items = {
+            // Every preference the catalogue has no entry for, as its own row.
+            let mut settings = switcher::settings(&settings);
+            settings.extend(switcher::prefs(app.engine.borrow().settings()));
+            switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, settings)
+        };
         // Ctrl+K: the best few messages after the agents and contacts.
         if !contacts_only && query.trim().chars().count() >= crate::search_view::MIXED_FROM {
             let (found, results) = crate::search_view::items(&mut app.engine.borrow_mut(), &query, crate::search_view::MIXED);
@@ -777,6 +790,7 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
             key: item.key.clone().into(),
             group: item.group.into(),
             value: item.value.clone().into(),
+            adjustable: item.target.starts_with("pref:") && item.group == "setting",
         })
         .collect();
     state.items = items;
@@ -809,6 +823,15 @@ pub fn close_switcher(app: &App, window: &AppWindow, restore: Option<bool>) {
         app.focus_transcript();
     }
     show_hints(app, window);
+}
+
+/// + or - on a setting in the switcher: it steps, and the switcher stays
+/// open on it with its new value.
+pub fn switcher_adjusted(app: &Rc<App>, window: &AppWindow, index: i32, delta: i32) {
+    let Some(item) = usize::try_from(index).ok().and_then(|i| app.switcher.borrow().items.get(i).cloned()) else { return };
+    let Some(name) = item.target.strip_prefix("pref:") else { return };
+    crate::look::run(app, window, &format!("pref:{name}:{delta}"));
+    refresh_switcher(app, window);
 }
 
 /// Enter on a row (QuickSwitcher.qml `choose`).

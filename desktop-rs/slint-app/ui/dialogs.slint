@@ -1,6 +1,6 @@
 import { Button } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing } from "theme.slint";
+import { Palette, Focus, FocusRing, Look } from "theme.slint";
 
 // A dialog over the window: a dimmed backdrop that closes it when clicked,
 // and a card in the middle. Escape closes it through the keyboard map.
@@ -66,20 +66,20 @@ export component KeymapEditor inherits Modal {
         spacing: 10px;
         HorizontalLayout {
             spacing: 12px;
-            Text { text: "Key bindings"; color: Palette.text; font-size: 20px; }
+            Text { text: "Key bindings"; color: Palette.text; font-size: 20 * Look.unit; }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: "‹ " + root.context + " ›"; color: Palette.accent; font-size: 14px; font-weight: 700; vertical-alignment: center; accessible-label: "Context " + root.context; }
+            Text { text: "‹ " + root.context + " ›"; color: Palette.accent; font-size: 14 * Look.unit; font-weight: 700; vertical-alignment: center; accessible-label: "Context " + root.context; }
         }
         HorizontalLayout {
             spacing: 12px;
             Text {
                 text: "A binding here reaches the contexts inside this one. Typing keys bound further out never reach a text field.";
                 color: Palette.muted;
-                font-size: 11px;
+                font-size: 11 * Look.unit;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
-            Text { text: root.filter != "" ? root.filter + "  " + root.count : root.count; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+            Text { text: root.filter != "" ? root.filter + "  " + root.count : root.count; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
         }
         Rectangle {
             vertical-stretch: 1;
@@ -114,7 +114,7 @@ export component KeymapEditor inherits Modal {
                             text: row.keys;
                             color: row.custom ? Palette.accent : Palette.text;
                             font-family: "JetBrains Mono";
-                            font-size: 12px;
+                            font-size: 12 * Look.unit;
                             font-weight: row.custom ? 700 : 400;
                             vertical-alignment: center;
                             horizontal-alignment: right;
@@ -127,7 +127,7 @@ export component KeymapEditor inherits Modal {
         }
         if root.status != "": Text { text: root.status; color: Palette.text; wrap: word-wrap; }
         if root.error != "": Text { text: root.error; color: Palette.danger; wrap: word-wrap; }
-        Text { text: "Profile JSON"; color: Palette.muted; font-size: 11px; }
+        Text { text: "Profile JSON"; color: Palette.muted; font-size: 11 * Look.unit; }
         json := Editor {
             height: 110px;
             text <=> root.profile;
@@ -170,11 +170,11 @@ export component ConnectionPage inherits Modal {
     VerticalLayout {
         padding: 28px;
         spacing: 14px;
-        Text { text: "Connect to Clarp"; color: Palette.text; font-size: 17px; font-weight: 600; }
+        Text { text: "Connect to Clarp"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
         Text {
             text: "The native client connects directly to the Clarp server. Credentials remain outside the UI after this session.";
             color: Palette.muted;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             wrap: word-wrap;
         }
         server := Field { placeholder-text: "http://127.0.0.1:7682"; accessible-label: "Server"; }
@@ -185,7 +185,7 @@ export component ConnectionPage inherits Modal {
             accepted => { root.connect(server.text, token.text); }
         }
         Rectangle { height: 1px; background: Palette.border; }
-        Text { text: "Or pair with a one-time code from clarp-admin pair create"; color: Palette.muted; font-size: 11px; }
+        Text { text: "Or pair with a one-time code from clarp-admin pair create"; color: Palette.muted; font-size: 11 * Look.unit; }
         HorizontalLayout {
             spacing: 8px;
             code := Field {
@@ -200,7 +200,7 @@ export component ConnectionPage inherits Modal {
                 clicked => { root.pair(server.text, code.text); }
             }
         }
-        if root.error != "": Text { text: root.error; color: Palette.danger; font-size: 11px; wrap: word-wrap; }
+        if root.error != "": Text { text: root.error; color: Palette.danger; font-size: 11 * Look.unit; wrap: word-wrap; }
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 8px;
@@ -210,7 +210,7 @@ export component ConnectionPage inherits Modal {
                 y: 4px;
                 border-radius: 12px;
                 background: root.state == "live" ? Palette.success.with-alpha(0.2) : Palette.warning.with-alpha(0.2);
-                pill := Text { text: root.state; color: root.state == "live" ? Palette.success : Palette.warning; font-size: 11px; }
+                pill := Text { text: root.state; color: root.state == "live" ? Palette.success : Palette.warning; font-size: 11 * Look.unit; }
             }
             Rectangle { horizontal-stretch: 1; }
             if root.can-cancel: Button { text: "Cancel"; clicked => { root.cancel(); } }

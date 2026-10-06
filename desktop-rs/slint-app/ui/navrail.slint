@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 
 component RailButton inherits Rectangle {
     in property <image> icon;
@@ -26,7 +26,7 @@ component RailButton inherits Rectangle {
         height: 16px;
         border-radius: 8px;
         background: Palette.accent;
-        Text { text: root.badge; color: Palette.accent-text; font-size: 10px; }
+        Text { text: root.badge; color: Palette.accent-text; font-size: 10 * Look.unit; }
     }
 }
 
@@ -72,7 +72,7 @@ export component NavRail inherits Rectangle {
                 border-radius: 15px;
                 border-width: 1px;
                 border-color: root.live ? Palette.success : Palette.warning;
-                Text { text: root.server-initial; color: Palette.chrome-text; font-size: 13px; }
+                Text { text: root.server-initial; color: Palette.chrome-text; font-size: 13 * Look.unit; }
             }
             accessible-role: button;
             accessible-label: "Host connection";

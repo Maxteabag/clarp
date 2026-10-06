@@ -1,5 +1,5 @@
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing, Frame, PaneFrame } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, Look } from "theme.slint";
 import { CompactWork, ProcessIndicator } from "processes.slint";
 import { ProfileBridge } from "profile.slint";
 import { AgentAvatar, AvatarArt } from "avatar.slint";
@@ -54,7 +54,7 @@ component Chip inherits Rectangle {
     text := Text {
         text: root.label;
         color: root.on ? Palette.accent-text : Palette.chrome-text;
-        font-size: 12px;
+        font-size: 12 * Look.unit;
     }
     touch := TouchArea { clicked => { root.clicked(); } }
 }
@@ -80,9 +80,9 @@ component ListSwitch inherits Rectangle {
             height: 18px;
             y: (parent.height - self.height) / 2;
             background: Palette.accent;
-            Text { text: root.unread; color: Palette.accent-text; font-size: 11px; }
+            Text { text: root.unread; color: Palette.accent-text; font-size: 11 * Look.unit; }
         }
-        Text { text: root.count; color: Palette.faint; font-size: 12px; vertical-alignment: center; }
+        Text { text: root.count; color: Palette.faint; font-size: 12 * Look.unit; vertical-alignment: center; }
     }
 }
 
@@ -104,9 +104,10 @@ component Row inherits Rectangle {
     callback restore();
     // The avatar's line: room for the avatar size chosen.
     property <length> top-height: root.compact ? Math.max(40px, AvatarArt.compact + 8px) : Math.max(58px, AvatarArt.row + 16px);
-    height: root.compact
+    // Settings → Density pads it above and below.
+    height: (root.compact
         ? root.top-height
-        : root.top-height + (root.chat.activity != "" ? 14px : 0px) + (root.chat.done-count > 0 ? 22px : 0px);
+        : root.top-height + (root.chat.activity != "" ? 14px : 0px) + (root.chat.done-count > 0 ? 22px : 0px)) + 2 * Look.density-pad;
     opacity: root.chat.archived ? 0.65 : 1;
     background: root.cursor ? Focus.cursor : root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
     accessible-role: list-item;
@@ -119,7 +120,7 @@ component Row inherits Rectangle {
         // Made round at its device size in Rust (a pair room's two in one).
         AgentAvatar {
             size: root.compact ? AvatarArt.compact : AvatarArt.row;
-            y: (root.top-height - self.height) / 2;
+            y: (root.top-height - self.height) / 2 + Look.density-pad;
             portrait: root.chat.portrait;
             name: root.chat.name;
             initial: root.chat.initial;
@@ -129,7 +130,7 @@ component Row inherits Rectangle {
             ring-color: root.chat.queue > 0 ? Palette.accent : Palette.success;
         }
         VerticalLayout {
-            padding-top: root.compact ? (root.top-height - 20px) / 2 : 8px;
+            padding-top: (root.compact ? (root.top-height - 20px) / 2 : 8px) + Look.density-pad;
             spacing: 2px;
             HorizontalLayout {
                 spacing: 6px;
@@ -145,7 +146,7 @@ component Row inherits Rectangle {
                     number := Text {
                         text: root.chat.queue;
                         color: root.chat.queue == 1 ? Palette.accent-text : Palette.accent;
-                        font-size: 10px;
+                        font-size: 10 * Look.unit;
                         font-weight: 700;
                     }
                 }
@@ -206,19 +207,19 @@ component Row inherits Rectangle {
                     count: root.chat.running-processes;
                     clicked => { root.processes(self.absolute-position.x + self.width, self.absolute-position.y + self.height); }
                 }
-                if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11px; }
+                if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11 * Look.unit; }
             }
             if !root.compact: HorizontalLayout {
                 spacing: 6px;
                 Text {
                     text: root.chat.preview;
                     color: Palette.muted;
-                    font-size: 12px;
+                    font-size: 12 * Look.unit;
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
-                if root.chat.muted: Text { text: "⊘"; color: Palette.faint; font-size: 12px; }
-                if root.chat.queued > 0: Text { text: root.chat.queued + " queued"; color: Palette.warning; font-size: 11px; }
+                if root.chat.muted: Text { text: "⊘"; color: Palette.faint; font-size: 12 * Look.unit; }
+                if root.chat.queued > 0: Text { text: root.chat.queued + " queued"; color: Palette.warning; font-size: 11 * Look.unit; }
                 if root.chat.unread: Rectangle {
                     width: 8px;
                     height: 8px;
@@ -230,7 +231,7 @@ component Row inherits Rectangle {
             if !root.compact && root.chat.activity != "": Text {
                 text: root.chat.activity;
                 color: Palette.warning;
-                font-size: 11px;
+                font-size: 11 * Look.unit;
                 overflow: elide;
             }
             if !root.compact && root.chat.done-count > 0: Rectangle {
@@ -241,7 +242,7 @@ component Row inherits Rectangle {
                     x: 0;
                     text: (root.chat.done-expanded ? "▾ " : "▸ ") + root.chat.done-count + (root.chat.done-count == 1 ? " helper done" : " helpers done");
                     color: done-touch.has-hover ? Palette.muted : Palette.faint;
-                    font-size: 11px;
+                    font-size: 11 * Look.unit;
                 }
                 done-touch := TouchArea { clicked => { root.done-toggled(root.chat.done-parent); } }
             }
@@ -374,7 +375,7 @@ export component Sidebar inherits Rectangle {
                 if root.showing-pairs && root.rooms.length == 0: Text {
                     text: "No agent-to-agent conversations yet.";
                     color: Palette.muted;
-                    font-size: 12px;
+                    font-size: 12 * Look.unit;
                     horizontal-alignment: center;
                 }
             }

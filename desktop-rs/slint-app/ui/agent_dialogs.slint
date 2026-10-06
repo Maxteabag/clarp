@@ -1,6 +1,6 @@
 import { Button, ComboBox, ListView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 import { Modal } from "dialogs.slint";
 import { IconButton } from "launch.slint";
 
@@ -58,7 +58,7 @@ export component RenameAgentDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 14px;
-        Text { text: "Rename contact"; color: Palette.text; font-size: 17px; }
+        Text { text: "Rename contact"; color: Palette.text; font-size: 17 * Look.unit; }
         field := Field {
             placeholder-text: "Name";
             text <=> AgentDialogs.rename-name;
@@ -71,7 +71,7 @@ export component RenameAgentDialog inherits Modal {
         if AgentDialogs.rename-session != "": Text {
             text: "Chat id " + AgentDialogs.rename-session + " stays the same, so history and pairings are kept.";
             color: Palette.muted;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             wrap: word-wrap;
         }
         if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
@@ -161,7 +161,7 @@ export component AssignAgentDialog inherits Modal {
         VerticalLayout {
             padding: 20px;
             spacing: 10px;
-            Text { text: "Assign contact"; color: Palette.text; font-size: 18px; }
+            Text { text: "Assign contact"; color: Palette.text; font-size: 18 * Look.unit; }
             Radio {
                 text: "Automatic";
                 checked: AgentDialogs.assign-mode == "auto";
@@ -240,7 +240,7 @@ component QueueRow inherits Rectangle {
         editor := Editor {
             text: root.item.text;
             wrap: word-wrap;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             min-height: 54px;
             accessible-label: "Queued message";
         }
@@ -249,7 +249,7 @@ component QueueRow inherits Rectangle {
             Text {
                 text: root.item.stamp;
                 color: Palette.faint;
-                font-size: 9px;
+                font-size: 9 * Look.unit;
                 overflow: elide;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
@@ -299,14 +299,14 @@ export component QueueDialog inherits Modal {
                 Text {
                     text: "QUEUED MESSAGES";
                     color: Palette.text;
-                    font-size: 14px;
+                    font-size: 14 * Look.unit;
                     font-weight: 600;
                     letter-spacing: 1.2px;
                 }
                 Text {
                     text: AgentDialogs.queue-title + (AgentDialogs.queue-paused ? "  ·  paused" : "");
                     color: AgentDialogs.queue-paused ? Palette.warning : Palette.muted;
-                    font-size: 10px;
+                    font-size: 10 * Look.unit;
                 }
             }
             if AgentDialogs.queue-loading: Text { text: "…"; color: Palette.muted; vertical-alignment: center; }
@@ -324,7 +324,7 @@ export component QueueDialog inherits Modal {
         if AgentDialogs.queue-error != "": Text {
             text: AgentDialogs.queue-error;
             color: Palette.danger;
-            font-size: 11px;
+            font-size: 11 * Look.unit;
             wrap: word-wrap;
         }
         Rectangle {
@@ -338,7 +338,7 @@ export component QueueDialog inherits Modal {
             if AgentDialogs.queue-items.length == 0 && !AgentDialogs.queue-loading: Text {
                 text: "No queued messages";
                 color: Palette.faint;
-                font-size: 11px;
+                font-size: 11 * Look.unit;
             }
         }
     }

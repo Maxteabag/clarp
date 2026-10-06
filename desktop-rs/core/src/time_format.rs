@@ -6,11 +6,19 @@
 
 use chrono::{DateTime, Datelike, Days, FixedOffset, NaiveDate, NaiveDateTime, TimeZone};
 
+static CLOCK_24H: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Settings → Time format: times as "18:10" instead of "6:10 PM".
+pub fn set_clock_24h(on: bool) {
+    CLOCK_24H.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 fn short_time<Tz: TimeZone>(moment: &DateTime<Tz>) -> String
 where
     Tz::Offset: std::fmt::Display,
 {
-    moment.format("%-I:%M %p").to_string()
+    let format = if CLOCK_24H.load(std::sync::atomic::Ordering::Relaxed) { "%H:%M" } else { "%-I:%M %p" };
+    moment.format(format).to_string()
 }
 
 fn short_date(day: NaiveDate) -> String {

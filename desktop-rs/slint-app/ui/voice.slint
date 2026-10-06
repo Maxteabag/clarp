@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { Modal } from "dialogs.slint";
 import { IconButton, Busy } from "agent_controls.slint";
@@ -46,14 +46,14 @@ export component VoiceDialog inherits Modal {
             Text {
                 text: (VoiceBridge.agent-name != "" ? VoiceBridge.agent-name : "Agent") + "’s voice";
                 color: Palette.text;
-                font-size: 17px;
+                font-size: 17 * Look.unit;
                 font-weight: 600;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
             IconButton { icon: @image-url("icons/close.svg"); tip: "Close"; clicked => { VoiceBridge.close(); } }
         }
-        if VoiceBridge.bio != "": Text { text: VoiceBridge.bio; color: Palette.muted; font-size: 12px; wrap: word-wrap; }
+        if VoiceBridge.bio != "": Text { text: VoiceBridge.bio; color: Palette.muted; font-size: 12 * Look.unit; wrap: word-wrap; }
         if VoiceBridge.loading: Busy { height: 18px; reduced-motion: VoiceBridge.reduced-motion; }
         ListView {
             vertical-stretch: 1;
@@ -75,8 +75,8 @@ export component VoiceDialog inherits Modal {
                             alignment: center;
                             spacing: 1px;
                             horizontal-stretch: 1;
-                            Text { text: voice.label; color: Palette.text; font-size: 13px; font-weight: 500; }
-                            Text { text: voice.status; color: voice.taken ? Palette.chrome-text : Palette.faint; font-size: 10px; }
+                            Text { text: voice.label; color: Palette.text; font-size: 13 * Look.unit; font-weight: 500; }
+                            Text { text: voice.status; color: voice.taken ? Palette.chrome-text : Palette.faint; font-size: 10 * Look.unit; }
                         }
                         IconButton {
                             y: (parent.height - self.height) / 2;

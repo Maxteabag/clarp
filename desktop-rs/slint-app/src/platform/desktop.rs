@@ -338,11 +338,12 @@ pub fn muted_changed(muted: bool) {
 }
 
 /// A reply in a chat that is not open. Only with a tray, as in the Qt and
-/// C++ clients.
-pub fn notify(title: String, body: String) {
+/// C++ clients. `sound` asks the desktop for its message sound (Settings →
+/// Notification sound).
+pub fn notify(title: String, body: String, sound: bool) {
     if let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") {
         use std::io::Write;
-        let line = serde_json::json!({"title": title, "body": body}).to_string();
+        let line = serde_json::json!({"title": title, "body": body, "sound": sound}).to_string();
         let written = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| writeln!(f, "{line}"));
         if let Err(error) = written {
             eprintln!("clarp-slint: could not record a notification: {error}");
@@ -356,7 +357,10 @@ pub fn notify(title: String, body: String) {
     runtime::handle().spawn(async move {
         let sent = async {
             let connection = zbus::Connection::session().await?;
-            let hints: std::collections::HashMap<&str, zbus::zvariant::Value> = std::collections::HashMap::new();
+            let mut hints: std::collections::HashMap<&str, zbus::zvariant::Value> = std::collections::HashMap::new();
+            if sound {
+                hints.insert("sound-name", zbus::zvariant::Value::from("message-new-instant"));
+            }
             connection
                 .call_method(
                     Some("org.freedesktop.Notifications"),

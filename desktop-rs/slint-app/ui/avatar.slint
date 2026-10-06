@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 
 // The avatar sizes (Settings: Agent picture size) and the soft rings
 // drawn round avatars. Rust sets the sizes and makes each ring at the
@@ -45,7 +45,7 @@ export component AgentAvatar inherits Rectangle {
         text: root.symbol != "" ? root.symbol : root.initial;
         color: root.initial-color;
         font-family: "JetBrains Mono";
-        font-size: Math.max(9px, root.size * 0.38);
+        font-size: Math.max(9 * Look.unit, root.size * 0.38);
         font-weight: 600;
     }
     if root.has-portrait: Image {
@@ -128,7 +128,7 @@ export component StatusPill inherits HorizontalLayout {
         text: root.label.to-uppercase();
         color: root.tone;
         font-family: "JetBrains Mono";
-        font-size: 9px;
+        font-size: 9 * Look.unit;
         font-weight: 600;
         vertical-alignment: center;
     }

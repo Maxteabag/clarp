@@ -1,5 +1,5 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
-import { Palette, Focus, FocusRing, ChatLook } from "theme.slint";
+import { Palette, Focus, FocusRing, ChatLook, Look } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
 import { Attachment, MentionRow, MentionBridge } from "composer.slint";
@@ -35,10 +35,13 @@ import { DisplayCell, CellLine } from "cells.slint";
 import { ArtifactItem, ArtifactBridge, CardHint } from "artifacts.slint";
 import { LinkHints, LinkBadge, LinkHintLayer } from "link_hints.slint";
 export { LinkHints, LinkBadge }
+// ---- settings: the value editor and colour picker
+import { PrefEditorDialog, PrefConfirmDialog, PrefEditor, Swatch } from "prefs.slint";
+export { PrefEditor, Swatch }
 export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint }
 
 export { ScrollBook, MeasureRow }
-export { Palette, Focus, ChatLook, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
+export { Palette, Focus, ChatLook, Look, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
 
@@ -71,15 +74,15 @@ component ShortcutBar inherits Rectangle {
                 spacing: 16px;
                 for hint in root.hints: HorizontalLayout {
                     spacing: 5px;
-                    Text { text: hint.label + ":"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
-                    Text { text: hint.keys; color: Palette.accent; font-size: 11px; font-weight: 700; vertical-alignment: center; }
+                    Text { text: hint.label + ":"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
+                    Text { text: hint.keys; color: Palette.accent; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
                 }
             }
         }
         Text {
             text: root.connection;
             color: root.connection == "live" ? Palette.success : Palette.warning;
-            font-size: 11px;
+            font-size: 11 * Look.unit;
             vertical-alignment: center;
         }
     }
@@ -94,6 +97,7 @@ export component AppWindow inherits Window {
     // transcript and the composer (as in the Qt app).
     default-font-family: "JetBrains Mono";
     default-font-size: Palette.body-size;
+    default-font-weight: Look.weight;
 
     in property <[ChatRow]> chats;
     in property <[ChatRow]> rooms;
@@ -179,12 +183,15 @@ export component AppWindow inherits Window {
     in property <length> explorer-compact-width: 200px;
     out property <bool> settings-focused: settings.list-focused;
     public function focus-settings() { settings.focus-list(); }
+    // A settings row: Enter (0), or a step left or right (-1, 1).
     callback setting-changed(string, int);
     // The settings page's search (`/`), with the switcher's matcher.
     in-out property <string> settings-query;
     out property <bool> settings-search-focused: settings.search-focused;
     public function focus-settings-search() { settings.focus-search(); }
     callback settings-searched(string);
+    // Backspace on a settings row: its setting, or (true) its section.
+    callback setting-reset(string, bool);
     callback surface-chosen(string);
     callback sidebar-hide();
     callback run-command(string);
@@ -306,6 +313,7 @@ export component AppWindow inherits Window {
     callback switcher-chosen(int);
     callback switcher-moved(int);
     callback switcher-dismissed();
+    callback switcher-adjusted(int, int);
     public function show-switcher() { switcher.open(); }
 
     changed search-focused => { root.focus-moved(); }
@@ -340,7 +348,7 @@ export component AppWindow inherits Window {
             }
             sidebar := Sidebar {
                 visible: root.sidebar-visible;
-                width: !root.sidebar-visible ? 0px : root.explorer-compact ? root.explorer-compact-width : 320px;
+                width: !root.sidebar-visible ? 0px : root.explorer-compact ? root.explorer-compact-width : Look.explorer-width;
                 rows: root.chats;
                 rooms: root.rooms;
                 archived: root.archived;
@@ -383,8 +391,8 @@ export component AppWindow inherits Window {
                         if root.error-dismiss-key != "": HorizontalLayout {
                             spacing: 4px;
                             padding-left: 12px;
-                            Text { text: root.error-dismiss-key; color: Palette.danger; font-size: 11px; font-weight: 700; vertical-alignment: center; }
-                            Text { text: "Dismiss"; color: Palette.danger; font-size: 11px; vertical-alignment: center; }
+                            Text { text: root.error-dismiss-key; color: Palette.danger; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
+                            Text { text: "Dismiss"; color: Palette.danger; font-size: 11 * Look.unit; vertical-alignment: center; }
                         }
                         Rectangle {
                             width: 28px;
@@ -446,10 +454,11 @@ export component AppWindow inherits Window {
                     rows: root.setting-rows;
                     current: root.setting-current;
                     moved(index) => { root.setting-current = index; }
-                    activated(id) => { root.setting-changed(id, 1); }
+                    activated(id) => { root.setting-changed(id, 0); }
                     adjusted(id, delta) => { root.setting-changed(id, delta); }
                     query: root.settings-query;
                     searched(text) => { root.settings-searched(text); }
+                    reset(id, section) => { root.setting-reset(id, section); }
                 }
                 // ---- updates and teams
                 updates := Updates {
@@ -623,6 +632,16 @@ export component AppWindow inherits Window {
             width: parent.width;
             height: parent.height;
         }
+        PrefEditorDialog {
+            visible: root.overlay == "pref-editor";
+            width: parent.width;
+            height: parent.height;
+        }
+        PrefConfirmDialog {
+            visible: root.overlay == "pref-confirm";
+            width: parent.width;
+            height: parent.height;
+        }
         AssignAgentDialog {
             visible: root.overlay == "assign-agent";
             width: parent.width;
@@ -702,6 +721,7 @@ export component AppWindow inherits Window {
             chosen(index) => { root.switcher-chosen(index); }
             moved(index) => { root.switcher-moved(index); }
             dismissed => { root.switcher-dismissed(); }
+            adjusted(index, delta) => { root.switcher-adjusted(index, delta); }
         }
     }
 }

@@ -41,6 +41,37 @@ impl Settings {
         }
     }
 
+    /// The file the settings are kept in (None in memory).
+    pub fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+
+    /// Reads the file again (someone edited it, or another window saved):
+    /// the keys whose values changed, or why the file cannot be read. A
+    /// file that is not a JSON object keeps the current values.
+    pub fn reload(&mut self) -> Result<Vec<String>, String> {
+        let Some(path) = self.path.clone() else { return Ok(Vec::new()) };
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::from("{}"),
+            Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+        };
+        let fresh = match serde_json::from_str::<Value>(&text) {
+            Ok(Value::Object(fresh)) => fresh,
+            Ok(_) => return Err(format!("{} is not a JSON object; keeping the settings as they were", path.display())),
+            Err(error) => return Err(format!("{} is not valid JSON ({error}); keeping the settings as they were", path.display())),
+        };
+        let mut changed: Vec<String> = fresh.iter().filter(|(k, v)| self.values.get(*k) != Some(*v)).map(|(k, _)| k.clone()).collect();
+        changed.extend(self.values.keys().filter(|k| !fresh.contains_key(*k)).cloned());
+        self.values = fresh;
+        Ok(changed)
+    }
+
+    /// Every stored value.
+    pub fn values(&self) -> &Map<String, Value> {
+        &self.values
+    }
+
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.values.get(key)
     }
@@ -98,7 +129,9 @@ impl Settings {
             };
             let mut temporary = path.clone().into_os_string();
             temporary.push(format!(".tmp.{}", std::process::id()));
-            std::fs::write(&temporary, Value::Object(current.clone()).to_string())?;
+            // Pretty, so the file reads well in an editor.
+            let text = serde_json::to_string_pretty(&Value::Object(current.clone())).map_err(std::io::Error::other)?;
+            std::fs::write(&temporary, text + "\n")?;
             std::fs::rename(&temporary, &path)?;
             self.values = current;
             Ok(())

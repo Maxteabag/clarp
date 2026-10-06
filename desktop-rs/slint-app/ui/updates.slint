@@ -1,5 +1,5 @@
 import { Button, ScrollView, Spinner, ProgressIndicator } from "std-widgets.slint";
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 
 // A decision waiting on the user (UpdatesPanel.qml's attention cards).
 export struct AttentionView {
@@ -71,7 +71,7 @@ export component IconButton inherits Rectangle {
 
 component SectionTitle inherits Text {
     color: Palette.muted;
-    font-size: 11px;
+    font-size: 11 * Look.unit;
     font-weight: 600;
     letter-spacing: 1px;
 }
@@ -88,20 +88,20 @@ component ArtifactCard inherits Rectangle {
         padding: 12px;
         spacing: 6px;
         HorizontalLayout {
-            Text { text: root.artifact.kind; color: Palette.muted; font-size: 11px; horizontal-stretch: 1; }
-            Text { text: root.artifact.outcome; color: root.artifact.failed ? Palette.danger : Palette.text; font-size: 12px; }
+            Text { text: root.artifact.kind; color: Palette.muted; font-size: 11 * Look.unit; horizontal-stretch: 1; }
+            Text { text: root.artifact.outcome; color: root.artifact.failed ? Palette.danger : Palette.text; font-size: 12 * Look.unit; }
         }
-        Text { text: root.artifact.title; color: Palette.text; font-size: 15px; wrap: word-wrap; }
+        Text { text: root.artifact.title; color: Palette.text; font-size: 15 * Look.unit; wrap: word-wrap; }
         if root.artifact.summary != "": Text {
             text: root.artifact.summary;
             color: Palette.text;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             wrap: word-wrap;
             overflow: elide;
             max-height: 36px;
         }
-        if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12px; }
-        if root.artifact.countdown != "": Text { text: root.artifact.countdown; color: Palette.text; font-size: 12px; wrap: word-wrap; }
+        if root.artifact.progress != "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12 * Look.unit; }
+        if root.artifact.countdown != "": Text { text: root.artifact.countdown; color: Palette.text; font-size: 12 * Look.unit; wrap: word-wrap; }
         HorizontalLayout {
             spacing: 8px;
             alignment: start;
@@ -114,7 +114,7 @@ component ArtifactCard inherits Rectangle {
             if root.artifact.form: Text {
                 text: "Interactive form unavailable";
                 color: Palette.warning;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
                 vertical-alignment: center;
                 wrap: word-wrap;
             }
@@ -149,7 +149,7 @@ export component Updates inherits Rectangle {
             Text {
                 text: "UPDATES";
                 color: Palette.text;
-                font-size: 17px;
+                font-size: 17 * Look.unit;
                 font-weight: 600;
                 letter-spacing: 1.6px;
                 vertical-alignment: center;
@@ -157,7 +157,7 @@ export component Updates inherits Rectangle {
             Text {
                 text: root.attention.length > 0 ? root.attention.length + " need attention" : "All caught up";
                 color: root.attention.length > 0 ? Palette.danger : Palette.muted;
-                font-size: 11px;
+                font-size: 11 * Look.unit;
                 vertical-alignment: center;
             }
             Rectangle { horizontal-stretch: 1; }
@@ -175,7 +175,7 @@ export component Updates inherits Rectangle {
             border-color: Palette.danger.with-alpha(0.55);
             VerticalLayout {
                 padding: 7px;
-                Text { text: root.error; color: Palette.danger; font-size: 12px; wrap: word-wrap; }
+                Text { text: root.error; color: Palette.danger; font-size: 12 * Look.unit; wrap: word-wrap; }
             }
         }
         ScrollView {
@@ -190,12 +190,12 @@ export component Updates inherits Rectangle {
                     VerticalLayout {
                         padding: 10px;
                         spacing: 7px;
-                        Text { text: item.title; color: Palette.text; font-size: 14px; font-weight: 600; overflow: elide; }
-                        if item.question != "": Text { text: item.question; color: Palette.chrome-text; font-size: 13px; wrap: word-wrap; }
+                        Text { text: item.title; color: Palette.text; font-size: 14 * Look.unit; font-weight: 600; overflow: elide; }
+                        if item.question != "": Text { text: item.question; color: Palette.chrome-text; font-size: 13 * Look.unit; wrap: word-wrap; }
                         if item.context != "": Text {
                             text: item.context;
                             color: Palette.muted;
-                            font-size: 11px;
+                            font-size: 11 * Look.unit;
                             wrap: word-wrap;
                             overflow: elide;
                             max-height: 60px;
@@ -205,7 +205,7 @@ export component Updates inherits Rectangle {
                             Text {
                                 text: item.meta;
                                 color: Palette.muted;
-                                font-size: 11px;
+                                font-size: 11 * Look.unit;
                                 overflow: elide;
                                 vertical-alignment: center;
                                 horizontal-stretch: 1;
@@ -238,14 +238,14 @@ export component Updates inherits Rectangle {
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 2px;
-                        Text { text: job.title; color: Palette.text; font-size: 13px; font-weight: 600; overflow: elide; }
-                        if job.detail != "": Text { text: job.detail; color: Palette.muted; font-size: 11px; overflow: elide; }
+                        Text { text: job.title; color: Palette.text; font-size: 13 * Look.unit; font-weight: 600; overflow: elide; }
+                        if job.detail != "": Text { text: job.detail; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
                         if job.active && job.progress >= 0: ProgressIndicator { height: 3px; progress: job.progress; }
                     }
                     Text {
                         text: job.status;
                         color: job.active ? Palette.chrome-text : Palette.muted;
-                        font-size: 11px;
+                        font-size: 11 * Look.unit;
                         vertical-alignment: center;
                     }
                     if job.active && job.can-cancel: IconButton {
@@ -265,8 +265,8 @@ export component Updates inherits Rectangle {
                 if !root.loading && root.attention.length == 0 && root.jobs.length == 0 && root.artifacts.length == 0: VerticalLayout {
                     padding-top: 80px;
                     spacing: 7px;
-                    Text { text: "✓"; color: Palette.chrome-text; font-size: 17px; horizontal-alignment: center; }
-                    Text { text: "Nothing needs you right now"; color: Palette.text; font-size: 14px; horizontal-alignment: center; }
+                    Text { text: "✓"; color: Palette.chrome-text; font-size: 17 * Look.unit; horizontal-alignment: center; }
+                    Text { text: "Nothing needs you right now"; color: Palette.text; font-size: 14 * Look.unit; horizontal-alignment: center; }
                 }
             }
         }

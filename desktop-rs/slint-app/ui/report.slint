@@ -1,5 +1,5 @@
 import { ListView } from "std-widgets.slint";
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 import { Modal } from "dialogs.slint";
 import { Block, MessageBlock } from "transcript.slint";
 import { KeyHint } from "artifacts.slint";
@@ -61,10 +61,10 @@ export component ReportView inherits Modal {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 2px;
-                    Text { text: root.title == "" ? "Report" : root.title; color: Palette.text; font-size: 17px; font-weight: 600; overflow: elide; }
-                    if root.summary != "": Text { text: root.summary; color: Palette.muted; font-size: 12px; overflow: elide; }
+                    Text { text: root.title == "" ? "Report" : root.title; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; overflow: elide; }
+                    if root.summary != "": Text { text: root.summary; color: Palette.muted; font-size: 12 * Look.unit; overflow: elide; }
                 }
-                Text { text: root.kind != "" ? root.kind : root.html ? "HTML" : "MARKDOWN"; color: Palette.faint; font-size: 11px; vertical-alignment: center; }
+                Text { text: root.kind != "" ? root.kind : root.html ? "HTML" : "MARKDOWN"; color: Palette.faint; font-size: 11 * Look.unit; vertical-alignment: center; }
                 KeyHint { key: "↑/↓"; label: "Scroll"; emphasised: true; }
                 if root.links > 0: KeyHint { key: root.links == 1 ? "1" : "1-" + Math.min(9, root.links); label: root.links == 1 ? "Open link" : "Open links"; emphasised: true; clicked => { root.open-link(0); } }
                 KeyHint { key: "Esc"; label: "Close"; emphasised: true; clicked => { root.done(); } }
@@ -73,7 +73,7 @@ export component ReportView inherits Modal {
             if root.blocks.length == 0: Text {
                 text: "This artifact has no readable body.";
                 color: Palette.muted;
-                font-size: 13px;
+                font-size: 13 * Look.unit;
             }
             keys := FocusScope {
                 width: 0px;
