@@ -86,7 +86,8 @@ def test_list_sessions_uses_cwd_mapping(tmp_path):
 def test_agy_1_3_calls_are_read_from_their_step_and_answered_in_order(tmp_path):
     p = _write_transcript(tmp_path / "brain", "conv-13", [
         {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>check</USER_REQUEST>"},
-        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Looking.", "tool_calls": [
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Looking.",
+         "thinking": "The user wants a check.\n\nRead the readme first.", "tool_calls": [
             {"name": "view_file", "args": {"AbsolutePath": '"/repo/README.md"', "toolSummary": "Read the readme"}},
             {"name": "run_command", "args": {"CommandLine": "false", "Cwd": "/repo"}}]},
         {"step_index": 2, "type": "GENERIC", "content": "Created At: x\n\nFile Path: /repo/README.md\n1: hi"},
@@ -104,4 +105,7 @@ def test_agy_1_3_calls_are_read_from_their_step_and_answered_in_order(tmp_path):
     assert (read["name"], read["summary"], read["status"]) == ("Read", "Read the readme", "ok")
     assert read["input"]["file_path"] == "/repo/README.md"
     assert (run["name"], run["status"], run["result"]) == ("Bash", "error", "boom")
-    assert [c["kind"] for c in turns[1]["display_cells"]] == ["exploration", "command"]
+    cells = turns[1]["display_cells"]
+    assert [c["kind"] for c in cells] == ["reasoning", "exploration", "command"]
+    assert [line["text"] for line in cells[0]["lines"]] == [
+        "The user wants a check.", "Read the readme first."]

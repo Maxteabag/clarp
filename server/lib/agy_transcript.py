@@ -170,14 +170,30 @@ def _cell(tool: dict) -> dict:
     return _generic_tool_cell(tool["name"], {"call_id": call_id}, status)
 
 
+def _thinking_cell(text: Any, step: Any) -> dict | None:
+    """The model's own thinking for a step, as the reasoning cell Codex shows."""
+    from .codex_transcript import _display_cell, _display_line
+    from .voice_markup import clean_for_display
+    if not isinstance(text, str) or not text.strip():
+        return None
+    paragraphs = [p.strip() for p in clean_for_display(text).split("\n\n") if p.strip()]
+    lines = [_display_line(truncate(p, 600), kind="status") for p in paragraphs[:8]]
+    if not lines:
+        return None
+    return _display_cell(kind="reasoning", title="Reasoned", status="ok",
+                         cell_id=f"agy-think-{step}", lines=lines)
+
+
 def _finish_tools(turns: list[dict]) -> None:
-    """Display cells for each assistant turn's calls, then drop the scratch keys."""
+    """Display cells for each assistant turn, in the order the steps produced
+    them (thinking, then that step's calls), then drop the scratch keys."""
     from .opencode_transcript import _coalesce_exploration
     for turn in turns:
-        calls = [t for t in turn.get("tools", []) if "_raw" in t]
-        if calls:
+        order = turn.pop("_order", None)
+        if order:
+            cells = [item if kind == "cell" else _cell(item) for kind, item in order]
             turn["display_cells"] = _coalesce_exploration(
-                list(turn.get("display_cells", [])) + [_cell(t) for t in calls])
+                list(turn.get("display_cells", [])) + cells)
         for tool in turn.get("tools", []):
             for key in ("_raw", "_output"):
                 tool.pop(key, None)
@@ -203,12 +219,14 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
     turns: list[dict] = []
     pending_tools: list[dict] = []
     awaiting: list[dict] = []   # calls in order, each answered by the next GENERIC
+    pending_order: list[tuple[str, dict]] = []   # thinking cells and calls, in step order
 
     def _flush_tools_onto_assistant(ts: str) -> None:
-        if not pending_tools:
+        if not pending_tools and not pending_order:
             return
         if turns and turns[-1].get("role") == "assistant":
             turns[-1].setdefault("tools", []).extend(pending_tools)
+            turns[-1].setdefault("_order", []).extend(pending_order)
         else:
             # Older step-typed tools always made their own turn. agy 1.2+ calls
             # never do: the old parser emitted no turn for them, and a new one
@@ -218,6 +236,7 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                 turns.append({"role": "assistant", "text": "", "tools": older,
                               "timestamp": ts})
         pending_tools.clear()
+        pending_order.clear()
 
     for ev in rows:
         etype = str(ev.get("type") or "")
@@ -236,14 +255,20 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                      for i, c in enumerate(ev.get("tool_calls") or [])
                      if isinstance(c, dict) and isinstance(c.get("args"), dict)]
             awaiting.extend(calls)
+            thinking = _thinking_cell(ev.get("thinking"), ev.get("step_index", 0))
+            if thinking:
+                pending_order.append(("cell", thinking))
+            pending_order.extend(("tool", call) for call in calls)
             # One assistant turn per step with text, exactly as before, so the
             # stored authority ordinals of earlier turns keep pointing right;
-            # calls from text-less steps ride on the next text step.
+            # thinking and calls from text-less steps ride on the next text step.
             pending_tools.extend(calls)
             if content:
                 turns.append({"role": "assistant", "text": content,
-                              "tools": list(pending_tools), "timestamp": ts})
+                              "tools": list(pending_tools), "timestamp": ts,
+                              "_order": list(pending_order)})
                 pending_tools.clear()
+                pending_order.clear()
         elif etype == "GENERIC" and awaiting:
             _settle(awaiting.pop(0), str(ev.get("content") or ""))
         elif etype in _TOOL_TYPES or (
