@@ -1344,3 +1344,12 @@ def test_a_restored_record_stays_inside_the_argument_limit():
             client_msg_id=f"w{index}", text="漢" * 3900)
     prompt = _restore_prompt(agent_id, "pruned-wide", "Next?")
     assert len(prompt.encode()) < 128 * 1024
+
+def test_live_text_from_separate_response_steps_stays_separate_paragraphs():
+    from lib.backend.agy import _TurnState
+    st = _TurnState()
+    for index, delta in ((1, "Looking"), (1, " now."), (3, "Done.")):
+        AGY._handle_step({"step_type": "agent_response", "state": "ACTIVE",
+                          "step_index": index, "text_delta": delta}, {}, st,
+                         agent_id="", session="", trace_id="", stream=None)
+    assert st.live_text == "Looking now.\n\nDone."
