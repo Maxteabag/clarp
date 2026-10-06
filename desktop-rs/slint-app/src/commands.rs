@@ -578,6 +578,12 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         // ---- the settings page's search
         "settings-search" if window.get_surface() == "settings" => window.invoke_focus_settings_search(),
+        "settings-reset" if window.get_surface() == "settings" => {
+            let current = window.get_setting_rows().row_data(window.get_setting_current().max(0) as usize).map(|r| r.id.to_string()).unwrap_or_default();
+            if !current.is_empty() {
+                crate::settings_view::reset(app, window, &current);
+            }
+        }
         "settings-results" => crate::settings_view::to_results(app, window),
         "settings-search-cancel" => crate::settings_view::cancel_search(app, window),
         _ if action.starts_with("settingrow:") => {

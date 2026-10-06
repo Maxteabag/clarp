@@ -215,6 +215,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("settings-move", &["Up", "Down"], "Move", true, Always, true),
             b("settings-open", &["Return"], "Change", true, Always, true),
             b("settings-search", &["/"], "Search", true, Always, false),
+            b("settings-reset", &["Delete"], "Default", true, Always, false),
             b("escape", &["Escape"], "Back", true, Always, false),
         ],
         // The settings page's search field.

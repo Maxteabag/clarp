@@ -1,14 +1,24 @@
-//! Every Ctrl+K command and every user setting, each with a one-line
-//! description and the other names people search it by, and the one matcher
-//! the switcher and the settings search share.
+//! The one place every Ctrl+K command and every user setting is
+//! registered: what it is called, a one-line description, the other names
+//! people search it by, and, for a setting, how to read, change and reset
+//! it. The settings page, Ctrl+K and its pickers all read from here, and
+//! the one matcher they share lives here too.
 //!
-//! An entry's id is the command's action ("split-right") or the settings
-//! row's id ("nav-rail"). Ties in a search keep this list's order, so the
-//! window's own parts come first, left to right as they sit on screen.
-//! `tests::every_command_and_setting_is_described` keeps a new command or
-//! setting from shipping without a description and two aliases.
+//! A command is an `e(...)` line in `ENTRIES`, run by its action in
+//! `commands::run`. A setting is a `Setting` in `settings::register` (or in
+//! a module of its own that `register` adds): its text, its section on the
+//! settings page, and a toggle, a choice or an action. Ties in a search
+//! keep `order`, so the window's own parts come first, left to right as
+//! they sit on screen. The tests keep a new command or setting from
+//! shipping without a description and two aliases.
 
-#[derive(Debug)]
+use std::rc::Rc;
+
+use crate::{App, AppWindow};
+
+mod settings;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Entry {
     pub id: &'static str,
     pub label: &'static str,
@@ -20,11 +30,11 @@ pub struct Entry {
     pub actions: &'static [&'static str],
 }
 
-const fn e(id: &'static str, label: &'static str, group: &'static str, description: &'static str, aliases: &'static [&'static str]) -> Entry {
+pub const fn e(id: &'static str, label: &'static str, group: &'static str, description: &'static str, aliases: &'static [&'static str]) -> Entry {
     Entry { id, label, description, aliases, group, actions: &[] }
 }
 
-const fn keyed(entry: Entry, actions: &'static [&'static str]) -> Entry {
+pub const fn keyed(entry: Entry, actions: &'static [&'static str]) -> Entry {
     Entry { actions, ..entry }
 }
 
@@ -32,43 +42,283 @@ const fn keyed(entry: Entry, actions: &'static [&'static str]) -> Entry {
 macro_rules! shown {
     ($($alias:literal),* $(,)?) => { &[$($alias,)* "hide", "show", "toggle", "on off", "visible", "collapse", "expand"] };
 }
+pub(crate) use shown;
+
+// ---- settings
+
+pub type Getter<T> = Rc<dyn Fn(&App) -> T>;
+pub type Setter<T> = Rc<dyn Fn(&Rc<App>, &AppWindow, T)>;
+pub type Run = Rc<dyn Fn(&Rc<App>, &AppWindow)>;
+pub type Pick = Rc<dyn Fn(&Rc<App>, &AppWindow, &str)>;
+
+/// One option of a choice: the value stored, the label shown, a line about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Choice {
+    pub value: String,
+    pub label: String,
+    pub description: String,
+}
+
+impl Choice {
+    pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
+        Choice { value: value.into(), label: label.into(), description: String::new() }
+    }
+
+    pub fn about(self, description: impl Into<String>) -> Self {
+        Choice { description: description.into(), ..self }
+    }
+}
+
+#[derive(Clone)]
+pub enum Control {
+    /// On or off: Enter and Space switch it.
+    Toggle { get: Getter<bool>, set: Setter<bool> },
+    /// One of `options` (by value): Left/Right step it; Enter in Ctrl+K lists them.
+    Choice { options: Getter<Vec<Choice>>, get: Getter<String>, set: Pick },
+    /// Opens something (a dialog, the font picker).
+    Action { run: Run },
+}
+
+/// A user setting, registered once; the settings page and Ctrl+K show it.
+#[derive(Clone)]
+pub struct Setting {
+    pub entry: Entry,
+    /// Its section on the settings page ("APPEARANCE"); `SECTIONS` orders them.
+    pub section: &'static str,
+    pub control: Control,
+    /// What `reset` puts back: "on"/"off", or a choice's value. None: no reset.
+    pub default: Option<String>,
+    /// Listed only while this holds (a Host feature).
+    pub shown: Option<Getter<bool>>,
+    /// A label that changes (the Host's name), instead of the entry's.
+    pub label: Option<Getter<String>>,
+    /// The value as shown, instead of the option's label (an action's state).
+    pub detail: Option<Getter<String>>,
+}
+
+impl Setting {
+    fn with(entry: Entry, section: &'static str, control: Control) -> Self {
+        Setting { entry, section, control, default: None, shown: None, label: None, detail: None }
+    }
+
+    pub fn toggle(entry: Entry, section: &'static str, get: impl Fn(&App) -> bool + 'static, set: impl Fn(&Rc<App>, &AppWindow, bool) + 'static) -> Self {
+        Self::with(entry, section, Control::Toggle { get: Rc::new(get), set: Rc::new(set) })
+    }
+
+    /// A switch kept in the app's settings under `key`.
+    pub fn stored_toggle(entry: Entry, section: &'static str, key: &'static str, default: bool) -> Self {
+        Self::toggle(entry, section, move |app| app.engine.borrow().settings().boolean(key, default), move |app, _, on| app.engine.borrow_mut().settings_mut().set(key, on))
+            .default(if default { "on" } else { "off" })
+    }
+
+    pub fn choice(
+        entry: Entry,
+        section: &'static str,
+        options: impl Fn(&App) -> Vec<Choice> + 'static,
+        get: impl Fn(&App) -> String + 'static,
+        set: impl Fn(&Rc<App>, &AppWindow, &str) + 'static,
+    ) -> Self {
+        Self::with(entry, section, Control::Choice { options: Rc::new(options), get: Rc::new(get), set: Rc::new(set) })
+    }
+
+    /// A choice kept in the app's settings under `key`, as its value.
+    pub fn stored_choice(entry: Entry, section: &'static str, key: &'static str, options: Vec<Choice>, default: &'static str) -> Self {
+        Self::choice(
+            entry,
+            section,
+            move |_| options.clone(),
+            move |app| app.engine.borrow().settings().string(key, default),
+            move |app, _, value| app.engine.borrow_mut().settings_mut().set(key, value),
+        )
+        .default(default)
+    }
+
+    pub fn action(entry: Entry, section: &'static str, run: impl Fn(&Rc<App>, &AppWindow) + 'static) -> Self {
+        Self::with(entry, section, Control::Action { run: Rc::new(run) })
+    }
+
+    pub fn default(self, value: impl Into<String>) -> Self {
+        Setting { default: Some(value.into()), ..self }
+    }
+
+    pub fn when(self, shown: impl Fn(&App) -> bool + 'static) -> Self {
+        Setting { shown: Some(Rc::new(shown)), ..self }
+    }
+
+    pub fn label_from(self, label: impl Fn(&App) -> String + 'static) -> Self {
+        Setting { label: Some(Rc::new(label)), ..self }
+    }
+
+    pub fn detail(self, detail: impl Fn(&App) -> String + 'static) -> Self {
+        Setting { detail: Some(Rc::new(detail)), ..self }
+    }
+
+    /// Runs `after` once a change is made (to show it in the window).
+    pub fn then(self, after: impl Fn(&Rc<App>, &AppWindow) + 'static) -> Self {
+        let after: Run = Rc::new(after);
+        let control = match self.control {
+            Control::Toggle { get, set } => {
+                let set: Setter<bool> = Rc::new(move |app: &Rc<App>, window: &AppWindow, on: bool| {
+                    set(app, window, on);
+                    after(app, window);
+                });
+                Control::Toggle { get, set }
+            }
+            Control::Choice { options, get, set } => {
+                let set: Pick = Rc::new(move |app: &Rc<App>, window: &AppWindow, value: &str| {
+                    set(app, window, value);
+                    after(app, window);
+                });
+                Control::Choice { options, get, set }
+            }
+            Control::Action { run } => {
+                let run: Run = Rc::new(move |app: &Rc<App>, window: &AppWindow| {
+                    run(app, window);
+                    after(app, window);
+                });
+                Control::Action { run }
+            }
+        };
+        Setting { control, ..self }
+    }
+
+    pub fn id(&self) -> &'static str {
+        self.entry.id
+    }
+
+    /// "toggle", "choice" or "action" (the settings page's row kinds).
+    pub fn kind(&self) -> &'static str {
+        match self.control {
+            Control::Toggle { .. } => "toggle",
+            Control::Choice { .. } => "choice",
+            Control::Action { .. } => "action",
+        }
+    }
+
+    pub fn is_shown(&self, app: &App) -> bool {
+        self.shown.as_ref().is_none_or(|shown| shown(app))
+    }
+
+    pub fn label(&self, app: &App) -> String {
+        self.label.as_ref().map_or_else(|| self.entry.label.to_owned(), |label| label(app))
+    }
+
+    /// The stored value: "on"/"off" or the chosen option's value.
+    pub fn current(&self, app: &App) -> String {
+        match &self.control {
+            Control::Toggle { get, .. } => if get(app) { "on" } else { "off" }.to_owned(),
+            Control::Choice { get, .. } => get(app),
+            Control::Action { .. } => String::new(),
+        }
+    }
+
+    pub fn on(&self, app: &App) -> bool {
+        matches!(&self.control, Control::Toggle { get, .. } if get(app))
+    }
+
+    /// The value as shown: "On", the chosen option's label, an action's state.
+    pub fn value(&self, app: &App) -> String {
+        if let Some(detail) = &self.detail {
+            return detail(app);
+        }
+        match &self.control {
+            Control::Toggle { get, .. } => if get(app) { "On" } else { "Off" }.to_owned(),
+            Control::Choice { options, get, .. } => {
+                let now = get(app);
+                options(app).into_iter().find(|o| o.value == now).map_or(now, |o| o.label)
+            }
+            Control::Action { .. } => String::new(),
+        }
+    }
+
+    pub fn options(&self, app: &App) -> Vec<Choice> {
+        match &self.control {
+            Control::Choice { options, .. } => options(app),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Sets it from a stored value ("on"/"off", a choice's value), as a
+    /// settings file or `reset` would; false for a value it does not take.
+    pub fn apply(&self, app: &Rc<App>, window: &AppWindow, value: &str) -> bool {
+        match &self.control {
+            Control::Toggle { set, .. } => match value {
+                "on" | "true" => set(app, window, true),
+                "off" | "false" => set(app, window, false),
+                _ => return false,
+            },
+            Control::Choice { options, set, .. } => {
+                if !options(app).iter().any(|o| o.value == value) {
+                    return false;
+                }
+                set(app, window, value);
+            }
+            Control::Action { .. } => return false,
+        }
+        true
+    }
+
+    /// Puts its default back; false when it has none.
+    pub fn reset(&self, app: &Rc<App>, window: &AppWindow) -> bool {
+        let Some(default) = self.default.clone() else { return false };
+        self.current(app) == default || self.apply(app, window, &default)
+    }
+
+    /// Enter or Space (`delta` 1) and Left/Right: a toggle switches, a
+    /// choice steps, an action runs.
+    pub fn change(&self, app: &Rc<App>, window: &AppWindow, delta: i32) {
+        match &self.control {
+            Control::Toggle { get, set } => {
+                let on = get(app);
+                set(app, window, !on);
+            }
+            Control::Choice { options, get, set } => {
+                let options = options(app);
+                if options.is_empty() {
+                    return;
+                }
+                let now = get(app);
+                let at = options.iter().position(|o| o.value == now).map_or(0, |i| i as i32);
+                let next = &options[(at + delta).rem_euclid(options.len() as i32) as usize];
+                set(app, window, &next.value);
+            }
+            Control::Action { run } => run(app, window),
+        }
+    }
+}
+
+/// The settings page's sections, in order; a setting in another section
+/// gets one of its own after these.
+pub const SECTIONS: &[&str] = &["CHATS", "EXPERIMENTS", "STARTUP", "AGENT IDENTITY", "APPEARANCE", "VOICE & AUDIO", "NOTIFICATIONS", "HOST", "HOST STATUS", "KEYBOARD", "ABOUT"];
+
+thread_local! {
+    static SETTINGS: Rc<Vec<Setting>> = Rc::new(settings::register());
+}
+
+/// Every setting, in the settings page's order within each section.
+pub fn settings() -> Rc<Vec<Setting>> {
+    SETTINGS.with(Rc::clone)
+}
+
+pub fn setting(id: &str) -> Option<Setting> {
+    SETTINGS.with(|all| all.iter().find(|s| s.entry.id == id).cloned())
+}
+
+/// The sections in the page's order: `SECTIONS`, then any new ones.
+pub fn sections() -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = SECTIONS.to_vec();
+    for setting in settings().iter() {
+        if !out.contains(&setting.section) {
+            out.push(setting.section);
+        }
+    }
+    out
+}
+
+// ---- commands
 
 pub const ENTRIES: &[Entry] = &[
-    // ---- the window's parts, left to right
-    e("nav-rail", "Activity bar", "layout", "The icon strip on the far left: Chats, Updates, Teams and Settings.", shown!["navigation rail", "nav rail", "rail", "left bar", "left side", "icons", "icon bar", "activity rail", "sidebar icons", "destinations"]),
-    keyed(e("explorer", "Explorer", "layout", "The list of agents and chats beside the conversation.", shown!["sidebar", "side bar", "side panel", "panel", "agents list", "chat list", "left panel"]), &["sidebar"]),
-    e("avatar-size", "Agent picture size", "layout", "How large agents' portraits are in the explorer; opens a list of sizes.", &["avatar", "avatars", "portrait", "portraits", "profile picture", "photo", "face", "picture size", "bigger", "smaller"]),
-    keyed(e("compact-explorer", "Compact explorer", "layout", "Shows only each chat's avatar and name in the explorer.", &["dense", "condensed", "small rows", "avatar only", "sidebar", "toggle", "density"]), &["toggle-compact"]),
-    keyed(e("live-preview", "Explorer live preview", "layout", "Opens the chat under the explorer's cursor while you move through the list.", &["preview", "peek", "follow cursor", "sidebar", "toggle", "browse"]), &["toggle-preview"]),
-    keyed(e("workspace-bar", "Workspace bar", "layout", "The strip of workspace tabs along the top.", shown!["workspaces", "tabs", "tab bar", "top bar", "strip"]), &["setting:workspaceBarVisible"]),
-    keyed(e("shortcut-bar", "Shortcut bar", "layout", "The key hints along the bottom of the window.", shown!["keybindings", "key bindings", "hints", "status bar", "bottom bar", "shortcuts", "footer"]), &["shortcut-bar"]),
-    e("minimal-ui", "Minimal UI", "layout", "Hides chips, switches and other chrome for a quieter window.", shown!["zen", "focus mode", "distraction free", "clean", "simple", "chrome", "declutter"]),
-    keyed(e("timestamps", "Timestamps", "chats", "Shows the time beside each message.", shown!["time", "date", "clock", "message times", "stamps"]), &["setting:timestampsVisible"]),
-    e("reading-theme", "Reading theme", "appearance", "The colours and typeface of the whole window; opens a list to pick one.", &["theme", "colours", "colors", "color scheme", "colour scheme", "dark mode", "light mode", "font", "typeface", "appearance", "skin", "contrast"]),
-    e("font", "Font", "appearance", "The chat's typeface and size for this reading theme; opens the font picker.", &["typeface", "font family", "font size", "text size", "monospace", "serif", "sans"]),
-    e("choose-font", "Choose font…", "appearance", "Picks the chat's typeface and size for this reading theme, previewed in the chat.", &["font", "typeface", "font family", "font size", "text size", "monospace", "serif", "sans"]),
-    e("reset-font", "Reset font to theme default", "appearance", "Goes back to the reading theme's own typeface and size.", &["font", "typeface", "revert", "default font", "undo font", "restore"]),
-    e("ui-scale", "Interface size", "appearance", "How large the whole interface is drawn; opens a list of sizes.", &["zoom", "scale", "size", "bigger", "smaller", "larger", "font size", "text size", "dpi"]),
-    e("reduced-motion", "Reduce Motion", "appearance", "Turns off animations and smooth scrolling.", &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still"]),
-    // ---- chats
-    e("show-when-ready", "Show when ready", "chats", "Shows a reply once it is complete instead of while it streams in.", &["stream", "streaming", "typing", "live text", "wait for answer", "toggle"]),
-    keyed(e("activity", "Tool activity", "chats", "How an agent's tool calls show in the chat: grouped, always visible or old ones grouped.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity"]), &["tools"]),
-    keyed(e("tool-explanations", "Tool explanations (Host)", "chats", "The Host's plain-language explanation of each tool row.", &["explain", "explanations", "plain english", "narration", "tool labels", "toggle"]), &["toggle-explanations"]),
-    keyed(e("narration", "Plain-English tools", "experiment", "Describes tool calls in plain English with Spark (uses extra AI).", &["narration", "narrator", "spark", "explain tools", "plain english", "toggle"]), &["tool-narration"]),
-    e("tool-detail", "Tool detail", "experiment", "How much the plain-English tool descriptions say; opens a list of levels.", &["detail level", "explanation", "verbosity", "narration", "audience", "explanations"]),
-    // ---- startup and agents
-    e("new-agent-on-startup", "Start a new agent when opening Clarp", "startup", "Opens the new-agent hub each time Clarp starts.", &["startup", "launch", "on open", "new session", "boot", "toggle"]),
-    e("anonymous-agents", "Anonymous agents by default", "agent", "New agents start without a contact's name and persona.", &["anonymous", "nameless", "persona", "identity", "contact", "toggle"]),
-    // ---- voice, notifications, keyboard, Host
-    keyed(e("spoken-replies", "Spoken replies", "audio", "Reads agents' replies aloud.", &["voice", "mute", "unmute", "speech", "tts", "audio", "sound", "read aloud", "voice replies", "toggle"]), &["mute"]),
-    e("voice-provider", "Voice provider", "audio", "The Host's text-to-speech service; opens a list to pick one.", &["tts", "speech", "voice", "elevenlabs", "kokoro", "speaker"]),
-    e("voice-fallback", "Voice fallback", "audio", "The voice the Host uses when the main provider fails; opens a list.", &["backup voice", "tts fallback", "secondary", "speech", "voice"]),
-    e("pause-mobile-push", "Pause phone alerts while active on desktop", "notifications", "Holds phone notifications while you are using this window.", &["notifications", "notification", "push", "phone", "mobile", "alerts", "quiet", "do not disturb", "toggle"]),
-    e("double-press", "Double-press window", "keyboard", "How quickly the second press of a double press (Right Right) must follow; opens a list.", &["double press", "double tap", "double click", "key timing", "delay", "speed", "milliseconds"]),
-    e("shared-filesystem", "Shared filesystem", "host", "Lets the app open the Host's files directly (a trusted Host on this machine).", &["files", "local folders", "filesystem", "trusted host", "disk", "toggle"]),
-    e("connection", "Host connection", "host", "The Clarp Host this window talks to, and its address and state.", &["host", "server", "connect", "url", "address", "status"]),
-    e("orchestrator", "Orchestrator settings", "host", "The orchestrator that routes your messages to agents.", &["orchestrator", "routing", "router", "dispatch", "hands-free"]),
-    // ---- commands
+    e("choose-font", "Choose font…", "appearance", "Picks the chat's typeface and size for this reading theme, previewed in the chat.", &["font", "typeface", "font family", "monospace", "serif", "sans"]),
     e("edit-keymap", "Customize key bindings", "view", "Opens the editor for every keyboard shortcut.", &["keymap", "shortcuts", "hotkeys", "keyboard", "customise", "rebind", "bindings"]),
     e("next-workspace", "Next workspace", "view", "Switches to the next workspace tab.", &["workspace", "tab", "cycle", "switch workspace"]),
     e("quick-new-agent", "New contact & chat", "agent", "Creates a new contact and opens a chat with it.", &["new session", "hub", "create", "add contact", "new persona"]),
@@ -112,13 +362,32 @@ pub const ENTRIES: &[Entry] = &[
     e("talk", "Talk", "audio", "Records your voice and sends it to the open agent.", &["voice", "microphone", "mic", "dictate", "speak", "record", "push to talk"]),
 ];
 
-pub fn find(id: &str) -> Option<&'static Entry> {
-    ENTRIES.iter().find(|entry| entry.id == id)
+/// A setting's or a command's text.
+pub fn find(id: &str) -> Option<Entry> {
+    setting(id).map(|s| s.entry).or_else(|| ENTRIES.iter().find(|entry| entry.id == id).copied())
 }
 
-/// The entry's place in the list: ties in a search keep it.
+/// Ties in a search: the window's parts first, left to right, then the
+/// settings in their page order, then the commands.
+const FIRST: &[&str] = &["nav-rail", "explorer", "avatar-size", "compact-explorer", "live-preview", "workspace-bar", "shortcut-bar", "minimal-ui", "timestamps"];
+
+/// Every setting's and command's text, in `order`.
+pub fn entries() -> Vec<Entry> {
+    let mut all: Vec<Entry> = settings().iter().map(|s| s.entry).chain(ENTRIES.iter().copied()).collect();
+    all.sort_by_key(|entry| order(entry.id));
+    all
+}
+
+/// The entry's place in a tie.
 pub fn order(id: &str) -> usize {
-    ENTRIES.iter().position(|entry| entry.id == id).unwrap_or(ENTRIES.len())
+    if let Some(at) = FIRST.iter().position(|first| *first == id) {
+        return at;
+    }
+    let (count, at) = SETTINGS.with(|all| (all.len(), all.iter().position(|s| s.entry.id == id)));
+    match at {
+        Some(at) => FIRST.len() + at,
+        None => FIRST.len() + count + ENTRIES.iter().position(|entry| entry.id == id).unwrap_or(ENTRIES.len()),
+    }
 }
 
 fn words(text: &str) -> impl Iterator<Item = &str> {
@@ -210,7 +479,7 @@ mod tests {
 
     fn ranked(query: &str) -> Vec<&'static str> {
         let mut hits: Vec<(u32, usize, &str)> =
-            ENTRIES.iter().enumerate().filter_map(|(i, e)| score(query, e.label, e.aliases, e.description).map(|s| (s, i, e.id))).collect();
+            entries().iter().enumerate().filter_map(|(i, e)| score(query, e.label, e.aliases, e.description).map(|s| (s, i, e.id))).collect();
         hits.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         hits.into_iter().map(|(_, _, id)| id).collect()
     }
@@ -221,19 +490,27 @@ mod tests {
     }
 
     #[test]
-    fn every_entry_has_a_description_and_two_aliases() {
-        for entry in ENTRIES {
+    fn every_command_and_setting_has_a_description_and_two_aliases() {
+        let all = entries();
+        for entry in &all {
             assert!(!entry.label.is_empty(), "{} has no label", entry.id);
             assert!(entry.description.len() > 10 && !entry.description.contains('\n'), "{} needs a one-line description", entry.id);
             assert!(entry.aliases.len() >= 2, "{} needs at least two aliases", entry.id);
-            assert_eq!(ENTRIES.iter().filter(|other| other.id == entry.id).count(), 1, "{} is listed twice", entry.id);
+            assert_eq!(all.iter().filter(|other| other.id == entry.id).count(), 1, "{} is registered twice", entry.id);
         }
     }
 
     #[test]
-    fn every_setting_on_the_page_is_described() {
-        for id in crate::settings_view::IDS {
-            assert!(find(id).is_some(), "the setting {id} needs a catalogue entry");
+    fn every_setting_has_a_section_and_a_toggle_defaults_on_or_off() {
+        let sections = sections();
+        for setting in settings().iter() {
+            assert!(sections.contains(&setting.section), "{} has no section", setting.id());
+            if let (Some(default), Control::Toggle { .. }) = (&setting.default, &setting.control) {
+                assert!(default == "on" || default == "off", "{}: a toggle's default is on or off", setting.id());
+            }
+        }
+        for id in ["nav-rail", "font-size", "reading-theme", "connection"] {
+            assert!(setting(id).is_some(), "{id} is registered");
         }
     }
 
@@ -256,6 +533,9 @@ mod tests {
         top3("double tap", "double-press");
         top3("zoom", "ui-scale");
         assert_eq!(ranked("avatar")[0], "avatar-size");
+        assert_eq!(ranked("font size")[0], "font-size");
+        assert_eq!(ranked("text size")[0], "font-size");
+        top3("bigger text", "font-size");
         top3("portrait size", "avatar-size");
     }
 
