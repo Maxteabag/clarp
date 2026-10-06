@@ -1146,3 +1146,45 @@ def test_each_agy_turn_carries_a_host_issued_identity(fake_agy, tmp_path, monkey
                    trace_id=trace_id).wait(timeout=8.0)
     token = (tmp_path / "turn.txt").read_text()
     assert turn_identity.caller_agent_id({"CLARP_PROVIDER_TURN": token}) == agent_id
+
+
+def test_a_dispatched_turns_tool_calls_reach_its_final_row(fake_agy, tmp_path, monkeypatch):
+    session = "agy-tools"
+    agent_id = _make_agy_agent(persona="Tools", session=session)
+    agents_db.bind_backend_session(agent_id, _FAKE_CONV)
+    trace_id = _open_owned_turn(agent_id, "trace-tools")
+    agy_home = tmp_path / "agy-tools"
+    monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(agy_home))
+    fake_agy(_stream("The tests pass."))
+    results = []
+    AGY.start_turn(text="run the tests", cwd=tmp_path, backend_session_id=_FAKE_CONV,
+                   agent_id=agent_id, session=session, trace_id=trace_id,
+                   on_result=results.append).wait(timeout=8)
+    assert _wait_for(lambda: bool(results))
+    # agy 1.3 records each call on the step that made it; GENERIC steps answer them in order.
+    _write_agy_transcript(agy_home, [
+        {"step_index": 0, "type": "USER_INPUT", "created_at": "t1",
+         "content": "<USER_REQUEST>run the tests</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "created_at": "t2", "content": "",
+         "tool_calls": [{"name": "run_command", "args": {
+             "CommandLine": "make test", "Cwd": "/repo", "toolSummary": "Run the test suite",
+             "toolAction": "Running tests"}}]},
+        {"step_index": 2, "type": "GENERIC", "created_at": "t3",
+         "content": "Created At: t3\nCompleted At: t3\n\nThe command exited with code 0.\nOutput:\n12 passed\n"},
+        {"step_index": 3, "type": "PLANNER_RESPONSE", "created_at": "t4", "content": "The tests pass."},
+    ])
+    _load_agy_conversation(session)
+
+    def final():
+        return agents_db.conn().execute(
+            "SELECT text, tools_json, display_cells_json, revision FROM messages "
+            "WHERE agent_id=? AND source_file=?", (agent_id, f"final:{trace_id}")).fetchone()
+    row = final()
+    tools = json.loads(row["tools_json"])
+    assert row["text"] == "The tests pass."
+    assert [(t["name"], t["summary"], t["status"], t["result"]) for t in tools] == [
+        ("Bash", "Run the test suite", "ok", "12 passed")]
+    assert [c["kind"] for c in json.loads(row["display_cells_json"])] == ["command"]
+    revision = row["revision"]
+    _load_agy_conversation(session)      # importing again changes nothing
+    assert final()["revision"] == revision

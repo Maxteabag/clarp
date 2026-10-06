@@ -634,6 +634,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         latest_user_key if current_origin == "heartbeat" else ""
     )
     assistant_ordinal = 0
+    # Tools of agy turns whose final row the stream owns: trace -> (row, tools, cells).
+    authority_tools: dict[str, tuple[str, list, list]] = {}
     # The request whose client row was matched last and has had no answer yet.
     # When an attempt fails, the dispatcher sends the same prompt again and
     # the backend records one more copy of it per retry.
@@ -673,7 +675,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             unanswered_key = ""
         if role == "assistant":
             authority = database.execute(
-                """SELECT trace_id FROM agy_turn_authority
+                """SELECT trace_id, authoritative_message_id FROM agy_turn_authority
                      WHERE agent_id=? AND backend_session_id=?
                        AND assistant_start_ordinal<=?
                        AND (assistant_end_ordinal IS NULL
@@ -686,6 +688,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # Stream-json terminal authority owns this provider turn.
                 # Its canonical final row (or empty/error tombstone) remains
                 # authoritative across every later /log or watcher import.
+                # Its text, that is: the tool calls the transcript records for
+                # the turn are carried onto that row below.
+                if authority["authoritative_message_id"]:
+                    _, tools, cells = authority_tools.setdefault(
+                        authority["trace_id"], (authority["authoritative_message_id"], [], []))
+                    tools.extend(turn.get("tools") or [])
+                    cells.extend(turn.get("display_cells") or [])
                 continue
         text = str(turn.get("text") or "")
         origin = "user"
@@ -968,6 +977,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if stale is not None or skipped_slot_removed else 0)
     replace_revision = max(stale_replace_revision, live_replace_revision)
     latest_revision = max(latest_revision, replace_revision)
+    latest_revision = max(latest_revision, _attach_authority_tools(database, authority_tools))
     database.execute(
         """INSERT INTO conversation_heads (
                agent_id, backend_session_id, revision, replace_revision
@@ -984,6 +994,49 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
 
 
 # --- turn summaries (docs/live-items.md §9; helpers in lib.message_turns) ---
+
+def _merge_by_id(existing: list, incoming: list) -> list:
+    merged = list(existing)
+    index = {str(item.get("id")): i for i, item in enumerate(merged)
+             if isinstance(item, dict) and item.get("id")}
+    for item in incoming:
+        key = str(item.get("id") or "") if isinstance(item, dict) else ""
+        if key and key in index:
+            merged[index[key]] = item
+        else:
+            if key:
+                index[key] = len(merged)
+            merged.append(item)
+    return merged
+
+
+def _attach_authority_tools(database, collected: dict[str, tuple[str, list, list]]) -> int:
+    """Put each stream-owned agy turn's transcript tool calls on its final row.
+
+    Written only when they differ from what the row holds, under a new
+    revision so clients fetch it; the row's text stays the stream's."""
+    latest = 0
+    for message_id, tools, cells in collected.values():
+        if not tools and not cells:
+            continue
+        row = database.execute("SELECT tools_json, display_cells_json FROM messages "
+                               "WHERE message_id=?", (message_id,)).fetchone()
+        if row is None:
+            continue
+        # Imports can be incremental: merge by id so a later read adds to, and
+        # updates, what an earlier read attached instead of replacing it.
+        tools_json = json.dumps(_merge_by_id(json.loads(row["tools_json"] or "[]"), tools),
+                                ensure_ascii=False)
+        cells_json = json.dumps(_merge_by_id(json.loads(row["display_cells_json"] or "[]"), cells),
+                                ensure_ascii=False)
+        if (row["tools_json"], row["display_cells_json"]) == (tools_json, cells_json):
+            continue
+        revision = _next_revision(database)
+        database.execute("UPDATE messages SET tools_json=?, display_cells_json=?, revision=? "
+                         "WHERE message_id=?", (tools_json, cells_json, revision, message_id))
+        latest = max(latest, revision)
+    return latest
+
 
 def stamp_turn(database, agent_id: str, trace_id: str, next_revision) -> int:
     from . import message_turns
