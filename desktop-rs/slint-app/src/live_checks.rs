@@ -125,7 +125,7 @@ fn set_status_line(on: bool) {
     }
 }
 
-fn set_reduced_motion(on: bool) {
+pub(super) fn set_reduced_motion(on: bool) {
     let app = app_now();
     if crate::profile_view::reduced_motion(&app) != on {
         crate::settings_view::change(&app, &crate::window().expect("window"), "reduced-motion", 1);
@@ -146,7 +146,7 @@ fn cpu_time() -> Duration {
 
 /// What a running tool's clock alone redraws, at most: its elapsed time and
 /// the hidden status line change twice a second. The shimmer draws 15–30.
-const NO_SHIMMER_FPS: f64 = 6.0;
+pub(super) const NO_SHIMMER_FPS: f64 = 6.0;
 
 thread_local! {
     /// Frames per second and CPU % the window takes idle (no turn).
@@ -157,13 +157,13 @@ thread_local! {
 
 /// Starts counting the frames the app draws by itself (the stages stop
 /// asking for them until `since_mark`).
-fn mark() {
+pub(super) fn mark() {
     quiet(true);
     MARK.with(|m| m.set((crate::perf::stats().frames.len(), cpu_time(), Some(std::time::Instant::now()))));
 }
 
 /// Frames per second and CPU (% of a core) since `mark`, and over how long.
-fn since_mark() -> (f64, f64, Duration) {
+pub(super) fn since_mark() -> (f64, f64, Duration) {
     quiet(false);
     let (frames, cpu, at) = MARK.with(std::cell::Cell::get);
     let elapsed = at.map(|a| a.elapsed()).unwrap_or_default();
