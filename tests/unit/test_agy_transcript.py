@@ -177,3 +177,32 @@ def test_a_pruned_conversation_whose_brain_folder_remains_is_gone(tmp_path, monk
     (tmp_path / "brain/pruned").mkdir(parents=True)     # agy leaves these behind
     assert agy_transcript.conversation_exists("kept")
     assert not agy_transcript.conversation_exists("pruned")
+
+def test_sessions_come_from_agys_catalogue_with_titles_and_folders(tmp_path):
+    import sqlite3
+    brain = tmp_path / "brain"
+    for conv in ("proj", "elsewhere", "scratch", "nested"):
+        _write_transcript(brain, conv, [{"step_index": 0, "type": "USER_INPUT",
+                                         "content": "<USER_REQUEST>hi</USER_REQUEST>"}])
+    db = tmp_path / "conversation_summaries.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE conversation_summaries (conversation_id text, title text, "
+                "preview text, workspace_uris text, last_modified_time datetime, "
+                "nesting_depth integer)")
+    con.executemany("INSERT INTO conversation_summaries VALUES (?,?,?,?,?,?)", [
+        ("proj", "Fix the build", "fix it", '["file:///home/u/proj"]', "2026-10-06 10:00", 0),
+        ("elsewhere", "Other", "", '["file:///home/u/other%20dir"]', "2026-10-06 11:00", 0),
+        # Pruned by agy: summary kept, history gone.
+        ("pruned", "Old", "", '["file:///home/u/proj"]', "2026-10-06 12:00", 0),
+        # Clarp's own one-shot request and a subagent are not adoptable sessions.
+        ("scratch", "Labels", "", '["file:///tmp/clarp-model-fallback-x1"]', "2026-10-06 13:00", 0),
+        ("nested", "Sub", "", '["file:///home/u/proj"]', "2026-10-06 14:00", 1),
+    ])
+    con.commit()
+    con.close()
+    every = agy_transcript.list_sessions("", brain_root=brain, summaries_file=db)
+    assert [s["id"] for s in every] == ["elsewhere", "proj"]
+    assert every[0]["cwd"] == "/home/u/other dir"
+    here = agy_transcript.list_sessions("/home/u/proj", brain_root=brain, summaries_file=db)
+    assert [(s["id"], s["title"], s["cwd"]) for s in here] == [
+        ("proj", "Fix the build", "/home/u/proj")]

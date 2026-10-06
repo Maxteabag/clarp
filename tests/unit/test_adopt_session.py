@@ -69,7 +69,7 @@ class AdoptTest(unittest.TestCase):
                    mock.patch.object(adopt, 'enclosing_cli', lambda: None),
                    mock.patch.dict(os.environ, {}, clear=False)]
         for name in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID', 'CLAUDE_CODE_SESSION_ID',
-                     'GROK_SESSION_ID'):
+                     'GROK_SESSION_ID', 'ANTIGRAVITY_CONVERSATION_ID'):
             os.environ.pop(name, None)
         for patch in patches:
             patch.start()
@@ -147,6 +147,17 @@ class AdoptTest(unittest.TestCase):
             self.assertEqual(adopt.detect_self(), ('grok', 'inner-grok'))
         with mock.patch.object(adopt, 'enclosing_cli', lambda: 'claude'):
             self.assertEqual(adopt.detect_self(), ('claude', 'outer-claude'))
+
+    def test_an_antigravity_conversation_identifies_itself(self):
+        # agy exports its conversation id to every command it runs; inherited
+        # from a Claude session above it, the innermost CLI still wins.
+        os.environ['CLAUDE_CODE_SESSION_ID'] = 'outer-claude'
+        os.environ['ANTIGRAVITY_CONVERSATION_ID'] = 'inner-agy'
+        with mock.patch.object(adopt, 'enclosing_cli', lambda: 'agy'):
+            self.assertEqual(adopt.detect_self(), ('agy', 'inner-agy'))
+        with mock.patch.object(adopt, '_ancestor_commands',
+                               lambda: iter([['/home/u/.local/bin/agy', '--conversation']])):
+            self.assertEqual(self.real_enclosing_cli(), 'agy')
 
     def test_conflicting_ids_without_a_known_cli_are_refused(self):
         os.environ['CLAUDE_CODE_SESSION_ID'] = 'a'
