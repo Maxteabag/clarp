@@ -1,6 +1,6 @@
 import { ListView } from "std-widgets.slint";
 import { Field } from "fields.slint";
-import { Palette, Focus, FocusRing } from "theme.slint";
+import { Palette, Focus, FocusRing, Look } from "theme.slint";
 
 // One installed family, drawn in itself.
 export struct FontItem {
@@ -56,10 +56,10 @@ export component FontPicker inherits Rectangle {
         VerticalLayout {
             padding: 12px;
             spacing: 8px;
-            Text { text: FontBridge.title; color: Palette.chrome-text; font-size: 14px; font-weight: 700; }
+            Text { text: FontBridge.title; color: Palette.chrome-text; font-size: 14 * Look.unit; font-weight: 700; }
             search := Field {
                 height: 38px;
-                font-size: 14px;
+                font-size: 14 * Look.unit;
                 placeholder-text: "Type to find a font";
                 edited(text) => { FontBridge.edited(text); }
             }
@@ -81,19 +81,19 @@ export component FontPicker inherits Rectangle {
                             accessible-role: checkbox;
                             accessible-checked: FontBridge.monospace-only;
                             accessible-label: "Monospace only";
-                            if FontBridge.monospace-only: Text { text: "✓"; color: Palette.accent-text; font-size: 11px; horizontal-alignment: center; vertical-alignment: center; }
+                            if FontBridge.monospace-only: Text { text: "✓"; color: Palette.accent-text; font-size: 11 * Look.unit; horizontal-alignment: center; vertical-alignment: center; }
                         }
-                        Text { text: "Monospace only"; color: mono.has-hover ? Palette.text : Palette.chrome-text; font-size: 12px; vertical-alignment: center; }
+                        Text { text: "Monospace only"; color: mono.has-hover ? Palette.text : Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: FontBridge.size-text; color: Palette.muted; font-size: 12px; vertical-alignment: center; }
+                Text { text: FontBridge.size-text; color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
             }
-            if FontBridge.note != "": Text { text: FontBridge.note; color: Palette.warning; font-size: 12px; wrap: word-wrap; }
+            if FontBridge.note != "": Text { text: FontBridge.note; color: Palette.warning; font-size: 12 * Look.unit; wrap: word-wrap; }
             if FontBridge.fonts.length == 0: Text {
                 text: "No installed font matches";
                 color: Palette.faint;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
                 horizontal-alignment: center;
             }
             list := ListView {
@@ -115,14 +115,14 @@ export component FontPicker inherits Rectangle {
                         Text {
                             text: font.name;
                             font-family: font.name;
-                            font-size: 15px;
+                            font-size: 15 * Look.unit;
                             color: Palette.text;
                             vertical-alignment: center;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
-                        if font.monospace: Text { text: "mono"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
-                        if font.saved: Text { text: "✓"; color: Palette.accent; font-size: 13px; vertical-alignment: center; }
+                        if font.monospace: Text { text: "mono"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
+                        if font.saved: Text { text: "✓"; color: Palette.accent; font-size: 13 * Look.unit; vertical-alignment: center; }
                     }
                 }
             }
@@ -133,8 +133,8 @@ export component FontPicker inherits Rectangle {
                 clicked => { FontBridge.act(entry.action); }
                 HorizontalLayout {
                     spacing: 8px;
-                    Text { text: entry.keys; color: Palette.accent; font-size: 12px; width: 76px; vertical-alignment: center; }
-                    Text { text: entry.label; color: action.has-hover ? Palette.text : Palette.chrome-text; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: entry.keys; color: Palette.accent; font-size: 12 * Look.unit; width: 76 * Look.unit; vertical-alignment: center; }
+                    Text { text: entry.label; color: action.has-hover ? Palette.text : Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                 }
             }
         }
