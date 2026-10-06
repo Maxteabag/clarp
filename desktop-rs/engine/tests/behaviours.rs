@@ -128,3 +128,26 @@ fn a_chat_opens_from_its_cached_copy_and_asks_only_for_what_is_newer() {
     assert!(!asked.is_empty());
     assert!(asked.iter().all(|r| r["query"]["after_revision"] == cached.to_string()), "only the delta after the cached copy: {asked:?}");
 }
+
+#[test]
+fn message_search_finds_loaded_chats_and_chats_only_the_cache_holds() {
+    use clarp_core::message_search::Source;
+    let host = Host::start("message-search");
+    let cache = host.dir.join("transcripts");
+    let mut d = Driver::with_transcript_cache(&host.base, &cache);
+    let snapshot = json!({"conversation_id": "c-mike", "latest_revision": 1, "has_more": false, "turns": [
+        {"id": "m-cached", "role": "assistant", "text": "The quarterly pelican report is ready", "revision": 1, "timestamp": "2026-09-28T09:00:00Z"}]});
+    clarp_core::transcript_cache::TranscriptCache::new(&cache).save(d.engine.base_url(), "mike", snapshot.as_object().unwrap()).unwrap();
+    d.connect();
+    d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2 && !e.log_pending("rachel")));
+    let first = d.engine.search_messages("pelican", 10);
+    assert!(first.cache_reading, "the first search starts reading the cache");
+    d.until_change(&Change::Search);
+    let found = d.engine.search_messages("PELICAN report", 10);
+    assert_eq!(found.hits.iter().map(|h| (h.session.as_str(), h.id.as_str())).collect::<Vec<_>>(), [("mike", "m-cached")]);
+    assert_eq!(found.hits[0].source, Source::Cache);
+    assert!(!found.cache_reading && found.cache_error.is_empty());
+    assert!(found.cached_chats >= 1 && found.loaded_chats >= 1, "{found:?}");
+    let help = d.engine.search_messages("can I help", 10);
+    assert_eq!(help.hits.first().map(|h| (h.session.as_str(), h.id.as_str(), h.source)), Some(("rachel", "r2", Source::Memory)), "a loaded chat is searched as loaded");
+}
