@@ -168,26 +168,32 @@ def _private_home() -> pathlib.Path:
         except OSError:
             continue
     now = time.time()
-    if now - _PRIVATE_HOME_LOGS_PRUNED[0] > 3600:
+    if now - _PRIVATE_HOME_LOGS_PRUNED[0] > 600:
         _PRIVATE_HOME_LOGS_PRUNED[0] = now
-        cutoff = now - AgyBackend._ONESHOT_LOG_DAYS * 86400
-        for old in (home / ".gemini/antigravity-cli/log").glob("cli-*.log"):
+        cutoff = now - AgyBackend._ONESHOT_KEEP_SECONDS
+        store = home / ".gemini/antigravity-cli"
+        for old in (*store.glob("log/cli-*.log"), *store.glob("conversations/*.db"),
+                    *store.glob("brain/*")):
             try:
-                if old.stat().st_mtime < cutoff:
+                if old.stat().st_mtime >= cutoff:
+                    continue
+                if old.is_dir() and not old.is_symlink():
+                    shutil.rmtree(old, ignore_errors=True)
+                else:
                     old.unlink()
             except OSError:
                 pass
     return home
 
 
-RESTORE_MAX_CHARS = 60_000
+RESTORE_MAX_BYTES = 60_000
 RESTORE_BLOCK_CHARS = 4_000
 
 
 def _restore_prompt(agent_id: str, conversation_id: str, text: str,
                     trace_id: str = "") -> str:
     """The new turn, preceded by the most recent part of the pruned
-    conversation as Clarp recorded it (at most RESTORE_MAX_CHARS). The record
+    conversation as Clarp recorded it (at most RESTORE_MAX_BYTES). The record
     sits in an injected-context block, so the chat shows only the new turn."""
     from .. import db
     from ..message_context import RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE
@@ -205,12 +211,15 @@ def _restore_prompt(agent_id: str, conversation_id: str, text: str,
                 half = RESTORE_BLOCK_CHARS // 2
                 body = body[:half] + "\n[…]\n" + body[-half:]
             blocks.append(f"{'User' if row['role'] == 'user' else 'Assistant'}: {body}")
+    # The prompt is a single argv entry, which Linux caps at 128 KiB: budget
+    # bytes, not characters.
     kept, size = [], 0
     for block in reversed(blocks):
-        if size + len(block) + 2 > RESTORE_MAX_CHARS:
+        cost = len(block.encode()) + 2
+        if size + cost > RESTORE_MAX_BYTES:
             break
         kept.append(block)
-        size += len(block) + 2
+        size += cost
     if not kept:
         return text
     return (f"{RESTORED_CONTEXT_OPEN}\n[Antigravity no longer has this conversation "
@@ -224,20 +233,28 @@ def _carry_restored(agent_id: str, pruned: str, conversation_id: str,
                     trace_id: str) -> None:
     """Move the pruned conversation's chat rows and goals onto the new one."""
     from .. import message_store, task_plans
+    # Goals first: a goal left on the old id would fence this very turn,
+    # while rows left behind only hide history.
+    goals: list[str] = []
     try:
-        moved = message_store.carry_conversation(
-            agent_id=agent_id, from_session_id=pruned,
-            to_session_id=conversation_id, current_trace_id=trace_id)
         goals = task_plans.carry_native_session(
             agent_id, pruned, conversation_id,
             "Antigravity pruned the conversation; Clarp continued it in a new one "
             "that opens with its record of the old one")
-        log("agyConversationCarried",
-            f"agent={agent_id} from={pruned} to={conversation_id} rows={moved} "
-            f"goals={len(goals)} trace={trace_id or '∅'}")
     except Exception as e:
+        log_exception("agyGoalCarryFail", e,
+                      detail=f"agent={agent_id} from={pruned} to={conversation_id}")
+    try:
+        moved = message_store.carry_conversation(
+            agent_id=agent_id, from_session_id=pruned,
+            to_session_id=conversation_id, current_trace_id=trace_id)
+    except Exception as e:
+        moved = 0
         log_exception("agyConversationCarryFail", e,
                       detail=f"agent={agent_id} from={pruned} to={conversation_id}")
+    log("agyConversationCarried",
+        f"agent={agent_id} from={pruned} to={conversation_id} rows={moved} "
+        f"goals={len(goals)} trace={trace_id or '∅'}")
 
 
 def _runner_error(detail: str) -> str:
@@ -698,10 +715,7 @@ class AgyBackend(StreamJsonBackend):
             if runtime_agent_id:
                 self._transition(runtime_agent_id, TurnEvent.SPAWN_STARTED,
                                    {"dispatch": self.runner, "trace_id": trace_id})
-            # An isolated turn (a dream) is a one-shot: keep it out of agy's
-            # real conversation store, as routing_env does.
-            env_extra = {**identity, **self.routing_env()} if isolated else identity
-            process.append(popen_turn(cmd, cwd=cwd, session=session, env_extra=env_extra))
+            process.append(popen_turn(cmd, cwd=cwd, session=session, env_extra=identity))
             provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
                                           provider=self.id, pid=process[0].pid)
         try:
@@ -1093,8 +1107,7 @@ class AgyBackend(StreamJsonBackend):
 
     # agy keeps every conversation under $HOME/.gemini and prunes its store to
     # roughly the newest 500. Clarp's one-shot requests (tool explanations, model
-    # fallbacks, janitor decisions, the orchestrator) and dreams made over a
-    # thousand a day, pruning real agents' conversations within hours; a resumed
+    # fallbacks, janitor decisions, the orchestrator) made over a thousand a day, pruning real agents' conversations within hours; a resumed
     # conversation that was pruned silently restarts empty. They therefore run
     # with a private HOME in Clarp's cache that links agy's login and copies
     # its settings (the default model, onboarding), and nothing else.
@@ -1104,8 +1117,10 @@ class AgyBackend(StreamJsonBackend):
                        ".gemini/antigravity-cli/installation_id")
     _ONESHOT_COPIED = (".gemini/antigravity-cli/settings.json",
                        ".gemini/antigravity-cli/cache/onboarding.json")
-    # agy never prunes its own CLI logs; the private HOME keeps two days.
-    _ONESHOT_LOG_DAYS = 2
+    # One-shots never resume a conversation, and agy never prunes its CLI
+    # logs, so the private HOME keeps an hour of either (it may sit on a small
+    # tmpfs in the container).
+    _ONESHOT_KEEP_SECONDS = 3600
 
     def routing_env(self) -> dict[str, str]:
         return {"HOME": str(_private_home())}

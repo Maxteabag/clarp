@@ -471,18 +471,24 @@ def carry_conversation(*, agent_id: str, from_session_id: str,
     database.execute("BEGIN IMMEDIATE")
     try:
         rows = database.execute(
-            """SELECT message_id, source_file, trace_id FROM messages
-                WHERE agent_id = ? AND backend_session_id = ?
-                ORDER BY COALESCE(timestamp, '') DESC, seq DESC""",
+            """SELECT message_id, source_file, trace_id, timestamp, seq,
+                      updated_at, revision FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?""",
             (agent_id, from_session_id)).fetchall()
         floor = database.execute(
             """SELECT COALESCE(MIN(seq), 0) FROM messages
                 WHERE agent_id = ? AND backend_session_id = ?""",
             (agent_id, to_session_id)).fetchone()[0]
-        seq = min(int(floor), 0)
+        # Display order (timestamp, seq) is kept by the new seqs, all below
+        # the new conversation's own; "the latest user row" (a reply's
+        # origin, the done push, interruption markers) is read by updated_at
+        # then revision, so each row keeps its updated_at and the fresh
+        # revisions follow the old ones' order.
+        displayed = sorted(rows, key=lambda r: (r["timestamp"] or "", r["seq"]))
+        seqs = {row["message_id"]: min(int(floor), 0) - len(rows) + index
+                for index, row in enumerate(displayed)}
         revision = 0
-        for row in rows:
-            seq -= 1
+        for row in sorted(rows, key=lambda r: (r["updated_at"], r["revision"])):
             revision = _next_revision(database)
             source = str(row["source_file"] or "")
             if not (current_trace_id and row["trace_id"] == current_trace_id
@@ -490,9 +496,9 @@ def carry_conversation(*, agent_id: str, from_session_id: str,
                 source = "carried:" + source
             database.execute(
                 """UPDATE messages SET backend_session_id = ?, seq = ?,
-                          source_file = ?, revision = ?, updated_at = ?
+                          source_file = ?, revision = ?
                     WHERE message_id = ?""",
-                (to_session_id, seq, source, revision, now_ms(),
+                (to_session_id, seqs[row["message_id"]], source, revision,
                  row["message_id"]))
         if revision:
             database.execute(
