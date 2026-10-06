@@ -156,7 +156,7 @@ pub fn settings(rows: &[SettingRow]) -> Vec<Item> {
         }
         let (target, value) = match kind.as_str() {
             "toggle" => (format!("settingrow:{id}:1"), if *on { "On" } else { "Off" }.to_owned()),
-            "choice" => (format!("settingpicker:{id}"), detail.clone()),
+            "choice" | "number" => (format!("settingpicker:{id}"), detail.clone()),
             "action" => (format!("settingrow:{id}:1"), String::new()),
             _ => continue,
         };

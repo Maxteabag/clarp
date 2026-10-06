@@ -76,8 +76,48 @@ pub enum Control {
     Toggle { get: Getter<bool>, set: Setter<bool> },
     /// One of `options` (by value): Left/Right step it; Enter in Ctrl+K lists them.
     Choice { options: Getter<Vec<Choice>>, get: Getter<String>, set: Pick },
+    /// A number from `min` to `max`: Left/Right and Ctrl+K +/- move it one
+    /// `step` from where it is (clamped); Enter in Ctrl+K lists the steps.
+    Number { get: Getter<f64>, set: Setter<f64>, min: f64, max: f64, step: f64, unit: &'static str },
     /// Opens something (a dialog, the font picker).
     Action { run: Run },
+}
+
+/// `now` moved `delta` steps, kept within `min..=max`.
+pub fn stepped(now: f64, delta: i32, min: f64, max: f64, step: f64) -> f64 {
+    tidy(now + f64::from(delta) * step, step).clamp(min, max)
+}
+
+/// Rounds away float noise at the step's precision (0.1 + 0.2 is 0.3).
+fn tidy(value: f64, step: f64) -> f64 {
+    let places = decimals(step);
+    let scale = 10f64.powi(places as i32);
+    (value * scale).round() / scale
+}
+
+/// How many decimals a step needs: 1 → 0, 0.05 → 2.
+fn decimals(step: f64) -> usize {
+    (0..6).find(|places| {
+        let scale = 10f64.powi(*places);
+        ((step * scale).round() - step * scale).abs() < 1e-9
+    }).unwrap_or(6) as usize
+}
+
+/// A number as stored and listed: as many decimals as its step needs.
+pub fn number_text(value: f64, step: f64) -> String {
+    format!("{:.*}", decimals(step), tidy(value, step))
+}
+
+/// The steps from `min` to `max`, with `now` among them when it falls between.
+pub fn steps(min: f64, max: f64, step: f64, now: f64) -> Vec<f64> {
+    let count = ((max - min) / step).round().max(0.0) as usize;
+    let mut out: Vec<f64> = (0..=count).map(|i| tidy(min + i as f64 * step, step)).collect();
+    let now = tidy(now, step);
+    if now >= min && now <= max && !out.iter().any(|v| (v - now).abs() < 1e-9) {
+        out.push(now);
+        out.sort_by(f64::total_cmp);
+    }
+    out
 }
 
 /// A user setting, registered once; the settings page and Ctrl+K show it.
@@ -95,11 +135,14 @@ pub struct Setting {
     pub label: Option<Getter<String>>,
     /// The value as shown, instead of the option's label (an action's state).
     pub detail: Option<Getter<String>>,
+    /// How `reset` puts it back when its default is not one value (a font
+    /// size back to the theme's own): runs instead of applying `default`.
+    pub reset_to: Option<Run>,
 }
 
 impl Setting {
     fn with(entry: Entry, section: &'static str, control: Control) -> Self {
-        Setting { entry, section, control, default: None, shown: None, label: None, detail: None }
+        Setting { entry, section, control, default: None, shown: None, label: None, detail: None, reset_to: None }
     }
 
     pub fn toggle(entry: Entry, section: &'static str, get: impl Fn(&App) -> bool + 'static, set: impl Fn(&Rc<App>, &AppWindow, bool) + 'static) -> Self {
@@ -134,12 +177,49 @@ impl Setting {
         .default(default)
     }
 
+    /// A number from `min` to `max` in `step`s, shown with its `unit` ("px", "%", "").
+    #[allow(clippy::too_many_arguments)]
+    pub fn number(
+        entry: Entry,
+        section: &'static str,
+        get: impl Fn(&App) -> f64 + 'static,
+        set: impl Fn(&Rc<App>, &AppWindow, f64) + 'static,
+        min: f64,
+        max: f64,
+        step: f64,
+        unit: &'static str,
+    ) -> Self {
+        debug_assert!(step > 0.0 && min <= max, "{}: a number needs a step and min <= max", entry.id);
+        Self::with(entry, section, Control::Number { get: Rc::new(get), set: Rc::new(set), min, max, step, unit })
+    }
+
+    /// A number kept in the app's settings under `key`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stored_number(entry: Entry, section: &'static str, key: &'static str, default: f64, min: f64, max: f64, step: f64, unit: &'static str) -> Self {
+        Self::number(
+            entry,
+            section,
+            move |app| app.engine.borrow().settings().get(key).and_then(serde_json::Value::as_f64).unwrap_or(default),
+            move |app, _, value| app.engine.borrow_mut().settings_mut().set(key, value),
+            min,
+            max,
+            step,
+            unit,
+        )
+        .default(number_text(default, step))
+    }
+
     pub fn action(entry: Entry, section: &'static str, run: impl Fn(&Rc<App>, &AppWindow) + 'static) -> Self {
         Self::with(entry, section, Control::Action { run: Rc::new(run) })
     }
 
     pub fn default(self, value: impl Into<String>) -> Self {
         Setting { default: Some(value.into()), ..self }
+    }
+
+    /// Resets by running `reset` (when the default is not one fixed value).
+    pub fn reset_with(self, reset: impl Fn(&Rc<App>, &AppWindow) + 'static) -> Self {
+        Setting { reset_to: Some(Rc::new(reset)), ..self }
     }
 
     pub fn when(self, shown: impl Fn(&App) -> bool + 'static) -> Self {
@@ -172,6 +252,14 @@ impl Setting {
                 });
                 Control::Choice { options, get, set }
             }
+            Control::Number { get, set, min, max, step, unit } => {
+                let after = after.clone();
+                let set: Setter<f64> = Rc::new(move |app: &Rc<App>, window: &AppWindow, value: f64| {
+                    set(app, window, value);
+                    after(app, window);
+                });
+                Control::Number { get, set, min, max, step, unit }
+            }
             Control::Action { run } => {
                 let run: Run = Rc::new(move |app: &Rc<App>, window: &AppWindow| {
                     run(app, window);
@@ -187,11 +275,12 @@ impl Setting {
         self.entry.id
     }
 
-    /// "toggle", "choice" or "action" (the settings page's row kinds).
+    /// "toggle", "choice", "number" or "action" (the settings page's row kinds).
     pub fn kind(&self) -> &'static str {
         match self.control {
             Control::Toggle { .. } => "toggle",
             Control::Choice { .. } => "choice",
+            Control::Number { .. } => "number",
             Control::Action { .. } => "action",
         }
     }
@@ -204,11 +293,12 @@ impl Setting {
         self.label.as_ref().map_or_else(|| self.entry.label.to_owned(), |label| label(app))
     }
 
-    /// The stored value: "on"/"off" or the chosen option's value.
+    /// The stored value: "on"/"off", the chosen option's value or the number.
     pub fn current(&self, app: &App) -> String {
         match &self.control {
             Control::Toggle { get, .. } => if get(app) { "on" } else { "off" }.to_owned(),
             Control::Choice { get, .. } => get(app),
+            Control::Number { get, step, .. } => number_text(get(app), *step),
             Control::Action { .. } => String::new(),
         }
     }
@@ -228,13 +318,27 @@ impl Setting {
                 let now = get(app);
                 options(app).into_iter().find(|o| o.value == now).map_or(now, |o| o.label)
             }
+            Control::Number { get, step, unit, .. } => with_unit(&number_text(get(app), *step), unit),
             Control::Action { .. } => String::new(),
         }
     }
 
+    /// A choice's options, or a number's steps (its current value among them).
     pub fn options(&self, app: &App) -> Vec<Choice> {
         match &self.control {
             Control::Choice { options, .. } => options(app),
+            Control::Number { get, min, max, step, unit, .. } => steps(*min, *max, *step, get(app))
+                .into_iter()
+                .map(|value| {
+                    let text = number_text(value, *step);
+                    let label = with_unit(&text, unit);
+                    let choice = Choice::new(text, label);
+                    match &self.default {
+                        Some(default) if *default == choice.value => choice.about("The default"),
+                        _ => choice,
+                    }
+                })
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -254,6 +358,10 @@ impl Setting {
                 }
                 set(app, window, value);
             }
+            Control::Number { set, min, max, .. } => match value.trim().parse::<f64>() {
+                Ok(number) if number.is_finite() => set(app, window, number.clamp(*min, *max)),
+                _ => return false,
+            },
             Control::Action { .. } => return false,
         }
         true
@@ -261,6 +369,10 @@ impl Setting {
 
     /// Puts its default back; false when it has none.
     pub fn reset(&self, app: &Rc<App>, window: &AppWindow) -> bool {
+        if let Some(reset) = &self.reset_to {
+            reset(app, window);
+            return true;
+        }
         let Some(default) = self.default.clone() else { return false };
         self.current(app) == default || self.apply(app, window, &default)
     }
@@ -283,9 +395,31 @@ impl Setting {
                 let next = &options[(at + delta).rem_euclid(options.len() as i32) as usize];
                 set(app, window, &next.value);
             }
+            Control::Number { get, set, min, max, step, .. } => {
+                let next = stepped(get(app), delta, *min, *max, *step);
+                set(app, window, next);
+            }
             Control::Action { run } => run(app, window),
         }
     }
+}
+
+fn with_unit(number: &str, unit: &str) -> String {
+    match unit {
+        "" => number.to_owned(),
+        "%" => format!("{number}%"),
+        unit => format!("{number} {unit}"),
+    }
+}
+
+/// Puts every setting in `section` back to its default; how many changed.
+pub fn reset_section(app: &Rc<App>, window: &AppWindow, section: &str) -> usize {
+    settings().iter().filter(|s| s.section == section).filter(|s| s.reset(app, window)).count()
+}
+
+/// Puts every setting back to its default; how many it could.
+pub fn reset_all(app: &Rc<App>, window: &AppWindow) -> usize {
+    settings().iter().filter(|s| s.reset(app, window)).count()
 }
 
 /// The settings page's sections, in order; a setting in another section
@@ -569,6 +703,22 @@ mod tests {
         assert_eq!(ranked("text size")[0], "font-size");
         top3("bigger text", "font-size");
         top3("portrait size", "avatar-size");
+    }
+
+    #[test]
+    fn a_number_steps_from_where_it_is_and_stays_in_range() {
+        assert_eq!(stepped(15.0, 1, 11.0, 28.0, 1.0), 16.0, "from the theme's 15, + is 16, not the first step");
+        assert_eq!(stepped(15.0, -1, 11.0, 28.0, 1.0), 14.0);
+        assert_eq!(stepped(28.0, 1, 11.0, 28.0, 1.0), 28.0, "clamped at the top");
+        assert_eq!(stepped(11.0, -3, 11.0, 28.0, 1.0), 11.0, "and the bottom");
+        assert_eq!(stepped(1.15, 1, 1.0, 1.4, 0.05), 1.2, "no float noise");
+        assert_eq!(stepped(1.1, 2, 1.0, 1.4, 0.1), 1.3);
+        assert_eq!(number_text(1.2000000001, 0.05), "1.20");
+        assert_eq!(number_text(16.0, 1.0), "16");
+        assert_eq!(steps(1.0, 1.2, 0.1, 1.0), [1.0, 1.1, 1.2]);
+        assert_eq!(steps(11.0, 13.0, 1.0, 12.5), [11.0, 12.0, 12.5, 13.0], "an off-step value is listed where it falls");
+        assert_eq!(with_unit("16", "px"), "16 px");
+        assert_eq!(with_unit("115", "%"), "115%");
     }
 
     #[test]
