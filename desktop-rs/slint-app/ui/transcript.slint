@@ -1101,6 +1101,51 @@ export component Transcript inherits FocusScope {
         running: root.dragging;
         triggered => { root.seek(root.drag-target); }
     }
+    // J/K bringing a card the list has not drawn into view: its row goes to
+    // the viewport's top (`down`: its end to the bottom, when it fits) by
+    // the rows' measured heights, which hold while the list re-estimates
+    // the rows it has not drawn. A frame at a time until it is there; the
+    // card's own report then places it exactly.
+    public function seek-row(index: int, down: bool) {
+        root.holding = false;
+        root.follow = false;
+        root.seek-row-index = index;
+        root.seek-row-down = down;
+        root.seek-row-ticks = 0;
+        root.seeking-row = true;
+    }
+    property <bool> seeking-row;
+    property <int> seek-row-index;
+    property <bool> seek-row-down;
+    property <int> seek-row-ticks;
+    Timer {
+        interval: 16ms;
+        running: root.seeking-row;
+        triggered => {
+            root.seek-row-ticks += 1;
+            if (!root.measured || root.seek-row-index + 1 >= root.before.length || root.seek-row-ticks > 120) {
+                root.seeking-row = false;
+                return;
+            }
+            let top = root.before[root.seek-row-index] * 1px;
+            let bottom = root.before[root.seek-row-index + 1] * 1px;
+            let target = Math.clamp(root.seek-row-down && bottom - top < list.visible-height - 24px ? bottom - list.visible-height + 12px : top - 12px, 0, root.range);
+            let delta = target - root.above;
+            if (Math.abs(delta / 1px) < 0.5) {
+                root.seeking-row = false;
+                return;
+            }
+            let y = Math.abs(delta) <= list.visible-height
+                ? Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta))
+                : Math.max(list.visible-height - list.content-height, Math.min(0px, -(ScrollBook.row-at(root.pane-id, target) + 0.5) * list.content-height / Math.max(1, root.rows.length)));
+            if (Math.abs((y - list.content-y) / 1px) < 0.5) {
+                // At the chat's end: as near as it gets.
+                root.seeking-row = false;
+                return;
+            }
+            root.move-to(y, "seek");
+        }
+    }
 
     // Settings → Follow new messages off: new rows leave the reader where
     // they are, at the end too.
@@ -1140,6 +1185,7 @@ export component Transcript inherits FocusScope {
     // or the top (load the page before) is decided once it has settled.
     function reader-scrolled() {
         ArtifactBridge.reader-moved();
+        root.seeking-row = false;
         root.holding = false;
         root.follow = false;
         if (!root.settling) { root.start-y = list.content-y; }
@@ -1224,6 +1270,7 @@ export component Transcript inherits FocusScope {
     // again, and a card J/K were still bringing into view is let go.
     public function scroll-to-latest() {
         ArtifactBridge.reader-moved();
+        root.seeking-row = false;
         root.holding = false;
         root.pin("jump-latest");
     }
@@ -1233,6 +1280,7 @@ export component Transcript inherits FocusScope {
     // pages towards the row until it reports where it is drawn.
     public function reveal(index: int) {
         ArtifactBridge.reader-moved();
+        root.seeking-row = false;
         root.holding = false;
         root.settling = false;
         root.follow = false;
@@ -1290,6 +1338,7 @@ export component Transcript inherits FocusScope {
         }
     }
     public function scroll-by(delta: length, cause: string) {
+        root.seeking-row = false;
         root.move-to(Math.max(list.visible-height - list.content-height, Math.min(0px, list.content-y - delta)), cause);
         root.holding = false;
         root.follow = root.at-end;

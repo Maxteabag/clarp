@@ -1468,6 +1468,8 @@ struct Seek {
     /// The card's last report (number and top): the list settles for a
     /// while after a scroll, so a place counts once it holds still.
     seen: Option<(u64, f32)>,
+    /// How often its row was asked into view by the measured heights.
+    rows_asked: u32,
 }
 
 thread_local! {
@@ -1492,7 +1494,7 @@ fn bring_into_view(app: &App, id: &str, direction: i32) {
     let now = std::time::Instant::now();
     let (since_seq, scrolled) = LAST_SCROLL.with(std::cell::Cell::get);
     let scrolled = scrolled.unwrap_or(now - Duration::from_secs(1));
-    SEEK.with(|s| *s.borrow_mut() = Some(Seek { id: id.to_owned(), direction, since_seq, scrolled, started: now, placements: 0, seen: None }));
+    SEEK.with(|s| *s.borrow_mut() = Some(Seek { id: id.to_owned(), direction, since_seq, scrolled, started: now, placements: 0, seen: None, rows_asked: 0 }));
     // A card on screen or near it is placed now; one further away is found
     // over the next frames.
     if seek_tick(app) {
@@ -1529,12 +1531,40 @@ fn seek_scrolled(app: &App, delta: f32, direction: i32, placed: bool) {
     });
 }
 
+/// The row of the open chat that holds `id` (as `selectables` finds it).
+fn row_of(app: &App, id: &str) -> Option<usize> {
+    let rows = app.active_messages()?;
+    rows.iter().position(|row| {
+        row.receipt.key == id
+            || row.blocks.iter().any(|b| b.key == id)
+            || row.artifacts.iter().any(|a| a.id == id)
+            || (row.live.expandable && row.live.key == id)
+            || row.prompt.key == id
+    })
+}
+
+/// Asks the transcript to bring `row` into view by the rows' measured
+/// heights; from report number `seq` on, the card's reports count.
+fn seek_row_asked(app: &App, row: usize, direction: i32) {
+    app.seek_row(row, direction > 0);
+    let seq = SHOWN.with(|s| s.borrow().0);
+    LAST_SCROLL.with(|l| l.set((seq, Some(std::time::Instant::now()))));
+    SEEK.with(|s| {
+        if let Some(seek) = s.borrow_mut().as_mut() {
+            seek.since_seq = seq;
+            seek.scrolled = std::time::Instant::now();
+            seek.seen = None;
+            seek.rows_asked += 1;
+        }
+    });
+}
+
 /// One step of bringing the card into view; false once it is there (or
 /// out of reach).
 fn seek_tick(app: &App) -> bool {
     const MARGIN: f32 = 12.0;
-    let Some((id, mut direction, since_seq, scrolled, started, placements, seen)) =
-        SEEK.with(|s| s.borrow().as_ref().map(|k| (k.id.clone(), k.direction, k.since_seq, k.scrolled, k.started, k.placements, k.seen)))
+    let Some((id, mut direction, since_seq, scrolled, started, placements, seen, rows_asked)) =
+        SEEK.with(|s| s.borrow().as_ref().map(|k| (k.id.clone(), k.direction, k.since_seq, k.scrolled, k.started, k.placements, k.seen, k.rows_asked)))
     else {
         return false;
     };
@@ -1590,9 +1620,23 @@ fn seek_tick(app: &App) -> bool {
         });
         return true;
     }
-    // Not drawn yet: a page towards it, then wait for the rows there to
-    // report (each card every 150 ms, once drawn), and page on towards it
-    // by the cards that did: past them, or back if it was passed.
+    // Not drawn yet: its row is brought into view by the rows' measured
+    // heights (the list's own positions of rows it has not drawn are
+    // estimates that shift as it draws them, so paging by them can pass
+    // the card back and forth), and then its own report places it. The
+    // transcript takes a few frames; the card reports every 150 ms.
+    if rows_asked < 3 && (rows_asked == 0 || waited >= Duration::from_millis(700)) {
+        if let Some(row) = row_of(app, &id) {
+            seek_row_asked(app, row, direction);
+            return true;
+        }
+    }
+    if rows_asked > 0 && rows_asked < 3 {
+        return true;
+    }
+    // Else a page towards it, then wait for the rows there to report
+    // (each card every 150 ms, once drawn), and page on towards it by the
+    // cards that did: past them, or back if it was passed.
     if since_seq > 0 {
         let ids = selectables(app);
         let target = ids.iter().position(|i| *i == id).unwrap_or(0);
