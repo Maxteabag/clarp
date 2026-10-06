@@ -145,11 +145,11 @@ pub fn square_portrait(bytes: &[u8]) -> Option<Vec<u8>> {
     }
     let source = image::load_from_memory_with_format(bytes, format).ok()?;
     let side = width.min(height);
-    let mut square = source.crop_imm((width - side) / 2, (height - side) / 2, side, side).to_rgba8();
+    let mut square = source.crop_imm((width - side) / 2, (height - side) / 2, side, side);
     if side > PORTRAIT_SOURCE_MAX {
-        square = image::imageops::resize(&square, PORTRAIT_SOURCE_MAX, PORTRAIT_SOURCE_MAX, image::imageops::FilterType::Lanczos3);
+        square = square.resize_exact(PORTRAIT_SOURCE_MAX, PORTRAIT_SOURCE_MAX, image::imageops::FilterType::Lanczos3);
     }
-    png(&square)
+    png(&square.into_rgba8())
 }
 
 /// An image as PNG.
@@ -161,16 +161,21 @@ pub fn png(image: &image::RgbaImage) -> Option<Vec<u8>> {
 
 /// `source`'s centred square at `side` px: Lanczos3 down (sharp, without
 /// the moiré of a plain sample), Catmull-Rom up when the Host's own
-/// portrait is smaller than the size it is drawn at.
+/// portrait is smaller than the size it is drawn at. Through
+/// `DynamicImage`, whose resizing is compiled (and optimised) in the image
+/// crate even in debug builds; the generic `imageops` ones are not.
 fn square_at(source: &image::RgbaImage, side: u32) -> image::RgbaImage {
     let (width, height) = source.dimensions();
     let small = width.min(height).max(1);
-    let square = image::imageops::crop_imm(source, (width - small.min(width)) / 2, (height - small.min(height)) / 2, small.min(width), small.min(height)).to_image();
+    let mut square = image::DynamicImage::ImageRgba8(source.clone());
+    if width != height {
+        square = square.crop_imm((width - small) / 2, (height - small) / 2, small, small);
+    }
     if small == side {
-        return square;
+        return square.into_rgba8();
     }
     let filter = if small > side { image::imageops::FilterType::Lanczos3 } else { image::imageops::FilterType::CatmullRom };
-    image::imageops::resize(&square, side, side, filter)
+    square.resize_exact(side, side, filter).into_rgba8()
 }
 
 /// How much of the pixel at (`x`, `y`) lies inside a circle of `radius`
