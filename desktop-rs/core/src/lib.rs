@@ -30,6 +30,7 @@ pub mod mention;
 pub mod message_search;
 pub mod narrator;
 pub mod panes;
+pub mod prefs;
 pub mod presentation;
 pub mod presence;
 pub mod preview;

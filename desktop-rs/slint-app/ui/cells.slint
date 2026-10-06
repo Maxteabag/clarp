@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 
 export struct CellLine {
     // diff_old, diff_new, error, or ""
@@ -49,21 +49,21 @@ export component DisplayCellCard inherits Rectangle {
                 // ProcessGlyph's "agent" kind.
                 text: "◆";
                 color: root.phase-color;
-                font-size: 11px;
+                font-size: 11 * Look.unit;
                 vertical-alignment: center;
             }
             if root.cell.subagent: Text {
                 text: root.cell.phase == "activity" ? "sub-agent" : root.cell.phase;
                 color: root.phase-color;
                 font-family: "JetBrains Mono";
-                font-size: 11px;
+                font-size: 11 * Look.unit;
                 vertical-alignment: center;
             }
             Text {
                 text: root.cell.title;
                 color: Palette.text;
                 font-family: "JetBrains Mono";
-                font-size: 12px;
+                font-size: 12 * Look.unit;
                 font-weight: 600;
                 overflow: elide;
                 max-width: root.cell.subagent ? 240px : 100000px;
@@ -72,7 +72,7 @@ export component DisplayCellCard inherits Rectangle {
             Text {
                 text: root.cell.summary;
                 color: Palette.muted;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
                 overflow: elide;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
@@ -80,7 +80,7 @@ export component DisplayCellCard inherits Rectangle {
             if root.has-detail: Text {
                 text: root.open ? "−" : "+";
                 color: Palette.chrome-text;
-                font-size: 13px;
+                font-size: 13 * Look.unit;
                 vertical-alignment: center;
             }
         }
@@ -103,7 +103,7 @@ export component DisplayCellCard inherits Rectangle {
                     text: line.text;
                     color: line.kind == "error" ? Palette.danger : Palette.chrome-text;
                     font-family: "JetBrains Mono";
-                    font-size: 12px;
+                    font-size: 12 * Look.unit;
                     wrap: word-wrap;
                 }
             }
@@ -111,7 +111,7 @@ export component DisplayCellCard inherits Rectangle {
                 text: root.cell.more + " more details available";
                 color: Palette.muted;
                 font-family: "JetBrains Mono";
-                font-size: 11px;
+                font-size: 11 * Look.unit;
             }
         }
     }
@@ -131,7 +131,7 @@ export component TypingIndicator inherits Rectangle {
     HorizontalLayout {
         alignment: center;
         spacing: 5px;
-        Text { text: "Working…"; color: Palette.text; font-size: 12px; vertical-alignment: center; }
+        Text { text: "Working…"; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; }
         for index in 3: Rectangle {
             width: 6px;
             height: 6px;

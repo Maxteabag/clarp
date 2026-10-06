@@ -20,8 +20,11 @@ use slint::ComponentHandle;
 
 use super::{app_now, check};
 
-/// The space between two rows: each row's padding above and below.
-const SPACING: f32 = 14.0;
+/// The space between two rows: each row's padding above and below
+/// (Settings → Message spacing, 14px by default).
+fn spacing() -> f32 {
+    crate::window().map_or(14.0, |window| window.global::<crate::Look>().get_message_spacing())
+}
 /// Rounding the layout may do.
 const SLACK: f32 = 1.0;
 
@@ -171,13 +174,14 @@ fn drawn() -> Option<((f32, f32), Vec<Drawn>)> {
 pub(super) fn tiling() -> Result<String, String> {
     let Some(((top, bottom), rows)) = drawn() else { return Err("the active chat's transcript is not found".into()) };
     let mut faults = Vec::new();
+    let spacing = spacing();
     for pair in rows.windows(2) {
         let (above, below) = (&pair[0], &pair[1]);
         let gap = below.top - above.bottom;
-        if (gap - SPACING).abs() > SLACK {
-            let kind = if gap < 0.0 { "overlaps" } else if gap < SPACING { "crowds" } else { "leaves a gap under" };
+        if (gap - spacing).abs() > SLACK {
+            let kind = if gap < 0.0 { "overlaps" } else if gap < spacing { "crowds" } else { "leaves a gap under" };
             faults.push(format!(
-                "row {} at {:.1}..{:.1} {kind} row {} at {:.1}..{:.1} (gap {gap:.1}px, want {SPACING})",
+                "row {} at {:.1}..{:.1} {kind} row {} at {:.1}..{:.1} (gap {gap:.1}px, want {spacing})",
                 below.id, below.top, below.bottom, above.id, above.top, above.bottom
             ));
         }

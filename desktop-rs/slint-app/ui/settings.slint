@@ -1,23 +1,36 @@
 import { ListView } from "std-widgets.slint";
-import { Palette, Focus, FocusRing } from "theme.slint";
+import { Palette, Focus, FocusRing, Look } from "theme.slint";
 import { Field } from "fields.slint";
 
 // One line of the settings surface: a section title, a switch, a choice
 // that steps through values, an action, or read-only information.
 export struct SettingRow {
+    // "section", "toggle", "choice", "number", "color", "text", "action" or
+    // "info".
     kind: string,
     id: string,
     label: string,
+    // The current value (or an action's or information's detail).
     detail: string,
     on: bool,
-    // What it does, one line under the label.
+    // One line: what it does.
     description: string,
+    // Its `:set` name and settings-file key.
+    key: string,
+    // Not its default (Backspace puts the default back).
+    changed: bool,
+    // A colour setting's colour.
+    swatch: color,
+    // A colour below the readability rules.
+    warning: string,
 }
 
 // SettingsPanel.qml: sections of switches and choices. Up/Down (or Tab)
 // move between the rows that do something, Space/Enter change the current
-// one, Left/Right step a choice, Escape goes back to the chats. `/` searches
-// the settings by name, alias or description (Rust filters the rows).
+// one (a number, colour or font opens the value editor), Left/Right or -/+
+// step it, Backspace resets it, Shift+Backspace its section, Escape goes
+// back to the chats. `/` searches the settings by name, alias or
+// description (Rust filters the rows).
 export component Settings inherits Rectangle {
     in property <[SettingRow]> rows;
     in-out property <int> current;
@@ -26,11 +39,14 @@ export component Settings inherits Rectangle {
     callback moved(int);
     callback searched(string);
     in property <string> query;
+    // Backspace: this row's setting; Shift+Backspace: its section.
+    callback reset(string, bool);
     public function focus-list() { keys.focus(); }
     public function focus-search() { search.focus(); }
     out property <bool> list-focused: keys.has-focus;
     out property <bool> search-focused: search.has-focus;
-    property <length> row-height: 48px;
+    // A row with a description: its label and key, and the description.
+    property <length> row-height: 54px;
     background: Palette.window;
 
     function actionable(index: int) -> bool {
@@ -60,10 +76,14 @@ export component Settings inherits Rectangle {
                 if (root.actionable(root.current)) { root.activated(root.rows[root.current].id); }
                 return accept;
             }
-            if (event.text == Key.LeftArrow || event.text == Key.RightArrow) {
+            if (event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == "+" || event.text == "=" || event.text == "-") {
                 if (root.actionable(root.current)) {
-                    root.adjusted(root.rows[root.current].id, event.text == Key.RightArrow ? 1 : -1);
+                    root.adjusted(root.rows[root.current].id, event.text == Key.RightArrow || event.text == "+" || event.text == "=" ? 1 : -1);
                 }
+                return accept;
+            }
+            if (event.text == Key.Backspace || event.text == Key.Delete) {
+                if (root.actionable(root.current)) { root.reset(root.rows[root.current].id, event.modifiers.shift); }
                 return accept;
             }
             reject
@@ -75,11 +95,11 @@ export component Settings inherits Rectangle {
             spacing: 6px;
             HorizontalLayout {
                 spacing: 16px;
-                Text { text: "SETTINGS"; color: Palette.chrome-text; font-size: 16px; font-weight: 700; }
+                Text { text: "SETTINGS"; color: Palette.chrome-text; font-size: 16 * Look.unit; font-weight: 700; }
                 Text {
-                    text: search.has-focus ? "↓ / Enter results · Esc clear" : "↑↓ / Tab move · Space / Enter change · / search · Esc back to chat";
+                    text: search.has-focus ? "↓ / Enter results · Esc clear" : "↑↓ move · Enter change · ←→ / −+ adjust · ⌫ reset · ⇧⌫ section · / search · Esc back";
                     color: Palette.muted;
-                    font-size: 11px;
+                    font-size: 11 * Look.unit;
                     vertical-alignment: center;
                 }
             }
@@ -98,7 +118,15 @@ export component Settings inherits Rectangle {
             list := ListView {
                 vertical-stretch: 1;
                 for row[index] in root.rows: Rectangle {
-                    height: row.kind == "section" ? 40px : row.description != "" ? root.row-height : 36px;
+                    // A setting with a description takes a second line.
+                    height: (row.kind == "section" ? 40px : row.description != "" ? root.row-height : 36px) + 2 * Look.density-pad;
+                    // The keyboard landed here: bring it into view.
+                    property <bool> is-current: index == root.current;
+                    changed is-current => {
+                        if (self.is-current) {
+                            list.content-y = Math.min(Math.max(list.content-y, -self.y), list.visible-height - self.y - self.height);
+                        }
+                    }
                     border-radius: 3px;
                     background: index == root.current && keys.has-focus ? Focus.cursor : touch.has-hover && root.actionable(index) ? Palette.hover : transparent;
                     touch := TouchArea {
@@ -114,7 +142,7 @@ export component Settings inherits Rectangle {
                         y: parent.height - self.height - 6px;
                         text: row.label;
                         color: Palette.accent;
-                        font-size: 11px;
+                        font-size: 11 * Look.unit;
                         font-weight: 700;
                     }
                     if row.kind != "section": HorizontalLayout {
@@ -122,20 +150,61 @@ export component Settings inherits Rectangle {
                         padding-right: 12px;
                         spacing: 12px;
                         VerticalLayout {
-                            alignment: center;
                             horizontal-stretch: 1;
-                            Text { text: row.label; color: Palette.text; overflow: elide; }
-                            if row.description != "": Text { text: row.description; color: Palette.muted; font-size: 11px; overflow: elide; }
+                            alignment: center;
+                            spacing: 1px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: row.label; color: Palette.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; accessible-label: row.label; }
+                                if row.key != "": Text {
+                                    text: row.key;
+                                    color: Palette.faint;
+                                    font-size: 11 * Look.unit;
+                                    font-family: Palette.code-family;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            if row.description != "": Text {
+                                text: row.warning != "" ? "⚠ " + row.warning : row.description;
+                                color: row.warning != "" ? Palette.warning : Palette.muted;
+                                font-size: 12 * Look.unit;
+                                overflow: elide;
+                            }
                         }
-                        if row.kind == "choice": Text {
+                        // Changed from its default: a dot (Backspace resets it).
+                        if row.changed: Rectangle {
+                            width: 6px;
+                            height: 6px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 3px;
+                            background: Palette.accent;
+                            accessible-role: text;
+                            accessible-label: "Changed";
+                        }
+                        if row.kind == "color": Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: row.swatch;
+                            border-width: 1px;
+                            border-color: Palette.border;
+                        }
+                        if row.kind == "choice" || row.kind == "number": Text {
                             text: "‹  " + row.detail + "  ›";
                             color: Palette.accent;
+                            vertical-alignment: center;
+                        }
+                        if row.kind == "color" || row.kind == "text": Text {
+                            text: row.detail;
+                            color: Palette.accent;
+                            font-family: row.kind == "color" ? Palette.code-family : Palette.body-family;
                             vertical-alignment: center;
                         }
                         if row.kind == "info" || row.kind == "action": Text {
                             text: row.detail;
                             color: Palette.muted;
-                            font-size: 12px;
+                            font-size: 12 * Look.unit;
                             vertical-alignment: center;
                             overflow: elide;
                         }
@@ -163,9 +232,6 @@ export component Settings inherits Rectangle {
                 }
             }
         }
-    }
-    changed current => {
-        list.content-y = Math.min(Math.max(list.content-y, -root.current * root.row-height), list.visible-height - (root.current + 2) * root.row-height);
     }
     // Rust emptied the search (Escape, opening the page): the field follows.
     changed query => {

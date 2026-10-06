@@ -1,4 +1,4 @@
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 import { ComboBox, Slider, SpinBox, Switch } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
 import { Modal } from "dialogs.slint";
@@ -45,30 +45,30 @@ export component OrchestratorDialog inherits Modal {
         spacing: 11px;
         HorizontalLayout {
             spacing: 8px;
-            Text { text: "Orchestrator"; color: Palette.text; font-size: 17px; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
+            Text { text: "Orchestrator"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
             if OrchestratorBridge.loading: Busy { reduced-motion: OrchestratorBridge.reduced-motion; }
             IconButton { icon: @image-url("icons/close.svg"); tip: "Close"; clicked => { OrchestratorBridge.close(); } }
         }
         Text {
             text: "Name matching runs first. The routing model resolves delegations that do not clearly select one agent.";
             color: Palette.muted;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             wrap: word-wrap;
         }
         HorizontalLayout {
             spacing: 8px;
             Switch { checked <=> OrchestratorBridge.enabled; accessible-label: "Use AI to resolve failed delegations"; }
-            Text { text: "Use AI to resolve failed delegations"; color: Palette.chrome-text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: "Use AI to resolve failed delegations"; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
         }
         HorizontalLayout {
             spacing: 8px;
             Switch { checked <=> OrchestratorBridge.fallback-only; accessible-label: "Only when name matching cannot decide"; }
-            Text { text: "Only when name matching cannot decide"; color: Palette.chrome-text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: "Only when name matching cannot decide"; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
         }
         Text {
             text: "Automatic routing confidence  " + Math.round(OrchestratorBridge.confidence * 100) / 100;
             color: Palette.chrome-text;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
         }
         Slider {
             minimum: 0.5;
@@ -82,19 +82,19 @@ export component OrchestratorDialog inherits Modal {
             VerticalLayout {
                 spacing: 4px;
                 horizontal-stretch: 1;
-                Text { text: "Provider"; color: Palette.chrome-text; font-size: 12px; }
+                Text { text: "Provider"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
                 ComboBox { model: OrchestratorBridge.providers; current-index <=> OrchestratorBridge.provider-index; accessible-label: "Provider"; }
             }
             VerticalLayout {
                 spacing: 4px;
                 horizontal-stretch: 1;
-                Text { text: "Effort"; color: Palette.chrome-text; font-size: 12px; }
+                Text { text: "Effort"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
                 ComboBox { model: OrchestratorBridge.efforts; current-index <=> OrchestratorBridge.effort-index; accessible-label: "Effort"; }
             }
         }
-        Text { text: "Model override"; color: Palette.chrome-text; font-size: 12px; }
+        Text { text: "Model override"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
         Field { text <=> OrchestratorBridge.model; placeholder-text: "Provider default"; accessible-label: "Model override"; }
-        Text { text: "Timeout (milliseconds)"; color: Palette.chrome-text; font-size: 12px; }
+        Text { text: "Timeout (milliseconds)"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
         HorizontalLayout {
             alignment: start;
             SpinBox {
@@ -111,7 +111,7 @@ export component OrchestratorDialog inherits Modal {
             background: Palette.window;
             VerticalLayout {
                 padding: 9px;
-                Text { text: "Last decision: " + OrchestratorBridge.last-decision; color: Palette.muted; font-size: 11px; wrap: word-wrap; }
+                Text { text: "Last decision: " + OrchestratorBridge.last-decision; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
             }
         }
         Rectangle { vertical-stretch: 1; }

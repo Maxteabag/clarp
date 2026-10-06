@@ -1,6 +1,6 @@
 import { ListView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing } from "theme.slint";
+import { Palette, Focus, FocusRing, Look } from "theme.slint";
 
 export struct SwitcherRow {
     kind: string,
@@ -12,6 +12,8 @@ export struct SwitcherRow {
     value: string,
     // A message search result: the words around the match, matches bold.
     snippet: styled-text,
+    // A setting that steps: + and - change it in place.
+    adjustable: bool,
 }
 
 // The quick switcher (QuickSwitcher.qml): type to find an agent, command or
@@ -33,6 +35,8 @@ export component Switcher inherits Rectangle {
     callback chosen(int);
     callback moved(int);
     callback dismissed();
+    // + or - on a setting that steps (the row, and -1 or 1).
+    callback adjusted(int, int);
     public function open() {
         search.text = "";
         search.focus();
@@ -64,6 +68,11 @@ export component Switcher inherits Rectangle {
                     root.chosen(root.current);
                     return accept;
                 }
+                // A setting steps in place: the switcher stays open on it.
+                if ((event.text == "+" || event.text == "=" || event.text == "-") && root.current >= 0 && root.current < root.rows.length && root.rows[root.current].adjustable) {
+                    root.adjusted(root.current, event.text == "-" ? -1 : 1);
+                    return accept;
+                }
                 reject
             }
             VerticalLayout {
@@ -72,14 +81,14 @@ export component Switcher inherits Rectangle {
                 search := Field {
                     height: 43px;
                     accessible-label: root.placeholder;
-                    font-size: 14px;
+                    font-size: 14 * Look.unit;
                     placeholder-text: root.placeholder;
                     edited(text) => { root.edited(text); }
                 }
                 if root.rows.length == 0: Text {
                     text: root.empty-text;
                     color: Palette.faint;
-                    font-size: 12px;
+                    font-size: 12 * Look.unit;
                     horizontal-alignment: center;
                 }
                 list := ListView {
@@ -132,10 +141,18 @@ export component Switcher inherits Rectangle {
                                     vertical-alignment: center;
                                 }
                             }
+                            if row.adjustable && index == root.current: Text {
+                                text: "−  +";
+                                color: Palette.accent;
+                                font-size: 13 * Look.unit;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                                accessible-label: "Minus or plus steps it";
+                            }
                             if row.key != "": Text {
                                 text: row.key;
                                 color: Palette.accent;
-                                font-size: 11px;
+                                font-size: 11 * Look.unit;
                                 vertical-alignment: center;
                             }
                         }

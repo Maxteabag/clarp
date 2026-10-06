@@ -22,6 +22,8 @@ mod scroll_journal;
 mod preview_view;
 mod platform;
 mod settings_view;
+// ---- every preference, applied (Settings, Ctrl+K, :set, the settings file)
+mod look;
 mod switcher;
 mod search_view;
 mod mention_view;
@@ -307,6 +309,7 @@ impl App {
         let engine = self.engine.borrow();
         if changes.contains(&Change::Preferences) {
             view::apply_app_theme(self, &window);
+            look::apply(self, &window);
         }
         let selected = engine.selected_session().to_owned();
         if changes.contains(&Change::Selection) && !selected.is_empty() {
@@ -518,7 +521,15 @@ impl App {
                     platform::audio::with(|audio| audio.set_muted(muted));
                     platform::desktop::muted_changed(muted);
                 }
-                Change::Notification { title, body } => platform::desktop::notify(title.clone(), body.clone()),
+                Change::Notification { title, body } => {
+                    let (on, sound) = {
+                        let engine = self.engine.borrow();
+                        (clarp_core::prefs::flag(engine.settings(), "notifyreplies"), clarp_core::prefs::flag(engine.settings(), "notifysound"))
+                    };
+                    if on {
+                        platform::desktop::notify(title.clone(), body.clone(), sound);
+                    }
+                }
                 _ => {}
             }
         }
@@ -651,6 +662,7 @@ fn main() {
         expanded: RefCell::new(std::collections::HashSet::new()),
     });
     APP.with(|a| *a.borrow_mut() = Some(state.clone()));
+    look::wire(&state, &window);
 
     window.on_fold_toggled(|session| with_window(|app, _| app.fold(&session, None)));
     window.on_done_helpers_toggled(|parent| with_window(|app, _| {
@@ -803,6 +815,7 @@ fn main() {
             settings_view::searched(&app, &window, &text);
         }
     });
+    window.on_setting_reset(|id, section| with_window(|app, window| settings_view::reset(app, window, &id, section)));
     window.on_surface_chosen(|surface| {
         if let (Some(app), Some(window)) = (app(), crate::window())
             && !commands::run(&app, &window, &surface)
@@ -855,6 +868,7 @@ fn main() {
             commands::switcher_chosen(&app, &window, index);
         }
     });
+    window.on_switcher_adjusted(|index, delta| with_window(|app, window| commands::switcher_adjusted(app, window, index, delta)));
     window.on_switcher_dismissed(|| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             commands::close_switcher(&app, &window, None);

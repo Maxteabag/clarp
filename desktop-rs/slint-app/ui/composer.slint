@@ -1,5 +1,5 @@
 import { Field, Editor, PlainEditor } from "fields.slint";
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 
 export struct Attachment {
     id: string,
@@ -71,7 +71,7 @@ component Chip inherits Rectangle {
         Text {
             text: root.item.name + (root.item.status == "ready" ? "" : " · " + root.item.status);
             color: root.item.status == "failed" ? Palette.danger : Palette.text;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             vertical-alignment: center;
             overflow: elide;
             max-width: 180px;
@@ -190,40 +190,40 @@ export component Composer inherits FocusScope {
         if root.starting != "": Text {
             text: "Starting " + root.starting + "…";
             color: Palette.muted;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
         }
         if root.recording: Text {
             text: "● Recording · Ctrl+Shift+Space sends";
             color: Palette.danger;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
         }
         if root.transcribing > 0: HorizontalLayout {
             spacing: 8px;
             Text {
                 text: root.transcribing == 1 ? "Transcribing voice in background…" : root.transcribing + " voice notes transcribing…";
                 color: Palette.muted;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
                 overflow: elide;
                 horizontal-stretch: 1;
             }
             Text {
                 text: "Cancel";
                 color: Palette.link;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
                 TouchArea { clicked => { root.cancel-transcription(); } }
             }
         }
         if root.quota-notice != "": Text {
             text: "! " + root.quota-notice;
             color: Palette.warning;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             overflow: elide;
             accessible-label: root.quota-notice;
         }
         if root.queued > 0: Text {
             text: root.queued + (root.queued == 1 ? " message queued" : " messages queued") + "  ·  Ctrl+Enter queues next";
             color: Palette.muted;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             overflow: elide;
             accessible-role: button;
             // Opens the queue dialog (launch dialogs).

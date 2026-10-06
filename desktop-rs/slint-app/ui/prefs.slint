@@ -1,0 +1,150 @@
+import { Button } from "std-widgets.slint";
+import { Field } from "fields.slint";
+import { Palette, Look } from "theme.slint";
+import { Modal } from "dialogs.slint";
+import { IconButton } from "launch.slint";
+
+// One of the theme's colours, offered by the colour picker.
+export struct Swatch {
+    role: string,
+    hex: string,
+    tint: color,
+}
+
+// The value editor (look.rs): type a setting's value (a size, a font, a
+// colour as #rrggbb) or pick one of the theme's colours. It applies as
+// you type; Enter keeps it, Escape puts the old value back.
+export global PrefEditor {
+    in property <string> name;
+    in property <string> label;
+    in property <string> description;
+    // The settings-file key and the range or choices.
+    in property <string> key;
+    in property <string> range;
+    in property <bool> colour;
+    in property <color> preview;
+    in property <[Swatch]> swatches;
+    // Readability rules the colour now breaks (it is applied anyway).
+    in property <[string]> warnings;
+    in property <string> error;
+    in-out property <string> text;
+    // Bumped to give the field the keyboard.
+    in property <int> focus-request;
+    callback edited(string);
+    callback accept();
+    callback cancel();
+    callback picked(string);
+    callback reset();
+    // Settings → Confirm stop and release: the question, and its yes.
+    in property <string> confirm-title;
+    in property <string> confirm-message;
+    in property <int> confirm-request;
+    callback confirmed();
+}
+
+export component PrefEditorDialog inherits Modal {
+    card-width: 600px;
+    card-height: PrefEditor.colour ? 520px : 320px;
+    dismissed => { PrefEditor.cancel(); }
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        Text { text: PrefEditor.label; color: Palette.text; font-size: 17 * Look.unit; }
+        Text { text: PrefEditor.description; color: Palette.muted; font-size: 12 * Look.unit; wrap: word-wrap; }
+        Text {
+            text: PrefEditor.key + (PrefEditor.range != "" ? "  ·  " + PrefEditor.range : "");
+            color: Palette.faint;
+            font-size: 11 * Look.unit;
+            font-family: Palette.code-family;
+            overflow: elide;
+        }
+        HorizontalLayout {
+            spacing: 10px;
+            if PrefEditor.colour: Rectangle {
+                width: 40px;
+                border-radius: 4px;
+                background: PrefEditor.preview;
+                border-width: 1px;
+                border-color: Palette.border;
+                accessible-role: image;
+                accessible-label: "Colour preview";
+            }
+            Field {
+                text <=> PrefEditor.text;
+                accessible-label: PrefEditor.label;
+                edited(value) => { PrefEditor.edited(value); }
+                accepted => { PrefEditor.accept(); }
+                property <int> request: PrefEditor.focus-request;
+                changed request => {
+                    self.focus();
+                    self.select-all();
+                }
+            }
+        }
+        if PrefEditor.colour: Text { text: "The theme's colours"; color: Palette.muted; font-size: 11 * Look.unit; }
+        // Twelve to a line; a click takes the colour.
+        if PrefEditor.colour: Rectangle {
+            height: 2 * 34px;
+            for swatch[i] in PrefEditor.swatches: Rectangle {
+                x: Math.mod(i, 12) * 34px;
+                y: Math.floor(i / 12) * 34px;
+                width: 28px;
+                height: 28px;
+                border-radius: 4px;
+                background: swatch.tint;
+                border-width: touch.has-hover || swatch.hex == PrefEditor.text ? 2px : 1px;
+                border-color: touch.has-hover || swatch.hex == PrefEditor.text ? Palette.accent : Palette.border;
+                accessible-role: button;
+                accessible-label: swatch.role + " " + swatch.hex;
+                touch := TouchArea { clicked => { PrefEditor.picked(swatch.hex); } }
+            }
+        }
+        for warning in PrefEditor.warnings: Text {
+            text: "⚠ " + warning;
+            color: Palette.warning;
+            font-size: 12 * Look.unit;
+            wrap: word-wrap;
+        }
+        if PrefEditor.error != "": Text { text: PrefEditor.error; color: Palette.danger; font-size: 12 * Look.unit; wrap: word-wrap; }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            IconButton { icon: @image-url("icons/restore.svg"); label: "Reset to default"; clicked => { PrefEditor.reset(); } }
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { PrefEditor.cancel(); } }
+            Button { text: "Keep · Enter"; primary: true; enabled: PrefEditor.error == ""; clicked => { PrefEditor.accept(); } }
+        }
+    }
+}
+
+// Asks before an action that cannot be taken back (Settings → Confirm stop
+// and release). Enter or Y says yes; Escape or a click outside, no.
+export component PrefConfirmDialog inherits Modal {
+    card-width: 440px;
+    card-height: 170px;
+    dismissed => { PrefEditor.cancel(); }
+    keys := FocusScope {
+        property <int> request: PrefEditor.confirm-request;
+        changed request => { self.focus(); }
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == "y" || event.text == "Y") {
+                PrefEditor.confirmed();
+                return accept;
+            }
+            reject
+        }
+        VerticalLayout {
+            padding: 18px;
+            spacing: 10px;
+            Text { text: PrefEditor.confirm-title; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; }
+            Text { text: PrefEditor.confirm-message; color: Palette.muted; font-size: 12 * Look.unit; wrap: word-wrap; }
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                IconButton { icon: @image-url("icons/rail-close.svg"); label: "No · Esc"; clicked => { PrefEditor.cancel(); } }
+                Button { text: "Yes · Enter"; primary: true; clicked => { PrefEditor.confirmed(); } }
+            }
+        }
+    }
+}

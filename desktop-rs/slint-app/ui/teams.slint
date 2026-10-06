@@ -1,6 +1,6 @@
 import { Button, ComboBox, ListView, Spinner } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 import { Modal } from "dialogs.slint";
 import { IconButton } from "updates.slint";
 
@@ -64,12 +64,12 @@ export component Teams inherits Rectangle {
             Text {
                 text: "TEAMS";
                 color: Palette.text;
-                font-size: 17px;
+                font-size: 17 * Look.unit;
                 font-weight: 600;
                 letter-spacing: 1.5px;
                 vertical-alignment: center;
             }
-            Text { text: root.teams.length + " teams"; color: Palette.muted; font-size: 11px; vertical-alignment: center; }
+            Text { text: root.teams.length + " teams"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
             if root.loading: Spinner { width: 18px; height: 18px; y: 18px; indeterminate: true; }
             Button {
@@ -101,7 +101,7 @@ export component Teams inherits Rectangle {
                 width: parent.width - 16px;
                 text: root.error;
                 color: Palette.danger;
-                font-size: 12px;
+                font-size: 12 * Look.unit;
                 overflow: elide;
                 vertical-alignment: center;
             }
@@ -134,23 +134,23 @@ export component Teams inherits Rectangle {
                                 y: 14px;
                                 border-radius: 3px;
                                 background: team.colour;
-                                Text { text: team.initial; color: Palette.text; font-size: 15px; font-weight: 600; }
+                                Text { text: team.initial; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; }
                             }
                             VerticalLayout {
                                 alignment: center;
                                 spacing: 2px;
                                 HorizontalLayout {
                                     spacing: 6px;
-                                    Text { text: team.name; color: Palette.text; font-size: 13px; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
+                                    Text { text: team.name; color: Palette.text; font-size: 13 * Look.unit; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
                                     if team.unread > 0: Rectangle {
                                         width: 18px;
                                         height: 16px;
                                         border-radius: 3px;
                                         background: Palette.chrome-text;
-                                        Text { text: team.unread; color: Palette.window; font-size: 11px; }
+                                        Text { text: team.unread; color: Palette.window; font-size: 11 * Look.unit; }
                                     }
                                 }
-                                Text { text: team.subtitle; color: Palette.muted; font-size: 11px; overflow: elide; }
+                                Text { text: team.subtitle; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
                             }
                         }
                     }
@@ -172,8 +172,8 @@ export component Teams inherits Rectangle {
                                 horizontal-stretch: 1;
                                 alignment: center;
                                 spacing: 2px;
-                                Text { text: root.title; color: Palette.text; font-size: 14px; font-weight: 600; overflow: elide; }
-                                if root.subtitle != "": Text { text: root.subtitle; color: Palette.muted; font-size: 11px; overflow: elide; }
+                                Text { text: root.title; color: Palette.text; font-size: 14 * Look.unit; font-weight: 600; overflow: elide; }
+                                if root.subtitle != "": Text { text: root.subtitle; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
                             }
                             if root.selected != "": IconButton {
                                 y: 13px;
@@ -216,7 +216,7 @@ export component Teams inherits Rectangle {
                                     padding-left: 8px;
                                     padding-right: 2px;
                                     spacing: 2px;
-                                    Text { text: member.name; color: Palette.text; font-size: 11px; vertical-alignment: center; }
+                                    Text { text: member.name; color: Palette.text; font-size: 11 * Look.unit; vertical-alignment: center; }
                                     IconButton {
                                         y: 3px;
                                         size: 19px;
@@ -236,7 +236,7 @@ export component Teams inherits Rectangle {
                                 background: add-touch.has-hover ? Palette.hover : transparent;
                                 accessible-role: button;
                                 accessible-label: "Add team member";
-                                add := Text { text: "+ member"; color: Palette.chrome-text; font-size: 11px; }
+                                add := Text { text: "+ member"; color: Palette.chrome-text; font-size: 11 * Look.unit; }
                                 add-touch := TouchArea { clicked => { root.add-member(); } }
                             }
                         }
@@ -254,10 +254,10 @@ export component Teams inherits Rectangle {
                                     padding: 9px;
                                     spacing: 5px;
                                     HorizontalLayout {
-                                        Text { text: message.source; color: Palette.chrome-text; font-size: 12px; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
+                                        Text { text: message.source; color: Palette.chrome-text; font-size: 12 * Look.unit; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
                                         if message.session != "": Button { text: "Open chat"; clicked => { root.open-chat(message.session); } }
                                     }
-                                    Text { text: message.text; color: Palette.chrome-text; font-size: 13px; wrap: word-wrap; }
+                                    Text { text: message.text; color: Palette.chrome-text; font-size: 13 * Look.unit; wrap: word-wrap; }
                                 }
                             }
                         }
@@ -268,7 +268,7 @@ export component Teams inherits Rectangle {
                     horizontal-alignment: center;
                     text: root.selected != "" ? "No team messages yet" : "Choose a team";
                     color: Palette.muted;
-                    font-size: 12px;
+                    font-size: 12 * Look.unit;
                 }
             }
         }
@@ -286,8 +286,8 @@ export component TeamCreateDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 10px;
-        Text { text: "Create team"; color: Palette.text; font-size: 17px; font-weight: 600; }
-        Text { text: "Team name"; color: Palette.muted; font-size: 12px; }
+        Text { text: "Create team"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        Text { text: "Team name"; color: Palette.muted; font-size: 12 * Look.unit; }
         name := Field {
             placeholder-text: "e.g. Release crew";
             accessible-label: "Team name";
@@ -319,12 +319,12 @@ export component TeamEditDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 8px;
-        Text { text: "Edit team"; color: Palette.text; font-size: 17px; font-weight: 600; }
-        Text { text: "Name"; color: Palette.muted; font-size: 12px; }
+        Text { text: "Edit team"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        Text { text: "Name"; color: Palette.muted; font-size: 12 * Look.unit; }
         name := Field { accessible-label: "Name"; accepted => { root.save(name.text, colour.text, root.leader-index); } }
-        Text { text: "Color"; color: Palette.muted; font-size: 12px; }
+        Text { text: "Color"; color: Palette.muted; font-size: 12 * Look.unit; }
         colour := Field { placeholder-text: "#8f96bc"; accessible-label: "Color"; accepted => { root.save(name.text, colour.text, root.leader-index); } }
-        Text { text: "Leader"; color: Palette.muted; font-size: 12px; }
+        Text { text: "Leader"; color: Palette.muted; font-size: 12 * Look.unit; }
         ComboBox {
             model: root.leaders;
             current-index <=> root.leader-index;
@@ -352,8 +352,8 @@ export component TeamMemberDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 10px;
-        Text { text: "Add team member"; color: Palette.text; font-size: 17px; font-weight: 600; }
-        Text { text: "Agent"; color: Palette.muted; font-size: 12px; }
+        Text { text: "Add team member"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        Text { text: "Agent"; color: Palette.muted; font-size: 12 * Look.unit; }
         ComboBox { model: root.agents; current-index <=> root.agent-index; accessible-label: "Agent"; }
         HorizontalLayout {
             spacing: 6px;
@@ -375,8 +375,8 @@ export component TeamDeleteDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 10px;
-        Text { text: "Delete team?"; color: Palette.text; font-size: 17px; font-weight: 600; }
-        Text { text: "This removes the team and its history."; color: Palette.chrome-text; font-size: 13px; wrap: word-wrap; }
+        Text { text: "Delete team?"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        Text { text: "This removes the team and its history."; color: Palette.chrome-text; font-size: 13 * Look.unit; wrap: word-wrap; }
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 6px;

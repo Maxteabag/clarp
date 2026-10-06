@@ -600,6 +600,31 @@ impl Engine {
             self.changes.push(Change::Preferences);
         }
     }
+    /// Reads the preferences the engine keeps a copy of (voice, streaming,
+    /// tool activity and detail) from the settings again: they were changed
+    /// through `clarp_core::prefs` or by editing the settings file.
+    pub fn reload_preferences(&mut self) {
+        let muted = self.settings.boolean("audio/muted", false);
+        if self.muted != muted {
+            self.muted = muted;
+        }
+        let show = self.settings.boolean("conversation/showWhenReady", false);
+        if self.presentation.show_when_ready != show {
+            self.presentation.show_when_ready = show;
+            let selected = self.selected.clone();
+            self.changes.push(Change::Conversation(selected));
+        }
+        let tools_visible = self.settings.boolean("conversation/toolsVisible", false);
+        let mode = self.settings.integer("conversation/activityDisplayMode", i64::from(tools_visible)).clamp(0, 2) as i32;
+        if self.presentation.activity_mode != mode {
+            self.set_activity_mode(mode);
+        }
+        let level = self.settings.integer("experiments/toolDetailLevel", 0).clamp(0, 4) as i32;
+        if self.narrator_detail_level() != level {
+            self.set_narrator_detail_level(level);
+        }
+        self.changes.push(Change::Preferences);
+    }
     pub fn settings(&self) -> &Settings {
         &self.settings
     }

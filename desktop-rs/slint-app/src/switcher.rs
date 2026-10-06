@@ -148,7 +148,8 @@ pub fn settings(rows: &[SettingRow]) -> Vec<Item> {
     const COMMANDS: &[&str] = &["font", "reset-font"];
     let mut items = Vec::new();
     for (kind, id, label, detail, on) in rows {
-        if id.is_empty() || COMMANDS.contains(&id.as_str()) {
+        // Preferences of their own come from their registry (`prefs` below).
+        if id.is_empty() || COMMANDS.contains(&id.as_str()) || id.starts_with("pref") {
             continue;
         }
         let (target, value) = match kind.as_str() {
@@ -211,6 +212,60 @@ pub fn rank(items: Vec<Item>, query: &str) -> Vec<Item> {
         .collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     scored.into_iter().map(|(_, _, item)| item).collect()
+}
+
+/// Every preference (`clarp_core::prefs`) the catalogue has no entry for,
+/// as a command: its label, value and description, found by its aliases.
+/// Enter flips a switch, steps a choice or opens the value editor; a
+/// setting that steps (group "setting") also takes + and - in place. The
+/// settings file's actions come last.
+pub fn prefs(settings: &clarp_core::settings::Settings) -> Vec<Item> {
+    use clarp_core::prefs::{self, Kind as PrefKind};
+    let theme = prefs::theme_of(settings);
+    let item = |target: String, label: &str, group: &'static str, description: String, aliases: &'static [&'static str], value: String| Item {
+        kind: Kind::Command,
+        target,
+        label: label.to_owned(),
+        detail: String::new(),
+        key: String::new(),
+        group,
+        description,
+        aliases,
+        value,
+        entry: "",
+    };
+    let mut items: Vec<Item> = prefs::specs()
+        .iter()
+        .filter(|spec| crate::settings_view::legacy_id(spec.name).is_none())
+        .map(|spec| {
+            let value = prefs::display(spec, &prefs::current(settings, spec, &theme));
+            let steps = matches!(spec.kind, PrefKind::Number { .. } | PrefKind::Choice { .. } | PrefKind::Toggle { .. });
+            let how = match spec.kind {
+                PrefKind::Number { .. } => "−/+ adjust, Enter to type",
+                PrefKind::Choice { .. } => "−/+ or Enter for the next",
+                PrefKind::Toggle { .. } => "Enter switches",
+                PrefKind::Color { .. } => "Enter: colour picker",
+                PrefKind::Text { .. } => "Enter to type",
+            };
+            item(
+                format!("pref:{}", spec.name),
+                spec.label,
+                if steps { "setting" } else { "settings" },
+                format!("{} · {how} · :set {}", spec.description, spec.name),
+                spec.aliases,
+                value,
+            )
+        })
+        .collect();
+    for (target, label, description, aliases) in [
+        ("pref-edit-file", "Edit the settings file", "Opens settings.json in your editor; saved changes apply at once", &["settings file", "config file", "json", "editor", "$EDITOR", "dotfile"][..]),
+        ("pref-export", "Export settings", "Writes every preference to ~/Downloads/clarp-settings.json", &["backup", "save settings", "share settings", "copy settings"][..]),
+        ("pref-import", "Import settings…", "Applies a settings file exported from Clarp", &["restore", "load settings", "apply settings", "from file"][..]),
+        ("pref-reset-all", "Reset every setting", "Every preference back to its default (key bindings and chats stay)", &["defaults", "factory reset", "reset all", "restore defaults"][..]),
+    ] {
+        items.push(item(target.to_owned(), label, "settings", description.to_owned(), aliases, String::new()));
+    }
+    items
 }
 
 /// Agents matching `query`, best first (C++ `matchingAgents`).
@@ -399,6 +454,27 @@ mod tests {
         assert_eq!(all.iter().map(|i| i.target.as_str()).collect::<Vec<_>>(), ["settingpick:reading-theme:paper", "settingpick:reading-theme:night"]);
         assert_eq!(all[0].value, "Current");
         assert_eq!(picker("reading-theme", &options, "dark")[0].label, "Night", "the options' descriptions are searched too");
+    }
+
+    #[test]
+    fn every_preference_is_a_command_found_by_its_aliases_with_its_value() {
+        let mut settings = clarp_core::settings::Settings::in_memory();
+        clarp_core::prefs::set_text(&mut settings, "fontsize", "17").unwrap();
+        let items = prefs(&settings);
+        let own = clarp_core::prefs::specs().iter().filter(|s| crate::settings_view::legacy_id(s.name).is_none()).count();
+        assert_eq!(items.len(), own + 4, "every preference the catalogue lacks, and the settings file's four actions");
+        assert!(!items.iter().any(|i| i.target == "pref:timestamps"), "the catalogue's own settings are not listed twice");
+        let size = items.iter().find(|i| i.target == "pref:fontsize").unwrap();
+        assert_eq!((size.label.as_str(), size.value.as_str()), ("Font size", "17 px"));
+        assert_eq!(size.group, "setting", "it steps with + and -");
+        assert!(size.description.contains("Size of message text") && size.description.contains(":set fontsize"));
+        let ranked = rank(items.clone(), "zoom");
+        assert!(ranked.iter().take(3).any(|i| i.target == "pref:fontsize"), "zoom finds it: {:?}", ranked.iter().map(|i| &i.target).collect::<Vec<_>>());
+        for word in ["bigger", "smaller", "larger", "text size", "fontsize", "font size"] {
+            assert!(rank(items.clone(), word).iter().any(|i| i.target == "pref:fontsize"), "{word}");
+        }
+        let accent = items.iter().find(|i| i.target == "pref:color.accent").unwrap();
+        assert_eq!(accent.group, "settings", "a colour opens the picker instead");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { Button } from "std-widgets.slint";
-import { Palette, Focus, FocusRing } from "theme.slint";
+import { Palette, Focus, FocusRing, Look } from "theme.slint";
 import { Modal } from "dialogs.slint";
 
 export struct PreviewVersion {
@@ -36,7 +36,7 @@ export component PreviewPanel inherits Modal {
         VerticalLayout {
             padding: 22px;
             spacing: 12px;
-            Text { text: "Preview versions"; color: Palette.text; font-size: 17px; }
+            Text { text: "Preview versions"; color: Palette.text; font-size: 17 * Look.unit; }
             Text {
                 text: "Choose a build and reopen. Rolling back pauses automatic updates. Chats stay on the Host.";
                 color: Palette.text;
@@ -69,7 +69,7 @@ export component PreviewPanel inherits Modal {
             Text {
                 text: "Recovery is always available from Clarp Preview Versions in the app launcher.";
                 color: Palette.muted;
-                font-size: 11px;
+                font-size: 11 * Look.unit;
                 wrap: word-wrap;
             }
             HorizontalLayout {

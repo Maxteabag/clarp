@@ -59,6 +59,9 @@ mod avatar_checks;
 // ---- message search and @-mentions
 #[path = "search_checks.rs"]
 mod search_checks;
+// ---- every preference (Ctrl+K, Settings, :set, the settings file)
+#[path = "customize_checks.rs"]
+mod customize_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -471,6 +474,10 @@ pub fn start_check(name: &str, out: String) {
         "row-overlap" => {
             row_overlap_checks::watch();
             row_overlap_checks::row_overlap_check(out)
+        }
+        "customize" => {
+            row_overlap_checks::watch();
+            customize_checks::customize_check(out)
         }
         _ => {
             check(false, &format!("no check named {name}"));

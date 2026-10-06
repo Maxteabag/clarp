@@ -186,6 +186,34 @@ pub(crate) fn apply_theme(window: &AppWindow, id: &str, chosen: Option<&FontOver
         }
         _ => eprintln!("clarp-slint: theme {id} has no shimmer colours"),
     }
+    // The reader's own colours and size over the theme's.
+    crate::look::over_theme(window, id);
+}
+
+thread_local! {
+    /// Settings → Fold agent prompts: whether a prompt from another agent
+    /// shows folded until it is opened (opening flips it either way).
+    static PROMPTS_FOLDED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+pub(crate) fn set_prompts_folded(folded: bool) {
+    PROMPTS_FOLDED.with(|f| f.set(folded));
+}
+
+/// Whether the prompt `key` shows open: toggled from the default.
+pub(crate) fn prompt_open(expanded: &std::collections::HashSet<String>, key: &str) -> bool {
+    expanded.contains(key) == PROMPTS_FOLDED.with(std::cell::Cell::get)
+}
+
+/// Opens a local file with the desktop's app for it; checks record it to
+/// `CLARP_TEST_OPEN_URL` instead.
+pub(crate) fn open_file(path: &std::path::Path) -> Result<(), String> {
+    if let Some(record) = std::env::var_os("CLARP_TEST_OPEN_URL") {
+        use std::io::Write;
+        let mut log = std::fs::OpenOptions::new().create(true).append(true).open(record).map_err(|e| e.to_string())?;
+        return writeln!(log, "file://{}", path.display()).map_err(|e| e.to_string());
+    }
+    std::process::Command::new("xdg-open").arg(path).spawn().map(drop).map_err(|e| format!("could not open {}: {e}", path.display()))
 }
 
 pub(crate) fn stamp(epoch_millis: i64) -> String {
@@ -291,6 +319,14 @@ pub(crate) fn open_link(url: &str) {
     let openable = url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:");
     if !openable {
         eprintln!("clarp-slint: not opening {url}: only web and mail links open");
+        return;
+    }
+    // Settings → Opening links: copy the address instead.
+    let copy = crate::app().is_some_and(|app| app.engine.try_borrow().is_ok_and(|e| clarp_core::prefs::choice_of(e.settings(), "linkopen") == "copy"));
+    if copy {
+        if let Err(error) = crate::platform::clipboard::copy(url) {
+            eprintln!("clarp-slint: could not copy {url}: {error}");
+        }
         return;
     }
     if let Some(path) = std::env::var_os("CLARP_TEST_OPEN_URL") {
@@ -455,7 +491,7 @@ pub(crate) fn message_row(
     // Another agent's message folds to one line until opened by its key
     // (a resolved decision is its receipt instead).
     let prompt = if author == "user" && receipt.is_none() { clarp_core::agent_prompt::of(m) } else { None };
-    let prompt_open = prompt.as_ref().is_some_and(|p| expanded.contains(&p.key));
+    let prompt_open = prompt.as_ref().is_some_and(|p| prompt_open(expanded, &p.key));
     // The user's own words stay literal; replies and opened prompts are
     // Markdown. A resolved decision is its receipt, never the Host's prompt.
     let blocks = match &prompt {
@@ -601,7 +637,7 @@ impl RowCache {
             .map(|row| {
                 let id = row.message.id.clone();
                 let open = expanded.contains(&id);
-                let prompt_open = row.message.origin == "agent" && expanded.contains(&clarp_core::agent_prompt::key(&id));
+                let prompt_open = row.message.origin == "agent" && prompt_open(expanded, &clarp_core::agent_prompt::key(&id));
                 let reused = self.rows.remove(&id).filter(|(source, _)| {
                     source.always == always
                         && source.open == open

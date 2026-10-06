@@ -1,5 +1,5 @@
 import { ListView } from "std-widgets.slint";
-import { Palette } from "theme.slint";
+import { Palette, Look } from "theme.slint";
 
 export struct ProcessJob {
     title: string,
@@ -68,7 +68,7 @@ export component ProcessIndicator inherits Rectangle {
         badge := Text {
             text: root.total > 9 ? "9+" : root.total;
             color: Palette.window;
-            font-size: 8px;
+            font-size: 8 * Look.unit;
             font-weight: 700;
         }
     }
@@ -106,7 +106,7 @@ export component CompactWork inherits Rectangle {
         Text {
             text: root.count > 9 ? "9+" : root.count;
             color: Palette.chrome-text;
-            font-size: 10px;
+            font-size: 10 * Look.unit;
             font-weight: 700;
             vertical-alignment: center;
         }
@@ -152,8 +152,8 @@ export component ProcessPopover inherits Rectangle {
                 padding: 10px;
                 padding-bottom: 6px;
                 spacing: 8px;
-                Text { text: root.name; color: Palette.text; font-size: 12px; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
-                Text { text: root.count; color: Palette.muted; font-size: 11px; }
+                Text { text: root.name; color: Palette.text; font-size: 12 * Look.unit; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
+                Text { text: root.count; color: Palette.muted; font-size: 11 * Look.unit; }
             }
             Rectangle { height: 1px; background: Palette.rule; }
             for job in root.jobs: HorizontalLayout {
@@ -166,14 +166,14 @@ export component ProcessPopover inherits Rectangle {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 1px;
-                    Text { text: job.title; color: Palette.text; font-size: 12px; overflow: elide; }
-                    if job.detail != "": Text { text: job.detail; color: Palette.muted; font-size: 10px; overflow: elide; }
+                    Text { text: job.title; color: Palette.text; font-size: 12 * Look.unit; overflow: elide; }
+                    if job.detail != "": Text { text: job.detail; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
                 }
                 VerticalLayout {
                     alignment: start;
                     spacing: 1px;
-                    Text { text: job.elapsed; color: Palette.chrome-text; font-size: 11px; horizontal-alignment: right; }
-                    if job.heartbeat != "": Text { text: "♥ " + job.heartbeat; color: Palette.faint; font-size: 10px; horizontal-alignment: right; }
+                    Text { text: job.elapsed; color: Palette.chrome-text; font-size: 11 * Look.unit; horizontal-alignment: right; }
+                    if job.heartbeat != "": Text { text: "♥ " + job.heartbeat; color: Palette.faint; font-size: 10 * Look.unit; horizontal-alignment: right; }
                 }
             }
             for helper in root.helpers: Rectangle {
@@ -191,15 +191,15 @@ export component ProcessPopover inherits Rectangle {
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 1px;
-                        Text { text: helper.name; color: Palette.text; font-size: 12px; overflow: elide; }
-                        Text { text: helper.detail; color: Palette.muted; font-size: 10px; overflow: elide; }
+                        Text { text: helper.name; color: Palette.text; font-size: 12 * Look.unit; overflow: elide; }
+                        Text { text: helper.detail; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
                     }
-                    Text { text: "›"; color: Palette.chrome-text; font-size: 14px; vertical-alignment: center; }
+                    Text { text: "›"; color: Palette.chrome-text; font-size: 14 * Look.unit; vertical-alignment: center; }
                 }
             }
             if root.note != "": HorizontalLayout {
                 padding: 10px;
-                Text { text: root.note; color: Palette.muted; font-size: 11px; wrap: word-wrap; }
+                Text { text: root.note; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
             }
             Rectangle { height: 4px; }
         }
