@@ -31,7 +31,7 @@ env:
   DEFAULT_CHECKS: >-
     scrollbar transcript scroll scroll-jump row-overlap composer live a2a receipts
     artifacts form-events artifact-keys link-hints keymap switcher panes sidebar banner
-    layout-warning updates settings themes fonts startup refocus
+    layout-warning updates settings themes fonts startup refocus avatars
 
 jobs:
   test:
