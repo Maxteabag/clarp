@@ -33,7 +33,7 @@ pub(super) fn register() -> Vec<Setting> {
     all.extend(host());
     all.extend(keyboard());
     // Every other preference (clarp_core::prefs) and the settings file.
-    all.extend(crate::look::settings());
+    all.extend(super::prefs::register());
     all
 }
 
