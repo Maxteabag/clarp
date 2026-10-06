@@ -401,7 +401,7 @@ component LiveItem inherits Rectangle {
                         property <float> glow: Math.max(0, 1 - Math.abs(self.at - shimmer.phase) * 4);
                         text: letter;
                         color: shimmer.high.mix(shimmer.low, self.glow);
-                        font-size: 13px;
+                        font-size: 13 * Look.unit;
                         font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
                         font-italic: root.live.kind == "reasoning";
                         vertical-alignment: center;
