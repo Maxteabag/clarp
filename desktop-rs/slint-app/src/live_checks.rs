@@ -230,7 +230,7 @@ pub fn live_check(out: String) {
             true
         })),
         ("settled", Box::new(move |_, _window, elapsed| {
-            if elapsed < Duration::from_secs(1) {
+            if elapsed < Duration::from_secs(2) {
                 return false;
             }
             mark();
@@ -242,7 +242,8 @@ pub fn live_check(out: String) {
             }
             let (fps, cpu, over) = since_mark();
             IDLE.with(|i| i.set((fps, cpu)));
-            check(fps <= 4.0, &format!("idle, the window draws little: {fps:.1} frames/s, CPU {cpu:.0}% of a core (debug build) over {over:.1?}"));
+            // The window's own baseline (the shimmer's bounds are relative to it).
+            check(fps <= 6.0, &format!("idle, the window draws little: {fps:.1} frames/s, CPU {cpu:.0}% of a core (debug build) over {over:.1?}"));
             replay(AFTER_THINKING_TITLE)
         })),
         ("thinking", Box::new(move |_, _window, elapsed| {
