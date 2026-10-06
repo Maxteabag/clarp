@@ -919,12 +919,14 @@ class AgyBackend(StreamJsonBackend):
                 raise ValueError("agent text_delta must be a string")
             if delta:
                 step = update.get("step_index")
-                if (st.text_step is not None and step != st.text_step
+                if (st.text_step is not None and step is not None
+                        and step != st.text_step
                         and st.live_text and not st.live_text.endswith("\n\n")):
                     # A new response step after tools is a new paragraph, as
                     # the transcript shows it, not a continuation of the last.
                     st.live_text = st.live_text.rstrip("\n") + "\n\n"
-                st.text_step = step
+                if step is not None:
+                    st.text_step = step
                 st.live_text += delta
                 self._persist_live_text(st, agent_id=agent_id, session=session,
                                         trace_id=trace_id, stream=stream)

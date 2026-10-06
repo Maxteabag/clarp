@@ -178,10 +178,10 @@ def test_a_pruned_conversation_whose_brain_folder_remains_is_gone(tmp_path, monk
     assert agy_transcript.conversation_exists("kept")
     assert not agy_transcript.conversation_exists("pruned")
 
-def test_sessions_come_from_agys_catalogue_with_titles_and_folders(tmp_path):
+def test_sessions_come_from_agys_catalogue_with_titles_and_folders(tmp_path, monkeypatch):
     import sqlite3
     brain = tmp_path / "brain"
-    for conv in ("proj", "elsewhere", "scratch", "nested"):
+    for conv in ("proj", "elsewhere", "scratch", "nested", "dream", "leftover"):
         _write_transcript(brain, conv, [{"step_index": 0, "type": "USER_INPUT",
                                          "content": "<USER_REQUEST>hi</USER_REQUEST>"}])
     db = tmp_path / "conversation_summaries.db"
@@ -196,10 +196,18 @@ def test_sessions_come_from_agys_catalogue_with_titles_and_folders(tmp_path):
         ("pruned", "Old", "", '["file:///home/u/proj"]', "2026-10-06 12:00", 0),
         # Clarp's own one-shot request and a subagent are not adoptable sessions.
         ("scratch", "Labels", "", '["file:///tmp/clarp-model-fallback-x1"]', "2026-10-06 13:00", 0),
+        ("dream", "Dream", "", '["file:///var/tmp/clarp-dream-worktrees/r1"]', "2026-10-06 13:30", 0),
+        # Pruned, but agy left its brain folder behind.
+        ("leftover", "Gone", "", '["file:///home/u/proj"]', "2026-10-06 13:40", 0),
         ("nested", "Sub", "", '["file:///home/u/proj"]', "2026-10-06 14:00", 1),
     ])
     con.commit()
     con.close()
+    held = tmp_path / "agy/conversations"
+    held.mkdir(parents=True)
+    for conv in ("proj", "elsewhere", "scratch", "nested", "dream"):
+        (held / f"{conv}.db").write_text("")
+    monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path / "agy"))
     every = agy_transcript.list_sessions("", brain_root=brain, summaries_file=db)
     assert [s["id"] for s in every] == ["elsewhere", "proj"]
     assert every[0]["cwd"] == "/home/u/other dir"
