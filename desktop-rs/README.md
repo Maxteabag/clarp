@@ -13,6 +13,27 @@ The native Clarp desktop client: a Rust app with a Slint UI, no Qt.
 `SLINT_PARITY.md` maps every part of the former QML UI to its Slint
 implementation and the check that verifies it.
 
+## Settings
+
+Every preference (typography, layout, colours per reading theme,
+behaviour) is one entry in `core/src/prefs.rs`: a short name, its key in the
+settings file, a label, a one-line description, aliases, a section, a kind
+and a default. Ctrl+K (`+`/`-` step the selected one), the Settings view
+(Left/Right or `-`/`+` step, Enter edits, Backspace resets, Shift+Backspace
+resets the section), `:set name=value`, export/import and the settings
+file's JSON schema and reference are all made from that list, so a new
+setting is added there once; `core/tests/prefs.rs` refuses one without a
+description or two aliases. The window reloads the settings file
+(`~/.config/MaxTeaBag/ClarpSlint/settings.json`) when it changes and reports
+invalid values instead of applying them. `slint-app/src/look.rs` applies the
+values; `--check customize` exercises them.
+
+Slint's rich text has no line height: "Paragraph spacing" (alias line
+spacing) sets the space between a message's paragraphs, lists, code and
+headings, while lines inside one paragraph keep the font's own spacing.
+"Text weight" reaches interface text without a weight of its own; message
+text keeps the face's regular weight.
+
 ## Build and run
 
 ```sh
