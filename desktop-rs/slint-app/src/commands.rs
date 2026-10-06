@@ -69,6 +69,11 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
     }
 }
 
+/// Whether vim mode is on (the setting, on unless turned off).
+pub fn vim_on(app: &App) -> bool {
+    app.engine.borrow().settings().boolean(crate::vim_view::SETTING, true)
+}
+
 /// The user's own key bindings, from settings.
 pub fn overrides(app: &App) -> keymap::Overrides {
     overrides_of(&app.engine.borrow())

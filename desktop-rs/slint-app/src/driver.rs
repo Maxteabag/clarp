@@ -65,6 +65,9 @@ mod customize_checks;
 // ---- the chat's own zoom
 #[path = "zoom_checks.rs"]
 mod zoom_checks;
+// ---- vim mode: the keyboard without Ctrl
+#[path = "vim_checks.rs"]
+mod vim_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -475,6 +478,7 @@ pub fn start_check(name: &str, out: String) {
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
         "refocus" => refocus_checks::refocus_check(out),
+        "vim" => vim_checks::vim_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         "fonts" => font_checks::fonts_check(out),
