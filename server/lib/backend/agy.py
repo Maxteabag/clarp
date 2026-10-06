@@ -371,7 +371,8 @@ def _deliver_terminal(st: _TurnState, *, on_result, on_error) -> None:
 
 _TOOL_NAMES = {
     "run_command": "Bash", "view_file": "Read", "write_to_file": "Write",
-    "replace_file_content": "Edit", "grep_search": "Grep",
+    "replace_file_content": "Edit", "multi_replace_file_content": "Edit",
+    "grep_search": "Grep", "find_by_name": "Glob",
     "list_dir": "LS", "search_web": "WebSearch",
     "read_url_content": "WebFetch",
 }

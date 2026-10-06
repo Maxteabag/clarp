@@ -73,7 +73,10 @@ def _validate_skill_tree(skill: pathlib.Path) -> None:
 
 def _link(skill: pathlib.Path) -> None:
     for root in _roots():
-        root.mkdir(parents=True, exist_ok=True)
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError:   # e.g. a dangling symlinked skills folder: skip it
+            continue
         destination = root / skill.name
         if destination.exists() or destination.is_symlink():
             if destination.is_symlink() and destination.resolve() == skill.resolve():

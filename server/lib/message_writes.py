@@ -977,7 +977,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if stale is not None or skipped_slot_removed else 0)
     replace_revision = max(stale_replace_revision, live_replace_revision)
     latest_revision = max(latest_revision, replace_revision)
-    latest_revision = max(latest_revision, _attach_authority_tools(database, authority_tools))
+    latest_revision = max(latest_revision,
+                          _attach_authority_tools(database, agent_id, authority_tools))
     database.execute(
         """INSERT INTO conversation_heads (
                agent_id, backend_session_id, revision, replace_revision
@@ -995,45 +996,39 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
 
 # --- turn summaries (docs/live-items.md §9; helpers in lib.message_turns) ---
 
-def _merge_by_id(existing: list, incoming: list) -> list:
-    merged = list(existing)
-    index = {str(item.get("id")): i for i, item in enumerate(merged)
-             if isinstance(item, dict) and item.get("id")}
-    for item in incoming:
-        key = str(item.get("id") or "") if isinstance(item, dict) else ""
-        if key and key in index:
-            merged[index[key]] = item
-        else:
-            if key:
-                index[key] = len(merged)
-            merged.append(item)
-    return merged
-
-
-def _attach_authority_tools(database, collected: dict[str, tuple[str, list, list]]) -> int:
+def _attach_authority_tools(database, agent_id: str,
+                            collected: dict[str, tuple[str, list, list]]) -> int:
     """Put each stream-owned agy turn's transcript tool calls on its final row.
 
-    Written only when they differ from what the row holds, under a new
-    revision so clients fetch it; the row's text stays the stream's."""
+    agy's whole transcript is parsed on every import, so the calls collected
+    here are the turn's complete set and replace what the row held. They are
+    settled against how the turn ended (a call cut off by a stopped turn does
+    not spin forever) and written under a new revision only when they change;
+    the row's text stays the stream's."""
+    from . import message_turns
     latest = 0
-    for message_id, tools, cells in collected.values():
-        if not tools and not cells:
-            continue
-        row = database.execute("SELECT tools_json, display_cells_json FROM messages "
+    for trace_id, (message_id, tools, cells) in collected.items():
+        row = database.execute("SELECT tools_json, display_cells_json, turn_json FROM messages "
                                "WHERE message_id=?", (message_id,)).fetchone()
         if row is None:
             continue
-        # Imports can be incremental: merge by id so a later read adds to, and
-        # updates, what an earlier read attached instead of replacing it.
-        tools_json = json.dumps(_merge_by_id(json.loads(row["tools_json"] or "[]"), tools),
-                                ensure_ascii=False)
-        cells_json = json.dumps(_merge_by_id(json.loads(row["display_cells_json"] or "[]"), cells),
-                                ensure_ascii=False)
-        if (row["tools_json"], row["display_cells_json"]) == (tools_json, cells_json):
+        turn = database.execute("SELECT outcome FROM turns WHERE agent_id=? AND trace_id=? "
+                                "ORDER BY started_at DESC LIMIT 1", (agent_id, trace_id)).fetchone()
+        outcome = turn["outcome"] if turn is not None else None
+        tools_json = json.dumps(message_turns.settle_statuses(tools, outcome), separators=(",", ":"))
+        cells_json = json.dumps(message_turns.settle_statuses(cells, outcome), separators=(",", ":"))
+        turn_json = row["turn_json"]
+        if turn_json:
+            summary = json.loads(turn_json)
+            summary["tool_count"] = len(tools)
+            turn_json = json.dumps(summary, separators=(",", ":"))
+        if (row["tools_json"], row["display_cells_json"], row["turn_json"]) == (
+                tools_json, cells_json, turn_json):
             continue
         revision = _next_revision(database)
-        database.execute("UPDATE messages SET tools_json=?, display_cells_json=?, revision=? "
-                         "WHERE message_id=?", (tools_json, cells_json, revision, message_id))
+        database.execute("UPDATE messages SET tools_json=?, display_cells_json=?, turn_json=?, "
+                         "revision=? WHERE message_id=?",
+                         (tools_json, cells_json, turn_json, revision, message_id))
         latest = max(latest, revision)
     return latest
 
