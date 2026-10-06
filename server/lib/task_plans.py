@@ -911,10 +911,10 @@ def carry_native_session(agent_id: str, from_session_id: str, to_session_id: str
                 if goal.get("native_session_id") != from_session_id:
                     continue
                 goal["native_session_id"] = to_session_id
-                state = goal["continuation"]
+                state = goal.setdefault("continuation", {})
                 if state.get("plan_revision") == plan["revision"]:
                     state["plan_revision"] = plan["revision"] + 1
-                goal["history"].append(dict(
+                goal.setdefault("history", []).append(dict(
                     at=now, kind="rebind", revision=plan["revision"] + 1,
                     detail={"reason": reason, "from_native_session_id": from_session_id,
                             "native_session_id": to_session_id}))

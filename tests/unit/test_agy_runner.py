@@ -1258,18 +1258,25 @@ def test_one_shots_racing_to_create_the_private_home_all_get_it(tmp_path, monkey
     assert (tmp_path / "cache/agy-oneshot-home/.gemini/oauth_creds.json").read_text() == "creds"
 
 
-def test_a_dream_runs_in_the_private_home(fake_agy, tmp_path, monkeypatch):
+def test_the_private_home_keeps_only_an_hour_of_one_shots(tmp_path, monkeypatch):
+    import time
+    from lib.backend import agy as agy_module
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("CLARP_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("AGY_FAKE_HOME_OUT", str(tmp_path / "home.txt"))
-    agent_id = _make_agy_agent(persona="Dreamer", session="dreamer")
-    fake_agy(_stream("Dreamt."))
-    results = []
-    AGY.start_turn(text="Dream", cwd=tmp_path, backend_session_id="", is_new_session=True,
-                   agent_id=agent_id, session="dreamer", trace_id="dream-1",
-                   on_session_init=None, on_result=results.append,
-                   isolated=True).wait(timeout=8.0)
-    assert _wait_for(lambda: len(results) == 1)
-    assert (tmp_path / "home.txt").read_text() == str(tmp_path / "cache/agy-oneshot-home")
+    monkeypatch.setattr(agy_module, "_PRIVATE_HOME_LOGS_PRUNED", [0.0])
+    store = tmp_path / "cache/agy-oneshot-home/.gemini/antigravity-cli"
+    old, new = store / "conversations/old.db", store / "conversations/new.db"
+    brain = store / "brain/old"
+    for path in (old, new, store / "log/cli-1.log"):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+    brain.mkdir(parents=True)
+    stale = time.time() - 7200
+    for path in (old, brain, store / "log/cli-1.log"):
+        os.utime(path, (stale, stale))
+    AGY.routing_env()
+    assert new.exists()
+    assert not old.exists() and not brain.exists() and not (store / "log/cli-1.log").exists()
 
 
 def test_a_pruned_conversation_continues_in_a_new_one_carrying_clarps_record(
@@ -1281,7 +1288,16 @@ def test_a_pruned_conversation_continues_in_a_new_one_carrying_clarps_record(
     agent_id = _make_agy_agent(persona="Books", session="books")
     agents_db.bind_backend_session(agent_id, "pruned-conv")
     message_store.record_user_message(agent_id=agent_id, backend_session_id="pruned-conv",
+                                      client_msg_id="beat", text="Heartbeat tick",
+                                      origin="heartbeat")
+    message_store.record_user_message(agent_id=agent_id, backend_session_id="pruned-conv",
                                       client_msg_id="old", text="Track the v6 publish")
+    # Hours apart, as real history is.
+    for text, age in (("Heartbeat tick", 7_200_000), ("Track the v6 publish", 3_600_000)):
+        agents_db.conn().execute(
+            "UPDATE messages SET updated_at = updated_at - ?, "
+            "timestamp = strftime('%Y-%m-%dT%H:%M:%fZ', (updated_at - ?) / 1000.0, 'unixepoch') "
+            "WHERE agent_id = ? AND text = ?", (age, age, agent_id, text))
     trace_id = _open_owned_turn(agent_id, "restore")
     # Dispatch records the new message under the conversation it knows.
     message_store.record_user_message(agent_id=agent_id, backend_session_id="pruned-conv",
@@ -1311,3 +1327,20 @@ def test_a_pruned_conversation_continues_in_a_new_one_carrying_clarps_record(
     assert rows["Track the v6 publish"]["source_file"] == "carried:client:old"
     assert rows["Any news?"]["source_file"] == "client:new"
     assert all(r["seq"] < 0 for r in rows.values())
+    # The reply belongs to the new message, not to the oldest carried one.
+    from lib import message_writes
+    _key, origin, _sender = message_writes._latest_user_provenance(
+        agents_db.conn(), agent_id, _FAKE_CONV)
+    assert origin == "user"
+
+
+def test_a_restored_record_stays_inside_the_argument_limit():
+    from lib import message_store
+    from lib.backend.agy import _restore_prompt
+    agent_id = _make_agy_agent(persona="Wide", session="wide")
+    for index in range(40):
+        message_store.record_user_message(
+            agent_id=agent_id, backend_session_id="pruned-wide",
+            client_msg_id=f"w{index}", text="漢" * 3900)
+    prompt = _restore_prompt(agent_id, "pruned-wide", "Next?")
+    assert len(prompt.encode()) < 128 * 1024

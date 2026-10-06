@@ -97,10 +97,11 @@ def strip_injected_context(text: str) -> str:
     words, so the chat showed the user's message twice: once as they typed it
     and once several kilobytes long with the injection attached.
     """
-    return _strip_block(
-        _strip_block(strip_injected_team_context(text),
-                     FALLBACK_CONTEXT_OPEN, FALLBACK_CONTEXT_CLOSE),
-        RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE)
+    # The restored record is the outermost block and may quote the others
+    # (an old reply about Clarp's own team context), so it goes first.
+    text = _strip_block(text, RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE)
+    return _strip_block(strip_injected_team_context(text),
+                        FALLBACK_CONTEXT_OPEN, FALLBACK_CONTEXT_CLOSE)
 
 
 def _strip_block(text: str, opening: str, closing: str) -> str:

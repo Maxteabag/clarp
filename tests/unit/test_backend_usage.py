@@ -963,3 +963,14 @@ def test_an_unused_antigravity_window_keeps_its_id_as_its_reset_slides():
     first = backend_usage._agy_windows(row("2026-10-06T15:00:00Z"), "pi", 2)
     later = backend_usage._agy_windows(row("2026-10-06T15:05:00Z"), "pi", 2)
     assert first[0]["window_id"] == later[0]["window_id"]
+
+
+def test_antigravitys_answer_stands_when_a_helper_keeps_its_pipes_open(tmp_path, monkeypatch):
+    import pathlib, stat, sys
+    fixture = pathlib.Path(__file__).resolve().parents[1] / "fixtures/agy/1.3.0-usage.json"
+    fake = tmp_path / "bin/agy"
+    fake.parent.mkdir()
+    fake.write_text(f"#!/bin/sh\ncat {fixture}\nsleep 60 &\nexit 0\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
+    assert backend_usage.fetch_agy_usage(timeout=1.0)["groups"]

@@ -1206,15 +1206,23 @@ def _run_agy_usage(executable: str, timeout: float) -> tuple[str, str, int]:
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        # agy itself may have answered and exited while a helper it started
+        # still holds the pipes: its answer stands.
+        finished = proc.poll()
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         try:
-            proc.communicate(timeout=2)
+            stdout, stderr = proc.communicate(timeout=2)
         except subprocess.TimeoutExpired:
-            pass
-        raise RuntimeError(f"agy /usage timed out after {timeout:g}s")
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
+            stdout = stderr = ""
+        if finished is None or not stdout:
+            raise RuntimeError(f"agy /usage timed out after {timeout:g}s")
+        return stdout, stderr or "", finished
     return stdout or "", stderr or "", proc.returncode
 
 
