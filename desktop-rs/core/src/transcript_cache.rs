@@ -55,6 +55,12 @@ impl TranscriptCache {
         envelope.get("snapshot").and_then(Value::as_object).cloned().unwrap_or_default()
     }
 
+    /// Every chat cached for `base_url`, as (session, snapshot), by
+    /// session; none when nothing was cached yet.
+    pub fn all(&self, _base_url: &str) -> Result<Vec<(String, Object)>, String> {
+        Ok(Vec::new())
+    }
+
     pub fn save(&self, base_url: &str, session: &str, snapshot: &Object) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         if base_url.is_empty() || session.is_empty() || snapshot.is_empty() {

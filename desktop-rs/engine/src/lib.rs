@@ -20,6 +20,7 @@ mod host_status;
 pub mod lifecycle;
 mod live;
 mod queue;
+pub mod search;
 mod panels;
 pub mod profile;
 mod teams;
@@ -111,6 +112,8 @@ pub enum Change {
     Orchestrator,
     /// An agent portrait arrived (`avatar_source`).
     Avatars,
+    /// Message search's cached chats were read (`search_messages`).
+    Search,
 }
 
 enum Message {
@@ -132,6 +135,8 @@ enum Message {
     PortraitsCached(Vec<avatars::Cached>),
     /// A chat's transcript is due to be cached.
     CacheSaveDue(String),
+    /// Every cached chat, read for message search off the UI thread.
+    SearchCache(Result<Vec<(String, Vec<clarp_core::protocol::Message>)>, String>),
     /// A form's queued events are due to be sent.
     FormEventsDue { key: String, token: u64 },
 }
@@ -262,6 +267,7 @@ pub struct Engine {
     form_event_token: u64,
     /// The Host's `server_id` from `/server-info`.
     server_id: String,
+    search: search::SearchState,
 }
 
 impl Engine {
@@ -370,6 +376,7 @@ impl Engine {
             form_events_supported: false,
             form_event_token: 0,
             server_id: String::new(),
+            search: Default::default(),
         })
     }
 
@@ -409,6 +416,7 @@ impl Engine {
                 Message::UpdatesDue => self.updates_due(),
                 Message::PortraitsCached(cached) => cached.into_iter().for_each(|c| self.portrait_cached(c)),
                 Message::CacheSaveDue(session) => self.cache_save_due(&session),
+                Message::SearchCache(chats) => self.search_cache_read(chats),
                 Message::FormEventsDue { key, token } => self.form_events_due(&key, token),
             }
         }
@@ -995,6 +1003,7 @@ impl Engine {
         let ops = conversation.take_ops();
         if !ops.is_empty() {
             self.changes.push(Change::Conversation(session.to_owned()));
+            self.search.changed(session);
         }
         for op in ops {
             match op {

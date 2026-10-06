@@ -73,3 +73,18 @@ fn damaged_or_foreign_files_restore_nothing() {
     assert!(cache.save("https://h", "", &snapshot).is_err());
     std::fs::remove_dir_all(directory).ok();
 }
+
+#[test]
+fn every_chat_cached_for_a_host_is_listed() {
+    let directory = std::env::temp_dir().join(format!("clarp-transcript-cache-all-{}", std::process::id()));
+    let cache = TranscriptCache::new(&directory);
+    assert!(cache.all("http://a").unwrap().is_empty(), "no folder yet: nothing cached");
+    let snapshot = |text: &str| log(json!({"conversation_id": "c", "latest_revision": 1, "has_more": false, "turns": [{"id": "1", "role": "user", "text": text, "revision": 1}]}));
+    cache.save("http://a", "rachel", &snapshot("one")).unwrap();
+    cache.save("http://a", "mike", &snapshot("two")).unwrap();
+    cache.save("http://b", "rachel", &snapshot("elsewhere")).unwrap();
+    let chats = cache.all("http://a").unwrap();
+    assert_eq!(chats.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(), ["mike", "rachel"], "only this Host's chats, by session");
+    assert_eq!(chats[1].1["turns"][0]["text"], "one");
+    std::fs::remove_dir_all(&directory).unwrap();
+}
