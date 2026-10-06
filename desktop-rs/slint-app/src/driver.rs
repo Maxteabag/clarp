@@ -50,6 +50,9 @@ mod row_overlap_checks;
 mod refocus_checks;
 #[path = "scrollbar_checks.rs"]
 mod scrollbar_checks;
+// ---- the reader's own font per theme
+#[path = "font_checks.rs"]
+mod font_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -433,6 +436,7 @@ pub fn start_check(name: &str, out: String) {
         "refocus" => refocus_checks::refocus_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
+        "fonts" => font_checks::fonts_check(out),
         "link-hints" => link_hint_checks::link_hints_check(out),
         "live" => {
             row_overlap_checks::watch();

@@ -105,3 +105,66 @@ fn font_falls_back_to_the_next_installed_family() {
     assert_eq!(styled["fontPixelSize"], 17);
     assert_eq!(style("x", |_| true)["id"], "terminal");
 }
+
+#[test]
+fn a_chosen_font_comes_before_the_theme_s_own() {
+    let hacker = theme("hacker");
+    let chosen = FontOverride { family: "Iosevka".into(), size: None };
+    let font = resolve(hacker, Some(&chosen), |f| f == "Iosevka" || f == "JetBrains Mono");
+    assert_eq!(font, ResolvedFont { family: "Iosevka".into(), size: 15.0, missing: None }, "the theme's size stays");
+    let sized = FontOverride { family: String::new(), size: Some(18.0) };
+    let font = resolve(hacker, Some(&sized), |f| f == "JetBrains Mono");
+    assert_eq!((font.family.as_str(), font.size), ("JetBrains Mono", 18.0), "a size alone keeps the theme's family");
+    let font = resolve(hacker, None, |f| f == "Fira Code");
+    assert_eq!((font.family.as_str(), font.missing), ("Fira Code", None), "no override: the theme's first installed family");
+}
+
+#[test]
+fn a_chosen_font_that_is_gone_falls_back_to_the_theme_and_says_so() {
+    let chosen = FontOverride { family: "Gone Mono".into(), size: Some(16.0) };
+    let font = resolve(theme("hacker"), Some(&chosen), |f| f == "DejaVu Sans Mono");
+    assert_eq!(font, ResolvedFont { family: "DejaVu Sans Mono".into(), size: 16.0, missing: Some("Gone Mono".into()) });
+    let generic = FontOverride { family: "monospace".into(), size: None };
+    assert_eq!(resolve(theme("paper"), Some(&generic), |_| false).family, "monospace", "a generic name is always accepted");
+}
+
+#[test]
+fn each_theme_keeps_its_own_font_and_a_reset_removes_only_its_own() {
+    let mono = FontOverride { family: "JetBrains Mono".into(), size: None };
+    let serif = FontOverride { family: "Literata".into(), size: Some(19.0) };
+    let stored = with_font_override(None, "hacker", Some(&mono));
+    let stored = with_font_override(Some(&stored), "paper", Some(&serif));
+    assert_eq!(font_override(Some(&stored), "hacker"), Some(mono.clone()));
+    assert_eq!(font_override(Some(&stored), "paper"), Some(serif));
+    assert_eq!(font_override(Some(&stored), "night"), None);
+    assert_eq!(stored["hacker"], serde_json::json!({"family": "JetBrains Mono"}), "an unset size is not stored");
+    let stored = with_font_override(Some(&stored), "paper", None);
+    assert_eq!(font_override(Some(&stored), "paper"), None, "reset removes the override");
+    assert_eq!(font_override(Some(&stored), "hacker"), Some(mono), "and leaves the other themes alone");
+    assert_eq!(font_override(Some(&serde_json::json!("garbage")), "hacker"), None);
+}
+
+#[test]
+fn the_font_list_marks_monospace_families_and_filters_by_words() {
+    let output = "JetBrains Mono,JetBrains Mono NL\t100\nDejaVu Sans\t0\nDejaVu Sans Mono\t100\nJetBrains Mono,JetBrains Mono NL\t100\n\
+                  Noto Sans Mono\t100\nNoto Sans Mono\t0\nLiberation Serif\nCaskaydiaMono Nerd Font\t90\n\n";
+    let fonts = parse_font_list(output);
+    let names: Vec<(&str, bool)> = fonts.iter().map(|f| (f.name.as_str(), f.monospace)).collect();
+    assert_eq!(
+        names,
+        [
+            ("CaskaydiaMono Nerd Font", true),
+            ("DejaVu Sans", false),
+            ("DejaVu Sans Mono", true),
+            ("JetBrains Mono", true),
+            ("Liberation Serif", false),
+            ("Noto Sans Mono", true),
+        ],
+        "sorted, once each, under its first name; a family with a monospace face counts as monospace"
+    );
+    let found = |query: &str, mono: bool| filter_fonts(&fonts, query, mono).iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert_eq!(found("dejavu", false), ["DejaVu Sans", "DejaVu Sans Mono"]);
+    assert_eq!(found("dejavu", true), ["DejaVu Sans Mono"]);
+    assert_eq!(found("sans mono", false), ["DejaVu Sans Mono", "Noto Sans Mono"], "every word must match");
+    assert_eq!(found("", true).len(), 4);
+}

@@ -563,6 +563,17 @@ impl Engine {
         }
     }
 
+    /// The reader's own font for `theme` (Settings → Font), if any.
+    pub fn font_override(&self, theme: &str) -> Option<clarp_core::reading_theme::FontOverride> {
+        let _ = theme;
+        unimplemented!()
+    }
+    /// Sets `theme`'s own font, or removes it (None: the theme's default).
+    pub fn set_font_override(&mut self, theme: &str, value: Option<clarp_core::reading_theme::FontOverride>) {
+        let _ = (theme, value);
+        unimplemented!()
+    }
+
     /// Voice replies on or off, remembered (C++ `setMuted`).
     pub fn set_muted(&mut self, muted: bool) {
         if self.muted != muted {

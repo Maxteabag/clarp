@@ -164,6 +164,37 @@ fn preferences_are_remembered() {
 }
 
 #[test]
+fn a_font_override_is_the_theme_s_own_and_survives_a_restart() {
+    use clarp_core::reading_theme::FontOverride;
+    let dir = std::env::temp_dir().join(format!("clarp-font-override-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("settings.json");
+    let _ = std::fs::remove_file(&file);
+    let engine = || {
+        let config = Config { base_url: "http://127.0.0.1:9".into(), token: "probe-token".into(), settings: Settings::at(file.clone()), workspace_store: None, keyring: false, transcript_cache: None, form_events: None };
+        Engine::new(config, || {}).unwrap()
+    };
+    let mut e = engine();
+    let mono = FontOverride { family: "JetBrains Mono".into(), size: Some(16.0) };
+    e.set_font_override("hacker", Some(mono.clone()));
+    assert!(e.pump().contains(&Change::Preferences), "the theme is applied again");
+    assert_eq!(e.font_override("hacker"), Some(mono.clone()));
+    assert_eq!(e.font_override("paper"), None, "another theme is unaffected");
+    e.set_font_override("paper", Some(FontOverride { family: "Literata".into(), size: None }));
+    drop(e);
+
+    let mut e = engine();
+    assert_eq!(e.font_override("hacker"), Some(mono), "kept across a restart");
+    e.set_font_override("hacker", None);
+    assert!(e.pump().contains(&Change::Preferences));
+    assert_eq!(e.font_override("hacker"), None, "reset to the theme's default");
+    assert_eq!(e.font_override("paper").map(|f| f.family), Some("Literata".into()), "and only that theme's");
+    drop(e);
+    assert_eq!(engine().font_override("hacker"), None, "the reset is saved too");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn drafts_and_attachments_belong_to_the_chat_and_survive_a_restart() {
     let host = Host::start("composer");
     let file = host.dir.join("settings.json");

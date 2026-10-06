@@ -23,6 +23,9 @@ export global Palette {
     in property <color> link: #7aa2f7;
     in property <length> body-size: 15px;
     in property <string> body-family: "JetBrains Mono";
+    // Code blocks and tool output: the reader's own font when it is
+    // monospace, else JetBrains Mono.
+    in property <string> code-family: "JetBrains Mono";
 }
 
 // Where the keyboard is: the keyboard map's state (commands::context), set
