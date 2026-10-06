@@ -148,3 +148,22 @@ def test_a_1_1_call_recorded_as_its_own_step_is_not_counted_twice(tmp_path):
     ])
     tools = agy_transcript.parse_turns(p)[1]["tools"]
     assert [(t["name"], t["id"], t["status"]) for t in tools] == [("Bash", "step-2", "ok")]
+
+
+def test_background_tasks_settle_when_canceled_or_stopped_by_a_restart(tmp_path):
+    running = "Tool is running as a background task. Its output is at /x/.system_generated/tasks/task-{}.log"
+    p = _write_transcript(tmp_path / "brain", "conv-bg", [
+        {"step_index": 0, "type": "USER_INPUT", "content": "<USER_REQUEST>go</USER_REQUEST>"},
+        {"step_index": 1, "type": "PLANNER_RESPONSE", "content": "Started.", "tool_calls": [
+            {"name": "run_command", "args": {"CommandLine": "sleep 1"}},
+            {"name": "run_command", "args": {"CommandLine": "sleep 2"}}]},
+        {"step_index": 2, "type": "GENERIC", "status": "RUNNING", "content": running.format(1)},
+        {"step_index": 3, "type": "GENERIC", "status": "RUNNING", "content": running.format(2)},
+        {"step_index": 4, "type": "SYSTEM_MESSAGE", "content": 'sender=conv/task-1 content=Task id "conv/task-1" '
+         'was canceled with result:\nTool execution was canceled\nLog: file:///x</SYSTEM_MESSAGE>'},
+        {"step_index": 5, "type": "SYSTEM_MESSAGE", "content": "sender=system content=[Notice] All your "
+         "subagents and background tasks have been stopped due to server restart."},
+    ])
+    first, second = agy_transcript.parse_turns(p)[1]["tools"]
+    assert (first["status"], first["result"]) == ("error", "Tool execution was canceled")
+    assert (second["status"], second["result"]) == ("error", "Stopped when Antigravity restarted")

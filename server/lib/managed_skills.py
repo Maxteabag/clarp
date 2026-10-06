@@ -25,12 +25,18 @@ AGY_SKILLS = Path(os.environ.get("CLARP_AGY_SKILLS", HOME / ".gemini/config/skil
 OPTIONAL_ROOTS = frozenset({"agy"})
 
 
+def agy_usable(agy: Path) -> bool:
+    """agy is installed (its config folder exists) and its skills folder is not
+    a dangling symlink."""
+    return agy.parent.is_dir() and (not agy.is_symlink() or agy.is_dir())
+
+
 def skill_roots(claude: Path, codex: Path, agy: Path) -> list[tuple[str, Path]]:
     """Where provider CLIs read skills: Claude and Codex always, agy only where
     its config directory exists. Roots that are the same directory (a shared
     symlinked skills folder) are written once."""
     roots = [("claude", claude), ("codex", codex)]
-    if agy.parent.is_dir():
+    if agy_usable(agy):
         roots.append(("agy", agy))
     unique, seen = [], set()
     for name, root in roots:
@@ -133,21 +139,22 @@ def status() -> list[dict]:
                     "claude": _link_status(CLAUDE_SKILLS / skill_id, source),
                     "codex": _link_status(CODEX_SKILLS / skill_id, source),
                 }
-                if AGY_SKILLS.parent.is_dir():
+                required = dict(links)   # an optional folder never decides health
+                if agy_usable(AGY_SKILLS):
                     links["agy"] = _link_status(AGY_SKILLS / skill_id, source)
                 enabled = skill_id in active
                 requirements_ok, missing_requirements = _requirements(item)
                 if not (source / "SKILL.md").is_file():
                     health = "missing"
-                elif "modified" in links.values():
+                elif "modified" in required.values():
                     health = "modified"
-                elif "outdated" in links.values():
+                elif "outdated" in required.values():
                     health = "outdated"
-                elif not enabled and "healthy" in links.values():
+                elif not enabled and "healthy" in required.values():
                     health = "modified"
                 elif not enabled:
                     health = "inactive"
-                elif "missing" in links.values():
+                elif "missing" in required.values():
                     health = "missing"
                 elif not requirements_ok:
                     health = "dependency-missing"

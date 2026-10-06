@@ -1172,6 +1172,13 @@ def test_a_dispatched_turns_tool_calls_reach_its_final_row(fake_agy, tmp_path, m
         {"step_index": 2, "type": "GENERIC", "created_at": "t3",
          "content": "Created At: t3\nCompleted At: t3\n\nThe command exited with code 0.\nOutput:\n12 passed\n"},
         {"step_index": 3, "type": "PLANNER_RESPONSE", "created_at": "t4", "content": "The tests pass."},
+        # Later, agy used from a terminal in the same conversation: not this turn's calls.
+        {"step_index": 4, "type": "USER_INPUT", "created_at": "t5",
+         "content": "<USER_REQUEST>clean up</USER_REQUEST>"},
+        {"step_index": 5, "type": "PLANNER_RESPONSE", "created_at": "t6", "content": "Cleaning.",
+         "tool_calls": [{"name": "run_command", "args": {"CommandLine": "rm -rf build"}}]},
+        {"step_index": 6, "type": "GENERIC", "created_at": "t7",
+         "content": "The command exited with code 0.\nOutput:\n"},
     ])
     _load_agy_conversation(session)
 

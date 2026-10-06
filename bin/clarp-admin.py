@@ -53,7 +53,8 @@ def skill_roots() -> list[Path]:
     """Same rule as lib.managed_skills.skill_roots: agy only where its config
     exists, and one write per real directory."""
     agy = agy_skills()
-    roots = [CLAUDE_SKILLS, CODEX_SKILLS] + ([agy] if agy.parent.is_dir() else [])
+    usable = agy.parent.is_dir() and (not agy.is_symlink() or agy.is_dir())
+    roots = [CLAUDE_SKILLS, CODEX_SKILLS] + ([agy] if usable else [])
     unique, seen = [], set()
     for root in roots:
         try:
@@ -1013,8 +1014,10 @@ def cmd_doctor(_args) -> int:
         for root in skill_roots():
             path = root / skill_id
             ok = path.is_symlink() and (path / "SKILL.md").is_file()
-            failures += not ok
-            print(f"{'OK' if ok else 'FAIL':<5} skill link: {path}")
+            optional = root == agy_skills() and root.resolve() not in {
+                CLAUDE_SKILLS.resolve(), CODEX_SKILLS.resolve()}
+            failures += not ok and not optional   # agy's folder is best effort
+            print(f"{'OK' if ok else ('WARN' if optional else 'FAIL'):<5} skill link: {path}")
     return 1 if failures else 0
 
 

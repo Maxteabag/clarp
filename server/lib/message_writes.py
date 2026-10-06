@@ -636,6 +636,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     assistant_ordinal = 0
     # Tools of agy turns whose final row the stream owns: trace -> (row, tools, cells).
     authority_tools: dict[str, tuple[str, list, list]] = {}
+    # A dispatched turn's range stays open until the next Clarp turn binds, so
+    # once a later user message appears its tools are complete: assistant turns
+    # after that (agy run from a terminal, say) are not its own.
+    closed_authority: set[str] = set()
     # The request whose client row was matched last and has had no answer yet.
     # When an attempt fails, the dispatcher sends the same prompt again and
     # the backend records one more copy of it per retry.
@@ -671,6 +675,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             final_rows.invalidate()
             batch_started = time.monotonic()
         role = turn.get("role")
+        if role == "user":
+            closed_authority.update(authority_tools)
         if role == "assistant" and not turn.get("failed"):
             unanswered_key = ""
         if role == "assistant":
@@ -690,7 +696,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # authoritative across every later /log or watcher import.
                 # Its text, that is: the tool calls the transcript records for
                 # the turn are carried onto that row below.
-                if authority["authoritative_message_id"]:
+                if authority["authoritative_message_id"] and \
+                        authority["trace_id"] not in closed_authority:
                     _, tools, cells = authority_tools.setdefault(
                         authority["trace_id"], (authority["authoritative_message_id"], [], []))
                     tools.extend(turn.get("tools") or [])
@@ -1008,7 +1015,7 @@ def _attach_authority_tools(database, agent_id: str,
     from . import message_turns
     latest = 0
     for trace_id, (message_id, tools, cells) in collected.items():
-        row = database.execute("SELECT tools_json, display_cells_json, turn_json FROM messages "
+        row = database.execute("SELECT tools_json, display_cells_json FROM messages "
                                "WHERE message_id=?", (message_id,)).fetchone()
         if row is None:
             continue
@@ -1017,18 +1024,12 @@ def _attach_authority_tools(database, agent_id: str,
         outcome = turn["outcome"] if turn is not None else None
         tools_json = json.dumps(message_turns.settle_statuses(tools, outcome), separators=(",", ":"))
         cells_json = json.dumps(message_turns.settle_statuses(cells, outcome), separators=(",", ":"))
-        turn_json = row["turn_json"]
-        if turn_json:
-            summary = json.loads(turn_json)
-            summary["tool_count"] = len(tools)
-            turn_json = json.dumps(summary, separators=(",", ":"))
-        if (row["tools_json"], row["display_cells_json"], row["turn_json"]) == (
-                tools_json, cells_json, turn_json):
+        if (row["tools_json"], row["display_cells_json"]) == (tools_json, cells_json):
             continue
         revision = _next_revision(database)
-        database.execute("UPDATE messages SET tools_json=?, display_cells_json=?, turn_json=?, "
+        database.execute("UPDATE messages SET tools_json=?, display_cells_json=?, "
                          "revision=? WHERE message_id=?",
-                         (tools_json, cells_json, turn_json, revision, message_id))
+                         (tools_json, cells_json, revision, message_id))
         latest = max(latest, revision)
     return latest
 
