@@ -643,7 +643,29 @@ impl PaneTree {
     /// Closes workspace `id`; the active one gives way to its neighbour in
     /// the tab bar. The last workspace stays.
     pub fn close_workspace(&mut self, id: &str) {
-        let _ = id;
+        if self.workspace_names.len() <= 1 || !self.workspace_names.contains_key(id) {
+            return;
+        }
+        let ids: Vec<String> = self.workspace_names.keys().cloned().collect();
+        self.workspace_names.remove(id);
+        self.workspace_states.remove(id);
+        if id != self.active_workspace {
+            self.emit_tree();
+            return;
+        }
+        let at = ids.iter().position(|w| w == id).unwrap_or(0);
+        let next = ids.get(at + 1).or_else(|| at.checked_sub(1).and_then(|i| ids.get(i))).cloned().unwrap_or_default();
+        self.active_workspace = next.clone();
+        let state = self.workspace_states.get(&next).cloned().unwrap_or_default();
+        if !self.load_state(&state) {
+            // A neighbour without a saved layout (never left) starts empty.
+            let pane = self.next_id("pane");
+            self.root = Node::leaf(pane.clone(), String::new());
+            self.active_pane_id = pane;
+            self.zoomed_pane_id.clear();
+            self.emit_tree();
+            self.emit_active();
+        }
     }
 
     pub fn move_active_to_workspace(&mut self, id: &str) {

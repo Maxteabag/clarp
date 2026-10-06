@@ -426,6 +426,14 @@ fn explorer_row(name: &str) -> Option<Rect> {
 /// details the Host left out), a reader scrolling up stops following while
 /// rows arrive, and End resumes it. Needs the fake Host.
 pub fn start_check(name: &str, out: String) {
+    // The other checks drive the classic keymap (J/K onto cards, Space for
+    // the switcher, the composer after a split); the vim check drives vim
+    // mode, which is on by default.
+    if name != "vim" {
+        if let Some(app) = crate::app() {
+            app.engine.borrow_mut().settings_mut().set(crate::vim_view::SETTING, false);
+        }
+    }
     match name {
         "transcript" => {
             row_overlap_checks::watch();

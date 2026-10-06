@@ -181,6 +181,20 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     if state == "hints" && crate::link_hints::count() == 0 {
         hints = vec![Hint { keys: "".into(), label: "No links on screen".into() }];
     }
+    // Vim mode's own keys lead; Space is its leader, the switcher two of them.
+    if vim_on(app) {
+        for hint in hints.iter_mut() {
+            match hint.label.as_str() {
+                "Commands" if matches!(state, "pane" | "sidebar") => hint.keys = "Space Space".into(),
+                "Cards" => hint.keys = "Shift+J/K".into(),
+                _ => {}
+            }
+        }
+        let mut lead = crate::vim_view::hints(state);
+        lead.append(&mut hints);
+        hints = lead;
+    }
+    crate::vim_view::show(app, window, state);
     let mode = match state {
         "composer" => "INSERT".to_owned(),
         "sidebar" => "EXPLORER".to_owned(),
@@ -210,6 +224,11 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return false };
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
     let state = context(&app, &window);
+    // ? again closes the key help, as Escape does.
+    if chord == "?" && *app.overlay.borrow() == crate::help_view::OVERLAY {
+        close_overlay(&app, &window);
+        return true;
+    }
     if state == "keymap" {
         let used = crate::keymap_view::key(&app, &window, text, &chord, !control && !alt);
         return used;
@@ -218,6 +237,12 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
         let used = crate::font_view::key(&app, &window, &chord);
         show_hints(&app, &window);
         return used;
+    }
+    // ---- vim mode: Normal mode's keys and the command line come first.
+    if vim_on(&app) {
+        if let Some(used) = crate::vim_view::key(&app, &window, state, text, &chord) {
+            return used;
+        }
     }
     // A double press runs on its second press; the first did its own thing.
     let window_ms = keymap::double_press_window(app.engine.borrow().settings().get("keymap/doublePressMs").and_then(serde_json::Value::as_i64));
@@ -281,6 +306,8 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
     }
     let selected = app.engine.borrow().selected_session().to_owned();
     let mut layout_changed = false;
+    // In vim mode a layout changed from Normal mode stays in Normal mode.
+    let typing = context(app, window) == "composer";
     match action {
         "shortcut-bar" => {
             let visible = !window.get_shortcuts_visible();
@@ -341,6 +368,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             window.invoke_open_connection_page();
         }
         "edit-keymap" => crate::keymap_view::open(app, window),
+        "help-keys" => crate::help_view::open(app, window),
         // Escape first dismisses the error banner over the chats.
         "escape" | "dismiss-error" if action == "dismiss-error" || (window.get_surface() == "chats" && !window.get_error().is_empty()) => {
             app.engine.borrow_mut().dismiss_error();
@@ -366,8 +394,9 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             let state = app.engine.borrow().roster().find(&selected).map(|a| a.latest_state.clone()).unwrap_or_default();
             let context = context(app, window);
             // One thing per press: in the composer Escape only leaves it; a
-            // working agent stops from the conversation (or Ctrl+.).
-            if context != "composer" && matches!(state.as_str(), "thinking" | "tool" | "compacting") {
+            // working agent stops from the conversation (or Ctrl+.). Not in
+            // vim mode, where Escape is pressed out of habit (Space x stops).
+            if context != "composer" && !vim_on(app) && matches!(state.as_str(), "thinking" | "tool" | "compacting") {
                 app.engine.borrow_mut().stop();
             } else if context == "search" {
                 focus_sidebar(app, window);
@@ -498,12 +527,16 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             focus_sidebar(app, window);
         }
         "sidebar" => {
-            // The keyboard stays where it is; only a hidden explorer (or its
-            // search) hands it to the chat.
+            // Shown, the explorer takes the keyboard (on the open chat);
+            // hidden, the keyboard goes back to the chat.
             let was_in_sidebar = window.get_sidebar_focused() || window.get_search_focused();
-            window.set_sidebar_visible(!window.get_sidebar_visible());
-            if was_in_sidebar && !window.get_sidebar_visible() {
-                app.focus_transcript();
+            if window.get_sidebar_visible() {
+                window.set_sidebar_visible(false);
+                if was_in_sidebar {
+                    app.focus_transcript();
+                }
+            } else {
+                focus_sidebar(app, window);
             }
         }
         "split-right" | "split-down" => {
@@ -521,7 +554,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             layout_changed = true;
         }
         "balance" => app.engine.borrow_mut().with_panes(|p| p.equalize()),
-        "next-workspace" => {
+        "next-workspace" | "previous-workspace" => {
             let (workspaces, active) = {
                 let engine = app.engine.borrow();
                 (engine.panes().workspaces(), engine.panes().active_workspace().to_owned())
@@ -529,10 +562,23 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             let ids: Vec<String> = workspaces.iter().map(|w| clarp_core::json::string(w, "id")).collect();
             if ids.len() > 1 {
                 let index = ids.iter().position(|id| *id == active).unwrap_or(0);
-                let next = ids[(index + 1) % ids.len()].clone();
+                let step = if action == "next-workspace" { 1 } else { ids.len() - 1 };
+                let next = ids[(index + step) % ids.len()].clone();
                 app.engine.borrow_mut().with_panes(|p| p.switch_workspace(&next));
                 layout_changed = true;
             }
+        }
+        "new-workspace" => {
+            new_workspace(app, window, "");
+            return true;
+        }
+        "close-workspace" => {
+            let active = app.engine.borrow().panes().active_workspace().to_owned();
+            if app.engine.borrow().panes().workspaces().len() < 2 {
+                return false;
+            }
+            app.engine.borrow_mut().with_panes(|p| p.close_workspace(&active));
+            layout_changed = true;
         }
         _ if action.starts_with("move-") => {
             let direction = action.trim_start_matches("move-").to_owned();
@@ -628,9 +674,19 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
     pump_now(app);
     if layout_changed {
         app.refresh(&[Change::Panes]);
-        app.focus_composer();
+        if vim_on(app) && !typing { app.focus_transcript() } else { app.focus_composer() }
     }
     true
+}
+
+/// A new tab (workspace) named `name` ("Workspace N" when empty), opened.
+pub fn new_workspace(app: &Rc<App>, window: &AppWindow, name: &str) {
+    let typing = context(app, window) == "composer";
+    let name = if name.trim().is_empty() { format!("Workspace {}", app.engine.borrow().panes().workspaces().len() + 1) } else { name.trim().to_owned() };
+    app.engine.borrow_mut().with_panes(|p| p.create_workspace(&name));
+    pump_now(app);
+    app.refresh(&[Change::Panes]);
+    if vim_on(app) && !typing { app.focus_transcript() } else { app.focus_composer() }
 }
 
 fn focus_sidebar(app: &App, window: &AppWindow) {
@@ -940,8 +996,12 @@ pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
 /// Closes the dialog; the surface under it (the active pane's composer on
 /// the chats) gets the keyboard back.
 pub fn close_overlay(app: &App, window: &AppWindow) {
-    app.overlay.borrow_mut().clear();
+    let closed = std::mem::take(&mut *app.overlay.borrow_mut());
     window.set_overlay("".into());
+    if closed == crate::help_view::OVERLAY && crate::help_view::give_back(app, window) {
+        show_hints(app, window);
+        return;
+    }
     // A viewer opened from a card gives the keyboard back to the chat, on
     // that card.
     if crate::artifacts_view::take_return() && window.get_surface() == "chats" {

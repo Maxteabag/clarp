@@ -97,6 +97,12 @@ export global Focus {
     out property <color> cursor: Palette.accent.with-alpha(0.16);
 }
 
+// Vim mode: its mode ("" while it is off) and the chat row its cursor is on.
+export global VimBridge {
+    in property <string> mode;
+    in property <string> cursor;
+}
+
 // The focus style: a ring over the region the keyboard is in. Place it last
 // in the region so it draws on top (it fills its parent unless placed); it
 // takes no input.
