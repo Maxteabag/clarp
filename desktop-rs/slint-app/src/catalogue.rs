@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use crate::{App, AppWindow};
 
+mod prefs;
 mod settings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
