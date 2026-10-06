@@ -125,6 +125,9 @@ def _handle_result(result: Any, evidence: dict[str, Any], st: _TurnState, *,
         "agy_raw_evidence": evidence,
         "agy_reported_usage": raw_usage,
     }
+    turn_usage = _turn_usage(cumulative or dict(st.turn_usage))
+    if turn_usage:
+        event["usage"] = turn_usage
     if terminal_duration is not None:
         event["duration_ms"] = int(round(float(terminal_duration) * 1000))
     _finish_result(event, st, on_result=on_result)
@@ -301,6 +304,22 @@ def _normalize_usage(value: Any) -> dict[str, int]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def _turn_usage(reported: dict[str, int]) -> dict[str, int]:
+    """The turn's usage in the shape every backend reports.
+
+    agy's terminal `result.usage` is the sum of its steps (1.1.21 fixtures:
+    input 21549 = 18831 + 2718, cache reads likewise), the same per-turn
+    aggregate Claude reports. Its input excludes cache reads, as Anthropic's
+    does; thinking tokens are billed output, so they count as output here."""
+    if not reported:
+        return {}
+    return {
+        "input_tokens": reported.get("input_tokens", 0),
+        "cache_read_input_tokens": reported.get("cache_read_input_tokens", 0),
+        "output_tokens": reported.get("output_tokens", 0) + reported.get("thinking_tokens", 0),
+    }
 
 
 def _capture_step_usage(update: dict[str, Any], evidence: dict[str, Any],

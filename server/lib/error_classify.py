@@ -107,7 +107,9 @@ _USAGE_LIMIT_RE = re.compile(
     # an exhausted balance. Keep it anchored to the status word/number pair so
     # a stray "402" in unrelated output cannot trip it.
     r"payment required|status(?: code)? 402\b|\b402 payment\b|"
-    r"resource[_ ]exhausted|no credits? remaining|trial quota",
+    r"resource[_ ]exhausted|no credits? remaining|trial quota|"
+    # Antigravity (agy 1.2.15+): "Your AI credits balance is too low to continue."
+    r"credits? balance is too low",
     re.I,
 )
 # The CLI's own wording when its OAuth token is gone. Twelve agents launched

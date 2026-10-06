@@ -234,7 +234,10 @@ def test_spawn_turn_binds_conversation_speaks_and_results(fake_agy, tmp_path):
         "cache_read_input_tokens"] == 3
     assert results[0]["agy_reported_usage"]["step_duration_seconds_sum"] == 1.2
     assert results[0]["duration_ms"] == 1300
-    assert "tokens_in" not in _result_detail(results[0], trace_id="t")
+    # agy's per-turn total, in the shape every backend records: input plus
+    # cache reads in, output plus thinking out.
+    detail = _result_detail(results[0], trace_id="t")
+    assert (detail["tokens_in"], detail["tokens_out"]) == (10 + 3, 4 + 2)
     assert _wait_for(lambda: any("forty-two" in t for t in _queued_texts(agent_id))), \
         "the <speak> block should be enqueued for TTS"
     kinds = [r["kind"] for r in agents_db.conn().execute(
