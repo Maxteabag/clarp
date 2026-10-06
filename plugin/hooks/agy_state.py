@@ -28,6 +28,9 @@ def _clarp_conversation(conversation_id: str) -> bool:
 
 try:
     payload = json.load(sys.stdin)
+    # stream-json owns every turn Clarp starts; they carry this marker.
+    if os.environ.get("CLARP_AGY_MANAGED_TURN") == "1":
+        payload = None
     if isinstance(payload, dict) and _clarp_conversation(
             str(payload.get("conversationId") or "")):
         import _clarp_lib  # noqa: F401

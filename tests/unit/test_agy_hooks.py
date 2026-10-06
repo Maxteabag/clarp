@@ -270,13 +270,16 @@ def test_agy_clarp_started_is_never_reported_by_the_hook(tmp_path, monkeypatch):
     own, theirs = jobs.new_turn_token(), jobs.new_turn_token()
     jobs.record_identity(own, agent_id=agent_id, provider="agy", pid=os.getpid())
     jobs.record_identity(theirs, agent_id=other, provider="claude", pid=os.getpid())
-    # Clarp's turn for this agent, also one whose token is not recorded yet.
+    # Clarp's live turn for this agent.
     assert not reported({"CLARP_PROVIDER_TURN": own})
-    assert not reported({"CLARP_PROVIDER_TURN": jobs.new_turn_token()})
-    # agy run from another agent's turn, and the desktop's "open in terminal"
-    # (the agent's session, no token), are terminal turns.
+    # agy run from another agent's turn, the desktop's "open in terminal"
+    # (the agent's session, no token), and a token Clarp never issued or
+    # whose turn has ended (inherited by a terminal) are terminal turns.
     assert reported({"CLARP_PROVIDER_TURN": theirs})
     assert reported({"CLAUDE_PWA_SESSION": "marcus"})
+    assert reported({"CLARP_PROVIDER_TURN": jobs.new_turn_token()})
+    db.conn().execute("UPDATE provider_turns SET exited_at = 1 WHERE turn_token = ?", (own,))
+    assert reported({"CLARP_PROVIDER_TURN": own})
 
 
 def test_a_terminal_turn_that_lost_its_stop_is_repaired_eventually(tmp_path, monkeypatch):
@@ -315,3 +318,26 @@ def test_agy_runs_outside_clarp_never_load_clarp(tmp_path, monkeypatch):
                             capture_output=True, timeout=10)
     assert json.loads(result.stdout) == {}
     assert result.stderr.strip().endswith("False")
+
+
+@pytest.mark.parametrize("reason", ["USER_CANCELED", "ERROR"])
+def test_a_turn_ended_at_the_terminal_is_not_resumed_by_heartbeat(tmp_path, monkeypatch, reason):
+    from lib import heartbeat
+    agent_id = make_agent(tmp_path, monkeypatch)
+    run_hook("PreInvocation", {"conversationId": CONVERSATION})
+    run_hook("Stop", {"conversationId": CONVERSATION, "terminationReason": reason,
+                      "error": "", "fullyIdle": True})
+    latest = agents.latest_state(agent_id)
+    assert latest["kind"] == "interrupted"
+    assert heartbeat._is_user_stopped(latest)
+
+
+def test_compaction_still_reports_a_missing_agy(tmp_path, monkeypatch):
+    from lib import compaction
+    agent_id = make_agent(tmp_path, monkeypatch)
+    monkeypatch.setattr(compaction, "_runtime_client", None)
+    # Never drive a real tmux/agy from a test, even if the check regresses.
+    monkeypatch.setattr(compaction, "_run", lambda *args: None)
+    monkeypatch.setattr(compaction.shutil, "which",
+                        lambda name: None if name == "agy" else f"/usr/bin/{name}")
+    assert compaction.compact_session("marcus") == {"ok": False, "error": "agy not on PATH"}

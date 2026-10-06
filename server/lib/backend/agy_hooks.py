@@ -11,6 +11,7 @@ import json
 import os
 import shlex
 import tempfile
+import time
 from pathlib import Path
 from uuid import UUID
 
@@ -25,18 +26,25 @@ LIVE_STATE_MAX_AGE_MS = 15 * 60 * 1000
 
 
 def _started_by_clarp_for(agent_id: str, token: str) -> bool:
-    """Whether the process carrying this turn token is Clarp's turn for the
-    agent. The runner records the token just after agy starts, so a token
-    not recorded yet is taken as the agent's own."""
+    """Whether the process carrying this turn token is Clarp's live turn for
+    the agent. The runner records the token microseconds after agy starts,
+    long before agy's first model call; one short retry covers that race. A
+    token from a turn that has ended (inherited by a terminal or a tmux
+    server started inside it) proves nothing."""
     if not token:
         return False
-    try:
-        row = agents.conn().execute(
-            "SELECT agent_id FROM provider_turns WHERE turn_token = ?",
-            (token,)).fetchone()
-    except Exception:  # noqa: BLE001 - no table yet: nothing recorded
-        return True
-    return row is None or row[0] == agent_id
+    for attempt in range(2):
+        try:
+            row = agents.conn().execute(
+                "SELECT agent_id, exited_at FROM provider_turns WHERE turn_token = ?",
+                (token,)).fetchone()
+        except Exception:  # noqa: BLE001 - no table: no Clarp turn recorded
+            return False
+        if row is not None:
+            return row[0] == agent_id and row[1] is None
+        if not attempt:
+            time.sleep(0.3)
+    return False
 
 
 def record_event(event: str, payload: object) -> None:
@@ -71,8 +79,13 @@ def record_event(event: str, payload: object) -> None:
         # reports, so a settled turn is done rather than "background".
         reason = str(payload.get("terminationReason") or "").upper()
         if payload.get("error") or reason in _FAILED_REASONS:
+            # The user is at that terminal and decides what happens next, so
+            # this counts as their stop: heartbeat must not resume the turn.
             event_name = turn_lifecycle.TurnEvent.PROCESS_EXITED_FAILED
-            detail["message"] = "Antigravity turn interrupted — send again to resume"
+            detail["reason"] = "interrupted"
+            detail["message"] = ("Antigravity turn cancelled in the terminal"
+                                 if reason == "USER_CANCELED"
+                                 else "Antigravity turn failed in the terminal")
         else:
             event_name = turn_lifecycle.TurnEvent.HOOK_STOP
     turn_lifecycle.hook_transition(agent["agent_id"], event_name, detail)

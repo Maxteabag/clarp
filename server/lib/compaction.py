@@ -74,8 +74,10 @@ def compact_session(session: str) -> dict[str, Any]:
     except backends.Unsupported:
         return {"ok": False, "error": f"compaction unsupported for {backend}"}
     launch = list(strategy.launch)
-    if shutil.which(launch[0]) is None:
-        return {"ok": False, "error": f"{launch[0]} not on PATH"}
+    # A launch may set environment first (`env NAME=value program ...`).
+    program = next((part for part in launch if part != "env" and "=" not in part), "")
+    if shutil.which(program) is None:
+        return {"ok": False, "error": f"{program} not on PATH"}
     # Don't drive an interactive session while a turn is in-flight on the same
     # session — two processes on one transcript would collide.
     if backends.active_handles(backend, agent_id):
