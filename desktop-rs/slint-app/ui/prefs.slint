@@ -49,7 +49,8 @@ export component PrefEditorDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 10px;
-        Text { text: PrefEditor.label; color: Palette.text; font-size: 17 * Look.unit; }
+        // In the interface colour: the text colour may be the one being edited.
+        Text { text: PrefEditor.label; color: Palette.chrome-text; font-size: 17 * Look.unit; }
         Text { text: PrefEditor.description; color: Palette.muted; font-size: 12 * Look.unit; wrap: word-wrap; }
         Text {
             text: PrefEditor.key + (PrefEditor.range != "" ? "  ·  " + PrefEditor.range : "");
