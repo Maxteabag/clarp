@@ -451,6 +451,64 @@ def record_dream_digest(*, agent_id: str, backend_session_id: str,
     }
 
 
+def carry_conversation(*, agent_id: str, from_session_id: str,
+                       to_session_id: str, current_trace_id: str = "") -> int:
+    """Move one conversation's rows onto the native conversation that
+    continues it, so the chat keeps its history.
+
+    agy prunes old conversations; Clarp then continues in a new one that opens
+    with its own record of the old one. The read model shows a single native
+    conversation, so without this the history would vanish from the app.
+    Carried rows sit below the new conversation's numbering and leave the
+    ``client:``/``final:`` bands, so the new transcript's import neither
+    deletes nor adopts them; the current turn's own user row stays a client
+    row so that import links it as usual. Returns the number of rows moved.
+    """
+    if not agent_id or not from_session_id or not to_session_id \
+            or from_session_id == to_session_id:
+        return 0
+    database = conn()
+    database.execute("BEGIN IMMEDIATE")
+    try:
+        rows = database.execute(
+            """SELECT message_id, source_file, trace_id FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?
+                ORDER BY COALESCE(timestamp, '') DESC, seq DESC""",
+            (agent_id, from_session_id)).fetchall()
+        floor = database.execute(
+            """SELECT COALESCE(MIN(seq), 0) FROM messages
+                WHERE agent_id = ? AND backend_session_id = ?""",
+            (agent_id, to_session_id)).fetchone()[0]
+        seq = min(int(floor), 0)
+        revision = 0
+        for row in rows:
+            seq -= 1
+            revision = _next_revision(database)
+            source = str(row["source_file"] or "")
+            if not (current_trace_id and row["trace_id"] == current_trace_id
+                    and source.startswith("client:")):
+                source = "carried:" + source
+            database.execute(
+                """UPDATE messages SET backend_session_id = ?, seq = ?,
+                          source_file = ?, revision = ?, updated_at = ?
+                    WHERE message_id = ?""",
+                (to_session_id, seq, source, revision, now_ms(),
+                 row["message_id"]))
+        if revision:
+            database.execute(
+                """INSERT INTO conversation_heads (
+                       agent_id, backend_session_id, revision, replace_revision
+                   ) VALUES (?, ?, ?, 0)
+                   ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                       revision = MAX(conversation_heads.revision, excluded.revision)""",
+                (agent_id, to_session_id, revision))
+        database.execute("COMMIT")
+    except BaseException:
+        database.execute("ROLLBACK")
+        raise
+    return len(rows)
+
+
 # A whole-file import used to hold the write lock for its entire run: a 19 MB
 # Codex transcript took 6-7 s, every other writer hit the 5 s busy timeout,
 # and a /send died mid-launch (2026-09-20). Rows are keyed by position and

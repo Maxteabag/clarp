@@ -8,6 +8,11 @@ import pytest
 from lib import backend_usage
 
 
+@pytest.fixture(autouse=True)
+def _no_recent_agy_attempt(monkeypatch):
+    monkeypatch.setattr(backend_usage, "_AGY_LAST_ATTEMPT_MS", [0], raising=False)
+
+
 def test_backend_usage_response_filters_legacy_non_quota_windows():
     """_quota_windows still guards the Codex row, which is endpoint-shaped."""
     backend_usage._upsert(
@@ -918,3 +923,43 @@ def test_a_failed_antigravity_usage_check_keeps_the_last_reading(tmp_path, monke
     agy = backend_usage.get_backend_usage(refresh_codex=False)["providers"]["agy"]
     assert agy["windows"] == [] and agy["source"]["kind"] == "unavailable"
     assert "not signed in" in (backend_usage._row("agy") or {}).get("error", "")
+
+
+def test_a_failed_antigravity_usage_check_is_not_rerun_on_every_request(tmp_path, monkeypatch):
+    import stat
+    runs = tmp_path / "runs"
+    fake = tmp_path / "bin/agy"
+    fake.parent.mkdir()
+    fake.write_text(f"#!/bin/sh\necho run >> {runs}\necho 'not signed in' >&2\nexit 1\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
+    monkeypatch.setattr(backend_usage, "_claude_needs_refresh", lambda: False)
+    monkeypatch.setattr(backend_usage, "_codex_needs_refresh", lambda: False)
+    for _ in range(3):
+        backend_usage.get_backend_usage(refresh_codex=False)
+    assert runs.read_text().count("run") == 1
+
+
+def test_a_hung_antigravity_usage_check_ends_with_its_helpers(tmp_path, monkeypatch):
+    import stat, time
+    fake = tmp_path / "bin/agy"
+    fake.parent.mkdir()
+    # A helper that inherits the output pipes and outlives agy itself.
+    fake.write_text("#!/bin/sh\nsleep 60 &\nsleep 60\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("CLARP_AGY_BIN", str(fake))
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="timed out"):
+        backend_usage.fetch_agy_usage(timeout=0.5)
+    assert time.monotonic() - started < 5
+
+
+def test_an_unused_antigravity_window_keeps_its_id_as_its_reset_slides():
+    def row(reset):
+        return {"fetched_at": 1, "used_percentage": 0.0, "source": "agy-usage-command",
+                "raw": json.dumps({"groups": [{"name": "Gemini Models", "buckets": [
+                    {"id": "g-5h", "window": "5h", "remaining_fraction": 1.0,
+                     "reset_time": reset}]}]})}
+    first = backend_usage._agy_windows(row("2026-10-06T15:00:00Z"), "pi", 2)
+    later = backend_usage._agy_windows(row("2026-10-06T15:05:00Z"), "pi", 2)
+    assert first[0]["window_id"] == later[0]["window_id"]

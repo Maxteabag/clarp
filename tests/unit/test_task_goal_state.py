@@ -738,3 +738,22 @@ def test_a_dependency_awaited_through_a_pause_is_awaited_again_on_resume(tmp_pat
         "waiting", "render-1", due)
     p = act(p, "dependency", {"key": "render-1", "outcome": "succeeded", "evidence": "render.log"})
     assert p["goal"]["continuation"]["dependency_result"]["outcome"] == "succeeded"
+
+
+def test_a_conversation_the_host_continued_keeps_its_goal_and_running_wake(tmp_path):
+    p = make_goal(tmp_path)
+    claim = recovery._claim(p["plan_id"], db.now_ms() + 130000)
+    request = claim[1]["continuation"]["request_id"]
+    # agy pruned the conversation; the Host continued it in a new one.
+    agents.bind_backend_session(p["agent_id"], "continued-native")
+    assert task_plans.carry_native_session(
+        p["agent_id"], "native-goal-test", "continued-native", "pruned") == [p["plan_id"]]
+    # The wake already running stays valid against the new conversation.
+    recovery.validate_dispatch(agents.get_by_session("goal-owner"), request,
+                               native_session_id="continued-native")
+    goal = task_plans.get(p["plan_id"])["goal"]
+    assert goal["native_session_id"] == "continued-native"
+    assert goal["history"][-1]["kind"] == "rebind"
+    # Only a goal bound to the conversation that was continued moves.
+    assert task_plans.carry_native_session(
+        p["agent_id"], "native-goal-test", "elsewhere", "pruned") == []

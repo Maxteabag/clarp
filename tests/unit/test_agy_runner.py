@@ -157,6 +157,10 @@ def _install_fake_agy(tmp_bin: pathlib.Path, stdout: str, *, rc: int = 0) -> Non
         if dump:
             with open(dump, "w") as f:
                 json.dump(argv, f)
+        home = os.environ.get("AGY_FAKE_HOME_OUT")
+        if home:
+            with open(home, "w") as f:
+                f.write(os.environ.get("HOME", ""))
         turn = os.environ.get("AGY_FAKE_TURN_OUT")
         if turn:
             with open(turn, "w") as f:
@@ -1199,22 +1203,73 @@ def test_a_dispatched_turns_tool_calls_reach_its_final_row(fake_agy, tmp_path, m
 
 
 def test_one_shot_requests_use_a_private_home_sharing_only_the_login(tmp_path, monkeypatch):
-    from lib import deployment
     real = tmp_path / "home"
     (real / ".gemini/antigravity-cli").mkdir(parents=True)
     (real / ".gemini/oauth_creds.json").write_text("creds")
     (real / ".gemini/antigravity-cli/antigravity-oauth-token").write_text("token")
+    (real / ".gemini/antigravity-cli/settings.json").write_text('{"model": "Flash"}')
     (real / ".gemini/antigravity-cli/conversation_summaries.db").write_text("real store")
     monkeypatch.setenv("HOME", str(real))
-    monkeypatch.setattr(deployment, "LAYOUT", replace(deployment.LAYOUT, data_root=tmp_path / "data"))
+    monkeypatch.setenv("CLARP_CACHE_DIR", str(tmp_path / "cache"))
     env = AGY.routing_env()
     private = pathlib.Path(env["HOME"])
-    assert private == tmp_path / "data/agy-oneshot-home"
+    # Clarp's cache, not its data: backups refuse links out of the data root.
+    assert private == tmp_path / "cache/agy-oneshot-home"
     assert (private / ".gemini/antigravity-cli/antigravity-oauth-token").read_text() == "token"
     assert (private / ".gemini/oauth_creds.json").read_text() == "creds"
+    # The default model comes along, as a copy agy cannot write back through.
+    settings = private / ".gemini/antigravity-cli/settings.json"
+    assert settings.read_text() == '{"model": "Flash"}' and not settings.is_symlink()
     # agy's own conversation store is never shared, so one-shots cannot prune it.
     assert not (private / ".gemini/antigravity-cli/conversation_summaries.db").exists()
     assert AGY.routing_env() == env      # idempotent
+    # A token agy rewrote in place of the link is relinked, so a re-login
+    # reaches one-shots.
+    token = private / ".gemini/antigravity-cli/antigravity-oauth-token"
+    token.unlink()
+    token.write_text("stale")
+    (real / ".gemini/antigravity-cli/antigravity-oauth-token").write_text("relogged")
+    AGY.routing_env()
+    assert token.is_symlink() and token.read_text() == "relogged"
+
+
+def test_one_shots_racing_to_create_the_private_home_all_get_it(tmp_path, monkeypatch):
+    import threading
+    real = tmp_path / "home"
+    (real / ".gemini/antigravity-cli").mkdir(parents=True)
+    (real / ".gemini/oauth_creds.json").write_text("creds")
+    monkeypatch.setenv("HOME", str(real))
+    monkeypatch.setenv("CLARP_CACHE_DIR", str(tmp_path / "cache"))
+    errors = []
+    barrier = threading.Barrier(8)
+
+    def make():
+        barrier.wait()
+        try:
+            AGY.routing_env()
+        except Exception as e:      # noqa: BLE001
+            errors.append(e)
+    threads = [threading.Thread(target=make) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert (tmp_path / "cache/agy-oneshot-home/.gemini/oauth_creds.json").read_text() == "creds"
+
+
+def test_a_dream_runs_in_the_private_home(fake_agy, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLARP_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("AGY_FAKE_HOME_OUT", str(tmp_path / "home.txt"))
+    agent_id = _make_agy_agent(persona="Dreamer", session="dreamer")
+    fake_agy(_stream("Dreamt."))
+    results = []
+    AGY.start_turn(text="Dream", cwd=tmp_path, backend_session_id="", is_new_session=True,
+                   agent_id=agent_id, session="dreamer", trace_id="dream-1",
+                   on_session_init=None, on_result=results.append,
+                   isolated=True).wait(timeout=8.0)
+    assert _wait_for(lambda: len(results) == 1)
+    assert (tmp_path / "home.txt").read_text() == str(tmp_path / "cache/agy-oneshot-home")
 
 
 def test_a_pruned_conversation_continues_in_a_new_one_carrying_clarps_record(
@@ -1228,6 +1283,10 @@ def test_a_pruned_conversation_continues_in_a_new_one_carrying_clarps_record(
     message_store.record_user_message(agent_id=agent_id, backend_session_id="pruned-conv",
                                       client_msg_id="old", text="Track the v6 publish")
     trace_id = _open_owned_turn(agent_id, "restore")
+    # Dispatch records the new message under the conversation it knows.
+    message_store.record_user_message(agent_id=agent_id, backend_session_id="pruned-conv",
+                                      client_msg_id="new", text="Any news?",
+                                      trace_id=trace_id)
     fake_agy(_stream("Continuing."))
     sids, results = [], []
     AGY.start_turn(text="Any news?", cwd=tmp_path, backend_session_id="pruned-conv",
@@ -1238,4 +1297,17 @@ def test_a_pruned_conversation_continues_in_a_new_one_carrying_clarps_record(
     assert "--conversation" not in argv                      # a new conversation, not a resume
     prompt = next(a for a in argv if a.startswith("--print="))
     assert "Track the v6 publish" in prompt and prompt.endswith("Any news?")
+    assert prompt.count("Any news?") == 1                     # not also in the record
+    # The record is injected context: the chat shows only the new message.
+    assert message_store.strip_injected_context(prompt).endswith("Any news?")
+    assert "Track the v6 publish" not in message_store.strip_injected_context(prompt)
     assert sids == [_FAKE_CONV]                               # bound to the new one
+    # The chat keeps its history: the old rows moved onto the new conversation,
+    # out of the bands the new transcript's import adopts or deletes; the new
+    # message stays a client row so that import links it.
+    rows = {r["text"]: r for r in agents_db.conn().execute(
+        "SELECT text, source_file, seq FROM messages WHERE agent_id=? AND backend_session_id=?",
+        (agent_id, _FAKE_CONV))}
+    assert rows["Track the v6 publish"]["source_file"] == "carried:client:old"
+    assert rows["Any news?"]["source_file"] == "client:new"
+    assert all(r["seq"] < 0 for r in rows.values())

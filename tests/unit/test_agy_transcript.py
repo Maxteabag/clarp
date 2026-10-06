@@ -167,3 +167,13 @@ def test_background_tasks_settle_when_canceled_or_stopped_by_a_restart(tmp_path)
     first, second = agy_transcript.parse_turns(p)[1]["tools"]
     assert (first["status"], first["result"]) == ("error", "Tool execution was canceled")
     assert (second["status"], second["result"]) == ("error", "Stopped when Antigravity restarted")
+
+
+def test_a_pruned_conversation_whose_brain_folder_remains_is_gone(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path))
+    (tmp_path / "conversations").mkdir()
+    (tmp_path / "conversations/kept.db").write_text("")
+    (tmp_path / "brain/kept").mkdir(parents=True)
+    (tmp_path / "brain/pruned").mkdir(parents=True)     # agy leaves these behind
+    assert agy_transcript.conversation_exists("kept")
+    assert not agy_transcript.conversation_exists("pruned")

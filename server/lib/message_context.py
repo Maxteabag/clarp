@@ -67,6 +67,9 @@ TEAM_CONTEXT_OPEN = "--- Clarp team context ---"
 TEAM_CONTEXT_CLOSE = "--- End Clarp team context ---"
 FALLBACK_CONTEXT_OPEN = "--- Clarp fallback context ---"
 FALLBACK_CONTEXT_CLOSE = "--- End Clarp fallback context ---"
+# Clarp's record of a conversation the backend lost, opening its continuation.
+RESTORED_CONTEXT_OPEN = "--- Clarp restored conversation ---"
+RESTORED_CONTEXT_CLOSE = "--- End Clarp restored conversation ---"
 
 
 def strip_injected_team_context(text: str) -> str:
@@ -94,8 +97,10 @@ def strip_injected_context(text: str) -> str:
     words, so the chat showed the user's message twice: once as they typed it
     and once several kilobytes long with the injection attached.
     """
-    return _strip_block(strip_injected_team_context(text),
-                        FALLBACK_CONTEXT_OPEN, FALLBACK_CONTEXT_CLOSE)
+    return _strip_block(
+        _strip_block(strip_injected_team_context(text),
+                     FALLBACK_CONTEXT_OPEN, FALLBACK_CONTEXT_CLOSE),
+        RESTORED_CONTEXT_OPEN, RESTORED_CONTEXT_CLOSE)
 
 
 def _strip_block(text: str, opening: str, closing: str) -> str:

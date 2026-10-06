@@ -185,7 +185,7 @@ class AutonomyJanitors:
                 if receipt is None:continue
                 if not janitor_builtins.is_current(run['run_id']):return
                 rid=digest([provider_id,account,window['window_id'],stamp,owner['generation']])
-                payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f'{provider_id}: {100-used:g}% quota remaining','push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation']}
+                payload={'notification_id':rid,'session':owner['session'],'agent_id':owner['agent_id'],'persona':owner['name'],'preview':f"{provider_id}{' '+window['label'] if window.get('label') else ''}: {100-used:g}% quota remaining",'push':True,'reason':'quota_threshold','recovery_mode':owner['options']['recovery_mode'],'owner_generation':owner['generation']}
                 inserted=janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
                 if inserted:
                     if used >= 100 and owner['options']['recovery_mode']!='notify':
