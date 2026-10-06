@@ -640,6 +640,12 @@ impl PaneTree {
         self.load_state(&state);
     }
 
+    /// Closes workspace `id`; the active one gives way to its neighbour in
+    /// the tab bar. The last workspace stays.
+    pub fn close_workspace(&mut self, id: &str) {
+        let _ = id;
+    }
+
     pub fn move_active_to_workspace(&mut self, id: &str) {
         if id == self.active_workspace || !self.workspace_states.contains_key(id) {
             return;

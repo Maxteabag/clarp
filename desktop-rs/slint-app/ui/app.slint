@@ -125,6 +125,15 @@ export component AppWindow inherits Window {
     in-out property <bool> sidebar-visible: true;
     in-out property <bool> shortcuts-visible: true;
     in property <string> keyboard-mode;
+    // Vim mode: NORMAL, INSERT, COMMAND or SEARCH ("" when it is off), the
+    // command line as typed (":vs", "/Table"), the keys of a sequence so
+    // far and what may follow them (the which-key panel), and the last
+    // command's word ("Copied", an error).
+    in property <string> vim-mode;
+    in property <string> vim-line;
+    in property <string> vim-pending;
+    in property <[Hint]> vim-which;
+    in property <string> vim-message;
     in property <[Hint]> hints;
     // The chat the sidebar's keyboard cursor is on.
     in property <string> sidebar-cursor;

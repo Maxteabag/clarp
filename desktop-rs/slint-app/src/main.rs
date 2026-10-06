@@ -28,6 +28,8 @@ mod switcher;
 mod search_view;
 mod mention_view;
 mod view;
+mod vim;
+mod vim_view;
 // ---- updates and teams
 mod teams_view;
 mod updates_view;

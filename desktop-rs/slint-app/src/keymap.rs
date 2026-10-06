@@ -484,6 +484,13 @@ pub fn shown_or(state_name: &str, action: &str, overrides: &Overrides, default: 
     if overrides.contains_key(action) { shown(state_name, action, overrides).unwrap_or_default() } else { default.to_owned() }
 }
 
+/// Whether the user bound `chord` themselves in `state` (or further out,
+/// reaching it): their keys win over vim mode's.
+pub fn user_bound(state_name: &str, chord: &str, overrides: &Overrides) -> bool {
+    let _ = (state_name, chord, overrides);
+    false
+}
+
 /// The shortcut bar's hints for `state`.
 pub fn hints(state_name: &str, overrides: &Overrides, facts: Facts) -> Vec<Binding> {
     resolve(state_name, overrides, Some(facts)).into_iter().filter(|entry| entry.hint && facts.allows(entry.hint_guard)).collect()
@@ -1122,6 +1129,40 @@ mod tests {
             assert!(!actions.contains(&action), "{action} is the control's");
         }
         assert!(matches!(add(&Overrides::new(), "send", "composer", "Ctrl+Q"), Err(Refusal::Invalid(_))));
+    }
+
+    #[test]
+    fn tabs_have_ctrl_keys_and_the_hub_keeps_ctrl_t() {
+        let none = Overrides::new();
+        for state in ["pane", "sidebar", "composer", "settings"] {
+            assert_eq!(action_for(state, "Ctrl+T", &none, all()), Some("new-workspace"), "Ctrl+T in {state}");
+            assert_eq!(action_for(state, "Ctrl+Tab", &none, all()), Some("next-workspace"), "Ctrl+Tab in {state}");
+            assert_eq!(action_for(state, "Ctrl+Shift+Tab", &none, all()), Some("previous-workspace"), "Ctrl+Shift+Tab in {state}");
+        }
+        assert_eq!(action_for("pane", "Ctrl+Alt+W", &none, all()), Some("next-workspace"), "the old key stays");
+        // Ctrl+W closes a tab from the chat and the explorer, never while typing.
+        assert_eq!(action_for("pane", "Ctrl+W", &none, all()), Some("close-workspace"));
+        assert_eq!(action_for("sidebar", "Ctrl+W", &none, all()), Some("close-workspace"));
+        assert_eq!(action_for("composer", "Ctrl+W", &none, all()), None);
+        assert_eq!(action_for("pane", "Ctrl+Shift+W", &none, all()), Some("close-pane"), "Ctrl+Shift+W still closes a pane");
+        // In the New Session hub Ctrl+T is still Show all.
+        assert_eq!(keys_in("launch", "launch-show-all", &none), ["Ctrl+T"]);
+        assert_eq!(action_for("launch", "Ctrl+T", &none, all()), None, "the hub handles it");
+        // Capital J and K walk the cards too (vim mode's way onto them).
+        assert_eq!(action_for("pane", "Shift+K", &none, all()), Some("artifact-previous"));
+        assert_eq!(action_for("pane", "Shift+J", &none, all()), Some("artifact-next"));
+        assert!(clashes(&none).is_empty(), "the defaults agree: {:?}", clashes(&none));
+    }
+
+    #[test]
+    fn the_user_s_own_keys_are_known_so_they_win_over_vim() {
+        let mine = add(&Overrides::new(), "mute", "main", "M").unwrap();
+        assert!(user_bound("pane", "M", &mine));
+        assert!(user_bound("sidebar", "M", &mine));
+        assert!(!user_bound("composer", "M", &mine), "a typing key bound further out never reaches the composer");
+        assert!(!user_bound("pane", "J", &mine), "a default is not the user's");
+        let removed = remove(&Overrides::new(), "next-attention", "navigation", "N");
+        assert!(!user_bound("pane", "N", &removed), "taking a key away binds nothing");
     }
 
     #[test]
