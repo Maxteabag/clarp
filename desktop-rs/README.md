@@ -28,6 +28,12 @@ description or two aliases. The window reloads the settings file
 invalid values instead of applying them. `slint-app/src/look.rs` applies the
 values; `--check customize` exercises them.
 
+Chat zoom (`chatzoom`, 60–250% in 10% steps, kept in the settings file) draws
+the chats' text, code, cards and spacing larger or smaller apart from the
+window: Ctrl+= (or Ctrl++), Ctrl+- and Ctrl+0, or Ctrl+wheel over a chat; the
+rows are measured again and the reader keeps their place. The whole window's
+scale (the chats with it) is Ctrl+Alt+PageUp / Ctrl+Alt+PageDown / Ctrl+Alt+0.
+
 Slint's rich text has no line height: "Paragraph spacing" (alias line
 spacing) sets the space between a message's paragraphs, lists, code and
 headings, while lines inside one paragraph keep the font's own spacing.

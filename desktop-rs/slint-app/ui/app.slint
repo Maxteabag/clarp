@@ -324,9 +324,15 @@ export component AppWindow inherits Window {
         height: root.height;
         focus-on-click: false;
         capture-key-pressed(event) => {
+            // Ctrl down: Ctrl+wheel over a chat zooms it.
+            if (event.text == Key.Control || event.text == Key.ControlR) { Look.ctrl-held = true; }
             if (root.shortcut(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta, event.repeat)) {
                 return accept;
             }
+            reject
+        }
+        capture-key-released(event) => {
+            if (event.text == Key.Control || event.text == Key.ControlR) { Look.ctrl-held = false; }
             reject
         }
         // The shortcut bar is the window's footer, under every column.
