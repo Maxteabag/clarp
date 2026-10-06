@@ -132,3 +132,23 @@ def test_a_skills_folder_shared_by_symlink_is_written_once(tmp_path, monkeypatch
     managed_skills.set_enabled("clarp-extra", True)
     row = next(r for r in managed_skills.status() if r["id"] == "clarp-extra")
     assert row["links"] == {"claude": "healthy", "codex": "healthy", "agy": "healthy"}
+
+
+def test_antigravitys_folder_never_holds_back_the_other_links(tmp_path, monkeypatch):
+    configure(tmp_path, monkeypatch)
+    agy = tmp_path / "gemini/config/skills"
+    agy.parent.mkdir(parents=True)
+    monkeypatch.setattr(managed_skills, "AGY_SKILLS", agy)
+    mine = agy / "clarp-extra"                    # the user's own skill of that name
+    mine.mkdir(parents=True)
+    (mine / "SKILL.md").write_text("mine")
+    managed_skills.set_enabled("clarp-extra", True)
+    row = next(r for r in managed_skills.status() if r["id"] == "clarp-extra")
+    assert (row["health"], row["links"]["claude"], row["links"]["agy"]) == ("healthy", "healthy", "modified")
+    assert (mine / "SKILL.md").read_text() == "mine"
+    # A dangling symlinked agy folder is skipped rather than failing the enable.
+    shutil_rm = __import__("shutil").rmtree
+    shutil_rm(agy)
+    agy.symlink_to(tmp_path / "gone", target_is_directory=True)
+    managed_skills.set_enabled("clarp-core", True)
+    assert next(r for r in managed_skills.status() if r["id"] == "clarp-core")["health"] == "healthy"

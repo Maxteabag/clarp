@@ -149,6 +149,32 @@ def _settle(tool: dict, content: str, status: str = "") -> None:
         tool["status"] = "error" if tool["exit_code"] not in (None, 0) else "ok"
 
 
+_TASK_END_RE = re.compile(r"\b(finished|was canceled) with result:", re.I)
+
+
+def _settle_background(content: str, background: dict[str, dict]) -> None:
+    """agy reports a background task's end in a later SYSTEM_MESSAGE: it
+    finished, was canceled, or every task stopped when agy restarted."""
+    if "background tasks have been stopped" in content:
+        for tool in background.values():
+            tool.update(status="error", result="Stopped when Antigravity restarted")
+        background.clear()
+        return
+    end = _TASK_END_RE.search(content)
+    if not end:
+        return
+    for task_id, tool in list(background.items()):
+        if not re.search(rf"/{task_id}\b", content):
+            continue
+        body = content[end.end():]
+        body = re.split(r"\nLog: |</SYSTEM_MESSAGE>", body, maxsplit=1)[0]
+        if end.group(1).lower() == "finished":
+            _settle(tool, body)
+        else:
+            tool.update(status="error", result=truncate(body.strip() or "Canceled", 300))
+        background.pop(task_id)
+
+
 def _cell(tool: dict) -> dict:
     from .codex_transcript import (_classify_exploration, _command_cell,
                                    _display_cell, _generic_tool_cell)
@@ -287,11 +313,7 @@ def parse_turns(path: pathlib.Path) -> list[dict]:
                 pending_tools.clear()
                 pending_order.clear()
         elif etype == "SYSTEM_MESSAGE" and background:
-            content = str(ev.get("content") or "")
-            for task_id, tool in list(background.items()):
-                if re.search(rf"/{task_id}\b", content) and "finished" in content:
-                    _settle(tool, content.split("finished with result:", 1)[-1])
-                    background.pop(task_id)
+            _settle_background(str(ev.get("content") or ""), background)
         elif etype in _TOOL_TYPES or (
                 etype not in ("CONVERSATION_HISTORY", "SYSTEM_MESSAGE",
                               "GENERIC", "ERROR_MESSAGE") and ev.get("content")

@@ -22,9 +22,29 @@ AGY_SKILLS = pathlib.Path(os.environ.get(
     "CLARP_AGY_SKILLS", pathlib.Path.home() / ".gemini/config/skills"))
 
 
-def _roots() -> list[pathlib.Path]:
-    from .managed_skills import skill_roots
-    return [root for _name, root in skill_roots(CLAUDE_SKILLS, CODEX_SKILLS, AGY_SKILLS)]
+def _roots(names=()) -> list[pathlib.Path]:
+    """Where to link. agy's folder is best effort: it is left out of an
+    operation when any of `names` already sits there as something that is not
+    one of these personal skills, so it never blocks the Claude and Codex links."""
+    from .managed_skills import OPTIONAL_ROOTS, skill_roots
+    roots = []
+    for name, root in skill_roots(CLAUDE_SKILLS, CODEX_SKILLS, AGY_SKILLS):
+        if name in OPTIONAL_ROOTS and any(_foreign(root / n) for n in names):
+            continue
+        roots.append(root)
+    return roots
+
+
+def _foreign(link: pathlib.Path) -> bool:
+    if not (link.exists() or link.is_symlink()):
+        return False
+    if not link.is_symlink():
+        return True
+    try:
+        target = link.resolve()
+    except OSError:
+        return True
+    return not (target.is_relative_to(IMPORTED.resolve()) or target.is_relative_to(GIT.resolve()))
 
 
 def _safe_id(value: str) -> str:
@@ -72,7 +92,7 @@ def _validate_skill_tree(skill: pathlib.Path) -> None:
 
 
 def _link(skill: pathlib.Path) -> None:
-    for root in _roots():
+    for root in _roots([skill.name]):
         try:
             root.mkdir(parents=True, exist_ok=True)
         except OSError:   # e.g. a dangling symlinked skills folder: skip it
@@ -102,7 +122,7 @@ def import_path(source: pathlib.Path, *, replace: bool = False) -> list[str]:
             raise ValueError(f"duplicate skill id in import: {skill_id}")
         seen.add(skill_id)
         destination = IMPORTED / skill_id
-        link_paths = [root / skill_id for root in _roots()]
+        link_paths = [root / skill_id for root in _roots([skill_id])]
         if destination.exists():
             if not replace:
                 raise ValueError(f"skill already imported: {skill_id}")
@@ -166,14 +186,15 @@ def add_git(url: str, name: str = "", ref: str = "") -> dict:
             raise ValueError("Git source contains no SKILL.md")
         for skill in staged_skills: _validate_skill_tree(skill)
         published = [destination / skill.relative_to(staging) for skill in staged_skills]
+        roots = _roots([skill.name for skill in published])
         for skill in published:
-            for root in _roots():
+            for root in roots:
                 link = root / skill.name
                 if link.exists() or link.is_symlink():
                     raise ValueError(f"preserving existing skill at {link}")
         staging.rename(destination)
         for skill in published:
-            for root in _roots():
+            for root in roots:
                 link = root / skill.name
                 link.parent.mkdir(parents=True, exist_ok=True)
                 link.symlink_to(skill, target_is_directory=True)
@@ -219,8 +240,9 @@ def update_git(source_id: str) -> dict:
         for skill in staged_skills: _validate_skill_tree(skill)
         published = [destination / skill.relative_to(staging) for skill in staged_skills]
         old_skills = _skill_dirs(destination)
+        roots = _roots([skill.name for skill in old_skills + published])
         for skill in old_skills + published:
-            for root in _roots():
+            for root in roots:
                 link = root / skill.name
                 if link.exists() or link.is_symlink():
                     if not link.is_symlink():
@@ -237,7 +259,7 @@ def update_git(source_id: str) -> dict:
         for link in original_links:
             link.unlink(missing_ok=True)
         for skill in published:
-            for root in _roots():
+            for root in roots:
                 link = root / skill.name
                 link.parent.mkdir(parents=True, exist_ok=True)
                 link.symlink_to(skill, target_is_directory=True)
@@ -302,7 +324,7 @@ def repair_links() -> None:
     for row in status():
         source = pathlib.Path(str(row.get("source") or ""))
         if source.is_dir():
-            for root in _roots():
+            for root in _roots([source.name]):
                 destination = root / source.name
                 if destination.is_symlink() and destination.resolve() == source.resolve():
                     continue
