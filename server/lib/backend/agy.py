@@ -717,7 +717,10 @@ class AgyBackend(StreamJsonBackend):
             if runtime_agent_id:
                 self._transition(runtime_agent_id, TurnEvent.SPAWN_STARTED,
                                    {"dispatch": self.runner, "trace_id": trace_id})
-            process.append(popen_turn(cmd, cwd=cwd, session=session, env_extra=identity))
+            # Clarp owns this turn's state through stream-json; the global
+            # lifecycle hooks (agy_hooks) only report turns run elsewhere.
+            process.append(popen_turn(cmd, cwd=cwd, session=session,
+                                      env_extra={**identity, "CLARP_AGY_MANAGED_TURN": "1"}))
             provider_jobs.record_identity(turn_token, agent_id=runtime_agent_id,
                                           provider=self.id, pid=process[0].pid)
         try:
@@ -1158,6 +1161,10 @@ class AgyBackend(StreamJsonBackend):
         return bool(provider_capabilities.is_dispatchable_agy_model(value))
 
     # --- sessions and transcripts -----------------------------------------
+
+    def external_live_work(self, agent_id: str) -> bool:
+        from . import agy_hooks
+        return agy_hooks.has_live_work(agent_id)
 
     def list_sessions(self, cwd: str, *, limit: int = 20,
                       all_projects: bool = False) -> list[dict]:

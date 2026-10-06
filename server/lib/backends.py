@@ -214,6 +214,10 @@ def interrupt_any(agent_id: str) -> int:
     return total
 
 
+def external_live_work(backend: str, agent_id: str) -> bool:
+    return by_id(normalize(backend)).external_live_work(agent_id)
+
+
 def active_handles(backend: str, agent_id: str) -> list:
     if _RUNTIME_CLIENT is not None:
         try:

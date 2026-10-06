@@ -48,6 +48,12 @@ def has_live_work(agent_id: str, backend: str) -> bool:
         log_exception("reconcileHandlesFail", e, detail=agent_id)
         return True  # can't tell → don't repair
     try:
+        if backends.external_live_work(backend, agent_id):
+            return True
+    except Exception as e:  # noqa: BLE001
+        log_exception("reconcileExternalWorkFail", e, detail=agent_id)
+        return True  # can't tell → don't repair
+    try:
         from . import turn_dispatch
         if turn_dispatch.live_work(agent_id).terminal:
             return True
