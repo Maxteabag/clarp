@@ -157,6 +157,13 @@ pub fn reduced_motion(app: &App) -> bool {
     app.engine.borrow().settings().boolean("appearance/reducedMotion", false)
 }
 
+/// The live status line under the chat (Settings, off by default).
+pub fn live_status_line(app: &App) -> bool {
+    app.engine.borrow().settings().boolean(LIVE_STATUS_LINE, false)
+}
+
+pub const LIVE_STATUS_LINE: &str = "appearance/liveStatusLine";
+
 /// Opens a `file://` URL in the desktop's file manager; checks record it in
 /// `CLARP_TEST_OPEN_URL` instead.
 pub(crate) fn open_file_url(url: &str) {
@@ -210,6 +217,9 @@ pub fn open(app: &Rc<App>, window: &AppWindow, session: &str) {
 pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
     let reduced = reduced_motion(app);
     window.global::<ProfileBridge>().set_reduced_motion(reduced);
+    let look = window.global::<crate::ChatLook>();
+    look.set_reduced_motion(reduced);
+    look.set_live_status_line(live_status_line(app));
     crate::overview_view::refresh(app, window, changes, reduced);
     crate::voice_view::refresh(app, window, changes, reduced);
     crate::orchestrator_view::refresh(app, window, changes, reduced);

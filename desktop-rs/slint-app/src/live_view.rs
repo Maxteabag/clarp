@@ -77,6 +77,14 @@ pub(crate) fn ticking(engine: &Engine, session: &str) -> bool {
     busy || view.items().iter().any(|i| i.get("status").and_then(|s| s.as_str()) == Some("running"))
 }
 
+/// Whether the typing dots show for a chat with live items: while the agent
+/// works with the status line hidden and no item at work, whose row would
+/// show it (a shimmering label, a growing reply).
+pub(crate) fn dots(engine: &Engine, session: &str, busy: bool, status_line: bool) -> bool {
+    let Some(view) = engine.live_view(session).filter(|_| engine.live_active(session)) else { return false };
+    busy && !status_line && !view.items().iter().any(|i| matches!(i.get("status").and_then(|s| s.as_str()), Some("running" | "pending")))
+}
+
 /// What a live row is built from: an equal signature builds an equal row.
 pub(crate) fn signature(entry: &Entry) -> String {
     format!(
@@ -96,8 +104,34 @@ pub(crate) fn signature(entry: &Entry) -> String {
     )
 }
 
+/// The tone a live row's label shimmers in while it works: "accent" for
+/// what acts (a tool, an explore group, a plan, a diff), "muted" for what
+/// thinks (reasoning, compaction), "" once it settles. A streaming reply
+/// shows its text growing, and the fold is a settled turn: neither shimmers.
+pub(crate) fn shimmer(kind: Kind, status: &str) -> &'static str {
+    let _ = (kind, status);
+    ""
+}
+
+/// A theme's shimmer colours for `tone` (its key: "accent", "mutedText"),
+/// as (low, high) `#rrggbb`: the letters rest at 80% of the tone over the
+/// window, and the glow brings them 60% of the way to the body text. Both
+/// ends stay readable on every theme, and on Hacker, where the accent is
+/// as bright as the text, the dimmer rest still lets the glow show.
+pub(crate) fn shimmer_colours(theme: &clarp_core::json::Object, tone: &str) -> Option<(String, String)> {
+    let colour = |key: &str| theme.get(key).and_then(|v| v.as_str()).and_then(clarp_core::reading_theme::rgb);
+    let (base, window, text) = (colour(tone)?, colour("window")?, colour("text")?);
+    let mix = |a: (f64, f64, f64), b: (f64, f64, f64), f: f64| {
+        let channel = |x: f64, y: f64| ((f * x + (1.0 - f) * y) * 255.0).round() as u8;
+        format!("#{:02x}{:02x}{:02x}", channel(a.0, b.0), channel(a.1, b.1), channel(a.2, b.2))
+    };
+    Some((mix(base, window, 0.8), mix(base, text, 0.4)))
+}
+
 pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow {
     let message = entry.kind == Kind::Message;
+    let tone = shimmer(entry.kind, &entry.status);
+    let letters: Vec<SharedString> = if tone.is_empty() { Vec::new() } else { entry.title.chars().map(|c| c.to_string().into()).collect() };
     MessageRow {
         id: entry.key.clone().into(),
         author: if message { "assistant" } else { "live" }.into(),
@@ -126,6 +160,8 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
             text: entry.text.clone().into(),
             expandable: entry.expandable,
             expanded: entry.expanded,
+            shimmer: tone.into(),
+            letters: ModelRc::new(VecModel::from(letters)),
         },
         receipt: crate::ReceiptRow::default(),
         prompt: crate::PromptRow::default(),
@@ -301,7 +337,7 @@ pub(crate) fn keep_ticking(running: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockCache, Pacer, message_blocks};
+    use super::{BlockCache, Pacer, message_blocks, row, shimmer, shimmer_colours};
 
     /// A message streamed in small appends parses each committed block
     /// once: the work is the tail, not the whole text every time.
@@ -336,6 +372,74 @@ mod tests {
         // Text that changed under the cache (not an extension) starts over.
         let other = cache.blocks("live:m", "Something else entirely.\n\nNew.");
         assert_eq!(kinds(&other), kinds(&message_blocks("Something else entirely.\n\nNew.")));
+    }
+
+    /// What works shimmers in its kind's tone; nothing settled does, nor a
+    /// streaming reply (its growing text is the motion) or the fold.
+    #[test]
+    fn only_a_working_row_shimmers_in_its_kind_s_tone() {
+        use clarp_core::live_present::Kind;
+        for status in ["running", "pending"] {
+            for kind in [Kind::Tool, Kind::Explore, Kind::Plan, Kind::Diff] {
+                assert_eq!(shimmer(kind, status), "accent", "{kind:?} {status}");
+            }
+            for kind in [Kind::Reasoning, Kind::Compaction] {
+                assert_eq!(shimmer(kind, status), "muted", "{kind:?} {status}");
+            }
+            assert_eq!(shimmer(Kind::Message, status), "", "a streaming reply");
+            assert_eq!(shimmer(Kind::Fold, status), "");
+        }
+        for status in ["completed", "failed", "interrupted", ""] {
+            for kind in [Kind::Tool, Kind::Explore, Kind::Reasoning, Kind::Compaction, Kind::Plan, Kind::Diff] {
+                assert_eq!(shimmer(kind, status), "", "{kind:?} {status} has settled");
+            }
+        }
+    }
+
+    /// A running tool's row carries its tone and its label letter by letter;
+    /// once it settles, neither.
+    #[test]
+    fn a_running_row_carries_its_letters_until_it_settles() {
+        use clarp_core::live_present::{Entry, Kind};
+        use slint::Model;
+        let running = Entry { key: "live:t".into(), kind: Kind::Tool, status: "running".into(), title: "Running npm ✓".into(), ..Entry::default() };
+        let built = row_of(&running);
+        assert_eq!(built.live.shimmer, "accent");
+        let letters: Vec<String> = built.live.letters.iter().map(|l| l.to_string()).collect();
+        assert_eq!(letters.concat(), "Running npm ✓");
+        assert_eq!(letters.len(), 13, "one per character, not per byte");
+        let done = row_of(&Entry { status: "completed".into(), title: "Ran npm ✓".into(), ..running });
+        assert_eq!(done.live.shimmer, "");
+        assert_eq!(done.live.letters.row_count(), 0);
+        let thinking = row_of(&Entry { key: "live:r".into(), kind: Kind::Reasoning, status: "running".into(), title: "Thinking…".into(), ..Entry::default() });
+        assert_eq!(thinking.live.shimmer, "muted");
+    }
+
+    fn row_of(entry: &clarp_core::live_present::Entry) -> crate::MessageRow {
+        row(entry, Vec::new())
+    }
+
+    /// Every theme's shimmer stays readable at both ends (3:1 on the window,
+    /// the large-text and interface minimum) and its glow visibly differs
+    /// from the rest, Hacker, Word and Sepia included.
+    #[test]
+    fn the_shimmer_is_readable_and_visible_in_every_theme() {
+        use clarp_core::reading_theme::{contrast, themes};
+        let mut seen = Vec::new();
+        for theme in themes() {
+            let id = theme.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+            let window = theme.get("window").and_then(|v| v.as_str()).unwrap_or_default();
+            for tone in ["accent", "mutedText"] {
+                let (low, high) = shimmer_colours(theme, tone).unwrap_or_else(|| panic!("{id} has a {tone} shimmer"));
+                assert!(contrast(&low, window) >= 3.0, "{id} {tone}: rest {low} on {window} is {:.2}:1", contrast(&low, window));
+                assert!(contrast(&high, window) >= 3.0, "{id} {tone}: glow {high} on {window} is {:.2}:1", contrast(&high, window));
+                assert!(contrast(&low, &high) >= 1.5, "{id} {tone}: the glow {high} hardly differs from {low}: {:.2}:1", contrast(&low, &high));
+            }
+            seen.push(id);
+        }
+        for id in ["hacker", "word", "sepia"] {
+            assert!(seen.iter().any(|s| s == id), "{id} is among the themes checked");
+        }
     }
 
     #[test]

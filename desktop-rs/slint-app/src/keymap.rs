@@ -50,14 +50,19 @@ pub struct Binding {
     /// Shown in the shortcut bar.
     pub hint: bool,
     pub guard: Guard,
+    /// Shown in the bar only while this holds too (it runs whenever
+    /// `guard` does).
+    pub hint_guard: Guard,
     /// Handled by the focused control itself (the composer's Return); the
     /// dispatcher lets it through.
     pub native: bool,
 }
 
 fn binding(action: &'static str, keys: &[&str], label: &'static str, hint: bool, guard: Guard, native: bool) -> Binding {
-    Binding { action, keys: keys.iter().map(|k| (*k).to_owned()).collect(), label, hint, guard, native }
+    Binding { action, keys: keys.iter().map(|k| (*k).to_owned()).collect(), label, hint, guard, hint_guard: Guard::None, native }
 }
+
+
 
 /// Text editing keys no binding may take.
 const RESERVED: &[&str] = &["Ctrl+A", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Y"];
@@ -144,6 +149,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("balance", &["Ctrl+Alt+="], "Balance panes", false, Always, false),
             b("agent-terminal", &["Ctrl+Alt+T"], "Terminal", false, Agent, false),
             b("release-agent", &["Ctrl+Shift+R"], "Release", false, Agent, false),
+            // Stops the agent from anywhere; the bar names it while it works.
             b("stop-agent", &["Ctrl+.", "Ctrl+C"], "Stop", false, Agent, false),
             b("talk", &["Ctrl+Shift+Space"], "Talk", false, Agent, false),
             // Link hints, from the composer too.
@@ -471,7 +477,7 @@ pub fn shown_or(state_name: &str, action: &str, overrides: &Overrides, default: 
 
 /// The shortcut bar's hints for `state`.
 pub fn hints(state_name: &str, overrides: &Overrides, facts: Facts) -> Vec<Binding> {
-    resolve(state_name, overrides, Some(facts)).into_iter().filter(|entry| entry.hint).collect()
+    resolve(state_name, overrides, Some(facts)).into_iter().filter(|entry| entry.hint && facts.allows(entry.hint_guard)).collect()
 }
 
 /// Remembers the last key, to tell a double press: the second press of the
@@ -922,6 +928,22 @@ mod tests {
         assert_eq!(action_for("pane", "Ctrl+End", &none, nothing), None);
         assert!(!hints("composer", &none, nothing).iter().any(|b| b.action == "queue"));
         assert!(hints("composer", &none, all()).iter().any(|b| b.action == "queue"));
+    }
+
+    /// With the live status line hidden, the bar names the stop key while
+    /// the agent works, wherever the keyboard is; idle, the key still works
+    /// but the bar does not offer it.
+    #[test]
+    fn the_bar_names_stop_while_the_agent_works() {
+        let none = Overrides::new();
+        let idle = Facts { agent: true, ..Facts::default() };
+        let busy = Facts { busy: true, ..idle };
+        for state in ["pane", "composer", "sidebar"] {
+            let stop = hints(state, &none, busy).into_iter().find(|b| b.action == "stop-agent");
+            assert!(stop.as_ref().is_some_and(|b| b.keys.first().map(String::as_str) == Some("Ctrl+.") && b.label == "Stop"), "{state}: {stop:?}");
+            assert!(!hints(state, &none, idle).iter().any(|b| b.action == "stop-agent"), "{state}: not while idle");
+        }
+        assert_eq!(action_for("pane", "Ctrl+.", &none, idle), Some("stop-agent"), "the key works idle as before");
     }
 
     fn peter() -> Overrides {
