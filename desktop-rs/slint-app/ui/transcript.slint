@@ -713,7 +713,6 @@ component TranscriptRow inherits HorizontalLayout {
         // One message of the list; the id finds it in the checks.
         accessible-role: list-item;
         accessible-id: root.measuring ? "" : "row:" + root.message.id;
-        accessible-selected: root.marked;
         background: root.marked ? Palette.accent.with-alpha(0.14) : root.message.author == "user" && root.message.receipt.key == "" ? Palette.bubble : transparent;
         border-width: root.marked ? 2px : 0px;
         border-color: Palette.accent;

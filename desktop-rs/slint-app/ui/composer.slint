@@ -240,7 +240,6 @@ export component Composer inherits FocusScope {
                 accessible-role: list-item;
                 accessible-id: "mention:" + row.session;
                 accessible-label: row.name;
-                accessible-selected: index == root.mention-current;
                 touch := TouchArea { clicked => { MentionBridge.accept(root.pane-id, index); } }
                 HorizontalLayout {
                     padding-left: 8px;
