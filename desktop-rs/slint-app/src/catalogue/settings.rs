@@ -16,8 +16,6 @@ const ACTIVITY: [(&str, &str); 3] = [
     ("Always visible", "Every tool call shows as its own row."),
     ("Group old", "Recent tool calls show; older ones fold."),
 ];
-/// The interface sizes offered, as scale factors (1.15 is the usual).
-const SCALES: [f64; 9] = [1.0, 1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4];
 /// The double-press windows offered, in milliseconds.
 const DOUBLE_PRESS: [u64; 8] = [150, 200, 250, 300, 400, 500, 700, 1000];
 /// The chat's font sizes offered, in pixels.
@@ -201,10 +199,6 @@ fn set_font_size(app: &App, size: Option<f64>) {
     app.engine.borrow_mut().set_font_override(&theme_id, next);
 }
 
-fn ui_scale(app: &App) -> f64 {
-    app.engine.borrow().settings().get("appearance/uiScale").and_then(Value::as_f64).unwrap_or(1.15)
-}
-
 fn appearance() -> Vec<Setting> {
     vec![
         Setting::stored_toggle(
@@ -340,19 +334,19 @@ fn appearance() -> Vec<Setting> {
             let theme = reading_theme::theme(&theme_id);
             if chosen.is_some() { format!("Back to {} · {theme_size} px", crate::view::theme_font(theme)) } else { "Already the theme default".to_owned() }
         }),
-        Setting::choice(
+        // The whole window's scale (the chats with it): a number from where
+        // it is, Ctrl+Alt+PageUp / PageDown a step, kept as a preference.
+        Setting::number(
             e("ui-scale", "Interface size", "appearance", "How large the whole interface is drawn; opens a list of sizes.", &["zoom", "scale", "size", "bigger", "smaller", "larger", "dpi", "everything bigger"]),
             "APPEARANCE",
-            |_| SCALES.iter().map(|scale| Choice::new(format!("{scale:.2}"), format!("{}%", (scale * 100.0).round())).about(if (*scale - 1.15).abs() < 0.001 { "The usual size" } else { "" })).collect(),
-            |app| format!("{:.2}", ui_scale(app)),
-            |app, _, value| match value.parse::<f64>() {
-                Ok(scale) => {
-                    store(app, "appearance/uiScale", scale);
-                    crate::platform::desktop::set_ui_scale(scale as f32);
-                }
-                Err(error) => eprintln!("clarp-slint: not an interface size {value}: {error}"),
-            },
+            |app| clarp_core::prefs::number_of(app.engine.borrow().settings(), "uiscale"),
+            |app, window, scale| crate::look::set_pref(app, window, "uiscale", &super::number_text(scale, 0.05)),
+            0.5,
+            3.0,
+            0.05,
+            "",
         )
+        .detail(|app| format!("{:.0}%", clarp_core::prefs::number_of(app.engine.borrow().settings(), "uiscale") * 100.0))
         .default("1.15"),
     ]
 }

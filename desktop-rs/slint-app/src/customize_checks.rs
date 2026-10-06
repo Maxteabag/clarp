@@ -148,7 +148,8 @@ pub fn customize_check(out: String) {
             let row = setting_row(window, "font-size").map(|(_, r)| r).unwrap_or_default();
             check(row.detail.contains("15 px") && !row.changed, &format!("Backspace puts the theme's size back: {} changed {}", row.detail, row.changed));
             check(stored("appearance/fontOverrides").is_none(), "and leaves nothing in the file");
-            check(run(window, "pref:color.text"), "Enter on a colour opens the picker");
+            // Enter on the colour's row (its catalogue action).
+            crate::settings_view::change(&app_now(), window, "color.text", 0);
             true
         })),
         ("picker", Box::new(|_, window, elapsed| {
@@ -180,7 +181,7 @@ pub fn customize_check(out: String) {
             }
             check(hex(window.global::<crate::Palette>().get_text()) == "#e7e1dc", "Escape puts the colour back");
             check(stored("appearance/colorOverrides").is_none(), "and nothing is kept");
-            run(window, "pref:color.accent");
+            crate::settings_view::change(&app_now(), window, "color.accent", 0);
             true
         })),
         ("accent", Box::new(|_, window, elapsed| {
@@ -291,6 +292,17 @@ pub fn customize_check(out: String) {
             if body(window) != 18.0 {
                 return false;
             }
+            // Numbers step in the catalogue's own control, from where they are.
+            let number = |name: &str| clarp_core::prefs::number_of(app_now().engine.borrow().settings(), name);
+            let app = app_now();
+            crate::settings_view::change(&app, window, "radius", -1);
+            check(number("radius") == 11.0, &format!("Left on Corner radius steps 12 → 11: {}", number("radius")));
+            crate::settings_view::change(&app, window, "measure", 1);
+            check(number("measure") == 40.0, &format!("Right on Line length goes from full width to 40 ch: {}", number("measure")));
+            crate::settings_view::change(&app, window, "measure", -1);
+            check(number("measure") == 0.0, &format!("and Left back to full width: {}", number("measure")));
+            crate::settings_view::reset(&app, window, "radius", false);
+            check(number("radius") == 6.0, &format!("Delete puts Corner radius's default back: {}", number("radius")));
             for line in [
                 "density=compact", "radius=0", "explorerwidth=240", "messagespacing=24", "bubblewidth=60", "measure=60", "paragraphspacing=16",
                 "chromesize=120", "headingscale=180", "codesize=110", "timeformat=24h", "timestamps", "avatarsize=large", "borderwidth=3", "panegap=10",

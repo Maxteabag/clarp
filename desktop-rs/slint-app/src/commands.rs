@@ -266,7 +266,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
     if crate::look::confirm_first(app, window, action) {
         return true;
     }
-    // Every preference: `pref:NAME`, `pref:NAME:+1`, resets, the file.
+    // `:set`, the settings file, reset all, the chat zoom.
     if let Some(ran) = crate::look::run(app, window, action) {
         return ran;
     }
@@ -608,12 +608,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "settings" => crate::settings_view::open(app, window),
         // Settings → Interface scale, a step at a time.
         "ui-larger" | "ui-smaller" | "ui-reset" => {
-            let pref = match action {
-                "ui-larger" => "pref:uiscale:1",
-                "ui-smaller" => "pref:uiscale:-1",
-                _ => "pref-reset:uiscale",
+            match action {
+                "ui-larger" => crate::look::step_setting(app, window, "ui-scale", 1),
+                "ui-smaller" => crate::look::step_setting(app, window, "ui-scale", -1),
+                _ => crate::catalogue::setting("ui-scale").is_some_and(|scale| scale.reset(app, window)),
             };
-            crate::look::run(app, window, pref);
         }
         "chats" => {
             window.set_surface("chats".into());
@@ -826,14 +825,8 @@ pub fn close_switcher(app: &App, window: &AppWindow, restore: Option<bool>) {
 pub fn switcher_adjusted(app: &Rc<App>, window: &AppWindow, index: i32, delta: i32) {
     let Some(item) = usize::try_from(index).ok().and_then(|i| app.switcher.borrow().items.get(i).cloned()) else { return };
     let Some(id) = item.target.strip_prefix("settingpicker:") else { return };
-    match crate::look::pref_of(id).filter(|spec| matches!(spec.kind, clarp_core::prefs::Kind::Number { .. })) {
-        // A number moves one step from where it is (the font size from the
-        // theme's own size, not from the top of its list).
-        Some(spec) => {
-            crate::look::run(app, window, &format!("pref:{}:{delta}", spec.name));
-        }
-        None => crate::settings_view::change(app, window, id, delta),
-    }
+    // A number steps from where it is; a choice to its next option.
+    crate::settings_view::change(app, window, id, delta);
     refresh_switcher(app, window);
 }
 

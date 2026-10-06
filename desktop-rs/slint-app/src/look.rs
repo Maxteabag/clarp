@@ -245,52 +245,12 @@ fn refresh_views(app: &Rc<App>, window: &AppWindow) {
     crate::commands::show_hints(app, window);
 }
 
-/// One `pref:` action: `pref:NAME` (Enter: flip, next choice, or the value
-/// editor), `pref:NAME:+1` / `:-1` (step), `pref-reset:NAME`,
-/// `pref-reset-section:SECTION`, `pref-reset-all`, `pref-edit-file`,
-/// `pref-export`, `pref-import`, `pref-set:NAME=VALUE`. True when it was one.
+/// One preference action: `pref-set:NAME=VALUE` (`:set`), `pref-reset-all`,
+/// `pref-edit-file`, `pref-export`, `pref-import`, and the chat's zoom
+/// (`chat-zoom-in`, `-out`, `-reset`, through its catalogue setting). True
+/// when it was one. Stepping and resetting one setting go through the
+/// catalogue (`Setting::change`, `Setting::reset`).
 pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> Option<bool> {
-    let theme = || prefs::theme_of(app.engine.borrow().settings());
-    if let Some(rest) = action.strip_prefix("pref:") {
-        let (name, delta) = match rest.rsplit_once(':') {
-            Some((name, delta)) if delta.parse::<i32>().is_ok() => (name, delta.parse::<i32>().ok()),
-            _ => (rest, None),
-        };
-        let Some(spec) = prefs::find(name) else {
-            eprintln!("clarp-slint: no setting {name}");
-            return Some(false);
-        };
-        match (delta, spec.kind) {
-            (Some(delta), _) => {
-                let theme = theme();
-                prefs::adjust(app.engine.borrow_mut().settings_mut(), spec, &theme, delta);
-            }
-            (None, Kind::Toggle { .. } | Kind::Choice { .. }) => {
-                let theme = theme();
-                prefs::adjust(app.engine.borrow_mut().settings_mut(), spec, &theme, 1);
-            }
-            (None, _) => {
-                open_editor(app, window, spec.name);
-                return Some(true);
-            }
-        }
-        changed(app, window, spec);
-        return Some(true);
-    }
-    if let Some(name) = action.strip_prefix("pref-reset:") {
-        let spec = prefs::find(name)?;
-        let theme = theme();
-        prefs::reset(app.engine.borrow_mut().settings_mut(), spec, &theme);
-        changed(app, window, spec);
-        return Some(true);
-    }
-    if let Some(section) = action.strip_prefix("pref-reset-section:") {
-        let theme = theme();
-        let count = prefs::reset_section(app.engine.borrow_mut().settings_mut(), section, &theme);
-        notice(vec![format!("{section}: {count} setting{} back to the default", if count == 1 { "" } else { "s" })]);
-        everything_changed(app, window);
-        return Some(true);
-    }
     if let Some(line) = action.strip_prefix("pref-set:") {
         let (name, value) = prefs::split_assignment(line);
         let result = prefs::set_text(app.engine.borrow_mut().settings_mut(), &name, &value);
@@ -308,14 +268,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> Option<bool> {
     }
     match action {
         // The chat's zoom (Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+wheel).
-        "chat-zoom-in" => run(app, window, "pref:chatzoom:1"),
-        "chat-zoom-out" => run(app, window, "pref:chatzoom:-1"),
-        "chat-zoom-reset" => run(app, window, "pref-reset:chatzoom"),
+        "chat-zoom-in" => Some(step_setting(app, window, "chatzoom", 1)),
+        "chat-zoom-out" => Some(step_setting(app, window, "chatzoom", -1)),
+        "chat-zoom-reset" => Some(crate::catalogue::setting("chatzoom").is_some_and(|zoom| zoom.reset(app, window))),
         "pref-reset-all" => {
-            let theme = theme();
-            let count = prefs::reset_all(app.engine.borrow_mut().settings_mut(), &theme);
-            notice(vec![format!("{count} setting{} back to the default", if count == 1 { "" } else { "s" })]);
-            everything_changed(app, window);
+            reset_all(app, window);
             Some(true)
         }
         "pref-edit-file" => Some(edit_file(app)),
@@ -326,6 +283,43 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> Option<bool> {
         }
         _ => None,
     }
+}
+
+/// One catalogue setting a step on (the chat's zoom, the window's scale).
+pub fn step_setting(app: &Rc<App>, window: &AppWindow, id: &str, delta: i32) -> bool {
+    match crate::catalogue::setting(id) {
+        Some(setting) => {
+            setting.change(app, window, delta);
+            true
+        }
+        None => {
+            eprintln!("clarp-slint: no setting {id} to step");
+            false
+        }
+    }
+}
+
+/// A colour or font back to the theme's or the default (the catalogue's
+/// reset for a setting the value editor sets).
+pub fn reset_pref(app: &Rc<App>, window: &AppWindow, name: &str) {
+    let Some(spec) = prefs::find(name) else { return };
+    let theme = prefs::theme_of(app.engine.borrow().settings());
+    prefs::reset(app.engine.borrow_mut().settings_mut(), spec, &theme);
+    changed(app, window, spec);
+}
+
+/// Every setting back to its default: the preferences in the settings file
+/// at once, then the catalogue's settings that are not preferences (the
+/// explorer, ...). How many changed.
+pub fn reset_all(app: &Rc<App>, window: &AppWindow) -> usize {
+    let theme = prefs::theme_of(app.engine.borrow().settings());
+    let stored = prefs::reset_all(app.engine.borrow_mut().settings_mut(), &theme);
+    everything_changed(app, window);
+    let others = crate::catalogue::settings().iter().filter(|s| pref_of(s.id()).is_none()).filter(|s| s.reset(app, window)).count();
+    let count = stored + others;
+    notice(vec![format!("{count} setting{} back to the default", if count == 1 { "" } else { "s" })]);
+    refresh_views(app, window);
+    count
 }
 
 fn everything_changed(app: &Rc<App>, window: &AppWindow) {
@@ -728,7 +722,7 @@ pub fn wire(app: &Rc<App>, window: &AppWindow) {
     editor.on_confirmed(|| with_window(confirmed));
     window.global::<Look>().on_zoom_by(|delta| {
         with_window(|app, window| {
-            run(app, window, &format!("pref:chatzoom:{delta}"));
+            step_setting(app, window, "chatzoom", delta);
         })
     });
     let problems = prefs::problems(app.engine.borrow().settings());
