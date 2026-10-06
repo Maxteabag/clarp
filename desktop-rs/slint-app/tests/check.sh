@@ -31,6 +31,8 @@ passes=(once); [ "$name" = startup ] && passes=(cold warm)
 settings=off; case $name in keymap|fonts) passes=(once restart); settings="$scratch/settings.json" ;; esac
 # customize edits its settings file by hand, as a person would.
 [ "$name" = customize ] && settings="$scratch/settings.json"
+# chat-zoom zooms, then starts again (restart) to find the zoom kept.
+[ "$name" = chat-zoom ] && { passes=(once restart); settings="$scratch/settings.json"; }
 # form-events runs it twice too: what the first run queued is delivered by
 # the second (the scratch data folder and the fake Host outlive the app).
 [ "$name" = form-events ] && passes=(first second)
