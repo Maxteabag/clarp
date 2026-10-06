@@ -107,3 +107,28 @@ def test_core_skill_cannot_be_disabled(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(ValueError, match="core"):
         managed_skills.set_enabled("clarp-core", False)
+
+
+def test_antigravity_gets_the_skills_where_it_is_installed(tmp_path, monkeypatch):
+    release, _state = configure(tmp_path, monkeypatch)
+    agy_root = tmp_path / "gemini/config/skills"
+    monkeypatch.setattr(managed_skills, "AGY_SKILLS", agy_root)
+    managed_skills.set_enabled("clarp-extra", True)
+    assert not (tmp_path / "gemini").exists()          # no agy config, nothing created
+    agy_root.parent.mkdir(parents=True)                 # agy installed
+    managed_skills.set_enabled("clarp-extra", True)
+    assert (agy_root / "clarp-extra").resolve() == (release / "skills/clarp-extra").resolve()
+    row = next(r for r in managed_skills.status() if r["id"] == "clarp-extra")
+    assert row["links"]["agy"] == "healthy" and row["health"] == "healthy"
+
+
+def test_a_skills_folder_shared_by_symlink_is_written_once(tmp_path, monkeypatch):
+    configure(tmp_path, monkeypatch)
+    shared = managed_skills.CLAUDE_SKILLS
+    shared.mkdir(parents=True)
+    (tmp_path / "gemini/config").mkdir(parents=True)
+    (tmp_path / "gemini/config/skills").symlink_to(shared, target_is_directory=True)
+    monkeypatch.setattr(managed_skills, "AGY_SKILLS", tmp_path / "gemini/config/skills")
+    managed_skills.set_enabled("clarp-extra", True)
+    row = next(r for r in managed_skills.status() if r["id"] == "clarp-extra")
+    assert row["links"] == {"claude": "healthy", "codex": "healthy", "agy": "healthy"}
