@@ -996,10 +996,10 @@ export component Transcript inherits FocusScope {
     property <length> above: root.measured ? root.before[Math.min(root.top-index, root.before.length - 1)] * 1px - root.top-y : -list.content-y;
     property <length> range: Math.max(1px, root.total - list.visible-height);
     property <float> scroll-place: root.at-end ? 1 : list.content-y >= 0 ? 0 : Math.clamp(root.above / root.range, 0, 1);
-    // Ctrl+wheel zooms the chats (Settings → Chat zoom). It takes the wheel
-    // only while Ctrl is held, so clicks and plain scrolling reach the rows.
-    TouchArea {
-        enabled: Look.ctrl-held;
+    // Ctrl+wheel zooms the chats (Settings → Chat zoom). It is there only
+    // while Ctrl is held, so clicks and plain scrolling reach the rows (and
+    // an idle chat has nothing more to draw).
+    if Look.ctrl-held: TouchArea {
         // Ctrl let go while the window was away: the pointer says so.
         pointer-event(event) => {
             if (!event.modifiers.control) { Look.ctrl-held = false; }
