@@ -95,6 +95,9 @@ _STOPPING_SENTINEL = turn_slots.STOPPING_SENTINEL
 # sends wait behind it (see _claim_or_queue).
 _PROCESS_OWNER_PREFIX = "process:"
 _PROCESS_EXIT_POLL_S = 0.25
+# A settled turn whose slot is still held this long after it settled leaked
+# (see TurnDispatchService.release_leaked_slots).
+LEAKED_SLOT_GRACE_MS = 60_000
 
 
 def configure_runtime_client(client: Any | None) -> None:
@@ -1326,10 +1329,13 @@ class TurnDispatchService:
         """True if the agent currently has a real in-flight turn process. Used
         to detect a leaked in-flight slot (marked busy, but the process is
         gone)."""
-        if _terminal_live(spec.agent_id):
+        return self._agent_has_live_turn(spec.agent_id, spec.backend)
+
+    def _agent_has_live_turn(self, agent_id: str, backend: str) -> bool:
+        if _terminal_live(agent_id):
             return True  # interactive terminal holds the session
         try:
-            return bool(self.backends.active_handles(spec.backend, spec.agent_id))
+            return bool(self.backends.active_handles(backend, agent_id))
         except Exception:  # noqa: BLE001
             return True  # can't tell → assume live (don't double-spawn)
 
@@ -1346,12 +1352,14 @@ class TurnDispatchService:
         over the in-flight slot and spawn it; otherwise free the slot. Guarded
         by trace so a duplicate terminal callback (or a superseded turn) is a
         no-op."""
-        agent_id = spec.agent_id
+        self._finish_slot(spec.agent_id, spec.trace_id, spec.backend)
+
+    def _finish_slot(self, agent_id: str, trace_id: str, backend: str) -> None:
         with _TURN_LOCK:
-            if _SLOTS.get(agent_id) != spec.trace_id:
+            if _SLOTS.get(agent_id) != trace_id:
                 return  # not the current turn — already drained / superseded
-            account_failover(spec.backend).discard(agent_id, spec.trace_id)
-            next_spec = _SLOTS.pop_next(agent_id, expected=spec.trace_id)
+            account_failover(backend).discard(agent_id, trace_id)
+            next_spec = _SLOTS.pop_next(agent_id, expected=trace_id)
             if next_spec is None:
                 return
             # The handover is decided; the spawn runs once no thread waits on
@@ -1803,10 +1811,12 @@ class TurnDispatchService:
             return True
 
         def on_result(event: dict) -> None:
-            if (self._superseded(spec) or state.get("account_recovery")
-                    or state.get("outcome_seen")):
+            if state.get("account_recovery") or state.get("outcome_seen"):
                 return
             state["outcome_seen"] = True
+            if self._superseded(spec):
+                self._release_superseded(spec)
+                return
             try:
                 if state.get("bind_error"):
                     self._handle_failure(
@@ -1868,10 +1878,12 @@ class TurnDispatchService:
                 self._finish_turn(spec)
 
         def on_error(message: str) -> None:
-            if (self._superseded(spec) or state.get("account_recovery")
-                    or state.get("outcome_seen")):
+            if state.get("account_recovery") or state.get("outcome_seen"):
                 return
             state["outcome_seen"] = True
+            if self._superseded(spec):
+                self._release_superseded(spec)
+                return
             try:
                 category = (error_classify.RUNNER_EXIT if state.get("bind_error")
                             else judgment_sites.classify_error_or_unknown(
@@ -2091,6 +2103,69 @@ class TurnDispatchService:
                     agents_db.interaction_capabilities(agent)["can_chat"] else "")
         except Exception:
             return ""
+
+    def _release_superseded(self, spec: _TurnSpec) -> None:
+        """A superseded turn records no state, but its slot is a separate
+        question: the agent's trace also moves when a hook inside this very
+        process mints one (UserPromptSubmit after the trace TTL), and then no
+        newer turn holds the slot. Only the trace holding the slot may give it
+        back, which is exactly what _finish_turn checks."""
+        with _TURN_LOCK:
+            owned = _SLOTS.owns(spec.agent_id, spec.trace_id)
+        if owned:
+            log("supersededTurnReleased",
+                f"agent={spec.agent_id} trace={spec.trace_id} "
+                f"agent_trace={agents_db.get_trace(spec.agent_id) or '∅'} — "
+                f"trace moved on but this turn still held the slot; releasing")
+        self._finish_turn(spec)
+
+    def release_leaked_slots(
+        self, *, grace_ms: int = LEAKED_SLOT_GRACE_MS,
+    ) -> dict[str, str]:
+        """Release every slot no process owns once its turn has settled.
+
+        A turn whose terminal callback never ran (or ran and bailed) keeps its
+        slot forever, and a held slot blocks the runtime's idle handoff. A
+        slot is leaked when the agent has no live process, terminal or spawn,
+        and its newest state is terminal for at least ``grace_ms`` (a finishing
+        turn records DONE just before it releases). Queued work behind it takes
+        the slot as after a normal finish. Returns {agent_id: released trace}.
+        """
+        released: dict[str, str] = {}
+        now = db.now_ms()
+        for agent_id, trace_id in _SLOTS.snapshot()["active"].items():
+            try:
+                agent = agents_db.get_by_agent_id(agent_id)
+                if agent is None:
+                    log("leakedSlotUnknownAgent",
+                        f"agent={agent_id} trace={trace_id} — slot held by an "
+                        f"agent with no row; left alone")
+                    continue
+                backend = self.backends.normalize(agent.get("backend"))
+                state = agents_db.latest_state(agent_id) or {}
+                if (state.get("kind") not in turn_lifecycle.TERMINAL
+                        or now - int(state.get("ts") or now) < grace_ms):
+                    continue
+                if (_SLOTS.is_spawning(agent_id)
+                        or self._agent_has_live_turn(agent_id, backend)):
+                    continue
+                external = getattr(self.backends, "external_live_work", None)
+                if external is not None and external(backend, agent_id):
+                    continue
+                if not _SLOTS.owns(agent_id, trace_id):
+                    continue
+                log("leakedSlotReleased",
+                    f"agent={agent_id} trace={trace_id} state={state['kind']} "
+                    f"settled_ms_ago={now - int(state['ts'])} — slot held with "
+                    f"no live process after its turn settled; releasing")
+                eventlog.emit("server", "leakedSlotReleased", detail={
+                    "agent_id": agent_id, "trace_id": trace_id,
+                    "state": state["kind"]})
+                self._finish_slot(agent_id, trace_id, backend)
+                released[agent_id] = trace_id
+            except Exception as exc:  # noqa: BLE001 - check the other slots
+                log_exception("leakedSlotCheckFail", exc, detail=agent_id)
+        return released
 
     def _superseded(self, spec: _TurnSpec, *, locked: bool = True) -> bool:
         """True if a newer turn has taken over this agent since `spec` was

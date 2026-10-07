@@ -312,6 +312,24 @@ def test_runtime_drain_waits_for_idle_and_fences_new_dispatch(tmp_path):
         runtime.server_close()
 
 
+def test_runtime_drain_releases_a_leaked_slot_before_judging_idle(tmp_path):
+    status = {"active": {"agent-1": "trace-1"}, "queued": {}}
+
+    class LeakHealingRuntime(RecordingRuntime):
+        def release_leaked_slots(self):
+            status["active"] = {}
+            return {"agent-1": "trace-1"}
+
+    runtime = RuntimeRPCServer(
+        tmp_path / "runtime.sock", dispatch_service=LeakHealingRuntime(),
+        status_provider=lambda: status,
+    )
+    try:
+        assert runtime.begin_drain_if_idle() is True
+    finally:
+        runtime.server_close()
+
+
 def test_backend_control_uses_runtime_owner_from_server_process():
     class RuntimeOwner:
         def __init__(self):

@@ -657,6 +657,12 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             with self._stop_lease_lock:
                 if self._stop_leases:
                     return False
+            # A slot whose turn settled without releasing it would hold the
+            # handoff off forever; give those back before judging idleness.
+            release_leaked = getattr(
+                self.dispatch_service, "release_leaked_slots", None)
+            if release_leaked is not None:
+                release_leaked()
             status = dict(self.status_provider())
             if (status.get("active") or status.get("spawning")
                     or status.get("terminals") or status.get("queued")
