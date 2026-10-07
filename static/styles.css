@@ -1062,6 +1062,29 @@ body.chat-open .status { display: none !important; }
   color: #f7768e;
 }
 
+/* What the Host says about a turn it ended (failed, cut short by a
+   restart): a notice, never dressed as the agent's reply. */
+.turn.notice { background: transparent; }
+.turn-notice {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(247, 118, 142, 0.45);
+  border-radius: 6px;
+  background: color-mix(in srgb, #f7768e 7%, transparent);
+  font: 13px/1.4 var(--font-body);
+}
+.turn-notice .tn-glyph { color: #f7768e; font-weight: 700; }
+.turn-notice .tn-message { color: var(--washi, inherit); }
+.turn-notice .tn-detail {
+  margin-top: 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--washi-dim);
+  overflow-wrap: anywhere;
+}
+
 .turn.activity {
   display: flex;
   align-items: center;

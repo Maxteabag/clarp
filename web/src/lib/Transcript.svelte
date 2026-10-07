@@ -35,7 +35,7 @@
   // value (a number) between events, so the turn filter, the merged timeline
   // and the keyed list below are not rebuilt per event.
   let lastHidden = null;
-  let hidden = $derived.by(() => (lastHidden = takenOverTurns(conv.turns, liveItems, lastHidden)));
+  let hidden = $derived.by(() => (lastHidden = takenOverTurns(conv.turns, liveItems, lastHidden, liveState && liveState.turn)));
   let turns = $derived(hidden.size ? conv.turns.filter(t => !hidden.has(t.id)) : conv.turns);
   // Read both lists at the top level so the tracking sees them.
   let merged = $derived(mergeTimeline(turns, liveItems.length ? [] : conv.activity));

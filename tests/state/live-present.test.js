@@ -11,7 +11,7 @@ import {
   applyLiveEvent, applyLiveSnapshot, blankLive, liveItems,
 } from '@core/live-items.js';
 import {
-  activityFromStatus, cellRow, clock, currentTurnItems, liveInsertIndex, formatDuration, liveRows, settledFold, statusLine, takenOverTurns,
+  activityFromStatus, cellRow, clock, currentTurnItems, liveInsertIndex, formatDuration, liveRows, settledFold, statusLine, systemNotice, takenOverTurns,
 } from '@core/live-present.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -387,5 +387,65 @@ describe('takeover set identity', () => {
     const next = takenOverTurns([...turns, { id: 'live-2', kind: 'live' }], items, first);
     expect(next).not.toBe(first);
     expect([...next].sort()).toEqual(['live-1', 'live-2']);
+  });
+});
+
+// Solu's turns on 2026-10-07 died at compaction on a model the Codex login's
+// plan no longer included. The chat folded them behind "Worked for 1s", as
+// if they had answered (Host contract 54, feature turn_failure_reason).
+describe('a failed turn', () => {
+  const REFUSAL = "Error running remote compact task: The 'gpt-6-astra' model is not supported when using Codex with a ChatGPT account.";
+  const MESSAGE = "This account's plan does not include gpt-6-astra. Switch to an account that has it or choose another model";
+  const failed = {
+    turn_id: '2B4F9759', status: 'failed', worked_ms: 1200, tool_count: 0,
+    error: { reason: 'account_plan', message: MESSAGE, detail: REFUSAL },
+  };
+  const compaction = [{ id: 'cx:2B4F9759:compaction', kind: 'compaction', status: 'interrupted', ordinal: 1 }];
+
+  it('says it failed and why, instead of how long it worked', () => {
+    const fold = settledFold(failed, liveRows(compaction, on));
+    expect(fold.label).toBe('Failed after 1s');
+    expect(fold.error).toEqual({ message: MESSAGE, detail: REFUSAL });
+  });
+
+  it('still reads as failed from a Host that sends no reason', () => {
+    const fold = settledFold({ ...failed, error: undefined }, liveRows(compaction, on));
+    expect(fold.label).toBe('Failed after 1s');
+    expect(fold.error).toEqual({ message: 'Turn failed', detail: '' });
+  });
+
+  it('carries no error when it completed or was stopped', () => {
+    const done = settledFold({ ...failed, status: 'completed', error: undefined }, []);
+    expect(done.label).toBe('Worked for 1s');
+    expect(done.error).toBeNull();
+    const stopped = settledFold({ ...failed, status: 'interrupted', error: undefined }, []);
+    expect(stopped.label).toBe('Stopped after 1s');
+    expect(stopped.error).toBeNull();
+  });
+
+  const failureRow = {
+    id: 'marker-u-28B0E933', role: 'assistant', origin: 'system', trace_id: '2B4F9759',
+    text: `${MESSAGE}.\n\n${REFUSAL}`,
+  };
+
+  it('shows the Host failure row as a notice, not a reply', () => {
+    expect(systemNotice(failureRow)).toEqual({ message: `${MESSAGE}.`, detail: REFUSAL });
+    expect(systemNotice({ ...failureRow, text: 'Turn interrupted by server restart' }))
+      .toEqual({ message: 'Turn interrupted by server restart', detail: '' });
+    // Replies, prompts and the dream digest stay what they are.
+    expect(systemNotice({ ...failureRow, origin: 'user' })).toBeNull();
+    expect(systemNotice({ ...failureRow, origin: undefined })).toBeNull();
+    expect(systemNotice({ ...failureRow, origin: 'dreaming' })).toBeNull();
+    expect(systemNotice({ ...failureRow, role: 'user' })).toBeNull();
+  });
+
+  it('shows the failure once while the live turn is on screen', () => {
+    const other = { ...failureRow, id: 'marker-u-older', trace_id: 'older' };
+    const reply = { id: 'r1', role: 'assistant', text: 'hello', trace_id: '2B4F9759' };
+    const hidden = takenOverTurns([failureRow, other, reply], compaction, null, failed);
+    expect([...hidden]).toEqual(['marker-u-28B0E933']);
+    // A live turn without an error leaves the durable row in view.
+    const plain = takenOverTurns([failureRow], compaction, null, { ...failed, error: undefined });
+    expect(plain.size).toBe(0);
   });
 });

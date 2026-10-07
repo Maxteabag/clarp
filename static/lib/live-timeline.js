@@ -24,7 +24,7 @@ export function withLiveEntry(merged, at) {
 
 export function composeTimeline({ turns = [], activity = [], liveState = null, previousHidden = null } = {}) {
   const items = liveState ? currentTurnItems(liveState) : [];
-  const hidden = takenOverTurns(turns, items, previousHidden);
+  const hidden = takenOverTurns(turns, items, previousHidden, liveState && liveState.turn);
   const kept = hidden.size ? turns.filter(t => !hidden.has(t.id)) : turns;
   const merged = mergeTimeline(kept, items.length ? [] : activity);
   const at = items.length ? liveInsertIndex(merged.map(e => e.item), liveState.turn) : -1;
