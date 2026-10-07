@@ -370,8 +370,9 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
   label + elapsed + status). With `explain.text` present it is the secondary line,
   in a reserved one-line slot so the row never changes height when it arrives;
   only while `explain.status` is `pending` and the turn is running does the slot
-  read a faint `Explaining…`. `null` (never requested), `failed`, `skipped` or any
-  other status shows nothing; once the turn has ended nothing says it is coming.
+  read a faint `Explaining…`. `null` (never requested), `failed` (whatever its
+  `reason`, e.g. `skipped`; its text is not shown) or any other status shows
+  nothing; once the turn has ended nothing says it is coming.
   With the setting off, the secondary line is the raw `tool.command`. Clients
   keep their per-device detail level for the existing `POST /tool-explanations`
   path; items use the Host level.

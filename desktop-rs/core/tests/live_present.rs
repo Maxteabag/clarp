@@ -268,14 +268,21 @@ fn a_tool_waiting_for_its_explanation_says_explaining() {
     ]});
     view.apply_event(pending.as_object().unwrap());
     assert!(present(&view, &[], &options(&[], 1759480005000)).entries.last().unwrap().explaining, "pending");
-    for state in ["failed", "skipped", "queued"] {
+    // Contract 55 settles every explanation ready or failed (with a reason);
+    // anything but pending is not coming, and a failed one shows nothing.
+    for explain in [
+        json!({"level": 2, "status": "failed", "reason": "skipped"}),
+        json!({"level": 2, "status": "failed", "reason": "error", "text": "explainer timed out"}),
+        json!({"level": 2, "status": "skipped"}),
+        json!({"level": 2, "status": "queued"}),
+    ] {
         let mut settled = view.clone();
         let op = json!({"type": "live", "conv": "conv-1", "epoch": "boot-a", "lseq": 15, "ops": [
-            {"op": "upsert", "conv": "conv-1", "id": "cl:toolu_03", "kind": "tool", "rev": 3, "item": {"tool": {"explain": {"level": 2, "status": state}}}},
+            {"op": "upsert", "conv": "conv-1", "id": "cl:toolu_03", "kind": "tool", "rev": 3, "item": {"tool": {"explain": explain}}},
         ]});
         settled.apply_event(op.as_object().unwrap());
         let tool = present(&settled, &[], &options(&[], 1759480005000)).entries.last().unwrap().clone();
-        assert!(!tool.explaining, "{state}: nothing");
+        assert!(!tool.explaining && tool.secondary.is_empty(), "{explain}: nothing");
     }
     let explained = present(&turn_full(after(15)), &[], &options(&[], 1759480005300));
     let tool = explained.entries.last().unwrap();
@@ -340,7 +347,7 @@ fn a_running_tool_whose_log_row_landed_at_its_start_keeps_its_live_row() {
     assert_eq!(p.absorbed_rows, ["msg-e60c25b9161ac8b660ca"]);
     assert!(tool.explaining, "the turn still running, the explanation still pending");
     let ended = json!({"type": "live", "conv": "c-probe", "epoch": "26f356fdabe6", "lseq": 45, "ops": [
-        {"op": "turn", "conv": "c-probe", "turn": {"turn_id": "2b2b466e35457fb0", "status": "failed", "started_at_ms": 1791028403856, "ended_at_ms": 1791028426000, "worked_ms": 22144, "tool_count": 1}},
+        {"op": "turn", "conv": "c-probe", "turn": {"turn_id": "2b2b466e35457fb0", "status": "failed", "started_at_ms": 1791028403856_i64, "ended_at_ms": 1791028426000_i64, "worked_ms": 22144, "tool_count": 1}},
     ]});
     view.apply_event(ended.as_object().unwrap());
     let p = present(&view, &rows, &options(&[], started + 21_000));

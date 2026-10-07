@@ -564,14 +564,15 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
     // explanations off the raw command.
     let explain = object(tool, "explain");
     if options.explanations {
-        entry.secondary = explain.map(|e| text(e, "text")).unwrap_or_default().to_owned();
+        // A failed explanation (contract 55: with a `reason`) shows nothing.
+        let state = explain.map(|e| text(e, "status")).unwrap_or_default();
+        entry.secondary = explain.filter(|_| state != "failed").map(|e| text(e, "text")).unwrap_or_default().to_owned();
         // The line says Explaining… only while the Host has one pending;
         // none requested (null), failed or skipped shows nothing. A running
         // tool keeps the line so a late explanation lands without moving
         // the chat. A settled turn clears it (`present`).
-        let pending = explain.is_some_and(|e| text(e, "status") == "pending");
-        entry.explaining = entry.secondary.is_empty() && pending;
-        entry.reserve_secondary = entry.explaining || !is_terminal(&status);
+        entry.explaining = entry.secondary.is_empty() && state == "pending";
+        entry.reserve_secondary = entry.explaining || (!is_terminal(&status) && state != "failed");
     } else {
         entry.secondary = tool.get("command").and_then(Value::as_str).filter(|c| *c != label).unwrap_or_default().to_owned();
     }
