@@ -67,6 +67,9 @@ pub struct PaneState {
     /// Durable rows that took over live rows: row id → the place (key)
     /// they took, kept while the chat is shown so the row never moves.
     slots: std::collections::HashMap<String, String>,
+    /// Unsent messages of one's own: when each was first shown (its status
+    /// shows once `SEND_STATUS_GRACE` has passed).
+    unsent: std::collections::HashMap<String, std::time::Instant>,
 }
 
 impl PaneState {
@@ -108,6 +111,7 @@ impl PaneState {
             draft_cursor: 0,
             cards: std::collections::HashMap::new(),
             slots: std::collections::HashMap::new(),
+            unsent: std::collections::HashMap::new(),
         }
     }
 }
@@ -558,6 +562,8 @@ impl App {
         let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
         pane.presented_with = Some(self.presentation_key());
         let built = pane.rows.rows(&presented, always, &expanded);
+        let now = std::time::Instant::now();
+        let mut unsent = std::collections::HashMap::new();
         let mut kept = std::collections::HashMap::new();
         let rows: Vec<MessageRow> = presented
             .iter()
@@ -566,6 +572,25 @@ impl App {
             .map(|((row, artifacts), mut shown)| {
                 if !stamps {
                     shown.stamp = SharedString::new();
+                }
+                // An unsent message says so only once the grace period has
+                // passed; the pane is refreshed then, once.
+                if shown.pending {
+                    let since = pane.unsent.get(&row.message.id).copied();
+                    let first = since.unwrap_or(now);
+                    unsent.insert(row.message.id.clone(), first);
+                    match crate::view::send_status_due(now.duration_since(first)) {
+                        Ok(()) => shown.status_due = true,
+                        Err(left) if since.is_none() => {
+                            let session = pane.session.clone();
+                            slint::Timer::single_shot(left, move || {
+                                if let Some(app) = crate::app() {
+                                    app.refresh(&[Change::Conversation(session)]);
+                                }
+                            });
+                        }
+                        Err(_) => {}
+                    }
                 }
                 // A message addressed to this chat's agent by an @-mention.
                 if shown.author == "user" {
@@ -591,6 +616,7 @@ impl App {
             })
             .collect();
         pane.cards = kept;
+        pane.unsent = unsent;
         // Opened activity the Host sent without its tool calls: fetch them.
         let mut engine = self.engine.borrow_mut();
         for (row, shown) in presented.iter().zip(&rows) {
@@ -654,7 +680,8 @@ impl App {
             let pictures = if row.blocks.iter().any(|b| b.kind == "images") { crate::artifacts_view::pictures_landed() } else { 0 };
             let receipt = format!("{}:{}:{}", row.receipt.agent, row.receipt.kind, row.receipt.linked);
             // Another agent's prompt is drawn again when it opens or folds.
-            format!("{cards}|{}|{pictures}|{receipt}|{}", explained.join(","), row.prompt.expanded)
+            // An unsent message is drawn again when its status becomes due.
+            format!("{cards}|{}|{pictures}|{receipt}|{}|{}", explained.join(","), row.prompt.expanded, row.status_due)
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let mut fresh: Vec<Shown> = presented

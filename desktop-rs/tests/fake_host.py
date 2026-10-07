@@ -106,6 +106,9 @@ form_event_config = {}
 form_event_lost_receipts = 0
 # Seconds an older page (/log?before=) takes; /__control/older-delay sets it.
 older_delay = 0.0
+# Seconds a /send takes to be filed and answered (a slow Host's ack);
+# /__control/send-delay sets it.
+send_delay = 0.0
 CLOSE = object()
 # Live items (docs/live-items.md): off until /__control/live turns the
 # feature on. The recorded streams in contract/live/ are replayed as `live`
@@ -998,6 +1001,11 @@ class Handler(BaseHTTPRequestHandler):
             global older_delay
             older_delay = float(body.get("seconds", 0))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/send-delay":
+            # Test control: each /send is filed and answered after `seconds`.
+            global send_delay
+            send_delay = float(body.get("seconds", 0))
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/upsert":
             # Test control: update turns by id (a streaming reply growing) or
             # append them, each with a new revision, and announce it.
@@ -1440,6 +1448,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/send":
             session = body["session"]
+            if send_delay:
+                time.sleep(send_delay)
+            failure = failures.get(url.path)
+            if failure and failure[1] > 0:
+                failure[1] -= 1
+                return self.reply(failure[0], {"error": "Internal Server Error"})
             if body.get("text") == "never-file":
                 # Accepted but never filed: the client must time the send out.
                 return self.reply(200, {"ok": True})

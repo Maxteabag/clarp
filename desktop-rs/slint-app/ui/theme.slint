@@ -42,6 +42,37 @@ export global ChatLook {
     in property <bool> live-status-line;
     in property <bool> reduced-motion;
     in property <bool> window-shown: true;
+    // Settings → Send animation (on by default): a sent message flies from
+    // the composer to its place in the chat.
+    in property <bool> send-animation: true;
+}
+
+// A send as it is drawn (workspace.slint): how long its animations take,
+// the grace period before an unsent message or a queued send says so
+// (Rust's SEND_STATUS_GRACE), and the last send's animation, for the
+// checks: its row, "flight" (the text flies to the bubble), "fade" (the
+// bubble fades in) or "" once it has landed, where it started and where it
+// is (in the window).
+export global SendFlight {
+    out property <duration> flight: 300ms;
+    out property <duration> fade: 150ms;
+    in property <duration> status-grace: 1500ms;
+    in-out property <string> id;
+    in-out property <string> phase;
+    in-out property <int> started;
+    in-out property <int> landed;
+    in-out property <length> from-x;
+    in-out property <length> from-y;
+    in-out property <length> from-width;
+    in-out property <length> from-height;
+    // Each frame of the animation: how far it is (0 to 1, eased), the
+    // flying text's box and the composer's height.
+    in-out property <float> progress;
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <length> width;
+    in-out property <length> height;
+    in-out property <length> composer-height;
 }
 
 // The reader's own look (Settings → Typography and Layout; clarp_core::prefs),
