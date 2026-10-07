@@ -1,5 +1,5 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
-import { Palette, Focus, FocusRing, ChatLook, Look, VimBridge, SendFlight } from "theme.slint";
+import { Palette, Focus, FocusRing, ChatLook, Look, VimBridge, SendFlight, ChromeText } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
 import { Attachment, MentionRow, MentionBridge } from "composer.slint";
@@ -88,7 +88,7 @@ component ShortcutBar inherits Rectangle {
                 height: parent.height;
                 text: root.vim-mode;
                 color: Palette.sunken;
-                font-size: 11px;
+                font-size: 11 * Look.unit;
                 font-weight: 700;
                 vertical-alignment: center;
                 horizontal-alignment: center;
@@ -102,7 +102,7 @@ component ShortcutBar inherits Rectangle {
             horizontal-stretch: 1;
             text: root.vim-line + "▏";
             color: Palette.chrome-text;
-            font-size: 12px;
+            font-size: 12 * Look.unit;
             vertical-alignment: center;
             overflow: elide;
         }
@@ -126,7 +126,7 @@ component ShortcutBar inherits Rectangle {
         if root.vim-message != "": Text {
             text: root.vim-message;
             color: Palette.muted;
-            font-size: 11px;
+            font-size: 11 * Look.unit;
             vertical-alignment: center;
             max-width: 360px;
             overflow: elide;
@@ -145,10 +145,11 @@ export component AppWindow inherits Window {
     preferred-width: 1100px;
     preferred-height: 700px;
     background: Palette.window;
-    // The chrome keeps the terminal face; the reading theme styles the
-    // transcript and the composer (as in the Qt app).
+    // The chrome keeps the terminal face and Interface size; the reading
+    // theme styles the transcript and the composer (as in the Qt app), each
+    // text with its own size.
     default-font-family: "JetBrains Mono";
-    default-font-size: Palette.body-size;
+    default-font-size: ChromeText.body;
     default-font-weight: Look.weight;
 
     in property <[ChatRow]> chats;
@@ -452,6 +453,7 @@ export component AppWindow inherits Window {
                         padding-left: 16px;
                         padding-right: 16px;
                         Text {
+                            font-size: ChromeText.body;
                             text: root.error;
                             color: Palette.danger;
                             vertical-alignment: center;
@@ -603,11 +605,11 @@ export component AppWindow inherits Window {
             which-list := VerticalLayout {
                 padding: 10px;
                 spacing: 2px;
-                Text { text: root.vim-pending; color: Palette.accent; font-size: 12px; font-weight: 700; }
+                Text { text: root.vim-pending; color: Palette.accent; font-size: 12 * Look.unit; font-weight: 700; }
                 for hint in root.vim-which: HorizontalLayout {
                     spacing: 12px;
-                    Text { text: hint.keys; width: 52px; color: Palette.accent; font-size: 12px; font-weight: 700; horizontal-alignment: right; }
-                    Text { text: hint.label; color: Palette.chrome-text; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+                    Text { text: hint.keys; width: 52px; color: Palette.accent; font-size: 12 * Look.unit; font-weight: 700; horizontal-alignment: right; }
+                    Text { text: hint.label; color: Palette.chrome-text; font-size: 12 * Look.unit; overflow: elide; horizontal-stretch: 1; }
                 }
             }
         }
@@ -649,22 +651,22 @@ export component AppWindow inherits Window {
                 help-column := VerticalLayout {
                     padding: 18px;
                     spacing: 12px;
-                    Text { text: root.help-title; color: Palette.chrome-text; font-size: 15px; font-weight: 700; }
+                    Text { text: root.help-title; color: Palette.chrome-text; font-size: 15 * Look.unit; font-weight: 700; }
                     HorizontalLayout {
                         spacing: 28px;
                         alignment: start;
                         for group in root.help-groups: VerticalLayout {
                             spacing: 4px;
                             alignment: start;
-                            Text { text: group.title; color: Palette.muted; font-size: 11px; font-weight: 700; }
+                            Text { text: group.title; color: Palette.muted; font-size: 11 * Look.unit; font-weight: 700; }
                             for item in group.items: HorizontalLayout {
                                 spacing: 10px;
-                                Text { text: item.keys; min-width: 72px; color: Palette.accent; font-size: 12px; font-weight: 700; }
-                                Text { text: item.label; color: Palette.chrome-text; font-size: 12px; }
+                                Text { text: item.keys; min-width: 72px; color: Palette.accent; font-size: 12 * Look.unit; font-weight: 700; }
+                                Text { text: item.label; color: Palette.chrome-text; font-size: 12 * Look.unit; }
                             }
                         }
                     }
-                    Text { text: root.help-footer; color: Palette.muted; font-size: 11px; wrap: word-wrap; }
+                    Text { text: root.help-footer; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
                 }
             }
         }

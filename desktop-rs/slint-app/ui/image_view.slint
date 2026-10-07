@@ -1,4 +1,4 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, ChromeText } from "theme.slint";
 import { KeyHint } from "artifacts.slint";
 import { MessageImage } from "transcript.slint";
 
@@ -35,6 +35,7 @@ export component ImageView inherits Rectangle {
                 accessible-label: root.shown.alt;
             }
             if !root.shown.loaded: Text {
+                font-size: ChromeText.body;
                 width: parent.width;
                 height: parent.height;
                 text: root.shown.failed ? "Image unavailable" : "Loading…";

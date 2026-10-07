@@ -1,6 +1,6 @@
 import { Button, ComboBox, ListView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, ChromeText } from "theme.slint";
 import { Modal } from "dialogs.slint";
 import { IconButton } from "launch.slint";
 
@@ -75,6 +75,7 @@ export component RenameAgentDialog inherits Modal {
             wrap: word-wrap;
         }
         if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
+            font-size: ChromeText.body;
             text: AgentDialogs.error != "" ? AgentDialogs.error : "Connect to the Host to rename a contact";
             color: Palette.warning;
             wrap: word-wrap;
@@ -130,6 +131,7 @@ component Radio inherits Rectangle {
             }
         }
         Text {
+            font-size: ChromeText.body;
             text: root.text;
             color: root.enabled ? Palette.text : Palette.faint;
             vertical-alignment: center;
@@ -181,6 +183,7 @@ export component AssignAgentDialog inherits Modal {
                 accessible-label: "Contact";
             }
             if AgentDialogs.assign-mode == "choose" && AgentDialogs.assign-contacts.length == 0: Text {
+                font-size: ChromeText.body;
                 text: "No contacts available";
                 color: Palette.muted;
                 wrap: word-wrap;
@@ -199,6 +202,7 @@ export component AssignAgentDialog inherits Modal {
                 init => { if (AgentDialogs.focus-target == "assign") { self.focus(); } }
             }
             if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
+                font-size: ChromeText.body;
                 text: AgentDialogs.error != "" ? AgentDialogs.error : "Connect to the Host to assign a contact.";
                 color: Palette.warning;
                 wrap: word-wrap;
@@ -309,7 +313,7 @@ export component QueueDialog inherits Modal {
                     font-size: 10 * Look.unit;
                 }
             }
-            if AgentDialogs.queue-loading: Text { text: "…"; color: Palette.muted; vertical-alignment: center; }
+            if AgentDialogs.queue-loading: Text { font-size: ChromeText.body; text: "…"; color: Palette.muted; vertical-alignment: center; }
             IconButton {
                 icon: @image-url("icons/refresh.svg");
                 label: "Reload";

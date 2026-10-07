@@ -620,23 +620,160 @@ fn heights_scaled(small: &Survey, large: &Survey, ratio: f32, when: &str) {
     check(faults.is_empty() && lines > 0, &format!("{when}: {lines} one-line rows grow {ratio:.3}× and {others} others grow{}", if faults.is_empty() { String::new() } else { format!(": {}", faults.join("; ")) }));
 }
 
-/// The chrome's texts drawn in both surveys (those with a size of their
-/// own: a text that takes the window's default follows the reading size,
-/// as it always has) are `ratio` times their size in the first.
-fn chrome_scaled(a: &Survey, b: &Survey, ratio: f32, when: &str) {
+/// The chrome's texts drawn in both surveys are `ratio` times their size in
+/// the first, and texts with each of `named`'s words were among them.
+fn chrome_scaled(a: &Survey, b: &Survey, ratio: f32, named: &[&str], when: &str) {
+    texts_scaled(&a.chrome, &b.chrome, ratio, named, when);
+}
+
+/// Every text in both `a` and `b` (by its words) is `ratio` times its size
+/// in `a`; texts holding each of `named`'s words were compared.
+fn texts_scaled(a: &Texts, b: &Texts, ratio: f32, named: &[&str], when: &str) {
     let mut faults = Vec::new();
     let mut compared = 0;
-    for (key, before) in &a.chrome {
-        let Some(after) = b.chrome.get(key) else { continue };
-        if (before - a.body).abs() < 0.01 && (after - b.body).abs() < 0.01 {
-            continue;
-        }
+    let mut missing: Vec<&str> = named.to_vec();
+    for (key, before) in a {
+        let Some(after) = b.get(key) else { continue };
         compared += 1;
+        missing.retain(|name| !key.0.contains(name));
         if (after - before * ratio).abs() > 0.05 + before * ratio * 0.01 {
             faults.push(format!("\"{}\": {before:.2}px → {after:.2}px, want {:.2}px", key.0, before * ratio));
         }
     }
-    check(faults.is_empty() && compared >= 5, &format!("{when}: {compared} chrome texts are {ratio:.3}× their size{}", if faults.is_empty() { String::new() } else { format!(": {}", faults.join("; ")) }));
+    check(
+        faults.is_empty() && compared >= 5 && missing.is_empty(),
+        &format!(
+            "{when}: {compared} chrome texts are {ratio:.3}× their size{}{}",
+            if missing.is_empty() { String::new() } else { format!(", but none reads {missing:?}") },
+            if faults.is_empty() { String::new() } else { format!(": {}", faults.join("; ")) }
+        ),
+    );
+}
+
+/// The chrome's texts drawn now, outside the chat: (its words, which of
+/// them) → size.
+type Texts = std::collections::HashMap<(String, usize), f32>;
+
+fn chrome_now() -> Texts {
+    let mut survey = Survey::default();
+    survey_now(&mut survey);
+    survey.chrome
+}
+
+/// The active pane's composer: the box it is drawn in and its editor's
+/// height (the editor is 0 while the box has folded it away).
+fn composer_now() -> Option<(f32, f32)> {
+    let window = crate::window()?;
+    let inner = WindowInner::from_pub(window.window());
+    let root = ItemRc::new_root(inner.component());
+    let wanted = format!("composer-box:{}", app_now().active_id());
+    let mut found = None;
+    visit(&root, &mut |item| {
+        if found.is_some() || !item.is_visible() {
+            return true;
+        }
+        if !id_of(item).is_some_and(|id| id == wanted) {
+            return false;
+        }
+        let (_, _, _, frame) = rect(item);
+        let mut editor = 0.0;
+        visit(item, &mut |inside| {
+            if id_of(inside).is_some_and(|id| id == "composer-editor") {
+                editor = rect(inside).3;
+                return true;
+            }
+            false
+        });
+        found = Some((frame, editor));
+        true
+    });
+    found
+}
+
+/// What the chrome draws at one Font size: the composer folded and with the
+/// keyboard, Ctrl+K and Settings.
+#[derive(Default)]
+struct Views {
+    size: f32,
+    folded: f32,
+    composer: (f32, f32),
+    switcher: Texts,
+    settings: Texts,
+}
+
+/// Stages that open the composer, Ctrl+K and Settings at the Font size the
+/// window is at and keep what they draw in `into`; the keyboard ends back
+/// in the chat.
+fn view_stages(size: &'static str, into: std::rc::Rc<std::cell::RefCell<Views>>, shot: impl Fn() + 'static) -> Vec<super::Stage> {
+    use std::time::Duration;
+    let (a, b, c, d) = (into.clone(), into.clone(), into.clone(), into);
+    vec![
+        (size, Box::new(move |app, _, _| {
+            let Some((folded, _)) = composer_now() else { return false };
+            let mut views = a.borrow_mut();
+            views.size = body_size();
+            views.folded = folded;
+            app.focus_composer();
+            true
+        })),
+        ("the composer has the keyboard", Box::new(move |app, window, elapsed| {
+            if !super::report().composer_focused || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let Some(composer) = composer_now() else { return false };
+            b.borrow_mut().composer = composer;
+            shot();
+            let _ = app;
+            check(crate::commands::run(&app_now(), window, "switcher"), "Ctrl+K opens");
+            true
+        })),
+        ("Ctrl+K is open", Box::new(move |app, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            c.borrow_mut().switcher = chrome_now();
+            crate::commands::close_switcher(app, window, Some(false));
+            crate::settings_view::open(app, window);
+            true
+        })),
+        ("Settings are open", Box::new(move |app, window, elapsed| {
+            if window.get_switcher_open() || window.get_surface() != "settings" || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            d.borrow_mut().settings = chrome_now();
+            window.set_surface("chats".into());
+            app.focus_transcript();
+            true
+        })),
+        ("back in the chat", Box::new(|_, window, elapsed| {
+            window.get_surface() == "chats" && super::report().transcript_focused && elapsed >= Duration::from_millis(500)
+        })),
+    ]
+}
+
+/// The composer keeps a line of its own text at each size (folded to its
+/// title only while the keyboard is elsewhere), its text follows Font size,
+/// and Ctrl+K and Settings draw their texts at the same size at both.
+fn views_compared(small: &Views, large: &Views) {
+    const TITLE: f32 = 16.0;
+    for views in [small, large] {
+        let (frame, editor) = views.composer;
+        check(
+            (views.folded - TITLE).abs() < SLACK,
+            &format!("at {}px, with the keyboard in the chat, the composer folds to its [i] Insert title: {:.1}px", views.size, views.folded),
+        );
+        check(
+            editor >= views.size * 1.2 && frame + SLACK >= editor + TITLE,
+            &format!("at {}px the composer with the keyboard is at least a line of its text: editor {editor:.1}px (a line {:.1}px) in a {frame:.1}px box", views.size, views.size * 1.2),
+        );
+    }
+    check(
+        large.composer.1 > small.composer.1 * 1.5,
+        &format!("the composer's text follows Font size: {:.1}px at {}px, {:.1}px at {}px", small.composer.1, small.size, large.composer.1, large.size),
+    );
+    let when = format!("Font size {}px to {}px", small.size, large.size);
+    texts_scaled(&small.switcher, &large.switcher, 1.0, &["Agent, contact, setting or command"], &format!("{when} leaves Ctrl+K"));
+    texts_scaled(&small.settings, &large.settings, 1.0, &["SETTINGS", "Search settings"], &format!("{when} leaves Settings"));
 }
 
 /// The reading theme's own text size.
@@ -663,10 +800,14 @@ pub(super) fn row_overlap_check(out: String) {
     let (shot1, shot2, shot3, shot4) = (shot("row-overlap-01-history"), shot("row-overlap-02-prompt"), shot("row-overlap-03-settled"), shot("row-overlap-04-next-turn"));
     let shot5 = shot("row-overlap-05-narrow-large");
     let (font_small, font_large, font_default) = (shot("font-scale-01-small-11px"), shot("font-scale-02-large-22px"), shot("font-scale-03-theme-default"));
+    let (composer_small, composer_large) = (shot("font-scale-04-composer-11px"), shot("font-scale-05-composer-22px"));
     let surveys: Vec<std::rc::Rc<std::cell::RefCell<Survey>>> = (0..3).map(|_| std::rc::Rc::default()).collect();
     let (small, large, chrome) = (surveys[0].clone(), surveys[1].clone(), surveys[2].clone());
     let (small2, large2, large3, chrome2) = (small.clone(), large.clone(), large.clone(), chrome.clone());
-    let stages: Vec<super::Stage> = vec![
+    let views: Vec<std::rc::Rc<std::cell::RefCell<Views>>> = (0..2).map(|_| std::rc::Rc::default()).collect();
+    let (small_views, large_views) = (views[0].clone(), views[1].clone());
+    let (small_views2, large_views2) = (small_views.clone(), large_views.clone());
+    let mut stages: Vec<super::Stage> = vec![
         ("live", Box::new(|app, _, _| {
             if app.engine.borrow().connection_state() != "live" {
                 return false;
@@ -751,19 +892,32 @@ pub(super) fn row_overlap_check(out: String) {
         }),
         moment("a small font size", 1500, || body_size() == 11.0, |_, _| {}),
         survey_stage("surveying the chat at 11px", small),
-        moment("surveyed at 11px", 300, || true, move |_, window| {
+        moment("surveyed at 11px", 300, || true, move |_, _| {
             font_small();
+        }),
+    ];
+    stages.extend(view_stages("the composer, Ctrl+K and Settings at 11px", small_views, composer_small));
+    stages.extend(vec![
+        moment("the chat at 11px again", 300, || true, |_, window| {
             set(window, "fontsize=22");
         }),
         moment("a large font size", 1500, || body_size() == 22.0, |_, _| {}),
         survey_stage("surveying the chat at 22px", large),
-        moment("surveyed at 22px", 300, || true, move |_, window| {
+        moment("surveyed at 22px", 300, || true, move |_, _| {
             font_large();
+        }),
+    ]);
+    stages.extend(view_stages("the composer, Ctrl+K and Settings at 22px", large_views, composer_large));
+    stages.extend(vec![
+        moment("the chat at 22px again", 300, || true, move |_, window| {
             let (small, large) = (small2.borrow(), large2.borrow());
             let ratio = large.body / small.body;
             scaled_by(&small, &large, ratio, &["live fold", "live reasoning", "live plan", "live tool|live explore", "prompt", "stamp", "assistant", "user"], "Font size 11px to 22px");
             heights_scaled(&small, &large, ratio, "Font size 11px to 22px");
-            chrome_scaled(&small, &large, 1.0, "Font size 11px to 22px leaves the chrome");
+            // The explorer's names and lists, the tab, the pane's title and
+            // the shortcut bar.
+            chrome_scaled(&small, &large, 1.0, &["Overlap", "Rachel", "Mike", "Agent conversations", "Archived", "Main", "Insert", "Commands:"], "Font size 11px to 22px leaves the chrome");
+            views_compared(&small_views2.borrow(), &large_views2.borrow());
             set(window, "chromesize=130");
         }),
         moment("a larger interface size", 1500, || crate::window().is_some_and(|w| (w.global::<crate::Look>().get_unit() - 1.3).abs() < 0.001), |_, _| {}),
@@ -814,7 +968,7 @@ pub(super) fn row_overlap_check(out: String) {
             live_event(live_turn_ends());
         }),
         moment("the live turn ends", 1500, || true, |_, _| {}),
-    ];
+    ]);
     super::run_stages(stages);
 }
 

@@ -309,6 +309,7 @@ export component Composer inherits FocusScope {
             // scrolls.
             height: clamp(self.text-height, Palette.body-size * 1.6, 240px);
             accessible-label: "Message to " + root.agent-name;
+            accessible-id: "composer-editor";
             edited(text) => {
                 root.edited(text);
                 MentionBridge.scan(root.pane-id, text, self.cursor);

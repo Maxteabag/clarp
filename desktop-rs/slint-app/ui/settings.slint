@@ -1,5 +1,5 @@
 import { ListView } from "std-widgets.slint";
-import { Palette, Focus, FocusRing, Look } from "theme.slint";
+import { Palette, Focus, FocusRing, Look, ChromeText } from "theme.slint";
 import { Field } from "fields.slint";
 
 // One line of the settings surface: a section title, a switch, a choice
@@ -155,7 +155,7 @@ export component Settings inherits Rectangle {
                             spacing: 1px;
                             HorizontalLayout {
                                 spacing: 8px;
-                                Text { text: row.label; color: Palette.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; accessible-label: row.label; }
+                                Text { font-size: ChromeText.body; text: row.label; color: Palette.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; accessible-label: row.label; }
                                 if row.key != "": Text {
                                     text: row.key;
                                     color: Palette.faint;
@@ -191,11 +191,13 @@ export component Settings inherits Rectangle {
                             border-color: Palette.border;
                         }
                         if row.kind == "choice" || row.kind == "number": Text {
+                            font-size: ChromeText.body;
                             text: "‹  " + row.detail + "  ›";
                             color: Palette.accent;
                             vertical-alignment: center;
                         }
                         if row.kind == "color" || row.kind == "text": Text {
+                            font-size: ChromeText.body;
                             text: row.detail;
                             color: Palette.accent;
                             font-family: row.kind == "color" ? Palette.code-family : Palette.body-family;

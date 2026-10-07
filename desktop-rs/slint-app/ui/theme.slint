@@ -146,6 +146,14 @@ export global ChatText {
     out property <length> tiny: Palette.body-size * Look.zoom * 9 / 15;
 }
 
+// The chrome's own text (explorer, tabs, panels, Ctrl+K, settings, the
+// status bar, dialogs and overlays): Interface size, never Font size, which
+// is the chat's reading text and the composer's alone. The window's default
+// size, so a chrome text without its own size takes it too.
+export global ChromeText {
+    out property <length> body: 15 * Look.unit;
+}
+
 // Where the keyboard is: the keyboard map's state (commands::context), set
 // from Rust with the shortcut bar. Every region that owns a state draws the
 // one FocusRing when it is the one; lists mark their cursor with Cursor.

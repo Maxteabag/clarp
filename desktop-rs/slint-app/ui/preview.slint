@@ -1,5 +1,5 @@
 import { Button } from "std-widgets.slint";
-import { Palette, Focus, FocusRing, Look } from "theme.slint";
+import { Palette, Focus, FocusRing, Look, ChromeText } from "theme.slint";
 import { Modal } from "dialogs.slint";
 
 export struct PreviewVersion {
@@ -38,16 +38,18 @@ export component PreviewPanel inherits Modal {
             spacing: 12px;
             Text { text: "Preview versions"; color: Palette.text; font-size: 17 * Look.unit; }
             Text {
+                font-size: ChromeText.body;
                 text: "Choose a build and reopen. Rolling back pauses automatic updates. Chats stay on the Host.";
                 color: Palette.text;
                 wrap: word-wrap;
             }
             if !root.can-restart: Text {
+                font-size: ChromeText.body;
                 text: "Finish sending, uploads, recording, transcription or playback before switching versions.";
                 color: Palette.warning;
                 wrap: word-wrap;
             }
-            if root.pinned: Text { text: "Pinned to an older build — automatic updates paused"; color: Palette.warning; }
+            if root.pinned: Text { font-size: ChromeText.body; text: "Pinned to an older build — automatic updates paused"; color: Palette.warning; }
             VerticalLayout {
                 vertical-stretch: 1;
                 spacing: 4px;
@@ -57,15 +59,15 @@ export component PreviewPanel inherits Modal {
                     border-radius: 3px;
                     background: index == root.current && keys.has-focus ? Focus.cursor : Palette.border;
                     opacity: root.busy || !root.can-restart ? 0.5 : 1;
-                    Text { x: 10px; text: version.label; color: Palette.text; vertical-alignment: center; }
+                    Text { font-size: ChromeText.body; x: 10px; text: version.label; color: Palette.text; vertical-alignment: center; }
                     TouchArea {
                         enabled: !root.busy && root.can-restart;
                         clicked => { root.current = index; root.choose(version.hash); }
                     }
                 }
             }
-            if root.error != "": Text { text: root.error; color: Palette.danger; wrap: word-wrap; }
-            if root.notice != "": Text { text: root.notice; color: Palette.success; wrap: word-wrap; }
+            if root.error != "": Text { font-size: ChromeText.body; text: root.error; color: Palette.danger; wrap: word-wrap; }
+            if root.notice != "": Text { font-size: ChromeText.body; text: root.notice; color: Palette.success; wrap: word-wrap; }
             Text {
                 text: "Recovery is always available from Clarp Preview Versions in the app launcher.";
                 color: Palette.muted;
@@ -101,6 +103,7 @@ export component PreviewBanner inherits Rectangle {
         padding-right: 14px;
         spacing: 8px;
         Text {
+            font-size: ChromeText.body;
             text: root.error != "" ? root.error : root.update-label != "" ? "New update available" : "Preview pinned · automatic updates paused";
             color: root.error != "" ? Palette.danger : Palette.muted;
             vertical-alignment: center;
