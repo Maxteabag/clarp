@@ -189,6 +189,29 @@ describe('the settled turn', () => {
     expect(fold.visible.map(r => r.id)).toEqual(['m1']);
   });
 
+  // Omar's turn on 2026-10-07 (claude): a message, two tools, then the
+  // answer. The message before the tools is a reply too and must not hide
+  // behind the fold.
+  it('keeps a message written before tool calls in view', () => {
+    const turn = { turn_id: 'C8799C53', status: 'completed', worked_ms: 26898, tool_count: 2 };
+    const items = [
+      { id: 'cl:msg_A:0', kind: 'reasoning', status: 'completed', ordinal: 3, title: 'Clarify v1' },
+      { id: 'cl:msg_A:1', kind: 'message', status: 'completed', ordinal: 4, phase: 'commentary',
+        row_id: 'live-bbf1147eeb9be65d7f2d', text: 'Good question. Let me fetch an example from the tests.' },
+      { id: 'cl:toolu_1', kind: 'tool', status: 'completed', ordinal: 5,
+        tool: { name: 'Bash', call_id: 'toolu_1', category: 'search', label: 'search.py' } },
+      { id: 'cl:toolu_2', kind: 'tool', status: 'completed', ordinal: 6,
+        tool: { name: 'Bash', call_id: 'toolu_2', category: 'exec', label: 'python3 -' } },
+      { id: 'cl:msg_B:0', kind: 'reasoning', status: 'completed', ordinal: 7, title: 'A good example' },
+      { id: 'cl:msg_B:1', kind: 'message', status: 'completed', ordinal: 8, phase: 'final',
+        row_id: 'live-203e09a956b39f094647', text: 'v1 does not search for the exact text.' },
+    ];
+    const fold = settledFold(turn, liveRows(items, on));
+    expect(fold.label).toBe('Worked for 26s · 2 tools');
+    expect(fold.visible.map(r => r.id)).toEqual(['cl:msg_A:1', 'cl:msg_B:1']);
+    expect(fold.folded.map(r => r.id)).toEqual(['cl:msg_A:0', 'cl:toolu_1', 'cl:toolu_2', 'cl:msg_B:0']);
+  });
+
   it('keeps failed and interrupted work in view, and says the turn was stopped', () => {
     const live = replay('turn-full');
     const fold = settledFold(live.turn, liveRows(liveItems(live), { ...on, now: T0 + 20000 }));
@@ -196,7 +219,7 @@ describe('the settled turn', () => {
     expect(fold.visible.map(r => r.id)).toEqual(
       expect.arrayContaining(['cl:toolu_03', 'cl:toolu_05', 'cl:msg_02:0']));
     expect(fold.folded.map(r => r.id)).toEqual(
-      ['cl:msg_01:0', 'cl:msg_01:1', 'explore:cl:toolu_01', 'cl:toolu_04']);
+      ['cl:msg_01:0', 'explore:cl:toolu_01', 'cl:toolu_04']);
   });
 
   it('does not fold a running turn', () => {

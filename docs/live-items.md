@@ -383,7 +383,8 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
    `tools[].id` / `display_cells[].id` equals a tool item's `tool.call_id`, the
    durable row takes over that item's place. Do not delete and re-insert.
 6. Settled turn: fold its work behind `Worked for <worked_ms>`; failed or
-   interrupted items stay visible. The fold survives the takeover: the Host
+   interrupted items and every message (commentary included: text written
+   before a tool call is a reply to the user) stay visible. The fold survives the takeover: the Host
    lands each tool as its own `/log` row, so while the turn is held keep the
    tool and reasoning rows (one row per tool, inside the fold or, when failed,
    outside it) and do not show those tool rows again as activity; the answer's
