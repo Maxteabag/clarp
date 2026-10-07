@@ -85,6 +85,17 @@ thread_local! {
     static TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    /// The send check's no-destination case: the next send reports a row
+    /// no chat draws, so its copy has nowhere to go.
+    static LOSE_SEND_ROW: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether the next send's row is to be one no chat draws (once).
+pub fn lose_send_row() -> bool {
+    LOSE_SEND_ROW.with(|l| l.replace(false))
+}
+
 pub fn exit_code() -> i32 {
     FAILURES.with(|f| if f.get() == 0 { 0 } else { 1 })
 }

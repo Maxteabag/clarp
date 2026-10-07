@@ -48,27 +48,54 @@ export global ChatLook {
 }
 
 // A send as it is drawn (workspace.slint): how its animations move, the
-// grace period before an unsent message or a queued send says so (Rust's
+// grace period before an unsent message or a queued turn says so (Rust's
 // SEND_STATUS_GRACE), and the last send's animation, for the checks: its
-// row, "flight" (the text flies to the bubble), "settle" (landed: the
-// bubble shows under the copy as it fades), "fade" (the bubble fades in)
-// or "" once it is over, where it started and where it is (in the window).
-// The numbers are the iPhone's (clarp-ios 7bdc0d3), so both move alike.
+// row and phase: "wait" (the copy waits on the composer until the bubble
+// is laid out), "flight" (it springs to the bubble), "settle" (landed: the
+// bubble shows under the copy as it fades), "fade" (no copy: the bubble
+// fades in) or "" once it is over; where it started and where it is (in
+// the window). The numbers are the iPhone's (clarp-ios 7bdc0d3), so both
+// move alike.
 export global SendFlight {
-    // The flight: a spring of 0.32 s with a little bounce (SwiftUI's
-    // spring(duration:bounce:)), from the composer field's shape (radius
-    // 24, no wash) to the bubble's.
+    // The flight: once the bubble is laid out, a spring of 0.32 s with a
+    // little bounce (SwiftUI's spring(duration:bounce:)) to the bubble's
+    // frame; on the way the corners go 24 to 8, the text 0.88 to 1 of the
+    // bubble's size and the user wash 0 to 1.
     out property <duration> flight: 320ms;
     out property <float> flight-bounce: 0.12;
     out property <length> from-radius: 24px;
-    // Landed, the copy fades over the real bubble.
-    out property <duration> settle: 140ms;
-    // The composer clears and shrinks with a 0.3 s spring (no bounce).
+    out property <length> to-radius: 8px;
+    out property <float> from-text-scale: 0.88;
+    // No bubble laid out this long after the send: no copy, the bubble
+    // shows.
+    out property <duration> destination-wait: 600ms;
+    // Landed, the real bubble shows at once under the copy, which fades
+    // over 0.14 s and is gone at 0.2 s.
+    out property <duration> settle-fade: 140ms;
+    out property <duration> settle: 200ms;
+    // The composer clears and shrinks with a 0.3 s spring (no bounce);
+    // its height moves this way only within 0.6 s of a send.
     out property <duration> composer: 300ms;
     out property <float> composer-bounce: 0;
-    // Reduce Motion, and a send that cannot fly: a plain fade.
+    out property <duration> composer-window: 600ms;
+    // Reduce Motion, or a send with no text (attachments, voice): no copy,
+    // the bubble fades in, ease-out 0.2 s.
     out property <duration> fade: 200ms;
+    // An unsent message's status, a queued-turn label: shown only after
+    // the grace period (a failure at once), each fading in, ease-out 0.2 s.
     in property <duration> status-grace: 1750ms;
+    out property <duration> reveal: 200ms;
+    // Ease-out (CSS's cubic-bezier(0, 0, 0.58, 1), near enough).
+    public pure function ease-out(x: float) -> float {
+        return 1 - (1 - Math.clamp(x, 0, 1)) * (1 - Math.clamp(x, 0, 1));
+    }
+    in-out property <int> dropped;
+    // The last send's moments by the animation clock: its first frame, the
+    // bubble laid out, landed, and the copy (or fade) gone.
+    in-out property <duration> sent-at;
+    in-out property <duration> placed-at;
+    in-out property <duration> settled-at;
+    in-out property <duration> gone-at;
     in-out property <string> id;
     in-out property <string> phase;
     in-out property <int> started;
@@ -78,13 +105,27 @@ export global SendFlight {
     in-out property <length> from-width;
     in-out property <length> from-height;
     // Each frame of the animation: how far it is (0 to 1, sprung), the
-    // flying text's box and the composer's height.
+    // copy's box and the composer's height.
     in-out property <float> progress;
     in-out property <length> x;
     in-out property <length> y;
     in-out property <length> width;
     in-out property <length> height;
     in-out property <length> composer-height;
+}
+
+// A status line that appears (an unsent or failed message's, a queued
+// turn's): it fades in, ease-out 0.2 s, then holds still.
+export component RevealText inherits Text {
+    property <duration> born;
+    property <bool> revealing: true;
+    init => { self.born = animation-tick(); }
+    opacity: self.revealing ? SendFlight.ease-out((animation-tick() - self.born) / SendFlight.reveal) : 1;
+    Timer {
+        interval: SendFlight.reveal;
+        running: root.revealing;
+        triggered => { root.revealing = false; }
+    }
 }
 
 // The reader's own look (Settings → Typography and Layout; clarp_core::prefs),

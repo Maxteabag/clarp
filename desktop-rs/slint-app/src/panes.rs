@@ -504,7 +504,7 @@ impl App {
         let attachments: Vec<Attachment> = engine.attachments(session).iter().map(attachment).collect();
         view.attachments = ModelRc::new(VecModel::from(attachments));
         view.can_send = engine.can_send(session);
-        view.queued = engine.queue_count(session);
+        view.queued = crate::view::queued_shown(session, engine.queue_count(session));
         view.quota_notice = engine.quota_notice(session).into();
     }
 

@@ -1,4 +1,4 @@
-import { Palette, Focus, ChatLook, Look, VimBridge, ChatText, SendFlight } from "theme.slint";
+import { Palette, Focus, ChatLook, Look, VimBridge, ChatText, SendFlight, RevealText } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
@@ -883,10 +883,20 @@ component TranscriptRow inherits HorizontalLayout {
                 accessible-label: root.message.meta;
             }
             // A send is drawn as it will stay: "Sending…" only once it has
-            // been unsent for the grace period, a failure at once.
-            if ((root.message.pending && root.message.status-due) || root.message.failed || root.message.stamp != "") && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
-                text: root.message.failed ? "Not delivered" : root.message.pending && root.message.status-due ? "Sending…" : root.message.stamp;
+            // been unsent for the grace period, a failure at once; either
+            // fades in. Otherwise the time, when timestamps are on.
+            if ((root.message.pending && root.message.status-due) || root.message.failed) && (root.message.prompt.key == "" || root.message.prompt.expanded): RevealText {
+                text: root.message.failed ? "Not delivered" : "Sending…";
                 color: root.message.failed ? Palette.danger : Palette.faint;
+                font-size: ChatText.note;
+                horizontal-alignment: root.message.author == "user" ? right : left;
+                accessible-role: text;
+                accessible-id: root.measuring ? "" : "status:" + root.message.id;
+                accessible-label: self.text;
+            }
+            if !((root.message.pending && root.message.status-due) || root.message.failed) && root.message.stamp != "" && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
+                text: root.message.stamp;
+                color: Palette.faint;
                 font-size: ChatText.note;
                 horizontal-alignment: root.message.author == "user" ? right : left;
                 accessible-role: text;
@@ -929,7 +939,7 @@ export component Transcript inherits FocusScope {
     // fades in (Settings → Send animation; unless it is in flight).
     property <string> fade-id;
     property <duration> fade-start;
-    property <float> fade-reveal: root.fade-id == "" ? 1 : Math.clamp((animation-tick() - root.fade-start) / SendFlight.fade, 0, 1);
+    property <float> fade-reveal: root.fade-id == "" ? 1 : SendFlight.ease-out((animation-tick() - root.fade-start) / SendFlight.fade);
     property <int> row-count: root.rows.length;
     changed row-count => {
         if (!ChatLook.send-animation || root.rows.length == 0) { return; }
@@ -945,7 +955,7 @@ export component Transcript inherits FocusScope {
     Timer {
         interval: 16ms;
         running: root.fade-id != "";
-        triggered => { if (root.fade-reveal >= 1) { root.fade-id = ""; } }
+        triggered => { if (animation-tick() - root.fade-start >= SendFlight.fade) { root.fade-id = ""; } }
     }
     out property <length> offset: list.content-y;
     out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
