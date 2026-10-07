@@ -1,5 +1,5 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
-import { Palette, Focus, FocusRing, ChatLook, Look, VimBridge } from "theme.slint";
+import { Palette, Focus, FocusRing, ChatLook, Look, VimBridge, SendFlight } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
 import { Attachment, MentionRow, MentionBridge } from "composer.slint";
@@ -41,7 +41,7 @@ export { PrefEditor, Swatch }
 export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint }
 
 export { ScrollBook, MeasureRow, VimBridge }
-export { Palette, Focus, ChatLook, Look, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
+export { Palette, Focus, ChatLook, SendFlight, Look, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
 
@@ -218,7 +218,7 @@ export component AppWindow inherits Window {
     callback focus-moved();
     // Pane events carry the pane's id.
     callback pane-activated(string);
-    callback send(string, string, bool);
+    callback send(string, string, bool) -> string;
     callback stop(string);
     callback draft-edited(string, string);
     callback attach(string);
@@ -495,7 +495,7 @@ export component AppWindow inherits Window {
                     save-warning-keep-key: root.save-warning-keep-key;
                     bar-visible: root.workspace-bar;
                     activate(id) => { root.pane-activated(id); }
-                    send(id, text, queue) => { root.send(id, text, queue); }
+                    send(id, text, queue) => { return root.send(id, text, queue); }
                     stop(id) => { root.stop(id); }
                     draft-edited(id, text) => { root.draft-edited(id, text); }
                     attach(id) => { root.attach(id); }

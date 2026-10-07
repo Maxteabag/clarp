@@ -745,6 +745,7 @@ pub const CATALOGUED: &[(&str, &str)] = &[
     ("timestamps", "timestamps"),
     ("showwhenready", "show-when-ready"),
     ("reducedmotion", "reduced-motion"),
+    ("sendanimation", "send-animation"),
     ("toolactivity", "activity"),
     ("tooldetail", "tool-detail"),
     ("startupnewagent", "new-agent-on-startup"),

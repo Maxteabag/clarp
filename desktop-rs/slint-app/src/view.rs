@@ -470,6 +470,18 @@ pub(crate) fn tool_row(tool: &serde_json::Value) -> ToolRow {
     }
 }
 
+/// How long a message of one's own may stay unsent before its bubble says
+/// so ("Sending…"). Most sends are confirmed well within it: the bubble is
+/// drawn at its final size straight away instead of with a status line
+/// that is gone a moment later. A failure shows at once.
+pub(crate) const SEND_STATUS_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Whether an unsent message's status is due after `pending_for`, or how
+/// long until it is.
+pub(crate) fn send_status_due(pending_for: std::time::Duration) -> Result<(), std::time::Duration> {
+    if pending_for >= SEND_STATUS_GRACE { Ok(()) } else { Err(SEND_STATUS_GRACE - pending_for) }
+}
+
 /// "HH:MM" in local time for an RFC 3339 stamp.
 pub(crate) fn message_stamp(timestamp: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(timestamp)
@@ -532,6 +544,8 @@ pub(crate) fn message_row(
         stamp: message_stamp(&m.timestamp).into(),
         meta: SharedString::new(),
         pending: m.pending,
+        // The pane decides once the grace period has passed.
+        status_due: false,
         failed: m.delivery_failed,
         activity_label: label.into(),
         group_id: group_id.into(),
@@ -665,6 +679,15 @@ impl RowCache {
 mod tests {
     /// The explorer's preview and activity lines are one line each: a helper
     /// running a multi-line command must not spill over the next chat.
+    #[test]
+    fn an_unsent_message_says_so_only_after_the_grace_period() {
+        use std::time::Duration;
+        assert_eq!(super::send_status_due(Duration::ZERO), Err(super::SEND_STATUS_GRACE));
+        assert_eq!(super::send_status_due(Duration::from_millis(1000)), Err(super::SEND_STATUS_GRACE - Duration::from_millis(1000)));
+        assert_eq!(super::send_status_due(super::SEND_STATUS_GRACE), Ok(()));
+        assert_eq!(super::send_status_due(Duration::from_secs(5)), Ok(()));
+    }
+
     #[test]
     fn explorer_lines_stay_on_one_line() {
         let row = clarp_core::roster::AgentRow {

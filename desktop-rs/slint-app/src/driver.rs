@@ -68,6 +68,9 @@ mod zoom_checks;
 // ---- vim mode: the keyboard without Ctrl
 #[path = "vim_checks.rs"]
 mod vim_checks;
+// ---- a send as it is drawn: the grace period and the send animation
+#[path = "send_checks.rs"]
+mod send_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -514,6 +517,10 @@ pub fn start_check(name: &str, out: String) {
         "chat-zoom" => {
             row_overlap_checks::watch();
             zoom_checks::zoom_check(out)
+        }
+        "send" => {
+            row_overlap_checks::watch();
+            send_checks::send_check(out)
         }
         _ => {
             check(false, &format!("no check named {name}"));

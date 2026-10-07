@@ -1,4 +1,4 @@
-import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge, ChatText, SendFlight } from "theme.slint";
 import { Composer, Attachment, MentionRow } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
@@ -102,7 +102,9 @@ export struct WorkspaceTab {
 export component Pane inherits Rectangle {
     in property <PaneView> pane;
     callback activate();
-    callback send(string, bool);
+    // Sends the draft; the id of the message's row in this chat, or "" (not
+    // sent, or sent to another agent's chat).
+    callback send(string, bool) -> string;
     callback stop();
     callback draft-edited(string);
     callback attach();
@@ -183,6 +185,95 @@ export component Pane inherits Rectangle {
             root.pending-focus = "";
         }
     }
+    // The send animation (Telegram's): the composer's text lifts out of the
+    // box and flies, growing into a bubble, to where the new message is
+    // drawn at the chat's end, while the box shrinks to its empty height.
+    // One overlay moves; the chat's rows stay as they are laid out (the new
+    // one hidden until the overlay lands on it). Reduce Motion, and a send
+    // that cannot fly (an attachment adds to its text, a draft longer than
+    // the box shows), fade the bubble in instead. A reader scrolled up gets
+    // the usual jump to the latest, with no flight.
+    property <string> flight-id;
+    property <bool> flying;
+    property <duration> flight-start;
+    // The clock starts on the first frame after the send (the send itself
+    // and the frame that lays out the new row can take a while on a slow
+    // machine): the first frame drawn shows the text still in the box.
+    property <bool> flight-armed;
+    property <float> flight-raw: root.flight-id == "" ? 1 : !root.flight-armed ? 0 : Math.clamp((animation-tick() - root.flight-start) / (root.flying ? SendFlight.flight : SendFlight.fade), 0, 1);
+    // Ease out: quick off the composer, settling into place.
+    property <float> flight-t: 1 - Math.pow(1 - root.flight-raw, 3);
+    // Where it flies from (in the pane) and the box's height then.
+    property <length> from-x;
+    property <length> from-y;
+    property <length> from-width;
+    property <length> from-height;
+    property <length> box-from;
+    property <string> flown-text;
+    property <string> sent-id;
+    // Where the bubble is drawn, once the chat has drawn it (else where
+    // the text started).
+    property <bool> landing: transcript.flight-drawn-id == root.flight-id && root.flight-id != "";
+    property <length> to-x: root.landing ? transcript.flight-x - root.absolute-position.x : root.from-x;
+    property <length> to-y: root.landing ? transcript.flight-y - root.absolute-position.y : root.from-y;
+    property <length> to-width: root.landing ? transcript.flight-width : root.from-width;
+    property <length> to-height: root.landing ? transcript.flight-height : root.from-height;
+    property <length> fly-x: root.from-x + (root.to-x - root.from-x) * root.flight-t;
+    property <length> fly-y: root.from-y + (root.to-y - root.from-y) * root.flight-t;
+    property <length> fly-width: root.from-width + (root.to-width - root.from-width) * root.flight-t;
+    property <length> fly-height: root.from-height + (root.to-height - root.from-height) * root.flight-t;
+    function sent(text: string, queue: bool) {
+        let can-fly = composer.attachments.length == 0 && root.pane.route == "" && composer.editor-text-height <= composer.editor-height + 1px;
+        let at-end = transcript.follow && transcript.at-end;
+        root.from-x = composer.editor-x - root.absolute-position.x;
+        root.from-y = composer.editor-y - root.absolute-position.y;
+        root.from-width = composer.editor-width;
+        root.from-height = Math.min(composer.editor-text-height, composer.editor-height);
+        root.box-from = composer-box.height;
+        root.flown-text = text;
+        root.land();
+        root.sent-id = root.send(text, queue);
+        if (root.sent-id == "" || !ChatLook.send-animation || !at-end) {
+            return;
+        }
+        root.flying = can-fly && !ChatLook.reduced-motion;
+        root.flight-id = root.sent-id;
+        root.flight-armed = false;
+        SendFlight.id = root.sent-id;
+        SendFlight.phase = root.flying ? "flight" : "fade";
+        SendFlight.from-x = composer.editor-x;
+        SendFlight.from-y = composer.editor-y;
+        SendFlight.from-width = root.from-width;
+        SendFlight.from-height = root.from-height;
+        SendFlight.started += 1;
+    }
+    // The animation is over (or another send takes its place): the row
+    // shows as it is.
+    function land() {
+        if (root.flight-id != "") {
+            root.flight-id = "";
+            root.flying = false;
+            SendFlight.phase = "";
+            SendFlight.landed += 1;
+        }
+    }
+    Timer {
+        interval: 16ms;
+        running: root.flight-id != "";
+        triggered => {
+            if (!root.flight-armed) {
+                root.flight-start = animation-tick();
+                root.flight-armed = true;
+            }
+            SendFlight.progress = root.flight-t;
+            SendFlight.x = root.absolute-position.x + root.fly-x;
+            SendFlight.y = root.absolute-position.y + root.fly-y;
+            SendFlight.width = root.fly-width;
+            SendFlight.height = root.fly-height;
+            SendFlight.composer-height = composer-box.height;
+            if (root.flight-raw >= 1) { root.land(); }
+        }
+    }
     property <int> draft-set-seen;
     property <int> focus-composer-seen;
     property <int> focus-transcript-seen;
@@ -226,6 +317,9 @@ export component Pane inherits Rectangle {
             measure: root.pane.measure;
             before: root.pane.before;
             marked: root.pane.marked;
+            flight-id: root.flight-id;
+            flight-reveal: root.flying ? 0 : root.flight-t;
+            flight-pinning: root.flying;
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }
@@ -292,12 +386,16 @@ export component Pane inherits Rectangle {
             }
         }
         // Pair rooms are the Host's read-only projection: no composer.
-        Rectangle {
+        composer-box := Rectangle {
           visible: !root.pane.pair;
+          accessible-role: groupbox;
+          accessible-id: "composer-box:" + root.pane.id;
           // Folded to its "[i] Insert" line until it has the keyboard (or
           // holds a draft, which stays in view).
           property <bool> folded: !composer.editor-focused && composer.draft == "";
-          height: root.pane.pair ? 0px : self.folded ? 16px : composer.preferred-height + Frame.top + Frame.bottom;
+          property <length> natural: root.pane.pair ? 0px : self.folded ? 16px : composer.preferred-height + Frame.top + Frame.bottom;
+          // A flight shrinks it from its height at the send.
+          height: root.flying ? root.box-from + (self.natural - root.box-from) * root.flight-t : self.natural;
           clip: true;
           composer := Composer {
             x: Frame.side;
@@ -322,7 +420,7 @@ export component Pane inherits Rectangle {
             mentions: root.pane.mentions;
             mention-current: root.pane.mention-current;
             route: root.pane.route;
-            send(text, queue) => { root.send(text, queue); }
+            send(text, queue) => { root.sent(text, queue); }
             stop => { root.stop(); }
             edited(text) => { root.draft-edited(text); }
             attach => { root.attach(); }
@@ -337,6 +435,32 @@ export component Pane inherits Rectangle {
             active: root.pane.active && Focus.mode == "composer";
             surface: root.background;
           }
+        }
+    }
+    // The sent text in flight: from the editor to the bubble, taking on
+    // the bubble's colour, padding and text size on the way.
+    if root.flying: Rectangle {
+        accessible-role: text;
+        accessible-id: "send-flight";
+        accessible-label: flown.text;
+        x: root.fly-x;
+        y: root.fly-y;
+        width: root.fly-width;
+        height: root.fly-height;
+        background: Palette.bubble.with-alpha(root.flight-t);
+        border-radius: Look.radius / 3;
+        // The bubble's own padding (transcript.slint) at the reading size.
+        property <length> inset: 10px * ChatText.scale * root.flight-t;
+        flown := Text {
+            x: parent.inset;
+            y: parent.inset;
+            width: parent.width - 2 * parent.inset;
+            text: root.flown-text;
+            color: Palette.text;
+            font-size: Palette.body-size + (ChatText.body - Palette.body-size) * root.flight-t;
+            font-family: Palette.body-family;
+            wrap: word-wrap;
+            vertical-alignment: top;
         }
     }
 }
@@ -388,7 +512,7 @@ export component Workspace inherits Rectangle {
     in property <string> save-warning-keep-key;
     in property <bool> bar-visible;
     callback activate(string);
-    callback send(string, string, bool);
+    callback send(string, string, bool) -> string;
     callback stop(string);
     callback draft-edited(string, string);
     callback attach(string);
@@ -484,7 +608,7 @@ export component Workspace inherits Rectangle {
         height: Math.max(1px, Math.round(pane.height * root.area-height / 1px) * 1px - root.gap);
         pane: pane;
         activate => { root.activate(pane.id); }
-        send(text, queue) => { root.send(pane.id, text, queue); }
+        send(text, queue) => { return root.send(pane.id, text, queue); }
         stop => { root.stop(pane.id); }
         draft-edited(text) => { root.draft-edited(pane.id, text); }
         attach => { root.attach(pane.id); }

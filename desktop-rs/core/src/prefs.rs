@@ -609,6 +609,16 @@ pub static SPECS: &[Spec] = &[
         kind: toggle(false),
         scope: G,
     },
+    Spec {
+        name: "sendanimation",
+        key: "appearance/sendAnimation",
+        label: "Send animation",
+        description: "A sent message flies from the composer to its place in the chat",
+        aliases: &["send", "sending", "fly", "flight", "telegram", "bubble animation"],
+        section: BEHAVIOUR,
+        kind: toggle(true),
+        scope: G,
+    },
 ];
 
 pub fn specs() -> &'static [Spec] {

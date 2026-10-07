@@ -1,4 +1,4 @@
-import { Palette, Focus, ChatLook, Look, VimBridge, ChatText } from "theme.slint";
+import { Palette, Focus, ChatLook, Look, VimBridge, ChatText, SendFlight } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
@@ -109,7 +109,10 @@ export struct MessageRow {
     blocks: [MessageBlock],
     stamp: string,
     meta: string,
+    // Not yet confirmed by the Host; its "Sending…" shows only once
+    // `status-due` (the grace period passed: SEND_STATUS_GRACE).
     pending: bool,
+    status-due: bool,
     failed: bool,
     // Tool activity: the toggle's label, whether the cards show, the cards.
     activity-label: string,
@@ -738,6 +741,14 @@ component TranscriptRow inherits HorizontalLayout {
     in property <bool> measuring;
     // The message search jumped to (drawn with a ring; it lays out the same).
     in property <bool> marked;
+    // How much of the message is drawn: 0 while a sent message's text flies
+    // to it, rising as it fades in (the send animation); 1 otherwise.
+    in property <float> reveal: 1;
+    // Where its bubble is drawn, in the window.
+    out property <length> bubble-x: bubble.absolute-position.x;
+    out property <length> bubble-y: bubble.absolute-position.y;
+    out property <length> bubble-width: bubble.width;
+    out property <length> bubble-height: bubble.height;
     callback link-clicked(string);
     callback toggle-activity(string, string);
     callback copy-message(string);
@@ -758,7 +769,11 @@ component TranscriptRow inherits HorizontalLayout {
     padding-top: Look.message-spacing * Look.zoom / 2;
     padding-bottom: Look.message-spacing * Look.zoom / 2;
     alignment: root.message.author == "user" ? end : stretch;
-    Rectangle {
+    bubble := Rectangle {
+        // Hidden outright while in flight; a fade is the only time a row
+        // is drawn through a layer.
+        visible: root.reveal > 0;
+        opacity: root.reveal;
         // One message of the list; the id finds it in the checks.
         accessible-role: list-item;
         accessible-id: root.measuring ? "" : "row:" + root.message.id;
@@ -867,11 +882,16 @@ component TranscriptRow inherits HorizontalLayout {
                 accessible-id: root.measuring ? "" : "meta:" + root.message.id;
                 accessible-label: root.message.meta;
             }
-            if (root.message.pending || root.message.failed || root.message.stamp != "") && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
-                text: root.message.failed ? "Not delivered" : root.message.pending ? "Sending…" : root.message.stamp;
+            // A send is drawn as it will stay: "Sending…" only once it has
+            // been unsent for the grace period, a failure at once.
+            if ((root.message.pending && root.message.status-due) || root.message.failed || root.message.stamp != "") && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
+                text: root.message.failed ? "Not delivered" : root.message.pending && root.message.status-due ? "Sending…" : root.message.stamp;
                 color: root.message.failed ? Palette.danger : Palette.faint;
                 font-size: ChatText.note;
                 horizontal-alignment: root.message.author == "user" ? right : left;
+                accessible-role: text;
+                accessible-id: root.measuring ? "" : "status:" + root.message.id;
+                accessible-label: self.text;
             }
         }
     }
@@ -892,6 +912,41 @@ export component Transcript inherits FocusScope {
     in-out property <bool> follow: true;
     // The row message search jumped to, by id.
     in property <string> marked;
+    // The send animation (workspace.slint): the row a sent message flies
+    // to, drawn at `flight-reveal` (0 in flight, rising in a fade). The
+    // row reports where its bubble is drawn (in the window) as it moves.
+    in property <string> flight-id;
+    in property <float> flight-reveal: 1;
+    // While the composer shrinks under a flight the chat grows, and a
+    // following chat keeps its end in place frame by frame.
+    in property <bool> flight-pinning;
+    out property <string> flight-drawn-id;
+    out property <length> flight-x;
+    out property <length> flight-y;
+    out property <length> flight-width;
+    out property <length> flight-height;
+    // A message of one's own sent another way (dictation, a card): it
+    // fades in (Settings → Send animation; unless it is in flight).
+    property <string> fade-id;
+    property <duration> fade-start;
+    property <float> fade-reveal: root.fade-id == "" ? 1 : Math.clamp((animation-tick() - root.fade-start) / SendFlight.fade, 0, 1);
+    property <int> row-count: root.rows.length;
+    changed row-count => {
+        if (!ChatLook.send-animation || root.rows.length == 0) { return; }
+        root.last-own = root.rows[root.rows.length - 1].author == "user" && root.rows[root.rows.length - 1].pending ? root.rows[root.rows.length - 1].id : "";
+        if (root.last-own != "" && root.last-own != root.flight-id && root.last-own != root.faded-id) {
+            root.faded-id = root.last-own;
+            root.fade-id = root.last-own;
+            root.fade-start = animation-tick();
+        }
+    }
+    property <string> faded-id;
+    property <string> last-own;
+    Timer {
+        interval: 16ms;
+        running: root.fade-id != "";
+        triggered => { if (root.fade-reveal >= 1) { root.fade-id = ""; } }
+    }
     out property <length> offset: list.content-y;
     out property <bool> at-end: list.content-y <= list.visible-height - list.content-height + 2px;
     // The row across the top of the view.
@@ -934,6 +989,23 @@ export component Transcript inherits FocusScope {
         for row[index] in root.rows: TranscriptRow {
             message: row;
             marked: row.id == root.marked;
+            reveal: row.id == root.flight-id ? root.flight-reveal : row.id == root.fade-id ? root.fade-reveal : 1;
+            property <bool> flying: row.id == root.flight-id && row.id != "";
+            function report-flight() {
+                if (self.flying) {
+                    root.flight-x = self.bubble-x;
+                    root.flight-y = self.bubble-y;
+                    root.flight-width = self.bubble-width;
+                    root.flight-height = self.bubble-height;
+                    root.flight-drawn-id = row.id;
+                }
+            }
+            init => { self.report-flight(); }
+            changed flying => { self.report-flight(); }
+            changed bubble-x => { self.report-flight(); }
+            changed bubble-y => { self.report-flight(); }
+            changed bubble-width => { self.report-flight(); }
+            changed bubble-height => { self.report-flight(); }
             list-width: list.visible-width;
             view-top: root.absolute-position.y;
             view-bottom: root.absolute-position.y + root.height;
@@ -1182,6 +1254,12 @@ export component Transcript inherits FocusScope {
     }
     property <int> seen-count;
     property <string> seen-first;
+    property <length> view-height: list.visible-height;
+    changed view-height => {
+        if (root.flight-pinning && root.follow) {
+            root.pin("follow");
+        }
+    }
     // Following also tracks rows that grow while streaming.
     changed list-height => {
         if (root.follow && Look.follow) {

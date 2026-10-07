@@ -1,5 +1,5 @@
 import { Field, Editor, PlainEditor } from "fields.slint";
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, SendFlight } from "theme.slint";
 
 export struct Attachment {
     id: string,
@@ -173,11 +173,33 @@ export component Composer inherits FocusScope {
     callback queue-requested();
 
     out property <bool> editor-focused: editor.has-focus;
+    // Where the editor is drawn (in the window) and how tall its text is:
+    // the send animation lifts the text out of it.
+    out property <length> editor-x: editor.absolute-position.x;
+    out property <length> editor-y: editor.absolute-position.y;
+    out property <length> editor-width: editor.width;
+    out property <length> editor-height: editor.height;
+    out property <length> editor-text-height: editor.text-height;
     property <bool> sendable: root.can-send && (root.draft != "" || root.attachments.length > 0);
     function submit(queue: bool) {
         if (root.sendable) {
+            if (!root.queue-held) {
+                root.queue-before = root.queued;
+                root.queue-held = true;
+            }
             root.send(root.draft, queue);
         }
+    }
+    // A send that queues behind a running turn says so only once it has
+    // stayed queued for the grace period: most are taken at once, and the
+    // line would come and go under the message just sent.
+    property <bool> queue-held;
+    property <int> queue-before;
+    property <int> queued-shown: root.queue-held ? Math.min(root.queued, root.queue-before) : root.queued;
+    Timer {
+        interval: SendFlight.status-grace;
+        running: root.queue-held;
+        triggered => { root.queue-held = false; }
     }
     // The [i] Insert frame is the box: the editor sits on the pane itself,
     // and its actions are keys (the shortcut bar lists them).
@@ -220,8 +242,8 @@ export component Composer inherits FocusScope {
             overflow: elide;
             accessible-label: root.quota-notice;
         }
-        if root.queued > 0: Text {
-            text: root.queued + (root.queued == 1 ? " message queued" : " messages queued") + "  ·  Ctrl+Enter queues next";
+        if root.queued-shown > 0: Text {
+            text: root.queued-shown + (root.queued-shown == 1 ? " message queued" : " messages queued") + "  ·  Ctrl+Enter queues next";
             color: Palette.muted;
             font-size: 12 * Look.unit;
             overflow: elide;
