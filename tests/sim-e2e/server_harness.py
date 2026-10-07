@@ -32,11 +32,105 @@ import json
 import io
 import os
 import pathlib
+import shutil
+import signal
 import socket
 import sys
 import tempfile
 import threading
 import time
+
+# /tmp is a small RAM-backed tmpfs and this folder can grow large, so it goes
+# to /var/tmp unless the caller chose a TMPDIR (the same rule as
+# tests/conftest.py's default_temp_root).
+def _scratch_root(environ, *, var_tmp_exists: bool) -> str | None:
+    if environ.get("TMPDIR") or not var_tmp_exists:
+        return None
+    return "/var/tmp"
+
+
+_TMPDIR = pathlib.Path(tempfile.mkdtemp(
+    prefix="claude-pwa-e2e-",
+    dir=_scratch_root(os.environ, var_tmp_exists=os.path.isdir("/var/tmp"))))
+
+
+# Cleanup belongs to a separate reaper process, not to this one: vitest's
+# afterAll ends us with SIGTERM (or worse), server threads keep writing into
+# _TMPDIR until the interpreter is gone, and provider CLIs the server started
+# outlive us. The reaper waits until our end of a pipe closes, however we
+# died, then kills everything left in our process group and removes _TMPDIR.
+def _log(message: str) -> None:
+    print(f"server_harness: {message}", file=sys.stderr, flush=True)
+
+
+def _group_members(pgid: int) -> list[int]:
+    members = []
+    for entry in pathlib.Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+        except OSError:
+            continue  # exited while we looked
+        state, _ppid, pgrp = stat.rsplit(")", 1)[1].split()[:3]
+        if int(pgrp) == pgid and state != "Z":
+            members.append(int(entry.name))
+    return members
+
+
+def _reap(pgid: int | None, scratch: pathlib.Path, wait_fd: int) -> None:
+    while os.read(wait_fd, 4096):
+        pass
+    if pgid is not None and os.path.isdir("/proc"):
+        for pid in _group_members(pgid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        deadline = time.monotonic() + 5
+        while (left := _group_members(pgid)) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        if left:
+            _log(f"processes still running after cleanup: {left}")
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(scratch, onexc=lambda _f, path, exc: _log(
+            f"could not remove {path}: {exc!r}"))
+    else:
+        shutil.rmtree(scratch, onerror=lambda _f, path, info: _log(
+            f"could not remove {path}: {info[1]!r}"))
+
+
+def _start_reaper() -> int:
+    """Fork the reaper; return the fd whose closing tells it we are gone."""
+    pgid: int | None = os.getpid()
+    try:
+        # Lead our own group so the reaper finds what we started without
+        # touching the caller's processes.
+        os.setpgid(0, 0)
+    except OSError as exc:
+        _log(f"cannot lead a process group, children will not be reaped: {exc!r}")
+        pgid = None
+    read_fd, write_fd = os.pipe()
+    if os.fork():
+        os.close(read_fd)
+        return write_fd
+    try:
+        os.setpgid(0, 0)
+        for sig in (signal.SIGINT, signal.SIGHUP):
+            signal.signal(sig, signal.SIG_IGN)
+        os.close(write_fd)
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0)
+        os.dup2(devnull, 1)  # stdout is the protocol pipe; do not hold it open
+        os.close(devnull)
+        _reap(pgid, _TMPDIR, read_fd)
+    except BaseException as exc:  # noqa: BLE001 - a fork must never return
+        _log(f"reaper failed: {exc!r}")
+        os._exit(1)
+    os._exit(0)
+
+
+_REAPER_FD = _start_reaper()
 
 # The server uses print(...) for HTTP access logging, which would collide
 # with our JSON-on-stdout protocol. Redirect Python's stdout to stderr and
@@ -55,7 +149,6 @@ sys.path.insert(0, str(_SERVER))
 # CLAUDE_PWA_DB at import time. Without this we'd write into the user's
 # real ~/.local/share/clarp/state.sqlite and conflict with the
 # running production server's data (agent UNIQUE constraint, etc).
-_TMPDIR = pathlib.Path(tempfile.mkdtemp(prefix="claude-pwa-e2e-"))
 os.environ["HOME"] = str(_TMPDIR)
 os.environ["XDG_CONFIG_HOME"] = str(_TMPDIR / "config")
 os.environ["XDG_DATA_HOME"] = str(_TMPDIR / "data")
@@ -70,6 +163,7 @@ _config.write_text(
     '[elevenlabs]\napi_key = "simulated"\n')
 
 from lib import agents as agents_db                # noqa: E402
+from lib import provider_capabilities              # noqa: E402
 from lib import tts_queue                          # noqa: E402
 from lib import tts_worker as _tw                  # noqa: E402
 from lib.audio_stream import AudioStream           # noqa: E402
@@ -83,6 +177,12 @@ assert _spec and _spec.loader
 _srv_mod = _ilu.module_from_spec(_spec)
 _spec.loader.exec_module(_srv_mod)
 build_server = _srv_mod.build_server
+
+# The cache warm-up probes every provider CLI for the model catalogue. With
+# HOME pointing here, the developer's `opencode` and `grok` run through mise,
+# which installs whole toolchains into this folder (hundreds of megabytes)
+# and rewrites its global config. Report every provider as not installed.
+provider_capabilities._resolve_executable = lambda _provider_id: None
 
 
 def _free_port() -> int:
@@ -257,6 +357,7 @@ def main():
     # Initial banner so the Node side can read the port without sending a
     # command first.
     _reply({"ready": True, "port": h.port,
+            "tmpdir": str(h.tmpdir),
             "audio_dir": str(h.audio_dir),
             "agent_id": h.agent_id})
     for line in sys.stdin:
@@ -278,6 +379,14 @@ def main():
                     chunks=cmd.get("chunks"),
                     chunk_delay_ms=cmd.get("chunk_delay_ms", 0),
                 ))
+            elif name == "spawn_straggler":
+                # Test-only: a child that ignores SIGTERM and keeps writing
+                # into the scratch HOME, as a mise install would.
+                import subprocess
+                p = subprocess.Popen(
+                    ["sh", "-c", 'trap "" TERM; while :; do mkdir -p "$HOME/late"; sleep 0.05; done'],
+                    stdin=subprocess.DEVNULL)
+                _reply({"pid": p.pid})
             elif name == "exit":
                 _reply({"ok": True})
                 h.shutdown()
