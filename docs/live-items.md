@@ -355,6 +355,12 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
   "status": "ready"}` (`pending` first when it has to wait for the model, `failed`
   when it gives up). Template and learned answers usually arrive in the same
   event as the tool start.
+- A `failed` explanation carries `reason`. `skipped` means the Host stopped
+  waiting: the item fell off a full backlog (the newest items go first), waited
+  45 s, or its turn ended 15 s ago. Render every `failed` as no explanation (the
+  raw command, or nothing), never as `Explaining…`. No item stays `pending`:
+  each settles `ready` or `failed` within 45 s, and within 15 s of its turn
+  ending. The Host asks the model for up to 8 of an agent's items at once.
 - **Off**: no explainer runs (no model call, nothing queued), `tool.explain` stays
   `null`, and `POST /tool-explanations` answers every item `disabled`.
 - Rendering: the tool row's first line is always the deterministic `label` (verb +
