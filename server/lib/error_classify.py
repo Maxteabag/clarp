@@ -18,6 +18,11 @@ A turn can end three interesting ways beyond "clean":
   * USAGE_LIMIT — the backend account is out of quota / credits / usage.
     Never retry silently; the user needs to know the agent cannot continue.
 
+  * ACCOUNT_PLAN — the signed-in account's plan does not include the model
+    (a ChatGPT login that fell from Pro to the free plan refuses Pro-only
+    models). Another saved account may serve it, so account recovery
+    applies; without one the user must switch account or model.
+
   * RUNNER_EXIT — the CLI process exited non-zero without a recognisable
     backend error. This is also user-visible because otherwise the agent can
     appear to stop and fall back to "Connected" with no explanation.
@@ -36,6 +41,7 @@ failure as an error-result on some paths and a non-zero exit on others.
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -45,14 +51,15 @@ TRANSIENT = "transient"
 INTERRUPTED = "interrupted"
 USAGE_LIMIT = "usage_limit"
 AUTH = "auth"                     # sign-in expired / refresh failed; account recovery applies
+ACCOUNT_PLAN = "account_plan"     # the account's plan lacks the model; account recovery applies
 RUNNER_EXIT = "runner_exit"
 TIMEOUT = "timeout"
 UNKNOWN = "unknown"
 
 # Categories that should flip the agent to the INTERRUPTED badge once we
 # stop trying (connection errors only reach here after retries are spent).
-NOTIFY = frozenset({CONNECTION, TRANSIENT, INTERRUPTED, USAGE_LIMIT, AUTH, RUNNER_EXIT,
-                    TIMEOUT})
+NOTIFY = frozenset({CONNECTION, TRANSIENT, INTERRUPTED, USAGE_LIMIT, AUTH, ACCOUNT_PLAN,
+                    RUNNER_EXIT, TIMEOUT})
 
 # Order matters: INTERRUPTED is checked before CONNECTION because a SIGTERM'd
 # turn often *also* prints a broken-pipe message as it dies, and we must not
@@ -124,6 +131,16 @@ _AUTH_RE = re.compile(
     r"please run /login|run `?claude login`?",
     re.I,
 )
+# Checked after USAGE_LIMIT: Codex's limit message also advertises a plan
+# upgrade. On 2026-10-07 a login that had silently dropped to the free plan
+# failed every gpt-6-astra turn at compaction with the first wording; it
+# matched nothing, so each turn read as a one-second success.
+_ACCOUNT_PLAN_RE = re.compile(
+    r"model is not supported when using codex with a chatgpt account|"
+    r"not (?:available|supported|included) (?:on|in|with|for) your (?:current )?plan|"
+    r"your (?:current )?plan does not (?:include|support|have access)",
+    re.I,
+)
 _RUNNER_EXIT_RE = re.compile(
     r"\b(codex|clarp|agy|claude|agent|opencode)\s+exited\s+rc=\d+|"
     r"\b(exit status|exited with code)\s+\d+|"
@@ -154,6 +171,28 @@ def explain(message: str | None) -> str:
     return ""
 
 
+_PROVIDER_MESSAGE_RE = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def provider_message(message: str | None) -> str:
+    """The error as a person should read it: a provider's JSON body, which
+    Codex appends to its own prefix, replaced by the message inside it.
+    Text that is not such a body comes back as it was, stripped."""
+    text = (message or "").strip()
+    start = text.find("{")
+    if start < 0:
+        return text
+    found = _PROVIDER_MESSAGE_RE.findall(text[start:])
+    if not found:
+        return text
+    try:
+        inner = json.loads(f'"{found[-1]}"')
+    except ValueError:
+        return text
+    prefix = text[:start].strip()
+    return f"{prefix} {inner}".strip() if prefix else inner
+
+
 def classify_error(message: str | None) -> str:
     """Classify a free-text error string from a runner's `on_error`."""
     text = (message or "").strip()
@@ -168,6 +207,8 @@ def classify_error(message: str | None) -> str:
         return INTERRUPTED
     if _USAGE_LIMIT_RE.search(text):
         return USAGE_LIMIT
+    if _ACCOUNT_PLAN_RE.search(text):
+        return ACCOUNT_PLAN
     if _AUTH_RE.search(text):
         return AUTH
     if _CONNECTION_RE.search(text):

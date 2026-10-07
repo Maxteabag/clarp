@@ -73,6 +73,8 @@ def is_junk(text: str, *, agent_last_message: str = "") -> bool:
 _ERROR_KINDS = {
     "usage_limit": "The account ran out of quota, credits, usage, or hit a plan, "
                    "session or weekly limit",
+    "account_plan": "The signed-in account's plan or subscription does not include "
+                    "the requested model",
     "connection": "The network link broke: DNS failure, socket closed, connection "
                   "reset, fetch failed, offline",
     "transient": "The provider answered but is overloaded, rate limiting by load, "

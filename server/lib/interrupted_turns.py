@@ -33,7 +33,7 @@ RESTART_MARKER_TEXT = "Turn interrupted by server restart"
 _CAUSE_MARGIN_MS = 5_000
 # Nobody was waiting on these turns, so nothing is shown in the transcript.
 # The state change still lands so the agent stops looking busy.
-_SILENT_ORIGINS = frozenset(origins.ROUTINE_AUTOMATION_ORIGINS | {"watcher"})
+SILENT_ORIGINS = frozenset(origins.ROUTINE_AUTOMATION_ORIGINS | {"watcher"})
 
 
 def orphaned_turn(agent: dict) -> dict[str, Any] | None:
@@ -122,7 +122,7 @@ def recover_after_restart(stream=None) -> list[dict[str, Any]]:
 def _mark(turn: dict[str, Any], stream) -> None:
     agent_id = turn["agent_id"]
     marker = None
-    if turn["origin"] not in _SILENT_ORIGINS and turn["cause_message_id"]:
+    if turn["origin"] not in SILENT_ORIGINS and turn["cause_message_id"]:
         marker = message_store.record_interruption_marker(
             agent_id=agent_id,
             backend_session_id=turn["backend_session_id"],

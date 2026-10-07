@@ -203,6 +203,12 @@ reported there as `thinking` so older clients stay busy.
 `worked_ms = ended_at_ms - started_at_ms` once settled. Render a settled turn's
 work behind `Worked for 1m 12s · 6 tools`.
 
+A `failed` turn adds `"error": {"reason": "account_plan", "message": "This
+account's plan does not include gpt-6-astra. …", "detail": "<the provider's own
+words>"}` (Host contract 54). Show `message` (and `detail` on demand) with the
+fold; never render a failed turn as if it had answered. The same text lands in
+`/log` as a `system`-origin row under the prompt.
+
 ## 2. Identity
 
 Item ids derive from provider ids so a live item, a re-import and a reconnect agree

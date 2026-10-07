@@ -126,7 +126,11 @@ class LiveHub:
                 "ended_at_ms": None, "worked_ms": None, "tool_count": 0}}],
                 status_after=True)
 
-    def end_turn(self, agent_id: str, *, status: str = "completed") -> None:
+    def end_turn(self, agent_id: str, *, status: str = "completed",
+                 error: dict[str, str] | None = None) -> None:
+        """Settle the open turn. A failed turn carries ``error`` (reason,
+        message, provider detail) so a client can say why instead of folding
+        a one-second turn behind "Worked for 1s"."""
         with self._lock:
             state = self._open(agent_id)
             if state is None:
@@ -141,6 +145,9 @@ class LiveHub:
             turn = dict(state.view.turn or {})
             turn.update(status=status, ended_at_ms=now,
                         worked_ms=now - int(turn.get("started_at_ms") or now))
+            turn.pop("error", None)
+            if status == "failed" and error:
+                turn["error"] = error
             ops.append({"op": "turn", "conv": state.conv, "turn": turn})
             self._emit(state, ops, status_after=True, ended=status)
 
@@ -461,8 +468,11 @@ class LiveHub:
         if ended or turn.get("status") not in (None, "running"):
             final = ended or str(turn.get("status") or "completed")
             state_name = "interrupted" if final in ("interrupted", "failed") else "idle"
+            headline = None
+            if state_name == "interrupted":
+                headline = str((turn.get("error") or {}).get("message") or "Interrupted")
             return {**base, "state": state_name, "turn_started_ms": None,
-                    "headline": "Interrupted" if state_name == "interrupted" else None}
+                    "headline": headline}
         if state.account_wait:
             return {**base, "state": "limited", "headline": state.account_wait,
                     "since_ms": _previous_since(state.view.activity, "limited", now)}
@@ -744,7 +754,7 @@ def _observe_state(hub: LiveHub, agent_id: str, event: str, to_state: str,
             status = "failed"
         elif interrupted:
             status = "interrupted"
-        hub.end_turn(agent_id, status=status)
+        hub.end_turn(agent_id, status=status, error=_turn_error(detail))
         return
     if to_state not in BUSY:
         return
@@ -778,6 +788,18 @@ def _observe_state(hub: LiveHub, agent_id: str, event: str, to_state: str,
         hub.item(agent_id, compaction_id, "compaction", {"status": "running"})
     elif event == TurnEvent.COMPACTION_FINISHED:
         hub.done(agent_id, compaction_id)
+
+
+def _turn_error(detail: dict[str, Any]) -> dict[str, str] | None:
+    """What a failed turn's state detail says went wrong, for its turn op."""
+    from .error_classify import provider_message
+    raw = str(detail.get("provider_message") or detail.get("error") or "")
+    message = str(detail.get("message") or "")
+    if not (raw or message):
+        return None
+    return {"reason": str(detail.get("reason") or "failed"),
+            "message": message[:300] or "Turn failed",
+            "detail": provider_message(raw)[:500]}
 
 
 # A provider turn that failed (its process died and was not retried): the

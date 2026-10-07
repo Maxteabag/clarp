@@ -313,6 +313,7 @@ def has_interruption_marker(cause_message_id: str) -> bool:
 
 def record_interruption_marker(*, agent_id: str, backend_session_id: str,
                                cause_message_id: str, text: str,
+                               trace_id: str = "",
                                ) -> dict[str, Any] | None:
     """Write the visible "this turn was cut short" row under a user message.
 
@@ -361,13 +362,13 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
                message_id, agent_id, backend_session_id, source_file, seq,
                role, timestamp, text, kind, tool_name, tools_json,
                display_cells_json, updated_at, revision, origin,
-               sender_agent_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               sender_agent_id, trace_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(message_id) DO NOTHING""",
         (
             msg_id, agent_id, backend_session_id, f"marker:{cause_message_id}",
             seq, "assistant", timestamp, text, None, None, "[]", "[]",
-            timestamp_ms, revision, MARKER_ORIGIN, None,
+            timestamp_ms, revision, MARKER_ORIGIN, None, trace_id or None,
         ),
     )
     if inserted.rowcount != 1:
@@ -384,7 +385,7 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
         "id": msg_id, "role": "assistant", "timestamp": timestamp,
         "text": text, "kind": None, "tool_name": None, "tools": [],
         "display_cells": [], "origin": MARKER_ORIGIN, "sender_agent_id": "",
-        "revision": revision, "created": True,
+        "trace_id": trace_id or "", "revision": revision, "created": True,
     }
 
 
