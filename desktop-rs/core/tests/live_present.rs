@@ -137,13 +137,14 @@ fn without_explanations_the_second_line_is_the_command() {
 fn a_settled_turn_folds_its_work_and_keeps_what_failed_or_stopped_in_view() {
     let view = turn_full(after(23));
     let p = present(&view, &[], &options(&[], 1759480012000));
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "Ran npm test", "", "Stopped npm test"]);
+    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "", "Stopped npm test"]);
     assert_eq!(p.entries[0].kind, Kind::Fold);
     assert_eq!(p.entries[0].key, "live:fold:tr-1");
-    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:msg_01:1", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"]);
-    assert_eq!(p.entries[2].text, "The failure came from an off-by-one", "as written: trimmed, like `/log`");
-    assert_eq!(p.entries[2].status, "interrupted");
-    assert_eq!(p.entries[3].meta, "interrupted");
+    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
+    assert_eq!(p.entries[1].text, "Let me look at the parser and its tests.", "the commentary stays in view");
+    assert_eq!(p.entries[3].text, "The failure came from an off-by-one", "as written: trimmed, like `/log`");
+    assert_eq!(p.entries[3].status, "interrupted");
+    assert_eq!(p.entries[4].meta, "interrupted");
     let open = present(&view, &[], &options(&["live:fold:tr-1"], 1759480012000));
     assert_eq!(open.entries.len(), 1 + 7, "the fold opened shows every row again");
     assert!(open.entries[0].expanded);
@@ -184,10 +185,49 @@ fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let tools: Vec<Value> = ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"].iter().map(|id| json!({"id": id})).collect();
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
     let p = present(&view, &[durable], &options(&[], 0));
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "Ran npm test", "", "Stopped npm test"]);
-    assert_eq!(p.entries[2].row, "live-abc", "the row shows where the answer that stays was");
-    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold; the row carries the commentary");
+    // The row carries both messages: it shows once, where the first is.
+    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "Stopped npm test"]);
+    assert_eq!(p.entries[1].row, "live-abc", "the row shows where its first message was");
+    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
     assert_eq!(p.stripped_calls.len(), 5);
+}
+
+/// A settled turn of message, two tools, message, tool, answer.
+fn commentary_turn() -> LiveView {
+    let message = |id: &str, ordinal: i64, phase: &str, text: &str| {
+        json!({"id": id, "kind": "message", "rev": 1, "conv": "c-1", "turn_id": "tr-c", "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1_000 + ordinal * 1_000, "ended_at_ms": 1_500 + ordinal * 1_000, "phase": phase, "text": text})
+    };
+    let tool = |call: &str, ordinal: i64, command: &str| {
+        json!({"id": format!("cl:{call}"), "kind": "tool", "rev": 1, "conv": "c-1", "turn_id": "tr-c", "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1_000 + ordinal * 1_000, "ended_at_ms": 1_500 + ordinal * 1_000,
+            "tool": {"name": "Bash", "call_id": call, "category": "exec", "group": null, "label": command, "command": command}})
+    };
+    let snapshot = json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 1, "server_now_ms": 20_000,
+        "activity": {"state": "idle", "turn_id": "tr-c"},
+        "turn": {"turn_id": "tr-c", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 13_000, "worked_ms": 12_000, "tool_count": 3},
+        "items": [
+            message("cl:m:0", 1, "commentary", "Building it first."),
+            tool("c1", 2, "make build"),
+            tool("c2", 3, "make lint"),
+            message("cl:m:1", 4, "commentary", "Built. Now the tests."),
+            tool("c3", 5, "make test"),
+            message("cl:m:2", 6, "final", "All green."),
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    view
+}
+
+#[test]
+fn commentary_between_tools_stays_visible() {
+    let view = commentary_turn();
+    let p = present(&view, &[], &options(&[], 0));
+    let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
+    assert_eq!(read(&p), ["Building it first.", "Worked for 12s · 3 tools", "Built. Now the tests.", "All green."], "every message in its place, the fold where the work begins");
+    assert_eq!(p.entries[1].items, ["cl:c1", "cl:c2", "cl:c3"], "only the tools fold");
+    let open = present(&view, &[], &options(&["live:fold:tr-c"], 0));
+    assert_eq!(read(&open), ["Building it first.", "Worked for 12s · 3 tools", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
 }
 
 /// The real Host's settled turn (tests/fixtures/live-real-settled-turn.json):
