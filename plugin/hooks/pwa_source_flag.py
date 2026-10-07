@@ -146,12 +146,25 @@ def main() -> int:
         # Open a turn row. trace_id is "pwa-…" or "local-…" until the
         # /transcribe handler attaches one for PWA-voice turns.
         source = TurnSource.PWA if pwa_fresh else TurnSource.LOCAL
+        # Inside a process Clarp started, the dispatcher owns the trace: a
+        # prompt that arrives mid-turn (a background-task notification) is
+        # part of that turn however old its trace is. Minting a new one here
+        # made the runtime take its own running turn for superseded.
+        current = _agents.get_trace(
+            agent_id, max_age_ms=None if env_session else _agents.TRACE_TTL_MS)
         trace_id = (
             marker_info.trace_id
-            or _agents.get_trace(agent_id)
+            or current
             or f"{source}-{int(time.time()*1000):x}"
         )
-        _agents.set_trace(agent_id, trace_id)
+        if marker_info.trace_id or not (env_session and current):
+            if env_session and not marker_info.trace_id:
+                try: _emit_event("userprompt_hook", "traceMinted",
+                                 session=session or None,
+                                 detail={"trace_id": trace_id,
+                                         "reason": "no trace for a Clarp-started turn"})
+                except Exception: pass
+            _agents.set_trace(agent_id, trace_id)
         turn_lifecycle.open_turn(agent_id=agent_id,
                                  source=source,
                                  trace_id=trace_id,

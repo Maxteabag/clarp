@@ -909,13 +909,22 @@ def backend_sessions_by_session() -> dict[str, str]:
     return {r["session"]: r["backend_session_id"] for r in rows}
 
 
-def get_trace(agent_id: str) -> str | None:
+def get_trace(agent_id: str, *,
+              max_age_ms: int | None = TRACE_TTL_MS) -> str | None:
+    """The agent's current trace, or None once it has gone stale.
+
+    A trace older than ``max_age_ms`` (None: any age) is stale only when the
+    agent is settled: a turn that is still running keeps its trace however
+    long it takes.
+    """
     row = conn().execute(
         "SELECT trace_id, updated_at FROM traces WHERE agent_id = ?",
         (agent_id,)).fetchone()
     if not row:
         return None
-    if now_ms() - int(row["updated_at"]) > TRACE_TTL_MS:
+    if (max_age_ms is not None
+            and now_ms() - int(row["updated_at"]) > max_age_ms
+            and not is_busy(agent_id)):
         return None
     return row["trace_id"]
 
