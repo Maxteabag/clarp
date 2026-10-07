@@ -319,7 +319,7 @@ pub fn live_check(out: String) {
             check(titles().last().map(String::as_str) == Some("Running npm test"), &format!("the command's row: {:?}", titles()));
             check(titles().contains(&"Explored 1 file, 1 search".to_owned()), &format!("the group settled: {:?}", titles()));
             let command = live_row("live:cl:toolu_03").unwrap_or_default();
-            check(command.live.explaining && command.live.secondary.is_empty(), "the explanation line says Explaining… until it lands");
+            check(!command.live.explaining && command.live.secondary.is_empty(), "no explanation requested yet (explain: null): no Explaining…");
             shot(&out7, "live-00-explaining");
             let bar: Vec<String> = crate::window().map(|w| w.get_hints().iter().map(|h| format!("{} {}", h.keys, h.label)).collect()).unwrap_or_default();
             check(bar.iter().any(|h| h == "Ctrl+. Stop"), &format!("with the status line hidden, the shortcut bar names the stop key: {bar:?}"));
@@ -731,7 +731,7 @@ pub fn live_check(out: String) {
             let tool = live_row(REAL_RUNNING).unwrap_or_default();
             check(tool.live.title == "Running python3 -c 'import time; time.sleep(120)'", &format!("the running tool keeps its live row after its /log row landed: {:?}", tool.live.title));
             check(tool.live.meta.starts_with("0:1"), &format!("with its timer from the Host's clock: {:?}", tool.live.meta));
-            check(tool.live.explaining, "and Explaining… while its explanation comes");
+            check(!tool.live.explaining, "and no Explaining… while the Host has none pending (explain: null)");
             let shown = rows(&crate::window().expect("window"));
             check(shown.iter().all(|r| r.id != REAL_RUNNING_ROW), "its /log row is not shown again as a 'Show · 1 tool call' row");
             let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);

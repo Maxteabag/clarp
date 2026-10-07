@@ -366,6 +366,15 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
         index += 1;
     }
 
+    // A settled turn explains nothing more: no Explaining… and no line
+    // held for one.
+    if settled {
+        for entry in entries.iter_mut().filter(|e| e.secondary.is_empty()) {
+            entry.explaining = false;
+            entry.reserve_secondary = false;
+        }
+    }
+
     // A settled turn folds its work (§7.6): what failed or stopped and the
     // final answer stay out of the fold.
     if settled {
@@ -556,12 +565,12 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
     let explain = object(tool, "explain");
     if options.explanations {
         entry.secondary = explain.map(|e| text(e, "text")).unwrap_or_default().to_owned();
-        // A line is kept while an explanation may still come, so it lands
-        // without moving the chat; a settled tool without one needs none.
-        // Until it lands the line says it is coming.
-        let state = explain.map(|e| text(e, "status")).unwrap_or_default();
-        let coming = state == "pending" || (explain.is_some() && !matches!(state, "ready" | "failed")) || (!is_terminal(&status) && state != "failed");
-        entry.explaining = entry.secondary.is_empty() && coming;
+        // The line says Explaining… only while the Host has one pending;
+        // none requested (null), failed or skipped shows nothing. A running
+        // tool keeps the line so a late explanation lands without moving
+        // the chat. A settled turn clears it (`present`).
+        let pending = explain.is_some_and(|e| text(e, "status") == "pending");
+        entry.explaining = entry.secondary.is_empty() && pending;
         entry.reserve_secondary = entry.explaining || !is_terminal(&status);
     } else {
         entry.secondary = tool.get("command").and_then(Value::as_str).filter(|c| *c != label).unwrap_or_default().to_owned();
