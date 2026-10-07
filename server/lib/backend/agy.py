@@ -74,6 +74,15 @@ def _handle_result(result: Any, evidence: dict[str, Any], st: _TurnState, *,
         return
     conv_id = result.get("conversation_id")
     if not isinstance(conv_id, str) or not conv_id.strip():
+        # agy refuses some turns before it opens a conversation (a rejected
+        # sign-in: status ERROR, conversation_id ""); its own error is the
+        # reason, not the missing id.
+        refused = result.get("error")
+        if (isinstance(result.get("status"), str) and isinstance(refused, str)
+                and refused.strip()):
+            _finish_error(_runner_error(
+                f"status={result['status']}: {refused.strip()}"), st, on_error=on_error)
+            return
         _finish_error(_runner_error("parser error: result conversation_id missing"), st,
                       on_error=on_error)
         return

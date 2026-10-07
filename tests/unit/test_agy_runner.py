@@ -1353,3 +1353,26 @@ def test_live_text_from_separate_response_steps_stays_separate_paragraphs():
                           "step_index": index, "text_delta": delta}, {}, st,
                          agent_id="", session="", trace_id="", stream=None)
     assert st.live_text == "Looking now.\n\nDone."
+
+
+def test_a_turn_agy_refuses_before_opening_a_conversation_reports_agys_reason(
+        fake_agy, tmp_path):
+    # 2026-10-06 18:14-~02:00: agy rejected the sign-in with status ERROR and
+    # an empty conversation_id; the turn read as a parser error instead.
+    from lib import error_classify
+    refusal = ("Eligibility check failed: PERMISSION_DENIED (code 403): Request had "
+               "insufficient authentication scopes.. Please log out (/logout) and log "
+               "back in (/login).")
+    fake_agy(json.dumps({"event": "result", "result": {
+        "conversation_id": "", "status": "ERROR", "response": "", "error": refusal,
+        "duration_seconds": 0, "num_turns": 0}}) + "\n", rc=1)
+    agent_id = _make_agy_agent(persona="Refused", session="refused")
+    trace_id = _open_owned_turn(agent_id, "refused")
+    results, errors = [], []
+    AGY.start_turn(text="prompt", cwd=tmp_path, agent_id=agent_id, session="refused",
+                   trace_id=trace_id, on_result=results.append,
+                   on_error=errors.append).wait(timeout=8)
+    assert _wait_for(lambda: bool(results or errors))
+    assert results == [] and len(errors) == 1
+    assert "insufficient authentication scopes" in errors[0]
+    assert error_classify.classify_error(errors[0]) == error_classify.AUTH
