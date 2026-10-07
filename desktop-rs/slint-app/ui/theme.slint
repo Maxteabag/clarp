@@ -78,8 +78,9 @@ export global SendFlight {
     out property <duration> composer: 300ms;
     out property <float> composer-bounce: 0;
     out property <duration> composer-window: 600ms;
-    // Reduce Motion, or a send with no text (attachments, voice): no copy,
-    // the bubble fades in, ease-out 0.2 s.
+    // Reduce Motion, or a send with no text (voice), with attachments or
+    // longer than the composer shows: no copy, the bubble fades in,
+    // ease-out 0.2 s.
     out property <duration> fade: 200ms;
     // An unsent message's status, a queued-turn label: shown only after
     // the grace period (a failure at once), each fading in, ease-out 0.2 s.

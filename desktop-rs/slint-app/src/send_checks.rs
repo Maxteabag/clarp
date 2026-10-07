@@ -10,9 +10,9 @@
 //! Ctrl+Enter flies too, Reduce Motion fades the bubble in, and the setting
 //! turns it off. The copy lands 320 ms after the bubble is laid out and is
 //! gone 200 ms later; with no bubble laid out it is dropped at 600 ms; a
-//! send with no text fades in; queued-turn labels wait the grace period
-//! too. Mid-flight frames are saved, and the frames drawn in flight are
-//! timed.
+//! send with no text, or longer than the composer shows, fades in;
+//! queued-turn labels wait the grace period too. Mid-flight frames are
+//! saved, and the frames drawn in flight are timed.
 
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
@@ -64,6 +64,11 @@ thread_local! {
     /// label, the explorer's label).
     static QUEUE_SEEN: RefCell<Vec<(Duration, i32, i32, i32)>> = const { RefCell::new(Vec::new()) };
 }
+
+/// A draft taller than the composer grows (240px): it scrolls in the box.
+const LONG_DRAFT: [&str; 16] = [
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen",
+];
 
 fn element(id: &str) -> Option<Rect> {
     use i_slint_backend_testing::ElementQuery;
@@ -537,6 +542,24 @@ pub fn send_check(out: String) {
             check(super::sends().last().is_some_and(|s| s["body"]["text"].as_str().is_some_and(|t| t.contains("photo.png"))), "the attachment was sent");
             check(samples.iter().any(|s| s.phase == "fade") && samples.iter().all(|s| s.flight.is_none() && s.phase != "wait"), "with no text there is no copy: the bubble fades in");
             check((200..=360).contains(&faded), &format!("over 0.2 s: {faded} ms"));
+            // A draft longer than the composer shows: a fade too.
+            type_draft(&LONG_DRAFT.join("\n"));
+            true
+        })),
+        ("long draft", Box::new(|_, _window, elapsed| {
+            if !draft_is(&LONG_DRAFT.join("\n")) || elapsed < Duration::from_millis(300) || !report().at_end {
+                return false;
+            }
+            send_and_sample(false, &[], last_own().map(|(id, ..)| id));
+            true
+        })),
+        ("long faded", Box::new(|_, window, _| {
+            let flight = window.global::<crate::SendFlight>();
+            if flight.get_started() <= STARTED.with(Cell::get) || flight.get_landed() < flight.get_started() || since_send() < Duration::from_millis(500) {
+                return false;
+            }
+            let samples = stop_sampling();
+            check(samples.iter().any(|s| s.phase == "fade") && samples.iter().all(|s| s.flight.is_none()), "a draft longer than the composer shows fades in, no copy");
             live_checks::set_reduced_motion(true);
             type_draft("Still and quiet");
             true
