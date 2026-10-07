@@ -1246,7 +1246,15 @@ def test_error_result_with_connection_text_is_retried(tmp_path):
     assert len(backends.spawned) == 2
 
 
-def test_unknown_error_keeps_legacy_idle_flip(tmp_path):
+def _failure_rows(agent_id):
+    return agents_db.conn().execute(
+        "SELECT role, origin, text, trace_id FROM messages "
+        "WHERE agent_id = ? AND origin = 'system'", (agent_id,)).fetchall()
+
+
+def test_unknown_error_interrupts_visibly_with_the_provider_message(tmp_path):
+    # It used to flip to IDLE: the chat read "Worked for 1s" as if the turn
+    # had answered, with the error nowhere a user would look.
     service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
     service.dispatch(text="hi", requested_session="mike", trace_id="t",
                      synthesize_audio=False)
@@ -1254,8 +1262,92 @@ def test_unknown_error_keeps_legacy_idle_flip(tmp_path):
     call["on_error"]("some unexpected parser crash")
 
     assert len(backends.spawned) == 1  # not retried
-    # Legacy behaviour: idle flip, not the interrupted badge.
-    assert agents_db.latest_state(agent_id)["kind"] == AgentState.IDLE
+    state = agents_db.latest_state(agent_id)
+    assert state["kind"] == AgentState.INTERRUPTED
+    assert state["detail"]["message"] == "Turn failed"
+    assert state["detail"]["error"] == "some unexpected parser crash"
+    rows = _failure_rows(agent_id)
+    assert len(rows) == 1
+    assert rows[0]["role"] == "assistant"
+    assert rows[0]["trace_id"] == "t"
+    assert "Turn failed" in rows[0]["text"]
+    assert "some unexpected parser crash" in rows[0]["text"]
+    assert any(event.get("type") == "transcript-updated"
+               for event in service.ctx.stream.events)
+
+
+def test_routine_and_deliberate_failures_add_no_chat_row(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
+    service.dispatch(text="Heartbeat check", requested_session="mike", trace_id="hb",
+                     origin="heartbeat", synthesize_audio=False)
+    backends.spawned[-1][1]["on_error"]("some unexpected parser crash")
+    assert agents_db.latest_state(agent_id)["kind"] == AgentState.INTERRUPTED
+    service.dispatch(text="hi", requested_session="mike", trace_id="stop",
+                     synthesize_audio=False)
+    backends.spawned[-1][1]["on_error"]("turn_aborted: the user interrupted the previous turn")
+    assert agents_db.latest_state(agent_id)["detail"]["reason"] == "interrupted"
+    assert _failure_rows(agent_id) == []
+
+
+_COMPACT_PLAN_ERROR = (
+    'Error running remote compact task: {"type":"error","status":400,'
+    '"error":{"type":"invalid_request_error","message":"The \'gpt-6-astra\' '
+    'model is not supported when using Codex with a ChatGPT account."}}')
+
+
+def _codex_plan_service(tmp_path, monkeypatch, selector):
+    from dataclasses import replace
+    cfg = replace(_td.config.load(), codex_account_switch_command=selector)
+    monkeypatch.setattr(_td.config, "load", lambda *args, **kwargs: cfg)
+    service, backend, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
+    agents_db.update_agent(agent_id, backend="codex", model="gpt-6-astra")
+    service.dispatch(text="Continue", requested_session="mike", trace_id="plan",
+                     synthesize_audio=False)
+    backend.spawned[-1][1]["on_session_init"]("codex-thread")
+    return service, backend, agent_id
+
+
+def test_codex_plan_refusal_switches_accounts_like_a_usage_limit(tmp_path, monkeypatch):
+    from lib.account_failover import AccountFailover
+    from unittest.mock import Mock
+    scheduled = []
+    coordinator = AccountFailover(
+        _td._TURN_LOCK, switch=Mock(return_value=True),
+        schedule=lambda d, f: scheduled.append((d, f)), now=lambda: 100)
+    monkeypatch.setitem(_td._FAILOVERS, "codex", coordinator)
+    service, backend, agent_id = _codex_plan_service(
+        tmp_path, monkeypatch, ("codex-selector",))
+
+    backend.spawned[-1][1]["on_error"](_COMPACT_PLAN_ERROR)
+
+    assert coordinator.recovering
+    scheduled.pop()[1]()
+    coordinator.switch.assert_called_once_with(("codex-selector",), ["gpt-6-astra"])
+    resumed = backend.spawned[-1][1]
+    assert len(backend.spawned) == 2
+    assert resumed["trace_id"] == "plan"
+    assert resumed["backend_session_id"] == "codex-thread"
+    assert agents_db.latest_state(agent_id)["kind"] != AgentState.INTERRUPTED
+
+
+def test_codex_plan_refusal_without_a_selector_says_which_model_the_plan_lacks(
+        tmp_path, monkeypatch):
+    service, backend, agent_id = _codex_plan_service(tmp_path, monkeypatch, ())
+
+    backend.spawned[-1][1]["on_error"](_COMPACT_PLAN_ERROR)
+
+    assert len(backend.spawned) == 1
+    state = agents_db.latest_state(agent_id)
+    assert state["kind"] == AgentState.INTERRUPTED
+    assert state["detail"]["reason"] == "account_plan"
+    assert "plan" in state["detail"]["message"].lower()
+    assert "gpt-6-astra" in state["detail"]["error"]
+    rows = _failure_rows(agent_id)
+    assert len(rows) == 1
+    assert rows[0]["trace_id"] == "plan"
+    assert ("The 'gpt-6-astra' model is not supported when using Codex with a "
+            "ChatGPT account.") in rows[0]["text"]
+    assert '"type":"error"' not in rows[0]["text"]
 
 
 def _enable_account_failover(monkeypatch, *, available=True):
@@ -2432,3 +2524,44 @@ def test_slot_with_live_work_is_never_released(tmp_path, case):
 
     assert service.release_leaked_slots() == {}
     assert _td.runtime_status()["active"][agent_id] == "tA"
+
+
+def test_a_failed_turn_keeps_its_prompt_and_runs_what_queued_behind_it(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path, retry_scheduler=_run_now)
+    service.dispatch(text="first", requested_session="mike", trace_id="t1",
+                     client_msg_id="first", synthesize_audio=False)
+    queued = service.dispatch(text="second", requested_session="mike", trace_id="t2",
+                              client_msg_id="second", queue_if_busy=True,
+                              synthesize_audio=False)
+    assert queued.queued
+    backends.spawned[0][1]["on_error"](_COMPACT_PLAN_ERROR)
+
+    users = agents_db.conn().execute(
+        "SELECT text, trace_id FROM messages WHERE agent_id = ? AND role = 'user' "
+        "ORDER BY updated_at", (agent_id,)).fetchall()
+    assert [(row["text"], row["trace_id"]) for row in users] == [
+        ("first", "t1"), ("second", "t2")]
+    assert [row["trace_id"] for row in _failure_rows(agent_id)] == ["t1"]
+    # The queued prompt is its own turn, running, not failed with the first.
+    assert len(backends.spawned) == 2
+    assert backends.spawned[1][1]["trace_id"] == "t2"
+    assert agents_db.latest_state(agent_id)["kind"] == AgentState.THINKING
+
+
+def test_a_plan_refusal_waiting_for_an_account_is_paused_not_failed(tmp_path, monkeypatch):
+    from lib.account_failover import AccountFailover
+    from unittest.mock import Mock
+    scheduled = []
+    coordinator = AccountFailover(
+        _td._TURN_LOCK, switch=Mock(return_value=False),
+        schedule=lambda d, f: scheduled.append((d, f)), now=lambda: 100)
+    monkeypatch.setitem(_td._FAILOVERS, "codex", coordinator)
+    service, backend, agent_id = _codex_plan_service(
+        tmp_path, monkeypatch, ("codex-selector",))
+
+    backend.spawned[-1][1]["on_error"](_COMPACT_PLAN_ERROR)
+    scheduled.pop(0)[1]()
+
+    assert coordinator.status()["waiting"] == [agent_id]
+    assert agents_db.latest_state(agent_id)["kind"] == AgentState.THINKING
+    assert _failure_rows(agent_id) == []

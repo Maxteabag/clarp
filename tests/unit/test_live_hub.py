@@ -238,3 +238,40 @@ def test_the_runtime_pushes_live_events_and_answers_snapshots_over_its_socket(tm
         relay.stop()
         runtime.shutdown()
         runtime.server_close()
+
+
+def test_a_failed_turn_carries_the_reason_clients_show(monkeypatch):
+    # A provider refusal ended the turn after a second; without the reason
+    # on the turn, a client could only fold it behind "Worked for 1s".
+    from lib import live_hub
+    from lib.protocol import AgentState
+    hub, clock, events = _hub()
+    monkeypatch.setattr(live_hub, "_HUB", hub)
+    hub.begin_turn(agent_id="a1", session="rachel", conv="conv-1", turn_id="tr-1")
+    hub.item("a1", "cx:tr-1:compaction", "compaction", {"status": "running"})
+    clock.advance(1)
+    live_hub.observe_transition("a1", "process_exited_failed", AgentState.INTERRUPTED, {
+        "trace_id": "tr-1", "reason": "account_plan",
+        "message": "This account's plan does not include this model",
+        "error": "The 'gpt-6-astra' model is not supported when using Codex "
+                 "with a ChatGPT account."})
+    snapshot = hub.snapshot(session="rachel")
+    assert snapshot["turn"]["status"] == "failed"
+    assert snapshot["turn"]["error"] == {
+        "reason": "account_plan",
+        "message": "This account's plan does not include this model",
+        "detail": "The 'gpt-6-astra' model is not supported when using Codex "
+                  "with a ChatGPT account."}
+    assert snapshot["activity"]["headline"] == "This account's plan does not include this model"
+    assert {item["status"] for item in snapshot["items"]} == {"interrupted"}
+    _same_state(_client(hub, events), snapshot)
+
+
+def test_a_completed_or_stopped_turn_has_no_error():
+    hub, _, _ = _hub()
+    hub.begin_turn(agent_id="a1", session="rachel", conv="conv-1", turn_id="tr-1")
+    hub.end_turn("a1")
+    assert "error" not in hub.snapshot(session="rachel")["turn"]
+    hub.begin_turn(agent_id="a1", session="rachel", conv="conv-1", turn_id="tr-2")
+    hub.end_turn("a1", status="interrupted")
+    assert "error" not in hub.snapshot(session="rachel")["turn"]

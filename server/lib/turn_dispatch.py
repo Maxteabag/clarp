@@ -1935,7 +1935,8 @@ class TurnDispatchService:
                     self._schedule_retry(
                         replace(spec, recovery_attempted=True), attempt, state, msg)
                     return
-        if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH)
+        if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH,
+                         error_classify.ACCOUNT_PLAN)
                 and backend.account_pool()
                 and account_failover(spec.backend).request(
                     spec.agent_id, spec.trace_id, account_selector(spec.backend))):
@@ -1961,28 +1962,19 @@ class TurnDispatchService:
                 f"re-delivering")
             self._schedule_retry(spec, attempt, state, msg)
             return
-        if category in error_classify.NOTIFY:
-            self._mark_interrupted(spec, category, msg, attempts=attempt,
-                                   quota_confirmed=getattr(message, "quota_confirmed", None))
-            if spec.origin == "heartbeat":
-                try:
-                    from . import heartbeat
-                    heartbeat.record_heartbeat_noop(spec.agent_id, is_interrupted=True)
-                except Exception as exc:  # noqa: BLE001
-                    log_exception("heartbeatFailureNoopFail", exc, detail=spec.agent_id)
-            return
-        # Unrecognised failure: keep the old behaviour — flip to IDLE so the
-        # UI doesn't hang on THINKING, and log the turn as failed.
-        turn_lifecycle.try_transition(
-            spec.agent_id, TurnEvent.TURN_FAILED_UNCLASSIFIED,
-            {"dispatch": spec.backend, "error": msg[:200]},
-        )
-        eventlog.emit("server", "clarpTurnFail", context=spec.context,
-                      detail={"err": msg})
-        from . import oracle_delegations
-        oracle_delegations.fail_for_trace(spec.trace_id, msg or "Agent turn failed")
-        # Terminal (gave up): drain the queue.
-        self._finish_turn(spec)
+        # Every failure that is not retried ends the turn visibly, an
+        # unrecognised one included. It used to flip to IDLE, which every
+        # client renders as a turn that answered: on 2026-10-07 a Codex login
+        # that had lost its plan failed each turn at compaction, and the chat
+        # showed "Worked for 1s" with the provider's refusal nowhere in sight.
+        self._mark_interrupted(spec, category, message, attempts=attempt,
+                               quota_confirmed=getattr(message, "quota_confirmed", None))
+        if spec.origin == "heartbeat":
+            try:
+                from . import heartbeat
+                heartbeat.record_heartbeat_noop(spec.agent_id, is_interrupted=True)
+            except Exception as exc:  # noqa: BLE001
+                log_exception("heartbeatFailureNoopFail", exc, detail=spec.agent_id)
 
     def _schedule_retry(self, spec: _TurnSpec, attempt: int, state: dict,
                         message: str) -> None:
@@ -2046,7 +2038,10 @@ class TurnDispatchService:
             error_classify.AUTH: "Sign-in expired — could not refresh the account",
             error_classify.RUNNER_EXIT: "Agent process exited unexpectedly",
             error_classify.TIMEOUT: "Turn timed out — backend stopped responding",
-        }.get(category, "Turn interrupted")
+            error_classify.ACCOUNT_PLAN: (
+                f"This account's plan does not include {spec.model or 'this model'}. "
+                "Switch to an account that has it or choose another model"),
+        }.get(category, "Turn failed")
         human = error_classify.explain(message) or human
         limit_event = None
         if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
@@ -2065,10 +2060,11 @@ class TurnDispatchService:
                         }))
             except Exception as exc:  # noqa: BLE001
                 log_exception("providerLimitRecordFail", exc, detail=spec.trace_id)
+        provider = error_classify.provider_message(message)
         state_detail = {
             "dispatch": spec.backend, "reason": category, "message": human,
-            "error": (message or "")[:200], "attempts": attempts,
-            "summary": human + ". Your message is saved.",
+            "error": (message or "")[:200], "provider_message": provider[:500],
+            "attempts": attempts, "summary": human + ". Your message is saved.",
         }
         if limit_event:
             state_detail["provider_limit_event_id"] = limit_event[
@@ -2082,13 +2078,51 @@ class TurnDispatchService:
                               "err": (message or "")[:300]})
         log("turnInterrupted",
             f"agent={spec.agent_id} reason={category} attempts={attempts} "
-            f"trace={spec.trace_id or '∅'}")
+            f"trace={spec.trace_id or '∅'} err={provider[:300]!r}")
+        if category != error_classify.INTERRUPTED:
+            _TURN_LOCK.defer(lambda: self._record_failure_row(spec, human, provider))
         from . import oracle_delegations
         oracle_delegations.fail_for_trace(
             spec.trace_id, (message or human)[:500])
         # Terminal: a killed/interrupted turn still drains anything queued
         # behind it (e.g. an explicit stop, then your next message runs).
         self._finish_turn(spec)
+
+    def _record_failure_row(self, spec: _TurnSpec, human: str, provider: str) -> None:
+        """Put the failure in the chat, under the message that caused it.
+
+        The agent's state carries it too, but that is replaced by the next
+        turn; this row stays where the user reads the conversation. Routine
+        automation nobody is waiting on gets none, as after a restart.
+        """
+        from . import interrupted_turns, message_store
+        if spec.origin in interrupted_turns.SILENT_ORIGINS:
+            return
+        try:
+            cause = agents_db.conn().execute(
+                """SELECT message_id, backend_session_id FROM messages
+                    WHERE agent_id = ? AND trace_id = ? AND role = 'user'
+                    ORDER BY updated_at DESC LIMIT 1""",
+                (spec.agent_id, spec.trace_id)).fetchone()
+            if cause is None:
+                log("turnFailureRowSkipped",
+                    f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
+                    f"no user row carries this trace")
+                return
+            text = human + "."
+            if provider and provider not in human:
+                text += "\n\n" + provider[:1000]
+            row = message_store.record_interruption_marker(
+                agent_id=spec.agent_id,
+                backend_session_id=str(cause["backend_session_id"] or ""),
+                cause_message_id=str(cause["message_id"]), text=text,
+                trace_id=spec.trace_id)
+            if row is not None and getattr(self.ctx, "stream", None) is not None:
+                events.broadcast(self.ctx.stream, events.transcript_updated(
+                    agent_id=spec.agent_id, session=spec.session,
+                    backend_session_id=str(cause["backend_session_id"] or "")))
+        except Exception as exc:  # noqa: BLE001 - the state already carries it
+            log_exception("turnFailureRowFail", exc, detail=spec.trace_id)
 
     def _sticky_session(self) -> str:
         """Session of the currently-focused agent — the last one addressed by

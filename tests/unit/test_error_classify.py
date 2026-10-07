@@ -144,3 +144,56 @@ def test_opencode_provider_outage_is_reported_not_retried_as_a_dropped_connectio
     raw = "Error from provider (Console): Upstream request failed: Endpoint is unavailable."
     assert ec.classify_error(raw) == ec.TRANSIENT
     assert "provider is unavailable" in ec.explain(raw)
+
+
+# The live failure of 2026-10-07: the saved Codex login fell from Pro to the
+# free plan, and every turn on a Pro-only model died at compaction with this.
+_COMPACT_PLAN_ERROR = (
+    'Error running remote compact task: {"type":"error","status":400,'
+    '"error":{"type":"invalid_request_error","message":"The \'gpt-6-astra\' '
+    'model is not supported when using Codex with a ChatGPT account."}}')
+
+
+def test_a_model_the_accounts_plan_does_not_include_is_an_account_problem():
+    for msg in [
+        _COMPACT_PLAN_ERROR,
+        "The 'gpt-5.6-sol' model is not supported when using Codex with a ChatGPT account.",
+        "unexpected status 400 Bad Request: The 'gpt-6-astra' model is not supported "
+        "when using Codex with a ChatGPT account.",
+        "This model is not available on your current plan.",
+        "Your plan does not include access to gpt-6-astra.",
+    ]:
+        assert ec.classify_error(msg) == ec.ACCOUNT_PLAN, msg
+
+
+def test_plan_wording_inside_a_usage_limit_stays_a_usage_limit():
+    # Codex's limit message advertises a plan upgrade; it is still a limit
+    # with a reset, not a model the plan lacks.
+    msg = ("You've hit your usage limit. Upgrade to Pro "
+           "(https://chatgpt.com/explore/pro) or try again at 3:29 PM.")
+    assert ec.classify_error(msg) == ec.USAGE_LIMIT
+
+
+def test_other_invalid_requests_are_not_account_problems():
+    for msg in [
+        "The model 'gpt-9' does not exist or you do not have access to it",
+        '{"error":{"type":"invalid_request_error","message":"context_length_exceeded"}}',
+        "Unsupported parameter: 'reasoning.effort' is not supported with this model.",
+        "the plan step is not supported by this tool",
+    ]:
+        assert ec.classify_error(msg) != ec.ACCOUNT_PLAN, msg
+
+
+def test_account_plan_failures_notify_the_user():
+    assert ec.ACCOUNT_PLAN in ec.NOTIFY
+
+
+def test_provider_message_unwraps_the_json_a_codex_error_carries():
+    assert ec.provider_message(_COMPACT_PLAN_ERROR) == (
+        "Error running remote compact task: The 'gpt-6-astra' model is not "
+        "supported when using Codex with a ChatGPT account.")
+    assert ec.provider_message("  plain failure\n") == "plain failure"
+    assert ec.provider_message("") == ""
+    # Malformed JSON is shown as it came, never dropped.
+    assert ec.provider_message('boom: {"message": "unterminated') == (
+        'boom: {"message": "unterminated')
