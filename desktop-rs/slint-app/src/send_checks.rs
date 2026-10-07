@@ -509,10 +509,10 @@ pub fn send_check(out: String) {
             // The iPhone's timing, by the animation's own clock.
             let ms = |d: i64| d.max(0) as u64;
             // What is drawn follows the clock to the frame; the pane's
-            // bookkeeping (when it saw each moment) runs a frame or so
-            // behind, so a frame's slack on what it saw.
+            // bookkeeping (when its timer saw each moment) runs up to two
+            // loop turns behind under load, so two frames' slack.
             let worst_frame = frames.iter().copied().fold(0.0, f64::max) as u64;
-            let slack = worst_frame.max(60) + 60;
+            let slack = 2 * worst_frame.max(60) + 40;
             let (placed, seen, gone) = (ms(flight.get_placed_at() - flight.get_sent_at()), ms(flight.get_settle_seen_at() - flight.get_placed_at()), ms(flight.get_gone_at() - flight.get_settled_at()));
             println!("perf send timing: bubble laid out {placed} ms after the send; landing seen {seen} ms later (lands at 320 ms); copy gone {gone} ms after landing (slack {slack} ms)");
             check(samples.iter().any(|s| s.phase == "wait") || placed < 100, &format!("the copy waits on the composer until the bubble is laid out ({placed} ms)"));
