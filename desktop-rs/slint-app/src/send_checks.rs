@@ -97,7 +97,7 @@ fn last_own() -> Option<(String, bool, bool)> {
     engine.conversation("rachel")?.rows().iter().rev().find(|m| m.role == "user").map(|m| (m.id.clone(), m.pending, m.delivery_failed))
 }
 
-/// The animation the last send started ("flight", "fade", "" once landed).
+/// The animation the last send is in ("flight", "settle", "fade", "" once over).
 fn phase() -> String {
     crate::window().map(|w| w.global::<crate::SendFlight>().get_phase().to_string()).unwrap_or_default()
 }
@@ -154,7 +154,7 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
         // The frame it landed on: its last report beside the bubble as
         // drawn then.
         let was_flying = SAMPLES.with(|s| s.borrow().last().is_some_and(|l| l.phase == "flight"));
-        if was_flying && sample.phase.is_empty() {
+        if was_flying && sample.phase != "flight" {
             let report = (flight.get_x(), flight.get_y(), flight.get_width(), flight.get_height());
             let bubble = element(&format!("row:{}", sample.id));
             LANDING.with(|l| *l.borrow_mut() = Some((report, flight.get_progress(), bubble)));
@@ -275,7 +275,7 @@ pub fn send_check(out: String) {
             let (low, high) = heights.iter().fold((f32::MAX, f32::MIN), |(l, h), x| (l.min(*x), h.max(*x)));
             check(!heights.is_empty() && high - low < 0.5, &format!("the row's height never changed from unsent to sent: {low}..{high}px over {} frames", heights.len()));
             shot(&OUT.with(|o| o.borrow().clone()), "send-01-confirmed");
-            set_delay(2.6);
+            set_delay(2.9);
             type_draft("A slow Host");
             true
         })),
@@ -285,19 +285,19 @@ pub fn send_check(out: String) {
                 return false;
             }
             *p2.borrow_mut() = last_own().map(|(id, ..)| id);
-            send_and_sample(false, &[(1900, "send-02-sending")], p2.borrow().clone());
+            send_and_sample(false, &[(2100, "send-02-sending")], p2.borrow().clone());
             true
         })),
         ("slow confirmed", Box::new(|_, _window, _| {
             let confirmed = last_own().is_some_and(|(id, pending, _)| id.starts_with("u-") && !pending);
-            if !confirmed || since_send() < Duration::from_millis(3000) {
+            if !confirmed || since_send() < Duration::from_millis(3300) {
                 return false;
             }
             let samples = stop_sampling();
             let first = samples.iter().find(|s| s.status == "Sending…").map(|s| s.at);
             check(
-                first.is_some_and(|at| at >= Duration::from_millis(1400) && at <= Duration::from_millis(2300)),
-                &format!("unsent past the grace period (1.5 s), it says Sending… from {first:?}"),
+                first.is_some_and(|at| at >= Duration::from_millis(1700) && at <= Duration::from_millis(2600)),
+                &format!("unsent past the grace period (1.75 s), it says Sending… from {first:?}"),
             );
             let heights = heights(&samples);
             let changes = heights.windows(2).filter(|w| (w[1] - w[0]).abs() >= 0.5).count();
@@ -359,8 +359,14 @@ pub fn send_check(out: String) {
             let frames = flight_frames(f2.get());
             let flying: Vec<&Sample> = samples.iter().filter(|s| s.phase == "flight" && s.flight.is_some()).collect();
             check(flying.len() >= 3, &format!("the text flew, sampled over {} frames", flying.len()));
+            // Landed, the copy fades over the real bubble (0.14 s).
+            let settling: Vec<Duration> = samples.iter().filter(|s| s.phase == "settle").map(|s| s.at).collect();
+            let span = settling.last().zip(settling.first()).map(|(l, f)| *l - *f);
+            check(!settling.is_empty() && span.is_some_and(|d| d <= Duration::from_millis(300)), &format!("landed, the copy fades over the bubble: {} frames over {span:?}", settling.len()));
             let progress: Vec<f32> = flying.iter().map(|s| s.progress).collect();
-            check(progress.windows(2).all(|w| w[1] >= w[0]), &format!("eased forward only: {progress:?}"));
+            // A spring with a little bounce: forward, give or take its
+            // overshoot of a fraction of a percent.
+            check(progress.windows(2).all(|w| w[1] >= w[0] - 0.01), &format!("sprung forward only: {progress:?}"));
             let from = (flight.get_from_x(), flight.get_from_y(), flight.get_from_width(), flight.get_from_height());
             let id = samples.iter().rev().find(|s| !s.id.is_empty()).map(|s| s.id.clone()).unwrap_or_default();
             let bubble = element(&format!("row:{id}"));

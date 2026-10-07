@@ -200,13 +200,32 @@ export component Pane inherits Rectangle {
     // and the frame that lays out the new row can take a while on a slow
     // machine): the first frame drawn shows the text still in the box.
     property <bool> flight-armed;
-    property <float> flight-raw: root.flight-id == "" ? 1 : !root.flight-armed ? 0 : Math.clamp((animation-tick() - root.flight-start) / (root.flying ? SendFlight.flight : SendFlight.fade), 0, 1);
-    // Ease out: quick off the composer, settling into place.
-    property <float> flight-t: 1 - Math.pow(1 - root.flight-raw, 3);
-    // The composer is done shrinking a little before the text lands, so
+    property <duration> flight-elapsed: root.flight-id == "" || !root.flight-armed ? 0ms : animation-tick() - root.flight-start;
+    // A damped spring's progress `elapsed` into one of `length` and
+    // `bounce` (as SwiftUI's spring(duration:bounce:): a period of
+    // `length`, damping 1 - bounce), taken as there at `length`.
+    pure function spring(elapsed: duration, length: duration, bounce: float) -> float {
+        if (elapsed >= length) { return 1; }
+        if (elapsed <= 0ms) { return 0; }
+        let w = 2 * 3.14159265 / (length / 1s);
+        let z = 1 - bounce;
+        let t = elapsed / 1s;
+        if (z >= 1) { return 1 - Math.exp(-w * t) * (1 + w * t); }
+        let wd = w * Math.sqrt(1 - z * z);
+        return 1 - Math.exp(-z * w * t) * (Math.cos(wd * t * 1rad) + z * w / wd * Math.sin(wd * t * 1rad));
+    }
+    // Where the copy is between the composer and the bubble.
+    property <float> flight-t: root.flying ? root.spring(root.flight-elapsed, SendFlight.flight, SendFlight.flight-bounce) : 1;
+    // The composer's own spring, done a little before the text lands, so
     // the chat's end (and the bubble with it) holds still for the last
     // frames and the text settles exactly where the bubble is drawn.
-    property <float> box-t: 1 - Math.pow(1 - Math.min(1, root.flight-raw / 0.7), 3);
+    property <float> box-t: root.spring(root.flight-elapsed, SendFlight.composer, SendFlight.composer-bounce);
+    // Landed: the bubble shows under the copy, which fades.
+    property <bool> settled: root.flying && root.flight-armed && root.flight-elapsed >= SendFlight.flight;
+    property <float> copy-opacity: root.settled ? Math.clamp(1 - (root.flight-elapsed - SendFlight.flight) / SendFlight.settle, 0, 1) : 1;
+    // A fade's progress.
+    property <float> fade-t: root.flying ? 1 : Math.clamp(root.flight-elapsed / SendFlight.fade, 0, 1);
+    property <bool> flight-done: root.flight-armed && root.flight-elapsed >= (root.flying ? SendFlight.flight + SendFlight.settle : SendFlight.fade);
     // Where it flies from (in the pane) and the box's height then.
     property <length> from-x;
     property <length> from-y;
@@ -275,7 +294,8 @@ export component Pane inherits Rectangle {
             SendFlight.width = root.fly-width;
             SendFlight.height = root.fly-height;
             SendFlight.composer-height = composer-box.height;
-            if (root.flight-raw >= 1) { root.land(); }
+            if (root.settled && SendFlight.phase == "flight") { SendFlight.phase = "settle"; }
+            if (root.flight-done) { root.land(); }
         }
     }
     property <int> draft-set-seen;
@@ -322,7 +342,7 @@ export component Pane inherits Rectangle {
             before: root.pane.before;
             marked: root.pane.marked;
             flight-id: root.flight-id;
-            flight-reveal: root.flying ? 0 : root.flight-t;
+            flight-reveal: root.flying ? (root.settled ? 1 : 0) : root.fade-t;
             flight-pinning: root.flying;
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
@@ -442,7 +462,8 @@ export component Pane inherits Rectangle {
         }
     }
     // The sent text in flight: from the editor to the bubble, taking on
-    // the bubble's colour, padding and text size on the way.
+    // the bubble's colour, corners, padding and text size on the way; at
+    // the bubble it fades over the real one.
     if root.flying: Rectangle {
         accessible-role: text;
         accessible-id: "send-flight";
@@ -451,8 +472,10 @@ export component Pane inherits Rectangle {
         y: root.fly-y;
         width: root.fly-width;
         height: root.fly-height;
-        background: Palette.bubble.with-alpha(root.flight-t);
-        border-radius: Look.radius / 3;
+        opacity: root.copy-opacity;
+        background: Palette.bubble.with-alpha(Math.min(1, root.flight-t));
+        // From the composer field's corners to the bubble's own.
+        border-radius: Math.max(0px, SendFlight.from-radius + (Look.radius / 3 - SendFlight.from-radius) * root.flight-t);
         // The bubble's own padding (transcript.slint) at the reading size.
         property <length> inset: 10px * ChatText.scale * root.flight-t;
         flown := Text {

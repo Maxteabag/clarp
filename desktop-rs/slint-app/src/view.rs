@@ -471,10 +471,13 @@ pub(crate) fn tool_row(tool: &serde_json::Value) -> ToolRow {
 }
 
 /// How long a message of one's own may stay unsent before its bubble says
-/// so ("Sending…"). Most sends are confirmed well within it: the bubble is
-/// drawn at its final size straight away instead of with a status line
-/// that is gone a moment later. A failure shows at once.
-pub(crate) const SEND_STATUS_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
+/// so ("Sending…"): the iPhone's 1.75 s (clarp-ios 7bdc0d3). Most sends are
+/// confirmed well within it: the bubble is drawn at its final size straight
+/// away instead of with a status line that is gone a moment later. A send
+/// that will not be confirmed shows at once: the desktop never retries one
+/// by itself, so that is a failed send ("Not delivered", on an error or the
+/// delivery timeout).
+pub(crate) const SEND_STATUS_GRACE: std::time::Duration = std::time::Duration::from_millis(1750);
 
 /// Whether an unsent message's status is due after `pending_for`, or how
 /// long until it is.
