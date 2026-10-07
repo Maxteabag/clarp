@@ -192,9 +192,10 @@ export component Pane inherits Rectangle {
     // under it and the copy fades out. The composer clears and shrinks with
     // a spring of its own. One overlay moves; the chat's rows stay as they
     // are laid out (the new one hidden until the copy lands on it). Reduce
-    // Motion, or a send with no text (attachments only), fades the bubble
-    // in instead. No bubble laid out in time: no copy, the bubble shows. A
-    // reader scrolled up gets the usual jump to the latest, with no copy.
+    // Motion, a send with no text, one with attachments or a draft longer
+    // than the box shows fades the bubble in instead. No bubble laid out
+    // in time: no copy, the bubble shows. A reader scrolled up gets the
+    // usual jump to the latest, with no copy.
     property <string> flight-id;
     // A copy flies (else the bubble fades in).
     property <bool> copying;
@@ -254,6 +255,10 @@ export component Pane inherits Rectangle {
     property <length> fly-width: root.from-width + (root.to-width - root.from-width) * root.flight-t;
     property <length> fly-height: root.from-height + (root.to-height - root.from-height) * root.flight-t;
     function sent(text: string, queue: bool) {
+        // A copy needs text, all of it in view, and to be the bubble's
+        // text: an attachment adds its path, and a draft longer than the
+        // box shows fades in instead.
+        let can-fly = text != "" && composer.attachments.length == 0 && composer.editor-text-height <= composer.editor-height + 1px;
         let at-end = transcript.follow && transcript.at-end;
         root.from-x = composer.editor-x - root.absolute-position.x;
         root.from-y = composer.editor-y - root.absolute-position.y;
@@ -271,7 +276,7 @@ export component Pane inherits Rectangle {
         if (!at-end) {
             return;
         }
-        root.copying = text != "" && !ChatLook.reduced-motion;
+        root.copying = can-fly && !ChatLook.reduced-motion;
         root.placed = false;
         root.flight-id = root.sent-id;
         SendFlight.id = root.sent-id;
