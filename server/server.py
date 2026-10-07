@@ -6004,6 +6004,8 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
         srv.live_activity_pusher = pusher
 
         class _Observers:
+            resync = staticmethod(explainer.resync)
+
             @staticmethod
             def observe(event):
                 explainer.observe(event)
@@ -6038,8 +6040,23 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
             return None
         watcher = getattr(srv, "runtime_event_watcher", None)
         explainer = live_explainer(ctx.runtime_client.live_patch)
+
+        def catch_up():
+            # Tools that started while this process was down, and jobs that
+            # died with the previous one, would otherwise never be explained.
+            from lib import agents as agents_db
+            from lib.log import log_exception
+            for agent in agents_db.list_agents():
+                if agent.get("archived_at"):
+                    continue
+                try:
+                    snapshot = ctx.runtime_client.live_snapshot(agent_id=agent["agent_id"])
+                except Exception as exc:  # noqa: BLE001 - the next reconnect retries
+                    log_exception("liveExplainCatchUpFail", exc, f"agent={agent['agent_id']}")
+                    return
+                explainer.resync(snapshot)
         relay = live_hub.LiveRelay(
-            socket_path, ctx.stream, on_event=explainer.observe,
+            socket_path, ctx.stream, on_event=explainer.observe, on_connect=catch_up,
             on_nudge=watcher.poll_now if watcher is not None else None).start()
         from lib import server_identity
         # Advertised only while the runtime's hub is connected and serving.
