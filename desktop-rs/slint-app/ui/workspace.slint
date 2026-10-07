@@ -203,6 +203,10 @@ export component Pane inherits Rectangle {
     property <float> flight-raw: root.flight-id == "" ? 1 : !root.flight-armed ? 0 : Math.clamp((animation-tick() - root.flight-start) / (root.flying ? SendFlight.flight : SendFlight.fade), 0, 1);
     // Ease out: quick off the composer, settling into place.
     property <float> flight-t: 1 - Math.pow(1 - root.flight-raw, 3);
+    // The composer is done shrinking a little before the text lands, so
+    // the chat's end (and the bubble with it) holds still for the last
+    // frames and the text settles exactly where the bubble is drawn.
+    property <float> box-t: 1 - Math.pow(1 - Math.min(1, root.flight-raw / 0.7), 3);
     // Where it flies from (in the pane) and the box's height then.
     property <length> from-x;
     property <length> from-y;
@@ -395,7 +399,7 @@ export component Pane inherits Rectangle {
           property <bool> folded: !composer.editor-focused && composer.draft == "";
           property <length> natural: root.pane.pair ? 0px : self.folded ? 16px : composer.preferred-height + Frame.top + Frame.bottom;
           // A flight shrinks it from its height at the send.
-          height: root.flying ? root.box-from + (self.natural - root.box-from) * root.flight-t : self.natural;
+          height: root.flying ? root.box-from + (self.natural - root.box-from) * root.box-t : self.natural;
           clip: true;
           composer := Composer {
             x: Frame.side;
