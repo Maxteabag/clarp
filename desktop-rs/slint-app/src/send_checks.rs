@@ -18,7 +18,7 @@ use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
 use serde_json::json;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 use slint::platform::Key;
 
 use super::{Rect, Stage, app_now, check, control, live_checks, rect, report, run_stages, shot};
