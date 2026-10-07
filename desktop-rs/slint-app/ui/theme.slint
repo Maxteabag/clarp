@@ -47,16 +47,28 @@ export global ChatLook {
     in property <bool> send-animation: true;
 }
 
-// A send as it is drawn (workspace.slint): how long its animations take,
-// the grace period before an unsent message or a queued send says so
-// (Rust's SEND_STATUS_GRACE), and the last send's animation, for the
-// checks: its row, "flight" (the text flies to the bubble), "fade" (the
-// bubble fades in) or "" once it has landed, where it started and where it
-// is (in the window).
+// A send as it is drawn (workspace.slint): how its animations move, the
+// grace period before an unsent message or a queued send says so (Rust's
+// SEND_STATUS_GRACE), and the last send's animation, for the checks: its
+// row, "flight" (the text flies to the bubble), "settle" (landed: the
+// bubble shows under the copy as it fades), "fade" (the bubble fades in)
+// or "" once it is over, where it started and where it is (in the window).
+// The numbers are the iPhone's (clarp-ios 7bdc0d3), so both move alike.
 export global SendFlight {
-    out property <duration> flight: 300ms;
-    out property <duration> fade: 150ms;
-    in property <duration> status-grace: 1500ms;
+    // The flight: a spring of 0.32 s with a little bounce (SwiftUI's
+    // spring(duration:bounce:)), from the composer field's shape (radius
+    // 24, no wash) to the bubble's.
+    out property <duration> flight: 320ms;
+    out property <float> flight-bounce: 0.12;
+    out property <length> from-radius: 24px;
+    // Landed, the copy fades over the real bubble.
+    out property <duration> settle: 140ms;
+    // The composer clears and shrinks with a 0.3 s spring (no bounce).
+    out property <duration> composer: 300ms;
+    out property <float> composer-bounce: 0;
+    // Reduce Motion, and a send that cannot fly: a plain fade.
+    out property <duration> fade: 200ms;
+    in property <duration> status-grace: 1750ms;
     in-out property <string> id;
     in-out property <string> phase;
     in-out property <int> started;
@@ -65,7 +77,7 @@ export global SendFlight {
     in-out property <length> from-y;
     in-out property <length> from-width;
     in-out property <length> from-height;
-    // Each frame of the animation: how far it is (0 to 1, eased), the
+    // Each frame of the animation: how far it is (0 to 1, sprung), the
     // flying text's box and the composer's height.
     in-out property <float> progress;
     in-out property <length> x;
