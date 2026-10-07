@@ -49,12 +49,13 @@ def boundary(plan, goal, *, check_live=True):
         )
     if heartbeat.globally_disabled():
         return "host_paused", "Autonomous wakes are paused on this Host"
+    # A user Stop fences goals by pausing every active one
+    # (task_plans.pause_recovery_for_agent). An active goal was therefore
+    # resumed or created after the latest Stop, and the queue pause the Stop
+    # left behind is no fence for it. Comparing queue revisions here instead
+    # made the wake fence itself: its own durable receipt bumps the revision
+    # (Omar, 2026-10-06 07:35 and 16:35: "Stopped by user; queue is paused").
     queue = turn_queue.state(agent["agent_id"])
-    if (
-        queue["paused"]
-        and goal["continuation"].get("resume_queue_revision") != queue["revision"]
-    ):
-        return "paused", "Stopped by user; queue is paused"
     latest = agents.latest_state(agent["agent_id"]) or {}
     detail = latest.get("detail") or {}
     if detail.get("account_recovery") == "waiting":
@@ -386,23 +387,19 @@ def _result(plan_id, request, now, state, reason):
 
 
 def allows_paused_queue(request_id):
-    from . import turn_queue
+    """The current wake of an active goal passes a Stop's leftover queue pause.
 
+    Only this wake: other held messages stay paused until the user resumes them.
+    """
     row = (
         db.conn()
         .execute(
-            "SELECT agent_id,goal_json FROM task_plans WHERE status='active' AND recovery_enabled=1 AND json_extract(goal_json,'$.continuation.request_id')=?",
+            "SELECT 1 FROM task_plans WHERE status='active' AND recovery_enabled=1 AND json_extract(goal_json,'$.continuation.request_id')=?",
             (request_id,),
         )
         .fetchone()
     )
-    if not row:
-        return False
-    state = json.loads(row["goal_json"])["continuation"]
-    return (
-        state.get("resume_queue_revision")
-        == turn_queue.state(row["agent_id"])["revision"]
-    )
+    return row is not None
 
 
 @contextmanager
