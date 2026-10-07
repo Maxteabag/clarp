@@ -565,15 +565,19 @@ class LiveFanout:
 class LiveRelay:
     """In the HTTP process: holds one ``live_stream`` call open on the
     runtime socket and hands each event to the SSE hub. Reconnects with
-    backoff; an older runtime that does not know the call is retried slowly."""
+    backoff; an older runtime that does not know the call is retried slowly.
+    Events are never replayed, so ``on_connect`` runs (on its own thread)
+    each time the stream opens, to catch up from snapshots."""
 
     def __init__(self, socket_path, stream, *, on_nudge: Callable[[], Any] | None = None,
-                 on_event: Callable[[dict[str, Any]], Any] | None = None):
+                 on_event: Callable[[dict[str, Any]], Any] | None = None,
+                 on_connect: Callable[[], Any] | None = None):
         import pathlib
         self.socket_path = pathlib.Path(socket_path)
         self.stream = stream
         self.on_nudge = on_nudge
         self.on_event = on_event
+        self.on_connect = on_connect
         # True only while connected to a runtime that serves live events.
         self.serving = False
         self._stop = threading.Event()
@@ -614,6 +618,13 @@ class LiveRelay:
                 return
             delay = min(delay * 2, 5.0)
 
+    def _connected(self) -> None:
+        try:
+            self.on_connect()
+        except Exception as exc:  # noqa: BLE001 - an extra, never the relay
+            from .log import log_exception
+            log_exception("liveRelayConnectFail", exc)
+
     def _follow(self) -> bool:
         import json as _json
         import socket as _socket
@@ -634,13 +645,17 @@ class LiveRelay:
                 kind = event.get("type")
                 if kind in ("hello", "live", "ping"):
                     self.serving = True
+                if kind == "hello" and self.on_connect is not None:
+                    threading.Thread(target=self._connected, daemon=True,
+                                     name="live-relay-connect").start()
                 if kind == "live":
                     self.stream.broadcast_live(event)
                     if self.on_event is not None:
                         try:
                             self.on_event(event)
-                        except Exception:  # noqa: BLE001 - an extra, never the relay
-                            pass
+                        except Exception as exc:  # noqa: BLE001 - an extra, never the relay
+                            from .log import log_exception
+                            log_exception("liveRelayObserverFail", exc)
                 elif kind == "sse" and self.on_nudge is not None:
                     self.on_nudge()
                 elif "ok" in event and not event.get("ok"):
