@@ -391,7 +391,10 @@ pub fn send_check(out: String) {
             // As drawn, mid-flight: between the composer and the bubble.
             match (MID.with(|m| m.borrow_mut().take()), bubble) {
                 (Some((reported, drawn)), Some(bubble)) => {
-                    let between = |v: f32, a: f32, b: f32| v >= a.min(b) - 4.0 && v <= a.max(b) + 4.0;
+                    // The element is read a frame or two after the report,
+                    // while the chat's end still settles under the shrinking
+                    // composer: a few pixels' slack.
+                    let between = |v: f32, a: f32, b: f32| v >= a.min(b) - 8.0 && v <= a.max(b) + 8.0;
                     let inside = between(drawn.0, from.0, bubble.0) && between(drawn.1, from.1, bubble.1) && between(drawn.2, from.2, bubble.2) && between(drawn.3, from.3, bubble.3);
                     check(inside, &format!("mid-flight the text is drawn between the composer and the bubble: {drawn:?} (reported {reported:?})"));
                 }
