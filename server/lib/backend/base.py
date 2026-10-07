@@ -140,6 +140,10 @@ class Backend:
     config_account_switch_field: str = ""
     fallback_models: tuple[tuple[str, str], ...] = ()
     resumable: bool = True
+    # The runner continues a conversation the CLI no longer has in a new one
+    # that opens with Clarp's record of it (agy prunes old conversations), so
+    # a missing transcript at boot keeps the binding instead of starting fresh.
+    continues_lost_conversations: bool = False
     # Context gauge: the window (tokens) the CLI's transcript fills, or None
     # when the CLI auto-compacts and shows no gauge.
     context_window: int | None = None
