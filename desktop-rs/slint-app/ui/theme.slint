@@ -96,6 +96,8 @@ export global SendFlight {
     in-out property <duration> placed-at;
     in-out property <duration> settled-at;
     in-out property <duration> gone-at;
+    // When the pane's clock (a frame at a time) saw it land.
+    in-out property <duration> settle-seen-at;
     in-out property <string> id;
     in-out property <string> phase;
     in-out property <int> started;

@@ -229,6 +229,8 @@ export component Pane inherits Rectangle {
     // Landed: the bubble shows under the copy, which fades and is gone.
     property <bool> settled: root.copying && root.placed && root.since-placed >= SendFlight.flight;
     property <float> copy-opacity: root.settled ? Math.clamp(1 - (root.since-placed - SendFlight.flight) / SendFlight.settle-fade, 0, 1) : 1;
+    // Drawn from the send until 0.2 s after landing, to the frame.
+    property <bool> copy-shown: root.copying && !(root.settled && root.since-placed >= SendFlight.flight + SendFlight.settle);
     // A fade's progress.
     property <float> fade-t: root.copying ? 1 : SendFlight.ease-out(root.since-send / SendFlight.fade);
     property <bool> flight-done: root.armed && (root.copying ? root.settled && root.since-placed >= SendFlight.flight + SendFlight.settle : root.since-send >= SendFlight.fade);
@@ -326,9 +328,12 @@ export component Pane inherits Rectangle {
             if (root.boxing && root.since-send >= SendFlight.composer-window) {
                 root.boxing = false;
             }
+            // The bookkeeping follows a frame behind what is drawn: the
+            // moment it landed is the spring's end.
             if (root.settled && SendFlight.phase == "flight") {
                 SendFlight.phase = "settle";
-                SendFlight.settled-at = animation-tick();
+                SendFlight.settled-at = root.placed-at + SendFlight.flight;
+                SendFlight.settle-seen-at = animation-tick();
             }
             if (root.flight-id != "" && root.flight-done) { root.land(); }
         }
@@ -499,7 +504,7 @@ export component Pane inherits Rectangle {
     // The sent text in flight: from the editor to the bubble, taking on
     // the bubble's colour, corners, padding and text size on the way; at
     // the bubble it fades over the real one.
-    if root.copying: Rectangle {
+    if root.copy-shown: Rectangle {
         accessible-role: text;
         accessible-id: "send-flight";
         accessible-label: flown.text;
