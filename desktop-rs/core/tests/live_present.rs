@@ -262,12 +262,21 @@ fn a_tool_waiting_for_its_explanation_says_explaining() {
     let p = present(&view, &[], &options(&[], 1759480005000));
     let tool = p.entries.last().unwrap();
     assert_eq!(tool.secondary, "");
-    assert!(tool.explaining && tool.reserve_secondary, "running, nothing explained yet: Explaining… in the reserved line");
+    assert!(!tool.explaining && tool.reserve_secondary, "running, none requested (null): no Explaining…, the line kept for one");
     let pending = json!({"type": "live", "conv": "conv-1", "epoch": "boot-a", "lseq": 14, "ops": [
         {"op": "upsert", "conv": "conv-1", "id": "cl:toolu_03", "kind": "tool", "rev": 2, "item": {"tool": {"explain": {"level": 2, "status": "pending"}}}},
     ]});
     view.apply_event(pending.as_object().unwrap());
     assert!(present(&view, &[], &options(&[], 1759480005000)).entries.last().unwrap().explaining, "pending");
+    for state in ["failed", "skipped", "queued"] {
+        let mut settled = view.clone();
+        let op = json!({"type": "live", "conv": "conv-1", "epoch": "boot-a", "lseq": 15, "ops": [
+            {"op": "upsert", "conv": "conv-1", "id": "cl:toolu_03", "kind": "tool", "rev": 3, "item": {"tool": {"explain": {"level": 2, "status": state}}}},
+        ]});
+        settled.apply_event(op.as_object().unwrap());
+        let tool = present(&settled, &[], &options(&[], 1759480005000)).entries.last().unwrap().clone();
+        assert!(!tool.explaining, "{state}: nothing");
+    }
     let explained = present(&turn_full(after(15)), &[], &options(&[], 1759480005300));
     let tool = explained.entries.last().unwrap();
     assert_eq!(tool.secondary, "Runs the parser tests");
@@ -312,16 +321,30 @@ fn a_running_tool_whose_log_row_landed_at_its_start_keeps_its_live_row() {
     assert_eq!(titles(&p), ["Running python3 -c 'import time; time.sleep(120)'"]);
     let tool = &p.entries[0];
     assert_eq!((tool.status.as_str(), tool.meta.as_str()), ("running", "0:13"), "the running tool ticks");
-    assert!(tool.explaining);
+    assert!(!tool.explaining && tool.reserve_secondary, "the real Host sends explain: null until it asks: nothing yet, the line kept");
+    let id = "cl:toolu_017NGGuPh5DkHZyPKu7aJyz5";
+    let pending = json!({"type": "live", "conv": "c-probe", "epoch": "26f356fdabe6", "lseq": 43, "ops": [
+        {"op": "upsert", "conv": "c-probe", "id": id, "kind": "tool", "rev": 2, "item": {"tool": {"explain": {"level": 2, "status": "pending"}}}},
+    ]});
+    view.apply_event(pending.as_object().unwrap());
+    assert!(present(&view, &rows, &options(&[], started + 14_000)).entries[0].explaining, "pending: Explaining…");
     assert_eq!(p.absorbed_rows, ["msg-e60c25b9161ac8b660ca"], "its /log row is shown by the item row");
     let mut done = body["next"]["done"].clone();
-    done["lseq"] = json!(43);
+    done["lseq"] = json!(44);
+    done["ops"][0]["rev"] = json!(3);
     view.apply_event(done.as_object().unwrap());
     let p = present(&view, &rows, &options(&[], started + 20_000));
     let tool = &p.entries[0];
     assert_eq!((tool.title.as_str(), tool.status.as_str(), tool.meta.as_str()), ("Ran python3 -c 'import time; time.sleep(120)'", "failed", "exit 1 · 19.9s"));
     assert_eq!(tool.lines, ["Exit code 137"], "the failed tool keeps its tail");
     assert_eq!(p.absorbed_rows, ["msg-e60c25b9161ac8b660ca"]);
+    assert!(tool.explaining, "the turn still running, the explanation still pending");
+    let ended = json!({"type": "live", "conv": "c-probe", "epoch": "26f356fdabe6", "lseq": 45, "ops": [
+        {"op": "turn", "conv": "c-probe", "turn": {"turn_id": "2b2b466e35457fb0", "status": "failed", "started_at_ms": 1791028403856, "ended_at_ms": 1791028426000, "worked_ms": 22144, "tool_count": 1}},
+    ]});
+    view.apply_event(ended.as_object().unwrap());
+    let p = present(&view, &rows, &options(&[], started + 21_000));
+    assert!(p.entries.iter().all(|e| !e.explaining && !(e.reserve_secondary && e.secondary.is_empty())), "the turn ended: no Explaining…, no line held: {:?}", p.entries.iter().map(|e| (&e.key, e.explaining)).collect::<Vec<_>>());
 }
 
 /// A user message written at `ms` (Host time), from another turn.
