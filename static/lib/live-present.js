@@ -173,7 +173,8 @@ const SETTLED_TURN = new Set(['completed', 'failed', 'interrupted']);
 
 /**
  * Fold a settled turn's work behind `Worked for …`: everything before the
- * final answer, except failed or interrupted work, which stays in view.
+ * final answer, except failed or interrupted work and messages, which stay
+ * in view (text written before a tool call is a reply too).
  * Null while the turn runs.
  */
 export function settledFold(turn, rows) {
@@ -185,7 +186,8 @@ export function settledFold(turn, rows) {
   const folded = [];
   const visible = [];
   rows.forEach((row, i) => {
-    const keep = i >= answer || row.status === 'failed' || row.status === 'interrupted';
+    const keep = i >= answer || row.type === 'message'
+      || row.status === 'failed' || row.status === 'interrupted';
     (keep ? visible : folded).push(row);
   });
   const worked = turn.worked_ms != null ? turn.worked_ms
