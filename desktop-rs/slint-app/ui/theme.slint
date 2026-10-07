@@ -91,6 +91,12 @@ export global SendFlight {
         return 1 - (1 - Math.clamp(x, 0, 1)) * (1 - Math.clamp(x, 0, 1));
     }
     in-out property <int> dropped;
+    // Status lines revealed (RevealText): started, finished, the last
+    // one's text and how long its fade took.
+    in-out property <int> reveals;
+    in-out property <int> revealed;
+    in-out property <string> reveal-text;
+    in-out property <duration> reveal-took;
     // The last send's moments by the animation clock: its first frame, the
     // bubble laid out, landed, and the copy (or fade) gone.
     in-out property <duration> sent-at;
@@ -118,16 +124,25 @@ export global SendFlight {
 }
 
 // A status line that appears (an unsent or failed message's, a queued
-// turn's): it fades in, ease-out 0.2 s, then holds still.
+// turn's): it fades in, ease-out 0.2 s, then holds still. Each reveal is
+// counted in SendFlight (its text, and how long it took), for the checks.
 export component RevealText inherits Text {
     property <duration> born;
     property <bool> revealing: true;
-    init => { self.born = animation-tick(); }
+    init => {
+        self.born = animation-tick();
+        SendFlight.reveals += 1;
+        SendFlight.reveal-text = self.text;
+    }
     opacity: self.revealing ? SendFlight.ease-out((animation-tick() - self.born) / SendFlight.reveal) : 1;
     Timer {
         interval: SendFlight.reveal;
         running: root.revealing;
-        triggered => { root.revealing = false; }
+        triggered => {
+            root.revealing = false;
+            SendFlight.revealed += 1;
+            SendFlight.reveal-took = animation-tick() - root.born;
+        }
     }
 }
 
