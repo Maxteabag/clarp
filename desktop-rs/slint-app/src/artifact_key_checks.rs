@@ -156,7 +156,12 @@ fn reach_stages(out: &str) -> Vec<Stage> {
     let latest = Rc::new(Cell::new(0.0f32));
     let latest2 = latest.clone();
     let mut stages: Vec<Stage> = vec![
-        ("from the latest, no card", Box::new(|app, _, _| {
+        // Escape from the composer (the stage before) hands the chat the
+        // keyboard; its keys go there once it has it.
+        ("from the latest, no card", Box::new(|app, _, elapsed| {
+            if !report().transcript_focused && elapsed < Duration::from_secs(3) {
+                return false;
+            }
             if !cursor(app).is_empty() {
                 headless::press(Key::Escape);
             }
