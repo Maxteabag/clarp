@@ -546,7 +546,6 @@ class TurnDispatchService:
                 f"requeued_parked={result['requeued_parked']}")
 
     def _recover_queued_locked(self) -> int:
-        from . import task_goal_recovery
         self._rehydrate_once()
         turn_queue.reset_stale_claims()
         recovered = 0
@@ -564,14 +563,7 @@ class TurnDispatchService:
             except Exception as exc:
                 log_exception("queuedRecoveryFail", exc, detail=row["session"])
                 continue
-            # A Stop's leftover pause holds user and peer messages, but the
-            # current wake of an active goal passed the goal fence above and
-            # must not wait behind it: the goal would see its own queued wake
-            # as live work and never wake again.
-            goal_wake = (
-                str(row["client_msg_id"]).startswith(task_goal_recovery.PREFIX)
-                and task_goal_recovery.allows_paused_queue(row["client_msg_id"]))
-            if turn_queue.is_paused(row["agent_id"]) and not goal_wake:
+            if turn_queue.is_paused(row["agent_id"]):
                 continue
             if agent and self.backends.active_handles(
                     self.backends.normalize(agent.get("backend")), row["agent_id"]):
@@ -593,7 +585,6 @@ class TurnDispatchService:
                     prompt_admission_id=row["prompt_admission_id"],
                     queue_if_busy=True, skip_admission=True,
                     durable_queue_id=row["queue_id"],
-                    allow_paused_queue=goal_wake,
                     janitor_run_id=_recovered_janitor_run(row),
                 ))
                 recovered += 1

@@ -78,7 +78,10 @@
         "label": {"type": "string"},
         "command": {"type": ["string", "null"]},
         "input_preview": {"type": "object"},
-        "explain": {"type": ["object", "null"]},
+        "explain": {"type": ["object", "null"], "additionalProperties": true,
+                    "properties": {"text": {"type": ["string", "null"]}, "level": {"type": "integer"},
+                                   "status": {"enum": ["pending", "ready", "failed"]},
+                                   "reason": {"type": "string"}}},
         "output": {"type": ["object", "null"]},
         "diff": {"$ref": "#/$defs/diff"}
       }

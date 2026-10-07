@@ -590,8 +590,6 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
             if action == "resume":
                 from . import turn_queue
 
-                # Recorded for the goal ledger; no longer a wake fence (see
-                # task_goal_recovery.boundary).
                 state["resume_queue_revision"] = turn_queue.state(plan["agent_id"])[
                     "revision"
                 ]
