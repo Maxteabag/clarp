@@ -430,6 +430,229 @@ fn read_through(label: &'static str) -> super::Stage {
     }))
 }
 
+/// The texts drawn at one reading size: in the chat's rows by row, and in
+/// the chrome around it, each with its font size.
+#[derive(Default, Clone)]
+struct Survey {
+    body: f32,
+    /// (row, kind of text, its words, which of those words in the row) → size.
+    chat: std::collections::HashMap<(String, String, String, usize), f32>,
+    /// A row's drawn height.
+    heights: std::collections::HashMap<String, f32>,
+    /// (its words, which of them) → size, outside the chat.
+    chrome: std::collections::HashMap<(String, usize), f32>,
+}
+
+/// What a chat row is, as the font-size survey names it.
+fn kind_of(row: &crate::MessageRow) -> String {
+    if !row.receipt.key.is_empty() {
+        "receipt".into()
+    } else if !row.prompt.key.is_empty() {
+        "prompt".into()
+    } else if row.author == "live" {
+        format!("live {}", row.live.kind)
+    } else {
+        row.author.to_string()
+    }
+}
+
+/// A text's words and font size.
+fn sized(item: &ItemRc) -> Option<(String, f32)> {
+    let (what, size) = if let Some(text) = item.downcast::<StyledTextItem>() {
+        let text = text.as_pin_ref();
+        (styled_words(&format!("{:?}", text.text())), text.default_font_size().get())
+    } else if let Some(text) = item.downcast::<SimpleText>() {
+        let text = text.as_pin_ref();
+        (words(&text.text()), text.font_size().get())
+    } else if let Some(text) = item.downcast::<ComplexText>() {
+        let text = text.as_pin_ref();
+        (words(&text.text()), text.font_size().get())
+    } else {
+        return None;
+    };
+    (!what.is_empty()).then_some((what, size))
+}
+
+/// Adds what is drawn now to `survey`: the active chat's rows (with their
+/// heights) and every text outside the chat.
+fn survey_now(survey: &mut Survey) {
+    let app = app_now();
+    let Some(window) = crate::window() else { return };
+    let models = super::rows(&window);
+    let inner = WindowInner::from_pub(window.window());
+    let root = ItemRc::new_root(inner.component());
+    let wanted = format!("chat:{}", app.active_id());
+    let mut chrome_seen = std::collections::HashMap::<String, usize>::new();
+    visit(&root, &mut |item| {
+        if !item.is_visible() {
+            return true;
+        }
+        if id_of(item).is_some_and(|id| id == wanted) {
+            let (_, top, _, height) = rect(item);
+            let bottom = top + height;
+            visit(item, &mut |inside| {
+                let Some(id) = id_of(inside).and_then(|id| id.strip_prefix("row:").map(str::to_owned)) else { return !inside.is_visible() };
+                let (_, row_top, _, row_height) = rect(inside);
+                if row_height <= 0.0 || row_top + row_height <= top || row_top >= bottom {
+                    return true;
+                }
+                let Some(model) = models.iter().find(|m| m.id.as_str() == id) else { return true };
+                let kind = kind_of(model);
+                let stamp = words(&model.stamp);
+                let meta = words(&model.live.meta);
+                let secondary = words(&model.live.secondary);
+                survey.heights.insert(id.clone(), row_height);
+                let mut seen = std::collections::HashMap::<String, usize>::new();
+                visit(inside, &mut |text| {
+                    if !text.is_visible() {
+                        return true;
+                    }
+                    if let Some((what, size)) = sized(text) {
+                        let part = if !stamp.is_empty() && what == stamp {
+                            "stamp".to_owned()
+                        } else if !meta.is_empty() && what == meta {
+                            format!("{kind} meta")
+                        } else if !secondary.is_empty() && what == secondary {
+                            format!("{kind} explanation")
+                        } else {
+                            kind.clone()
+                        };
+                        let n = seen.entry(what.clone()).or_default();
+                        survey.chat.insert((id.clone(), part, what, *n), size);
+                        *n += 1;
+                    }
+                    false
+                });
+                true
+            });
+            return true;
+        }
+        if let Some((what, size)) = sized(item) {
+            let n = chrome_seen.entry(what.clone()).or_default();
+            survey.chrome.insert((what, *n), size);
+            *n += 1;
+        }
+        false
+    });
+}
+
+/// A stage that surveys the chat's last pages at the reading size it is
+/// at: the end, then up a page at a time until the agent's prompt (above
+/// the settled turn, its tools, the live turn's thinking and plan) has been
+/// drawn, asserting the rows tile on every page. Ends back at the end.
+fn survey_stage(label: &'static str, into: std::rc::Rc<std::cell::RefCell<Survey>>) -> super::Stage {
+    use slint::platform::Key;
+    let step = std::cell::Cell::new(0usize);
+    let since = std::cell::Cell::new(std::time::Instant::now());
+    (label, Box::new(move |_, window, _| {
+        let n = step.get();
+        if n == 0 {
+            let mut fresh = Survey::default();
+            fresh.body = window.global::<crate::Palette>().get_body_size() * window.global::<crate::Look>().get_zoom();
+            *into.borrow_mut() = fresh;
+            app_now().focus_transcript();
+        } else if n == 1 {
+            if !super::report().transcript_focused {
+                return false;
+            }
+            crate::headless::press(Key::End);
+        } else if since.get().elapsed() < std::time::Duration::from_millis(450) {
+            return false;
+        } else {
+            assert_tiled(&format!("{label}, page {}", n - 1));
+            survey_now(&mut into.borrow_mut());
+            let top = rows_from_top().first().is_some_and(|(id, _)| id == "early-u0");
+            if into.borrow().heights.contains_key("b-prompt") || top || n > 12 {
+                crate::headless::press(Key::End);
+                step.set(0);
+                return true;
+            }
+            crate::headless::press(Key::PageUp);
+        }
+        step.set(n + 1);
+        since.set(std::time::Instant::now());
+        false
+    }))
+}
+
+/// Every chat text drawn at both sizes is `ratio` times its size at the
+/// first (within rounding), and the kinds of row `wanted` were among them.
+fn scaled_by(small: &Survey, large: &Survey, ratio: f32, wanted: &[&str], when: &str) {
+    let mut faults = Vec::new();
+    let mut kinds = std::collections::BTreeMap::<String, usize>::new();
+    for (key, before) in &small.chat {
+        let Some(after) = large.chat.get(key) else { continue };
+        *kinds.entry(key.1.clone()).or_default() += 1;
+        if (after - before * ratio).abs() > 0.05 + before * ratio * 0.01 {
+            faults.push(format!("{} {} \"{}\": {before:.2}px → {after:.2}px, want {:.2}px", key.0, key.1, key.2, before * ratio));
+        }
+    }
+    check(faults.is_empty(), &format!("{when}: every chat text drawn at both sizes is {ratio:.3}× ({} texts; {kinds:?}){}", kinds.values().sum::<usize>(), if faults.is_empty() { String::new() } else { format!(": {}", faults.join("; ")) }));
+    for want in wanted {
+        let found = want.split('|').any(|w| kinds.keys().any(|k| k == w));
+        check(found, &format!("{when}: {want} rows were compared"));
+    }
+}
+
+/// The rows drawn at both sizes: a one-line live row (a tool, the fold,
+/// folded thinking) and a folded prompt are as tall as their line, so they
+/// grow by `ratio` too; every other row grows.
+fn heights_scaled(small: &Survey, large: &Survey, ratio: f32, when: &str) {
+    use slint::Model;
+    let mut faults = Vec::new();
+    let (mut lines, mut others) = (0, 0);
+    for (id, before) in &small.heights {
+        let (Some(after), Some(model)) = (large.heights.get(id), row(id)) else { continue };
+        let one_line = (model.author == "live" && model.live.lines.row_count() == 0 && model.live.more.is_empty())
+            || (!model.prompt.key.is_empty() && !model.prompt.expanded);
+        if one_line {
+            lines += 1;
+            if (after - before * ratio).abs() > 1.5 + before * ratio * 0.02 {
+                faults.push(format!("{} ({}) {before:.1}px → {after:.1}px, want {:.1}px", id, kind_of(&model), before * ratio));
+            }
+        } else {
+            others += 1;
+            if *after <= *before {
+                faults.push(format!("{} ({}) {before:.1}px → {after:.1}px, want taller", id, kind_of(&model)));
+            }
+        }
+    }
+    check(faults.is_empty() && lines > 0, &format!("{when}: {lines} one-line rows grow {ratio:.3}× and {others} others grow{}", if faults.is_empty() { String::new() } else { format!(": {}", faults.join("; ")) }));
+}
+
+/// The chrome's texts drawn in both surveys (those with a size of their
+/// own: a text that takes the window's default follows the reading size,
+/// as it always has) are `ratio` times their size in the first.
+fn chrome_scaled(a: &Survey, b: &Survey, ratio: f32, when: &str) {
+    let mut faults = Vec::new();
+    let mut compared = 0;
+    for (key, before) in &a.chrome {
+        let Some(after) = b.chrome.get(key) else { continue };
+        if (before - a.body).abs() < 0.01 && (after - b.body).abs() < 0.01 {
+            continue;
+        }
+        compared += 1;
+        if (after - before * ratio).abs() > 0.05 + before * ratio * 0.01 {
+            faults.push(format!("\"{}\": {before:.2}px → {after:.2}px, want {:.2}px", key.0, before * ratio));
+        }
+    }
+    check(faults.is_empty() && compared >= 5, &format!("{when}: {compared} chrome texts are {ratio:.3}× their size{}", if faults.is_empty() { String::new() } else { format!(": {}", faults.join("; ")) }));
+}
+
+/// The reading theme's own text size.
+fn theme_size() -> f32 {
+    let theme = app_now().engine.borrow().reading_theme();
+    clarp_core::reading_theme::theme(&theme).get("fontPixelSize").and_then(serde_json::Value::as_f64).unwrap_or(15.0) as f32
+}
+
+fn body_size() -> f32 {
+    crate::window().map_or(0.0, |w| w.global::<crate::Palette>().get_body_size())
+}
+
+fn set(window: &crate::AppWindow, line: &str) {
+    check(crate::commands::run(&app_now(), window, &format!("pref-set:{line}")), &format!(":set {line}"));
+}
+
 /// `--check row-overlap --out DIR`.
 pub(super) fn row_overlap_check(out: String) {
     use std::time::Duration;
@@ -439,6 +662,10 @@ pub(super) fn row_overlap_check(out: String) {
     };
     let (shot1, shot2, shot3, shot4) = (shot("row-overlap-01-history"), shot("row-overlap-02-prompt"), shot("row-overlap-03-settled"), shot("row-overlap-04-next-turn"));
     let shot5 = shot("row-overlap-05-narrow-large");
+    let (font_small, font_large, font_default) = (shot("font-scale-01-small-11px"), shot("font-scale-02-large-22px"), shot("font-scale-03-theme-default"));
+    let surveys: Vec<std::rc::Rc<std::cell::RefCell<Survey>>> = (0..3).map(|_| std::rc::Rc::default()).collect();
+    let (small, large, chrome) = (surveys[0].clone(), surveys[1].clone(), surveys[2].clone());
+    let (small2, large2, large3, chrome2) = (small.clone(), large.clone(), large.clone(), chrome.clone());
     let stages: Vec<super::Stage> = vec![
         ("live", Box::new(|app, _, _| {
             if app.engine.borrow().connection_state() != "live" {
@@ -512,7 +739,52 @@ pub(super) fn row_overlap_check(out: String) {
         moment("a live turn shows a long plan and its thinking", 1000, || live_row("live:ov-plan").is_some(), |app, _| {
             crate::artifacts_view::toggle_live(app, "live:ov-think");
         }),
-        moment("its thinking opens to long paragraphs", 1000, || live_row("live:ov-think").is_some_and(|r| r.live.expanded), |app, _| {
+        // Font size scales every chat row (tool calls, the fold, thinking,
+        // the plan, prompts, stamps) from the reading size, and Interface
+        // size only the chrome (Peter, 2026-10-07).
+        moment("its thinking opens to long paragraphs", 1000, || live_row("live:ov-think").is_some_and(|r| r.live.expanded), |app, window| {
+            crate::artifacts_view::toggle_live(app, "live:fold:t-b");
+            set(window, "timestamps");
+            set(window, "fontsize=11");
+        }),
+        moment("a small font size", 1500, || body_size() == 11.0, |_, _| {}),
+        survey_stage("surveying the chat at 11px", small),
+        moment("surveyed at 11px", 300, || true, move |_, window| {
+            font_small();
+            set(window, "fontsize=22");
+        }),
+        moment("a large font size", 1500, || body_size() == 22.0, |_, _| {}),
+        survey_stage("surveying the chat at 22px", large),
+        moment("surveyed at 22px", 300, || true, move |_, window| {
+            font_large();
+            let (small, large) = (small2.borrow(), large2.borrow());
+            let ratio = large.body / small.body;
+            scaled_by(&small, &large, ratio, &["live fold", "live reasoning", "live plan", "live tool|live explore", "prompt", "stamp", "assistant", "user"], "Font size 11px to 22px");
+            heights_scaled(&small, &large, ratio, "Font size 11px to 22px");
+            chrome_scaled(&small, &large, 1.0, "Font size 11px to 22px leaves the chrome");
+            set(window, "chromesize=130");
+        }),
+        moment("a larger interface size", 1500, || crate::window().is_some_and(|w| (w.global::<crate::Look>().get_unit() - 1.3).abs() < 0.001), |_, _| {}),
+        survey_stage("surveying the chat at interface size 130%", chrome),
+        moment("surveyed at interface size 130%", 300, || true, move |_, window| {
+            let (large, chrome) = (large3.borrow(), chrome2.borrow());
+            scaled_by(&large, &chrome, 1.0, &["live fold", "live plan", "prompt"], "Interface size 130% leaves the chat's rows");
+            let grown = chrome.chrome.iter().filter(|(key, after)| large.chrome.get(*key).is_some_and(|before| (*after - before * 1.3).abs() < 0.1 && (*before - large.body).abs() > 0.01)).count();
+            check(grown >= 5, &format!("and Interface size 130% grows the chrome's labels: {grown} of them 1.3×"));
+            let app = app_now();
+            for name in ["font-size", "chromesize", "timestamps"] {
+                crate::settings_view::reset(&app, window, name, false);
+            }
+        }),
+        moment("font size back to the theme's", 1500, || body_size() == theme_size(), move |app, _| {
+            check(true, &format!("reset puts the theme's own size back: {}px", body_size()));
+            let unit = crate::window().map_or(0.0, |w| w.global::<crate::Look>().get_unit());
+            check(unit == 1.0, &format!("and Interface size's 100%: {unit}"));
+            check(super::rows(&crate::window().expect("window")).iter().all(|r| r.stamp.is_empty()), "and timestamps off again");
+            font_default();
+            crate::artifacts_view::toggle_live(app, "live:fold:t-b");
+        }),
+        moment("the settled turn folds again", 800, || true, |app, _| {
             app.engine.borrow_mut().set_reading_theme("night");
             crate::pump();
         }),

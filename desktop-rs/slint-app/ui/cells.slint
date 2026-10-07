@@ -1,4 +1,4 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, ChatText } from "theme.slint";
 
 export struct CellLine {
     // diff_old, diff_new, error, or ""
@@ -34,45 +34,45 @@ export component DisplayCellCard inherits Rectangle {
         clicked => { root.open = !root.open; }
     }
     VerticalLayout {
-        padding: 3px;
-        spacing: 3px;
+        padding: 3px * ChatText.scale;
+        spacing: 3px * ChatText.scale;
         HorizontalLayout {
-            spacing: 7px;
+            spacing: 7px * ChatText.scale;
             if !root.cell.subagent: Rectangle {
-                width: 6px;
-                height: 6px;
+                width: 6px * ChatText.scale;
+                height: 6px * ChatText.scale;
                 y: (parent.height - self.height) / 2;
-                border-radius: 3px;
+                border-radius: self.width / 2;
                 background: root.status-color;
             }
             if root.cell.subagent: Text {
                 // ProcessGlyph's "agent" kind.
                 text: "◆";
                 color: root.phase-color;
-                font-size: 11 * Look.unit * Look.zoom;
+                font-size: ChatText.note;
                 vertical-alignment: center;
             }
             if root.cell.subagent: Text {
                 text: root.cell.phase == "activity" ? "sub-agent" : root.cell.phase;
                 color: root.phase-color;
                 font-family: "JetBrains Mono";
-                font-size: 11 * Look.unit * Look.zoom;
+                font-size: ChatText.note;
                 vertical-alignment: center;
             }
             Text {
                 text: root.cell.title;
                 color: Palette.text;
                 font-family: "JetBrains Mono";
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 font-weight: 600;
                 overflow: elide;
-                max-width: root.cell.subagent ? 240px : 100000px;
+                max-width: root.cell.subagent ? 240px * ChatText.scale : 100000px;
                 vertical-alignment: center;
             }
             Text {
                 text: root.cell.summary;
                 color: Palette.muted;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 overflow: elide;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
@@ -80,12 +80,12 @@ export component DisplayCellCard inherits Rectangle {
             if root.has-detail: Text {
                 text: root.open ? "−" : "+";
                 color: Palette.chrome-text;
-                font-size: 13 * Look.unit * Look.zoom;
+                font-size: ChatText.label;
                 vertical-alignment: center;
             }
         }
         if root.open: VerticalLayout {
-            padding-left: 15px;
+            padding-left: 15px * ChatText.scale;
             // As tall as its text wraps at the width it is drawn at (laid out,
             // a repeated line was measured at its one-line width and the
             // chat's next row was drawn over it).
@@ -103,7 +103,7 @@ export component DisplayCellCard inherits Rectangle {
                     text: line.text;
                     color: line.kind == "error" ? Palette.danger : Palette.chrome-text;
                     font-family: "JetBrains Mono";
-                    font-size: 12 * Look.unit * Look.zoom;
+                    font-size: ChatText.detail;
                     wrap: word-wrap;
                 }
             }
@@ -111,7 +111,7 @@ export component DisplayCellCard inherits Rectangle {
                 text: root.cell.more + " more details available";
                 color: Palette.muted;
                 font-family: "JetBrains Mono";
-                font-size: 11 * Look.unit * Look.zoom;
+                font-size: ChatText.note;
             }
         }
     }

@@ -162,8 +162,9 @@ pub fn apply(app: &App, window: &AppWindow) {
     look.set_line_step(40.0 * n("scrollspeed") / 100.0);
     look.set_zoom(n("chatzoom") / 100.0);
     // A row's height changed: the chats measure their rows again (without
-    // rebuilding them, so nobody's place in a chat moves).
-    let shape = ["chromesize", "codesize", "paragraphspacing", "headingscale", "measure", "bubblewidth", "messagespacing"]
+    // rebuilding them, so nobody's place in a chat moves). Interface size
+    // is not one: the chat's rows follow the reading size (ChatText).
+    let shape = ["codesize", "paragraphspacing", "headingscale", "measure", "bubblewidth", "messagespacing"]
         .iter()
         .map(|name| n(*name).to_string())
         .chain([code, choice("fontweight"), body.to_string(), family])
