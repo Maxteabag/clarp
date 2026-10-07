@@ -1576,6 +1576,11 @@ fn seek_tick(app: &App) -> bool {
     if *app.artifact_cursor.borrow() != id || started.elapsed() > Duration::from_secs(10) {
         return stop();
     }
+    // Gone from the chat (its row folded away or replaced): there is no
+    // place to bring it to, and paging after it would carry the reader off.
+    if !selectables(app).contains(&id) {
+        return stop();
+    }
     let waited = scrolled.elapsed();
     if since_seq > 0 && waited < Duration::from_millis(160) {
         return true;
