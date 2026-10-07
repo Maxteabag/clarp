@@ -733,8 +733,8 @@ impl App {
     }
 
     /// Puts each finished turn's fold where the turn is: its entries after
-    /// its prompt, among the rows it keeps (commentary when open, the
-    /// answer), in the turn's order. `kept` gathers the entries' keys.
+    /// its prompt, among the rows it keeps (every message, commentary
+    /// too), in the turn's order. `kept` gathers the entries' keys.
     fn splice_history(
         &self,
         pane: &mut PaneState,

@@ -273,10 +273,10 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     let durable = durable(rows);
     let settled = turn.is_some_and(|t| !matches!(text(t, "status"), "running" | ""));
     // Taken over (§7.5): a durable row with the message's row_id, or a
-    // tool or cell with the tool's call_id. A message that stays in view
-    // (a settled turn folds commentary) is shown by its row, in its place;
-    // everything else keeps its item row, so a turn reads the same before
-    // and after it lands: one row per tool, the reasoning, the fold.
+    // tool or cell with the tool's call_id. A message (it never folds) is
+    // shown by its row, in its place; everything else keeps its item row,
+    // so a turn reads the same before and after it lands: one row per
+    // tool, the reasoning, the fold.
     let owner_of = |item: &Object| -> Option<&str> {
         match text(item, "kind") {
             "message" => durable.by_row.get(text(item, "row_id")).copied(),
@@ -284,9 +284,8 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
             _ => None,
         }
     };
-    let stays = |item: &Object| !settled || text(item, "phase") != "commentary" || text(item, "status") != "completed";
-    // Rows that carry a message staying in view: they show, at its place.
-    let giving: HashSet<&str> = items.iter().filter(|i| text(i, "kind") == "message" && stays(i)).filter_map(|i| owner_of(i)).collect();
+    // Rows that carry a message: they show, at its place.
+    let giving: HashSet<&str> = items.iter().filter(|i| text(i, "kind") == "message").filter_map(|i| owner_of(i)).collect();
     let mut placed: HashSet<&str> = HashSet::new();
     let mut rows_of: HashMap<&str, Entry> = HashMap::new();
     let mut shown = Vec::new();
@@ -305,7 +304,7 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
         }
         if text(item, "kind") == "message" && giving.contains(row) {
             // The row's text holds every message it carries: it shows once.
-            if stays(item) && placed.insert(row) {
+            if placed.insert(row) {
                 let mut entry = item_entry(item, options);
                 entry.row = row.to_owned();
                 rows_of.insert(text(item, "id"), entry);
@@ -375,12 +374,11 @@ pub(crate) fn arrange(turn_id: &str, turn: &Object, settled: bool, shown: &[&Obj
         }
     }
 
-    // A settled turn folds its work (§7.6): what failed or stopped and the
-    // final answer stay out of the fold.
+    // A settled turn folds its work (§7.6): its reasoning and tools. What
+    // failed or stopped and every message, commentary too, stay in view in
+    // their places; the fold sits where the folded work begins.
     if settled {
-        let stays = |entry: &Entry| {
-            matches!(entry.status.as_str(), "failed" | "interrupted" | "running" | "pending") || (entry.kind == Kind::Message && entry.phase != "commentary")
-        };
+        let stays = |entry: &Entry| matches!(entry.status.as_str(), "failed" | "interrupted" | "running" | "pending") || entry.kind == Kind::Message;
         let folded: Vec<usize> = (0..entries.len()).filter(|i| !stays(&entries[*i])).collect();
         if let Some(&first) = folded.first() {
             let key = format!("live:fold:{turn_id}");
