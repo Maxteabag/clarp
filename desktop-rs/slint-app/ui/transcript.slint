@@ -1,4 +1,4 @@
-import { Palette, Focus, ChatLook, Look, VimBridge } from "theme.slint";
+import { Palette, Focus, ChatLook, Look, VimBridge, ChatText } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
@@ -154,39 +154,39 @@ component ToolCard inherits Rectangle {
     background: Palette.raised;
     border-radius: 2px;
     VerticalLayout {
-        padding: 6px;
-        spacing: 4px;
+        padding: 6px * ChatText.scale;
+        spacing: 4px * ChatText.scale;
         HorizontalLayout {
-            spacing: 8px;
+            spacing: 8px * ChatText.scale;
             Rectangle {
-                width: 6px;
-                height: 6px;
+                width: 6px * ChatText.scale;
+                height: 6px * ChatText.scale;
                 y: (parent.height - self.height) / 2;
-                border-radius: 3px;
+                border-radius: self.width / 2;
                 background: root.tool.status == "error" ? Palette.danger : root.tool.status == "running" ? Palette.warning : Palette.success;
             }
-            if !root.tool.narrated: Text { text: root.tool.name; color: Palette.chrome-text; font-size: 12 * Look.unit * Look.zoom; font-weight: 600; }
-            if !root.tool.narrated: Text { text: root.tool.summary; color: Palette.muted; font-size: 12 * Look.unit * Look.zoom; overflow: elide; horizontal-stretch: 1; }
+            if !root.tool.narrated: Text { text: root.tool.name; color: Palette.chrome-text; font-size: ChatText.detail; font-weight: 600; }
+            if !root.tool.narrated: Text { text: root.tool.summary; color: Palette.muted; font-size: ChatText.detail; overflow: elide; horizontal-stretch: 1; }
             // ActivityExplanation.qml: the explanation in place of the call,
             // dots until it arrives; a failed one falls back to the call.
             if root.tool.narrated: Text {
                 text: root.tool.explanation != "" ? root.tool.explanation : "…";
                 color: Palette.text;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
                 accessible-label: root.tool.explanation != "" ? root.tool.explanation : "Explaining " + root.tool.name;
             }
             if root.tool.detail != "": TouchArea {
-                width: 60px;
+                width: 60px * ChatText.scale;
                 clicked => { root.open = !root.open; }
-                Text { text: root.open ? "Hide" : "Details"; color: Palette.link; font-size: 12 * Look.unit * Look.zoom; }
+                Text { text: root.open ? "Hide" : "Details"; color: Palette.link; font-size: ChatText.detail; }
             }
         }
         if root.open: Text {
             text: root.tool.detail;
             font-family: Palette.code-family;
-            font-size: 11 * Look.unit * Look.zoom;
+            font-size: ChatText.note;
             color: Palette.text;
             wrap: word-wrap;
         }
@@ -235,31 +235,32 @@ component DecisionReceipt inherits Rectangle {
         background: root.tone;
     }
     VerticalLayout {
-        padding-left: 14px;
-        padding-right: 12px;
-        padding-top: 10px;
-        padding-bottom: 11px;
-        spacing: 7px;
+        padding-left: 14px * ChatText.scale;
+        padding-right: 12px * ChatText.scale;
+        padding-top: 10px * ChatText.scale;
+        padding-bottom: 11px * ChatText.scale;
+        spacing: 7px * ChatText.scale;
         HorizontalLayout {
-            spacing: 6px;
+            spacing: 6px * ChatText.scale;
             Text {
                 text: "?";
                 color: Palette.warning;
-                font-size: 11 * Look.unit * Look.zoom;
+                font-size: ChatText.note;
                 font-weight: 700;
                 vertical-alignment: center;
             }
             Text {
                 text: root.receipt.agent != "" ? root.receipt.kind + " · " + root.receipt.agent : root.receipt.kind;
                 color: Palette.faint;
-                font-size: 10 * Look.unit * Look.zoom;
+                font-size: ChatText.caption;
                 font-weight: 600;
-                letter-spacing: 0.8px;
+                letter-spacing: 0.8px * ChatText.scale;
                 overflow: elide;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
             if root.selected && Focus.mode == "pane" && root.receipt.linked: KeyHint {
+                chat: true;
                 key: "O";
                 label: "Show decision";
                 emphasised: true;
@@ -269,15 +270,15 @@ component DecisionReceipt inherits Rectangle {
         Text {
             text: root.receipt.question;
             color: Palette.text;
-            font-size: 14 * Look.unit * Look.zoom;
+            font-size: ChatText.lead;
             font-weight: 600;
             wrap: word-wrap;
         }
         HorizontalLayout {
             alignment: start;
             Rectangle {
-                min-height: 22px;
-                border-radius: 11px;
+                min-height: 22px * ChatText.scale;
+                border-radius: 11px * ChatText.scale;
                 background: root.tone.with-alpha(0.16);
                 border-width: 1px;
                 border-color: root.tone.with-alpha(0.4);
@@ -285,22 +286,22 @@ component DecisionReceipt inherits Rectangle {
                 accessible-id: root.measuring ? "" : "receipt-outcome";
                 accessible-label: root.receipt.outcome;
                 HorizontalLayout {
-                    padding-left: 9px;
-                    padding-right: 10px;
-                    padding-top: 2px;
-                    padding-bottom: 2px;
-                    spacing: 6px;
+                    padding-left: 9px * ChatText.scale;
+                    padding-right: 10px * ChatText.scale;
+                    padding-top: 2px * ChatText.scale;
+                    padding-bottom: 2px * ChatText.scale;
+                    spacing: 6px * ChatText.scale;
                     Text {
                         text: root.receipt.mark;
                         color: root.tone;
-                        font-size: 12 * Look.unit * Look.zoom;
+                        font-size: ChatText.detail;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
                     Text {
                         text: root.receipt.outcome;
                         color: root.tone;
-                        font-size: 12 * Look.unit * Look.zoom;
+                        font-size: ChatText.detail;
                         font-weight: 600;
                         wrap: word-wrap;
                         vertical-alignment: center;
@@ -349,19 +350,19 @@ component LiveItem inherits Rectangle {
         clicked => { ArtifactBridge.open(root.live.key); }
     }
     VerticalLayout {
-        padding-left: 4px;
-        padding-right: 4px;
-        padding-top: 2px;
-        padding-bottom: 2px;
-        spacing: 2px;
+        padding-left: 4px * ChatText.scale;
+        padding-right: 4px * ChatText.scale;
+        padding-top: 2px * ChatText.scale;
+        padding-bottom: 2px * ChatText.scale;
+        spacing: 2px * ChatText.scale;
         HorizontalLayout {
-            spacing: 8px;
-            height: 20px;
+            spacing: 8px * ChatText.scale;
+            height: 20px * ChatText.scale;
             Rectangle {
-                width: 7px;
-                height: 7px;
+                width: 7px * ChatText.scale;
+                height: 7px * ChatText.scale;
                 y: (parent.height - self.height) / 2;
-                border-radius: root.live.kind == "fold" ? 1px : 3.5px;
+                border-radius: root.live.kind == "fold" ? 1px : self.width / 2;
                 background: root.running ? root.mark : transparent;
                 border-width: 1px;
                 border-color: root.live.kind == "fold" ? Palette.faint : root.mark;
@@ -374,7 +375,7 @@ component LiveItem inherits Rectangle {
                 color: root.live.shimmer == "accent" ? Palette.accent
                     : root.live.shimmer == "muted" || root.live.kind == "reasoning" || root.live.kind == "fold" ? Palette.muted
                     : Palette.chrome-text;
-                font-size: 13 * Look.unit * Look.zoom;
+                font-size: ChatText.label;
                 font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
                 font-italic: root.live.kind == "reasoning";
                 overflow: elide;
@@ -401,7 +402,7 @@ component LiveItem inherits Rectangle {
                         property <float> glow: Math.max(0, 1 - Math.abs(self.at - shimmer.phase) * 4);
                         text: letter;
                         color: shimmer.high.mix(shimmer.low, self.glow);
-                        font-size: 13 * Look.unit * Look.zoom;
+                        font-size: ChatText.label;
                         font-weight: root.live.kind == "fold" || root.live.kind == "reasoning" ? 400 : 600;
                         font-italic: root.live.kind == "reasoning";
                         vertical-alignment: center;
@@ -411,18 +412,19 @@ component LiveItem inherits Rectangle {
             if root.live.meta != "": Text {
                 text: root.live.meta;
                 color: root.live.status == "failed" ? Palette.danger : Palette.faint;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 font-family: Palette.code-family;
                 vertical-alignment: center;
             }
             if root.live.expandable: Text {
                 text: root.live.expanded ? "▾" : "▸";
                 color: Palette.faint;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 vertical-alignment: center;
             }
             // Its key only while it works: selected, in the focused chat.
             if root.selected && Focus.mode == "pane": KeyHint {
+                chat: true;
                 key: "O";
                 label: root.live.expanded ? "Collapse" : "Expand";
                 emphasised: true;
@@ -431,13 +433,13 @@ component LiveItem inherits Rectangle {
         }
         // Under the label, indented past the mark.
         VerticalLayout {
-            padding-left: 15px;
-            spacing: 2px;
+            padding-left: 15px * ChatText.scale;
+            spacing: 2px * ChatText.scale;
             if root.live.secondary != "" || root.live.reserve: Text {
-                height: 17px;
+                height: 17px * ChatText.scale;
                 text: root.live.secondary != "" ? root.live.secondary : root.live.explaining ? "Explaining…" : "";
                 color: root.live.secondary != "" ? Palette.muted : Palette.faint;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 font-italic: root.live.secondary == "";
                 overflow: elide;
             }
@@ -445,7 +447,7 @@ component LiveItem inherits Rectangle {
                 background: root.live.kind == "plan" || root.live.kind == "reasoning" ? transparent : Palette.sunken;
                 border-radius: 2px;
                 VerticalLayout {
-                    padding: root.live.kind == "plan" || root.live.kind == "reasoning" ? 0px : 6px;
+                    padding: root.live.kind == "plan" || root.live.kind == "reasoning" ? 0px : 6px * ChatText.scale;
                     spacing: 0px;
                     // Each line is as tall as it wraps at the width it is
                     // drawn at (laid out, it was measured at its one-line
@@ -459,7 +461,7 @@ component LiveItem inherits Rectangle {
                             height: parent.height;
                             text: line;
                             font-family: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.body-family : Palette.code-family;
-                            font-size: root.live.kind == "plan" || root.live.kind == "reasoning" ? 13 * Look.unit * Look.zoom : 11 * Look.unit * Look.zoom;
+                            font-size: root.live.kind == "plan" || root.live.kind == "reasoning" ? ChatText.label : ChatText.note;
                             color: root.live.kind == "plan" || root.live.kind == "reasoning" ? Palette.muted : Palette.text;
                             wrap: root.live.kind == "plan" || root.live.kind == "reasoning" ? word-wrap : no-wrap;
                             overflow: elide;
@@ -470,7 +472,7 @@ component LiveItem inherits Rectangle {
             if root.live.more != "": Text {
                 text: root.live.more;
                 color: Palette.faint;
-                font-size: 11 * Look.unit * Look.zoom;
+                font-size: ChatText.note;
             }
         }
     }
@@ -486,7 +488,7 @@ component PromptLine inherits Rectangle {
     in property <length> view-bottom;
     in property <bool> measuring;
     property <bool> selected: ArtifactBridge.cursor == root.prompt.key;
-    height: 22px;
+    height: 22px * ChatText.scale;
     border-radius: 3px;
     border-width: root.selected ? 1px : 0px;
     border-color: Palette.accent;
@@ -503,33 +505,34 @@ component PromptLine inherits Rectangle {
         clicked => { ArtifactBridge.open(root.prompt.key); }
     }
     HorizontalLayout {
-        padding-left: 2px;
-        padding-right: 2px;
-        spacing: 6px;
+        padding-left: 2px * ChatText.scale;
+        padding-right: 2px * ChatText.scale;
+        spacing: 6px * ChatText.scale;
         AgentAvatar {
             y: (parent.height - self.height) / 2;
-            size: 18px;
+            size: 18px * ChatText.scale;
+            min-letter: 9px * ChatText.scale;
             name: root.prompt.sender;
             initial: root.prompt.initial;
         }
         Text {
             text: root.prompt.sender;
             color: Palette.accent;
-            font-size: 12 * Look.unit * Look.zoom;
+            font-size: ChatText.detail;
             font-weight: 600;
             vertical-alignment: center;
         }
         Text {
             text: root.prompt.expanded || root.prompt.line == "" ? "prompted" : "prompted ·";
             color: Palette.muted;
-            font-size: 12 * Look.unit * Look.zoom;
+            font-size: ChatText.detail;
             vertical-alignment: center;
         }
         // The rest of the line: its first line, elided to the bubble.
         Text {
             text: root.prompt.expanded ? "" : root.prompt.line;
             color: Palette.text;
-            font-size: 13 * Look.unit * Look.zoom;
+            font-size: ChatText.label;
             overflow: elide;
             horizontal-stretch: 1;
             min-width: 0px;
@@ -538,11 +541,12 @@ component PromptLine inherits Rectangle {
         Text {
             text: root.prompt.expanded ? "▾" : "▸";
             color: Palette.faint;
-            font-size: 12 * Look.unit * Look.zoom;
+            font-size: ChatText.detail;
             vertical-alignment: center;
         }
         // Its key only while it works: selected, in the focused chat.
         if root.selected && Focus.mode == "pane": KeyHint {
+            chat: true;
             y: (parent.height - self.height) / 2;
             key: "O";
             label: root.prompt.expanded ? "Collapse" : "Expand";
@@ -710,7 +714,7 @@ export component Block inherits VerticalLayout {
                 height: parent.height;
                 text: picture.failed ? "Image unavailable" + (picture.alt != "" ? " · " + picture.alt : "") : picture.alt;
                 color: picture.failed ? Palette.warning : Palette.faint;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 wrap: word-wrap;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -746,7 +750,9 @@ component TranscriptRow inherits HorizontalLayout {
     // The measure (Settings → Line length) narrows every row's lane.
     property <length> lane: Look.measure > 0px ? Math.min(root.list-width, Look.measure * Look.zoom + 32px) : root.list-width;
     property <length> content-width: Math.min(root.lane - 32px, root.message.author == "user" ? root.list-width * Look.bubble-share : root.lane)
-        - 2 * (root.message.receipt.key != "" ? 0px : root.message.prompt.key != "" && !root.message.prompt.expanded ? 5px : root.message.author == "user" ? 10px : 2px);
+        - 2 * root.inset;
+    // The space round a message's content: its bubble's, sized with its text.
+    property <length> inset: (root.message.receipt.key != "" ? 0px : root.message.prompt.key != "" && !root.message.prompt.expanded ? 5px : root.message.author == "user" ? 10px : 2px) * ChatText.scale;
     padding-left: 16px;
     padding-right: 16px;
     padding-top: Look.message-spacing * Look.zoom / 2;
@@ -774,19 +780,19 @@ component TranscriptRow inherits HorizontalLayout {
             background: Focus.mode == "pane" ? Palette.accent : Palette.faint;
         }
         if root.message.author != "activity" && root.message.author != "live" && root.message.receipt.key == "": Rectangle {
-            x: parent.width - 20px;
+            x: parent.width - 20px * ChatText.scale;
             y: 2px;
-            width: 18px;
-            height: 18px;
+            width: 18px * ChatText.scale;
+            height: 18px * ChatText.scale;
             opacity: hover.has-hover || copy.has-hover ? 1 : 0;
             accessible-role: button;
             accessible-label: "Copy message";
-            Image { source: @image-url("icons/copy.svg"); width: 14px; height: 14px; colorize: Palette.faint; }
+            Image { source: @image-url("icons/copy.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
             copy := TouchArea { clicked => { root.copy-message(root.message.id); } }
         }
         VerticalLayout {
             // A folded prompt is one line in a slim bubble.
-            padding: root.message.receipt.key != "" ? 0px : root.message.prompt.key != "" && !root.message.prompt.expanded ? 5px : root.message.author == "user" ? 10px : 2px;
+            padding: root.inset;
             spacing: Look.paragraph-spacing * Look.zoom;
             if root.message.receipt.key != "": DecisionReceipt {
                 receipt: root.message.receipt;
@@ -812,7 +818,7 @@ component TranscriptRow inherits HorizontalLayout {
                 view-top: root.view-top;
                 view-bottom: root.view-bottom;
                 measuring: root.measuring;
-                body-size: root.message.author == "activity" ? 13px * Look.zoom : Palette.body-size * Look.zoom;
+                body-size: root.message.author == "activity" ? ChatText.label : ChatText.body;
                 body-color: root.message.author == "activity" ? Palette.muted : Palette.text;
                 link-clicked(url) => { root.link-clicked(url); }
             }
@@ -820,15 +826,15 @@ component TranscriptRow inherits HorizontalLayout {
             if root.message.live.kind == "message" && root.message.live.meta != "": Text {
                 text: "■ " + root.message.live.meta;
                 color: Palette.warning;
-                font-size: 11 * Look.unit * Look.zoom;
+                font-size: ChatText.note;
             }
             if root.message.activity-label != "": TouchArea {
-                height: 20px;
+                height: 20px * ChatText.scale;
                 clicked => { root.toggle-activity(root.message.id, root.message.group-id); }
                 Text {
                     text: (root.message.expanded ? "Hide · " : "Show · ") + root.message.activity-label;
                     color: Palette.faint;
-                    font-size: 12 * Look.unit * Look.zoom;
+                    font-size: ChatText.detail;
                     x: 0;
                 }
             }
@@ -855,7 +861,7 @@ component TranscriptRow inherits HorizontalLayout {
             if root.message.meta != "" && root.message.author == "user": Text {
                 text: root.message.meta;
                 color: Palette.accent;
-                font-size: 11 * Look.unit * Look.zoom;
+                font-size: ChatText.note;
                 horizontal-alignment: right;
                 accessible-role: text;
                 accessible-id: root.measuring ? "" : "meta:" + root.message.id;
@@ -864,7 +870,7 @@ component TranscriptRow inherits HorizontalLayout {
             if (root.message.pending || root.message.failed || root.message.stamp != "") && (root.message.prompt.key == "" || root.message.prompt.expanded): Text {
                 text: root.message.failed ? "Not delivered" : root.message.pending ? "Sending…" : root.message.stamp;
                 color: root.message.failed ? Palette.danger : Palette.faint;
-                font-size: 11 * Look.unit * Look.zoom;
+                font-size: ChatText.note;
                 horizontal-alignment: root.message.author == "user" ? right : left;
             }
         }

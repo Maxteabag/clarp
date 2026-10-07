@@ -89,6 +89,32 @@ export global Look {
     callback zoom-by(int);
 }
 
+// The chat rows' sizes: tool calls, live rows, the Worked-for fold,
+// reasoning, plans, receipts, prompts, cards and their stamps and names.
+// They follow the reading size (Font size × Chat zoom), not Interface
+// size, each at the ratio it had to the default theme's 15px text: a tool
+// row's 12px beside 15px text stays 0.8 of it at any size.
+export global ChatText {
+    // The message text itself.
+    out property <length> body: Palette.body-size * Look.zoom;
+    // How far the reading size is from the default's 15px: a row's marks,
+    // avatars, line heights and padding that sit against its text.
+    out property <float> scale: Palette.body-size * Look.zoom / 15px;
+    // A receipt's question, a card's title (14px beside 15px).
+    out property <length> lead: Palette.body-size * Look.zoom * 14 / 15;
+    // A live row's label, reasoning and plan lines, a prompt's line (13).
+    out property <length> label: Palette.body-size * Look.zoom * 13 / 15;
+    // Tool rows, explanations, a live row's time and second line, the
+    // activity toggle, names (12).
+    out property <length> detail: Palette.body-size * Look.zoom * 12 / 15;
+    // Stamps, output tails, tool details, "more" lines (11).
+    out property <length> note: Palette.body-size * Look.zoom * 11 / 15;
+    // A receipt's or card's kind line (10).
+    out property <length> caption: Palette.body-size * Look.zoom * 10 / 15;
+    // A card's smallest label (9).
+    out property <length> tiny: Palette.body-size * Look.zoom * 9 / 15;
+}
+
 // Where the keyboard is: the keyboard map's state (commands::context), set
 // from Rust with the shortcut bar. Every region that owns a state draws the
 // one FocusRing when it is the one; lists mark their cursor with Cursor.
