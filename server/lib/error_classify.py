@@ -128,7 +128,10 @@ _AUTH_RE = re.compile(
     r"failed to authenticate|oauth session expired|could not be refreshed|"
     r"not logged in|invalid_grant|token (has )?expired|"
     r"\b401\b.*unauthori[sz]ed|unauthori[sz]ed.*\b401\b|"
-    r"please run /login|run `?claude login`?",
+    r"please run /login|run `?claude login`?|"
+    # agy: "Request had insufficient authentication scopes.. Please log out
+    # (/logout) and log back in (/login)."
+    r"insufficient authentication scopes|log back in \(/login\)",
     re.I,
 )
 # Checked after USAGE_LIMIT: Codex's limit message also advertises a plan
