@@ -60,6 +60,7 @@ thread_local! {
     static MID: RefCell<Option<(Rect, Rect)>> = const { RefCell::new(None) };
     static LANDING: RefCell<Option<(Rect, f32, Option<Rect>)>> = const { RefCell::new(None) };
     static DROPPED: Cell<i32> = const { Cell::new(0) };
+    static REVEAL: RefCell<Option<RevealWatch>> = const { RefCell::new(None) };
     /// The queue's count over time: (since, the Host's, the composer's
     /// label, the explorer's label).
     static QUEUE_SEEN: RefCell<Vec<(Duration, i32, i32, i32)>> = const { RefCell::new(Vec::new()) };
@@ -172,6 +173,7 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
             let bubble = element(&format!("row:{}", sample.id));
             LANDING.with(|l| *l.borrow_mut() = Some((report, flight.get_progress(), bubble)));
         }
+        watch_reveal(&flight, &sample.id);
         SAMPLES.with(|s| s.borrow_mut().push(sample));
         let due: Vec<String> = SHOTS.with(|s| {
             let mut shots = s.borrow_mut();
@@ -184,6 +186,68 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
         }
     });
     SAMPLER.with(|s| *s.borrow_mut() = Some(timer));
+}
+
+/// A status line's reveal, as drawn: the first frame drawn with it, and
+/// one 0.4 s later (well after its 0.2 s fade), each with its box.
+#[derive(Default)]
+struct RevealWatch {
+    text: String,
+    from: i32,
+    frames: Option<usize>,
+    early: Option<Rect>,
+    late_due: Option<Instant>,
+    late: Option<Rect>,
+}
+
+/// Watches for the reveal of a status line saying `text` (from now on).
+fn watch_reveal_of(text: &str) {
+    let from = crate::window().map_or(0, |w| w.global::<crate::SendFlight>().get_reveals());
+    REVEAL.with(|r| *r.borrow_mut() = Some(RevealWatch { text: text.to_owned(), from, ..RevealWatch::default() }));
+}
+
+fn watch_reveal(flight: &crate::SendFlight, id: &str) {
+    REVEAL.with(|r| {
+        let mut slot = r.borrow_mut();
+        let Some(watch) = slot.as_mut() else { return };
+        if watch.late.is_some() || id.is_empty() || flight.get_reveals() <= watch.from || flight.get_reveal_text().as_str() != watch.text {
+            return;
+        }
+        let drawn = crate::perf::stats().frames.len();
+        let Some(frames) = watch.frames else {
+            watch.frames = Some(drawn);
+            return;
+        };
+        if watch.early.is_none() && drawn > frames {
+            OUT.with(|o| shot(&o.borrow(), "send-12-reveal-early"));
+            watch.early = element(&format!("status:{id}"));
+            watch.late_due = Some(Instant::now() + Duration::from_millis(400));
+        } else if watch.late_due.is_some_and(|due| Instant::now() >= due) {
+            OUT.with(|o| shot(&o.borrow(), "send-13-reveal-late"));
+            watch.late = element(&format!("status:{id}"));
+        }
+    });
+}
+
+/// How far the text in `rect` stands out from its background (the box's
+/// corner) in a saved frame: the largest difference in luminance, 0..255.
+fn contrast(name: &str, rect: Rect) -> Option<f32> {
+    let frame = image::open(format!("{}/{name}.png", OUT.with(|o| o.borrow().clone()))).ok()?.to_rgba8();
+    let scale = crate::window().map_or(1.0, |w| w.window().scale_factor());
+    let (x0, y0) = ((rect.0 * scale) as u32, (rect.1 * scale) as u32);
+    let (x1, y1) = (((rect.0 + rect.2) * scale) as u32, ((rect.1 + rect.3) * scale) as u32);
+    let luma = |x: u32, y: u32| {
+        let p = frame.get_pixel(x.min(frame.width() - 1), y.min(frame.height() - 1));
+        0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32
+    };
+    let background = luma(x0, y0);
+    let mut most: f32 = 0.0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            most = most.max((luma(x, y) - background).abs());
+        }
+    }
+    Some(most)
 }
 
 fn stop_sampling() -> Vec<Sample> {
@@ -219,6 +283,17 @@ fn near(a: f32, b: f32, slack: f32) -> bool {
 
 fn heights(samples: &[Sample]) -> Vec<f32> {
     samples.iter().filter_map(|s| s.row).collect()
+}
+
+/// The last reveal finished was `text`'s, and took 0.2 s (a frame's slack:
+/// the fade is drawn on time, its end noticed on the next frame).
+fn reveal_took(text: &str) -> bool {
+    let Some(window) = crate::window() else { return false };
+    let flight = window.global::<crate::SendFlight>();
+    let took = flight.get_reveal_took();
+    let ok = flight.get_reveal_text().as_str().contains(text) && (200..=330).contains(&took);
+    println!("perf reveal: {:?} took {took} ms", flight.get_reveal_text());
+    ok
 }
 
 /// The frames drawn in the flight that started at `from` (the renderer's
@@ -298,6 +373,7 @@ pub fn send_check(out: String) {
                 return false;
             }
             *p2.borrow_mut() = last_own().map(|(id, ..)| id);
+            watch_reveal_of("Sending…");
             send_and_sample(false, &[(2100, "send-02-sending")], p2.borrow().clone());
             true
         })),
@@ -315,6 +391,16 @@ pub fn send_check(out: String) {
             let heights = heights(&samples);
             let changes = heights.windows(2).filter(|w| (w[1] - w[0]).abs() >= 0.5).count();
             check(changes <= 2, &format!("the late line grows the row once (and confirmed, it is gone): {changes} height changes"));
+            // It fades in (ease-out 0.2 s): fainter on the first frame that
+            // draws it than once revealed.
+            let watch = REVEAL.with(|r| r.borrow_mut().take()).unwrap_or_default();
+            let early = watch.early.and_then(|r| contrast("send-12-reveal-early", r));
+            let late = watch.late.and_then(|r| contrast("send-13-reveal-late", r));
+            check(
+                early.zip(late).is_some_and(|(e, l)| l > 40.0 && e < l * 0.9),
+                &format!("Sending… fades in: contrast {early:?} on its first frame, {late:?} once revealed"),
+            );
+            check(reveal_took("Sending…"), "and its fade takes 0.2 s");
             set_delay(0.3);
             check(control("/__control/fail", &json!({"path": "/send", "status": 500, "count": 1})).is_ok(), "the next send fails");
             type_draft("This one fails");
@@ -331,12 +417,13 @@ pub fn send_check(out: String) {
         })),
         ("failed", Box::new(|_, _window, _| {
             let failed = last_own().is_some_and(|(_, _, failed)| failed);
-            if !failed || since_send() < Duration::from_millis(600) {
+            if !failed || since_send() < Duration::from_millis(900) {
                 return false;
             }
             let samples = stop_sampling();
             let first = samples.iter().find(|s| s.status == "Not delivered").map(|s| s.at);
             check(first.is_some_and(|at| at < Duration::from_millis(1000)), &format!("a failed send says Not delivered at once: {first:?}"));
+            check(reveal_took("Not delivered"), "fading in over 0.2 s");
             shot(&OUT.with(|o| o.borrow().clone()), "send-03-failed");
             // (b) The flight: a two-line draft, the Host a little slow so its
             // reply does not land mid-flight.
@@ -630,6 +717,13 @@ pub fn send_check(out: String) {
                 known.zip(shown).is_some_and(|(k, s)| s >= k + Duration::from_millis(1600) && s <= k + Duration::from_millis(2600)),
                 &format!("and show after it: known {known:?}, shown {shown:?}"),
             );
+            true
+        })),
+        ("queue label revealed", Box::new(|_, _window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(reveal_took("queued"), "the queued-turn labels fade in over 0.2 s");
             shot(&OUT.with(|o| o.borrow().clone()), "send-11-queued-label");
             check(control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 0}})).is_ok(), "the queue empties");
             SENT_AT.with(|s| s.set(Some(Instant::now())));
