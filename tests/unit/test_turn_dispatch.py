@@ -2313,3 +2313,122 @@ def test_a_goal_wake_keeps_running_when_its_conversation_is_carried_over(tmp_pat
                                     "pruned")
     ran = []
     assert owned(lambda: ran.append("event")) and ran == ["event"]
+
+
+# --- leaked slot: a hook-minted trace must not strand the turn's slot --------
+#
+# 2026-10-05: a helper's `claude -p` turn ran past the agents trace TTL (1h).
+# Background-task notifications then fired UserPromptSubmit inside that same
+# process; with no source marker and an expired trace the hook minted
+# "local-…" and stored it as the agent's trace. When the process finished,
+# on_result saw a trace other than its own, treated the turn as superseded and
+# returned before _finish_turn. Nothing else owned the slot, so it stayed held
+# for 30h and blocked every idle runtime handoff.
+
+def _hook_mints_local_trace(agent_id):
+    agents_db.set_trace(agent_id, "local-1a10d256179")
+
+
+@pytest.mark.parametrize("outcome", ["result", "error"])
+def test_turn_outcome_after_a_hook_minted_trace_releases_its_slot(tmp_path, outcome):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="review the PR", requested_session="mike",
+                     trace_id="19f671f72ccfa877", synthesize_audio=False)
+    _, call = backends.spawned[0]
+    _hook_mints_local_trace(agent_id)
+
+    if outcome == "result":
+        call["on_result"]({"duration_ms": 5})
+    else:
+        call["on_error"]("Turn interrupted")
+
+    assert agent_id not in _td.runtime_status()["active"]
+
+
+def test_queued_turn_runs_after_a_hook_minted_trace(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                     client_msg_id="u-second", synthesize_audio=False,
+                     queue_if_busy=True)
+    _hook_mints_local_trace(agent_id)
+
+    backends.spawned[0][1]["on_result"]({"duration_ms": 5})
+
+    assert [kw["text"] for _, kw in backends.spawned] == ["first", "second"]
+    assert _td.runtime_status()["active"][agent_id] == "tB"
+
+
+def test_superseded_turn_outcome_leaves_the_newer_owner_alone(tmp_path):
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    service.dispatch(text="second", requested_session="mike", trace_id="tB",
+                     synthesize_audio=False)
+
+    backends.spawned[0][1]["on_result"]({"duration_ms": 5})
+
+    assert _td.runtime_status()["active"][agent_id] == "tB"
+    assert agents_db.latest_state(agent_id)["kind"] != AgentState.DONE
+
+
+# --- self-heal: a slot without a process whose turn settled is released -----
+
+def _leak_slot(tmp_path, *, settled_ms_ago):
+    from lib import db, turn_lifecycle
+    service, backends, agent_id = _make_service(tmp_path)
+    service.dispatch(text="first", requested_session="mike", trace_id="tA",
+                     synthesize_audio=False)
+    turn_lifecycle.try_transition(
+        agent_id, turn_lifecycle.TurnEvent.PROCESS_EXITED_OK, {})
+    db.conn().execute(
+        "UPDATE state_log SET ts = ts - ? WHERE agent_id = ?",
+        (settled_ms_ago, agent_id))
+    backends.live = False
+    return service, backends, agent_id
+
+
+def test_leaked_slot_of_a_settled_turn_is_released_and_logged(tmp_path, monkeypatch):
+    logged = []
+    monkeypatch.setattr(_td, "log", lambda event, msg="": logged.append((event, msg)))
+    service, _backends, agent_id = _leak_slot(tmp_path, settled_ms_ago=10 * 60_000)
+
+    released = service.release_leaked_slots()
+
+    assert released == {agent_id: "tA"}
+    assert agent_id not in _td.runtime_status()["active"]
+    assert [event for event, _ in logged].count("leakedSlotReleased") == 1
+    assert "trace=tA" in dict(logged)["leakedSlotReleased"]
+
+
+def test_leaked_slot_hands_over_to_queued_work(tmp_path):
+    service, backends, agent_id = _leak_slot(tmp_path, settled_ms_ago=10 * 60_000)
+    backends.live = True
+    service.dispatch(text="queued", requested_session="mike", trace_id="tQ",
+                     client_msg_id="u-q", synthesize_audio=False,
+                     queue_if_busy=True)
+    backends.live = False
+
+    assert service.release_leaked_slots() == {agent_id: "tA"}
+
+    assert [kw["text"] for _, kw in backends.spawned] == ["first", "queued"]
+    assert _td.runtime_status()["active"][agent_id] == "tQ"
+
+
+@pytest.mark.parametrize("case", ["live_process", "busy_state", "fresh_settle",
+                                  "spawning"])
+def test_slot_with_live_work_is_never_released(tmp_path, case):
+    from lib import turn_lifecycle
+    service, backends, agent_id = _leak_slot(
+        tmp_path, settled_ms_ago=1_000 if case == "fresh_settle" else 10 * 60_000)
+    if case == "live_process":
+        backends.live = True
+    elif case == "busy_state":
+        turn_lifecycle.try_transition(
+            agent_id, turn_lifecycle.TurnEvent.RETRY_SCHEDULED, {})
+    elif case == "spawning":
+        _td._SLOTS.touch_claim(agent_id)
+
+    assert service.release_leaked_slots() == {}
+    assert _td.runtime_status()["active"][agent_id] == "tA"
