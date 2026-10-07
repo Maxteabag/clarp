@@ -1,4 +1,4 @@
-import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge, ChatText, SendFlight } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge, ChatText, SendFlight, ChromeText } from "theme.slint";
 import { Composer, Attachment, MentionRow } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
@@ -583,6 +583,7 @@ export component Workspace inherits Rectangle {
         padding-right: 8px;
         spacing: 8px;
         Text {
+            font-size: ChromeText.body;
             text: root.save-warning;
             color: Palette.warning;
             wrap: word-wrap;

@@ -1,6 +1,6 @@
 import { Button } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing, Look } from "theme.slint";
+import { Palette, Focus, FocusRing, Look, ChromeText } from "theme.slint";
 
 // A dialog over the window: a dimmed backdrop that closes it when clicked,
 // and a card in the middle. Escape closes it through the keyboard map.
@@ -103,6 +103,7 @@ export component KeymapEditor inherits Modal {
                         padding-right: 10px;
                         spacing: 12px;
                         Text {
+                            font-size: ChromeText.body;
                             text: row.label;
                             color: row.current ? Palette.text : Palette.muted;
                             font-weight: row.current ? 600 : 400;
@@ -125,8 +126,8 @@ export component KeymapEditor inherits Modal {
                 }
             }
         }
-        if root.status != "": Text { text: root.status; color: Palette.text; wrap: word-wrap; }
-        if root.error != "": Text { text: root.error; color: Palette.danger; wrap: word-wrap; }
+        if root.status != "": Text { font-size: ChromeText.body; text: root.status; color: Palette.text; wrap: word-wrap; }
+        if root.error != "": Text { font-size: ChromeText.body; text: root.error; color: Palette.danger; wrap: word-wrap; }
         Text { text: "Profile JSON"; color: Palette.muted; font-size: 11 * Look.unit; }
         json := Editor {
             height: 110px;

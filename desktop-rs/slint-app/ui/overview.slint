@@ -1,4 +1,4 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, ChromeText } from "theme.slint";
 import { ListView, ScrollView } from "std-widgets.slint";
 import { Modal } from "dialogs.slint";
 import { AvatarActivity, ActivitySweep, StatusPill, AvatarArt } from "avatar.slint";
@@ -307,7 +307,7 @@ export component AgentOverview inherits Modal {
                                     height: 36px;
                                     border-radius: 2px;
                                     background: Palette.border;
-                                    Text { text: contact.initial; color: Palette.text; font-weight: 600; }
+                                    Text { font-size: ChromeText.body; text: contact.initial; color: Palette.text; font-weight: 600; }
                                 }
                             }
                             VerticalLayout {
