@@ -194,6 +194,16 @@ class RuntimeClient:
         result = response.get("result") or {}
         return result if isinstance(result, dict) else {}
 
+    def release_leaked_slots(self, agent_id: str) -> dict[str, str]:
+        """Have the runtime release this agent's slot if its turn leaked it."""
+        response = self._request("release_leaked_slots", {"agent_id": agent_id})
+        if not response.get("ok"):
+            raise RuntimeProtocolError(
+                str(response.get("error") or "runtime leak release failed"))
+        result = response.get("result") or {}
+        return {str(k): str(v) for k, v in result.items()} \
+            if isinstance(result, dict) else {}
+
     def interrupt(self, backend: str, agent_id: str) -> int:
         response = self._request("interrupt", {
             "backend": backend, "agent_id": agent_id})
@@ -585,6 +595,17 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                     params.get("cancelled_trace_ids") or [])},
                 backend_registry=self.dispatch_service.backends)
             return {"ok": True, "result": True}
+        if method == "release_leaked_slots":
+            agent_id = str(params.get("agent_id") or "")
+            if not agent_id:
+                return {"ok": False, "status": 400,
+                        "error": "agent_id is required"}
+            release_leaked = getattr(
+                self.dispatch_service, "release_leaked_slots", None)
+            if release_leaked is None:
+                return {"ok": False, "status": 501,
+                        "error": "this runtime cannot release leaked slots"}
+            return {"ok": True, "result": release_leaked(agent_id=agent_id)}
         if method == "release_agent":
             from . import agents as agents_db, backends, turn_dispatch
             agent_id = str(params.get("agent_id") or "")
