@@ -194,9 +194,31 @@ export function settledFold(turn, rows) {
     : (turn.ended_at_ms && turn.started_at_ms ? turn.ended_at_ms - turn.started_at_ms : 0);
   const tools = turn.tool_count != null ? turn.tool_count
     : rows.reduce((n, r) => n + (r.type === 'explore' ? r.members.length : r.type === 'tool' ? 1 : 0), 0);
-  const lead = turn.status === 'interrupted' ? 'Stopped after' : 'Worked for';
+  const lead = { interrupted: 'Stopped after', failed: 'Failed after' }[turn.status] || 'Worked for';
   const label = `${lead} ${formatDuration(worked)}${tools ? ` · ${plural(tools, 'tool')}` : ''}`;
-  return { label, folded, visible };
+  return { label, folded, visible, error: turnError(turn) };
+}
+
+/** Why a failed turn failed (`turn.error`, Host contract 54); older Hosts
+ * send no reason, and the turn still must not read as one that answered. */
+function turnError(turn) {
+  if (turn.status !== 'failed') return null;
+  const e = turn.error || {};
+  return { message: String(e.message || 'Turn failed'), detail: String(e.detail || '') };
+}
+
+/**
+ * A /log row the Host wrote itself (`origin: system`: a turn that failed, or
+ * one a restart cut short) as a notice: the first paragraph says what
+ * happened, the rest is the provider's own words. Null for anything else,
+ * so replies, prompts and the dream digest render as they always have.
+ */
+export function systemNotice(row) {
+  if (!row || row.role !== 'assistant' || row.origin !== 'system') return null;
+  const text = String(row.text || '').trim();
+  const cut = text.indexOf('\n\n');
+  return cut < 0 ? { message: text, detail: '' }
+    : { message: text.slice(0, cut).trim(), detail: text.slice(cut + 2).trim() };
 }
 
 const STATUS_TEXT = {
@@ -255,9 +277,13 @@ function sameSet(a, b) {
  * while the live turn is shown, so nothing renders twice and nothing is
  * deleted and re-inserted when the durable copy lands.
  */
-export function takenOverTurns(turns, items, previous = null) {
+export function takenOverTurns(turns, items, previous = null, liveTurn = null) {
   const hidden = new Set();
   if (!items || !items.length) return sameSet(previous, hidden) ? previous : hidden;
+  // The live turn shows its own failure; the Host's failure row for it
+  // would say the same thing twice.
+  const failedTrace = liveTurn && liveTurn.status === 'failed' && liveTurn.error
+    ? liveTurn.turn_id : null;
   const rowIds = new Set();
   const callIds = new Set();
   for (const item of items) {
@@ -266,6 +292,10 @@ export function takenOverTurns(turns, items, previous = null) {
   }
   for (const turn of turns || []) {
     if (rowIds.has(turn.id) || turn.kind === 'live') { hidden.add(turn.id); continue; }
+    if (failedTrace && turn.trace_id === failedTrace && systemNotice(turn)) {
+      hidden.add(turn.id);
+      continue;
+    }
     const parts = [...(turn.tools || []), ...(turn.display_cells || [])];
     const text = String(turn.text || '').trim();
     if (!text && parts.length && parts.every(p => p && callIds.has(p.id))) hidden.add(turn.id);

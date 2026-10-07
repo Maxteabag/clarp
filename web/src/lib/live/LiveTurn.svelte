@@ -7,6 +7,7 @@
   import { renderText } from '../render.js';
   import LiveMessage from './LiveMessage.svelte';
   import LiveToolRow from './LiveToolRow.svelte';
+  import TurnNotice from './TurnNotice.svelte';
   import { isOpen, toggle } from './expanded.svelte.js';
 
   let { liveState, items, explanations = true } = $props();
@@ -83,4 +84,7 @@
       <div class="lv-divider" data-item-id={row.id}>{row.running ? 'Compacting context…' : 'Context compacted'}</div>
     {/if}
   {/each}
+  {#if fold && fold.error}
+    <TurnNotice message={fold.error.message} detail={fold.error.detail} />
+  {/if}
 </div>

@@ -2,8 +2,9 @@
   import { renderTool, renderTurnBodyCached } from './render.js';
   import LiveMessage from './live/LiveMessage.svelte';
   import { lazyHighlight } from './highlight.js';
-  import { cellRow } from '@core/live-present.js';
+  import { cellRow, systemNotice } from '@core/live-present.js';
   import CellRow from './live/CellRow.svelte';
+  import TurnNotice from './live/TurnNotice.svelte';
 
   let { turn } = $props();
 
@@ -20,6 +21,8 @@
   // A reply still streaming into its /log row (Hosts without live items):
   // committed blocks render once and new text is paced, as in the live turn.
   let streaming = $derived(turn.kind === 'live' && !!turn.text);
+  // A row the Host wrote about a turn (it failed, a restart cut it short).
+  let notice = $derived(systemNotice(turn));
   let html = $derived.by(() => {
     turn.revision;      // tracked: a growing assistant row bumps this
     return streaming ? (turn.tools || []).map(renderTool).join('') : renderTurnBodyCached(turn);
@@ -28,6 +31,9 @@
 
 <!-- .turn carries content-visibility in styles.css, so an off-screen row
      costs no layout or paint. -->
+{#if notice}
+<div class="turn notice"><TurnNotice message={notice.message} detail={notice.detail} /></div>
+{:else}
 <div
   class="turn {turn.role}"
   class:has-body={!!(turn.text && String(turn.text).trim())}
@@ -45,3 +51,4 @@
     <span class="turn-delivery">not delivered · press ↑ to resend</span>
   {/if}
 </div>
+{/if}
