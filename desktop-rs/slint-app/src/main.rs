@@ -703,6 +703,9 @@ fn main() {
                 let engine = app.engine.borrow();
                 let unsent = engine.conversation(&session).and_then(|c| c.rows().iter().rev().find(|m| m.pending && m.role == "user").map(|m| m.id.clone()));
                 row = unsent.unwrap_or_default().into();
+                if driver::lose_send_row() {
+                    row = format!("{row}:not-drawn").into();
+                }
             }
             // Your own message always brings the latest into view.
             app.to_latest();

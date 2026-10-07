@@ -1,4 +1,5 @@
-//! `--check send --out DIR`: a send as it is drawn (Peter, 2026-10-07).
+//! `--check send --out DIR`: a send as it is drawn (Peter, 2026-10-07),
+//! timed as the iPhone's (clarp-ios 7bdc0d3; SendFlight, SEND_STATUS_GRACE).
 //! Benefit of the doubt: the new bubble is drawn at its final size at once,
 //! with no "Sending…" line while the Host takes under the grace period to
 //! confirm it (the row's height never changes), the line shows once a slow
@@ -7,8 +8,11 @@
 //! final place while the composer shrinks to its empty height, the chat
 //! stays at its end throughout, a reader scrolled up gets no flight,
 //! Ctrl+Enter flies too, Reduce Motion fades the bubble in, and the setting
-//! turns it off. Mid-flight frames are saved, and the frames drawn in
-//! flight are timed.
+//! turns it off. The copy lands 320 ms after the bubble is laid out and is
+//! gone 200 ms later; with no bubble laid out it is dropped at 600 ms; a
+//! send with no text fades in; queued-turn labels wait the grace period
+//! too. Mid-flight frames are saved, and the frames drawn in flight are
+//! timed.
 
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
@@ -55,6 +59,10 @@ thread_local! {
     static MID_WANTED: Cell<bool> = const { Cell::new(false) };
     static MID: RefCell<Option<(Rect, Rect)>> = const { RefCell::new(None) };
     static LANDING: RefCell<Option<(Rect, f32, Option<Rect>)>> = const { RefCell::new(None) };
+    static DROPPED: Cell<i32> = const { Cell::new(0) };
+    /// The queue's count over time: (since, the Host's, the composer's
+    /// label, the explorer's label).
+    static QUEUE_SEEN: RefCell<Vec<(Duration, i32, i32, i32)>> = const { RefCell::new(Vec::new()) };
 }
 
 fn element(id: &str) -> Option<Rect> {
@@ -97,7 +105,7 @@ fn last_own() -> Option<(String, bool, bool)> {
     engine.conversation("rachel")?.rows().iter().rev().find(|m| m.role == "user").map(|m| (m.id.clone(), m.pending, m.delivery_failed))
 }
 
-/// The animation the last send is in ("flight", "settle", "fade", "" once over).
+/// The animation the last send is in ("wait", "flight", "settle", "fade", "" once over).
 fn phase() -> String {
     crate::window().map(|w| w.global::<crate::SendFlight>().get_phase().to_string()).unwrap_or_default()
 }
@@ -136,7 +144,7 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
         let sample = Sample {
             at: sent.elapsed(),
             progress: flight.get_progress(),
-            flight: (phase == "flight").then(|| (flight.get_x(), flight.get_y(), flight.get_width(), flight.get_height())),
+            flight: matches!(phase.as_str(), "wait" | "flight" | "settle").then(|| (flight.get_x(), flight.get_y(), flight.get_width(), flight.get_height())),
             composer: flight.get_composer_height(),
             row: if id.is_empty() { None } else { app_now().measured_height(&id).0 },
             status: if id.is_empty() { String::new() } else { status_of(&id) },
@@ -406,6 +414,14 @@ pub fn send_check(out: String) {
             let between = boxes.iter().filter(|h| **h < BOX_BEFORE.with(Cell::get) - 0.5 && **h > empty + 0.5).count();
             check(shrinking && between >= 1, &format!("the composer shrinks smoothly ({between} frames between its heights): {boxes:?}"));
             check(composer_box().is_some_and(|c| near(c.3, empty, 1.0)), &format!("and ends at its empty height {empty}: {:?}", composer_box()));
+            // The iPhone's timing, by the animation's own clock.
+            let ms = |d: i64| d.max(0) as u64;
+            let (placed, flew, gone) = (ms(flight.get_placed_at() - flight.get_sent_at()), ms(flight.get_settled_at() - flight.get_placed_at()), ms(flight.get_gone_at() - flight.get_settled_at()));
+            println!("perf send timing: bubble laid out {placed} ms after the send, landed {flew} ms later, copy gone {gone} ms after landing");
+            check(samples.iter().any(|s| s.phase == "wait") || placed < 100, &format!("the copy waits on the composer until the bubble is laid out ({placed} ms)"));
+            check((320..=420).contains(&flew), &format!("it lands 320 ms after the bubble is laid out: {flew} ms"));
+            check((140..=300).contains(&gone), &format!("the copy fades and is removed by +200 ms after landing: {gone} ms"));
+            check(element("send-flight").is_none(), "the copy is gone");
             let away = samples.iter().filter(|s| !s.at_end).count();
             check(away == 0 && report().at_end, &format!("the chat stays at its end before, during and after ({away} frames away)"));
             let jumps = unexplained() - JUMPS.with(Cell::get);
@@ -468,6 +484,54 @@ pub fn send_check(out: String) {
             let flight = window.global::<crate::SendFlight>();
             check(flight.get_started() == STARTED.with(Cell::get) && samples.iter().all(|s| s.flight.is_none()), "scrolled up, a send does not fly");
             check(report().at_end, "and the latest comes into view as before");
+            type_draft("Nowhere to land");
+            true
+        })),
+        // No bubble laid out in time (the send reports a row no chat
+        // draws): the copy waits on the composer, then is dropped at 600 ms.
+        ("no destination", Box::new(|_, _window, elapsed| {
+            if !draft_is("Nowhere to land") || elapsed < Duration::from_millis(300) || !report().at_end {
+                return false;
+            }
+            super::LOSE_SEND_ROW.with(|l| l.set(true));
+            DROPPED.with(|d| d.set(crate::window().map_or(0, |w| w.global::<crate::SendFlight>().get_dropped())));
+            send_and_sample(false, &[(300, "send-09-waiting")], last_own().map(|(id, ..)| id));
+            true
+        })),
+        ("dropped", Box::new(|_, window, _| {
+            let flight = window.global::<crate::SendFlight>();
+            if flight.get_dropped() <= DROPPED.with(Cell::get) || since_send() < Duration::from_millis(900) {
+                return false;
+            }
+            let samples = stop_sampling();
+            let waited = (flight.get_gone_at() - flight.get_sent_at()) as u64;
+            check(samples.iter().any(|s| s.phase == "wait") && samples.iter().all(|s| s.phase != "flight" && s.phase != "settle"), "the copy waited on the composer and never flew");
+            check((600..=750).contains(&waited), &format!("with no bubble to go to, the copy is dropped at 600 ms: {waited} ms"));
+            check(element("send-flight").is_none(), "and is gone");
+            check(last_own().is_some_and(|(id, ..)| element(&format!("row:{id}")).is_some()), "the bubble shows");
+            // A send with no text (an attachment only): no copy, a fade.
+            app_now().focus_composer();
+            headless::press_with(&[Key::Control, Key::Shift], "O");
+            true
+        })),
+        ("attached", Box::new(|_, _window, elapsed| {
+            let ready = super::view().attachments.row_data(0).is_some_and(|c| c.status == "ready");
+            if !ready || !app_now().active_draft().is_empty() || elapsed < Duration::from_millis(300) || !report().at_end {
+                return false;
+            }
+            send_and_sample(false, &[(60, "send-10-no-text-fade")], last_own().map(|(id, ..)| id));
+            true
+        })),
+        ("no text faded", Box::new(|_, window, _| {
+            let flight = window.global::<crate::SendFlight>();
+            if flight.get_started() <= STARTED.with(Cell::get) || flight.get_landed() < flight.get_started() || since_send() < Duration::from_millis(500) {
+                return false;
+            }
+            let samples = stop_sampling();
+            let faded = (flight.get_gone_at() - flight.get_sent_at()) as u64;
+            check(super::sends().last().is_some_and(|s| s["body"]["text"].as_str().is_some_and(|t| t.contains("photo.png"))), "the attachment was sent");
+            check(samples.iter().any(|s| s.phase == "fade") && samples.iter().all(|s| s.flight.is_none() && s.phase != "wait"), "with no text there is no copy: the bubble fades in");
+            check((200..=330).contains(&faded), &format!("over 0.2 s: {faded} ms"));
             live_checks::set_reduced_motion(true);
             type_draft("Still and quiet");
             true
@@ -489,6 +553,8 @@ pub fn send_check(out: String) {
             let samples = stop_sampling();
             check(samples.iter().any(|s| s.phase == "fade") && samples.iter().all(|s| s.phase != "flight" && s.flight.is_none()), "with Reduce Motion the bubble fades in, nothing flies");
             let empty = EMPTY.with(Cell::get);
+            let faded = (flight.get_gone_at() - flight.get_sent_at()) as u64;
+            check((200..=330).contains(&faded), &format!("a 0.2 s fade: {faded} ms"));
             let boxes: Vec<f32> = samples.iter().filter(|s| s.phase == "fade").map(|s| s.composer).collect();
             check(boxes.first().is_some_and(|h| near(*h, empty, 1.0)), &format!("and the composer is empty at once: {boxes:?}"));
             live_checks::set_reduced_motion(false);
@@ -512,6 +578,42 @@ pub fn send_check(out: String) {
             let flight = window.global::<crate::SendFlight>();
             check(flight.get_started() == STARTED.with(Cell::get) && samples.iter().all(|s| s.flight.is_none()), "off, a send neither flies nor fades");
             crate::settings_view::change(&app_now(), window, "send-animation", 1);
+            // A turn queued behind the running one: its labels wait too.
+            let queued = json!({"session": "rachel", "set": {"queued_turn_count": 1}});
+            check(control("/__control/agent", &queued).is_ok(), "a turn waits in rachel's queue");
+            QUEUE_SEEN.with(|q| q.borrow_mut().clear());
+            SENT_AT.with(|s| s.set(Some(Instant::now())));
+            true
+        })),
+        ("queue label", Box::new(|app, _window, _| {
+            let host = app.engine.borrow().queue_count("rachel");
+            let composer = super::view().queued;
+            let explorer = app.chats.iter().find(|c| c.session == "rachel").map_or(-1, |c| c.queued);
+            QUEUE_SEEN.with(|q| q.borrow_mut().push((since_send(), host, composer, explorer)));
+            if (composer < 1 || explorer < 1) && since_send() < Duration::from_secs(6) {
+                return false;
+            }
+            let seen = QUEUE_SEEN.with(|q| q.borrow().clone());
+            let known = seen.iter().find(|s| s.1 >= 1).map(|s| s.0);
+            let shown = seen.iter().find(|s| s.2 >= 1 && s.3 >= 1).map(|s| s.0);
+            let early = seen.iter().filter(|s| s.1 >= 1 && (s.2 >= 1 || s.3 >= 1)).any(|s| known.is_some_and(|k| s.0 < k + Duration::from_millis(1600)));
+            check(known.is_some() && !early, &format!("the queued-turn labels (composer, explorer) stay hidden under 1.75 s: known at {known:?}"));
+            check(
+                known.zip(shown).is_some_and(|(k, s)| s >= k + Duration::from_millis(1600) && s <= k + Duration::from_millis(2600)),
+                &format!("and show after it: known {known:?}, shown {shown:?}"),
+            );
+            shot(&OUT.with(|o| o.borrow().clone()), "send-11-queued-label");
+            check(control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 0}})).is_ok(), "the queue empties");
+            SENT_AT.with(|s| s.set(Some(Instant::now())));
+            true
+        })),
+        ("queue emptied", Box::new(|app, _window, _| {
+            if app.engine.borrow().queue_count("rachel") != 0 {
+                return false;
+            }
+            let composer = super::view().queued;
+            let explorer = app.chats.iter().find(|c| c.session == "rachel").map_or(-1, |c| c.queued);
+            check(composer == 0 && explorer == 0, &format!("an emptied queue's labels go at once: composer {composer}, explorer {explorer}"));
             true
         })),
     ];
