@@ -544,6 +544,7 @@ class AgyBackend(StreamJsonBackend):
     id = 'agy'
     label = 'Antigravity'
     required_binary = 'agy'
+    continues_lost_conversations = True
     aliases = ('antigravity',)
     badge = 'BackendAntigravity'
     detail = 'Runs on Antigravity.'

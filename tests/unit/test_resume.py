@@ -189,3 +189,18 @@ def test_find_session_jsonl_returns_none_for_empty_id(tmp_path):
     projects = tmp_path / "projects"
     _make_jsonl(projects, "/home/example", "some-other-agent")
     assert find_session_jsonl("", "/home/example", projects) is None
+
+
+def test_an_agy_conversation_agy_pruned_keeps_its_binding_for_the_restore(tmp_path, monkeypatch):
+    # agy prunes old conversations; the next turn continues the conversation
+    # from Clarp's record, so boot must not drop it and start fresh.
+    from lib import agy_transcript
+    monkeypatch.setattr(agy_transcript, "find_latest_jsonl",
+                        lambda uuid, brain_root=None: None)
+    results = resume_missing_sessions(
+        {"pip": {"name": "Pip", "voice_id": "v",
+                 "cwd": str(pathlib.Path.home()), "backend": "agy"}},
+        tmp_path,
+        backend_sessions_by_session={"pip": "pruned-uuid"})
+    assert results[0]["action"] == "resumed"
+    assert results[0]["backend_session_id"] == "pruned-uuid"

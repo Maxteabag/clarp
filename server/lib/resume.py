@@ -100,6 +100,13 @@ def resume_missing_sessions(
                 if derived and derived != cwd:
                     log("resumeCwdRealign", f"{sid} {cwd} → {derived}")
                     cwd = derived
+            elif runner.continues_lost_conversations:
+                # The next turn continues it from Clarp's record, carrying the
+                # chat history and goals over to the new conversation.
+                claude_id = mapped
+                action = "resumed"
+                log("resumeMappedContinued", f"{sid} id={mapped} not on disk; "
+                    "the next turn continues it")
             else:
                 log("resumeMappedMissing", f"{sid} id={mapped} not on disk")
 
