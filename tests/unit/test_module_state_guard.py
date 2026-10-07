@@ -58,6 +58,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcript_import_cache.py", "_deferred"): THROTTLE,
     ("lib/live_hub.py", "_FANOUT"): CLIENT,
     ("lib/backends.py", "_STATUS_CACHE"): CACHE,
+    ("lib/reconcile.py", "_LEAK_CHECK_ASKED"): THROTTLE,
     ("lib/cartesia_voices.py", "_cache"): CACHE,
     ("lib/codex_app_server.py", "_CLIENTS"): CLIENT,
     ("lib/compaction.py", "_active"): JOBS,

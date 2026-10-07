@@ -2756,3 +2756,11 @@ def test_a_stop_while_a_goal_wake_waits_keeps_it_from_running(tmp_path):
     assert len(backends.spawned) == spawned
     assert turn_queue.status(request) != "started"
     assert task_plans.get(plan["plan_id"])["status"] == "paused"
+
+
+def test_leaked_slot_release_can_be_scoped_to_one_agent(tmp_path):
+    service, _backends, agent_id = _leak_slot(tmp_path, settled_ms_ago=10 * 60_000)
+
+    assert service.release_leaked_slots(agent_id="someone-else") == {}
+    assert _td.runtime_status()["active"][agent_id] == "tA"
+    assert service.release_leaked_slots(agent_id=agent_id) == {agent_id: "tA"}
