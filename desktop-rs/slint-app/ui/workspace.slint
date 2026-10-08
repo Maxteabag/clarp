@@ -410,7 +410,7 @@ export component Pane inherits Rectangle {
             info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
             // In vim mode the title says the mode, as Vim's last line does.
             key: root.pane.active && Focus.mode == "composer" ? (VimBridge.mode != "" ? "esc" : "ctrl+h") : "h";
-            label: VimBridge.mode != "" && root.pane.active && Focus.mode == "pane" ? "Chat  -- " + VimBridge.mode + " --" : "Chat";
+            label: "Chat";
             active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
         }
         // Live items' one status line (docs/live-items.md §7.4): what runs
@@ -500,7 +500,7 @@ export component Pane inherits Rectangle {
           }
           PaneFrame {
             key: "i";
-            label: VimBridge.mode == "INSERT" && root.pane.active && Focus.mode == "composer" ? "Insert  -- INSERT --" : "Insert";
+            label: "Insert";
             active: root.pane.active && Focus.mode == "composer";
             surface: root.background;
           }
