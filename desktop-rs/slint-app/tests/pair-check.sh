@@ -20,9 +20,12 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
-python3 tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
+python3 tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" 2> "$out/host.stderr.txt" &
 host=$!
-for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
+for _ in $(seq 300); do [ -s "$scratch/port" ] && break; sleep 0.1; done
+if [ ! -s "$scratch/port" ]; then
+    echo "FAIL the fake Host did not start:"; cat "$out/host.stderr.txt"; echo E2E_FAIL; exit 1
+fi
 url="http://127.0.0.1:$(cat "$scratch/port")"
 binary="$PWD/target/${CLARP_CHECK_PROFILE:-debug}/clarp-slint"
 
