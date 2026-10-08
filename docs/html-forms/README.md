@@ -104,7 +104,7 @@ sends it with its own credential under the same wire fields and limits, and
 sends what a previous run left queued as soon as it reconnects, without the
 form being reopened. A followed draft key is honoured the same way.
 
-## Version-bound network connections (Host contract 58)
+## Version-bound network connections (Host contract 59)
 
 Forms and read-only reports default to blocking external connections. Publish
 an explicit allowlist with repeated `--connect` options:

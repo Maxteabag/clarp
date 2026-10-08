@@ -39,7 +39,7 @@ def configure(value, expected_revision):
             if config.get('execution',{}).get('executor')=='deterministic' or config.get('execution',{}).get('provider')=='local':raise ValueError('Deterministic Janitors do not inherit models')
             supported=janitors.template(config['template_id']).get('supported_providers',[config['backend']])
             if any(v['provider'] not in supported for v in chain):raise ValueError('Model provider incompatible with '+session)
-            if config['template_id']=='task-labels' and chain[0]['provider']!=config['backend']:raise ValueError('Managed primary provider must match the Janitor backend')
+            if config['template_id'] in janitors.TURN_TEMPLATES and chain[0]['provider']!=config['backend']:raise ValueError('Managed primary provider must match the Janitor backend')
         current.update(value);current['revision']+=1
         settings_store.set_text(KEY,json.dumps(current,sort_keys=True))
     return current

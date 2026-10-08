@@ -21,6 +21,10 @@ from .turn_lifecycle import TurnEvent
 
 LABEL_MAX_AGE_MS = 24 * 60 * 60 * 1000
 TERMINAL_OUTCOMES = frozenset({"changed", "same_task", "insufficient_context", "skipped", "error", "cancelled"})
+# Templates whose admitted runs are turns in the Janitor's own session (the
+# JanitorRunner dispatches them); every other template is a Host-run worker.
+TURN_TEMPLATES = frozenset({"task-labels", "scheduled-prompt"})
+INSTRUCTIONS_LIMIT = 8000
 _UNSET = object()
 
 # The statements live in janitor_store; these names stay for the callers and
@@ -48,6 +52,17 @@ def templates() -> list[dict]:
              "default_trigger_id": "agent-work-completed",
              # Applies to schedule@1 and active-interval@1; agent-work-completed has no interval.
              "options": [_max_interval_option(86400)]},
+            {"id": "scheduled-prompt", "name": "Scheduled task",
+             "description": "On a schedule, carry out the configured instructions in this Janitor's own workspace. "
+                            "Runs that find nothing to do back off, up to a day.",
+             "recommended_backend": "codex", "recommended_model": None, "recommended_effort": None,
+             "allowed_effects": ["scheduled_task"], "creatable": True,
+             "supported_trigger_ids": ["schedule"], "default_trigger_id": "schedule",
+             "options": [
+                 {"key": "instructions", "label": "Instructions", "type": "text", "default": "",
+                  "max_length": INSTRUCTIONS_LIMIT,
+                  "description": "What each run does. Delivered as the run's prompt, with the closing-report contract."},
+                 _max_interval_option(86400)]},
             {"id": "message-delegator", "name": "Message delegator",
              "description": "Choose an eligible recipient for an explicitly requested message route.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
@@ -147,6 +162,9 @@ def _validate_option(descriptor: dict, value) -> None:
                  and (isinstance(value, int) or math.isfinite(value)))
     elif kind == "string":
         valid = isinstance(value, str) and len(value) <= 160 and not any(ord(ch) < 32 for ch in value)
+    elif kind == "text":
+        valid = (isinstance(value, str) and len(value) <= descriptor.get("max_length", INSTRUCTIONS_LIMIT)
+                 and not any(ord(ch) < 32 and ch not in "\n\t" for ch in value))
     elif kind == "choice":
         valid = any(type(value) is type(choice["value"]) and value == choice["value"] for choice in descriptor["choices"])
     else:
@@ -540,7 +558,13 @@ def set_enabled(session: str, expected_revision: int, enabled: bool) -> dict:
                 raise JanitorError("This Janitor was released; convert it again before enabling", 409, "janitor_released")
             if a.get("archived_at"):
                 raise JanitorError("Archived maintenance cannot be enabled", 409, "agent_archived")
+            if row["template_id"] == "scheduled-prompt" and not str(
+                    option_values("scheduled-prompt", _decode(row["options_json"], {}))["instructions"]).strip():
+                raise JanitorError("Give the scheduled task its instructions first", 400, "invalid_option")
             for other in store.other_enabled_configs(a["agent_id"], c):
+                # Scheduled tasks act in their own workspace, not on watched agents: they never overlap.
+                if "scheduled-prompt" in (row["template_id"], other["template_id"]):
+                    continue
                 if (set(template(row["template_id"])["allowed_effects"]) & set(template(other["template_id"])["allowed_effects"])
                         and _overlap(_decode(row["scope_json"], {}), _decode(other["scope_json"], {}))):
                     raise JanitorError("Another enabled Janitor already maintains this job in this scope", 409, "scope_conflict")
@@ -699,7 +723,7 @@ def create_run(attachment_id: str, generation: int, candidates: list[dict], run_
     run_id = run_id or f"janitor-{uuid.uuid4().hex}"
     if not isinstance(run_id, str) or not 1 <= len(run_id) <= 160:
         raise JanitorError("Invalid maintenance run identity")
-    if not isinstance(candidates, list) or not 1 <= len(candidates) <= 3:
+    if not isinstance(candidates, list) or len(candidates) > 3:
         raise JanitorError("A run needs between one and three candidates")
     with _write() as c:
         old = store.run_row(run_id, c)
@@ -708,8 +732,11 @@ def create_run(attachment_id: str, generation: int, candidates: list[dict], run_
                 raise JanitorError("Run identity already refers to different work", 409, "run_conflict")
             return get_run(run_id)
         attachment = _active_attachment(c, attachment_id, generation)
-        if attachment["template_id"] != "task-labels":
+        if attachment["template_id"] not in TURN_TEMPLATES:
             raise JanitorError("Only a task-label job can admit label reviews", 409, "capability_denied")
+        # A scheduled task has no targets; a label review has one to three.
+        if (attachment["template_id"] == "scheduled-prompt") != (not candidates):
+            raise JanitorError("A run needs between one and three candidates")
         seen = set()
         for candidate in candidates:
             if not isinstance(candidate, dict):
@@ -820,7 +847,7 @@ def validate_dispatch(session: str, run_id: str, trace_id: str) -> bool:
     try:
         row = _active_run(db.conn(), run_id)
         if (row["session"] != session or row["trace_id"] != trace_id
-                or _decode(row["configuration_json"], {}).get("template_id") != "task-labels"):
+                or _decode(row["configuration_json"], {}).get("template_id") not in TURN_TEMPLATES):
             return False
         attachment = _active_attachment(db.conn(), row["attachment_id"], row["generation"])
         if row["status"] == "queued" and attachment["trigger_id"] == "active-interval":
@@ -857,11 +884,15 @@ def finish_run(run_id: str, outcome: str = "", error: str = "") -> dict:
         if _decode(row["configuration_json"], {}).get("executor") == "ephemeral":
             raise JanitorError("Demand jobs require their guarded result receipt", 409, "capability_denied")
         receipts = store.effect_outcomes(run_id, c)
+        scheduled = _decode(row["configuration_json"], {}).get("template_id") == "scheduled-prompt"
         if not outcome:
-            outcome = ("error" if len(receipts) != len(_decode(row["candidates_json"], [])) or "error" in receipts
+            outcome = ("completed" if scheduled
+                       else "error" if len(receipts) != len(_decode(row["candidates_json"], [])) or "error" in receipts
                        else "changed" if "changed" in receipts
                        else "same_task" if all(r == "same_task" for r in receipts) else "skipped")
-        if outcome not in TERMINAL_OUTCOMES:
+        # A scheduled task has no label receipts: it ends completed, error or cancelled.
+        allowed = {"completed", "error", "cancelled"} if scheduled else TERMINAL_OUTCOMES
+        if outcome not in allowed:
             raise JanitorError("Invalid maintenance outcome")
         if outcome not in {"cancelled", "error"} and len(receipts) != len(_decode(row["candidates_json"], [])):
             raise JanitorError("Review receipts are incomplete")
