@@ -1059,6 +1059,8 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/background-jobs/"):
             return self._handle_background_job_detail(
                 path[len("/background-jobs/"):].strip("/"))
+        if path.startswith("/artifacts/") and path.endswith("/html"):
+            return self._handle_artifact_html(unquote(path[len("/artifacts/"):-len("/html")].strip("/")))
         if path.startswith("/artifacts/") and path.endswith("/events-config"):
             return self._handle_artifact_events_config(unquote(path[len("/artifacts/"):-len("/events-config")].strip("/")), write=False)
         if path.startswith("/artifacts/") and path.endswith("/events"):
@@ -4640,6 +4642,18 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             return self._json_error(409, str(exc))
         return self._json_ok(receipt)
+
+    def _handle_artifact_html(self, artifact_id: str):
+        if getattr(self, "_request_device_scope", "") == "limited":
+            return self._json_error(403, "full device access required")
+        from lib import artifacts, html_forms
+        row = artifacts.get(artifact_id)
+        if not row or row["type"] != "html_form":
+            return self._json_error(404, "HTML artifact not found")
+        body, policy = html_forms.render_html(row["payload"])
+        return self._send(200, body, "text/html; charset=utf-8", {
+            "Content-Security-Policy": policy, "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer"})
 
     def _handle_artifact_get(self, artifact_id: str):
         from lib import artifacts

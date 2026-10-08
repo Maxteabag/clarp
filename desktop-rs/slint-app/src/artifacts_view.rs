@@ -1683,11 +1683,12 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
     let Some(artifact) = artifact(app, id) else { return };
     *app.artifact_cursor.borrow_mut() = id.to_owned();
     match text(&artifact, "type").as_str() {
-        "html_form" if !is_report(&artifact) => {
+        "html_form" => {
+            let interactive = !is_report(&artifact);
             let version = artifact.get("version").cloned().unwrap_or(Value::Null);
             let events = {
                 let mut engine = app.engine.borrow_mut();
-                if !engine.form_events_supported() {
+                if !interactive || !engine.form_events_supported() {
                     None
                 } else {
                     match engine.open_form_events(id, &version) {
@@ -1700,7 +1701,11 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                     }
                 }
             };
-            match crate::form_server::serve(id, version, &text(&artifact, "content"), events) {
+            let network = artifact.get("connect_origins")
+                .or_else(|| artifact.get("payload").and_then(|p| p.get("connect_origins")))
+                .cloned().unwrap_or(Value::Null);
+            let owner_origin = app.engine.borrow().form_event_origin();
+            match crate::form_server::serve(id, version, &text(&artifact, "content"), events, &network, interactive, &owner_origin) {
                 Ok(url) => crate::open_link(&url),
                 Err(error) => {
                     eprintln!("clarp-slint: {error}");

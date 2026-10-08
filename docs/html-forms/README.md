@@ -103,3 +103,34 @@ page never sees the token or the Host: the app appends each event to
 sends it with its own credential under the same wire fields and limits, and
 sends what a previous run left queued as soon as it reconnects, without the
 form being reopened. A followed draft key is honoured the same way.
+
+## Version-bound network connections (Host contract 56)
+
+Forms and read-only reports default to blocking external connections. Publish
+an explicit allowlist with repeated `--connect` options:
+
+```sh
+clarp-agent-artifacts create-form SESSION "Game" game.html answers.json \
+  --artifact-id form-STABLE_ID --version 1 --connect https://storage.googleapis.com
+```
+
+`create-report` accepts the same flag. The list is stored as `payload.connect_origins`
+with the immutable form version or report revision, and copied into flat responses.
+Up to eight exact HTTPS origins are accepted; paths, user information, wildcards,
+query strings, fragments and HTTP are rejected. Hosts lowercase DNS names,
+remove port 443 and deduplicate. Changed interactive policies require a new artifact;
+report revisions preserve old policies in their revision history.
+
+Updated wrappers expose `window.clarpForm.capabilities.network` (an array, empty
+for default-deny). Older wrappers may omit it: keep a baked-in/offline fallback.
+Only connection APIs such as fetch/XHR are permitted; scripts, images, fonts,
+frames and navigation do not gain access. CORS is still required. Native wrappers
+supply no Clarp credentials or authenticated proxy. A globe/info disclosure lists
+the effective origins without changing the game's viewport.
+
+Authenticated `GET /artifacts/<id>/html` renders the current HTML version with
+an opaque sandbox origin and the same connection policy. It supplies network
+capability only, not an answer/event bridge. The desktop's loopback bridge keeps
+its private local connection allowance for interactive drafts/events; that origin
+is not part of the external capability list. Read-only reports have no bridge
+allowance. Invalid cached metadata denies every external connection.

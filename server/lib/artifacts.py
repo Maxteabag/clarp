@@ -314,7 +314,7 @@ def _public(row) -> dict:
                 "deletions", "diff", "path_label", "artifact_ids", "asset_id", "asset_ids",
                 "root", "relative_path", "provider", "run_id", "run_url", "workflow_name",
                 "current_step", "conclusion", "total_steps", "completed_steps", "podcast",
-                "read_only"):
+                "read_only", "connect_origins"):
         if key in item["payload"] and _public_field_valid(key, item["payload"][key]):
             item[key] = item["payload"][key]
     if item["type"] in {"decision", "question"}:
@@ -344,6 +344,13 @@ def response_representation(item: dict, representation: str = "") -> dict:
 
 
 def _public_field_valid(key: str, value: Any) -> bool:
+    if key == "connect_origins":
+        from .html_forms import connect_origins
+        try:
+            connect_origins(value)
+            return True
+        except ValueError:
+            return False
     if key == "podcast":
         from .podcast_live import validate_episode
         try:
