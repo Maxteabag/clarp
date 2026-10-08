@@ -584,6 +584,9 @@ pub fn pump() {
 fn main() {
     perf::launched();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    for line in clarp_core::dirs::move_out_of_the_server_folder() {
+        eprintln!("clarp-slint: {line}");
+    }
     // Pairing over SSH: no window, no display.
     if let Some(parsed) = pair::arguments(&args) {
         std::process::exit(pair::run(parsed, settings()));
