@@ -60,7 +60,9 @@ pair() {
                 # In a GUI session a locked keychain may ask for its password
                 # instead of failing: never wait on that dialog.
                 perl -e 'alarm 60; exec @ARGV' env "${environment[@]}" HOME="$HOME" "$binary" --pair "$@"
+                local paired=$?
                 security unlock-keychain -p probe clarp-test.keychain
+                (exit $paired)
             else
                 env -u DBUS_SESSION_BUS_ADDRESS "${environment[@]}" \
                     dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- "$binary" --pair "$@"
