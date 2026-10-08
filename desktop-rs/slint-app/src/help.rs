@@ -253,7 +253,7 @@ mod tests {
         let mine = keymap::add(&taken, "next-agent", "main", "Right Right").unwrap();
         let shown = help("pane", false, true, &mine);
         let yours = shown.groups.iter().find(|g| g.title == "Yours").expect("a group of the user's own");
-        assert_eq!(yours.items, [Item { keys: "Ctrl+J / Right ×2".into(), label: "Next agent".into() }]);
+        assert_eq!(yours.items, [Item { keys: keymap::display("Ctrl+J") + " / Right ×2", label: "Next agent".into() }]);
         // A rebound action shows the user's key first.
         let link = keymap::add(&Overrides::new(), "link-hints", "main", "Ctrl+Shift+L").unwrap();
         assert!(has(&help("pane", false, false, &link), "Ctrl+Shift+L / F", "Open a link"));
@@ -262,9 +262,10 @@ mod tests {
     #[test]
     fn the_footer_says_where_everything_is() {
         let none = Overrides::new();
-        let vim = help("pane", false, true, &none).footer;
+        // Read as Ctrl (macOS shows Cmd).
+        let vim = help("pane", false, true, &none).footer.replace("Cmd+", "Ctrl+");
         assert!(vim.contains("Space k") && vim.contains("Ctrl+K") && vim.contains("Ctrl+Alt+,"), "{vim}");
-        let classic = help("sidebar", false, false, &none).footer;
+        let classic = help("sidebar", false, false, &none).footer.replace("Cmd+", "Ctrl+");
         assert!(classic.contains("Ctrl+K (commands)") && classic.contains("Esc closes"), "{classic}");
     }
 }
