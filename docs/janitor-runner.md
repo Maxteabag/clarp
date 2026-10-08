@@ -59,6 +59,26 @@ after restart. `preview_next_runs(..., count=3)` uses that same implementation.
 Legacy ordinary-agent schedules keep UTC behavior. Day-of-month and day-of-week
 retain the existing Host parser's AND semantics.
 
+## Scheduled tasks
+
+A `scheduled-prompt` Janitor ("Scheduled task") carries owner-written
+`instructions` on `schedule@1`.
+- **Each run is a turn in the Janitor's own session.** It uses that session's
+  workspace, model and history, with origin `janitor`, so it is quiet. The prompt
+  is the instructions plus the closing-report contract below.
+- **One run per due occurrence, with no candidates and no label admission.** A run
+  still working when the next occurrence comes due is not doubled up.
+- **How a run ends.** A run whose turn ends cleanly finishes `completed`, and that
+  counts as success for `janitor_failure` episodes. A turn that ended in an error
+  finishes `error`.
+- **Its activity sets the next occurrence.** This uses the adaptive policy below,
+  with the cron's gap as the base.
+- **Converting an ordinary agent's cron.** Convert the agent with
+  `clarp-admin janitor create --agent SESSION --template scheduled-prompt`, giving
+  its prompt as `instructions` and the same cron on `schedule@1`. Legacy agent
+  schedules are UTC, so set `"timezone": "UTC"` to keep the cadence. Then remove
+  the old schedule, because a Janitor refuses non-Janitor turns.
+
 ## Adaptive intervals
 
 An interval-driven Janitor stretches its cadence while it has nothing to do.
@@ -88,7 +108,7 @@ An interval-driven Janitor stretches its cadence while it has nothing to do.
   (fixed).** A quota watch that backs off misses the window it guards. Set the
   option to opt in.
 - **Where it applies.**
-  - Task-label attachments on `schedule@1` and `active-interval@1`: one due
+  - Task-label attachments on `schedule@1` and `active-interval@1`, and scheduled tasks: one due
     occurrence opens when the trigger fires. It closes once nothing is pending
     or running. It is `worked` if any of its runs worked, `failed` if one failed
     and none worked, otherwise `idle` (a pass with nothing to review is idle).

@@ -89,6 +89,29 @@ template model defaults, preserves watched scope/identity/history, and pauses.
 Review before deliberately enabling again; never retry a revision conflict.
 
 
+## Scheduled tasks
+
+A `scheduled-prompt` Janitor ("Scheduled task") runs owner-written instructions
+quietly in its own workspace on `schedule@1`. Use it to turn an ordinary agent's
+recurring cron into a Janitor without losing its job. Follow these steps in
+order; the agent must be restored (not archived), idle and with an empty queue.
+
+1. Disable its old schedule first, so no turn starts mid-conversion.
+2. Convert it paused, with the same prompt as `instructions` and the same cron
+   (legacy schedules are UTC):
+
+```bash
+clarp-admin janitor create --agent SESSION --template scheduled-prompt --config @task.json --dry-run
+# task.json: {"options": {"instructions": "..."},
+#             "attachments": [{"trigger_id": "schedule", "trigger_version": 1,
+#                              "config": {"cron": "*/15 * * * *", "timezone": "UTC"}}]}
+```
+
+3. Enable the Janitor, check that `inspect` shows the cadence's `next_run_at`,
+   then delete the old schedule.
+
+Each run closes with `clarp-admin janitor outcome`, as described below; idle runs back off up to a day.
+
 ## Built-in demand workers
 
 Message delegation and tool explanation are persisted Janitor identities. Their
