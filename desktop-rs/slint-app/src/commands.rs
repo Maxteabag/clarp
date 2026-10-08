@@ -257,6 +257,10 @@ fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
     let control = held.shortcut_control();
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return false };
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
+    // Cmd+C, Cmd+V, Cmd+Q... on a Mac are the text field's and the system's.
+    if crate::platform::keyboard::left_to_the_system(&chord, held) {
+        return false;
+    }
     let state = context(&app, &window);
     // ? again closes the key help, as Escape does.
     if chord == "?" && *app.overlay.borrow() == crate::help_view::OVERLAY {

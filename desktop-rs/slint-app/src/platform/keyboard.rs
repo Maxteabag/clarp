@@ -80,6 +80,18 @@ pub fn is_modifier(text: &str) -> bool {
         .any(|m| slint::SharedString::from(*m) == text)
 }
 
+/// Cmd chords a Mac keeps for itself or the text field: copy, paste, cut,
+/// select all, undo/redo, delete to line start, quit, hide, minimise. The
+/// Control key still runs the bindings on these (Control+C stops an agent).
+const MAC_SYSTEM_CHORDS: &[&str] =
+    &["Ctrl+A", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Y", "Ctrl+Backspace", "Ctrl+Q", "Ctrl+H", "Ctrl+M"];
+
+/// On macOS, a Cmd chord that is the system's or the text field's: no
+/// binding takes it. Never elsewhere.
+pub fn left_to_the_system(chord: &str, held: Modifiers) -> bool {
+    cfg!(target_os = "macos") && held.control && MAC_SYSTEM_CHORDS.contains(&chord)
+}
+
 /// `CLARP_KEY_TRACE=1`: every key, modifier report and decision to stderr.
 pub fn tracing() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -196,6 +208,19 @@ mod tests {
         let slint_read = if cfg!(target_os = "macos") { held(false, false, false, true) } else { held(true, false, false, false) };
         reported(Modifiers::from_window_system(true, false, false, false));
         assert!(!correct("k", slint_read), "Ctrl+K stays Ctrl+K");
+    }
+
+    #[test]
+    fn cmd_leaves_editing_and_the_systems_chords_alone_on_a_mac_only() {
+        let cmd = held(true, false, false, false);
+        let control_key = held(false, false, false, true);
+        for chord in ["Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+A", "Ctrl+Z", "Ctrl+Shift+Z", "Ctrl+Backspace", "Ctrl+Q", "Ctrl+H", "Ctrl+M"] {
+            assert_eq!(left_to_the_system(chord, cmd), cfg!(target_os = "macos"), "Cmd {chord}");
+            assert!(!left_to_the_system(chord, control_key), "the Control key keeps {chord}");
+        }
+        for chord in ["Ctrl+K", "Ctrl+F", "Ctrl+T", "Ctrl+W", "Ctrl+J", "Ctrl+Shift+P", "Ctrl+Alt+,"] {
+            assert!(!left_to_the_system(chord, cmd), "Cmd {chord} is a binding");
+        }
     }
 
     #[test]
