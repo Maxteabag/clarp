@@ -23,6 +23,10 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     if !app.switcher.borrow().open && *app.overlay.borrow() == crate::font_view::OVERLAY {
         return "fonts";
     }
+    // The processes panel moves, opens and stops with its own keys.
+    if !app.switcher.borrow().open && *app.overlay.borrow() == crate::processes_view::OVERLAY {
+        return "processes";
+    }
     if app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
         // ---- launch dialogs: the hub has its own keyboard state.
         if !app.switcher.borrow().open && *app.overlay.borrow() == crate::launch_view::HUB {
@@ -66,6 +70,7 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         artifacts: crate::artifacts_view::has_cards(app),
         artifact: crate::artifacts_view::selected(app).is_some(),
         layout_warning: !window.get_save_warning().is_empty(),
+        work: engine.roster().find(selected).is_some_and(|a| engine.roster().running_work(a) > 0),
     }
 }
 
@@ -175,6 +180,9 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     if state == "keymap" {
         hints = crate::keymap_view::hints(app, window).into_iter().map(|(keys, label)| Hint { keys: keys.into(), label: label.into() }).collect();
     }
+    if state == "processes" {
+        hints = crate::processes_view::hints();
+    }
     if state == "fonts" {
         hints = crate::font_view::hints();
     }
@@ -235,6 +243,18 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
     }
     if state == "fonts" {
         let used = crate::font_view::key(&app, &window, &chord);
+        show_hints(&app, &window);
+        return used;
+    }
+    if state == "processes" {
+        // The key that opened it closes it again.
+        let opener = ["workspace", "updates"].iter().any(|s| keymap::action_for(s, &chord, &overrides(&app), facts(&app, &window)) == Some("agent-processes"));
+        let used = if opener {
+            close_overlay(&app, &window);
+            true
+        } else {
+            crate::processes_view::key(&app, &window, &chord)
+        };
         show_hints(&app, &window);
         return used;
     }
@@ -351,6 +371,8 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         // ---- profile and overview
         "escape" if crate::profile_view::owns(app) => crate::profile_view::escape(app, window),
         "overview" => crate::overview_view::open(app, window),
+        // The selected agent's background work, or every job on Updates.
+        "agent-processes" => crate::processes_view::toggle(app, window),
         "orchestrator" => crate::orchestrator_view::open(app, window),
         "agent-profile" => crate::profile_view::open(app, window, &selected),
         // The profile's and overview's Relaunch: the Start dialog, replacing
@@ -921,6 +943,12 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
             crate::search_view::jump(app, &item.target);
             restore = false;
         }
+        // The panel keeps the keyboard.
+        switcher::Kind::Command if item.target == "agent-processes" => {
+            run(app, window, &item.target);
+            crate::processes_view::set_origin(restore);
+            return;
+        }
         switcher::Kind::Command if item.target == "new-contact" => {
             crate::launch_view::open_contacts(app, window, Some(restore));
             return;
@@ -994,6 +1022,10 @@ pub fn close_overlay(app: &App, window: &AppWindow) {
     let closed = std::mem::take(&mut *app.overlay.borrow_mut());
     window.set_overlay("".into());
     if closed == crate::help_view::OVERLAY && crate::help_view::give_back(app, window) {
+        show_hints(app, window);
+        return;
+    }
+    if closed == crate::processes_view::OVERLAY && crate::processes_view::give_back(app, window) {
         show_hints(app, window);
         return;
     }

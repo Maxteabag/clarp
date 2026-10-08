@@ -69,6 +69,9 @@ turns = {
               "- core models\n- **Qt bridges**\n\n| step | state |\n|---|---|\n| port | done |\n| verify | running |"}],
 }
 jobs = []
+# job id -> its log's text (GET /background-jobs/<id>); /__control/job-log
+# appends to it.
+job_logs = {}
 # /artifacts; /__control/artifacts replaces it.
 artifacts = [
     {"artifact_id": "art1", "title": "Report"},
@@ -700,6 +703,25 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/background-jobs":
             with state_lock:
                 return self.reply(200, {"jobs": jobs})
+        if url.path.startswith("/background-jobs/"):
+            # One job's detail (server/lib/background_jobs.py detail()).
+            job_id = url.path[len("/background-jobs/"):]
+            with state_lock:
+                job = next((j for j in jobs if j.get("job_id") == job_id), None)
+                text = job_logs.get(job_id)
+            if job is None:
+                return self.reply(404, {"error": "job not found"})
+            log = ({"available": True, "reason": "", "text": text, "size": len(text), "truncated": False} if text is not None
+                   else {"available": False, "reason": "no_log", "text": "", "size": 0, "truncated": False})
+            timeline = [{"event_id": 1, "observed_at": job.get("started_at") or int(time.time() * 1000),
+                         "status": "running", "note": "", "change": "status"}]
+            if job.get("status") not in ("running", "queued"):
+                timeline.append({"event_id": 2, "observed_at": int(time.time() * 1000), "status": job.get("status"),
+                                 "note": "", "change": "status"})
+            return self.reply(200, {"job": job, "handle": job_id, "is_process": True, "owner_session": job.get("session", ""),
+                                    "owner_agent_id": job.get("agent_id", ""), "helper_session": "",
+                                    "progress": {"text": job.get("progress_text", ""), "at": None},
+                                    "timeline": timeline, "log": log})
         if url.path == "/artifacts":
             with state_lock:
                 return self.reply(200, {"artifacts": artifacts})
@@ -1271,6 +1293,11 @@ class Handler(BaseHTTPRequestHandler):
                     artifacts.append({"created_at": int(time.time() * 1000), "updated_at": int(time.time() * 1000), **extra})
             broadcast({"type": "artifact-updated", "session": body.get("session", "")})
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/job-log":
+            # Test control: the job's log grows by `append`.
+            with state_lock:
+                job_logs[body["job_id"]] = job_logs.get(body["job_id"], "") + body.get("append", "")
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/jobs":
             # Test control: replace the job list, then push an optional event.
             global jobs
@@ -1477,7 +1504,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def do_DELETE(self):
     url = urlparse(self.path)
-    record({"method": "DELETE", "path": url.path})
+    length = int(self.headers.get("Content-Length", "0"))
+    body = json.loads(self.rfile.read(length) or b"{}") if length else None
+    record({"method": "DELETE", "path": url.path, "body": body})
     if not self.authorized():
         return self.reply(401, {"error": "unauthorized"})
     if url.path.startswith("/agents/"):
@@ -1488,7 +1517,20 @@ def do_DELETE(self):
         broadcast({"type": "agent-roster", "session": session, "kind": "deleted"})
         return
     if url.path.startswith("/background-jobs/"):
-        return self.reply(200, {"ok": True})
+        # The run stops (only the run asked for, as the Host fences it).
+        job_id = url.path[len("/background-jobs/"):]
+        with state_lock:
+            job = next((j for j in jobs if j.get("job_id") == job_id), None)
+            expected = (body or {}).get("expected_generation")
+            if job is not None and expected is not None and expected != job.get("generation", 1):
+                return self.reply(409, {"ok": False, "error": "generation_mismatch", "changed": False, "job": job})
+            changed = job is not None and job.get("status") in ("running", "queued")
+            if changed:
+                job["status"] = "cancelled"
+                job["updated_at"] = int(time.time() * 1000)
+        if changed:
+            broadcast({"type": "background-job-updated", "job": dict(job)})
+        return self.reply(200, {"ok": True, "changed": changed, "job": job})
     if url.path.startswith("/teams/") and "/members/" in url.path:
         _, _, team, _, agent = url.path.split("/")
         with state_lock:

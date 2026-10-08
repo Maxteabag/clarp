@@ -71,6 +71,9 @@ mod vim_checks;
 // ---- a send as it is drawn: the grace period and the send animation
 #[path = "send_checks.rs"]
 mod send_checks;
+// ---- an agent's background processes by keyboard: list, output, stop
+#[path = "processes_checks.rs"]
+mod processes_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -513,6 +516,7 @@ pub fn start_check(name: &str, out: String) {
         "observe" => observe_checks::observe_check(out),
         "message-search" => search_checks::message_search_check(out),
         "mention" => search_checks::mention_check(out),
+        "processes" => processes_checks::processes_check(out),
         "a2a" => {
             row_overlap_checks::watch();
             a2a_checks::a2a_check(out)
@@ -2670,8 +2674,9 @@ fn updates_check(out: String) {
             headless::press(Key::Escape);
             true
         })),
-        ("popover closed", Box::new(|_, window, _| {
-            if !window.get_overlay().is_empty() {
+        ("popover closed", Box::new(|_, window, elapsed| {
+            // The composer takes the keyboard back a frame after the close.
+            if !window.get_overlay().is_empty() || (!report().composer_focused && elapsed < Duration::from_secs(2)) {
                 return false;
             }
             check(report().composer_focused, "Escape closes the popover; the composer has the keyboard back");
@@ -2800,6 +2805,9 @@ fn updates_check(out: String) {
                 &format!("Deploy accepts the decision at the revision shown: {posted:?}"),
             );
             window.invoke_cancel_job("j1".into());
+            check(window.get_overlay() == "processes" && window.get_process_confirm().contains("Index the docs"), &format!("Cancel asks first: {:?}", window.get_process_confirm()));
+            check(requests("DELETE", "/background-jobs/j1").is_empty(), "nothing is cancelled before the answer");
+            headless::press(Key::Return);
             check(window.get_update_jobs().row_data(0).is_some_and(|j| j.pending), "the job's cancel is in flight");
             true
         })),
@@ -2808,6 +2816,14 @@ fn updates_check(out: String) {
                 return false;
             }
             check(true, "the cancel reaches the Host");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("cancel closed", Box::new(move |_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(window.get_updates_focused(), "Escape closes the panel; the Updates have the keyboard back");
             gets.set(requests("GET", "/attention").len());
             headless::press(Key::F5);
             true

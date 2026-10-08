@@ -35,6 +35,7 @@ mod help_view;
 // ---- updates and teams
 mod teams_view;
 mod updates_view;
+mod processes_view;
 // ---- launch dialogs
 mod agent_dialogs_view;
 mod launch_view;
@@ -962,16 +963,21 @@ fn main() {
         app.engine.borrow_mut().resolve_decision(&id, &choice, i64::from(revision));
         pump_now(app);
     }));
-    window.on_cancel_job(|id| with_window(|app, _| {
-        app.engine.borrow_mut().cancel_background_job(&id);
-        pump_now(app);
-    }));
+    // Updates' Cancel asks first, in the processes panel on that job.
+    window.on_cancel_job(|id| with_window(|app, window| processes_view::open_job(app, window, &id, true)));
+    window.on_job_output(|id| with_window(|app, window| processes_view::open_job(app, window, &id, false)));
     window.on_open_report(|id| with_window(|app, window| updates_view::open_report(app, window, &id)));
     window.on_report_link(updates_view::open_report_link);
     window.on_image_view_moved(|delta| with_window(|app, window| artifacts_view::image_view_moved(app, window, delta)));
     window.on_open_chat(|session| with_window(|app, window| updates_view::open_chat(app, window, &session)));
-    window.on_show_processes(|session, x, y| with_window(|app, window| updates_view::open_processes(app, window, &session, x, y)));
-    window.on_process_helper_opened(|session| with_window(|app, window| updates_view::open_helper(app, window, &session)));
+    window.on_show_processes(|session, x, y| with_window(|app, window| processes_view::open_at(app, window, &session, x, y)));
+    window.on_process_helper_opened(|session| with_window(|app, window| processes_view::open_helper(app, window, &session)));
+    window.on_process_job_opened(|id| with_window(|app, window| processes_view::open_output(app, window, &id)));
+    window.on_process_stop_asked(|kind, id| with_window(|app, window| processes_view::ask_stop_row(app, window, &kind, &id)));
+    window.on_process_answered(|stop| with_window(|app, window| {
+        processes_view::answer(app, window, stop);
+        pump_now(app);
+    }));
     window.on_team_action(|action, argument| with_window(|app, window| teams_view::action(app, window, &action, &argument)));
     artifacts_view::bind(&window);
     window.on_team_created(|name| with_window(|app, window| teams_view::created(app, window, &name)));

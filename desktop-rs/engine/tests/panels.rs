@@ -185,6 +185,33 @@ fn a_job_event_updates_the_tracker_and_a_job_can_be_cancelled() {
 }
 
 #[test]
+fn a_job_shows_its_log_and_a_stop_names_the_run() {
+    let host = Host::start("job-detail");
+    let mut d = Driver::live(&host);
+    d.until("updates loaded", |e| !e.updates_loading());
+    let job = json!({"job_id": "j2", "agent_id": "a1", "session": "rachel", "status": "running", "title": "Tail", "generation": 3, "updated_at": 5});
+    host.control("jobs", json!({"jobs": [job]}));
+    host.control("job-log", json!({"job_id": "j2", "append": "line one\n"}));
+    d.engine.load_job_detail("j2");
+    d.until("detail read", |e| e.job_detail("j2").is_some());
+    let detail = d.engine.job_detail("j2").cloned().expect("read").expect("found");
+    assert_eq!(detail["log"]["text"], "line one\n");
+    d.engine.load_job_detail("gone");
+    d.until("a missing job says so", |e| matches!(e.job_detail("gone"), Some(Err(_))));
+
+    // An older run's stop is refused; this run's goes through.
+    d.engine.cancel_background_job_run("j2", Some(2));
+    assert_eq!(d.engine.job_outcome("j2"), "Stopping…");
+    d.until("refused", |e| !e.update_action_pending("job", "j2"));
+    assert!(d.engine.job_outcome("j2").starts_with("Not stopped"), "{}", d.engine.job_outcome("j2"));
+    d.engine.cancel_background_job_run("j2", Some(3));
+    d.until("stopped", |e| e.job_outcome("j2") == "Stopped");
+    let deletes = host.requests("DELETE", "/background-jobs/j2");
+    assert_eq!(deletes.len(), 2);
+    assert_eq!(deletes[1]["body"], json!({"expected_generation": 3}));
+}
+
+#[test]
 fn teams_load_select_the_first_and_reload_after_an_action() {
     let host = Host::start("teams");
     let mut d = Driver::live(&host);

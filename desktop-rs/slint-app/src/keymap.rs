@@ -40,6 +40,8 @@ pub enum Guard {
     Artifact,
     /// Another window saved a newer layout (the conflict bar shows).
     LayoutWarning,
+    /// The selected agent runs background jobs or helpers.
+    Work,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,7 +85,7 @@ fn parent(state: &str) -> Option<&'static str> {
 }
 
 fn state(name: &str) -> Vec<Binding> {
-    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, LayoutWarning, None as Always, Playing, Rows, Send};
+    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, LayoutWarning, None as Always, Playing, Rows, Send, Work};
     let b = binding;
     match name {
         "main" => vec![
@@ -166,6 +168,9 @@ fn state(name: &str) -> Vec<Binding> {
             b("talk", &["Ctrl+Shift+Space"], "Talk", false, Agent, false),
             // Link hints, from the composer too.
             b("link-hints", &["Ctrl+L"], "Open a link", false, Always, false),
+            // The selected agent's jobs and helpers: output, stop. The bar
+            // names it while something runs.
+            b("agent-processes", &["Ctrl+Shift+P"], "Processes", false, Agent, false).hinted_while(Work),
         ],
         "navigation" => vec![
             b("next-attention", &["N", "Ctrl+J"], "Next attention", true, Attention, false),
@@ -213,6 +218,8 @@ fn state(name: &str) -> Vec<Binding> {
             b("agent-search", &["/"], "Search", true, Always, false),
             b("toggle-preview", &["P"], "Preview", true, Always, false),
             b("toggle-compact", &["V"], "Compact view", true, Always, false),
+            // The row's own badge, by key (P is the preview).
+            b("agent-processes", &["Shift+P", "Ctrl+Shift+P"], "Processes", false, Agent, false).hinted_while(Work),
             b("fold", &["Left"], "Fold", true, Folds, false),
             b("unfold", &["L", "Right"], "Unfold", true, Folds, false),
             // The explorer's header buttons, shown while it has the keyboard.
@@ -250,6 +257,8 @@ fn state(name: &str) -> Vec<Binding> {
         ],
         "updates" => vec![
             b("refresh", &["F5"], "Refresh", true, Always, false),
+            // Every job, with its output and a stop.
+            b("agent-processes", &["Ctrl+Shift+P"], "Jobs", true, Always, false),
             b("escape", &["Escape"], "Chats", true, Always, false),
             b("help-keys", &["?"], "Keys", true, Always, false),
         ],
@@ -296,6 +305,7 @@ pub struct Facts {
     pub artifacts: bool,
     pub artifact: bool,
     pub layout_warning: bool,
+    pub work: bool,
 }
 
 impl Facts {
@@ -313,6 +323,7 @@ impl Facts {
             Guard::Artifacts => self.artifacts,
             Guard::Artifact => self.artifact,
             Guard::LayoutWarning => self.layout_warning,
+            Guard::Work => self.work,
         }
     }
 }
@@ -928,7 +939,7 @@ mod tests {
     use super::*;
 
     fn all() -> Facts {
-        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true, layout_warning: true }
+        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true, layout_warning: true, work: true }
     }
 
     #[test]
@@ -968,6 +979,39 @@ mod tests {
         assert_eq!(action_for("hints", "7", &none, all()), Some("hint-digit"));
         assert_eq!(action_for("hints", "Escape", &none, all()), Some("hint-cancel"));
         assert_eq!(action_for("hints", "Ctrl+K", &none, all()), None, "hints own the keyboard");
+    }
+
+    #[test]
+    fn processes_open_from_the_chat_the_composer_the_explorer_and_updates() {
+        let none = Overrides::new();
+        for state in ["pane", "composer", "sidebar", "search"] {
+            assert_eq!(action_for(state, "Ctrl+Shift+P", &none, all()), Some("agent-processes"), "{state}");
+        }
+        assert_eq!(action_for("sidebar", "Shift+P", &none, all()), Some("agent-processes"), "the explorer row's own key");
+        assert_eq!(action_for("sidebar", "P", &none, all()), Some("toggle-preview"), "P stays the preview");
+        assert_eq!(action_for("composer", "Shift+P", &none, all()), None, "P types in the composer");
+        assert_eq!(action_for("updates", "Ctrl+Shift+P", &none, Facts::default()), Some("agent-processes"), "Updates lists every job");
+        assert_eq!(action_for("pane", "Ctrl+Shift+P", &none, Facts::default()), None, "no agent, nothing to list");
+        // The bar offers it while something runs; the key works regardless.
+        let idle = Facts { agent: true, ..Facts::default() };
+        assert_eq!(action_for("composer", "Ctrl+Shift+P", &none, idle), Some("agent-processes"));
+        assert!(!hints("composer", &none, idle).iter().any(|b| b.action == "agent-processes"));
+        assert!(hints("composer", &none, Facts { work: true, ..idle }).iter().any(|b| b.action == "agent-processes"));
+        assert!(hints("updates", &none, Facts::default()).iter().any(|b| b.action == "agent-processes" && b.label == "Jobs"));
+        // Customisable like the rest: a key of one's own in the chats.
+        assert!(actions().iter().any(|(a, l)| *a == "agent-processes" && *l == "Processes"));
+        let mut mine = Overrides::new();
+        mine.entry("agent-processes".into()).or_default().insert("workspace".into(), Change { add: vec!["Ctrl+Alt+J".into()], remove: vec!["Ctrl+Shift+P".into()] });
+        assert_eq!(action_for("composer", "Ctrl+Alt+J", &mine, all()), Some("agent-processes"));
+        assert_eq!(action_for("composer", "Ctrl+Shift+P", &mine, all()), None, "the default key is taken off");
+        // No other binding answers to it anywhere.
+        for state in STATES {
+            for binding in resolve(state, &none, Some(all())) {
+                if binding.action != "agent-processes" {
+                    assert!(!binding.keys.iter().any(|k| k == "Ctrl+Shift+P"), "{state}: {} also has Ctrl+Shift+P", binding.action);
+                }
+            }
+        }
     }
 
     #[test]

@@ -134,6 +134,8 @@ export component Updates inherits Rectangle {
     callback refresh();
     callback resolve(string, string, int);
     callback cancel-job(string);
+    // A job's output (its log tail) in the processes panel.
+    callback job-output(string);
     callback open-report(string);
     callback open-chat(string);
     background: Palette.window;
@@ -256,6 +258,12 @@ export component Updates inherits Rectangle {
                         color: job.active ? Palette.chrome-text : Palette.muted;
                         font-size: 11 * Look.unit;
                         vertical-alignment: center;
+                    }
+                    IconButton {
+                        icon: @image-url("icons/terminal.svg");
+                        label: "Show the job's output (Ctrl+Shift+P lists every job)";
+                        size: 26px;
+                        clicked => { root.job-output(job.id); }
                     }
                     if job.active && job.can-cancel: IconButton {
                         icon: @image-url("icons/rail-close.svg");
