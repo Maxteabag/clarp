@@ -306,6 +306,22 @@ fn next_attention_cycles_waiting_unread_and_pending() {
 }
 
 #[test]
+fn a_quiet_agent_is_never_unread_or_in_the_attention_queue() {
+    let mut roster = Roster::new();
+    roster.apply_snapshot(&obj(json!({"agents": [
+        {"session": "a", "persona": "a"},
+        {"session": "quiet", "persona": "quiet", "quiet": true, "latest_state": "waiting"},
+        {"session": "old-host-janitor", "persona": "j", "is_janitor": true, "latest_state": "waiting"},
+        {"session": "work", "persona": "work", "latest_state": "waiting"}]})));
+    for session in ["quiet", "old-host-janitor", "work"] {
+        roster.apply_notification_event(&obj(json!({"session": session})));
+    }
+    let pending = ["quiet".to_string(), "old-host-janitor".to_string()];
+    assert_eq!(roster.attention_queue("a", &pending), ["work"]);
+    assert!(roster.rows().iter().all(|row| row.unread == (row.session == "work")));
+}
+
+#[test]
 fn first_session_prefers_a_working_agent() {
     let mut roster = Roster::new();
     roster.apply_snapshot(&obj(json!({"agents": [

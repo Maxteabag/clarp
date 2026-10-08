@@ -420,7 +420,7 @@ impl Roster {
             return;
         }
         let Some(row) = self.index_of_session(&json::string(event, "session")) else { return };
-        if self.agents[row].unread {
+        if self.agents[row].unread || self.agents[row].quiet {
             return;
         }
         self.agents[row].unread = true;
@@ -524,7 +524,7 @@ impl Roster {
 
     /// Every agent that wants the reader, in the order Ctrl+J (next
     /// attention) visits them from `current`: the roster order, starting
-    /// after it and wrapping around.
+    /// after it and wrapping around. A quiet agent (a janitor) never does.
     pub fn attention_queue(&self, current: &str, pending: &[String]) -> Vec<String> {
         let count = self.agents.len();
         if count == 0 {
@@ -536,7 +536,7 @@ impl Roster {
             .map(|offset| &self.agents[(start + offset) % count])
             .filter(|agent| {
                 let wants = agent.unread || agent.latest_state == "waiting" || pending.contains(&agent.session);
-                agent.session != current && !agent.archived && wants
+                agent.session != current && !agent.archived && !agent.quiet && wants
             })
             .map(|agent| agent.session.clone())
             .collect()
