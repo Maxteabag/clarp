@@ -243,10 +243,16 @@ def claim_run(run_id: str) -> bool:
         return store.claim_run(c, run_id, db.now_ms())
 
 
-def complete_run(run_id: str, outcome: str = "completed", *, result=None, error: str = "", connection=None) -> bool:
-    """Accept one result only while its authority is current; stale output is discarded."""
+def complete_run(run_id: str, outcome: str = "completed", *, result=None, error: str = "", connection=None,
+                 activity: str | None = None, summary: str = "") -> bool:
+    """Accept one result only while its authority is current; stale output is discarded.
+
+    ``activity`` (worked/idle/failed) and ``summary`` are the run's closing
+    report for an interval-driven Janitor (janitor_adaptive)."""
     if outcome not in {"completed", "failed", "cancelled"}:
         raise janitors.JanitorError("Invalid demand outcome")
+    if activity is not None:
+        activity, summary = janitors._activity_values(activity, summary)
     result = _metadata(result)
     if not isinstance(error, str) or len(error) > 500:
         raise janitors.JanitorError("Demand errors must be bounded metadata")
@@ -266,5 +272,7 @@ def complete_run(run_id: str, outcome: str = "completed", *, result=None, error:
             return False
         store.insert_demand_result(c, run_id, result, now)
         store.finish_run_row(c, run_id, status=outcome, outcome=outcome, now=now, error=error)
+        if activity is not None:
+            store.set_run_activity(c, run_id, activity, summary)
         store.record_config_run(c, run["agent_id"], now, error)
         return True

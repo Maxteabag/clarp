@@ -112,6 +112,13 @@ ownership before committing effects and receipts atomically. Accepted outcomes:
 `changed`, `same_task`, `insufficient_context`, `error`. A changed label must be
 2–3 short words and at most 20 characters. No-op writes become `same_task`.
 
+`POST /janitor-runs/{run_id}/activity` accepts `{activity, summary}`. This is the
+run's closing report: `activity` is `worked`, `idle` or `failed`, and `summary`
+is one line of at most 300 characters. Only the active, current run may report,
+and a later report replaces an earlier one. Runs expose `activity` and
+`activity_summary` (`""` when not reported). The scheduler uses it to adapt the
+Janitor's interval (docs/janitor-runner.md, "Adaptive intervals").
+
 Snapshots expose `is_janitor` plus `interaction_capabilities` with
 `can_chat`, `can_voice_target`, `can_restart` false for Janitors and
 `can_inspect` true. The iOS inspector must not use select/focus/conversation

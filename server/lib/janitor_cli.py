@@ -116,9 +116,12 @@ def _execute(args, request) -> int:
             # response is lost. Retrying requires this key AND identical input.
             print(json.dumps({"request_id": request_id}), file=sys.stderr, flush=True)
         _emit(_send(args, request, "POST", "/janitors", body))
-    elif cmd in {"run-context", "review"}:
+    elif cmd in {"run-context", "review", "outcome"}:
         path = "/janitor-runs/" + quote(args.run_id, safe="")
-        if cmd == "run-context":
+        if cmd == "outcome":
+            _emit(_send(args, request, "POST", path + "/activity",
+                        {"activity": args.status, "summary": args.summary}))
+        elif cmd == "run-context":
             _emit(request("GET", path + "/context"))
         else:
             if args.outcome == "changed" and not args.label:
@@ -235,6 +238,12 @@ def add_parsers(sub, handler) -> None:
     review.add_argument("--label")
     review.add_argument("--reason", required=True)
     review.add_argument("--dry-run", action="store_true")
+    outcome = commands.add_parser("outcome", help="Close an admitted run: worked, idle or failed, plus one line")
+    outcome.set_defaults(func=handler)
+    outcome.add_argument("run_id")
+    outcome.add_argument("--status", required=True, choices=("worked", "idle", "failed"))
+    outcome.add_argument("--summary", required=True, help="One line, at most 300 characters")
+    outcome.add_argument("--dry-run", action="store_true")
     migration = commands.add_parser("migrate-pilot", help="Preview a fenced in-place pilot migration")
     migration.set_defaults(func=handler)
     for name in ("session", "agent-id", "pilot-dir", "service", "cron-id"):

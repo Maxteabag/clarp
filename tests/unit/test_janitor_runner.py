@@ -441,3 +441,102 @@ def test_explicit_minimum_interval_preserves_pending_changed_task(lane):
     assert runner.tick() == 0
     clock[0] += 60_000
     assert runner.tick() == 1
+
+
+QUARTER = 900_000
+
+
+def _scheduled(store, **options):
+    store.rows[0].update(trigger_id="schedule", options=options,
+                         config={"cron": "*/15 * * * *", "timezone": "UTC", "coalesce_seconds": 0})
+
+
+def _receipt(outcome):
+    return {"target_session": "worker", "outcome": outcome, "after": "Audio playback"}
+
+
+def _due(store, clock, make):
+    """Advance to the attachment's next run and tick a fresh runner (a restart)."""
+    clock[0] = store.progress["attachment"]["next_run_at"]
+    return make().tick()
+
+
+def test_idle_schedule_occurrences_double_the_interval_up_to_a_day_across_restarts(lane):
+    store, source, calls, clock, make = lane
+    _scheduled(store)
+    make().tick()
+    assert store.progress["attachment"]["next_run_at"] == QUARTER
+    gaps = []
+    for _ in range(9):
+        before = store.progress["attachment"]["next_run_at"]
+        _due(store, clock, make)  # nothing to review: an idle occurrence
+        gaps.append((store.progress["attachment"]["next_run_at"] - before) // 60_000)
+    assert gaps == [30, 60, 120, 240, 480, 960, 1440, 1440, 1440]
+    assert calls == []
+    assert store.progress["attachment"]["adaptive"]["idle_streak"] == 9
+
+
+def test_a_run_that_worked_resets_to_the_base_and_a_silent_run_counts_as_worked(lane, monkeypatch):
+    store, source, calls, clock, make = lane
+    logged = []
+    monkeypatch.setattr("lib.log.log", lambda event, detail="", **_: logged.append((event, detail)))
+    _scheduled(store)
+    make().tick()
+    for _ in range(3):
+        _due(store, clock, make)
+    assert store.progress["attachment"]["adaptive"]["interval_seconds"] == 7200
+    source.contexts["worker"] = context()
+    assert _due(store, clock, make) == 1
+    [run_id] = store.runs
+    store.runs[run_id].update(status="completed", outcome="changed", activity="worked",
+                              activity_summary="Relabelled one task", results=[_receipt("changed")])
+    make().tick()
+    adaptive_state = store.progress["attachment"]["adaptive"]
+    assert (adaptive_state["interval_seconds"], adaptive_state["last_summary"]) == (900, "Relabelled one task")
+    assert store.progress["attachment"]["next_run_at"] - clock[0] <= QUARTER
+    # Back off again, then a run that never reports: counted as worked, logged.
+    del source.contexts["worker"]
+    _due(store, clock, make)
+    assert store.progress["attachment"]["adaptive"]["interval_seconds"] == 1800
+    source.contexts["worker"] = context(fingerprint="fp2", change_key="phase2", state_id=9)
+    assert _due(store, clock, make) == 1
+    silent = next(r for r in store.runs if r != run_id)
+    store.runs[silent].update(status="completed", outcome="same_task", results=[_receipt("same_task")])
+    make().tick()
+    assert store.progress["attachment"]["adaptive"]["interval_seconds"] == 900
+    assert [e for e, _ in logged] == ["janitorActivityMissing"]
+
+
+def test_a_failed_run_keeps_the_interval(lane):
+    store, source, calls, clock, make = lane
+    _scheduled(store)
+    make().tick()
+    _due(store, clock, make)
+    source.contexts["worker"] = context()
+    assert _due(store, clock, make) == 1
+    [run_id] = store.runs
+    store.runs[run_id].update(status="failed", outcome="error", activity="worked", results=[_receipt("same_task")])
+    make().tick()
+    assert store.progress["attachment"]["adaptive"]["interval_seconds"] == 1800
+    assert store.progress["attachment"]["adaptive"]["last_activity"] == "failed"
+
+
+def test_active_interval_backs_off_while_idle(lane):
+    store, source, calls, clock, make = lane
+    from lib.janitor_active_interval import DEFAULTS
+    store.rows[0].update(trigger_id="active-interval", options={"max_interval_seconds": 240},
+                         config={**DEFAULTS, "interval_seconds": 60})
+    source.application_active = lambda timeout: True
+    make().tick()  # the first check is due at once; nothing to review
+    gaps = [store.progress["attachment"]["next_run_at"] - clock[0]]
+    for _ in range(3):
+        clock[0] = store.progress["attachment"]["next_run_at"]
+        make().tick()
+        gaps.append(store.progress["attachment"]["next_run_at"] - clock[0])
+    assert gaps == [120_000, 240_000, 240_000, 240_000]
+
+
+def test_the_prompt_asks_the_janitor_to_close_the_run_with_its_activity():
+    prompt = prompt_for_run({"run_id": "run"})
+    assert "clarp-admin janitor outcome run --status STATUS --summary SUMMARY" in prompt
+    assert all(word in prompt for word in ("worked", "idle", "failed"))

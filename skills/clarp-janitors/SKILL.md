@@ -114,7 +114,7 @@ see what it would do without switching. Details in `docs/janitor-autonomy.md`.
 The Label checker (`label-auditor`) is an installed built-in that stays idle
 until the `labels` judgment site is on. Hourly (`interval_seconds`) it asks Jev
 whether each working agent's label still matches its activity and lists the
-wrong ones in one Updates item. It is report only; `autocorrect` is reserved
+wrong ones in one report in its own chat (Janitors are quiet: not in Updates). It is report only; `autocorrect` is reserved
 and does nothing yet. Do not change a label because it was reported.
 
 For the developer adapter contract, read the Host's
@@ -143,8 +143,22 @@ change runtime busy state, or announce a deployment from a label review. Do not
 ask workers to write additional reports. A paused/stale run cannot apply effects;
 do not bypass it with a direct status command, database write or invented run ID.
 
-The companion `scripts/janitor_run.py` accepts `context RUN_ID` or
-`review RUN_ID` with the same review flags and delegates to the installed CLI.
+Close every admitted run with its activity: `worked` (you changed something),
+`idle` (nothing needed changing) or `failed` (you could not finish), plus one line.
+Idle runs let the Janitor back off (its interval doubles up to its
+`max_interval_seconds`, default a day); a run that worked returns it to the
+configured interval. A run that does not report counts as worked.
+
+```bash
+clarp-admin janitor outcome RUN_ID --status idle --summary 'All three labels still fit.'
+```
+
+`clarp-admin janitor list` and `inspect` show each Janitor's `cadence`: base,
+current and longest interval, idle streak, last activity and next run.
+
+The companion `scripts/janitor_run.py` accepts `context RUN_ID`,
+`review RUN_ID` with the same review flags, or `outcome RUN_ID` with the outcome
+flags, and delegates to the installed CLI.
 
 ## Pilot migration and recovery
 
