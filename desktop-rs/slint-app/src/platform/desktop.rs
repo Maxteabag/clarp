@@ -131,8 +131,24 @@ fn apply_scale() {
         MONITOR_SCALE.with(|s| s.set(monitor));
     }
     let scale = MONITOR_SCALE.with(|s| s.get()) * UI_SCALE.with(|s| s.get());
-    window.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+    rescale(window.window(), scale);
     crate::avatar_view::remake();
+}
+
+/// Draws the window at `scale` in the pixels it has. Slint's
+/// ScaleFactorChanged alone keeps the logical size, so the content would
+/// outgrow the software renderer's buffer, which is sized from the pixels,
+/// and the next frame panics ("buffer ... is too small to handle a window
+/// of size ..."): a 1100x700 window on a 2x display at the default 1.15
+/// asks for 2530x1610 in 2200x1400. The logical size follows the pixels.
+pub(crate) fn rescale(window: &slint::Window, scale: f32) {
+    window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+    // Before the window system's window exists there are no pixels yet:
+    // its first resize sets the size then.
+    let pixels = window.size();
+    if pixels.width > 0 && pixels.height > 0 {
+        window.dispatch_event(slint::platform::WindowEvent::Resized { size: pixels.to_logical(scale) });
+    }
 }
 
 fn start_now() {
@@ -191,7 +207,7 @@ fn watch_window() {
                 if let Err(error) = slint::invoke_from_event_loop(move || {
                     if let Some(window) = crate::window() {
                         use slint::ComponentHandle;
-                        window.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+                        rescale(window.window(), scale);
                         crate::avatar_view::remake();
                     }
                 }) {
