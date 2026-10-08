@@ -73,3 +73,34 @@ On Peter's machines `clarpd` (in dotfiles) builds `main`'s `desktop-rs` in a
 private worktree when the installed build is older, installs the stripped
 binary to `~/.local/lib/clarp-slint/clarp-slint`, and opens it.
 `clarpd --no-update` opens the installed build.
+
+## macOS (Apple Silicon)
+
+`desktop.yml` publishes `Clarp.app`, ad-hoc signed and zipped, to the
+[`desktop-builds`](https://github.com/Maxteabag/clarp/releases/tag/desktop-builds)
+release as `clarp-slint-<sha>-aarch64-macos.zip` (with a `.sha256`) for every
+desktop change on `main`. Install it, then pair it with a Host over SSH, no
+screen needed (`--pair` exchanges the Host's one-time code and exits):
+
+```sh
+ditto -x -k clarp-slint-<sha>-aarch64-macos.zip /Applications
+xattr -dr com.apple.quarantine /Applications/Clarp.app
+/Applications/Clarp.app/Contents/MacOS/clarp-slint --pair https://host.tailnet.ts.net CODE
+open /Applications/Clarp.app
+```
+
+The device token goes to the login Keychain (service `com.maxteabag.Clarp`,
+account the Host URL), stored through `/usr/bin/security` so an updated app
+reads it without a prompt; over SSH a locked Keychain fails the pairing
+("User interaction is not allowed"): run `security unlock-keychain` first.
+Settings, pane layouts and the stall log live in
+`~/Library/Application Support/clarp/`, caches in `~/Library/Caches/`. The
+XDG variables still win when set.
+
+What differs from Linux: no tray (the Dock shows and quits the app), no
+MPRIS media keys, notifications through Notification Center (via
+`osascript`), presence from the window's focus and input alone (no logind),
+no font picker list (it asks `fc-list`), and one voice player per Host by a
+file lock instead of the session bus. `--pair` works the same on Linux,
+against the Secret Service. The macOS CI job runs the unit tests and
+`check.sh pair`; the window checks run on Linux only.
