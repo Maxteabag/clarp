@@ -30,6 +30,14 @@ _decode = store.decode
 _write = store.write
 
 
+def _max_interval_option(default: int) -> dict:
+    """Adaptive cadence (janitor_adaptive): idle runs double the interval up to this."""
+    return {"key": "max_interval_seconds", "label": "Longest interval when idle (seconds)", "type": "integer",
+            "default": default, "min": 0, "max": 7 * 86400,
+            "description": "Each run that finds nothing to do doubles the wait, up to this; a run that does "
+                           "something returns to the configured interval. 0 keeps the interval fixed."}
+
+
 def templates() -> list[dict]:
     return autonomy_templates() + [{"id": "task-labels", "name": "Task labels",
              "description": "Keep agents' current task labels clear and useful.",
@@ -37,7 +45,9 @@ def templates() -> list[dict]:
              "recommended_effort": "low",
              "allowed_effects": ["task_label"], "creatable": True,
              "supported_trigger_ids": ["agent-work-completed", "schedule", "active-interval"],
-             "default_trigger_id": "agent-work-completed", "options": []},
+             "default_trigger_id": "agent-work-completed",
+             # Applies to schedule@1 and active-interval@1; agent-work-completed has no interval.
+             "options": [_max_interval_option(86400)]},
             {"id": "message-delegator", "name": "Message delegator",
              "description": "Choose an eligible recipient for an explicitly requested message route.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
@@ -70,7 +80,8 @@ def templates() -> list[dict]:
                  {"key": "interval_seconds", "label": "Check interval (seconds)", "type": "integer", "default": 3600,
                   "min": 900, "max": 86400},
                  {"key": "autocorrect", "label": "Correct labels automatically", "type": "boolean", "default": False,
-                  "description": "Reserved. Mismatches are only reported today; nothing is changed."}]},
+                  "description": "Reserved. Mismatches are only reported today; nothing is changed."},
+                 _max_interval_option(86400)]},
             {"id": "tool-explainer", "name": "Tool explainer",
              "description": "Explain requested tool activity using bounded read-only input.",
              "recommended_backend": "codex", "recommended_model": "gpt-5.3-codex-spark",
@@ -102,7 +113,9 @@ def autonomy_templates():
           ("quota-monitor", "Quota keeper", "Monitor provider quota, notify and coordinate authorized runtime account recovery.", "quota_monitor", "quota-check-requested", [
             {"key":"interval_seconds","label":"Check interval (seconds)","type":"integer","default":300,"min":60,"max":86400},
             {"key":"remaining_threshold","label":"Notify at remaining percent","type":"integer","default":25,"min":0,"max":100},
-            {"key":"recovery_mode","label":"Account recovery","type":"choice","default":"notify", "choices":[{"value":"notify","label":"Notify only"},{"value":"ask","label":"Ask before recovery"},{"value":"automatic","label":"Use configured runtime account selector"}]}]),
+            {"key":"recovery_mode","label":"Account recovery","type":"choice","default":"notify", "choices":[{"value":"notify","label":"Notify only"},{"value":"ask","label":"Ask before recovery"},{"value":"automatic","label":"Use configured runtime account selector"}]},
+            # A quota watch that backs off misses the window it guards: fixed unless configured.
+            _max_interval_option(0)]),
           ("account-hotseat", "Hotseat switcher", "Switch the default Claude or Codex account through Hotseat before its quota window runs out.", "account_switch", "account-switch-requested", [
             {"key":"interval_seconds","label":"Claude check interval (seconds)","type":"integer","default":300,"min":60,"max":86400},
             {"key":"codex_interval_seconds","label":"Codex check interval (seconds)","type":"integer","default":900,"min":300,"max":86400,
@@ -111,7 +124,9 @@ def autonomy_templates():
              "description":"Switch when the account in use is under this and another account is at or above it. Below the floor the ladder drops to 10%, then 0%."},
             {"key":"codex_min_remaining","label":"Codex floor: weekly window percent remaining","type":"integer","default":10,"min":0,"max":100},
             {"key":"mode","label":"Switching","type":"choice","default":"automatic","choices":[{"value":"notify","label":"Notify only"},{"value":"automatic","label":"Switch through Hotseat"}]},
-            {"key":"hotseat_command","label":"Hotseat command","type":"string","default":"hotseat"}])
+            {"key":"hotseat_command","label":"Hotseat command","type":"string","default":"hotseat"},
+            # Backing off would leave an exhausted account in use: fixed unless configured.
+            _max_interval_option(0)])
         ]]
 
 
@@ -381,7 +396,37 @@ def get(session: str, *, include_runtime: bool = True) -> dict:
             "scope": _decode(row["scope_json"], {}), "health": ("paused" if not row["enabled"] else "running" if current else "needs_attention" if row["last_error"] else "ready"),
             "last_error": row["last_error"], "last_run_at": row["last_run_at"],
             "last_change_at": row["last_change_at"], "current_run_id": current,
-            "attachments": [_public_attachment(r) for r in store.active_attachment_rows(a["agent_id"], c)]}
+            "attachments": [_public_attachment(r) for r in store.active_attachment_rows(a["agent_id"], c)],
+            "cadence": _cadence(a["agent_id"], row, c)}
+
+
+def _cadence(agent_id: str, row, c) -> list[dict]:
+    """Each schedule lane's base, current and longest interval and its next run
+    (janitor_adaptive). Demand and event-driven Janitors have none."""
+    from . import janitor_adaptive
+    options = option_values(row["template_id"], _decode(row["options_json"], {}))
+    if row["template_id"] in {"label-auditor", "quota-monitor", "account-hotseat"}:
+        from .janitor_autonomy import cadence
+        return cadence({"agent_id": agent_id, "generation": row["generation"], "template_id": row["template_id"],
+                        "options": options, "enabled": bool(row["enabled"])})
+    lanes = []
+    for attachment in store.active_attachment_rows(agent_id, c):
+        config = _decode(attachment["config_json"], {})
+        if attachment["trigger_id"] not in {"schedule", "active-interval"}:
+            continue
+        state = get_progress(attachment["attachment_id"])
+        if state.get("generation") != row["generation"]:
+            state = {}
+        if attachment["trigger_id"] == "active-interval":
+            base = int(config.get("interval_seconds", 900))
+        else:
+            from .janitor_schedule import base_interval_seconds
+            base = state.get("cron_base_seconds") or base_interval_seconds(config["cron"], config["timezone"], db.now_ms())
+        lanes.append(janitor_adaptive.cadence(
+            state.get("adaptive") or {}, base_seconds=base, max_seconds=options.get("max_interval_seconds"),
+            next_run_at=attachment["next_run_at"] if row["enabled"] else None,
+            lane=f"{attachment['trigger_id']}:{attachment['attachment_id']}"))
+    return lanes
 
 
 def list_janitors(*, include_runtime: bool = True) -> list[dict]:
@@ -613,7 +658,8 @@ def release(session: str, expected_revision: int, *, successor_session: str | No
 def attachments(enabled_only: bool = False) -> list[dict]:
     return [{**_public_attachment(r), "agent_id": r["agent_id"], "session": r["session"],
              "generation": r["generation"], "template_id": r["template_id"],
-             "scope": _decode(r["scope_json"], {}), "janitor_enabled": bool(r["janitor_enabled"])}
+             "scope": _decode(r["scope_json"], {}), "janitor_enabled": bool(r["janitor_enabled"]),
+             "options": option_values(r["template_id"], _decode(r["options_json"], {}))}
             for r in store.attachments_with_configs(enabled_only=enabled_only)]
 
 
@@ -746,6 +792,28 @@ def _active_run(c, run_id):
     if _decode(row["configuration_json"], {}).get("options", {}) != option_values(configured["template_id"], _decode(configured["options_json"], {})):
         raise JanitorError("This maintenance run's options were superseded", 409, "stale_generation")
     return row
+
+
+def _activity_values(activity, summary) -> tuple[str, str]:
+    from .janitor_adaptive import ACTIVITIES, SUMMARY_LIMIT
+    if activity not in ACTIVITIES:
+        raise JanitorError("Activity must be worked, idle or failed", 400, "invalid_activity")
+    summary = " ".join(str(summary or "").split())
+    if len(summary) > SUMMARY_LIMIT:
+        raise JanitorError(f"The summary is one line of at most {SUMMARY_LIMIT} characters", 400, "invalid_activity")
+    return activity, summary
+
+
+def report_activity(run_id: str, activity: str, summary: str = "") -> dict:
+    """The admitted run's closing report: worked, idle or failed plus one line.
+
+    Only the active, current run can report; a repeated report replaces the
+    earlier one. The scheduler reads it when the run ends (janitor_adaptive)."""
+    activity, summary = _activity_values(activity, summary)
+    with _write() as c:
+        _active_run(c, run_id)
+        store.set_run_activity(c, run_id, activity, summary)
+    return {"run_id": run_id, "activity": activity, "summary": summary}
 
 
 def validate_dispatch(session: str, run_id: str, trace_id: str) -> bool:

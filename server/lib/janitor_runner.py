@@ -16,12 +16,14 @@ import logging
 import threading
 from typing import Any, Callable
 
-from . import db
+from . import db, janitor_adaptive
 from .janitor_context import build_context_from_connection
 from .janitor_policy import admit, record_review
 from .janitor_schedule import compute_next_run
 
 logger = logging.getLogger(__name__)
+# Triggers with a cadence janitor_adaptive stretches; agent-work-completed has none.
+ADAPTIVE_TRIGGERS = frozenset(("schedule", "active-interval"))
 TERMINAL = frozenset(("changed", "same_task", "insufficient_context", "skipped", "error", "cancelled", "completed", "failed"))
 RECHECK_MS = 30_000
 MAX_RETRIES = 1
@@ -126,7 +128,10 @@ def prompt_for_run(run: dict) -> str:
         "same_task, insufficient_context, or error through the guarded run review helper. "
         "A chat response alone is not a receipt. Do not edit SQLite, invoke worker agents, alter lifecycle, "
         "create schedules, or infer that tests/pushes/deployments succeeded. "
-        "Only actual accepted effect receipts justify saying a label changed. Finish with a concise run summary."
+        "Only actual accepted effect receipts justify saying a label changed. "
+        f"Finish by closing the run: clarp-admin janitor outcome {run['run_id']} --status STATUS --summary SUMMARY, "
+        "where STATUS is worked (you changed at least one label), idle (nothing needed changing) or failed "
+        "(you could not complete the review), and SUMMARY is one line. Then give a concise run summary."
     )
 
 
@@ -229,10 +234,12 @@ class JanitorRunner:
 
         if attachment["trigger_id"] == "active-interval":
             from .janitor_active_interval import advance
-            config = attachment["config"]
+            config = {**attachment["config"], "interval_seconds": self._interval(attachment, state, now)}
             application_active = self.source.application_active(config["idle_timeout_seconds"])
             due = advance(state, config, now=now, active=application_active)
             interval_due = due
+            if due:
+                self._open_occurrence(state, now)
             state["cursor"] = high
             if not application_active:
                 self._save(attachment, state)
@@ -254,6 +261,7 @@ class JanitorRunner:
                 config = attachment["config"]
                 # One current-state reconciliation, never a catch-up loop.
                 state["next_run_at"] = compute_next_run(config["cron"], config["timezone"], now)
+                self._open_occurrence(state, now)
 
         active = state.get("active_run_id")
         if active:
@@ -272,6 +280,7 @@ class JanitorRunner:
                 return 0
 
         if not interval_due:
+            self._close_occurrence(attachment, state, now)
             self._save(attachment, state)
             return 0
         candidates = []
@@ -308,6 +317,7 @@ class JanitorRunner:
                     break
 
         if not candidates or self.store.has_active_run(attachment["agent_id"]):
+            self._close_occurrence(attachment, state, now)
             self._save(attachment, state)
             return 0
         key = [aid, generation, [(c["session"], c["state_id"], c["fingerprint"], c["retry_count"]) for c in candidates]]
@@ -317,6 +327,8 @@ class JanitorRunner:
         for context in candidates:
             del state["pending"][context["session"]]
         state.update(active_run_id=run_id, delivery_accepted=False, next_delivery_at=now, last_admitted_at=now)
+        if state.get("occurrence"):
+            state["occurrence"]["runs"] = state["occurrence"].get("runs", 0) + 1
         run = self.store.create_run(aid, generation, candidates, run_id=run_id, progress=state)
         return self._dispatch(attachment, state, run, now)
 
@@ -384,3 +396,65 @@ class JanitorRunner:
             self.store.finish_run(run["run_id"], outcome, error=error)
         state.pop("active_run_id", None)
         state.pop("delivery_accepted", None)
+        if state.get("occurrence") is not None and attachment["trigger_id"] in ADAPTIVE_TRIGGERS:
+            self._note_run_activity(attachment, state, self.store.get_run(run["run_id"]) or run)
+
+    # --- adaptive cadence (janitor_adaptive) -----------------------------------
+
+    def _base_seconds(self, attachment: dict, state: dict, now: int) -> int:
+        """The configured interval: the trigger's, or a cron's gap between runs."""
+        config = attachment["config"]
+        if attachment["trigger_id"] == "active-interval":
+            return int(config.get("interval_seconds", 900))
+        if not state.get("cron_base_seconds"):
+            from .janitor_schedule import base_interval_seconds
+            state["cron_base_seconds"] = base_interval_seconds(config["cron"], config["timezone"], now)
+        return int(state["cron_base_seconds"])
+
+    @staticmethod
+    def _max_seconds(attachment: dict) -> int | None:
+        return (attachment.get("options") or {}).get("max_interval_seconds")
+
+    def _interval(self, attachment: dict, state: dict, now: int) -> int:
+        return janitor_adaptive.current(state.get("adaptive") or {}, base_seconds=self._base_seconds(attachment, state, now),
+                                        max_seconds=self._max_seconds(attachment))
+
+    @staticmethod
+    def _open_occurrence(state: dict, now: int) -> None:
+        """A due tick opens one occurrence; a due tick while it is open joins it."""
+        if not state.get("occurrence"):
+            state["occurrence"] = {"at": now, "runs": 0, "activities": [], "summary": ""}
+
+    @staticmethod
+    def _note_run_activity(attachment: dict, state: dict, run: dict) -> None:
+        activity, summary, reported = janitor_adaptive.outcome(run)
+        if not reported and activity != "failed":
+            from .log import log
+            log("janitorActivityMissing",
+                f"run={run.get('run_id')} session={attachment.get('session')} counted=worked")
+        occurrence = state["occurrence"]
+        occurrence["activities"] = (occurrence.get("activities") or []) + [activity]
+        occurrence["summary"] = summary or occurrence.get("summary", "")
+
+    def _close_occurrence(self, attachment: dict, state: dict, now: int) -> None:
+        """Once nothing is pending or running, the occurrence's activity sets the
+        next due time: worked if any run worked, failed if one failed and none
+        worked, otherwise idle (a pass with nothing to review is idle too)."""
+        occurrence = state.get("occurrence")
+        if not occurrence or state.get("pending") or state.get("active_run_id") \
+                or attachment["trigger_id"] not in ADAPTIVE_TRIGGERS:
+            return
+        activities = occurrence.get("activities") or []
+        activity = ("worked" if "worked" in activities else "failed" if "failed" in activities else "idle")
+        summary = occurrence.get("summary") or ("" if activities else "Nothing to review")
+        adaptive = state.setdefault("adaptive", {})
+        interval = janitor_adaptive.advance(adaptive, activity=activity, summary=summary,
+                                            base_seconds=self._base_seconds(attachment, state, now),
+                                            max_seconds=self._max_seconds(attachment), now=now)
+        state.pop("occurrence", None)
+        earliest = max(now, occurrence["at"] + interval * 1000 - 1)
+        if attachment["trigger_id"] == "schedule":
+            config = attachment["config"]
+            state["next_run_at"] = compute_next_run(config["cron"], config["timezone"], earliest)
+        elif state.get("next_run_at") is not None:
+            state["next_run_at"] = earliest + 1

@@ -54,6 +54,62 @@ def snapshot(agent):
         'state_id':state.get('id',state.get('state_id')),'state_ts':state.get('ts'),'plan':plan,'jobs':jobs,
         'last_message_revision':agents.latest_message_revision(agent_id=agent['agent_id'])}
 
+# --- adaptive cadence (janitor_adaptive) for interval-driven autonomy Janitors ---
+ADAPTIVE_PREFIX='janitor-adaptive.'
+
+def lane_state(lane,owner):
+    """The persisted cadence of one schedule lane; a new owner or generation starts fresh."""
+    try:state=json.loads(settings_store.get_text(ADAPTIVE_PREFIX+lane,default='') or '{}')
+    except ValueError as exc:
+        from .log import log_exception
+        log_exception('janitorAdaptiveStateInvalid',exc,detail=lane);state={}
+    if not isinstance(state,dict) or state.get('agent_id')!=owner['agent_id'] or state.get('generation')!=owner['generation']:
+        state={'agent_id':owner['agent_id'],'generation':owner['generation']}
+    return state
+
+def lane_next_run(lane,owner,base_seconds,legacy_key):
+    """When this lane is due: its adaptive next run, else the fixed interval after the last check."""
+    state=lane_state(lane,owner)
+    if state.get('next_run_at') is not None:return int(state['next_run_at'])
+    return settings_store.get_int(legacy_key,default=0)+base_seconds*1000
+
+def lane_due(lane,owner,base_seconds,legacy_key,now):
+    return now>=lane_next_run(lane,owner,base_seconds,legacy_key)
+
+def lane_start(lane,owner,base_seconds,now):
+    """A check begins: until it records an outcome, the next one waits the current interval."""
+    from . import janitor_adaptive
+    state=lane_state(lane,owner)
+    state['next_run_at']=now+janitor_adaptive.current(state,base_seconds=base_seconds,max_seconds=owner['options'].get('max_interval_seconds'))*1000
+    settings_store.set_text(ADAPTIVE_PREFIX+lane,json.dumps(state,sort_keys=True))
+
+def lane_record(lane,owner,base_seconds,activity,summary,now):
+    """One finished check: worked/idle/failed sets the lane's next run."""
+    from . import janitor_adaptive
+    state=lane_state(lane,owner)
+    interval=janitor_adaptive.advance(state,activity=activity,summary=summary,base_seconds=base_seconds,
+                                      max_seconds=owner['options'].get('max_interval_seconds'),now=now)
+    state['next_run_at']=now+interval*1000
+    settings_store.set_text(ADAPTIVE_PREFIX+lane,json.dumps(state,sort_keys=True))
+    return interval
+
+def lanes(config):
+    """(lane, base seconds, legacy last-check key) for each schedule lane of an autonomy Janitor."""
+    options=config['options'];role=config['template_id']
+    if role=='label-auditor':return [('label-auditor',options['interval_seconds'],'label-auditor.last-check')]
+    if role=='quota-monitor':return [('quota-keeper',options['interval_seconds'],'quota-keeper.last-check')]
+    if role==janitor_hotseat.ROLE:
+        return [(f'hotseat-switcher.{p}',janitor_hotseat.interval_for(options,p),f'hotseat-switcher.{p}.last-check') for p in janitor_hotseat.PROVIDERS]
+    return []
+
+def cadence(config):
+    """What `clarp-admin janitor list` shows for an autonomy Janitor's lanes."""
+    from . import janitor_adaptive
+    owner={'agent_id':config['agent_id'],'generation':config['generation'],'options':config['options']}
+    return [janitor_adaptive.cadence(lane_state(lane,owner),base_seconds=base,max_seconds=owner['options'].get('max_interval_seconds'),
+                                     next_run_at=lane_next_run(lane,owner,base,legacy) if config['enabled'] else None,lane=lane)
+            for lane,base,legacy in lanes(config)]
+
 def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),default=str).encode()).hexdigest()
 
 def decision_model(packet,run):
@@ -122,7 +178,7 @@ class AutonomyJanitors:
                 if len(json.dumps(snap,default=str).encode())>65536:raise ValueError('Current evidence exceeds decision input budget')
                 decision=validate_decision(self.model_call(snap,run))
             except Exception:
-                janitor_builtins.complete_run(run['run_id'],'failed',error='Decision unavailable or invalid; no target was woken')
+                janitor_builtins.complete_run(run['run_id'],'failed',error='Decision unavailable or invalid; no target was woken',activity='failed',summary='Decision unavailable or invalid')
                 # Backoff is a capacity guard, not a rigid wake decision.
                 janitor_store.save_continuity(agent['agent_id'],fingerprint,run['run_id'],'{}',now+owner['options']['review_interval_seconds']*1000,'failed')
                 continue
@@ -135,7 +191,7 @@ class AutonomyJanitors:
                 janitor_store.save_continuity(agent['agent_id'],fingerprint,run['run_id'],json.dumps(decision),now+decision['delay_seconds']*1000,'pending' if decision['action']=='wake' else decision['action'],c)
             if decision['action']=='wake':
                 self.deliver(agent['agent_id'],run)
-            else:janitor_builtins.complete_run(run['run_id'],result={'summary':decision.get('reason',''),'status':decision['action']})
+            else:janitor_builtins.complete_run(run['run_id'],result={'summary':decision.get('reason',''),'status':decision['action']},activity='idle',summary=decision.get('reason','')[:300])
         # Pending accepted decisions recover with the exact identity, never a new payload.
         for row in janitor_store.pending_continuity_rows():
             run=janitors.get_run(row['run_id'])
@@ -150,15 +206,15 @@ class AutonomyJanitors:
         accepted=self.dispatch(agent['session'],value['message'],run['run_id'])
         if accepted:
             janitor_store.set_continuity_status(target_id,'delivered')
-            janitor_builtins.complete_run(run['run_id'],result={'summary':value.get('reason',''),'status':'dispatched','target_count':1})
+            janitor_builtins.complete_run(run['run_id'],result={'summary':value.get('reason',''),'status':'dispatched','target_count':1},activity='worked',summary=value.get('reason','')[:300])
     def quota_once(self):
         owner=janitor_builtins.resolve('quota-monitor')
         if not owner:return
         if self.stop_event.is_set():return
         self.deliver_notifications(owner)
-        now=db.now_ms();key='quota-keeper.last-check';last=settings_store.get_int(key,default=0)
-        if now-last<owner['options']['interval_seconds']*1000:return
-        settings_store.set_int(key,now)
+        now=db.now_ms();key='quota-keeper.last-check';base=owner['options']['interval_seconds']
+        if not lane_due('quota-keeper',owner,base,key,now):return
+        settings_store.set_int(key,now);lane_start('quota-keeper',owner,base,now)
         if self.usage_read is None:
             from .backend_usage import get_backend_usage, _structured_provider
             # Read the old cached identity before a refresh replaces its jittery
@@ -169,7 +225,8 @@ class AutonomyJanitors:
             usage=get_backend_usage()
         else:usage=self.usage_read()
         run=janitor_builtins.begin_run('quota-monitor',digest([owner['agent_id'],now]),context={'input_hash':digest(usage)})
-        if not run or not janitor_builtins.claim_run(run['run_id']):return
+        if not run or not janitor_builtins.claim_run(run['run_id']):
+            lane_record('quota-keeper',owner,base,'failed','The check could not start',now);return
         notifications=0;recovery_states=[]
         self.recover_approved(owner)
         for provider_id,provider in usage.get('providers',{}).items():
@@ -193,7 +250,10 @@ class AutonomyJanitors:
                         recovery_states.append(provider_id+': '+payload['recovery'].get('status','unknown'))
                     janitor_store.set_quota_receipt_payload(rid,json.dumps(payload));notifications+=1
         self.deliver_notifications(owner)
-        janitor_builtins.complete_run(run['run_id'],result={'summary':f'Checked provider quota; {notifications} threshold notifications','reason':'; '.join(recovery_states)[:500],'item_count':notifications})
+        summary=f'Checked provider quota; {notifications} threshold notifications'
+        activity='worked' if notifications or recovery_states else 'idle'
+        janitor_builtins.complete_run(run['run_id'],result={'summary':summary,'reason':'; '.join(recovery_states)[:500],'item_count':notifications},activity=activity,summary=summary)
+        lane_record('quota-keeper',owner,base,activity,summary,now)
 
     def hotseat_once(self):
         """Hotseat switcher: one bounded run per provider whose check interval elapsed."""
@@ -203,14 +263,18 @@ class AutonomyJanitors:
         options=owner['options'];now=db.now_ms()
         for provider in janitor_hotseat.PROVIDERS:
             if self.stop_event.is_set():return
-            key=f'hotseat-switcher.{provider}.last-check'
-            if now-settings_store.get_int(key,default=0)<janitor_hotseat.interval_for(options,provider)*1000:continue
-            settings_store.set_int(key,now)
+            key=f'hotseat-switcher.{provider}.last-check';lane=f'hotseat-switcher.{provider}'
+            base=janitor_hotseat.interval_for(options,provider)
+            if not lane_due(lane,owner,base,key,now):continue
+            settings_store.set_int(key,now);lane_start(lane,owner,base,now)
             run=janitor_builtins.begin_run(janitor_hotseat.ROLE,digest([owner['agent_id'],provider,now]),context={'summary':provider})
-            if not run or not janitor_builtins.claim_run(run['run_id']):continue
+            if not run or not janitor_builtins.claim_run(run['run_id']):
+                lane_record(lane,owner,base,'failed','The check could not start',now);continue
             try:accounts=self.hotseat_read(options['hotseat_command'],provider)
             except Exception as exc:
-                janitor_builtins.complete_run(run['run_id'],'failed',error=f'{provider}: Hotseat reading unavailable ({type(exc).__name__})');continue
+                error=f'{provider}: Hotseat reading unavailable ({type(exc).__name__})'
+                janitor_builtins.complete_run(run['run_id'],'failed',error=error,activity='failed',summary=error)
+                lane_record(lane,owner,base,'failed',error,now);continue
             decision=janitor_hotseat.decide(accounts,janitor_hotseat.floor_for(options,provider))
             if not janitor_builtins.is_current(run['run_id']):return
             switched=None;outcome='completed';error=''
@@ -226,6 +290,8 @@ class AutonomyJanitors:
             text=janitor_hotseat.preview(provider,decision,mode=options['mode'],switched=switched)
             # Advice and exhaustion repeat every interval; notify once per distinct situation.
             marker=f'hotseat-switcher.{provider}.notified';situation=json.dumps([decision['action'],decision.get('active'),decision.get('target'),switched],sort_keys=True)
+            # Worked: it switched, or found a situation that needs the owner (switch advice, exhaustion).
+            worked=bool(switched) or decision['action']!='noop'
             if text and (decision['action']=='switch' and switched or settings_store.get_text(marker,default='')!=situation):
                 settings_store.set_text(marker,situation)
                 rid=digest([provider,situation,now,owner['generation']])
@@ -233,7 +299,9 @@ class AutonomyJanitors:
                 janitor_store.insert_quota_receipt(rid,run['run_id'],json.dumps(payload),now)
             elif decision['action']=='noop':settings_store.set_text(marker,'')
             summary=text or f"{provider}: {decision.get('active','?')} keeps {decision.get('remaining','?')}% of the {janitor_hotseat.WINDOW_LABEL[provider]} window"
-            janitor_builtins.complete_run(run['run_id'],outcome,result={'summary':summary[:500],'status':decision['action'],'reason':decision.get('reason','')[:500]},error=error)
+            activity='failed' if outcome=='failed' else 'worked' if worked else 'idle'
+            janitor_builtins.complete_run(run['run_id'],outcome,result={'summary':summary[:500],'status':decision['action'],'reason':decision.get('reason','')[:500]},error=error,activity=activity,summary=summary[:300])
+            lane_record(lane,owner,base,activity,summary,now)
         self.deliver_notifications(owner)
 
     def label_audit_once(self):
@@ -246,20 +314,26 @@ class AutonomyJanitors:
         from .heartbeat import outside_active_hours
         owner=janitor_builtins.resolve(label_audit.ROLE)
         if not owner or self.stop_event.is_set():return
-        now=db.now_ms();key='label-auditor.last-check'
-        if now-settings_store.get_int(key,default=0)<owner['options']['interval_seconds']*1000:return
+        now=db.now_ms();key='label-auditor.last-check';lane='label-auditor';base=owner['options']['interval_seconds']
+        if not lane_due(lane,owner,base,key,now):return
         if not judgments.site_enabled('labels') or outside_active_hours(now/1000):return
-        settings_store.set_int(key,now)
+        settings_store.set_int(key,now);lane_start(lane,owner,base,now)
         evidence=label_audit.candidates(now)
-        if not evidence:return
+        if not evidence:
+            lane_record(lane,owner,base,'idle','Nothing shown as working',now);return
         packets=label_audit.packets(evidence)
         run=janitor_builtins.begin_run(label_audit.ROLE,digest([owner['agent_id'],now]),context={'input_hash':digest(packets),'target_count':len(packets)})
-        if not run or not janitor_builtins.claim_run(run['run_id']):return
+        if not run or not janitor_builtins.claim_run(run['run_id']):
+            lane_record(lane,owner,base,'failed','The check could not start',now);return
         try:verdicts=self.label_judge(packets)
         except Exception as exc:
-            janitor_builtins.complete_run(run['run_id'],'failed',error=f'Label check failed ({type(exc).__name__}); nothing reported');return
+            error=f'Label check failed ({type(exc).__name__}); nothing reported'
+            janitor_builtins.complete_run(run['run_id'],'failed',error=error,activity='failed',summary=error)
+            lane_record(lane,owner,base,'failed',error,now);return
         if verdicts is None:
-            janitor_builtins.complete_run(run['run_id'],'failed',error='Jev did not answer; nothing reported');return
+            error='Jev did not answer; nothing reported'
+            janitor_builtins.complete_run(run['run_id'],'failed',error=error,activity='failed',summary=error)
+            lane_record(lane,owner,base,'failed',error,now);return
         if self.stop_event.is_set() or not janitor_builtins.is_current(run['run_id']):
             janitor_builtins.complete_run(run['run_id'],'cancelled',result={'reason':'Configuration changed'});return
         found=label_audit.mismatches(evidence,verdicts)
@@ -267,7 +341,10 @@ class AutonomyJanitors:
         artifact,fingerprint=label_audit.report(owner,run['run_id'],found,checked=len(packets),last_fingerprint=settings_store.get_text(marker,default=''))
         settings_store.set_text(marker,fingerprint)
         summary=f"Checked {len(packets)} working labels; {len(found)} look wrong"+('' if artifact or not found else ' (already reported)')
-        janitor_builtins.complete_run(run['run_id'],result={'summary':summary,'item_count':len(found),'target_count':len(packets)})
+        # Worked only when it filed something new; a repeat of the same report is idle.
+        activity='worked' if artifact else 'idle'
+        janitor_builtins.complete_run(run['run_id'],result={'summary':summary,'item_count':len(found),'target_count':len(packets)},activity=activity,summary=summary)
+        lane_record(lane,owner,base,activity,summary,now)
 
     def deliver_notifications(self,owner):
         rows=janitor_store.undelivered_quota_receipts()

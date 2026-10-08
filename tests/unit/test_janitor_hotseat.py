@@ -5,6 +5,15 @@ from lib import agents, db, janitors, janitor_builtins, settings_store
 from lib import janitor_autonomy as service
 from lib import janitor_hotseat as hotseat
 
+def _check_again(lane):
+    """Make a schedule lane due now, keeping its adaptive cadence."""
+    import json
+    key = "janitor-adaptive." + lane
+    state = json.loads(settings_store.get_text(key, default="") or "{}")
+    state["next_run_at"] = 0
+    settings_store.set_text(key, json.dumps(state))
+
+
 
 def claude_payload(**accounts):
     """alias -> (is_active, used_5h, used_7d) or (is_active, 'rejected') or (is_active, None)."""
@@ -159,15 +168,15 @@ def test_notify_mode_reports_once_per_situation_without_switching(switcher):
     worker.hotseat_once()
     assert not [c for c in calls if c[0] == "switch"]
     assert len(sent) == 1 and sent[0]["preview"].startswith("Claude: would switch to b")
-    settings_store.set_int("hotseat-switcher.claude.last-check", 0)
+    _check_again("hotseat-switcher.claude")
     worker.hotseat_once()
     assert len(sent) == 1
     readings["claude"] = claude_payload(a=(True, 0.9), b=(False, 0.2))
-    settings_store.set_int("hotseat-switcher.claude.last-check", 0)
+    _check_again("hotseat-switcher.claude")
     worker.hotseat_once()
     assert len(sent) == 1  # same advice, same accounts
     readings["claude"] = claude_payload(a=(True, 0.9), c=(False, 0.2))
-    settings_store.set_int("hotseat-switcher.claude.last-check", 0)
+    _check_again("hotseat-switcher.claude")
     worker.hotseat_once()
     assert len(sent) == 2 and "c" in sent[1]["preview"]
 
@@ -195,13 +204,13 @@ def test_unreadable_hotseat_is_a_failed_run_and_no_switch(switcher):
 def test_exhaustion_notifies_once_until_the_situation_changes(switcher):
     owner, worker, readings, calls, sent = switcher
     readings["claude"] = claude_payload(a=(True, "rejected"), b=(False, "rejected"))
-    worker.hotseat_once(); settings_store.set_int("hotseat-switcher.claude.last-check", 0); worker.hotseat_once()
+    worker.hotseat_once(); _check_again("hotseat-switcher.claude"); worker.hotseat_once()
     assert len(sent) == 1 and "no saved account has more" in sent[0]["preview"]
     readings["claude"] = claude_payload(a=(True, 0.5), b=(False, "rejected"))
-    settings_store.set_int("hotseat-switcher.claude.last-check", 0); worker.hotseat_once()
+    _check_again("hotseat-switcher.claude"); worker.hotseat_once()
     assert settings_store.get_text("hotseat-switcher.claude.notified") == ""
     readings["claude"] = claude_payload(a=(True, "rejected"), b=(False, "rejected"))
-    settings_store.set_int("hotseat-switcher.claude.last-check", 0); worker.hotseat_once()
+    _check_again("hotseat-switcher.claude"); worker.hotseat_once()
     assert len(sent) == 2
 
 

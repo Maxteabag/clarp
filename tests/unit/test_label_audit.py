@@ -11,6 +11,15 @@ from lib import (agents, artifacts, attention_index, background_jobs, db, heartb
                  janitor_builtins, janitors, judgments, label_audit, settings_store)
 from lib import janitor_autonomy as service
 
+def _check_again(lane):
+    """Make a schedule lane due now, keeping its adaptive cadence."""
+    import json
+    key = "janitor-adaptive." + lane
+    state = json.loads(settings_store.get_text(key, default="") or "{}")
+    state["next_run_at"] = 0
+    settings_store.set_text(key, json.dumps(state))
+
+
 
 @pytest.fixture(autouse=True)
 def env(monkeypatch):
@@ -64,7 +73,7 @@ WAITING = {"accurate": 0.05, "waiting_for_user": 0.9, "finished": 0.05}
 
 def test_the_janitor_is_installed_with_an_hourly_interval_and_autocorrect_off(env):
     assert env["enabled"]
-    assert env["options"] == {"interval_seconds": 3600, "autocorrect": False}
+    assert env["options"] == {"interval_seconds": 3600, "autocorrect": False, "max_interval_seconds": 86400}
     assert janitors.template("label-auditor")["allowed_effects"] == ["label_report"]
 
 
@@ -105,7 +114,7 @@ def test_the_same_mismatch_is_not_reported_again_next_hour(monkeypatch, env):
     worker.label_audit_once()
     worker.label_audit_once()  # inside the interval: no call
     assert len(seen) == 1
-    settings_store.set_int("label-auditor.last-check", 0)
+    _check_again("label-auditor")
     worker.label_audit_once()
     assert len(seen) == 2
     assert len(_reports()) == 1
@@ -191,3 +200,31 @@ def test_a_label_that_just_changed_is_not_judged(monkeypatch):
     now = db.now_ms()
     assert label_audit.candidates(now) == []
     assert len(label_audit.candidates(now + 16 * 60 * 1000)) == 1
+
+
+def test_idle_checks_back_off_persist_across_restarts_and_a_report_resets(monkeypatch, env):
+    import lib.heartbeat as heartbeat_module
+    _enable_site(monkeypatch)
+    monkeypatch.setattr(heartbeat_module, "outside_active_hours", lambda *_: False)
+    start = db.now_ms()
+    now = [start]
+    monkeypatch.setattr(service.db, "now_ms", lambda: now[0])
+    hour = 3_600_000
+
+    def check_at(ms):
+        now[0] = ms
+        _worker().label_audit_once()  # a fresh worker each time: a restart
+        return janitors.get(env["session"])["cadence"][0]
+
+    lane = check_at(now[0])  # nothing shown as working: idle
+    assert (lane["current_interval_seconds"], lane["next_run_at"]) == (7200, now[0] + 2 * hour)
+    assert lane["last_activity"] == "idle" and lane["base_interval_seconds"] == 3600
+    assert check_at(now[0] + hour)["next_run_at"] == start + 2 * hour  # not due yet
+    lane = check_at(start + 2 * hour)
+    assert lane["current_interval_seconds"] == 14400 and lane["idle_streak"] == 2
+    _jev(monkeypatch, "waiting_for_user", WAITING)
+    _lena()
+    lane = check_at(lane["next_run_at"])
+    assert (lane["current_interval_seconds"], lane["last_activity"]) == (3600, "worked")
+    [run] = janitors.list_runs(env["session"])
+    assert (run["activity"], run["activity_summary"]) == ("worked", "Checked 1 working labels; 1 look wrong")
