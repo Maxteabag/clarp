@@ -186,7 +186,7 @@ pub(crate) fn open_file_url(url: &str) {
         }
         return;
     }
-    if let Err(error) = std::process::Command::new("xdg-open").arg(url).spawn() {
+    if let Err(error) = std::process::Command::new(crate::platform::OPENER).arg(url).spawn() {
         eprintln!("clarp-slint: could not open {url}: {error}");
     }
 }

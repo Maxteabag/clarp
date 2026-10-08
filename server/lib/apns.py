@@ -1081,7 +1081,7 @@ def send_decision_created(artifact: dict) -> dict:
     Mirrors the turn-end transport: respects the per-agent push mute, stays
     quiet while a desktop is active, and prunes dead tokens. Never raises.
     """
-    from . import agents as agents_db, config, desktop_presence
+    from . import agents as agents_db, config, desktop_presence, quiet_agents
     cfg = config.load()
     if not cfg.apns_enabled():
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
@@ -1098,6 +1098,10 @@ def send_decision_created(artifact: dict) -> dict:
     if not decision_id or decision.get("status", "pending") != "pending":
         return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0}
     agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+    if quiet_agents.is_quiet(agent):
+        log("apnsDecisionSuppressed", f"{persona} session={session} decision={decision_id} reason=quiet-agent")
+        return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0,
+                "suppressed": True, "reason": "quiet-agent"}
     if agent and agent.get("muted"):
         log("apnsDecisionSuppressed", f"{persona} session={session} decision={decision_id} reason=muted")
         return {"enabled": True, "sent": 0, "failed": 0, "disabled": 0,

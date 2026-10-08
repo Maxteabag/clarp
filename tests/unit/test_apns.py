@@ -956,6 +956,24 @@ def test_send_decision_created_respects_agent_mute_and_desktop(tmp_path, monkeyp
     assert apns.send_decision_created(_decision_row())["sent"] == 1
 
 
+def test_a_janitors_decision_never_pushes_but_an_ordinary_agents_does(tmp_path, monkeypatch):
+    from lib import db, desktop_presence
+    _apns_config(tmp_path)
+    apns.reset_jwt_cache()
+    db.conn().execute(
+        "INSERT INTO agents (agent_id, persona, voice_id, cwd, session, created_at, is_janitor, role)"
+        " VALUES (?,?,?,?,?,?,1,'janitor')", ("a1", "Nadia", "v", "/tmp", "nadia", db.now_ms()))
+    apns.register_token("goodtoken", session="nadia")
+    monkeypatch.setattr(desktop_presence, "active", lambda: False)
+    calls: list = []
+    import httpx
+    monkeypatch.setattr(httpx, "Client", lambda *a, **k: _FakeClient({"goodtoken": _FakeResp(200)}, calls))
+    assert apns.send_decision_created(_decision_row())["reason"] == "quiet-agent"
+    assert calls == []
+    db.conn().execute("UPDATE agents SET is_janitor=0, role='agent' WHERE agent_id='a1'")
+    assert apns.send_decision_created(_decision_row())["sent"] == 1
+
+
 def test_create_decision_hands_the_row_to_the_push_hook(tmp_path, monkeypatch):
     from lib import agents, artifacts
     agents.create_agent(persona="Nadia", voice_id="V", cwd=str(tmp_path), session="nadia")

@@ -27,13 +27,14 @@ pub(crate) struct Fonts {
 }
 
 thread_local! {
-    /// Installed font families, once `fc-list` has answered.
+    /// Installed font families, once they are listed.
     static FONTS: std::cell::RefCell<Option<Fonts>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Asks fontconfig for the installed families and whether they are
-/// monospace.
-fn list_fonts() -> Result<Fonts, String> {
+/// The installed families and whether they are monospace, as
+/// `fc-list -f '%{family}\t%{spacing}\n'` prints them.
+#[cfg(not(target_os = "macos"))]
+fn font_lines() -> Result<String, String> {
     let output = std::process::Command::new("fc-list")
         .args(["-f", "%{family}\\t%{spacing}\\n"])
         .output()
@@ -41,7 +42,26 @@ fn list_fonts() -> Result<Fonts, String> {
     if !output.status.success() {
         return Err(format!("fc-list failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
     }
-    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// macOS has no fontconfig: the system's font folders, scanned, in the
+/// same lines (spacing 100 for monospace, 0 otherwise).
+#[cfg(target_os = "macos")]
+fn font_lines() -> Result<String, String> {
+    let mut fonts = fontdb::Database::new();
+    fonts.load_system_fonts();
+    if fonts.is_empty() {
+        return Err("cannot list fonts: no system fonts found".into());
+    }
+    Ok(fonts
+        .faces()
+        .filter_map(|face| face.families.first().map(|(name, _)| format!("{name}\t{}\n", if face.monospaced { 100 } else { 0 })))
+        .collect())
+}
+
+fn list_fonts() -> Result<Fonts, String> {
+    let text = font_lines()?;
     let names = text
         .lines()
         .flat_map(|line| line.split('\t').next().unwrap_or_default().split(',').map(|f| f.trim().to_owned()).collect::<Vec<_>>())
@@ -213,7 +233,7 @@ pub(crate) fn open_file(path: &std::path::Path) -> Result<(), String> {
         let mut log = std::fs::OpenOptions::new().create(true).append(true).open(record).map_err(|e| e.to_string())?;
         return writeln!(log, "file://{}", path.display()).map_err(|e| e.to_string());
     }
-    std::process::Command::new("xdg-open").arg(path).spawn().map(drop).map_err(|e| format!("could not open {}: {e}", path.display()))
+    std::process::Command::new(crate::platform::OPENER).arg(path).spawn().map(drop).map_err(|e| format!("could not open {}: {e}", path.display()))
 }
 
 pub(crate) fn stamp(epoch_millis: i64) -> String {
@@ -337,7 +357,7 @@ pub(crate) fn open_link(url: &str) {
         }
         return;
     }
-    if let Err(error) = std::process::Command::new("xdg-open").arg(url).spawn() {
+    if let Err(error) = std::process::Command::new(crate::platform::OPENER).arg(url).spawn() {
         eprintln!("clarp-slint: could not open {url}: {error}");
     }
 }

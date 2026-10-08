@@ -2,7 +2,8 @@ name: Desktop checks
 
 # The Rust desktop's gate for work branches, so nothing compiles on the
 # owner's machines: unit tests, the headless behaviour checks against the fake
-# Host, and a release binary to run locally, all as artifacts. Push a branch
+# Host, and a release binary to run locally, all as artifacts; on macOS the
+# unit tests, the --pair check and a zipped Clarp.app. Push a branch
 # (not main) that touches desktop-rs, or run it by hand with a branch and a
 # list of checks.
 
@@ -12,6 +13,7 @@ on:
     paths:
       - "desktop-rs/**"
       - "static/icon.png"
+      - "src-tauri/icons/icon.icns"
       - ".github/workflows/desktop-checks.yml"
   workflow_dispatch:
     inputs:
@@ -32,7 +34,7 @@ env:
     scrollbar transcript scroll scroll-jump row-overlap composer live a2a receipts
     artifacts form-events artifact-keys link-hints keymap switcher panes sidebar banner
     layout-warning updates settings themes fonts startup refocus avatars message-search mention customize chat-zoom
-    send desktop vim
+    send desktop vim processes pair
 
 jobs:
   test:
@@ -73,7 +75,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
             libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev \
-            dbus python3 fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
+            dbus gnome-keyring python3 fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -135,3 +137,99 @@ jobs:
         with:
           name: clarp-slint-x86_64-linux
           path: /tmp/clarp-slint
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-rs
+          shared-key: desktop-macos-debug
+      - name: A throwaway default keychain
+        # The Keychain round trip and the pair check write here, not the
+        # runner's login keychain.
+        run: |
+          security create-keychain -p probe clarp-test.keychain
+          security list-keychains -d user -s clarp-test.keychain $(security list-keychains -d user | tr -d '"')
+          security default-keychain -d user -s clarp-test.keychain
+          security unlock-keychain -p probe clarp-test.keychain
+          security set-keychain-settings clarp-test.keychain
+      - name: Unit and contract tests
+        working-directory: desktop-rs
+        env:
+          CLARP_TEST_KEYCHAIN: "1"
+        run: |
+          set -o pipefail
+          cargo test --locked --no-fail-fast -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint 2>&1 | tee /tmp/cargo-test-macos.log
+      - name: Pair against the fake Host
+        working-directory: desktop-rs
+        env:
+          CLARP_TEST_KEYCHAIN: "1"
+        run: |
+          cargo build --locked -p clarp-slint
+          slint-app/tests/check.sh pair /tmp/checks-macos/pair
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-test-logs
+          path: |
+            /tmp/cargo-test-macos.log
+            /tmp/checks-macos
+
+  macos-app:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-rs
+          shared-key: desktop-macos-release
+      - name: Release build
+        working-directory: desktop-rs
+        run: cargo build --release --locked --target aarch64-apple-darwin -p clarp-slint
+      - name: Clarp.app
+        run: |
+          desktop-rs/tools/macos-bundle.sh desktop-rs/target/aarch64-apple-darwin/release/clarp-slint \
+            "${GITHUB_SHA::12}" "/tmp/clarp-slint-${GITHUB_SHA}-aarch64-macos.zip"
+          # What Jasper installs: it unzips to a launchable app.
+          mkdir /tmp/unzipped && ditto -x -k "/tmp/clarp-slint-${GITHUB_SHA}-aarch64-macos.zip" /tmp/unzipped
+          codesign --verify --strict /tmp/unzipped/Clarp.app
+          /tmp/unzipped/Clarp.app/Contents/MacOS/clarp-slint --version
+          /tmp/unzipped/Clarp.app/Contents/MacOS/clarp-slint --help | grep -- --pair
+      - name: What macOS sees of the window
+        # Diagnostic: Clarp.app launched by LaunchServices against the fake
+        # Host, then the window list and the Accessibility API's view of it.
+        continue-on-error: true
+        run: |
+          scratch=$(mktemp -d)
+          python3 desktop-rs/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
+          for _ in $(seq 300); do [ -s "$scratch/port" ] && break; sleep 0.1; done
+          open -n /tmp/unzipped/Clarp.app --stdout "$scratch/app.log" --stderr "$scratch/app.log" \
+            --env CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" --env CLARP_TOKEN=probe-token \
+            --env CLARP_KEYRING=off --env CLARP_SETTINGS=off --env XDG_CONFIG_HOME="$scratch/c" \
+            --env XDG_CACHE_HOME="$scratch/k" --env XDG_DATA_HOME="$scratch/d" --env XDG_STATE_HOME="$scratch/s"
+          sleep 15
+          pid=$(pgrep -x clarp-slint | head -1)
+          echo "pid: $pid"
+          swift desktop-rs/tools/macos-window-probe.swift "$pid"
+          osascript -e 'tell application "System Events" to get {name, count of windows} of (first process whose unix id is '"$pid"')' || true
+          screencapture -x /tmp/macos-window.png || true
+          kill "$pid"
+          tail -40 "$scratch/app.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-window
+          path: /tmp/macos-window.png
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clarp-slint-aarch64-macos
+          path: /tmp/clarp-slint-${{ github.sha }}-aarch64-macos.zip

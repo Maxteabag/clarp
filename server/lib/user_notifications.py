@@ -11,7 +11,7 @@ import re
 import time
 from typing import Any, Callable
 
-from . import agents as agents_db, artifacts, db, origins, settings_store
+from . import agents as agents_db, artifacts, db, origins, quiet_agents, settings_store
 from .log import log
 from .policies import notifications as notification_policy
 from .policies.notifications import (
@@ -386,6 +386,7 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
             can_chat=agents_db.interaction_capabilities(agent)["can_chat"] if agent else True,
             muted=bool(agent and agent.get("muted")),
             is_team_leader=_is_team_leader(agent_id),
+            quiet=quiet_agents.is_quiet(agent),
         ),
         NotificationSettings(
             special_automation=settings_store.get_bool(

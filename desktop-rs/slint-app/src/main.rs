@@ -5,6 +5,7 @@
 //! `clarp-slint` opens the window. `--headless` runs it without a display on
 //! Slint's software renderer (for checks), and `--e2e-out DIR` drives it like
 //! a person would, saving a screenshot per stage (see `driver.rs`).
+//! `--pair URL CODE` pairs with a Host and exits (see `pair.rs`).
 
 mod catalogue;
 mod commands;
@@ -15,6 +16,7 @@ mod keymap_view;
 mod link_hints;
 mod live_view;
 mod launch;
+mod pair;
 mod panes;
 mod perf;
 mod scroll_book;
@@ -35,6 +37,7 @@ mod help_view;
 // ---- updates and teams
 mod teams_view;
 mod updates_view;
+mod processes_view;
 // ---- launch dialogs
 mod agent_dialogs_view;
 mod launch_view;
@@ -146,8 +149,8 @@ fn settings() -> Settings {
     match std::env::var("CLARP_SETTINGS") {
         Ok(value) if value == "off" => Settings::in_memory(),
         Ok(value) if !value.is_empty() => Settings::at(value),
-        _ => match clarp_core::settings::config_home() {
-            Some(config) => Settings::at(config.join("MaxTeaBag").join("ClarpSlint").join("settings.json")),
+        _ => match clarp_core::dirs::app_config_dir() {
+            Some(config) => Settings::at(config.join("settings.json")),
             None => Settings::in_memory(),
         },
     }
@@ -581,6 +584,13 @@ pub fn pump() {
 fn main() {
     perf::launched();
     let args: Vec<String> = std::env::args().skip(1).collect();
+    for line in clarp_core::dirs::move_out_of_the_server_folder() {
+        eprintln!("clarp-slint: {line}");
+    }
+    // Pairing over SSH: no window, no display.
+    if let Some(parsed) = pair::arguments(&args) {
+        std::process::exit(pair::run(parsed, settings()));
+    }
     let e2e_out = args.iter().position(|a| a == "--e2e-out").and_then(|i| args.get(i + 1)).cloned();
     let arg = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
     let shot = arg("--shot");
@@ -819,6 +829,7 @@ fn main() {
         }
     });
     window.on_shortcut(|text, control, alt, shift, meta, repeat| commands::shortcut(&text, control, alt, shift, meta, repeat));
+    window.on_key_released(|text, control, alt, shift, meta| commands::key_released(&text, control, alt, shift, meta));
     window.on_setting_changed(|id, delta| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             settings_view::change(&app, &window, &id, delta);
@@ -962,16 +973,21 @@ fn main() {
         app.engine.borrow_mut().resolve_decision(&id, &choice, i64::from(revision));
         pump_now(app);
     }));
-    window.on_cancel_job(|id| with_window(|app, _| {
-        app.engine.borrow_mut().cancel_background_job(&id);
-        pump_now(app);
-    }));
+    // Updates' Cancel asks first, in the processes panel on that job.
+    window.on_cancel_job(|id| with_window(|app, window| processes_view::open_job(app, window, &id, true)));
+    window.on_job_output(|id| with_window(|app, window| processes_view::open_job(app, window, &id, false)));
     window.on_open_report(|id| with_window(|app, window| updates_view::open_report(app, window, &id)));
     window.on_report_link(updates_view::open_report_link);
     window.on_image_view_moved(|delta| with_window(|app, window| artifacts_view::image_view_moved(app, window, delta)));
     window.on_open_chat(|session| with_window(|app, window| updates_view::open_chat(app, window, &session)));
-    window.on_show_processes(|session, x, y| with_window(|app, window| updates_view::open_processes(app, window, &session, x, y)));
-    window.on_process_helper_opened(|session| with_window(|app, window| updates_view::open_helper(app, window, &session)));
+    window.on_show_processes(|session, x, y| with_window(|app, window| processes_view::open_at(app, window, &session, x, y)));
+    window.on_process_helper_opened(|session| with_window(|app, window| processes_view::open_helper(app, window, &session)));
+    window.on_process_job_opened(|id| with_window(|app, window| processes_view::open_output(app, window, &id)));
+    window.on_process_stop_asked(|kind, id| with_window(|app, window| processes_view::ask_stop_row(app, window, &kind, &id)));
+    window.on_process_answered(|stop| with_window(|app, window| {
+        processes_view::answer(app, window, stop);
+        pump_now(app);
+    }));
     window.on_team_action(|action, argument| with_window(|app, window| teams_view::action(app, window, &action, &argument)));
     artifacts_view::bind(&window);
     window.on_team_created(|name| with_window(|app, window| teams_view::created(app, window, &name)));

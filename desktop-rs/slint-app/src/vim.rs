@@ -88,6 +88,7 @@ const NORMAL: &[Entry] = &[
     entry("<Space> R", "rename-agent", "Rename contact", Place::Both),
     entry("<Space> m", "mute", "Mute", Place::Both),
     entry("<Space> x", "stop-agent", "Stop agent", Place::Both),
+    entry("<Space> j", "agent-processes", "Jobs and helpers", Place::Both),
     entry("<Space> l", "link-hints", "Open a link", Place::Both),
     entry("<Space> ?", "shortcut-bar", "Show/hide keys", Place::Both),
     entry("<Space> w n", "new-workspace", "New tab", Place::Both),
@@ -333,6 +334,8 @@ const COMMANDS: &[(&str, usize, Kind)] = &[
     ("teams", 4, Kind::Run("teams")),
     ("overview", 4, Kind::Run("overview")),
     ("commands", 4, Kind::Run("switcher")),
+    ("jobs", 3, Kind::Run("agent-processes")),
+    ("processes", 4, Kind::Run("agent-processes")),
     ("nohlsearch", 3, Kind::NoHighlight),
 ];
 
@@ -574,6 +577,7 @@ mod tests {
             (&["Space", "W", "L"], "move-right"),
             (&["Space", "W", "C"], "close-workspace"),
             (&["Space", "/"], "search-messages"),
+            (&["Space", "J"], "agent-processes"),
         ] {
             let outcomes = feed(&mut normal, Region::Chat, keys);
             assert_eq!(outcomes.last(), Some(&run(action)), "{keys:?}");
@@ -581,6 +585,7 @@ mod tests {
         }
         // The same from the explorer.
         assert_eq!(feed(&mut normal, Region::Explorer, &["Space", "S"]).last(), Some(&run("settings")));
+        assert_eq!(feed(&mut normal, Region::Explorer, &["Space", "J"]).last(), Some(&run("agent-processes")));
     }
 
     #[test]
@@ -592,6 +597,7 @@ mod tests {
         assert!(next.contains(&("e".to_owned(), "Explorer")), "{next:?}");
         assert!(next.contains(&("w".to_owned(), "Tabs and panes")), "a group says what it holds: {next:?}");
         assert!(next.contains(&("Space".to_owned(), "Commands")), "{next:?}");
+        assert!(next.contains(&("j".to_owned(), "Jobs and helpers")), "the leader shows the jobs: {next:?}");
         assert_eq!(normal.feed(Region::Chat, "W", false), Outcome::Pending);
         assert_eq!(normal.typed(), "Space w");
         assert!(normal.next(Region::Chat).contains(&("v".to_owned(), "Split right")));
@@ -639,6 +645,9 @@ mod tests {
         assert_eq!(parse("q"), Ok(Ex::Run("close-pane")));
         assert_eq!(parse("quit"), Ok(Ex::Run("close-pane")));
         assert_eq!(parse("vs"), Ok(Ex::Run("split-right")));
+        assert_eq!(parse("jobs"), Ok(Ex::Run("agent-processes")));
+        assert_eq!(parse("proc"), Ok(Ex::Run("agent-processes")));
+        assert_eq!(parse("processes"), Ok(Ex::Run("agent-processes")));
         assert_eq!(parse("vsplit"), Ok(Ex::Run("split-right")));
         assert_eq!(parse("sp"), Ok(Ex::Run("split-down")));
         assert_eq!(parse("tabnew"), Ok(Ex::TabNew(String::new())));

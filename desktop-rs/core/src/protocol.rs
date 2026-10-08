@@ -59,6 +59,10 @@ pub struct Agent {
     pub unread: bool,
     /// A Host maintenance agent: inspectable, but it refuses chat controls.
     pub janitor: bool,
+    /// Never wants the reader by itself: no unread, not in Ctrl+J
+    /// (docs/notification-policy.md, "Quiet agents"). The Host's `quiet`;
+    /// a Host older than contract 56 lacks it, so a janitor is quiet there.
+    pub quiet: bool,
 }
 
 impl Default for Agent {
@@ -106,6 +110,7 @@ impl Default for Agent {
             archived: false,
             unread: false,
             janitor: false,
+            quiet: false,
         }
     }
 }
@@ -165,6 +170,7 @@ impl Agent {
             focused: b("focused"),
             muted: b("muted"),
             janitor: b("is_janitor"),
+            quiet: b("quiet") || b("is_janitor"),
             heartbeat_enabled: b("heartbeat_enabled"),
             dreaming_enabled: b("dreaming_enabled"),
             archived: !matches!(object.get("archived_at"), None | Some(Value::Null)),

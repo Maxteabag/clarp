@@ -127,8 +127,9 @@ A label is reported when Jev gives it at most 0.30 chance of being accurate
 and names one reason (finished, waiting for the user, stalled, doing
 something else) with at least 0.50 (`judgment_sites.LABEL_MATCH_MAX`,
 `LABEL_REASON_MIN`). The run creates one `document` artifact on the Janitor
-(`attention_kind: "label_mismatch"`, status `completed`, so it lands in
-Updates for review), for example "Lena says 'Building', but it looks like it
+(`attention_kind: "label_mismatch"`, status `completed`), readable in the
+Label checker's chat; Janitors are quiet agents, so it is not in Updates
+(docs/notification-policy.md), for example "Lena says 'Building', but it looks like it
 is waiting for your answer (no change for 2h)." The same set of wrong labels
 is not reported again while it stays the same.
 

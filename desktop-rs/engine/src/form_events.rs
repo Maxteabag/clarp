@@ -59,11 +59,7 @@ pub(crate) fn default_root() -> Option<PathBuf> {
     match std::env::var("CLARP_FORM_EVENTS") {
         Ok(value) if value == "off" => None,
         Ok(value) if !value.is_empty() => Some(value.into()),
-        _ => std::env::var_os("XDG_DATA_HOME")
-            .filter(|dir| !dir.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("share")))
-            .map(|data| data.join("clarp").join("form-events")),
+        _ => clarp_core::dirs::data_home().map(|data| data.join("clarp").join("form-events")),
     }
 }
 

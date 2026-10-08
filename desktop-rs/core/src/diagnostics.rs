@@ -51,11 +51,7 @@ impl CpuRate {
 
 /// `$XDG_STATE_HOME/clarp/desktop-stalls.log`, else under `~/.local/state`.
 pub fn default_stall_log() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))?;
-    Some(base.join("clarp/desktop-stalls.log"))
+    Some(crate::dirs::state_home()?.join("clarp/desktop-stalls.log"))
 }
 
 /// The watchdog's poll interval for a stall threshold.

@@ -126,6 +126,12 @@ impl ApiClient {
         self.send_json(tag, Method::DELETE, self.resolve(path), Body::None, None);
     }
 
+    /// A DELETE that says which run it means (a background job's
+    /// `expected_generation`).
+    pub fn delete_json(&self, tag: &str, path: &str, body: Value) {
+        self.send_json(tag, Method::DELETE, self.resolve(path), Body::Json(body), None);
+    }
+
     pub fn post_bytes(&self, tag: &str, path: &str, body: Vec<u8>, content_type: &str, headers: &[(&str, &str)]) {
         let headers = headers.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
         let body = Body::Bytes { body, content_type: content_type.to_owned(), headers };

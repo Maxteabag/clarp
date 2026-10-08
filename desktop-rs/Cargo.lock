@@ -965,6 +965,7 @@ dependencies = [
  "clarp-core",
  "clarp-engine",
  "clarp-net",
+ "fontdb",
  "futures-util",
  "i-slint-backend-testing",
  "i-slint-core",

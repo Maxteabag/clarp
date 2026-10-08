@@ -107,6 +107,7 @@ pub fn help(state: &str, on_card: bool, vim: bool, overrides: &Overrides) -> Hel
             b.fixed("f", "Open a link");
             b.fixed("zo / zc", "Tool activity");
             b.fixed("J / K", "Cards");
+            b.fixed("Space j", "Jobs and helpers");
             b.group("Go");
             b.fixed("i", "Insert (type)");
             b.fixed("h", "Explorer");
@@ -123,6 +124,7 @@ pub fn help(state: &str, on_card: bool, vim: bool, overrides: &Overrides) -> Hel
             b.action("link-hints", "Open a link");
             b.action("artifact-previous", "Cards");
             b.action("stop-agent", "Stop the agent");
+            b.action("agent-processes", "Jobs and helpers");
             b.action("switcher", "Commands");
             b.group("Go");
             b.action("focus-composer", "Insert (type)");
@@ -143,6 +145,7 @@ pub fn help(state: &str, on_card: bool, vim: bool, overrides: &Overrides) -> Hel
             b.fixed("/", "Filter");
             b.fixed("p", "Live preview");
             b.fixed("zo / zc", "Unfold / fold");
+            b.action("agent-processes", "Jobs and helpers");
             b.group("Go");
             b.fixed("h", "Chat");
             b.fixed("i", "Insert (type)");
@@ -159,6 +162,7 @@ pub fn help(state: &str, on_card: bool, vim: bool, overrides: &Overrides) -> Hel
             b.action("toggle-preview", "Live preview");
             b.action("unfold", "Unfold");
             b.action("fold", "Fold");
+            b.action("agent-processes", "Jobs and helpers");
             b.action("new", "New agent");
             b.group("Go");
             b.action("focus-pane", "Chat");
@@ -202,8 +206,9 @@ pub fn help(state: &str, on_card: bool, vim: bool, overrides: &Overrides) -> Hel
 mod tests {
     use super::*;
 
+    /// The keys as listed, read back as Ctrl (macOS shows Cmd).
     fn items(help: &Help) -> Vec<(String, String)> {
-        help.groups.iter().flat_map(|g| g.items.iter().map(|i| (i.keys.clone(), i.label.clone()))).collect()
+        help.groups.iter().flat_map(|g| g.items.iter().map(|i| (i.keys.replace("Cmd+", "Ctrl+"), i.label.clone()))).collect()
     }
 
     fn has(help: &Help, keys: &str, label: &str) -> bool {
@@ -217,7 +222,7 @@ mod tests {
             for (state, card) in [("pane", false), ("pane", true), ("sidebar", false)] {
                 let help = help(state, card, vim, &none);
                 let count = items(&help).len();
-                assert!((8..=15).contains(&count), "{state} card {card} vim {vim}: {count} keys {:?}", items(&help));
+                assert!((8..=16).contains(&count), "{state} card {card} vim {vim}: {count} keys {:?}", items(&help));
                 assert!(help.groups.len() >= 2, "grouped");
             }
         }
@@ -231,6 +236,12 @@ mod tests {
         assert!(has(&card, "O", "Open") && has(&card, "Esc", "Leave the cards"), "{:?}", items(&card));
         let classic = help("pane", false, false, &none);
         assert!(has(&classic, "F / Ctrl+L", "Open a link") && has(&classic, "Ctrl+T", "New tab"), "{:?}", items(&classic));
+        // Where an agent's jobs are, from the chat and the explorer.
+        assert!(has(&chat, "Space j", "Jobs and helpers"), "{:?}", items(&chat));
+        assert!(has(&classic, "Ctrl+Shift+P", "Jobs and helpers"), "{:?}", items(&classic));
+        assert!(has(&help("sidebar", false, false, &none), "Shift+P / Ctrl+Shift+P", "Jobs and helpers"));
+        assert!(has(&explorer, "P / Ctrl+Shift+P", "Jobs and helpers"), "{:?}", items(&explorer));
+        assert!(has(&help("updates", false, false, &none), "Ctrl+Shift+P", "Jobs"));
         let settings = help("settings", false, false, &none);
         assert_eq!(settings.title, "Keys in Settings");
         assert!(has(&settings, "Esc", "Back"), "{:?}", items(&settings));
@@ -242,7 +253,7 @@ mod tests {
         let mine = keymap::add(&taken, "next-agent", "main", "Right Right").unwrap();
         let shown = help("pane", false, true, &mine);
         let yours = shown.groups.iter().find(|g| g.title == "Yours").expect("a group of the user's own");
-        assert_eq!(yours.items, [Item { keys: "Ctrl+J / Right ×2".into(), label: "Next agent".into() }]);
+        assert_eq!(yours.items, [Item { keys: keymap::display("Ctrl+J") + " / Right ×2", label: "Next agent".into() }]);
         // A rebound action shows the user's key first.
         let link = keymap::add(&Overrides::new(), "link-hints", "main", "Ctrl+Shift+L").unwrap();
         assert!(has(&help("pane", false, false, &link), "Ctrl+Shift+L / F", "Open a link"));
@@ -251,9 +262,10 @@ mod tests {
     #[test]
     fn the_footer_says_where_everything_is() {
         let none = Overrides::new();
-        let vim = help("pane", false, true, &none).footer;
+        // Read as Ctrl (macOS shows Cmd).
+        let vim = help("pane", false, true, &none).footer.replace("Cmd+", "Ctrl+");
         assert!(vim.contains("Space k") && vim.contains("Ctrl+K") && vim.contains("Ctrl+Alt+,"), "{vim}");
-        let classic = help("sidebar", false, false, &none).footer;
+        let classic = help("sidebar", false, false, &none).footer.replace("Cmd+", "Ctrl+");
         assert!(classic.contains("Ctrl+K (commands)") && classic.contains("Esc closes"), "{classic}");
     }
 }

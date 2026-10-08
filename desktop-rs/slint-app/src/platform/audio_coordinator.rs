@@ -5,6 +5,8 @@
 //! interface as the C++ client, so Rust and C++ windows share one player.
 //! Other windows offer their clips to it and poll its state. Without a
 //! session bus it fails closed: never a second, uncoordinated player.
+//! macOS has no session bus: there the window holding an exclusive lock
+//! beside the journal is the player, and any other window stays silent.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -40,6 +42,9 @@ struct Shared {
     polling: bool,
     generation: u64,
     connection: Option<zbus::Connection>,
+    /// The lock that makes this window the player (macOS).
+    #[cfg(target_os = "macos")]
+    owner_lock: Option<std::fs::File>,
 }
 
 #[derive(Clone)]
@@ -53,11 +58,7 @@ fn lock(shared: &Mutex<Shared>) -> std::sync::MutexGuard<'_, Shared> {
 }
 
 fn data_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("share")))?;
-    Some(base.join("MaxTeaBag").join("ClarpRust").join("audio-coordination"))
+    Some(clarp_core::dirs::data_home()?.join("MaxTeaBag").join("ClarpRust").join("audio-coordination"))
 }
 
 /// Written atomically and readable only by the user.
@@ -196,6 +197,12 @@ impl Coordinator {
             state.generation
         };
         let coordinator = self.clone();
+        #[cfg(target_os = "macos")]
+        {
+            coordinator.own_alone(generation);
+            return;
+        }
+        #[cfg_attr(target_os = "macos", allow(unreachable_code))]
         crate::platform::runtime::handle().spawn(async move {
             let connection = match zbus::connection::Builder::session() {
                 Ok(builder) => builder.build().await,
@@ -240,6 +247,10 @@ impl Coordinator {
             state.sending = false;
             state.polling = false;
             state.state = State::default();
+            #[cfg(target_os = "macos")]
+            {
+                state.owner_lock = None;
+            }
             (state.connection.take(), service, was_owner)
         };
         if was_owner {
@@ -293,47 +304,81 @@ impl Coordinator {
             self.abandon(connection, &service, false, None).await;
             return;
         }
+        if let Err(message) = self.assume_ownership(path, muted, generation) {
+            self.abandon(connection, &service, true, Some(message)).await;
+        }
+    }
+
+    /// Takes the journal over and becomes the player, unless the election
+    /// moved on meanwhile; Err(why) to give the name up with.
+    fn assume_ownership(&self, path: Option<PathBuf>, muted: bool, generation: u64) -> Result<(), String> {
         let saved = match path.as_ref().filter(|p| p.exists()).map(std::fs::read_to_string) {
             Some(Err(error)) => {
                 eprintln!("AudioCoordinator: could not read the journal: {error}");
-                self.abandon(connection, &service, true, Some("Cannot read shared audio state".into())).await;
-                return;
+                return Err("Cannot read shared audio state".into());
             }
             Some(Ok(text)) => Some(text),
             None => None,
         };
-        let journal = match Journal::take_over(saved.as_deref(), muted) {
-            Ok(taken) => taken,
-            Err(message) => {
-                self.abandon(connection, &service, true, Some(message)).await;
-                return;
-            }
-        };
-        let (journal, queued) = journal;
+        let (journal, queued) = Journal::take_over(saved.as_deref(), muted)?;
         let announce = {
             let mut state = lock(&self.shared);
             if state.generation != generation {
-                return;
+                return Ok(());
             }
-            match save(&mut state, journal) {
-                Ok(()) => {
-                    state.owner = true;
-                    Ok(snapshot_of(&state))
-                }
-                Err(message) => Err(message),
-            }
-        };
-        let announce = match announce {
-            Ok(announce) => announce,
-            Err(message) => {
-                self.abandon(connection, &service, true, Some(message)).await;
-                return;
-            }
+            save(&mut state, journal)?;
+            state.owner = true;
+            snapshot_of(&state)
         };
         (self.sink)(Event::Ownership(true));
         (self.sink)(Event::State(announce));
         for event in queued {
             (self.sink)(Event::ClipReady(event));
+        }
+        Ok(())
+    }
+
+    /// macOS: the player is whoever holds `<journal>.lock`; without it this
+    /// window stays silent, as without a bus elsewhere.
+    #[cfg(target_os = "macos")]
+    fn own_alone(&self, generation: u64) {
+        let (path, muted) = {
+            let state = lock(&self.shared);
+            (state.journal_path.clone(), state.initially_muted)
+        };
+        let Some(path) = path else { return };
+        let mut lock_path = path.clone().into_os_string();
+        lock_path.push(".lock");
+        let file = match std::fs::File::options().create(true).truncate(false).write(true).open(&lock_path) {
+            Ok(file) => file,
+            Err(error) => {
+                eprintln!("AudioCoordinator: could not open {}: {error}", std::path::Path::new(&lock_path).display());
+                (self.sink)(Event::Error("Cannot coordinate voice replies".into()));
+                return;
+            }
+        };
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                eprintln!("AudioCoordinator: another Clarp window plays voice replies for this Host");
+                return;
+            }
+            Err(std::fs::TryLockError::Error(error)) => {
+                eprintln!("AudioCoordinator: could not lock {}: {error}", std::path::Path::new(&lock_path).display());
+                (self.sink)(Event::Error("Cannot coordinate voice replies".into()));
+                return;
+            }
+        }
+        {
+            let mut state = lock(&self.shared);
+            if state.generation != generation {
+                return;
+            }
+            state.owner_lock = Some(file);
+        }
+        if let Err(message) = self.assume_ownership(Some(path), muted, generation) {
+            lock(&self.shared).owner_lock = None;
+            (self.sink)(Event::Error(message));
         }
     }
 
@@ -346,9 +391,15 @@ impl Coordinator {
     }
 
     async fn tick(&self, generation: u64) {
-        let Some(connection) = lock(&self.shared).connection.clone() else { return };
-        if !self.owner() {
-            self.take_ownership(&connection, generation).await;
+        // macOS's player has no bus and needs none: it only offers to itself.
+        let connection = lock(&self.shared).connection.clone();
+        if connection.is_none() && !self.owner() {
+            return;
+        }
+        if let Some(connection) = connection.as_ref()
+            && !self.owner()
+        {
+            self.take_ownership(connection, generation).await;
         }
         let (owner, service, outbox, send) = {
             let mut state = lock(&self.shared);
@@ -362,11 +413,14 @@ impl Coordinator {
             let events: Vec<Object> = outbox.iter().map(|(_, e)| e.clone()).collect();
             let delivered = if owner {
                 offer_locally(&self.shared, &self.sink, &events)
-            } else {
+            } else if let Some(connection) = connection.as_ref() {
                 let bytes = serde_json::to_vec(&events).unwrap_or_default();
                 let reply = Self::call(&connection, &service, "offer", &(bytes,)).await;
                 lock(&self.shared).sending = false;
                 reply.ok().and_then(|m| m.body().deserialize::<bool>().ok()).unwrap_or(false)
+            } else {
+                lock(&self.shared).sending = false;
+                false
             };
             if delivered {
                 let sent: Vec<String> = outbox.iter().map(|(k, _)| k.clone()).collect();
@@ -380,6 +434,10 @@ impl Coordinator {
             }
             state.polling = true;
         }
+        let Some(connection) = connection else {
+            lock(&self.shared).polling = false;
+            return;
+        };
         let reply = Self::call(&connection, &service, "snapshot", &()).await;
         let received = reply.ok().and_then(|m| m.body().deserialize::<Vec<u8>>().ok());
         let owner = {
