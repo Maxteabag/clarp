@@ -1682,8 +1682,14 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
     }
     let Some(artifact) = artifact(app, id) else { return };
     *app.artifact_cursor.borrow_mut() = id.to_owned();
+    let network = artifact.get("connect_origins")
+        .or_else(|| artifact.get("payload").and_then(|p| p.get("connect_origins")))
+        .cloned().unwrap_or(Value::Null);
+    // Keep legacy reports in their existing viewer. Only an explicit valid
+    // network grant needs the browser's HTML engine; malformed policy denies it.
+    let network_report = !crate::form_server::validated_origins(&network).is_empty();
     match text(&artifact, "type").as_str() {
-        "html_form" => {
+        "html_form" if !is_report(&artifact) || network_report => {
             let interactive = !is_report(&artifact);
             let version = artifact.get("version").cloned().unwrap_or(Value::Null);
             let events = {
@@ -1701,9 +1707,6 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                     }
                 }
             };
-            let network = artifact.get("connect_origins")
-                .or_else(|| artifact.get("payload").and_then(|p| p.get("connect_origins")))
-                .cloned().unwrap_or(Value::Null);
             let owner_origin = app.engine.borrow().form_event_origin();
             match crate::form_server::serve(id, version, &text(&artifact, "content"), events, &network, interactive, &owner_origin) {
                 Ok(url) => crate::open_link(&url),

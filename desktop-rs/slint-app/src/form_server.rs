@@ -275,7 +275,7 @@ fn handle(stream: TcpStream, port: u16) {
 /// The form with iOS's policy (no network but this page, no frames, no
 /// navigation) and its bridge, answers posted to this page.
 /// Malformed metadata cannot become a CSP source, including from an offline cache.
-fn validated_origins(value: &Value) -> Vec<String> {
+pub(super) fn validated_origins(value: &Value) -> Vec<String> {
     let Some(values) = value.as_array() else { return vec![] };
     if values.len() > 8 { return vec![]; }
     let mut result = Vec::new();
