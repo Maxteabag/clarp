@@ -49,5 +49,9 @@ ksni = { version = "0.3", default-features = false, features = ["tokio"] }
 arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
 
+# macOS has no fc-list: the font picker scans the system's fonts instead.
+[target.'cfg(target_os = "macos")'.dependencies]
+fontdb = { version = "0.24", default-features = false, features = ["std", "fs"] }
+
 [build-dependencies]
 slint-build = "1.18"

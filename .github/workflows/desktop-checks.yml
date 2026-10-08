@@ -213,6 +213,32 @@ jobs:
           codesign --verify --strict /tmp/unzipped/Clarp.app
           /tmp/unzipped/Clarp.app/Contents/MacOS/clarp-slint --version
           /tmp/unzipped/Clarp.app/Contents/MacOS/clarp-slint --help | grep -- --pair
+      - name: What macOS sees of the window
+        # Diagnostic: Clarp.app launched by LaunchServices against the fake
+        # Host, then the window list and the Accessibility API's view of it.
+        continue-on-error: true
+        run: |
+          scratch=$(mktemp -d)
+          python3 desktop-rs/tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
+          for _ in $(seq 300); do [ -s "$scratch/port" ] && break; sleep 0.1; done
+          open -n /tmp/unzipped/Clarp.app --stdout "$scratch/app.log" --stderr "$scratch/app.log" \
+            --env CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" --env CLARP_TOKEN=probe-token \
+            --env CLARP_KEYRING=off --env CLARP_SETTINGS=off --env XDG_CONFIG_HOME="$scratch/c" \
+            --env XDG_CACHE_HOME="$scratch/k" --env XDG_DATA_HOME="$scratch/d" --env XDG_STATE_HOME="$scratch/s"
+          sleep 15
+          pid=$(pgrep -x clarp-slint | head -1)
+          echo "pid: $pid"
+          swift desktop-rs/tools/macos-window-probe.swift "$pid"
+          osascript -e 'tell application "System Events" to get {name, count of windows} of (first process whose unix id is '"$pid"')' || true
+          screencapture -x /tmp/macos-window.png || true
+          kill "$pid"
+          tail -40 "$scratch/app.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-window
+          path: /tmp/macos-window.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: clarp-slint-aarch64-macos

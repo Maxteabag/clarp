@@ -9,12 +9,16 @@
 
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use super::APPLICATION;
 
 const SECURITY: &str = "/usr/bin/security";
 /// `errSecItemNotFound`, as `security`'s exit status.
 const NOT_FOUND: i32 = 44;
+/// A Keychain that wants its password puts up a dialog and `security`
+/// waits on it, unseen from SSH: give up rather than hang.
+const PATIENCE: Duration = Duration::from_secs(20);
 
 /// `security -i` splits its commands on whitespace and has no escapes, so
 /// a value goes in only as one plain word.
@@ -28,12 +32,42 @@ fn failure(output: &Output) -> String {
     if stderr.is_empty() { format!("{SECURITY} exited with {}", output.status) } else { format!("Keychain: {stderr}") }
 }
 
-fn run(arguments: &[&str]) -> Result<Output, String> {
-    Command::new(SECURITY).args(arguments).stdin(Stdio::null()).output().map_err(|error| format!("{SECURITY}: {error}"))
+/// Runs `security` with `input` on stdin, killing it after `PATIENCE`.
+/// Its output is a line or two, well within a pipe's buffer.
+fn run(arguments: &[&str], input: Option<&str>) -> Result<Output, String> {
+    let mut child = Command::new(SECURITY)
+        .args(arguments)
+        .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("{SECURITY}: {error}"))?;
+    if let Some(input) = input {
+        // Dropped after writing: EOF ends `security -i`.
+        let written = child.stdin.take().ok_or("no stdin for the Keychain tool")?.write_all(input.as_bytes());
+        if let Err(error) = written {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("{SECURITY}: {error}"));
+        }
+    }
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().map_err(|error| format!("{SECURITY}: {error}")),
+            Ok(None) if started.elapsed() < PATIENCE => std::thread::sleep(Duration::from_millis(25)),
+            Ok(None) => {
+                let killed = child.kill().and_then(|()| child.wait().map(drop));
+                let note = killed.err().map(|error| format!(" (and could not be stopped: {error})")).unwrap_or_default();
+                return Err(format!("the Keychain did not answer in {} s; it may be locked and waiting for its password in a dialog on the Mac's screen{note}", PATIENCE.as_secs()));
+            }
+            Err(error) => return Err(format!("{SECURITY}: {error}")),
+        }
+    }
 }
 
 fn find(server_url: &str) -> Result<String, String> {
-    let output = run(&["find-generic-password", "-s", APPLICATION, "-a", server_url, "-w"])?;
+    let output = run(&["find-generic-password", "-s", APPLICATION, "-a", server_url, "-w"], None)?;
     match output.status.code() {
         Some(0) => Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned()),
         Some(NOT_FOUND) => Ok(String::new()),
@@ -45,17 +79,8 @@ fn add(server_url: &str, token: &str) -> Result<(), String> {
     if !plain_word(server_url) || !plain_word(token) {
         return Err("The Host URL or device token has characters the Keychain tool cannot take".into());
     }
-    let mut child = Command::new(SECURITY)
-        .arg("-i")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("{SECURITY}: {error}"))?;
     let command = format!("add-generic-password -U -s {APPLICATION} -a {server_url} -w {token}\n");
-    let written = child.stdin.take().ok_or("no stdin for the Keychain tool")?.write_all(command.as_bytes());
-    let output = child.wait_with_output().map_err(|error| format!("{SECURITY}: {error}"))?;
-    written.map_err(|error| format!("{SECURITY}: {error}"))?;
+    let output = run(&["-i"], Some(&command))?;
     // Interactive mode reports a failed command on stderr but exits 0:
     // the token counts as stored only once it reads back.
     match find(server_url) {
@@ -66,7 +91,7 @@ fn add(server_url: &str, token: &str) -> Result<(), String> {
 }
 
 fn delete(server_url: &str) -> Result<(), String> {
-    let output = run(&["delete-generic-password", "-s", APPLICATION, "-a", server_url])?;
+    let output = run(&["delete-generic-password", "-s", APPLICATION, "-a", server_url], None)?;
     match output.status.code() {
         Some(0) | Some(NOT_FOUND) => Ok(()),
         _ => Err(failure(&output)),
