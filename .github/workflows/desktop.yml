@@ -4,6 +4,8 @@ name: Desktop build
 # publishes the binary as an asset of the rolling "desktop-builds" release,
 # named by the commit that last changed the desktop. clarpd on each machine
 # downloads it instead of compiling (it builds locally while none exists yet).
+# Beside it goes Clarp.app for Apple Silicon Macs, zipped
+# (clarp-slint-<sha>-aarch64-macos.zip), installed by hand.
 
 on:
   push:
@@ -11,6 +13,7 @@ on:
     paths:
       - "desktop-rs/**"
       - "static/icon.png"
+      - "src-tauri/icons/icon.icns"
       - ".github/workflows/desktop.yml"
   workflow_dispatch:
 
@@ -72,6 +75,52 @@ jobs:
         run: |
           gh release view "$RELEASE" --json assets \
             --jq '.assets | map(select(.name | endswith("-x86_64-linux.gz"))) | sort_by(.createdAt) | reverse | .[(env.KEEP | tonumber):] | .[].name' |
+          while read -r old; do
+            gh release delete-asset "$RELEASE" "$old" -y
+            gh release delete-asset "$RELEASE" "$old.sha256" -y
+          done
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The commit the app is named by
+        id: source
+        run: echo "sha=$(git log -1 --format=%H -- desktop-rs static/icon.png src-tauri/icons/icon.icns)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop-rs
+          shared-key: desktop-macos-release
+      - name: Build
+        working-directory: desktop-rs
+        run: cargo build --release --locked --target aarch64-apple-darwin -p clarp-slint
+      - name: Package
+        run: |
+          sha="${{ steps.source.outputs.sha }}"
+          name="clarp-slint-$sha-aarch64-macos.zip"
+          desktop-rs/tools/macos-bundle.sh desktop-rs/target/aarch64-apple-darwin/release/clarp-slint "${sha::12}" "$name"
+          shasum -a 256 "$name" > "$name.sha256"
+          echo "ASSET=$name" >> "$GITHUB_ENV"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE" >/dev/null 2>&1 || gh release create "$RELEASE" --prerelease \
+            --title "Desktop builds" --notes "Builds of the desktop client, one per desktop change on main: Linux x86_64 (clarpd installs these) and Clarp.app for Apple Silicon Macs." \
+            --target "$GITHUB_SHA"
+          gh release upload "$RELEASE" "$ASSET" "$ASSET.sha256" --clobber
+      - name: Keep the latest builds only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE" --json assets \
+            --jq '.assets | map(select(.name | endswith("-aarch64-macos.zip"))) | sort_by(.createdAt) | reverse | .[(env.KEEP | tonumber):] | .[].name' |
           while read -r old; do
             gh release delete-asset "$RELEASE" "$old" -y
             gh release delete-asset "$RELEASE" "$old.sha256" -y

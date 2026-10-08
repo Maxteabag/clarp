@@ -174,11 +174,7 @@ fn default_transcript_cache() -> Option<std::path::PathBuf> {
     match std::env::var("CLARP_TRANSCRIPT_CACHE") {
         Ok(value) if value == "off" => None,
         Ok(value) if !value.is_empty() => Some(value.into()),
-        _ => std::env::var_os("XDG_CACHE_HOME")
-            .filter(|dir| !dir.is_empty())
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache")))
-            .map(|cache| cache.join("clarp").join("transcripts")),
+        _ => clarp_core::dirs::cache_home().map(|cache| cache.join("clarp").join("transcripts")),
     }
 }
 

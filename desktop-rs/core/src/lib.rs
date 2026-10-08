@@ -13,6 +13,7 @@ pub mod decision_receipt;
 pub mod delivery;
 pub mod diagnostics;
 pub mod directory;
+pub mod dirs;
 pub mod endpoint;
 pub mod form_events;
 pub mod jobs;

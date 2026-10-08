@@ -33,11 +33,7 @@ pub fn avatar_url(avatar_url: &str, display_name: &str) -> String {
 /// Where the Rust client caches things (portraits, chat images), apart
 /// from the C++ client's cache.
 pub fn cache_dir() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|v| !v.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".cache")))?;
-    Some(base.join("MaxTeaBag").join("ClarpRust"))
+    Some(crate::dirs::cache_home()?.join("MaxTeaBag").join("ClarpRust"))
 }
 
 /// The cached portrait source (the Host's, cropped square) for a
