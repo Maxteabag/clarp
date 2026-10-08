@@ -125,6 +125,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("search-messages", "Ctrl+F"),
         ("refresh", "F5"),
         ("overview", "Ctrl+Shift+O"),
+        ("agent-processes", "Ctrl+Shift+P"),
         ("chats", "Ctrl+1"),
         ("updates", "Ctrl+2"),
         ("teams", "Ctrl+3"),
@@ -342,6 +343,17 @@ mod tests {
         assert_eq!(split[0].target, "split-right");
         assert!(rows.iter().all(|c| c.target != "preview-versions"), "only where previews can install");
         assert!(commands(Toggles { preview_versions: true }).iter().any(|c| c.target == "preview-versions"));
+    }
+
+    #[test]
+    fn background_processes_are_found_by_what_one_calls_them() {
+        let rows = commands(Toggles::default());
+        for query in ["processes", "jobs", "background", "tasks", "running", "helpers", "kill", "stop job", "output", "logs"] {
+            let top = rank(rows.clone(), query).into_iter().next().map(|i| i.target);
+            assert_eq!(top.as_deref(), Some("agent-processes"), "{query:?}");
+        }
+        let row = rows.iter().find(|c| c.target == "agent-processes").expect("listed");
+        assert_eq!((row.label.as_str(), row.key.as_str()), ("Background processes", "Ctrl+Shift+P"));
     }
 
     #[test]

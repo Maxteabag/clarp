@@ -69,6 +69,7 @@ After `Space` a panel lists the next keys.
 | `Space u` / `Space T` / `Space o` | Updates / Teams / Overview |
 | `Space p` / `Space R` / `Space d` | Agent profile / rename / change directory |
 | `Space m` / `Space x` / `Space l` | Mute / stop the agent / open a link |
+| `Space j` | The agent's jobs and helpers: `j`/`k` move, `Enter` shows a job's output, `x` stops (`y` confirms), `Esc` closes |
 | `Space ?` | Show or hide the key bar |
 | `Space w v` / `Space w s` | Split right / down |
 | `Space w h/j/k/l` | Move between panes |
@@ -90,7 +91,7 @@ After `Space` a panel lists the next keys.
 | `:set novim` / `vim` / `vim!` | Vim mode off, on, toggle |
 | `:set name=value`, `name+=2`, `noname`, `name!` | Any preference by name (`fontsize=16`, `notimestamps`, `timeformat=24h`); Tab completes the names |
 | `:noh` | Forget the search |
-| `:settings`, `:keymap` (`:help`), `:new`, `:recent`, `:updates`, `:teams`, `:overview` | Open them |
+| `:settings`, `:keymap` (`:help`), `:new`, `:recent`, `:updates`, `:teams`, `:overview`, `:jobs` (`:processes`) | Open them |
 
 ## Tabs and the explorer with Ctrl
 
