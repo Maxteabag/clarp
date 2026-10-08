@@ -128,6 +128,10 @@ fn change_setting(window: &crate::AppWindow, id: &str) {
 pub fn avatars_check(out: String) {
     let o = |n: usize| (0..n).map(|_| out.clone()).collect::<Vec<_>>();
     let [o1, o2, o3, o4, o5, o6, o7, o8, o9, o10] = <[String; 10]>::try_from(o(10)).expect("ten");
+    // Frames drawn when the monitor's scale last changed.
+    let frames = std::rc::Rc::new(std::cell::Cell::new(0u64));
+    let frames2 = std::rc::Rc::new(std::cell::Cell::new(0u64));
+    let (frames_seen, frames2_at) = (frames.clone(), frames2.clone());
     let stages: Vec<Stage> = vec![
         ("live", Box::new(|app, window, _| {
             let sessions: Vec<String> = window.get_chats().iter().map(|r| r.session.to_string()).collect();
@@ -243,6 +247,34 @@ pub fn avatars_check(out: String) {
             }
             check(sizes.iter().all(|s| *s == want), &format!("back at 1x, the portraits are made again at {want} px: {sizes:?}"));
             capture(&o10, "paper-1x-large-overview", window, &["Rachel", "Mike"], LARGE_CARD);
+            // An external display of another scale, as when one is plugged in
+            // on a Mac: the window keeps its pixels until the window system
+            // resizes it. Before `desktop::rescale` the content kept its
+            // logical size, outgrew the renderer's buffer and panicked.
+            frames.set(crate::headless::frames_drawn());
+            crate::platform::desktop::monitor_scale_changed(2.3);
+            true
+        })),
+        ("another monitor", Box::new(move |_, window, elapsed| {
+            if (scale(window) - 2.3).abs() > 0.01 || crate::headless::frames_drawn() <= frames_seen.get() || elapsed < Duration::from_millis(400) {
+                return elapsed > Duration::from_secs(5) && {
+                    check(false, &format!("a 2.3x monitor draws: scale {}, {} frames since", scale(window), crate::headless::frames_drawn() - frames_seen.get()));
+                    true
+                };
+            }
+            check(true, "a 2.3x monitor draws the window in the pixels it has");
+            frames2.set(crate::headless::frames_drawn());
+            crate::platform::desktop::monitor_scale_changed(1.0);
+            true
+        })),
+        ("monitor back", Box::new(move |_, window, elapsed| {
+            if (scale(window) - 1.0).abs() > 0.01 || crate::headless::frames_drawn() <= frames2_at.get() || elapsed < Duration::from_millis(400) {
+                return elapsed > Duration::from_secs(5) && {
+                    check(false, &format!("back on a 1x monitor it draws: scale {}", scale(window)));
+                    true
+                };
+            }
+            check(true, "back on a 1x monitor it draws at 1x");
             true
         })),
     ];

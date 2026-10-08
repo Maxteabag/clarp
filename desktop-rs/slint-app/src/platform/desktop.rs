@@ -135,6 +135,17 @@ fn apply_scale() {
     crate::avatar_view::remake();
 }
 
+/// The window moved to a monitor of another scale (an external display
+/// plugged in or out): the reader's scale stays on top of the new one.
+pub(crate) fn monitor_scale_changed(monitor: f32) {
+    use slint::ComponentHandle;
+    MONITOR_SCALE.with(|s| s.set(monitor));
+    if let Some(window) = crate::window() {
+        rescale(window.window(), monitor * UI_SCALE.with(|s| s.get()));
+        crate::avatar_view::remake();
+    }
+}
+
 /// Draws the window at `scale` in the pixels it has. Slint's
 /// ScaleFactorChanged alone keeps the logical size, so the content would
 /// outgrow the software renderer's buffer, which is sized from the pixels,
@@ -202,15 +213,8 @@ fn watch_window() {
         match event {
             // The monitor changed: keep the reader's scale on top of it.
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                MONITOR_SCALE.with(|s| s.set(*scale_factor as f32));
-                let scale = *scale_factor as f32 * UI_SCALE.with(|s| s.get());
-                if let Err(error) = slint::invoke_from_event_loop(move || {
-                    if let Some(window) = crate::window() {
-                        use slint::ComponentHandle;
-                        rescale(window.window(), scale);
-                        crate::avatar_view::remake();
-                    }
-                }) {
+                let monitor = *scale_factor as f32;
+                if let Err(error) = slint::invoke_from_event_loop(move || monitor_scale_changed(monitor)) {
                     eprintln!("clarp-slint: dropped a scale change: {error}");
                 }
             }

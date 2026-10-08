@@ -231,6 +231,11 @@ pub fn type_text(text: &str) {
 
 const MARGIN: usize = 8;
 
+/// How many frames have been drawn so far.
+pub fn frames_drawn() -> u64 {
+    FRAME.with(|frame| frame.borrow().3)
+}
+
 /// Saves the last drawn frame as PNG.
 pub fn save_frame(path: &str) -> Result<(), String> {
     FRAME.with(|frame| {
