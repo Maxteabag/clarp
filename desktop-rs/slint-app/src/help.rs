@@ -206,8 +206,9 @@ pub fn help(state: &str, on_card: bool, vim: bool, overrides: &Overrides) -> Hel
 mod tests {
     use super::*;
 
+    /// The keys as listed, read back as Ctrl (macOS shows Cmd).
     fn items(help: &Help) -> Vec<(String, String)> {
-        help.groups.iter().flat_map(|g| g.items.iter().map(|i| (i.keys.clone(), i.label.clone()))).collect()
+        help.groups.iter().flat_map(|g| g.items.iter().map(|i| (i.keys.replace("Cmd+", "Ctrl+"), i.label.clone()))).collect()
     }
 
     fn has(help: &Help, keys: &str, label: &str) -> bool {
