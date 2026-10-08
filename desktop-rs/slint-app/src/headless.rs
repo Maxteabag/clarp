@@ -61,7 +61,6 @@ impl Platform for Headless {
     fn run_event_loop(&self) -> Result<(), PlatformError> {
         self.window.set_size(PhysicalSize::new(self.size.0, self.size.1));
         self.window.dispatch_event(WindowEvent::WindowActiveChanged(true));
-        let mut last_scale = self.window.scale_factor();
         loop {
             slint::platform::update_timers_and_animations();
             let tasks: Vec<Task> = match self.queue.tasks.lock() {
@@ -74,13 +73,10 @@ impl Platform for Headless {
             if self.queue.quit.load(Ordering::SeqCst) {
                 return Ok(());
             }
-            // A scale change keeps the logical size and so grows the window;
-            // a real window keeps its pixels and scales its content instead.
-            let scale = self.window.scale_factor();
-            if scale != last_scale {
-                last_scale = scale;
-                self.window.set_size(PhysicalSize::new(self.size.0, self.size.1));
-            }
+            // No resize after a scale change here: the app's own
+            // (`desktop::rescale`) must keep the window in its pixels, or this
+            // renderer panics as the real window's does (the avatars check
+            // scales to 1.5).
             let size = self.window.size();
             let (width, height) = (size.width as usize, size.height as usize);
             self.window.draw_if_needed(|renderer| {
