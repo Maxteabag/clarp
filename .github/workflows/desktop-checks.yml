@@ -171,6 +171,16 @@ jobs:
         run: |
           cargo build --locked -p clarp-slint
           slint-app/tests/check.sh pair /tmp/checks-macos/pair
+      - name: Window checks
+        working-directory: desktop-rs
+        continue-on-error: true
+        run: |
+          brew install coreutils dbus
+          export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"
+          for c in startup send composer; do
+            slint-app/tests/check.sh "$c" "/tmp/checks-macos/$c" > "/tmp/checks-macos/$c.log" 2>&1 && echo "$c: E2E_PASS" || echo "$c: FAILED"
+            grep -E "^(ok|FAIL)" "/tmp/checks-macos/$c.log" | tail -5
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
