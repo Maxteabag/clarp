@@ -16,6 +16,9 @@ pub mod stall_monitor;
 pub mod mpris;
 pub mod runtime;
 
+/// The desktop's opener for files and URLs.
+pub const OPENER: &str = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+
 use std::cell::RefCell;
 
 thread_local! {
@@ -26,6 +29,10 @@ thread_local! {
 /// Serves the MPRIS player: media keys and the panel's controls pause,
 /// resume and stop speech; Raise shows the window; Quit closes it.
 pub fn serve_mpris() {
+    if cfg!(target_os = "macos") {
+        eprintln!("clarp-slint: MPRIS is a Linux service; media keys do not reach Clarp on macOS");
+        return;
+    }
     let status = audio::with(|audio| audio.playback_state()).unwrap_or_default();
     runtime::handle().spawn(async move {
         let served = mpris::Mpris::serve(status, |request| {

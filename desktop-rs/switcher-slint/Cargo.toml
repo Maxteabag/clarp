@@ -13,9 +13,12 @@ serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 slint = { version = "1.18", default-features = false, features = [
     "std", "compat-1-2", "accessibility",
-    "backend-winit", "backend-winit-wayland", "backend-winit-x11",
+    "backend-winit",
     "renderer-software", "software-renderer-systemfonts",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["backend-winit-wayland", "backend-winit-x11"] }
 
 [build-dependencies]
 slint-build = "1.18"

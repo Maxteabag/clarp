@@ -143,9 +143,7 @@ impl Settings {
 }
 
 pub fn config_home() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+    crate::dirs::config_home()
 }
 
 /// Trim and drop trailing slashes; empty means the local default Host.

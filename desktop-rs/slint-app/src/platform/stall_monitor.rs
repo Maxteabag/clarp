@@ -21,7 +21,7 @@ const MAX_FRAMES: usize = 64;
 const ROTATE_BYTES: u64 = 4 * 1024 * 1024;
 
 unsafe extern "C" {
-    // glibc <execinfo.h>; async-signal-safe once warmed up.
+    // <execinfo.h> (glibc, libSystem); async-signal-safe once warmed up.
     fn backtrace(buffer: *mut *mut c_void, size: i32) -> i32;
 }
 
@@ -39,8 +39,15 @@ extern "C" fn capture_stack(_signal: i32) {
     CAPTURED.store(true, Ordering::SeqCst);
 }
 
+#[cfg(target_os = "linux")]
 fn stack_signal() -> i32 {
     libc::SIGRTMIN() + 7
+}
+
+/// macOS has no real-time signals; nothing else here uses SIGUSR2.
+#[cfg(not(target_os = "linux"))]
+fn stack_signal() -> i32 {
+    libc::SIGUSR2
 }
 
 /// What the watchdog and the minute line share.

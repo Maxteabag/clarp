@@ -3,7 +3,9 @@
 //! replies in chats that are not open; and desktop presence (someone is at
 //! this window, so the Host may pause phone alerts; `clarp_core::presence`).
 //! The tray is a StatusNotifierItem; without a tray host there is no tray
-//! and, as in the Qt and C++ clients, no notifications.
+//! and, as in the Qt and C++ clients, no notifications. macOS has no tray
+//! (Show and Quit are the Dock's), notifies through Notification Center,
+//! and takes presence from the window alone (there is no logind).
 //!
 //! For checks: `CLARP_TEST_NOTIFY_LOG` records notifications in a file
 //! instead of sending them, `CLARP_TEST_FOREGROUND=1` treats the
@@ -11,6 +13,7 @@
 //! (or `locked`) stands in for the login session logind would report.
 
 use std::cell::RefCell;
+#[cfg(target_os = "linux")]
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,18 +21,21 @@ use super::runtime;
 
 /// What the tray asks the window to do.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 enum Action {
     Show,
     Mute(bool),
     Quit,
 }
 
+#[cfg(target_os = "linux")]
 struct ClarpTray {
     muted: bool,
     icons: Vec<ksni::Icon>,
     act: Arc<dyn Fn(Action) + Send + Sync>,
 }
 
+#[cfg(target_os = "linux")]
 impl ksni::Tray for ClarpTray {
     fn id(&self) -> String {
         "clarp-desktop".into()
@@ -66,8 +72,15 @@ impl ksni::Tray for ClarpTray {
     }
 }
 
+#[cfg(target_os = "linux")]
+type TrayHandle = ksni::Handle<ClarpTray>;
+/// No tray outside Linux.
+#[cfg(not(target_os = "linux"))]
+type TrayHandle = std::convert::Infallible;
+
 struct Services {
-    tray: Option<ksni::Handle<ClarpTray>>,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    tray: Option<TrayHandle>,
     presence: clarp_core::presence::Presence,
     instance: String,
     clock: Instant,
@@ -81,6 +94,7 @@ thread_local! {
     static SERVICES: RefCell<Option<Services>> = const { RefCell::new(None) };
 }
 
+#[cfg(target_os = "linux")]
 const ICON: &[u8] = include_bytes!("../../../../static/icon.png");
 
 fn later(act: impl FnOnce() + Send + 'static) {
@@ -136,6 +150,16 @@ fn start_now() {
     });
     presence_tick();
     runtime::handle().spawn(watch_login_session());
+    start_tray(muted);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn start_tray(_muted: bool) {
+    eprintln!("clarp-slint: no system tray on this platform; the Dock shows and quits Clarp");
+}
+
+#[cfg(target_os = "linux")]
+fn start_tray(muted: bool) {
     let act: Arc<dyn Fn(Action) + Send + Sync> = Arc::new(|action| later(move || perform(action)));
     let icons = [22, 48].iter().filter_map(|&side| clarp_core::media::argb_icon(ICON, side)).map(|(width, height, data)| ksni::Icon { width, height, data }).collect();
     let tray = ClarpTray { muted, icons, act };
@@ -303,6 +327,7 @@ fn login_state(state: LoginState) {
     }
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn perform(action: Action) {
     use slint::ComponentHandle;
     match action {
@@ -328,7 +353,9 @@ fn perform(action: Action) {
 }
 
 /// The tray's Mute item follows mute set anywhere else.
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
 pub fn muted_changed(muted: bool) {
+    #[cfg(target_os = "linux")]
     SERVICES.with(|slot| {
         if let Some(tray) = slot.borrow().as_ref().and_then(|s| s.tray.clone()) {
             runtime::handle().spawn(async move {
@@ -338,8 +365,8 @@ pub fn muted_changed(muted: bool) {
     });
 }
 
-/// A reply in a chat that is not open. Only with a tray, as in the Qt and
-/// C++ clients. `sound` asks the desktop for its message sound (Settings →
+/// A reply in a chat that is not open. On Linux only with a tray, as in
+/// the Qt and C++ clients. `sound` asks the desktop for its message sound (Settings →
 /// Notification sound).
 pub fn notify(title: String, body: String, sound: bool) {
     if let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") {
@@ -351,6 +378,35 @@ pub fn notify(title: String, body: String, sound: bool) {
         }
         return;
     }
+    #[cfg(target_os = "macos")]
+    notify_macos(title, body, sound);
+    #[cfg(not(target_os = "macos"))]
+    notify_freedesktop(title, body, sound);
+}
+
+/// Through Notification Center (as Script Editor, the sender `osascript`
+/// is): the texts go as arguments, never into the script.
+#[cfg(target_os = "macos")]
+fn notify_macos(title: String, body: String, sound: bool) {
+    let script = if sound {
+        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv) sound name \"Glass\"\nend run"
+    } else {
+        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
+    };
+    let spawned = std::thread::Builder::new().name("notify".into()).spawn(move || {
+        match std::process::Command::new("/usr/bin/osascript").args(["-e", script, &title, &body]).stdout(std::process::Stdio::null()).output() {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => eprintln!("clarp-slint: notification failed: {}", String::from_utf8_lossy(&output.stderr).trim()),
+            Err(error) => eprintln!("clarp-slint: notification failed: {error}"),
+        }
+    });
+    if let Err(error) = spawned {
+        eprintln!("clarp-slint: notification failed: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn notify_freedesktop(title: String, body: String, sound: bool) {
     let has_tray = SERVICES.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.tray.is_some()));
     if !has_tray {
         return;
@@ -429,6 +485,12 @@ async fn watch_login_session() {
     // A check's login session ("unlocked" or "locked"), never the machine's.
     if let Ok(test) = std::env::var("CLARP_TEST_LOGIN") {
         send(LoginState::Session { available: true, unlocked: test == "unlocked" });
+        return;
+    }
+    // No logind: presence follows the window (focus and input) alone.
+    if cfg!(target_os = "macos") {
+        eprintln!("clarp-slint: presence follows the window; macOS has no login session to read");
+        send(LoginState::Session { available: true, unlocked: true });
         return;
     }
     let bus = match zbus::Connection::system().await {

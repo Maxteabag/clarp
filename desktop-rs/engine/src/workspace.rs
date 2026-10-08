@@ -17,13 +17,7 @@ pub fn default_store_path() -> Option<PathBuf> {
     match std::env::var("CLARP_WORKSPACE_STORE") {
         Ok(value) if value == "off" => None,
         Ok(value) if !value.is_empty() => Some(PathBuf::from(value)),
-        _ => {
-            let config = std::env::var_os("XDG_CONFIG_HOME")
-                .filter(|dir| !dir.is_empty())
-                .map(PathBuf::from)
-                .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-            Some(config.join("MaxTeaBag").join("ClarpSlint").join("workspaces.json"))
-        }
+        _ => Some(clarp_core::dirs::app_config_dir()?.join("workspaces.json")),
     }
 }
 

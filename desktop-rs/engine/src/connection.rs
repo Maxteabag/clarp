@@ -1,8 +1,8 @@
 //! Connecting to a Host (the Qt controller's `connectToServer`, `pairDevice`
-//! and `forgetCredential`). Device tokens live in the Secret Service; with
+//! and `forgetCredential`). Device tokens live in the desktop keyring; with
 //! `Config::keyring` off (checks, tests) it is never touched.
 
-use clarp_core::json::{self, Object};
+use clarp_core::json::Object;
 use clarp_core::settings::normalized_base_url;
 use serde_json::{Value, json};
 use url::Url;
@@ -90,13 +90,15 @@ impl Engine {
     }
 
     pub(crate) fn handle_pairing(&mut self, object: &Object) {
-        let token = object.get("device").and_then(Value::as_object).map(|d| json::string(d, "token")).unwrap_or_default();
-        if token.is_empty() {
-            self.set_connecting(false);
-            self.set_connection_state("offline");
-            self.set_error("Pairing response did not contain a device credential");
-            return;
-        }
+        let token = match clarp_net::pairing::device_token(object) {
+            Ok(token) => token,
+            Err(message) => {
+                self.set_connecting(false);
+                self.set_connection_state("offline");
+                self.set_error(&message);
+                return;
+            }
+        };
         self.token = token.clone();
         self.store_credential(token);
         self.reconnect();

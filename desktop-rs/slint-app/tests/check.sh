@@ -3,6 +3,8 @@
 # display, private bus, scratch config): slint-app/tests/check.sh NAME [OUT]
 set -uo pipefail
 cd "$(dirname "$0")/../.."
+# pair runs the command line, not the window (and runs on macOS too).
+[ "$1" = pair ] && exec slint-app/tests/pair-check.sh "${2:-slint-app/docs/checks/pair}"
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
 # Every artifact type and its interactions run in one long check.
 case $name in artifacts|scroll-jump|live|row-overlap) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac

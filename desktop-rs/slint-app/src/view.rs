@@ -213,7 +213,7 @@ pub(crate) fn open_file(path: &std::path::Path) -> Result<(), String> {
         let mut log = std::fs::OpenOptions::new().create(true).append(true).open(record).map_err(|e| e.to_string())?;
         return writeln!(log, "file://{}", path.display()).map_err(|e| e.to_string());
     }
-    std::process::Command::new("xdg-open").arg(path).spawn().map(drop).map_err(|e| format!("could not open {}: {e}", path.display()))
+    std::process::Command::new(crate::platform::OPENER).arg(path).spawn().map(drop).map_err(|e| format!("could not open {}: {e}", path.display()))
 }
 
 pub(crate) fn stamp(epoch_millis: i64) -> String {
@@ -337,7 +337,7 @@ pub(crate) fn open_link(url: &str) {
         }
         return;
     }
-    if let Err(error) = std::process::Command::new("xdg-open").arg(url).spawn() {
+    if let Err(error) = std::process::Command::new(crate::platform::OPENER).arg(url).spawn() {
         eprintln!("clarp-slint: could not open {url}: {error}");
     }
 }
