@@ -113,4 +113,5 @@ the font picker lists the system's font folders instead of asking
 `fc-list`, and one voice player per Host by a
 file lock instead of the session bus. `--pair` works the same on Linux,
 against the Secret Service. The macOS CI job runs the unit tests and
-`check.sh pair`; the window checks run on Linux only.
+`check.sh pair`; the window checks run on Linux only (on a macOS runner
+`send` and `composer` time out opening a chat, not yet looked into).
