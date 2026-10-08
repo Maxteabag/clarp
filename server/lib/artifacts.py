@@ -881,13 +881,17 @@ def has_pending_decision(agent_id: str) -> bool:
 
 
 def attention(*, include_questions: bool = False, include_archived: bool = False) -> list[dict]:
+    """Pending decisions for Updates. A quiet agent's (a Janitor's) stay in its
+    own chat and never come here (``quiet_agents``)."""
+    from . import quiet_agents
     _expire_decisions()
     rows = db.conn().execute(
-        """SELECT d.*,a.agent_id,a.session,a.title,a.summary,a.created_at,a.updated_at,a.archived_at,
+        f"""SELECT d.*,a.agent_id,a.session,a.title,a.summary,a.created_at,a.updated_at,a.archived_at,
                   a.payload_json AS artifact_payload_json,
                   g.persona AS agent_name FROM artifact_decisions d JOIN artifacts a
                   ON a.artifact_id=d.artifact_id JOIN agents g ON g.agent_id=a.agent_id
             WHERE d.status='pending' AND a.deleted_at IS NULL AND g.deleted_at IS NULL
+              AND {quiet_agents.loud_sql("g")}
               AND (? OR d.response_type='approval') AND (? OR a.archived_at IS NULL)
               AND (d.expires_at IS NULL OR d.expires_at>?)""",
         (include_questions, include_archived, db.now_ms())).fetchall()

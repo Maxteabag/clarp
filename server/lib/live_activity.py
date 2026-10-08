@@ -198,6 +198,7 @@ class LiveActivityPusher:
         self._min_interval = min_interval
         self._lock = threading.Lock()
         self._agents: dict[str, dict[str, Any]] = {}
+        self._quiet: set[str] = set()
         self._sent_key: tuple | None = None
         self._sent_needs = 0
         self._last_sent = 0.0
@@ -254,19 +255,31 @@ class LiveActivityPusher:
             return
         agent_id = str(event.get("agent_id") or "")
         with self._lock:
-            info = self._agents.setdefault(agent_id, self._identity(agent_id, event))
+            if agent_id in self._quiet:
+                return
+            info = self._agents.get(agent_id)
+            if info is None:
+                info = self._identity(agent_id, event)
+                if info.pop("quiet"):
+                    # A Janitor's work is not "agents working" (quiet_agents).
+                    self._quiet.add(agent_id)
+                    return
+                self._agents[agent_id] = info
             info["activity"] = statuses[-1].get("activity") or {}
             self._consider()
 
     @staticmethod
     def _identity(agent_id: str, event: dict[str, Any]) -> dict[str, Any]:
-        persona = ""
+        from . import agents as agents_db, quiet_agents
         try:
-            from . import agents as agents_db
-            persona = str((agents_db.get_by_agent_id(agent_id) or {}).get("persona") or "")
-        except Exception:  # noqa: BLE001
-            pass
-        return {"session": event.get("session") or "", "persona": persona}
+            agent = agents_db.get_by_agent_id(agent_id) or {}
+        except Exception as exc:  # noqa: BLE001 - never break the live stream
+            from .log import log_exception
+            log_exception("liveActivityAgentLookupFail", exc, detail=f"agent={agent_id}")
+            agent = {}
+        return {"session": event.get("session") or "",
+                "persona": str(agent.get("persona") or ""),
+                "quiet": quiet_agents.is_quiet(agent)}
 
     def _consider(self) -> None:
         state = content_state(self._agents, int(self._clock() * 1000), self._current_attention())

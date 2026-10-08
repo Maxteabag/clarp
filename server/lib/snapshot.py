@@ -7,7 +7,7 @@ from typing import Any
 from . import (background_jobs, agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
                compaction, db,
                config, message_store, model_avatars, team_store,
-               turn_queue, scheduler, janitors)
+               turn_queue, scheduler, janitors, quiet_agents)
 from . import reconcile
 from .clock import now_ms
 from .session_models import agent_model
@@ -203,6 +203,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "mcp_servers":    mcp_servers,
             "schedules":      schedules.get(agent_id, []),
             "is_janitor": bool(a.get("is_janitor")),
+            # Never unread, in Updates, Ctrl+J or "agents working" by itself.
+            "quiet": quiet_agents.is_quiet(a),
             "parent_agent_id": a.get("parent_agent_id") or None,
             "role": a.get("role") or "agent",
             "helper_state": a.get("helper_state") or None,
