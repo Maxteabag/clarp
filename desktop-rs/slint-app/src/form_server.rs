@@ -26,6 +26,9 @@ struct Form {
     artifact_id: String,
     version: Value,
     html: String,
+    connect_origins: Vec<String>,
+    interactive: bool,
+    owner_origin: String,
     /// The latest draft the page saved, restored when it opens again.
     draft: Value,
     /// Where its events are queued; None on a Host without them.
@@ -103,10 +106,11 @@ fn port() -> Result<u16, String> {
 
 /// The page for `artifact_id`'s form, kept for the window's life: opening
 /// it again returns the same page with its draft.
-pub fn serve(artifact_id: &str, version: Value, html: &str, events: Option<Events>) -> Result<String, String> {
+pub fn serve(artifact_id: &str, version: Value, html: &str, events: Option<Events>, network: &Value, interactive: bool, owner_origin: &str) -> Result<String, String> {
     let port = port()?;
+    let connect_origins = validated_origins(network);
     let mut forms = forms().lock().map_err(|_| "the form list is poisoned".to_owned())?;
-    let token = match forms.iter().find(|(_, f)| f.artifact_id == artifact_id).map(|(t, _)| t.clone()) {
+    let token = match forms.iter().find(|(_, f)| f.artifact_id == artifact_id && f.version == version && f.connect_origins == connect_origins && f.interactive == interactive && f.owner_origin == owner_origin).map(|(t, _)| t.clone()) {
         Some(token) => {
             let form = forms.get_mut(&token).expect("found above");
             form.version = version;
@@ -116,7 +120,7 @@ pub fn serve(artifact_id: &str, version: Value, html: &str, events: Option<Event
         }
         None => {
             let token = uuid::Uuid::new_v4().simple().to_string();
-            forms.insert(token.clone(), Form { artifact_id: artifact_id.to_owned(), version, html: html.to_owned(), draft: json!({}), events });
+            forms.insert(token.clone(), Form { artifact_id: artifact_id.to_owned(), version, html: html.to_owned(), draft: json!({}), events, connect_origins, interactive, owner_origin: owner_origin.to_owned() });
             token
         }
     };
@@ -195,9 +199,12 @@ fn handle(stream: TcpStream, port: u16) {
     let (token, action) = rest.split_once('/').unwrap_or((rest, ""));
     let Ok(mut forms) = forms().lock() else { return respond(&stream, 500, "text/plain", "form list unavailable") };
     let Some(form) = forms.get_mut(token) else { return respond(&stream, 404, "text/plain", "not found") };
+    if request.method == "POST" && !form.interactive {
+        return respond(&stream, 403, "text/plain", "read-only report");
+    }
     match (request.method.as_str(), action) {
         ("GET", "") => {
-            let page = page(&form.html, &form.draft, form.events.is_some());
+            let page = page(&form.html, &form.draft, form.events.is_some(), &form.connect_origins, &format!("http://{own}"), form.interactive);
             drop(forms);
             respond(&stream, 200, "text/html; charset=utf-8", &page);
         }
@@ -267,10 +274,53 @@ fn handle(stream: TcpStream, port: u16) {
 
 /// The form with iOS's policy (no network but this page, no frames, no
 /// navigation) and its bridge, answers posted to this page.
-fn page(html: &str, draft: &Value, event_log: bool) -> String {
+/// Malformed metadata cannot become a CSP source, including from an offline cache.
+fn validated_origins(value: &Value) -> Vec<String> {
+    let Some(values) = value.as_array() else { return vec![] };
+    if values.len() > 8 { return vec![]; }
+    let mut result = Vec::new();
+    for value in values {
+        let Some(origin) = value.as_str() else { return vec![] };
+        if origin.len() > 256 { return vec![]; }
+        let Some(authority) = origin.strip_prefix("https://") else { return vec![] };
+        let (host, port) = match authority.split_once(':') {
+            Some((host, port)) => {
+                if port.is_empty() || port.len() > 5 || !port.bytes().all(|b| b.is_ascii_digit()) { return vec![]; }
+                let Ok(port) = port.parse::<u16>() else { return vec![] };
+                if port == 0 { return vec![]; }
+                (host, port)
+            }
+            None => (authority, 443),
+        };
+        let host = host.to_ascii_lowercase();
+        let labels: Vec<_> = host.split('.').collect();
+        if labels.iter().any(|label| label.is_empty() || label.len() > 63
+            || !label.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+            || !label.as_bytes().last().is_some_and(u8::is_ascii_alphanumeric)
+            || !label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')) { return vec![]; }
+        let last = labels.last().copied().unwrap_or_default();
+        if last.bytes().all(|b| b.is_ascii_digit()) || last.starts_with("0x") {
+            let Ok(address) = host.parse::<std::net::Ipv4Addr>() else { return vec![] };
+            if address.to_string() != host { return vec![]; }
+        }
+        let canonical = if port == 443 { format!("https://{host}") } else { format!("https://{host}:{port}") };
+        if !result.contains(&canonical) { result.push(canonical); }
+    }
+    result
+}
+
+fn page(html: &str, draft: &Value, event_log: bool, origins: &[String], internal_origin: &str, interactive: bool) -> String {
     // Inside a script, "</" could close it early.
     let saved = draft.to_string().replace("</", "<\\/");
-    let policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src 'self'; frame-src 'none'; form-action 'none'; base-uri 'none'";
+    let network = json!(origins).to_string();
+    let mut sources = origins.to_vec();
+    if interactive { sources.insert(0, internal_origin.to_owned()); }
+    let connect = if sources.is_empty() { "'none'".to_owned() } else { sources.join(" ") };
+    let policy = format!("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src {connect}; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'");
+    let network_info = format!("<details style=\"position:fixed;top:8px;right:8px;background:#1a1b26;color:#e7e1dc;padding:6px;font:14px sans-serif\"><summary>Network access</summary>{}</details>", if origins.is_empty() { "External connections blocked".to_owned() } else { origins.join("<br>") });
+    if !interactive {
+        return format!("<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"{policy}\"><script>window.clarpForm={{capabilities:{{network:{network}}}}};</script>{html}{network_info}");
+    }
     let bridge = format!(
         r#"(() => {{
   let saved = {saved}, custom = null;
@@ -313,7 +363,7 @@ fn page(html: &str, draft: &Value, event_log: bool) -> String {
     promise.catch(() => {{}});
     return promise;
   }}
-  window.clarpForm = {{capabilities: {{eventLog: {event_log}}}, collect, getDraft: () => saved, log,
+  window.clarpForm = {{capabilities: {{eventLog: {event_log}, network: {network}}}, collect, getDraft: () => saved, log,
     setAnswers: (answers) => {{ custom = answers; saved = answers; post('draft', answers); }},
     submit: (answers) => {{ if (answers !== undefined) custom = answers; post('draft', collect()); post('submit', collect()); }}}};
   document.addEventListener('DOMContentLoaded', () => {{
@@ -332,7 +382,7 @@ fn page(html: &str, draft: &Value, event_log: bool) -> String {
 <span id=\"clarp-status\">Drafts are kept by Clarp until you send.</span></div><div style=\"height:56px\"></div>";
     format!(
         "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-<meta http-equiv=\"Content-Security-Policy\" content=\"{policy}\"><script>{bridge}</script>{html}{bar}"
+<meta http-equiv=\"Content-Security-Policy\" content=\"{policy}\"><script>{bridge}</script>{html}{bar}{network_info}"
     )
 }
 
@@ -342,14 +392,30 @@ mod tests {
 
     #[test]
     fn a_draft_cannot_close_the_bridge_script() {
-        let page = page("<form></form>", &json!({"note": "</script><script>alert(1)"}), false);
+        let page = page("<form></form>", &json!({"note": "</script><script>alert(1)"}), false, &[], "http://127.0.0.1:1234", true);
         assert!(!page.contains("</script><script>alert"), "{page}");
-        assert!(page.contains("connect-src 'self'"));
+        assert!(page.contains("connect-src http://127.0.0.1:1234;"));
     }
 
     #[test]
     fn the_bridge_offers_the_event_log_only_on_a_host_that_keeps_events() {
-        assert!(page("", &json!({}), true).contains("capabilities: {eventLog: true}"));
-        assert!(page("", &json!({}), false).contains("capabilities: {eventLog: false}"));
+        assert!(page("", &json!({}), true, &[], "http://127.0.0.1:1234", true).contains("capabilities: {eventLog: true, network: []}"));
+        assert!(page("", &json!({}), false, &[], "http://127.0.0.1:1234", true).contains("capabilities: {eventLog: false, network: []}"));
     }
+    #[test]
+    fn untrusted_network_metadata_is_exact_and_bounded() {
+        assert_eq!(validated_origins(&json!(["https://Storage.Googleapis.Com:443", "https://storage.googleapis.com", "https://api.example.com:8443"])), vec!["https://storage.googleapis.com", "https://api.example.com:8443"]);
+        for value in [json!(null), json!("https://example.com"), json!([false]),
+            json!(["http://example.com"]), json!(["https://*.example.com"]),
+            json!(["https://example.com/"]), json!(["https://example.com/path"]),
+            json!(["https://example.com?x=1"]), json!(["https://example.com#fragment"]),
+            json!(["https://user@example.com"]), json!(["https://example.com; connect-src *"]),
+            json!(["https://example.com\n"]), json!(["https://example.com:0"]),
+            json!(["https://example.com:65536"]), json!(["https://127.1"]),
+            json!(["https://2130706433"]), json!(["https://example.com."]),
+            json!((0..9).map(|i| format!("https://host{i}.example")).collect::<Vec<_>>())] {
+            assert!(validated_origins(&value).is_empty(), "{value}");
+        }
+    }
+
 }

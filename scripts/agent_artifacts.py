@@ -178,10 +178,14 @@ def _create_form(args: list[str]) -> dict:
     parser.add_argument("--summary", default="")
     parser.add_argument("--artifact-id", required=True,
                         help="stable client-chosen identity; reconcile this ID after ambiguous publication")
+    parser.add_argument("--connect", action="append", default=[], metavar="HTTPS_ORIGIN")
     parser.add_argument("--dry-run", action="store_true")
     parsed = parser.parse_args(args)
+    from lib.html_forms import connect_origins
+    network = connect_origins(parsed.connect)
     payload = {"content": parsed.html_file.read_text(), "version": parsed.version,
                "answer_schema": json.loads(parsed.schema_file.read_text())}
+    if parsed.connect: payload["connect_origins"] = network
     body = {"session": parsed.session, "title": parsed.title, "type": "html_form",
             "summary": parsed.summary, "artifact_id": parsed.artifact_id, "payload": payload}
     if parsed.dry_run:
@@ -204,8 +208,11 @@ def _create_report(args: list[str]) -> dict:
     parser.add_argument("--artifact-id", default="",
                         help="stable identity; defaults to one derived from the title and HTML")
     parser.add_argument("--version", default="1")
+    parser.add_argument("--connect", action="append", default=[], metavar="HTTPS_ORIGIN")
     parser.add_argument("--dry-run", action="store_true")
     parsed = parser.parse_args(args)
+    from lib.html_forms import connect_origins
+    network = connect_origins(parsed.connect)
     content = parsed.html_file.read_text()
     if not content.strip():
         raise ValueError("report HTML is empty")
@@ -213,6 +220,7 @@ def _create_report(args: list[str]) -> dict:
             "summary": parsed.summary,
             "artifact_id": parsed.artifact_id or _report_id(parsed.title, content),
             "payload": {"content": content, "version": parsed.version, "read_only": True}}
+    if parsed.connect: body["payload"]["connect_origins"] = network
     if parsed.dry_run:
         return {"method": "POST", "path": "/artifacts", "body": body}
     try:

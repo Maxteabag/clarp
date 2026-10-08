@@ -128,3 +128,36 @@ def test_report_history_upgrade_preserves_artifacts_and_answer_receipts(tmp_path
     assert tuple(con.execute('SELECT * FROM form_submissions WHERE submission_id=?', (body['submission_id'],)).fetchone()) == receipt_before
     assert con.execute('SELECT COUNT(*) FROM html_report_revisions').fetchone()[0] == 0
     assert con.execute('PRAGMA user_version').fetchone()[0] == db._SCHEMA_VERSION
+
+
+@pytest.mark.parametrize('origins', [
+    None, 'https://example.com', [False], ['http://example.com'],
+    ['https://*.example.com'], ['https://example.com/path'],
+    ['https://example.com/'], ['https://example.com?x=1'],
+    ['https://example.com#fragment'], ['https://user@example.com'],
+    ["https://example.com; connect-src *"], ['https://example.com\n'],
+    ['https://example.com:0'], ['https://example.com:65536'],
+    ['https://127.1'], ['https://2130706433'], ['https://example.com.'],
+    [f'https://host{i}.example' for i in range(9)],
+])
+def test_network_policy_rejects_unsafe_artifact_publications(tmp_path, origins):
+    f = form(tmp_path)
+    with pytest.raises(ValueError, match='connect_origins'):
+        artifacts.create(session='mike', type='html_form', title='Network game',
+                         payload={**f['payload'], 'connect_origins': origins})
+
+
+def test_network_policy_is_version_bound_and_survives_flat_response(tmp_path):
+    f = form(tmp_path)
+    row = artifacts.create(session='mike', type='html_form', title='Network game',
+                           payload={**f['payload'], 'connect_origins': [
+                               'https://Storage.Googleapis.Com:443',
+                               'https://storage.googleapis.com', 'https://api.example.com:8443']})
+    expected = ['https://storage.googleapis.com', 'https://api.example.com:8443']
+    saved = artifacts.get(row['artifact_id'])
+    assert saved['payload']['connect_origins'] == expected
+    assert artifacts.response_representation(saved, 'flat-v1')['connect_origins'] == expected
+    with pytest.raises(ValueError, match='immutable'):
+        artifacts.update(row['artifact_id'], {'payload_patch': {'connect_origins': []}})
+    assert artifacts.get(row['artifact_id'])['connect_origins'] == expected
+    assert 'connect_origins' not in artifacts.get(f['artifact_id'])['payload']

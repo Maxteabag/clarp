@@ -2264,7 +2264,7 @@ pub(super) fn form_log_check(_out: String) {
                 return false;
             };
             let page = fetch("GET", &url, "", None).map(|(_, body)| body).unwrap_or_default();
-            check(page.contains("capabilities: {eventLog: true}"), "the page offers the event log");
+            check(page.contains("capabilities") && page.contains("eventLog: true"), "the page offers the event log");
             for n in 0..count {
                 let id = uuid::Uuid::new_v4().to_string();
                 let reply = log_event(&url, &id, &json!({"type": "desktop_event_log_probe", "n": n, "client": "clarp-slint"}));
