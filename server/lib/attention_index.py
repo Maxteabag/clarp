@@ -3,7 +3,7 @@ No inferred completion or age-based retention. Cursors restart on source changes
 Decisions and Janitor failures retain their dedicated authority endpoints.
 """
 import base64,hashlib,json,time
-from . import db,artifacts,countdown_attention
+from . import db,artifacts,countdown_attention,quiet_agents
 # workflow_run is deliberately absent: a CI result is not something the owner
 # can act on from Updates. An agent blocked by a failed run raises a question.
 TYPES={'countdown','document','research','file','audio','video','code_change','data','release','directory','html_form'}
@@ -38,8 +38,11 @@ def page(*,limit=100,cursor='',representation=''):
     c=db.conn();c.execute('SAVEPOINT attention_read')
     try:
         marks=','.join('?' for _ in TYPES)
+        # A quiet agent's (a Janitor's) artifacts stay in its chat; its failure
+        # alerts reach Updates through janitor_attention, not this index.
         rows=c.execute(f'''SELECT a.*,g.persona AS agent_name FROM artifacts a
             JOIN agents g ON a.agent_id=g.agent_id WHERE a.deleted_at IS NULL
+            AND {quiet_agents.loud_sql('g')}
             AND a.type IN ({marks}) ORDER BY a.created_at,a.artifact_id''',tuple(sorted(TYPES))).fetchall()
         # Select canonical workflow attempt from source updates before eligibility.
         # Distinct attempts never resolve each other; historical records stay intact.

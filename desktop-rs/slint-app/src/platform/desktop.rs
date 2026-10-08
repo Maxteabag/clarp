@@ -3,7 +3,9 @@
 //! replies in chats that are not open; and desktop presence (someone is at
 //! this window, so the Host may pause phone alerts; `clarp_core::presence`).
 //! The tray is a StatusNotifierItem; without a tray host there is no tray
-//! and, as in the Qt and C++ clients, no notifications.
+//! and, as in the Qt and C++ clients, no notifications. macOS has no tray
+//! (Show and Quit are the Dock's), notifies through Notification Center,
+//! and takes presence from the window alone (there is no logind).
 //!
 //! For checks: `CLARP_TEST_NOTIFY_LOG` records notifications in a file
 //! instead of sending them, `CLARP_TEST_FOREGROUND=1` treats the
@@ -11,6 +13,7 @@
 //! (or `locked`) stands in for the login session logind would report.
 
 use std::cell::RefCell;
+#[cfg(target_os = "linux")]
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,18 +21,21 @@ use super::runtime;
 
 /// What the tray asks the window to do.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 enum Action {
     Show,
     Mute(bool),
     Quit,
 }
 
+#[cfg(target_os = "linux")]
 struct ClarpTray {
     muted: bool,
     icons: Vec<ksni::Icon>,
     act: Arc<dyn Fn(Action) + Send + Sync>,
 }
 
+#[cfg(target_os = "linux")]
 impl ksni::Tray for ClarpTray {
     fn id(&self) -> String {
         "clarp-desktop".into()
@@ -66,8 +72,15 @@ impl ksni::Tray for ClarpTray {
     }
 }
 
+#[cfg(target_os = "linux")]
+type TrayHandle = ksni::Handle<ClarpTray>;
+/// No tray outside Linux.
+#[cfg(not(target_os = "linux"))]
+type TrayHandle = std::convert::Infallible;
+
 struct Services {
-    tray: Option<ksni::Handle<ClarpTray>>,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    tray: Option<TrayHandle>,
     presence: clarp_core::presence::Presence,
     instance: String,
     clock: Instant,
@@ -81,6 +94,7 @@ thread_local! {
     static SERVICES: RefCell<Option<Services>> = const { RefCell::new(None) };
 }
 
+#[cfg(target_os = "linux")]
 const ICON: &[u8] = include_bytes!("../../../../static/icon.png");
 
 fn later(act: impl FnOnce() + Send + 'static) {
@@ -117,8 +131,35 @@ fn apply_scale() {
         MONITOR_SCALE.with(|s| s.set(monitor));
     }
     let scale = MONITOR_SCALE.with(|s| s.get()) * UI_SCALE.with(|s| s.get());
-    window.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+    rescale(window.window(), scale);
     crate::avatar_view::remake();
+}
+
+/// The window moved to a monitor of another scale (an external display
+/// plugged in or out): the reader's scale stays on top of the new one.
+pub(crate) fn monitor_scale_changed(monitor: f32) {
+    use slint::ComponentHandle;
+    MONITOR_SCALE.with(|s| s.set(monitor));
+    if let Some(window) = crate::window() {
+        rescale(window.window(), monitor * UI_SCALE.with(|s| s.get()));
+        crate::avatar_view::remake();
+    }
+}
+
+/// Draws the window at `scale` in the pixels it has. Slint's
+/// ScaleFactorChanged alone keeps the logical size, so the content would
+/// outgrow the software renderer's buffer, which is sized from the pixels,
+/// and the next frame panics ("buffer ... is too small to handle a window
+/// of size ..."): a 1100x700 window on a 2x display at the default 1.15
+/// asks for 2530x1610 in 2200x1400. The logical size follows the pixels.
+pub(crate) fn rescale(window: &slint::Window, scale: f32) {
+    window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
+    // Before the window system's window exists there are no pixels yet:
+    // its first resize sets the size then.
+    let pixels = window.size();
+    if pixels.width > 0 && pixels.height > 0 {
+        window.dispatch_event(slint::platform::WindowEvent::Resized { size: pixels.to_logical(scale) });
+    }
 }
 
 fn start_now() {
@@ -136,6 +177,16 @@ fn start_now() {
     });
     presence_tick();
     runtime::handle().spawn(watch_login_session());
+    start_tray(muted);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn start_tray(_muted: bool) {
+    eprintln!("clarp-slint: no system tray on this platform; the Dock shows and quits Clarp");
+}
+
+#[cfg(target_os = "linux")]
+fn start_tray(muted: bool) {
     let act: Arc<dyn Fn(Action) + Send + Sync> = Arc::new(|action| later(move || perform(action)));
     let icons = [22, 48].iter().filter_map(|&side| clarp_core::media::argb_icon(ICON, side)).map(|(width, height, data)| ksni::Icon { width, height, data }).collect();
     let tray = ClarpTray { muted, icons, act };
@@ -162,15 +213,8 @@ fn watch_window() {
         match event {
             // The monitor changed: keep the reader's scale on top of it.
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                MONITOR_SCALE.with(|s| s.set(*scale_factor as f32));
-                let scale = *scale_factor as f32 * UI_SCALE.with(|s| s.get());
-                if let Err(error) = slint::invoke_from_event_loop(move || {
-                    if let Some(window) = crate::window() {
-                        use slint::ComponentHandle;
-                        window.window().dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: scale });
-                        crate::avatar_view::remake();
-                    }
-                }) {
+                let monitor = *scale_factor as f32;
+                if let Err(error) = slint::invoke_from_event_loop(move || monitor_scale_changed(monitor)) {
                     eprintln!("clarp-slint: dropped a scale change: {error}");
                 }
             }
@@ -198,12 +242,7 @@ fn watch_window() {
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
-                super::keyboard::reported(super::keyboard::Modifiers {
-                    control: state.control_key(),
-                    alt: state.alt_key(),
-                    shift: state.shift_key(),
-                    meta: state.super_key(),
-                });
+                super::keyboard::reported(super::keyboard::Modifiers::from_window_system(state.control_key(), state.alt_key(), state.shift_key(), state.super_key()));
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 use slint::winit_030::winit::keyboard::{Key, NamedKey};
@@ -303,6 +342,7 @@ fn login_state(state: LoginState) {
     }
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn perform(action: Action) {
     use slint::ComponentHandle;
     match action {
@@ -328,7 +368,9 @@ fn perform(action: Action) {
 }
 
 /// The tray's Mute item follows mute set anywhere else.
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
 pub fn muted_changed(muted: bool) {
+    #[cfg(target_os = "linux")]
     SERVICES.with(|slot| {
         if let Some(tray) = slot.borrow().as_ref().and_then(|s| s.tray.clone()) {
             runtime::handle().spawn(async move {
@@ -338,8 +380,8 @@ pub fn muted_changed(muted: bool) {
     });
 }
 
-/// A reply in a chat that is not open. Only with a tray, as in the Qt and
-/// C++ clients. `sound` asks the desktop for its message sound (Settings →
+/// A reply in a chat that is not open. On Linux only with a tray, as in
+/// the Qt and C++ clients. `sound` asks the desktop for its message sound (Settings →
 /// Notification sound).
 pub fn notify(title: String, body: String, sound: bool) {
     if let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") {
@@ -351,6 +393,35 @@ pub fn notify(title: String, body: String, sound: bool) {
         }
         return;
     }
+    #[cfg(target_os = "macos")]
+    notify_macos(title, body, sound);
+    #[cfg(not(target_os = "macos"))]
+    notify_freedesktop(title, body, sound);
+}
+
+/// Through Notification Center (as Script Editor, the sender `osascript`
+/// is): the texts go as arguments, never into the script.
+#[cfg(target_os = "macos")]
+fn notify_macos(title: String, body: String, sound: bool) {
+    let script = if sound {
+        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv) sound name \"Glass\"\nend run"
+    } else {
+        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
+    };
+    let spawned = std::thread::Builder::new().name("notify".into()).spawn(move || {
+        match std::process::Command::new("/usr/bin/osascript").args(["-e", script, &title, &body]).stdout(std::process::Stdio::null()).output() {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => eprintln!("clarp-slint: notification failed: {}", String::from_utf8_lossy(&output.stderr).trim()),
+            Err(error) => eprintln!("clarp-slint: notification failed: {error}"),
+        }
+    });
+    if let Err(error) = spawned {
+        eprintln!("clarp-slint: notification failed: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn notify_freedesktop(title: String, body: String, sound: bool) {
     let has_tray = SERVICES.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.tray.is_some()));
     if !has_tray {
         return;
@@ -429,6 +500,12 @@ async fn watch_login_session() {
     // A check's login session ("unlocked" or "locked"), never the machine's.
     if let Ok(test) = std::env::var("CLARP_TEST_LOGIN") {
         send(LoginState::Session { available: true, unlocked: test == "unlocked" });
+        return;
+    }
+    // No logind: presence follows the window (focus and input) alone.
+    if cfg!(target_os = "macos") {
+        eprintln!("clarp-slint: presence follows the window; macOS has no login session to read");
+        send(LoginState::Session { available: true, unlocked: true });
         return;
     }
     let bus = match zbus::Connection::system().await {

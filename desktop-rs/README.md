@@ -73,3 +73,45 @@ On Peter's machines `clarpd` (in dotfiles) builds `main`'s `desktop-rs` in a
 private worktree when the installed build is older, installs the stripped
 binary to `~/.local/lib/clarp-slint/clarp-slint`, and opens it.
 `clarpd --no-update` opens the installed build.
+
+## macOS (Apple Silicon)
+
+`desktop.yml` publishes `Clarp.app`, ad-hoc signed and zipped, to the
+[`desktop-builds`](https://github.com/Maxteabag/clarp/releases/tag/desktop-builds)
+release as `clarp-slint-<sha>-aarch64-macos.zip` (with a `.sha256`) for every
+desktop change on `main`. Install it, then pair it with a Host over SSH, no
+screen needed (`--pair` exchanges the Host's one-time code and exits):
+
+```sh
+ditto -x -k clarp-slint-<sha>-aarch64-macos.zip /Applications
+xattr -dr com.apple.quarantine /Applications/Clarp.app
+/Applications/Clarp.app/Contents/MacOS/clarp-slint --pair https://host.tailnet.ts.net CODE
+open /Applications/Clarp.app
+```
+
+The device token goes to the login Keychain (service `com.maxteabag.Clarp`,
+account the Host URL), stored through `/usr/bin/security` so an updated app
+reads it without a prompt. Over SSH the login Keychain is usually locked to
+that session: `--pair` checks it can write there before it spends the code,
+and if not it fails saying the code was not used. Then either run
+`security unlock-keychain ~/Library/Keychains/login.keychain-db` in the SSH
+session (it asks for the Mac's login password) and pair again, or run the
+pairing in the Mac's own login session: write the command to a `.command`
+file and `open` it, which runs it in Terminal there.
+
+Settings and pane layouts live in
+`~/Library/Application Support/com.maxteabag.Clarp.desktop/`, caches in
+`~/Library/Caches/com.maxteabag.Clarp.desktop/`. Not `Application
+Support/Clarp`: that is the Clarp server's install, and macOS paths ignore
+case. Early builds wrote `settings.json` there; the app moves it out on
+start. The XDG variables still win when set.
+
+What differs from Linux: no tray (the Dock shows and quits the app), no
+MPRIS media keys, notifications through Notification Center (via
+`osascript`), presence from the window's focus and input alone (no logind),
+the font picker lists the system's font folders instead of asking
+`fc-list`, and one voice player per Host by a
+file lock instead of the session bus. `--pair` works the same on Linux,
+against the Secret Service. The macOS CI job runs the unit tests and
+`check.sh pair`; the window checks run on Linux only (on a macOS runner
+`send` and `composer` time out opening a chat, not yet looked into).

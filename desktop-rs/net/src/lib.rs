@@ -4,6 +4,7 @@
 
 mod api;
 pub mod credentials;
+pub mod pairing;
 mod sse;
 
 pub use api::{ApiClient, ApiReply};

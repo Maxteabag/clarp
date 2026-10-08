@@ -16,10 +16,9 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 rodio = "0.22"
 serde = "1"
-ksni = { version = "0.3", default-features = false, features = ["tokio"] }
 futures-util = { version = "0.3", default-features = false }
 libc = "0.2"
-arboard = { version = "3", default-features = false, features = ["wayland-data-control", "image-data"] }
+arboard = { version = "3", default-features = false, features = ["image-data"] }
 backtrace = { version = "0.3", features = ["cpp_demangle"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 clarp-engine = { path = "../engine" }
@@ -28,7 +27,7 @@ serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 slint = { version = "1.18", default-features = false, features = [
     "std", "compat-1-2", "accessibility",
-    "backend-winit", "backend-winit-wayland", "backend-winit-x11",
+    "backend-winit",
     "renderer-software", "software-renderer-systemfonts", "image-default-formats",
     # The window system's own events (focus, input) for desktop presence.
     "unstable-winit-030",
@@ -38,8 +37,21 @@ i-slint-backend-testing = { version = "=1.18.1", default-features = false }
 # Wheel and touchpad input with the gesture phases winit sends (the public
 # PointerScrolled event jumps instead of animating like a real wheel).
 i-slint-core = { version = "=1.18.1", default-features = false }
-# The attach dialog, through the desktop's file-chooser portal.
+# The attach dialog: the desktop's file-chooser portal on Linux, the
+# native panel on macOS.
+rfd = { version = "0.17", default-features = false }
+
+# Linux only: the Wayland and X11 window systems, the StatusNotifierItem
+# tray, the clipboard's data-control protocol and the portal file chooser.
+[target.'cfg(target_os = "linux")'.dependencies]
+slint = { version = "1.18", default-features = false, features = ["backend-winit-wayland", "backend-winit-x11"] }
+ksni = { version = "0.3", default-features = false, features = ["tokio"] }
+arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"] }
+
+# macOS has no fc-list: the font picker scans the system's fonts instead.
+[target.'cfg(target_os = "macos")'.dependencies]
+fontdb = { version = "0.24", default-features = false, features = ["std", "fs"] }
 
 [build-dependencies]
 slint-build = "1.18"

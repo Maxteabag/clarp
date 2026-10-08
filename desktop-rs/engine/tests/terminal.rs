@@ -16,6 +16,8 @@ fn the_native_cli_opens_in_the_agents_folder_only_on_a_shared_filesystem() {
     let workspace = host.dir.join("project with spaces");
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(&workspace).unwrap();
+    // The path the engine sees (macOS's temporary folder is a symlink).
+    let workspace = workspace.canonicalize().unwrap();
     for program in ["claude", "xdg-terminal-exec"] {
         let path = bin.join(program);
         // Never run: the launcher only records the command.

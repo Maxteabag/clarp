@@ -1,13 +1,18 @@
-import { ListView } from "std-widgets.slint";
+import { Button } from "std-widgets.slint";
 import { Palette, Look, ChatLook } from "theme.slint";
 
 export struct ProcessJob {
+    id: string,
     title: string,
     // kind · queued · detail
     detail: string,
     elapsed: string,
     heartbeat: string,
     sub-agent: bool,
+    // Running and the Host lets it be cancelled.
+    can-stop: bool,
+    // How its latest stop went ("Stopping…", "Stopped", "Not stopped: …").
+    outcome: string,
 }
 
 export struct ProcessHelper {
@@ -168,9 +173,11 @@ export component CompactWork inherits Rectangle {
     }
 }
 
-// ProcessPopover.qml: what an agent runs right now, one line per active
-// job and one per running helper (choosing a helper opens its chat), placed
-// under the indicator that opened it. Escape and a click outside close it.
+// ProcessPopover.qml, with the iOS app's process detail: what an agent
+// runs right now, one line per job and one per running helper, placed under
+// the indicator that opened it (or centred when a key did). A job opens its
+// output (the log's newest lines, read again while it shows); a helper opens
+// its chat; either stops after a confirm. Escape and a click outside close it.
 export component ProcessPopover inherits Rectangle {
     in property <string> name;
     in property <string> count;
@@ -180,18 +187,49 @@ export component ProcessPopover inherits Rectangle {
     // Where the indicator's bottom right is, in window coordinates.
     in property <length> anchor-x;
     in property <length> anchor-y;
+    // Opened by a key: in the middle, not under a row.
+    in property <bool> centered;
+    // "list" or "output".
+    in property <string> mode: "list";
+    // The row the keyboard is on: jobs first, then helpers.
+    in property <int> cursor;
+    // The stop being asked about ("" for none).
+    in property <string> confirm;
+    // The keys that work right now.
+    in property <string> hint;
+    in property <string> output-title;
+    in property <string> output-status;
+    in property <string> output-progress;
+    in property <string> output-owner;
+    in property <[string]> output-lines;
+    // Lines scrolled back from the newest (0: following it).
+    in property <int> output-back;
+    in property <[string]> output-events;
+    in property <string> output-note;
+    in property <string> output-outcome;
+    in property <bool> output-stoppable;
     callback helper-opened(string);
+    callback job-opened(string);
+    // "job" or "helper", and its id.
+    callback stop-asked(string, string);
+    callback answered(bool);
     callback dismissed();
+    // Holds the keyboard while it shows (the window's map reads the keys).
+    public function take-focus() { keys.focus(); }
+    keys := FocusScope { }
     TouchArea { clicked => { root.dismissed(); } }
     card := Rectangle {
-        width: 340px;
+        width: root.mode == "output" ? Math.min(620px, root.width - 32px) : 360px;
         height: body.preferred-height;
-        x: Math.max(8px, Math.min(root.anchor-x - self.width, root.width - self.width - 8px));
-        y: Math.max(8px, Math.min(root.anchor-y + 4px, root.height - self.height - 8px));
+        x: root.centered ? (root.width - self.width) / 2 : Math.max(8px, Math.min(root.anchor-x - self.width, root.width - self.width - 8px));
+        y: root.centered ? Math.max(8px, (root.height - self.height) / 3) : Math.max(8px, Math.min(root.anchor-y + 4px, root.height - self.height - 8px));
         background: Palette.raised;
         border-width: 1px;
         border-color: Palette.border;
         border-radius: 3px;
+        accessible-role: list;
+        accessible-id: "processes-panel";
+        accessible-label: root.mode == "output" ? root.output-title : root.name + " processes";
         // Clicks on the card stay on it.
         TouchArea { }
         body := VerticalLayout {
@@ -199,56 +237,160 @@ export component ProcessPopover inherits Rectangle {
                 padding: 10px;
                 padding-bottom: 6px;
                 spacing: 8px;
-                Text { text: root.name; color: Palette.text; font-size: 12 * Look.unit; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
-                Text { text: root.count; color: Palette.muted; font-size: 11 * Look.unit; }
+                Text {
+                    text: root.mode == "output" ? root.output-title : root.name;
+                    color: Palette.text;
+                    font-size: 12 * Look.unit;
+                    font-weight: 600;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                Text { text: root.mode == "output" ? root.output-owner : root.count; color: Palette.muted; font-size: 11 * Look.unit; }
             }
             Rectangle { height: 1px; background: Palette.rule; }
-            for job in root.jobs: HorizontalLayout {
+            if root.mode == "list": VerticalLayout {
+                for job[i] in root.jobs: Rectangle {
+                    background: i == root.cursor ? Palette.control : job-touch.has-hover ? Palette.hover : transparent;
+                    accessible-role: list-item;
+                    accessible-id: "process-job:" + job.id;
+                    accessible-label: job.title;
+                    accessible-action-default => { root.job-opened(job.id); }
+                    job-touch := TouchArea { mouse-cursor: pointer; clicked => { root.job-opened(job.id); } }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 6px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        spacing: 8px;
+                        ProcessGlyph { y: 1px; glyph-size: 13px; kind: job.sub-agent ? "agent" : "process"; running: root.visible && job.can-stop; }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 1px;
+                            Text { text: job.title; color: Palette.text; font-size: 12 * Look.unit; overflow: elide; }
+                            if job.detail != "": Text { text: job.detail; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
+                            if job.outcome != "": Text { text: job.outcome; color: Palette.chrome-text; font-size: 10 * Look.unit; overflow: elide; }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: 1px;
+                            Text { text: job.elapsed; color: Palette.chrome-text; font-size: 11 * Look.unit; horizontal-alignment: right; }
+                            if job.heartbeat != "": Text { text: "♥ " + job.heartbeat; color: Palette.faint; font-size: 10 * Look.unit; horizontal-alignment: right; }
+                        }
+                        if job.can-stop: Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 3px;
+                            background: stop-touch.has-hover ? Palette.hover : transparent;
+                            accessible-role: button;
+                            accessible-label: "Stop " + job.title;
+                            accessible-action-default => { root.stop-asked("job", job.id); }
+                            Image { width: 12px; height: 12px; source: @image-url("icons/stop.svg"); colorize: Palette.muted; }
+                            stop-touch := TouchArea { mouse-cursor: pointer; clicked => { root.stop-asked("job", job.id); } }
+                        }
+                    }
+                }
+                for helper[h] in root.helpers: Rectangle {
+                    background: root.jobs.length + h == root.cursor ? Palette.control : helper-touch.has-hover ? Palette.hover : transparent;
+                    accessible-role: button;
+                    accessible-id: "process-helper:" + helper.session;
+                    accessible-label: "Open " + helper.name;
+                    helper-touch := TouchArea { mouse-cursor: pointer; clicked => { root.helper-opened(helper.session); } }
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 6px;
+                        padding-top: 6px;
+                        padding-bottom: 6px;
+                        spacing: 8px;
+                        ProcessGlyph { glyph-size: 13px; kind: "agent"; y: 1px; }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            spacing: 1px;
+                            Text { text: helper.name; color: Palette.text; font-size: 12 * Look.unit; overflow: elide; }
+                            Text { text: helper.detail; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
+                        }
+                        Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            border-radius: 3px;
+                            background: helper-stop.has-hover ? Palette.hover : transparent;
+                            accessible-role: button;
+                            accessible-label: "Stop " + helper.name;
+                            accessible-action-default => { root.stop-asked("helper", helper.session); }
+                            Image { width: 12px; height: 12px; source: @image-url("icons/stop.svg"); colorize: Palette.muted; }
+                            helper-stop := TouchArea { mouse-cursor: pointer; clicked => { root.stop-asked("helper", helper.session); } }
+                        }
+                        Text { text: "›"; color: Palette.chrome-text; font-size: 14 * Look.unit; vertical-alignment: center; }
+                    }
+                }
+                if root.note != "": HorizontalLayout {
+                    padding: 10px;
+                    Text { text: root.note; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
+                }
+            }
+            if root.mode == "output": VerticalLayout {
+                padding: 10px;
+                spacing: 6px;
+                Text {
+                    text: root.output-status;
+                    color: Palette.chrome-text;
+                    font-size: 11 * Look.unit;
+                    accessible-role: text;
+                    accessible-id: "process-output-status";
+                }
+                if root.output-progress != "": Text { text: root.output-progress; color: Palette.text; font-size: 11 * Look.unit; wrap: word-wrap; }
+                for event in root.output-events: Text { text: event; color: Palette.muted; font-size: 10 * Look.unit; font-family: Palette.code-family; overflow: elide; }
+                if root.output-outcome != "": Text { text: root.output-outcome; color: Palette.chrome-text; font-size: 11 * Look.unit; }
+                Rectangle {
+                    background: Palette.window;
+                    border-radius: 3px;
+                    min-height: 60px;
+                    accessible-role: text;
+                    accessible-id: "process-output-log";
+                    accessible-label: "Log";
+                    accessible-value: root.output-lines.length > 0 ? root.output-lines[root.output-lines.length - 1] : root.output-note;
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 0px;
+                        for line in root.output-lines: Text {
+                            text: line;
+                            color: Palette.text;
+                            font-size: 11 * Look.unit;
+                            font-family: Palette.code-family;
+                            overflow: elide;
+                        }
+                        if root.output-note != "": Text { text: root.output-note; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
+                        if root.output-back > 0: Text { text: "↑ " + root.output-back + " lines back · End for the latest"; color: Palette.faint; font-size: 10 * Look.unit; }
+                    }
+                }
+            }
+            if root.confirm != "": Rectangle {
+                background: Palette.control;
+                accessible-role: groupbox;
+                accessible-id: "process-confirm";
+                accessible-label: root.confirm;
+                HorizontalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    Text { text: root.confirm; color: Palette.text; font-size: 12 * Look.unit; wrap: word-wrap; horizontal-stretch: 1; vertical-alignment: center; }
+                    Button { text: "Keep running"; clicked => { root.answered(false); } }
+                    Button { text: "Stop"; primary: true; clicked => { root.answered(true); } }
+                }
+            }
+            Rectangle { height: 1px; background: Palette.rule; }
+            HorizontalLayout {
                 padding-left: 10px;
                 padding-right: 10px;
-                padding-top: 6px;
+                padding-top: 5px;
                 padding-bottom: 6px;
-                spacing: 8px;
-                ProcessGlyph { y: 1px; glyph-size: 13px; kind: job.sub-agent ? "agent" : "process"; running: root.visible; }
-                VerticalLayout {
-                    horizontal-stretch: 1;
-                    spacing: 1px;
-                    Text { text: job.title; color: Palette.text; font-size: 12 * Look.unit; overflow: elide; }
-                    if job.detail != "": Text { text: job.detail; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
-                }
-                VerticalLayout {
-                    alignment: start;
-                    spacing: 1px;
-                    Text { text: job.elapsed; color: Palette.chrome-text; font-size: 11 * Look.unit; horizontal-alignment: right; }
-                    if job.heartbeat != "": Text { text: "♥ " + job.heartbeat; color: Palette.faint; font-size: 10 * Look.unit; horizontal-alignment: right; }
+                Text {
+                    text: root.hint;
+                    color: Palette.faint;
+                    font-size: 10 * Look.unit;
+                    overflow: elide;
+                    accessible-role: text;
+                    accessible-id: "process-hint";
                 }
             }
-            for helper in root.helpers: Rectangle {
-                background: helper-touch.has-hover ? Palette.control : transparent;
-                accessible-role: button;
-                accessible-label: "Open " + helper.name;
-                helper-touch := TouchArea { clicked => { root.helper-opened(helper.session); } }
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    padding-top: 6px;
-                    padding-bottom: 6px;
-                    spacing: 8px;
-                    ProcessGlyph { glyph-size: 13px; kind: "agent"; y: 1px; }
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        spacing: 1px;
-                        Text { text: helper.name; color: Palette.text; font-size: 12 * Look.unit; overflow: elide; }
-                        Text { text: helper.detail; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
-                    }
-                    Text { text: "›"; color: Palette.chrome-text; font-size: 14 * Look.unit; vertical-alignment: center; }
-                }
-            }
-            if root.note != "": HorizontalLayout {
-                padding: 10px;
-                Text { text: root.note; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
-            }
-            Rectangle { height: 4px; }
         }
     }
 }

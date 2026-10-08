@@ -23,6 +23,10 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     if !app.switcher.borrow().open && *app.overlay.borrow() == crate::font_view::OVERLAY {
         return "fonts";
     }
+    // The processes panel moves, opens and stops with its own keys.
+    if !app.switcher.borrow().open && *app.overlay.borrow() == crate::processes_view::OVERLAY {
+        return "processes";
+    }
     if app.switcher.borrow().open || !app.overlay.borrow().is_empty() {
         // ---- launch dialogs: the hub has its own keyboard state.
         if !app.switcher.borrow().open && *app.overlay.borrow() == crate::launch_view::HUB {
@@ -66,6 +70,7 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         artifacts: crate::artifacts_view::has_cards(app),
         artifact: crate::artifacts_view::selected(app).is_some(),
         layout_warning: !window.get_save_warning().is_empty(),
+        work: engine.roster().find(selected).is_some_and(|a| engine.roster().running_work(a) > 0),
     }
 }
 
@@ -175,6 +180,9 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     if state == "keymap" {
         hints = crate::keymap_view::hints(app, window).into_iter().map(|(keys, label)| Hint { keys: keys.into(), label: label.into() }).collect();
     }
+    if state == "processes" {
+        hints = crate::processes_view::hints();
+    }
     if state == "fonts" {
         hints = crate::font_view::hints();
     }
@@ -215,14 +223,44 @@ thread_local! {
 
 /// A key the window saw before any control: true when a binding ran.
 pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, repeat: bool) -> bool {
+    use crate::platform::keyboard;
+    let used = run_shortcut(text, control, alt, shift, meta, repeat);
+    if keyboard::tracing() {
+        let held = keyboard::Modifiers { control, alt, shift, meta };
+        let chord = keymap::chord(text, held.shortcut_control(), alt, shift).unwrap_or_default();
+        let state = match (crate::app(), crate::window()) {
+            (Some(app), Some(window)) => context(&app, &window).to_string(),
+            _ => String::new(),
+        };
+        eprintln!("key-trace: pressed {} {held:?} repeat={repeat} chord={chord:?} state={state} -> {}", keyboard::code_points(text), if used { "taken" } else { "passed on" });
+    }
+    used
+}
+
+/// A key released, for `CLARP_KEY_TRACE`.
+pub fn key_released(text: &str, control: bool, alt: bool, shift: bool, meta: bool) {
+    use crate::platform::keyboard;
+    if keyboard::tracing() {
+        eprintln!("key-trace: released {} {:?}", keyboard::code_points(text), keyboard::Modifiers { control, alt, shift, meta });
+    }
+}
+
+fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, repeat: bool) -> bool {
     // Every key is someone at this window (headless too, where winit is not).
     crate::platform::desktop::note_input();
+    let held = crate::platform::keyboard::Modifiers { control, alt, shift, meta };
     // A modifier whose release the window never saw: the key comes again without it.
-    if crate::platform::keyboard::correct(text, crate::platform::keyboard::Modifiers { control, alt, shift, meta }) {
+    if crate::platform::keyboard::correct(text, held) {
         return true;
     }
+    // On macOS Cmd and the Control key are both Ctrl here.
+    let control = held.shortcut_control();
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return false };
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
+    // Cmd+C, Cmd+V, Cmd+Q... on a Mac are the text field's and the system's.
+    if crate::platform::keyboard::left_to_the_system(&chord, held) {
+        return false;
+    }
     let state = context(&app, &window);
     // ? again closes the key help, as Escape does.
     if chord == "?" && *app.overlay.borrow() == crate::help_view::OVERLAY {
@@ -235,6 +273,18 @@ pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
     }
     if state == "fonts" {
         let used = crate::font_view::key(&app, &window, &chord);
+        show_hints(&app, &window);
+        return used;
+    }
+    if state == "processes" {
+        // The key that opened it closes it again.
+        let opener = ["workspace", "updates"].iter().any(|s| keymap::action_for(s, &chord, &overrides(&app), facts(&app, &window)) == Some("agent-processes"));
+        let used = if opener {
+            close_overlay(&app, &window);
+            true
+        } else {
+            crate::processes_view::key(&app, &window, &chord)
+        };
         show_hints(&app, &window);
         return used;
     }
@@ -351,6 +401,8 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         // ---- profile and overview
         "escape" if crate::profile_view::owns(app) => crate::profile_view::escape(app, window),
         "overview" => crate::overview_view::open(app, window),
+        // The selected agent's background work, or every job on Updates.
+        "agent-processes" => crate::processes_view::toggle(app, window),
         "orchestrator" => crate::orchestrator_view::open(app, window),
         "agent-profile" => crate::profile_view::open(app, window, &selected),
         // The profile's and overview's Relaunch: the Start dialog, replacing
@@ -921,6 +973,12 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
             crate::search_view::jump(app, &item.target);
             restore = false;
         }
+        // The panel keeps the keyboard.
+        switcher::Kind::Command if item.target == "agent-processes" => {
+            run(app, window, &item.target);
+            crate::processes_view::set_origin(restore);
+            return;
+        }
         switcher::Kind::Command if item.target == "new-contact" => {
             crate::launch_view::open_contacts(app, window, Some(restore));
             return;
@@ -994,6 +1052,10 @@ pub fn close_overlay(app: &App, window: &AppWindow) {
     let closed = std::mem::take(&mut *app.overlay.borrow_mut());
     window.set_overlay("".into());
     if closed == crate::help_view::OVERLAY && crate::help_view::give_back(app, window) {
+        show_hints(app, window);
+        return;
+    }
+    if closed == crate::processes_view::OVERLAY && crate::processes_view::give_back(app, window) {
         show_hints(app, window);
         return;
     }

@@ -514,6 +514,7 @@ pub const ENTRIES: &[Entry] = &[
     e("recent-agents", "Recent agents", "agent", "Lists the agents you opened last, newest first.", &["last", "previous", "switch back", "mru", "history"]),
     e("search-messages", "Search messages", "view", "Finds words in the messages of every chat on this computer and jumps to the message.", &["find", "find in chats", "text", "history", "transcript", "grep", "look up"]),
     e("refresh", "Refresh conversation", "view", "Loads the open chat again from the Host.", &["reload", "update", "sync", "fetch"]),
+    e("agent-processes", "Background processes", "agent", "Shows the selected agent's background jobs and running helpers: open a job's output, stop a job or a helper. On Updates, every job.", &["processes", "jobs", "background jobs", "tasks", "running", "helpers", "kill", "stop job", "output", "logs", "show processes"]),
     e("overview", "Agent overview", "view", "Shows every agent and what it is doing.", &["dashboard", "summary", "all agents", "status", "fleet"]),
     e("chats", "Chats", "destination", "Goes to the chats.", &["conversations", "messages", "home", "main"]),
     e("updates", "Updates", "destination", "Goes to the updates feed.", &["feed", "activity", "news", "attention", "inbox"]),

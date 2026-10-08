@@ -1,4 +1,4 @@
-"""The Label checker Janitor: asks Jev, reports in Updates, changes nothing.
+"""The Label checker Janitor: asks Jev, reports in its own chat, changes nothing.
 
 No network: `judgments._post` is replaced by a fake that answers every
 question it is sent with the verdict the test chose.
@@ -86,10 +86,9 @@ def test_a_wrong_label_is_reported_once_and_nothing_changes(monkeypatch, env):
     public = artifacts.get(report["artifact_id"])
     assert public["payload"]["attention_kind"] == label_audit.KIND
     assert public["payload"]["items"][0]["verdict"] == "waiting_for_user"
-    # It shows in Updates for review.
-    [listed] = [item for item in attention_index.page(limit=50)["artifacts"]
-                if item["artifact_id"] == report["artifact_id"]]
-    assert listed["attention_bucket"] == "review"
+    # The Label checker is a quiet agent: the report stays in its chat, not Updates.
+    assert report["artifact_id"] not in {
+        item["artifact_id"] for item in attention_index.page(limit=50)["artifacts"]}
     # Report only: the label and state are untouched.
     row = agents.get_by_agent_id(aid)
     assert row["custom_status"] == "Building"

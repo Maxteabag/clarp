@@ -34,6 +34,12 @@ pub(crate) struct Updates {
     artifact_status: std::collections::HashMap<String, String>,
     /// "purpose:artifact" -> the bytes fetched for it, or why not.
     artifact_bytes: std::collections::HashMap<String, Result<Vec<u8>, String>>,
+    /// job id -> its latest `GET /background-jobs/<id>` (timeline, log
+    /// tail), or why it could not be read.
+    job_details: std::collections::HashMap<String, Result<Object, String>>,
+    /// job id -> how its latest stop went ("Stopping…", "Stopped", "Not
+    /// stopped: …").
+    job_outcomes: std::collections::HashMap<String, String>,
 }
 
 impl Engine {
@@ -112,6 +118,17 @@ impl Engine {
     /// A resolve or cancel is in flight: `kind` is `decision` or `job`.
     pub fn update_action_pending(&self, kind: &str, id: &str) -> bool {
         self.updates.pending_actions.contains(&format!("{kind}:{id}"))
+    }
+
+    /// One job's detail (`job`, `timeline`, `progress`, `log`) once read,
+    /// or why it could not be.
+    pub fn job_detail(&self, job_id: &str) -> Option<&Result<Object, String>> {
+        self.updates.job_details.get(job_id)
+    }
+
+    /// How the job's latest stop went ("" before any).
+    pub fn job_outcome(&self, job_id: &str) -> &str {
+        self.updates.job_outcomes.get(job_id).map_or("", String::as_str)
     }
 
     /// An agent's processes (jobs, sub-agents, helpers) for its popover.
@@ -212,14 +229,35 @@ impl Engine {
     }
 
     pub fn cancel_background_job(&mut self, job_id: &str) {
+        self.cancel_background_job_run(job_id, None);
+    }
+
+    /// Stops one run of a job (iOS `cancelBackgroundJob`): with its
+    /// generation the Host leaves a newer run alone (409).
+    pub fn cancel_background_job_run(&mut self, job_id: &str, generation: Option<i64>) {
         let key = format!("job:{job_id}");
         if job_id.is_empty() || self.updates.pending_actions.contains(&key) {
             return;
         }
         self.updates.pending_actions.insert(key);
+        self.updates.job_outcomes.insert(job_id.to_owned(), "Stopping…".into());
         self.changes.push(Change::Updates);
+        self.changes.push(Change::Processes);
         let path = format!("/background-jobs/{}", clarp_core::endpoint::percent_encode_segment(job_id));
-        self.api.delete(&format!("update-action:job:{job_id}"), &path);
+        let tag = format!("update-action:job:{job_id}");
+        match generation.filter(|g| *g > 0) {
+            Some(generation) => self.api.delete_json(&tag, &path, json!({"expected_generation": generation})),
+            None => self.api.delete(&tag, &path),
+        }
+    }
+
+    /// Reads one job's timeline and log tail (`GET /background-jobs/<id>`).
+    pub fn load_job_detail(&mut self, job_id: &str) {
+        if job_id.is_empty() {
+            return;
+        }
+        let path = format!("/background-jobs/{}", clarp_core::endpoint::percent_encode_segment(job_id));
+        self.api.get(&format!("job-detail:{job_id}"), &path, &[]);
     }
 
     // ---- replies and events ----------------------------------------------
@@ -262,8 +300,16 @@ impl Engine {
                 _ => {}
             }
             self.finish_update_request(generation);
+        } else if let Some(job_id) = tag.strip_prefix("job-detail:") {
+            self.updates.job_details.insert(job_id.to_owned(), Ok(object.clone()));
+            self.changes.push(Change::Processes);
         } else if let Some(action) = tag.strip_prefix("update-action:") {
             self.updates.pending_actions.remove(action);
+            if let Some(job_id) = action.strip_prefix("job:") {
+                let outcome = if object.get("changed") == Some(&Value::Bool(false)) { "Already stopped" } else { "Stopped" };
+                self.updates.job_outcomes.insert(job_id.to_owned(), outcome.into());
+                self.changes.push(Change::Processes);
+            }
             self.changes.push(Change::Updates);
             self.load_updates();
         } else if let Some(rest) = tag.strip_prefix("decision-answer:") {
@@ -308,9 +354,16 @@ impl Engine {
                 self.updates.error = detail.to_owned();
                 self.finish_update_request(self.updates.generation);
             }
+        } else if let Some(job_id) = tag.strip_prefix("job-detail:") {
+            self.updates.job_details.insert(job_id.to_owned(), Err(detail.to_owned()));
+            self.changes.push(Change::Processes);
         } else if let Some(action) = tag.strip_prefix("update-action:") {
             self.updates.pending_actions.remove(action);
             self.updates.error = detail.to_owned();
+            if let Some(job_id) = action.strip_prefix("job:") {
+                self.updates.job_outcomes.insert(job_id.to_owned(), format!("Not stopped: {detail}"));
+                self.changes.push(Change::Processes);
+            }
             self.changes.push(Change::Updates);
         } else if let Some(rest) = tag.strip_prefix("decision-answer:") {
             let (artifact, decision) = rest.split_once('|').unwrap_or((rest, ""));

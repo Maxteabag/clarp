@@ -345,7 +345,7 @@ fn save_and_open(id: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
         let mut log = std::fs::OpenOptions::new().create(true).append(true).open(record).map_err(|e| e.to_string())?;
         return writeln!(log, "file://{}", path.display()).map_err(|e| e.to_string());
     }
-    std::process::Command::new("xdg-open").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+    std::process::Command::new(crate::platform::OPENER).arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Downloads an artifact's file from the Host to open it.

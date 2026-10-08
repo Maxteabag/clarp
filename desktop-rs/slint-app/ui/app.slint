@@ -215,6 +215,8 @@ export component AppWindow inherits Window {
     callback dismiss-error();
     // Every key reaches the keyboard map first; true when it ran a command.
     callback shortcut(string, bool, bool, bool, bool, bool) -> bool;
+    // A key released (only traced, CLARP_KEY_TRACE=1).
+    callback key-released(string, bool, bool, bool, bool);
     // Tells the map where the keyboard went.
     callback focus-moved();
     // Pane events carry the pane's id.
@@ -325,8 +327,29 @@ export component AppWindow inherits Window {
     in property <string> process-note;
     in property <length> process-x;
     in property <length> process-y;
+    in property <bool> process-centered;
+    in property <string> process-mode: "list";
+    in property <int> process-cursor;
+    in property <string> process-confirm;
+    in property <string> process-hint;
+    in property <string> process-output-title;
+    in property <string> process-output-status;
+    in property <string> process-output-progress;
+    in property <string> process-output-owner;
+    in property <[string]> process-output-lines;
+    in property <int> process-output-back;
+    in property <[string]> process-output-events;
+    in property <string> process-output-note;
+    in property <string> process-output-outcome;
+    in property <bool> process-output-stoppable;
     callback show-processes(string, length, length);
     callback process-helper-opened(string);
+    callback process-job-opened(string);
+    callback process-stop-asked(string, string);
+    callback process-answered(bool);
+    // An Updates job's Output.
+    callback job-output(string);
+    public function focus-processes() { processes.take-focus(); }
     // ---- launch dialogs: the switcher's contacts-only mode
     in property <string> switcher-placeholder: "Agent, contact, setting or command";
     in property <string> switcher-empty: "No matching agent or contact";
@@ -399,6 +422,7 @@ export component AppWindow inherits Window {
         }
         capture-key-released(event) => {
             if (event.text == Key.Control || event.text == Key.ControlR) { Look.ctrl-held = false; }
+            root.key-released(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
             reject
         }
         // The shortcut bar is the window's footer, under every column.
@@ -546,6 +570,7 @@ export component AppWindow inherits Window {
                     refresh => { root.updates-refresh(); }
                     resolve(id, choice, revision) => { root.resolve-decision(id, choice, revision); }
                     cancel-job(id) => { root.cancel-job(id); }
+                    job-output(id) => { root.job-output(id); }
                     open-report(id) => { root.open-report(id); }
                     open-chat(session) => { root.open-chat(session); }
                 }
@@ -744,7 +769,7 @@ export component AppWindow inherits Window {
             confirm => { root.team-deleted(); }
             done => { root.overlay-closed(); }
         }
-        ProcessPopover {
+        processes := ProcessPopover {
             visible: root.overlay == "processes";
             width: parent.width;
             height: parent.height;
@@ -755,7 +780,25 @@ export component AppWindow inherits Window {
             note: root.process-note;
             anchor-x: root.process-x;
             anchor-y: root.process-y;
+            centered: root.process-centered;
+            mode: root.process-mode;
+            cursor: root.process-cursor;
+            confirm: root.process-confirm;
+            hint: root.process-hint;
+            output-title: root.process-output-title;
+            output-status: root.process-output-status;
+            output-progress: root.process-output-progress;
+            output-owner: root.process-output-owner;
+            output-lines: root.process-output-lines;
+            output-back: root.process-output-back;
+            output-events: root.process-output-events;
+            output-note: root.process-output-note;
+            output-outcome: root.process-output-outcome;
+            output-stoppable: root.process-output-stoppable;
             helper-opened(session) => { root.process-helper-opened(session); }
+            job-opened(id) => { root.process-job-opened(id); }
+            stop-asked(kind, id) => { root.process-stop-asked(kind, id); }
+            answered(stop) => { root.process-answered(stop); }
             dismissed => { root.overlay-closed(); }
         }
         // ---- launch dialogs

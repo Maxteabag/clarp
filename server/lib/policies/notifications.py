@@ -54,6 +54,7 @@ class AgentCapabilities:
     can_chat: bool = True
     muted: bool = False
     is_team_leader: bool = False
+    quiet: bool = False      # ``quiet_agents.is_quiet``: a Janitor
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,8 @@ def notify_decision(origin: str, completed_turn: CompletedTurn,
     Desktop presence is applied at delivery (``apns``), not here.
     """
     origin = (origin or "").strip()
-    if origin == "janitor" or (capabilities.present and not capabilities.can_chat):
+    if origin == "janitor" or capabilities.quiet or (
+            capabilities.present and not capabilities.can_chat):
         return Suppress("janitor-maintenance")
     if not completed_turn.agent_id:
         return Suppress("missing-agent")

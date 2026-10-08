@@ -23,6 +23,8 @@ Options:
   --model <model>          Use this backend model ID
   --effort <effort>        Use this model reasoning effort
   --preview-versions       Manage saved preview versions
+  --pair <url> <code>      Pair with a Host using its one-time code, keep the device token
+                           in the desktop keyring and the Host in the settings, then exit
 ";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

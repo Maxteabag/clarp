@@ -1,6 +1,6 @@
-//! The Updates surface (UpdatesPanel.qml), the report viewer (ReportView.qml)
-//! and an agent's process popover (ProcessPopover.qml): engine state turned
-//! into their Slint models, and what their buttons do.
+//! The Updates surface (UpdatesPanel.qml) and the report viewer
+//! (ReportView.qml): engine state turned into their Slint models, and what
+//! their buttons do. An agent's processes are `processes_view`.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -9,19 +9,15 @@ use std::time::Duration;
 use clarp_core::json::{self, Object};
 use clarp_engine::Change;
 use serde_json::Value;
-use slint::{ModelRc, SharedString, VecModel};
+use slint::{ModelRc, VecModel};
 
-use crate::{App, AppWindow, ArtifactView, AttentionView, JobView, MessageBlock, ProcessHelper, ProcessJob, commands, pump_now};
+use crate::{App, AppWindow, ArtifactView, AttentionView, JobView, MessageBlock, commands, pump_now};
 
 thread_local! {
     /// The artifact the report viewer shows ("" for none).
     static REPORT: RefCell<String> = const { RefCell::new(String::new()) };
-    /// The chat whose processes the popover lists ("" for none).
-    static PROCESSES: RefCell<String> = const { RefCell::new(String::new()) };
     /// Reloads the updates every 10 s while they show (as the QML Timer).
     static POLL: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
-    /// Ticks the popover's elapsed times once a second while it shows.
-    static TICK: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
 fn text(object: &Object, key: &str) -> String {
@@ -147,7 +143,7 @@ pub fn open(app: &App, window: &AppWindow) {
 }
 
 /// What the engine's changes mean here: the lists, the rail's badge, an
-/// open report and an open process popover.
+/// open report and an open processes panel.
 pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
     if changes.contains(&Change::Updates) {
         show(app, window);
@@ -156,9 +152,9 @@ pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
         }
         commands::show_hints(app, window);
     }
-    let processes = changes.iter().any(|c| matches!(c, Change::Processes | Change::Roster));
-    if processes && *app.overlay.borrow() == "processes" {
-        show_processes(app, window);
+    let processes = changes.iter().any(|c| matches!(c, Change::Processes | Change::Roster | Change::Updates));
+    if processes {
+        crate::processes_view::show(app, window);
     }
 }
 
@@ -388,83 +384,6 @@ pub fn html_markdown(html: &str) -> String {
         tidy.push('\n');
     }
     tidy.trim_end().to_owned()
-}
-
-// ---- the process popover -----------------------------------------------------
-
-/// A row's process indicator: the popover under it, kept current.
-pub fn open_processes(app: &App, window: &AppWindow, session: &str, x: f32, y: f32) {
-    PROCESSES.with(|p| *p.borrow_mut() = session.to_owned());
-    window.set_process_x(x);
-    window.set_process_y(y);
-    commands::open_overlay(app, window, "processes");
-    show_processes(app, window);
-    let timer = slint::Timer::default();
-    timer.start(slint::TimerMode::Repeated, Duration::from_secs(1), || {
-        let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
-        if *app.overlay.borrow() != "processes" {
-            TICK.with(|t| t.borrow_mut().take());
-            return;
-        }
-        show_processes(&app, &window);
-    });
-    TICK.with(|t| *t.borrow_mut() = Some(timer));
-}
-
-fn processes_session() -> String {
-    PROCESSES.with(|p| p.borrow().clone())
-}
-
-fn show_processes(app: &App, window: &AppWindow) {
-    let session = processes_session();
-    let engine = app.engine.borrow();
-    let processes = engine.agent_processes(&session).unwrap_or_default();
-    let jobs: Vec<ProcessJob> = objects(&json::array(&processes, "jobs"))
-        .map(|job| {
-            let sub_agent = json::boolean(job, "subAgent");
-            let kind = if sub_agent { "sub-agent".to_owned() } else { first(job, &["kind"], "job") };
-            let queued = if text(job, "status") == "queued" { "queued".to_owned() } else { String::new() };
-            let detail: Vec<String> = [kind, queued, text(job, "detail")].into_iter().filter(|p| !p.is_empty()).collect();
-            ProcessJob {
-                title: text(job, "title").into(),
-                detail: detail.join(" · ").into(),
-                elapsed: text(job, "elapsed").into(),
-                heartbeat: text(job, "heartbeat").into(),
-                sub_agent,
-            }
-        })
-        .collect();
-    let helpers: Vec<ProcessHelper> = objects(&json::array(&processes, "helpers"))
-        .map(|helper| {
-            let status = text(helper, "statusText");
-            ProcessHelper {
-                session: text(helper, "session").into(),
-                name: text(helper, "name").into(),
-                detail: if status.is_empty() { "helper".into() } else { format!("helper · {status}").into() },
-            }
-        })
-        .collect();
-    let count = |key: &str| json::integer(&processes, key).max(0) as usize;
-    let unlisted = count("jobCount").saturating_sub(jobs.len()) + count("runningChildren").saturating_sub(helpers.len());
-    let note = if jobs.is_empty() && helpers.is_empty() && unlisted == 0 {
-        "Nothing running.".to_owned()
-    } else if unlisted > 0 {
-        format!("{unlisted} more reported by the Host, details not loaded yet.")
-    } else {
-        String::new()
-    };
-    let total = count("total");
-    window.set_process_name(engine.chat_name(&session).into());
-    window.set_process_count(SharedString::from(if total == 0 { "nothing running".to_owned() } else { format!("{total} running") }));
-    window.set_process_jobs(model(jobs));
-    window.set_process_helpers(model(helpers));
-    window.set_process_note(note.into());
-}
-
-/// A helper row: its chat opens and the popover closes.
-pub fn open_helper(app: &Rc<App>, window: &AppWindow, session: &str) {
-    commands::close_overlay(app, window);
-    open_chat(app, window, session);
 }
 
 #[cfg(test)]
