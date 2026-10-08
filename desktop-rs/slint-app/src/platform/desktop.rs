@@ -242,12 +242,7 @@ fn watch_window() {
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 let state = modifiers.state();
-                super::keyboard::reported(super::keyboard::Modifiers {
-                    control: state.control_key(),
-                    alt: state.alt_key(),
-                    shift: state.shift_key(),
-                    meta: state.super_key(),
-                });
+                super::keyboard::reported(super::keyboard::Modifiers::from_window_system(state.control_key(), state.alt_key(), state.shift_key(), state.super_key()));
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 use slint::winit_030::winit::keyboard::{Key, NamedKey};

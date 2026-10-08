@@ -223,12 +223,38 @@ thread_local! {
 
 /// A key the window saw before any control: true when a binding ran.
 pub fn shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, repeat: bool) -> bool {
+    use crate::platform::keyboard;
+    let used = run_shortcut(text, control, alt, shift, meta, repeat);
+    if keyboard::tracing() {
+        let held = keyboard::Modifiers { control, alt, shift, meta };
+        let chord = keymap::chord(text, held.shortcut_control(), alt, shift).unwrap_or_default();
+        let state = match (crate::app(), crate::window()) {
+            (Some(app), Some(window)) => context(&app, &window).to_string(),
+            _ => String::new(),
+        };
+        eprintln!("key-trace: pressed {} {held:?} repeat={repeat} chord={chord:?} state={state} -> {}", keyboard::code_points(text), if used { "taken" } else { "passed on" });
+    }
+    used
+}
+
+/// A key released, for `CLARP_KEY_TRACE`.
+pub fn key_released(text: &str, control: bool, alt: bool, shift: bool, meta: bool) {
+    use crate::platform::keyboard;
+    if keyboard::tracing() {
+        eprintln!("key-trace: released {} {:?}", keyboard::code_points(text), keyboard::Modifiers { control, alt, shift, meta });
+    }
+}
+
+fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, repeat: bool) -> bool {
     // Every key is someone at this window (headless too, where winit is not).
     crate::platform::desktop::note_input();
+    let held = crate::platform::keyboard::Modifiers { control, alt, shift, meta };
     // A modifier whose release the window never saw: the key comes again without it.
-    if crate::platform::keyboard::correct(text, crate::platform::keyboard::Modifiers { control, alt, shift, meta }) {
+    if crate::platform::keyboard::correct(text, held) {
         return true;
     }
+    // On macOS Cmd and the Control key are both Ctrl here.
+    let control = held.shortcut_control();
     let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return false };
     let Some(chord) = keymap::chord(text, control, alt, shift) else { return false };
     let state = context(&app, &window);

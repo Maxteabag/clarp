@@ -215,6 +215,8 @@ export component AppWindow inherits Window {
     callback dismiss-error();
     // Every key reaches the keyboard map first; true when it ran a command.
     callback shortcut(string, bool, bool, bool, bool, bool) -> bool;
+    // A key released (only traced, CLARP_KEY_TRACE=1).
+    callback key-released(string, bool, bool, bool, bool);
     // Tells the map where the keyboard went.
     callback focus-moved();
     // Pane events carry the pane's id.
@@ -420,6 +422,7 @@ export component AppWindow inherits Window {
         }
         capture-key-released(event) => {
             if (event.text == Key.Control || event.text == Key.ControlR) { Look.ctrl-held = false; }
+            root.key-released(event.text, event.modifiers.control, event.modifiers.alt, event.modifiers.shift, event.modifiers.meta);
             reject
         }
         // The shortcut bar is the window's footer, under every column.

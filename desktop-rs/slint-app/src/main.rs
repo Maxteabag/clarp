@@ -829,6 +829,7 @@ fn main() {
         }
     });
     window.on_shortcut(|text, control, alt, shift, meta, repeat| commands::shortcut(&text, control, alt, shift, meta, repeat));
+    window.on_key_released(|text, control, alt, shift, meta| commands::key_released(&text, control, alt, shift, meta));
     window.on_setting_changed(|id, delta| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             settings_view::change(&app, &window, &id, delta);
