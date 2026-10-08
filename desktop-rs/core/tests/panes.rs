@@ -186,8 +186,12 @@ fn temp_store() -> (FileWorkspaceStore, std::path::PathBuf) {
     (FileWorkspaceStore::new(dir.join("workspaces.json")), dir)
 }
 
+/// Unique per test: macOS's clock moves in microseconds, so two tests
+/// starting together got one folder and one's cleanup removed the other's.
 fn uuid_like() -> String {
-    format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}-{}-{n}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())
 }
 
 fn saved_session(encoded: &str) -> String {
