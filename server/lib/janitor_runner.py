@@ -115,7 +115,24 @@ class SQLiteSource:
         return {"kind": "done", "ledger_terminal": True} if turn else None
 
 
+_CLOSE_RUN = ("Finish by closing the run: clarp-admin janitor outcome {run_id} --status STATUS --summary SUMMARY, "
+              "where STATUS is worked ({worked}), idle ({idle}) or failed ({failed}), and SUMMARY is one line.")
+
+
 def prompt_for_run(run: dict) -> str:
+    configuration = run.get("configuration") or {}
+    if configuration.get("template_id") == "scheduled-prompt":
+        instructions = str((configuration.get("options") or {}).get("instructions") or "").strip()
+        return (
+            f"Scheduled Janitor task. Registered run: {run['run_id']}. "
+            "Carry out the instructions below, which the owner configured as this Janitor's job. "
+            "You are a quiet maintenance agent: your replies are kept in your own chat and never notify the owner. "
+            "Do not create schedules.\n\n"
+            f"{instructions}\n\n"
+            + _CLOSE_RUN.format(run_id=run["run_id"], worked="you found and did something",
+                                idle="there was nothing to do", failed="you could not complete it")
+            + " Then give a concise run summary."
+        )
     return (
         f"Janitor task-label review. Registered run: {run['run_id']}. "
         "Use the installed clarp-janitors skill to read this run's frozen context and submit reviews. "
@@ -129,9 +146,9 @@ def prompt_for_run(run: dict) -> str:
         "A chat response alone is not a receipt. Do not edit SQLite, invoke worker agents, alter lifecycle, "
         "create schedules, or infer that tests/pushes/deployments succeeded. "
         "Only actual accepted effect receipts justify saying a label changed. "
-        f"Finish by closing the run: clarp-admin janitor outcome {run['run_id']} --status STATUS --summary SUMMARY, "
-        "where STATUS is worked (you changed at least one label), idle (nothing needed changing) or failed "
-        "(you could not complete the review), and SUMMARY is one line. Then give a concise run summary."
+        + _CLOSE_RUN.format(run_id=run["run_id"], worked="you changed at least one label",
+                            idle="nothing needed changing", failed="you could not complete the review")
+        + " Then give a concise run summary."
     )
 
 
@@ -183,11 +200,15 @@ class JanitorRunner:
         try:
             dispatched = 0
             for attachment in self.store.attachments(enabled_only=True):
-                if attachment.get("template_id", "task-labels") != "task-labels":
+                template_id = attachment.get("template_id", "task-labels")
+                if template_id not in ("task-labels", "scheduled-prompt"):
                     # Demand workers are invoked by their request path and
                     # must never enter the ordinary chat/label turn queue.
                     continue
                 try:
+                    if template_id == "scheduled-prompt":
+                        dispatched += self._scheduled_tick(attachment, self.clock())
+                        continue
                     dispatched += self._attachment_tick(attachment, self.clock())
                 except Exception:
                     logger.exception("Janitor attachment tick failed: %s", attachment["attachment_id"])
@@ -330,6 +351,54 @@ class JanitorRunner:
         if state.get("occurrence"):
             state["occurrence"]["runs"] = state["occurrence"].get("runs", 0) + 1
         run = self.store.create_run(aid, generation, candidates, run_id=run_id, progress=state)
+        return self._dispatch(attachment, state, run, now)
+
+    def _scheduled_tick(self, attachment: dict, now: int) -> int:
+        """A scheduled task: one run per due occurrence, no targets, no label
+        admission; the closing report sets the next occurrence (adaptive)."""
+        aid, generation, config = attachment["attachment_id"], attachment["generation"], attachment["config"]
+        state = copy.deepcopy(self.store.get_progress(aid) or {})
+        if state.get("generation") != generation:
+            state = {"generation": generation, "pending": {},
+                     "next_run_at": compute_next_run(config["cron"], config["timezone"], now)}
+        active = state.get("active_run_id")
+        if active:
+            run = self.store.get_run(active)
+            if not run:
+                state["last_error"] = "The admitted run is missing; configuration requires review"
+                self._save(attachment, state)
+                return 0
+            terminal = self.source.terminal(run)
+            if run["status"] not in TERMINAL and not terminal:
+                self._save(attachment, state)
+                return self._dispatch(attachment, state, run, now)
+            if run["status"] not in TERMINAL:
+                error = ""
+                outcome = "error" if terminal["kind"] == "error" else "completed"
+                if outcome == "error":
+                    from .janitor_context import redact
+                    detail = _detail(terminal)
+                    error = redact(str(detail.get("error") or detail.get("reason") or "The scheduled task failed"))[:500]
+                self.store.finish_run(run["run_id"], outcome, error=error)
+            state.pop("active_run_id", None)
+            state.pop("delivery_accepted", None)
+            if state.get("occurrence") is not None and run["status"] != "cancelled":
+                self._note_run_activity(attachment, state, self.store.get_run(run["run_id"]) or run)
+            self._close_occurrence(attachment, state, now)
+            self._save(attachment, state)
+            return 0
+        due = state.get("next_run_at")
+        if due is None or now < due or self.store.has_active_run(attachment["agent_id"]):
+            self._save(attachment, state)
+            return 0
+        # One run for this occurrence, never a catch-up loop; the provisional
+        # next run is replaced when the occurrence closes.
+        state["next_run_at"] = compute_next_run(config["cron"], config["timezone"], now)
+        self._open_occurrence(state, now)
+        run_id = "janitor-" + hashlib.sha256(json.dumps([aid, generation, "scheduled", due]).encode()).hexdigest()[:32]
+        state["occurrence"]["runs"] = 1
+        state.update(active_run_id=run_id, delivery_accepted=False, next_delivery_at=now, last_admitted_at=now)
+        run = self.store.create_run(aid, generation, [], run_id=run_id, progress=state)
         return self._dispatch(attachment, state, run, now)
 
     def _dispatch(self, attachment: dict, state: dict, run: dict, now: int) -> int:

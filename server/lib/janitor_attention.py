@@ -47,9 +47,12 @@ def _episode(config: dict) -> tuple[str, dict | None, int]:
           AND ((r.outcome IN ('changed','same_task')
           AND EXISTS (SELECT 1 FROM janitor_effects e WHERE e.run_id=r.run_id
                       AND e.outcome IN ('changed','same_task')))
-            OR (r.outcome='completed' AND r.finished_at IS NOT NULL AND d.result_json IS NOT NULL))
-        ORDER BY r.finished_at DESC,r.rowid DESC""", identity)
+            OR (r.outcome='completed' AND r.finished_at IS NOT NULL
+                AND (d.result_json IS NOT NULL OR ?='scheduled-prompt')))
+        ORDER BY r.finished_at DESC,r.rowid DESC""", (*identity, config["template_id"]))
+    # A scheduled task's completed turn is its success; it has no receipts.
     success = next((run for run in candidates if run["outcome"] in {"changed", "same_task"}
+                    or (run["outcome"] == "completed" and config["template_id"] == "scheduled-prompt")
                     or _valid_demand_receipt(config, run)), None)
     boundary = success["run_id"] if success else "initial"
     reference = f"{PREFIX}{config['agent_id']}:{config['generation']}:{boundary}"
