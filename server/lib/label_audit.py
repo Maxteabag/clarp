@@ -7,7 +7,8 @@ and processes) it builds a small evidence packet: the label as shown, how
 long the state has held, job titles, progress lines and heartbeat ages,
 helper names and states, and the last few messages. Jev judges all of them in
 one request (``judgment_sites.audit_work_labels``). Labels it finds wrong are
-listed in one Updates item per run.
+listed in one report per run, in the Label checker's own chat: a Janitor is a
+quiet agent (``quiet_agents``), so the report is not in Updates.
 
 Nothing here changes an agent, a job or a label. The Janitor's
 ``autocorrect`` option is reserved for that and is not acted on yet.

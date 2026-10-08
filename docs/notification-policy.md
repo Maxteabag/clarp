@@ -56,6 +56,31 @@ dispatch path finishes updating live provenance.
 Those channels are worker, automation, or team-system traffic. They may remain
 visible as transcript/activity rows, but they must not page or badge the user.
 
+## Quiet Agents
+
+Janitors are quiet agents (`server/lib/quiet_agents.py`, the one predicate
+every path below consults; snapshot rows carry it as `quiet`). A quiet agent's
+work never reaches the owner by itself:
+
+- its completed turns are classified `notify=0` with reason
+  `janitor-maintenance`, so no push, badge or unread;
+- its decisions never push (`apnsDecisionSuppressed reason=quiet-agent`) and,
+  with its artifacts, stay out of `GET /attention`, `GET /attention/inbox` and
+  the Updates badge;
+- it is not a row in the "agents working" Live Activity;
+- clients leave it out of unread counts, the attention queue (desktop Ctrl+J,
+  `waiting` included) and working summaries.
+
+Its chat stays readable when opened directly. `janitor_failure` items
+(`docs/janitor-attention.md`) are the deliberate exception: they are how a
+broken Janitor surfaces, and they keep their own quiet path into Updates.
+
+An ordinary agent that is only *named* a janitor (an agent driven by an
+`agent_schedules` cron) is not quiet. Making it quiet means converting it to a
+Janitor and moving its cron to a `schedule@1` attachment (a Janitor admits only
+Janitor runs, so the old schedule would be refused); muting it stops only the
+push.
+
 ## Push Urgency
 
 A push that fires is not automatically the loud, interrupting kind. Two tiers,
