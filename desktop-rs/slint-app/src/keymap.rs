@@ -1269,4 +1269,22 @@ mod tests {
         }
         assert_eq!(action_for("sidebar", "/", &none, all()), Some("agent-search"), "/ still filters the explorer");
     }
+
+    #[test]
+    fn option_keeps_making_characters_while_typing() {
+        // On a Mac Option+letter types a character (Option+E an accent):
+        // nothing bound where text is typed may take Alt with one key alone.
+        for typing in ["composer", "search", "settings-search"] {
+            let mut name = Some(typing);
+            while let Some(current) = name {
+                for binding in state(current) {
+                    for key in &binding.keys {
+                        let plain_alt = key.strip_prefix("Alt+").is_some_and(|rest| rest.chars().count() == 1);
+                        assert!(!plain_alt, "{typing} reaches {current}'s {key} ({})", binding.action);
+                    }
+                }
+                name = parent(current);
+            }
+        }
+    }
 }
