@@ -790,24 +790,19 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     let items = if !picker.is_empty() {
         switcher::picker(&picker, &crate::settings_view::choices(app, &picker), &query)
     } else if messages_only {
-        // Ctrl+F: messages alone, and what was searched.
+        // Ctrl+F: messages, and what was searched.
         let (items, results) = crate::search_view::items(&mut app.engine.borrow_mut(), &query, crate::search_view::LIMIT);
         note = crate::search_view::note(&results);
         items
     } else if recent_only {
         switcher::recent(&app.engine.borrow(), &app.recent.borrow(), &query)
     } else {
-        let mut items = switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings));
-        // Ctrl+K: the best few messages after the agents and contacts.
-        if !contacts_only && query.trim().chars().count() >= crate::search_view::MIXED_FROM {
-            let (found, results) = crate::search_view::items(&mut app.engine.borrow_mut(), &query, crate::search_view::MIXED);
-            if !found.is_empty() {
-                note = format!("{} Ctrl+F searches messages alone.", crate::search_view::note(&results));
-            }
-            let at = items.iter().take_while(|i| matches!(i.kind, switcher::Kind::Agent | switcher::Kind::Contact)).count();
-            items.splice(at..at, found);
+        // Ctrl+K lists agents, contacts, commands and settings, never
+        // messages: those are Ctrl+F's.
+        if !contacts_only && query.trim().chars().count() >= crate::search_view::HINT_FROM {
+            note = "Ctrl+F searches the messages of every chat.".to_owned();
         }
-        items
+        switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings))
     };
     window.set_switcher_note(note.into());
     // The commands' keys as the user bound them.

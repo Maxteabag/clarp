@@ -135,14 +135,37 @@ pub fn message_search_check(out: String) {
             headless::type_text("walrus");
             true
         })),
-        ("mixed", Box::new(move |_, window, elapsed| {
+        ("no messages in ctrl k", Box::new(move |_, window, elapsed| {
+            if window.get_switcher_query() != "walrus" || elapsed < Duration::from_millis(600) {
+                return false;
+            }
+            let kinds: Vec<String> = window.get_switcher_rows().iter().map(|r| r.kind.to_string()).collect();
+            check(!kinds.iter().any(|k| k == "message"), &format!("Ctrl+K lists no messages: {kinds:?}"));
+            check(window.get_switcher_note().contains("Ctrl+F"), "and points to message search");
+            shot(&out3, "message-search-03-ctrl-k");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("ctrl f again", Box::new(|_, window, elapsed| {
+            if window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::press_with(&[Key::Control], "f");
+            true
+        })),
+        ("walrus", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            headless::type_text("walrus");
+            true
+        })),
+        ("cached found", Box::new(|_, window, elapsed| {
             if window.get_switcher_query() != "walrus" || elapsed < Duration::from_millis(300) || first(window).0 != "message" {
                 return false;
             }
             let (_, label) = first(window);
-            check(label.starts_with("Dana · agent") && label.ends_with("· cached"), &format!("Ctrl+K finds a message only the cache holds, and says so: {label}"));
-            check(window.get_switcher_note().contains("Ctrl+F"), "and points to message search");
-            shot(&out3, "message-search-03-ctrl-k");
+            check(label.starts_with("Dana · agent") && label.ends_with("· cached"), &format!("message search finds a message only the cache holds, and says so: {label}"));
             headless::press(Key::Return);
             true
         })),
