@@ -41,10 +41,11 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 56
+HOST_CONTRACT = 57
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
+    "janitor_adaptive_intervals",
     "quiet_agents",
     "turn_failure_reason",
     "transcription_agent_language_set",
@@ -155,6 +156,7 @@ FEATURE_CONTRACTS["transcription_agent_language"] = 32
 FEATURE_CONTRACTS["transcription_agent_language_set"] = 53
 FEATURE_CONTRACTS["turn_failure_reason"] = 54
 FEATURE_CONTRACTS["quiet_agents"] = 56
+FEATURE_CONTRACTS["janitor_adaptive_intervals"] = 57
 FEATURE_CONTRACTS["transcription_session_header"] = 33
 FEATURE_CONTRACTS["transcription_agent_engine"] = 34
 FEATURE_CONTRACTS["transcription_agent_engine_fallback"] = 37

@@ -204,7 +204,7 @@ def has_enabled_attachment(agent_id: str, c=None) -> bool:
     return bool(_c(c).execute("SELECT 1 FROM janitor_attachments WHERE agent_id=? AND enabled=1 AND retired_at IS NULL", (agent_id,)).fetchone())
 
 
-_ATTACHMENT_WITH_CONFIG = """SELECT t.*,j.generation,j.template_id,j.scope_json,j.enabled AS janitor_enabled,
+_ATTACHMENT_WITH_CONFIG = """SELECT t.*,j.generation,j.template_id,j.scope_json,j.options_json,j.enabled AS janitor_enabled,
         a.session FROM janitor_attachments t JOIN janitor_configs j ON j.agent_id=t.agent_id
         JOIN agents a ON a.agent_id=t.agent_id"""
 
@@ -333,6 +333,11 @@ def mark_run_started(c, run_id: str, now: int) -> None:
 
 def finish_run_row(c, run_id: str, *, status: str, outcome: str, now: int, error: str = "") -> None:
     c.execute("UPDATE janitor_runs SET status=?,outcome=?,finished_at=?,error=? WHERE run_id=?", (status, outcome, now, error, run_id))
+
+
+def set_run_activity(c, run_id: str, activity: str, summary: str) -> None:
+    """The run's own worked/idle/failed report (janitor_adaptive)."""
+    c.execute("UPDATE janitor_runs SET activity=?,activity_summary=? WHERE run_id=?", (activity, summary, run_id))
 
 
 def cancel_run(c, run_id: str, now: int, *, error: str | None = None,

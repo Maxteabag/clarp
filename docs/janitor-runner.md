@@ -59,12 +59,58 @@ after restart. `preview_next_runs(..., count=3)` uses that same implementation.
 Legacy ordinary-agent schedules keep UTC behavior. Day-of-month and day-of-week
 retain the existing Host parser's AND semantics.
 
+## Adaptive intervals
+
+An interval-driven Janitor stretches its cadence while it has nothing to do.
+`lib.janitor_adaptive` holds the whole policy as pure functions:
+
+- **Every run reports its activity.** It ends `worked` (it found and did
+  something), `idle` (nothing needed doing) or `failed`, plus a one-line summary.
+  The values are stored on the run as `activity` and `activity_summary`.
+- **Model-run Janitors report it themselves.** A task-label run is told in its
+  prompt to close with
+  `clarp-admin janitor outcome RUN_ID --status worked|idle|failed --summary ...`
+  (`POST /janitor-runs/{run_id}/activity`). The Host-run Janitors (Label checker,
+  Quota keeper, Hotseat switcher, Heartbeat keeper) record it when they complete.
+- **A run that never reports counts as `worked`** and logs
+  `janitorActivityMissing`. A Janitor that forgets the contract keeps its
+  configured cadence; it never drifts to a day. A failed run is `failed`
+  whatever it reported.
+- **`advance` sets the next interval.**
+  - Each idle run doubles it from the base (the configured interval, or a
+    cron's gap between runs), up to the Janitor's `max_interval_seconds`
+    option (default 86400).
+  - `worked` resets it to the base.
+  - `failed` leaves it unchanged and keeps the existing failure handling
+    (retry, `janitor_failure` alerts).
+  - A changed base or cap starts again from the base.
+- **The Quota keeper and Hotseat switcher default to `max_interval_seconds: 0`
+  (fixed).** A quota watch that backs off misses the window it guards. Set the
+  option to opt in.
+- **Where it applies.**
+  - Task-label attachments on `schedule@1` and `active-interval@1`: one due
+    occurrence opens when the trigger fires. It closes once nothing is pending
+    or running. It is `worked` if any of its runs worked, `failed` if one failed
+    and none worked, otherwise `idle` (a pass with nothing to review is idle).
+    For a cron, the next run is the first occurrence at least one interval after
+    the occurrence began.
+  - `agent-work-completed@1` and the demand triggers have no interval and are
+    unchanged.
+- **The state survives restarts.** It persists in the attachment's progress
+  (`adaptive`) or in settings (`janitor-adaptive.<lane>`, keyed to the Janitor
+  and its configuration generation).
+- **`GET /janitors` and `clarp-admin janitor list`/`inspect` show the cadence.**
+  Each Janitor has a `cadence` list, one entry per schedule lane:
+  `{lane, base_interval_seconds, current_interval_seconds, max_interval_seconds,
+  adaptive, idle_streak, last_activity, last_summary, next_run_at}`.
+
 ## Verification
 
 ```bash
 python -m pytest -o addopts='' tests/unit/test_janitor_context.py \
   tests/unit/test_janitor_policy.py tests/unit/test_janitor_schedule.py \
-  tests/unit/test_janitor_runner.py -q
+  tests/unit/test_janitor_runner.py tests/unit/test_janitor_adaptive.py \
+  tests/unit/test_janitor_activity_report.py -q
 ```
 
 Tests use isolated databases or deterministic source/store adapters. They exercise

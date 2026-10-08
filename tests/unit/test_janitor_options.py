@@ -34,7 +34,11 @@ def test_templates_describe_all_job_options_with_typed_defaults():
     assert detail["key"] == "detail_level" and detail["type"] == "choice" and detail["default"] == 0
     assert detail["choices"] == [{"value": value, "label": label} for value, label in enumerate(
         ["Developer", "Technical", "Balanced", "Plain English", "Grandma"])]
-    assert templates["task-labels"]["options"] == []
+    [cap] = templates["task-labels"]["options"]
+    assert cap["key"] == "max_interval_seconds" and cap["default"] == 86400 and cap["min"] == 0
+    for role in ("quota-monitor", "account-hotseat"):
+        # Quota watches back off only when configured to.
+        assert {o["key"]: o["default"] for o in templates[role]["options"]}["max_interval_seconds"] == 0
 
 
 def test_unconfigured_options_resolve_defaults_without_claiming_device_preference():
@@ -117,7 +121,7 @@ def test_managed_label_runs_also_freeze_and_revalidate_job_options():
     config = janitors.set_enabled("labels", config["revision"], True)
     context = build_context_from_connection(db.conn(), "worker")
     run = janitors.create_run(config["attachments"][0]["attachment_id"], config["generation"], [context])
-    assert run["configuration"]["options"] == {}
+    assert run["configuration"]["options"] == {"max_interval_seconds": 86400}
     assert janitors.validate_dispatch("labels", run["run_id"], run["trace_id"])
     db.conn().execute("UPDATE janitor_configs SET options_json=? WHERE agent_id=?", ('{"future_setting":true}', config["agent_id"]))
     assert not janitors.validate_dispatch("labels", run["run_id"], run["trace_id"])

@@ -34,6 +34,13 @@ def compute_next_run(expression: str, timezone_name: str, from_ms: int) -> int |
     return None
 
 
+def base_interval_seconds(expression: str, timezone_name: str, from_ms: int) -> int:
+    """A schedule's cadence: the gap between its next two runs (a day if it has none)."""
+    first = compute_next_run(expression, timezone_name, from_ms)
+    second = compute_next_run(expression, timezone_name, first) if first else None
+    return max(60, (second - first) // 1000) if first and second else 86_400
+
+
 def preview_next_runs(expression: str, timezone_name: str, from_ms: int, count: int = 3) -> list[int]:
     result = []
     for _ in range(max(0, min(count, 10))):
