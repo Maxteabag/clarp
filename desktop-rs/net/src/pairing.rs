@@ -27,7 +27,8 @@ pub async fn exchange(base: &Url, code: &str, device_name: &str) -> Result<Strin
         .map_err(|error| error.to_string())?;
     let response = client
         .post(endpoint.clone())
-        .json(&json!({"code": code.trim(), "device_name": device_name}))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(json!({"code": code.trim(), "device_name": device_name}).to_string())
         .send()
         .await
         .map_err(|error| format!("Could not reach {endpoint}: {error}"))?;
