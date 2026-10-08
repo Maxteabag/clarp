@@ -361,13 +361,18 @@ POST /tool-explanations/settings    {"enabled": false}            (partial updat
   raw command, or nothing), never as `Explaining…`. No item stays `pending`:
   each settles `ready` or `failed` within 45 s, and within 15 s of its turn
   ending. The Host asks the model for up to 8 of an agent's items at once.
+  This holds across Host restarts: when the HTTP process reconnects to the
+  runtime it re-admits every tool item the hub shows without a settled
+  explanation, and a patch the runtime cannot take is retried.
 - **Off**: no explainer runs (no model call, nothing queued), `tool.explain` stays
   `null`, and `POST /tool-explanations` answers every item `disabled`.
 - Rendering: the tool row's first line is always the deterministic `label` (verb +
   label + elapsed + status). With `explain.text` present it is the secondary line,
   in a reserved one-line slot so the row never changes height when it arrives;
-  while it is coming (`explain.status` `pending`, or no text yet on a running
-  tool) the slot reads a faint `Explaining…`.
+  only while `explain.status` is `pending` and the turn is running does the slot
+  read a faint `Explaining…`. `null` (never requested), `failed` (whatever its
+  `reason`, e.g. `skipped`; its text is not shown) or any other status shows
+  nothing; once the turn has ended nothing says it is coming.
   With the setting off, the secondary line is the raw `tool.command`. Clients
   keep their per-device detail level for the existing `POST /tool-explanations`
   path; items use the Host level.

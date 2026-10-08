@@ -109,6 +109,18 @@ fn chats() -> Vec<Setting> {
             crate::profile_view::LIVE_STATUS_LINE,
             false,
         ),
+        Setting::stored_toggle(
+            e(
+                "send-animation",
+                "Send animation",
+                "appearance",
+                "A sent message lifts out of the composer and flies to its place at the end of the chat while the composer shrinks. With Reduce Motion it fades in instead.",
+                &["send", "sending", "message animation", "fly", "flight", "telegram", "bubble", "composer", "toggle"],
+            ),
+            "CHATS",
+            crate::profile_view::SEND_ANIMATION,
+            true,
+        ),
         // The Host's setting, on Hosts that send live items (§6).
         Setting::toggle(
             keyed(

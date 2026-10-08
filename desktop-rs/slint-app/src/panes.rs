@@ -18,6 +18,8 @@ pub struct Report {
     pub offset: f32,
     pub transcript_focused: bool,
     pub composer_focused: bool,
+    /// The row across the top of the chat's view.
+    pub top: i32,
 }
 
 /// How many of a chat's latest rows get their tool calls explained.
@@ -56,6 +58,8 @@ pub struct PaneState {
     pub mention_dismissed: Option<usize>,
     /// One more than where the cursor goes with the next `draft_set`.
     draft_cursor: i32,
+    /// What `scroll_amount` counts: px (""), "pages" or a "row" to go to.
+    scroll_kind: &'static str,
     view: PaneView,
     /// Each reply's artifact cards, updated in place: a card is never
     /// rebuilt under a click or a field that has the keyboard.
@@ -63,6 +67,9 @@ pub struct PaneState {
     /// Durable rows that took over live rows: row id → the place (key)
     /// they took, kept while the chat is shown so the row never moves.
     slots: std::collections::HashMap<String, String>,
+    /// Unsent messages of one's own: when each was first shown (its status
+    /// shows once `SEND_STATUS_GRACE` has passed).
+    unsent: std::collections::HashMap<String, std::time::Instant>,
 }
 
 impl PaneState {
@@ -91,6 +98,7 @@ impl PaneState {
             focus_transcript: 0,
             to_latest: 0,
             scroll_request: 0,
+            scroll_kind: "",
             scroll_amount: 0.0,
             seek_request: 0,
             seek_index: 0,
@@ -103,6 +111,7 @@ impl PaneState {
             draft_cursor: 0,
             cards: std::collections::HashMap::new(),
             slots: std::collections::HashMap::new(),
+            unsent: std::collections::HashMap::new(),
         }
     }
 }
@@ -285,6 +294,23 @@ impl App {
         self.bump(|p| {
             p.scroll_request += 1;
             p.scroll_amount = delta;
+            p.scroll_kind = "";
+        });
+    }
+    /// Scrolls the active transcript by `pages` of its height.
+    pub fn scroll_pages(&self, pages: f32) {
+        self.bump(|p| {
+            p.scroll_request += 1;
+            p.scroll_amount = pages;
+            p.scroll_kind = "pages";
+        });
+    }
+    /// Brings row `index` of the active transcript to the top of its view.
+    pub fn scroll_to_row(&self, index: usize) {
+        self.bump(|p| {
+            p.scroll_request += 1;
+            p.scroll_amount = index as f32;
+            p.scroll_kind = "row";
         });
     }
 
@@ -417,6 +443,7 @@ impl App {
         view.reveal_index = pane.reveal_index;
         view.draft_cursor = pane.draft_cursor;
         crate::mention_view::apply(self, pane, &mut view);
+        view.scroll_kind = pane.scroll_kind.into();
         view
     }
 
@@ -477,7 +504,7 @@ impl App {
         let attachments: Vec<Attachment> = engine.attachments(session).iter().map(attachment).collect();
         view.attachments = ModelRc::new(VecModel::from(attachments));
         view.can_send = engine.can_send(session);
-        view.queued = engine.queue_count(session);
+        view.queued = crate::view::queued_shown(session, engine.queue_count(session));
         view.quota_notice = engine.quota_notice(session).into();
     }
 
@@ -535,6 +562,8 @@ impl App {
         let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
         pane.presented_with = Some(self.presentation_key());
         let built = pane.rows.rows(&presented, always, &expanded);
+        let now = std::time::Instant::now();
+        let mut unsent = std::collections::HashMap::new();
         let mut kept = std::collections::HashMap::new();
         let rows: Vec<MessageRow> = presented
             .iter()
@@ -543,6 +572,25 @@ impl App {
             .map(|((row, artifacts), mut shown)| {
                 if !stamps {
                     shown.stamp = SharedString::new();
+                }
+                // An unsent message says so only once the grace period has
+                // passed; the pane is refreshed then, once.
+                if shown.pending {
+                    let since = pane.unsent.get(&row.message.id).copied();
+                    let first = since.unwrap_or(now);
+                    unsent.insert(row.message.id.clone(), first);
+                    match crate::view::send_status_due(now.duration_since(first)) {
+                        Ok(()) => shown.status_due = true,
+                        Err(left) if since.is_none() => {
+                            let session = pane.session.clone();
+                            slint::Timer::single_shot(left, move || {
+                                if let Some(app) = crate::app() {
+                                    app.refresh(&[Change::Conversation(session)]);
+                                }
+                            });
+                        }
+                        Err(_) => {}
+                    }
                 }
                 // A message addressed to this chat's agent by an @-mention.
                 if shown.author == "user" {
@@ -568,6 +616,7 @@ impl App {
             })
             .collect();
         pane.cards = kept;
+        pane.unsent = unsent;
         // Opened activity the Host sent without its tool calls: fetch them.
         let mut engine = self.engine.borrow_mut();
         for (row, shown) in presented.iter().zip(&rows) {
@@ -631,7 +680,8 @@ impl App {
             let pictures = if row.blocks.iter().any(|b| b.kind == "images") { crate::artifacts_view::pictures_landed() } else { 0 };
             let receipt = format!("{}:{}:{}", row.receipt.agent, row.receipt.kind, row.receipt.linked);
             // Another agent's prompt is drawn again when it opens or folds.
-            format!("{cards}|{}|{pictures}|{receipt}|{}", explained.join(","), row.prompt.expanded)
+            // An unsent message is drawn again when its status becomes due.
+            format!("{cards}|{}|{pictures}|{receipt}|{}|{}", explained.join(","), row.prompt.expanded, row.status_due)
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let mut fresh: Vec<Shown> = presented
@@ -710,8 +760,8 @@ impl App {
     }
 
     /// Puts each finished turn's fold where the turn is: its entries after
-    /// its prompt, among the rows it keeps (commentary when open, the
-    /// answer), in the turn's order. `kept` gathers the entries' keys.
+    /// its prompt, among the rows it keeps (every message, commentary
+    /// too), in the turn's order. `kept` gathers the entries' keys.
     fn splice_history(
         &self,
         pane: &mut PaneState,

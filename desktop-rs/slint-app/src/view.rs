@@ -244,7 +244,7 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
         preview: preview.into(),
         activity: activity.into(),
         depth: depth as i32,
-        queued: row.queue_count,
+        queued: queued_shown(&row.session, row.queue_count),
         busy: row.busy,
         unread: row.unread,
         muted: row.muted,
@@ -470,6 +470,75 @@ pub(crate) fn tool_row(tool: &serde_json::Value) -> ToolRow {
     }
 }
 
+/// How long a message of one's own may stay unsent before its bubble says
+/// so ("Sending…"): the iPhone's 1.75 s (clarp-ios 7bdc0d3). Most sends are
+/// confirmed well within it: the bubble is drawn at its final size straight
+/// away instead of with a status line that is gone a moment later. A send
+/// that will not be confirmed shows at once: the desktop never retries one
+/// by itself, so that is a failed send ("Not delivered", on an error or the
+/// delivery timeout).
+pub(crate) const SEND_STATUS_GRACE: std::time::Duration = std::time::Duration::from_millis(1750);
+
+/// Queued-turn labels (the composer's line, the explorer's and overview's
+/// counts) wait the same grace period before a rise shows: a send queued
+/// behind a turn is most often taken at once. A fall shows at once, and a
+/// chat's count is shown as it is the first time it is seen.
+#[derive(Default)]
+pub(crate) struct QueueGrace {
+    /// Session → the count shown, and since when a higher one has waited.
+    shown: std::collections::HashMap<String, (i32, Option<std::time::Instant>)>,
+}
+
+impl QueueGrace {
+    /// The count to show for `actual` at `now`, and how long until a rise
+    /// still waiting is due (to look again then).
+    pub(crate) fn shown(&mut self, session: &str, actual: i32, now: std::time::Instant) -> (i32, Option<std::time::Duration>) {
+        let entry = self.shown.entry(session.to_owned()).or_insert((actual, None));
+        if actual <= entry.0 {
+            *entry = (actual, None);
+            return (actual, None);
+        }
+        let since = *entry.1.get_or_insert(now);
+        match send_status_due(now.duration_since(since)) {
+            Ok(()) => {
+                *entry = (actual, None);
+                (actual, None)
+            }
+            Err(left) => (entry.0, Some(left)),
+        }
+    }
+}
+
+thread_local! {
+    static QUEUE_GRACE: std::cell::RefCell<QueueGrace> = std::cell::RefCell::default();
+    /// Sessions with a refresh already set for a waiting rise.
+    static QUEUE_DUE: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::default();
+}
+
+/// The queued-turn count `session`'s labels show (`QueueGrace`); a rise
+/// still waiting brings the labels up to date once it is due.
+pub(crate) fn queued_shown(session: &str, actual: i32) -> i32 {
+    let (shown, wait) = QUEUE_GRACE.with(|g| g.borrow_mut().shown(session, actual, std::time::Instant::now()));
+    if let Some(left) = wait
+        && QUEUE_DUE.with(|d| d.borrow_mut().insert(session.to_owned()))
+    {
+        let session = session.to_owned();
+        slint::Timer::single_shot(left + std::time::Duration::from_millis(10), move || {
+            QUEUE_DUE.with(|d| d.borrow_mut().remove(&session));
+            if let Some(app) = crate::app() {
+                app.refresh(&[clarp_engine::Change::Roster, clarp_engine::Change::Composer(session)]);
+            }
+        });
+    }
+    shown
+}
+
+/// Whether an unsent message's status is due after `pending_for`, or how
+/// long until it is.
+pub(crate) fn send_status_due(pending_for: std::time::Duration) -> Result<(), std::time::Duration> {
+    if pending_for >= SEND_STATUS_GRACE { Ok(()) } else { Err(SEND_STATUS_GRACE - pending_for) }
+}
+
 /// "HH:MM" in local time for an RFC 3339 stamp.
 pub(crate) fn message_stamp(timestamp: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(timestamp)
@@ -532,6 +601,8 @@ pub(crate) fn message_row(
         stamp: message_stamp(&m.timestamp).into(),
         meta: SharedString::new(),
         pending: m.pending,
+        // The pane decides once the grace period has passed.
+        status_due: false,
         failed: m.delivery_failed,
         activity_label: label.into(),
         group_id: group_id.into(),
@@ -665,6 +736,30 @@ impl RowCache {
 mod tests {
     /// The explorer's preview and activity lines are one line each: a helper
     /// running a multi-line command must not spill over the next chat.
+    #[test]
+    fn an_unsent_message_says_so_only_after_the_grace_period() {
+        use std::time::Duration;
+        assert_eq!(super::send_status_due(Duration::ZERO), Err(super::SEND_STATUS_GRACE));
+        assert_eq!(super::send_status_due(Duration::from_millis(1000)), Err(super::SEND_STATUS_GRACE - Duration::from_millis(1000)));
+        assert_eq!(super::send_status_due(super::SEND_STATUS_GRACE), Ok(()));
+        assert_eq!(super::send_status_due(Duration::from_secs(5)), Ok(()));
+    }
+
+    #[test]
+    fn a_queued_count_rises_only_after_the_grace_period_and_falls_at_once() {
+        use std::time::{Duration, Instant};
+        let mut grace = super::QueueGrace::default();
+        let start = Instant::now();
+        assert_eq!(grace.shown("a", 2, start), (2, None), "a chat's count first seen shows as it is");
+        assert_eq!(grace.shown("a", 3, start), (2, Some(super::SEND_STATUS_GRACE)), "a rise waits");
+        let later = start + Duration::from_millis(1000);
+        assert_eq!(grace.shown("a", 3, later), (2, Some(super::SEND_STATUS_GRACE - Duration::from_millis(1000))));
+        assert_eq!(grace.shown("a", 3, start + super::SEND_STATUS_GRACE), (3, None), "and shows once due");
+        assert_eq!(grace.shown("a", 0, start + super::SEND_STATUS_GRACE), (0, None), "a fall shows at once");
+        assert_eq!(grace.shown("a", 1, start + Duration::from_secs(10)), (0, Some(super::SEND_STATUS_GRACE)), "a new rise waits again");
+        assert_eq!(grace.shown("a", 0, start + Duration::from_secs(11)), (0, None), "taken within the grace period: never shown");
+    }
+
     #[test]
     fn explorer_lines_stay_on_one_line() {
         let row = clarp_core::roster::AgentRow {

@@ -124,6 +124,33 @@ fn prev_and_next_cycle_and_workspaces_switch() {
 }
 
 #[test]
+fn a_workspace_closes_to_its_neighbour_but_the_last_stays() {
+    let mut panes = PaneTree::new();
+    panes.set_active_session("a");
+    let main = panes.active_workspace().to_owned();
+    panes.close_workspace(&main);
+    assert_eq!(panes.workspaces().len(), 1, "the last workspace stays");
+    panes.create_workspace("Review");
+    let review = panes.active_workspace().to_owned();
+    panes.set_active_session("b");
+    panes.split_active("vertical", "c");
+    panes.switch_workspace(&main);
+    // Closing a hidden one leaves the active alone.
+    panes.close_workspace(&review);
+    assert_eq!(panes.workspaces().len(), 1);
+    assert_eq!(panes.active_workspace(), main);
+    assert_eq!(panes.active_session(), "a");
+    // Closing the active one opens a neighbour with its layout.
+    panes.create_workspace("Second");
+    let second = panes.active_workspace().to_owned();
+    panes.close_workspace(&second);
+    assert_eq!(panes.workspaces().len(), 1);
+    assert_eq!(panes.active_workspace(), main);
+    assert_eq!(panes.active_session(), "a");
+    assert!(panes.view_layout().iter().all(|p| p["shown"] == true), "no hidden panes of a closed workspace remain");
+}
+
+#[test]
 fn saved_state_round_trips_and_rejects_malformed_trees() {
     let mut panes = PaneTree::new();
     panes.set_active_session("a");

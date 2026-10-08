@@ -1,4 +1,4 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, ChromeText } from "theme.slint";
 import { ScrollView } from "std-widgets.slint";
 import { Busy } from "agent_controls.slint";
 
@@ -44,7 +44,7 @@ export component MediaGallery inherits Rectangle {
                 width: 20px;
                 accessible-role: button;
                 accessible-label: root.expanded ? "Collapse media" : "Show recent media";
-                Text { text: root.expanded ? "−" : "+"; color: Palette.chrome-text; }
+                Text { font-size: ChromeText.body; text: root.expanded ? "−" : "+"; color: Palette.chrome-text; }
                 TouchArea { clicked => { root.expanded = !root.expanded; } }
             }
         }

@@ -490,6 +490,16 @@ pub static SPECS: &[Spec] = &[
         scope: G,
     },
     Spec {
+        name: "vim",
+        key: "keymap/vim",
+        label: "Vim mode",
+        description: "Use the window without Ctrl: Esc for Normal mode, then j/k, gg, /, : and Space for every action",
+        aliases: &["vi", "vim keys", "modal keys", "normal mode", "no ctrl", "leader key", "hjkl"],
+        section: BEHAVIOUR,
+        kind: toggle(true),
+        scope: G,
+    },
+    Spec {
         name: "doublepress",
         key: "keymap/doublePressMs",
         label: "Double-press window",
@@ -597,6 +607,16 @@ pub static SPECS: &[Spec] = &[
         aliases: &["animations", "motion", "no animation", "accessibility", "still"],
         section: BEHAVIOUR,
         kind: toggle(false),
+        scope: G,
+    },
+    Spec {
+        name: "sendanimation",
+        key: "appearance/sendAnimation",
+        label: "Send animation",
+        description: "A sent message flies from the composer to its place in the chat",
+        aliases: &["send", "sending", "fly", "flight", "telegram", "bubble animation"],
+        section: BEHAVIOUR,
+        kind: toggle(true),
         scope: G,
     },
 ];

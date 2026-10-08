@@ -164,6 +164,13 @@ pub fn live_status_line(app: &App) -> bool {
 
 pub const LIVE_STATUS_LINE: &str = "appearance/liveStatusLine";
 
+/// The send animation (Settings, on by default).
+pub fn send_animation(app: &App) -> bool {
+    app.engine.borrow().settings().boolean(SEND_ANIMATION, true)
+}
+
+pub const SEND_ANIMATION: &str = "appearance/sendAnimation";
+
 /// Opens a `file://` URL in the desktop's file manager; checks record it in
 /// `CLARP_TEST_OPEN_URL` instead.
 pub(crate) fn open_file_url(url: &str) {
@@ -220,6 +227,8 @@ pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
     let look = window.global::<crate::ChatLook>();
     look.set_reduced_motion(reduced);
     look.set_live_status_line(live_status_line(app));
+    look.set_send_animation(send_animation(app));
+    window.global::<crate::SendFlight>().set_status_grace(crate::view::SEND_STATUS_GRACE.as_millis() as i64);
     crate::overview_view::refresh(app, window, changes, reduced);
     crate::voice_view::refresh(app, window, changes, reduced);
     crate::orchestrator_view::refresh(app, window, changes, reduced);

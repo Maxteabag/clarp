@@ -1,4 +1,4 @@
-//! Message search in the switcher (Ctrl+F alone, Ctrl+K among the rest):
+//! Message search in the switcher (Ctrl+F; Ctrl+K lists no messages):
 //! the text of every chat this computer holds, best and newest first, each
 //! row its chat, when, and the words around the match. Choosing one opens
 //! the chat, brings the message into view and marks it. The Host has no
@@ -15,11 +15,10 @@ use clarp_engine::search::SearchResults;
 use crate::switcher::Item;
 use crate::{App, pump_now};
 
-/// Rows Ctrl+F lists, and the best few Ctrl+K adds to its own.
+/// Rows message search lists.
 pub const LIMIT: usize = 50;
-pub const MIXED: usize = 5;
-/// Ctrl+K searches messages from this many characters typed.
-pub const MIXED_FROM: usize = 3;
+/// Ctrl+K points to message search from this many characters typed.
+pub const HINT_FROM: usize = 3;
 
 const SEPARATOR: char = '\u{1f}';
 

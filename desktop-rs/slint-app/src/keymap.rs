@@ -88,7 +88,10 @@ fn state(name: &str) -> Vec<Binding> {
     match name {
         "main" => vec![
             b("edit-keymap", &["Ctrl+Alt+,"], "Key bindings", false, Always, false),
-            b("next-workspace", &["Ctrl+Alt+W"], "Next workspace", false, Always, false),
+            // The tab bar's workspaces, as a browser's tabs.
+            b("new-workspace", &["Ctrl+T"], "New tab", false, Always, false),
+            b("next-workspace", &["Ctrl+Tab", "Ctrl+Alt+W"], "Next tab", false, Always, false),
+            b("previous-workspace", &["Ctrl+Shift+Tab"], "Previous tab", false, Always, false),
             b("update-preview", &["Ctrl+Alt+U"], "Update", false, Always, false),
             b("next-attention", &["Ctrl+J"], "Next attention", true, Attention, false),
             // No keys of their own: for the user to bind (and the switcher).
@@ -169,15 +172,21 @@ fn state(name: &str) -> Vec<Binding> {
             b("focus-sidebar", &["E", "Ctrl+E"], "Explorer", false, Always, false),
             b("focus-pane", &["H", "Ctrl+H"], "Chat", false, Always, false),
             b("focus-composer", &["I"], "Insert", false, Agent, false),
+            // The keys that matter where the keyboard is; never in a text
+            // field, where ? types.
+            b("help-keys", &["?"], "Keys", true, Always, false),
             b("toggle-focus", &["Tab", "Shift+Tab"], "Switch focus", false, Always, false),
             b("switcher", &["Space", "Ctrl+K"], "Commands", true, Always, false),
             b("link-hints", &["F", "Ctrl+L"], "Open a link", false, Always, false),
             b("escape", &["Escape"], "Chat", false, Always, false),
+            // Not while typing, where Ctrl+W deletes a word in a terminal.
+            b("close-workspace", &["Ctrl+W"], "Close tab", false, Always, false),
         ],
         "pane" => vec![
             // The chat's artifact cards: K from the chat is the lowest card on screen.
-            b("artifact-previous", &["K"], "Cards", true, Artifacts, false),
-            b("artifact-next", &["J"], "Next card", false, Artifacts, false),
+            // Capital J and K too: vim mode's j and k scroll.
+            b("artifact-previous", &["K", "Shift+K"], "Cards", true, Artifacts, false),
+            b("artifact-next", &["J", "Shift+J"], "Next card", false, Artifacts, false),
             // O, not Enter: Enter belongs to the composer, where a card's
             // keys never reach.
             b("artifact-open", &["O"], "Open", true, Artifact, false),
@@ -232,14 +241,19 @@ fn state(name: &str) -> Vec<Binding> {
             b("settings-search", &["/"], "Search", true, Always, false),
             b("settings-reset", &["Delete"], "Default", true, Always, false),
             b("escape", &["Escape"], "Back", true, Always, false),
+            b("help-keys", &["?"], "Keys", true, Always, false),
         ],
         // The settings page's search field.
         "settings-search" => vec![
             b("settings-results", &["Down", "Return"], "Results", true, Always, false),
             b("settings-search-cancel", &["Escape"], "Clear", true, Always, false),
         ],
-        "updates" => vec![b("refresh", &["F5"], "Refresh", true, Always, false), b("escape", &["Escape"], "Chats", true, Always, false)],
-        "teams" => vec![b("escape", &["Escape"], "Chats", true, Always, false)],
+        "updates" => vec![
+            b("refresh", &["F5"], "Refresh", true, Always, false),
+            b("escape", &["Escape"], "Chats", true, Always, false),
+            b("help-keys", &["?"], "Keys", true, Always, false),
+        ],
+        "teams" => vec![b("escape", &["Escape"], "Chats", true, Always, false), b("help-keys", &["?"], "Keys", true, Always, false)],
         "launch" => vec![
             b("switcher", &["Ctrl+K"], "Commands", true, Always, false),
             // The hub's own keys (it handles them; listed here for the bar).
@@ -482,6 +496,23 @@ pub fn shown(state_name: &str, action: &str, overrides: &Overrides) -> Option<St
 /// cards and their hints spell on every rebuild, without resolving the map.
 pub fn shown_or(state_name: &str, action: &str, overrides: &Overrides, default: &str) -> String {
     if overrides.contains_key(action) { shown(state_name, action, overrides).unwrap_or_default() } else { default.to_owned() }
+}
+
+/// Whether the user bound `chord` themselves in `state` (or further out,
+/// reaching it): their keys win over vim mode's.
+pub fn user_bound(state_name: &str, chord: &str, overrides: &Overrides) -> bool {
+    let chain = chain(state_name);
+    resolve(state_name, overrides, None).iter().filter(|b| b.keys.iter().any(|k| k == chord)).any(|b| {
+        overrides.get(b.action).is_some_and(|contexts| chain.iter().any(|c| contexts.get(*c).is_some_and(|ch| ch.add.iter().any(|k| k == chord))))
+    })
+}
+
+/// The keys the user bound to `action` themselves that reach `state`,
+/// double presses too.
+pub fn user_keys(state_name: &str, action: &str, overrides: &Overrides) -> Vec<String> {
+    let chain = chain(state_name);
+    let Some(contexts) = overrides.get(action) else { return Vec::new() };
+    keys_in(state_name, action, overrides).into_iter().filter(|k| chain.iter().any(|c| contexts.get(*c).is_some_and(|ch| ch.add.contains(k)))).collect()
 }
 
 /// The shortcut bar's hints for `state`.
@@ -1122,6 +1153,52 @@ mod tests {
             assert!(!actions.contains(&action), "{action} is the control's");
         }
         assert!(matches!(add(&Overrides::new(), "send", "composer", "Ctrl+Q"), Err(Refusal::Invalid(_))));
+    }
+
+    #[test]
+    fn tabs_have_ctrl_keys_and_the_hub_keeps_ctrl_t() {
+        let none = Overrides::new();
+        for state in ["pane", "sidebar", "composer", "settings"] {
+            assert_eq!(action_for(state, "Ctrl+T", &none, all()), Some("new-workspace"), "Ctrl+T in {state}");
+            assert_eq!(action_for(state, "Ctrl+Tab", &none, all()), Some("next-workspace"), "Ctrl+Tab in {state}");
+            assert_eq!(action_for(state, "Ctrl+Shift+Tab", &none, all()), Some("previous-workspace"), "Ctrl+Shift+Tab in {state}");
+        }
+        assert_eq!(action_for("pane", "Ctrl+Alt+W", &none, all()), Some("next-workspace"), "the old key stays");
+        // Ctrl+W closes a tab from the chat and the explorer, never while typing.
+        assert_eq!(action_for("pane", "Ctrl+W", &none, all()), Some("close-workspace"));
+        assert_eq!(action_for("sidebar", "Ctrl+W", &none, all()), Some("close-workspace"));
+        assert_eq!(action_for("composer", "Ctrl+W", &none, all()), None);
+        assert_eq!(action_for("pane", "Ctrl+Shift+W", &none, all()), Some("close-pane"), "Ctrl+Shift+W still closes a pane");
+        // In the New Session hub Ctrl+T is still Show all.
+        assert_eq!(keys_in("launch", "launch-show-all", &none), ["Ctrl+T"]);
+        assert_eq!(action_for("launch", "Ctrl+T", &none, all()), None, "the hub handles it");
+        // Capital J and K walk the cards too (vim mode's way onto them).
+        assert_eq!(action_for("pane", "Shift+K", &none, all()), Some("artifact-previous"));
+        assert_eq!(action_for("pane", "Shift+J", &none, all()), Some("artifact-next"));
+        assert!(clashes(&none).is_empty(), "the defaults agree: {:?}", clashes(&none));
+    }
+
+    #[test]
+    fn question_mark_is_help_outside_text_fields() {
+        let none = Overrides::new();
+        for state in ["pane", "sidebar", "settings", "updates"] {
+            assert_eq!(action_for(state, "?", &none, all()), Some("help-keys"), "? in {state}");
+        }
+        assert_eq!(action_for("composer", "?", &none, all()), None, "? types in the composer");
+        assert_eq!(action_for("search", "?", &none, all()), None);
+        assert_eq!(user_keys("pane", "next-agent", &peter()), ["Ctrl+J", "Right Right"]);
+        assert!(user_keys("pane", "switcher", &peter()).is_empty(), "defaults are not the user's");
+    }
+
+    #[test]
+    fn the_user_s_own_keys_are_known_so_they_win_over_vim() {
+        let mine = add(&Overrides::new(), "mute", "main", "M").unwrap();
+        assert!(user_bound("pane", "M", &mine));
+        assert!(user_bound("sidebar", "M", &mine));
+        assert!(!user_bound("composer", "M", &mine), "a typing key bound further out never reaches the composer");
+        assert!(!user_bound("pane", "J", &mine), "a default is not the user's");
+        let removed = remove(&Overrides::new(), "next-attention", "navigation", "N");
+        assert!(!user_bound("pane", "N", &removed), "taking a key away binds nothing");
     }
 
     #[test]

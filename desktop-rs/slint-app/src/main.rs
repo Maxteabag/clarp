@@ -28,6 +28,10 @@ mod switcher;
 mod search_view;
 mod mention_view;
 mod view;
+mod vim;
+mod vim_view;
+mod help;
+mod help_view;
 // ---- updates and teams
 mod teams_view;
 mod updates_view;
@@ -680,24 +684,34 @@ fn main() {
             pump_now(&app);
         }
     });
+    // The pane learns the sent message's row (its send animation flies to
+    // it); "" when nothing was sent or it went to another agent's chat.
     window.on_send(|pane, text, queue| {
-        if let Some(app) = app() {
-            let session = app.session_of(&pane);
-            // A draft naming another agent goes to that agent's chat, which
-            // then opens with it.
-            let route = mention_view::route(&mention_view::candidates(&app.engine.borrow()), &session, &text);
-            let target = route.as_ref().map_or(session.as_str(), |c| c.session.as_str()).to_owned();
-            let sent = app.engine.borrow_mut().send_composer_to(&session, &target, &text, queue);
-            if sent {
-                app.replace_draft(&session, "", None);
-                if target != session {
-                    app.engine.borrow_mut().select(&target);
+        let Some(app) = app() else { return SharedString::new() };
+        let session = app.session_of(&pane);
+        // A draft naming another agent goes to that agent's chat, which
+        // then opens with it.
+        let route = mention_view::route(&mention_view::candidates(&app.engine.borrow()), &session, &text);
+        let target = route.as_ref().map_or(session.as_str(), |c| c.session.as_str()).to_owned();
+        let sent = app.engine.borrow_mut().send_composer_to(&session, &target, &text, queue);
+        let mut row = SharedString::new();
+        if sent {
+            app.replace_draft(&session, "", None);
+            if target != session {
+                app.engine.borrow_mut().select(&target);
+            } else {
+                let engine = app.engine.borrow();
+                let unsent = engine.conversation(&session).and_then(|c| c.rows().iter().rev().find(|m| m.pending && m.role == "user").map(|m| m.id.clone()));
+                row = unsent.unwrap_or_default().into();
+                if driver::lose_send_row() {
+                    row = format!("{row}:not-drawn").into();
                 }
-                // Your own message always brings the latest into view.
-                app.to_latest();
             }
-            pump_now(&app);
+            // Your own message always brings the latest into view.
+            app.to_latest();
         }
+        pump_now(&app);
+        row
     });
     {
         let bridge = window.global::<MentionBridge>();
@@ -791,9 +805,9 @@ fn main() {
     window.on_scroll_journal(|pane, cause, old, new, old_place, new_place, content, viewport, at_end, follow, rows| {
         scroll_journal::record(scroll_journal::Move { pane: pane.into(), cause: cause.into(), old, new, old_place, new_place, content, viewport, at_end, follow, rows });
     });
-    window.on_pane_reported(|pane, follows, at_end, offset, transcript, composer| {
+    window.on_pane_reported(|pane, follows, at_end, offset, transcript, composer, top| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
-            let report = panes::Report { follows, at_end, offset, transcript_focused: transcript, composer_focused: composer };
+            let report = panes::Report { follows, at_end, offset, transcript_focused: transcript, composer_focused: composer, top };
             app.reported(&pane, report);
             link_hints::reported(&window, &pane, offset, &app.active_id());
             commands::show_hints(&app, &window);

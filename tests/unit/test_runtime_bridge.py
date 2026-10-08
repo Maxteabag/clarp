@@ -330,6 +330,44 @@ def test_runtime_drain_releases_a_leaked_slot_before_judging_idle(tmp_path):
         runtime.server_close()
 
 
+def test_runtime_rpc_releases_one_agents_leaked_slot(tmp_path):
+    asked = []
+
+    class LeakHealingRuntime(RecordingRuntime):
+        def release_leaked_slots(self, *, agent_id=None):
+            asked.append(agent_id)
+            return {agent_id: "trace-1"} if agent_id == "agent-1" else {}
+
+    socket_path = tmp_path / "runtime.sock"
+    runtime = RuntimeRPCServer(socket_path, dispatch_service=LeakHealingRuntime())
+    thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = RuntimeClient(socket_path)
+        assert client.release_leaked_slots("agent-1") == {"agent-1": "trace-1"}
+        assert client.release_leaked_slots("agent-2") == {}
+        assert asked == ["agent-1", "agent-2"]
+        with pytest.raises(RuntimeProtocolError):
+            client.release_leaked_slots("")
+        assert asked == ["agent-1", "agent-2"]  # never a fleet-wide release
+    finally:
+        runtime.shutdown()
+        runtime.server_close()
+
+
+def test_runtime_without_leak_release_answers_the_host_with_an_error(tmp_path):
+    socket_path = tmp_path / "runtime.sock"
+    runtime = RuntimeRPCServer(socket_path, dispatch_service=RecordingRuntime())
+    thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(RuntimeProtocolError):
+            RuntimeClient(socket_path).release_leaked_slots("agent-1")
+    finally:
+        runtime.shutdown()
+        runtime.server_close()
+
+
 def test_backend_control_uses_runtime_owner_from_server_process():
     class RuntimeOwner:
         def __init__(self):

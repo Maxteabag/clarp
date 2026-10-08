@@ -139,6 +139,117 @@ def test_inv3_leaves_queued_and_terminal_slots_alone(tmp_path):
     assert turn_dispatch.free_stale_slot(agent_id) is None
 
 
+# --- INV3 with an external runtime ------------------------------------------
+#
+# The runtime owns the slot table then: the Host's own table is empty, and a
+# slot the runtime still holds makes the agent look live here, so the old
+# INV3 could never free anything. It asks the runtime to run its own guarded
+# leak check instead, once the turn has visibly settled.
+
+class _Runtime:
+    def __init__(self, agent_id, *, releases=True, spawning=False, fail=False):
+        self.agent_id = agent_id
+        self.releases = releases
+        self.fail = fail
+        self.active = {agent_id: "tA"}
+        self.spawning = [agent_id] if spawning else []
+        self.asked = []
+
+    def status(self):
+        return {"active": dict(self.active), "spawning": list(self.spawning),
+                "terminals": []}
+
+    def release_leaked_slots(self, agent_id):
+        self.asked.append(agent_id)
+        if self.fail:
+            raise RuntimeError("runtime went away")
+        if not self.releases:
+            return {}
+        self.active.pop(agent_id, None)
+        return {agent_id: "tA"}
+
+
+@pytest.fixture
+def runtime_owned(monkeypatch):
+    from lib import backends
+    installed = []
+
+    def install(runtime):
+        backends.configure_runtime_client(runtime)
+        turn_dispatch.configure_runtime_client(runtime)
+        installed.append(runtime)
+        return runtime
+
+    reconcile._LEAK_CHECK_ASKED.clear()
+    yield install
+    backends.configure_runtime_client(None)
+    turn_dispatch.configure_runtime_client(None)
+    reconcile._LEAK_CHECK_ASKED.clear()
+
+
+def _settled(agent_id, kind="done", ms_ago=10 * 60_000):
+    from lib import db
+    agents_db.record_state(agent_id, kind)
+    db.conn().execute("UPDATE state_log SET ts = ts - ? WHERE agent_id = ?",
+                      (ms_ago, agent_id))
+
+
+def test_inv3_asks_the_runtime_to_release_a_settled_turns_slot(tmp_path, runtime_owned):
+    agent_id = _agent(tmp_path)
+    _settled(agent_id)
+    runtime = runtime_owned(_Runtime(agent_id))
+
+    repaired = reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+
+    assert runtime.asked == [agent_id]
+    assert repaired.get("slot") == "tA"
+
+
+@pytest.mark.parametrize("case", ["running", "fresh_settle", "spawning", "no_slot"])
+def test_inv3_leaves_the_runtime_alone_while_a_turn_may_be_live(
+        tmp_path, runtime_owned, case):
+    agent_id = _agent(tmp_path)
+    if case == "running":
+        _settled(agent_id, kind="thinking")
+    else:
+        _settled(agent_id, ms_ago=1_000 if case == "fresh_settle" else 10 * 60_000)
+    runtime = runtime_owned(_Runtime(agent_id, spawning=case == "spawning"))
+    if case == "no_slot":
+        runtime.active.clear()
+
+    repaired = reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+
+    assert runtime.asked == []
+    assert "slot" not in repaired
+
+
+def test_inv3_asks_the_runtime_at_most_once_per_grace_window(tmp_path, runtime_owned):
+    # Snapshots reconcile every agent on every read; a slot the runtime
+    # decides to keep must not cost one RPC per read.
+    agent_id = _agent(tmp_path)
+    _settled(agent_id)
+    runtime = runtime_owned(_Runtime(agent_id, releases=False))
+
+    for _ in range(3):
+        assert "slot" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+
+    assert runtime.asked == [agent_id]
+
+
+def test_inv3_logs_a_failed_runtime_release(tmp_path, runtime_owned, monkeypatch):
+    logged = []
+    monkeypatch.setattr(reconcile, "log_exception",
+                        lambda event, exc, detail="": logged.append((event, str(exc))))
+    agent_id = _agent(tmp_path)
+    _settled(agent_id)
+    runtime_owned(_Runtime(agent_id, fail=True))
+
+    repaired = reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+
+    assert "slot" not in repaired
+    assert logged == [("reconcileSlotFail", "runtime went away")]
+
+
 def test_reconcile_all_covers_every_agent(tmp_path):
     a = _agent(tmp_path, "mike")
     b = _agent(tmp_path, "rachel")
@@ -147,3 +258,17 @@ def test_reconcile_all_covers_every_agent(tmp_path):
     assert reconcile.reconcile_all(home=tmp_path) == 2
     assert agents_db.latest_state(a)["kind"] == "idle"
     assert agents_db.latest_state(b)["kind"] == "idle"
+
+
+def test_inv3_runtime_outage_costs_no_slot_check(tmp_path, runtime_owned, monkeypatch):
+    logged = []
+    monkeypatch.setattr(reconcile, "log_exception",
+                        lambda event, exc, detail="": logged.append(event))
+    agent_id = _agent(tmp_path)
+    _settled(agent_id)
+    runtime = runtime_owned(_Runtime(agent_id))
+    monkeypatch.setattr(runtime, "status", lambda: (_ for _ in ()).throw(
+        RuntimeError("runtime restarting")))
+
+    assert "slot" not in reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+    assert runtime.asked == [] and "reconcileSlotFail" not in logged

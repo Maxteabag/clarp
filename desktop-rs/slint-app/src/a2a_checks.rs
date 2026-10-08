@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use serde_json::json;
-use slint::Model;
+use slint::{ComponentHandle, Model};
 
 use super::scroll_checks::{anchor_moved, last_row_visible, place_of, row_height, wheel_up};
 use super::{Stage, app_now, check, click_at, control, report, rows, run_stages, shot};
@@ -63,15 +63,17 @@ pub fn a2a_check(out: String) {
             crate::pump();
             true
         })),
-        ("folded", Box::new(move |_, _, elapsed| {
+        ("folded", Box::new(move |_, window, elapsed| {
             if row("u7").is_none() || elapsed < Duration::from_millis(1200) {
                 return false;
             }
             let prompt = row("u7").map(|r| r.prompt).unwrap_or_default();
             check(prompt.key == KEY && !prompt.expanded, &format!("another agent's message is folded by default: {prompt:?}"));
             check(prompt.sender == "Rachel" && prompt.line == "Review the parser change", &format!("its line is the sender and the first line: {prompt:?}"));
+            // A line sized with the chat's text (36px beside the default 15px).
             let height = row_height("u7");
-            check(height > 0.0 && height <= 36.0, &format!("folded, it is one line tall ({height:.1}px)"));
+            let line = 36.0 * window.global::<crate::Palette>().get_body_size() * window.global::<crate::Look>().get_zoom() / 15.0;
+            check(height > 0.0 && height <= line, &format!("folded, it is one line tall ({height:.1}px of {line:.1}px)"));
             let older = row("u3").map(|r| r.prompt).unwrap_or_default();
             check(older.key == "a2a:u3" && !older.expanded, "every agent's prompt folds, not only the latest");
             check(row("f-own").is_some_and(|r| r.prompt.key.is_empty()), "the user's own message is not a prompt");
