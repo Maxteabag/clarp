@@ -3,6 +3,11 @@
 //! against the ones Slint read on a key: a release the window never saw
 //! (an input method or a window switch took it) leaves Slint reading every
 //! later key with that modifier, so J arrives as Alt+J and nothing runs.
+//!
+//! On macOS Slint reads Cmd as `control` and the Control key as `meta`
+//! (as Qt does): the window system's report is read the same way, and the
+//! Control key also counts as Ctrl for shortcuts, so Cmd+K and Ctrl+K both
+//! run Ctrl+K. `CLARP_KEY_TRACE=1` traces every key to stderr.
 
 use std::cell::Cell;
 
@@ -18,6 +23,23 @@ pub struct Modifiers {
 }
 
 impl Modifiers {
+    /// The window system's modifiers (winit's Control and Super keys) as
+    /// Slint reads them on this platform: swapped on macOS.
+    pub fn from_window_system(control_key: bool, alt: bool, shift: bool, super_key: bool) -> Self {
+        if cfg!(target_os = "macos") {
+            Self { control: super_key, alt, shift, meta: control_key }
+        } else {
+            Self { control: control_key, alt, shift, meta: super_key }
+        }
+    }
+
+    /// Whether a shortcut reads Ctrl: on macOS Cmd (`control`) or the
+    /// Control key (`meta`); elsewhere Ctrl alone (Super is not a shortcut
+    /// modifier there).
+    pub fn shortcut_control(self) -> bool {
+        self.control || (cfg!(target_os = "macos") && self.meta)
+    }
+
     fn any(self) -> bool {
         self.control || self.alt || self.shift || self.meta
     }
@@ -58,6 +80,20 @@ pub fn is_modifier(text: &str) -> bool {
         .any(|m| slint::SharedString::from(*m) == text)
 }
 
+/// `CLARP_KEY_TRACE=1`: every key, modifier report and decision to stderr.
+pub fn tracing() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("CLARP_KEY_TRACE").is_ok_and(|v| v == "1"))
+}
+
+/// A key's text as code points, for the trace ("U+006B 'k'").
+pub fn code_points(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() || (c as u32) >= 0xF700 { format!("U+{:04X}", c as u32) } else { format!("U+{:04X} '{c}'", c as u32) })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 thread_local! {
     /// The window system's last word, while no modifier key went by since
     /// (its report on that key is still to come).
@@ -66,6 +102,9 @@ thread_local! {
 
 /// The window system said which modifiers are held.
 pub fn reported(modifiers: Modifiers) {
+    if tracing() {
+        eprintln!("key-trace: window system modifiers {modifiers:?}");
+    }
     REPORTED.with(|r| r.set(Some(modifiers)));
 }
 
@@ -128,6 +167,42 @@ mod tests {
         assert_eq!(held(true, false, false, false).keys(), [Key::Control, Key::ControlR]);
         assert_eq!(held(false, true, false, true).keys(), [Key::Alt, Key::Meta, Key::MetaR]);
         assert!(Modifiers::default().keys().is_empty());
+    }
+
+    #[test]
+    fn cmd_and_the_control_key_read_as_slint_reads_them() {
+        // winit's Control and Super keys: Cmd is Super on a Mac.
+        let cmd = Modifiers::from_window_system(false, false, false, true);
+        let control_key = Modifiers::from_window_system(true, false, false, false);
+        if cfg!(target_os = "macos") {
+            assert_eq!(cmd, held(true, false, false, false), "Cmd is Slint's control");
+            assert_eq!(control_key, held(false, false, false, true), "the Control key is Slint's meta");
+            assert!(cmd.shortcut_control() && control_key.shortcut_control(), "both run Ctrl shortcuts");
+        } else {
+            assert_eq!(control_key, held(true, false, false, false));
+            assert_eq!(cmd, held(false, false, false, true));
+            assert!(control_key.shortcut_control() && !cmd.shortcut_control(), "Super is no Ctrl here");
+        }
+    }
+
+    #[test]
+    fn cmd_k_is_not_mistaken_for_a_stale_modifier() {
+        // Cmd+K on a Mac: Slint reads control; the window system's report,
+        // read the same way, agrees, so the key is not sent again bare.
+        let slint_read = if cfg!(target_os = "macos") { held(true, false, false, false) } else { held(false, false, false, true) };
+        reported(Modifiers::from_window_system(false, false, false, true));
+        assert!(!correct("k", slint_read), "Cmd+K stays Cmd+K");
+        // And the real Control key.
+        let slint_read = if cfg!(target_os = "macos") { held(false, false, false, true) } else { held(true, false, false, false) };
+        reported(Modifiers::from_window_system(true, false, false, false));
+        assert!(!correct("k", slint_read), "Ctrl+K stays Ctrl+K");
+    }
+
+    #[test]
+    fn code_points_name_each_character() {
+        assert_eq!(code_points("k"), "U+006B 'k'");
+        assert_eq!(code_points("\u{1b}"), "U+001B");
+        assert_eq!(code_points("\u{F700}"), "U+F700");
     }
 
     #[test]

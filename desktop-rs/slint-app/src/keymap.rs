@@ -610,9 +610,11 @@ pub fn parse_key(text: &str) -> Result<String, String> {
     }
 }
 
-/// A key as people read it: "Enter", "Esc", "Del", "Right ×2".
+/// A key as people read it: "Enter", "Esc", "Del", "Right ×2"; on macOS
+/// Ctrl reads "Cmd", the key that runs it there (the Control key does too).
 pub fn display(key: &str) -> String {
-    let one = |k: &str| k.replace("Return", "Enter").replace("Escape", "Esc").replace("Delete", "Del");
+    let control = if cfg!(target_os = "macos") { "Cmd+" } else { "Ctrl+" };
+    let one = |k: &str| k.replace("Ctrl+", control).replace("Return", "Enter").replace("Escape", "Esc").replace("Delete", "Del");
     match key.split_once(' ') {
         Some((first, _)) => format!("{} ×2", one(first)),
         None => one(key),
@@ -1065,7 +1067,7 @@ mod tests {
         assert!(parse_key("Ctrl+Banana").is_err());
         assert!(parse_key("").is_err());
         assert_eq!(display("Right Right"), "Right ×2");
-        assert_eq!(display("Ctrl+Return"), "Ctrl+Enter");
+        assert_eq!(display("Ctrl+Return"), if cfg!(target_os = "macos") { "Cmd+Enter" } else { "Ctrl+Enter" });
         assert_eq!(display("Escape"), "Esc");
     }
 
