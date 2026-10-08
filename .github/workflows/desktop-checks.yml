@@ -163,7 +163,7 @@ jobs:
           CLARP_TEST_KEYCHAIN: "1"
         run: |
           set -o pipefail
-          cargo test --locked -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint 2>&1 | tee /tmp/cargo-test-macos.log
+          cargo test --locked --no-fail-fast -p clarp-core -p clarp-engine -p clarp-net -p clarp-slint 2>&1 | tee /tmp/cargo-test-macos.log
       - name: Pair against the fake Host
         working-directory: desktop-rs
         env:
