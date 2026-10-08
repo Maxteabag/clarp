@@ -167,3 +167,109 @@ def test_claude_agent_is_still_bound_by_the_hook(tmp_path, monkeypatch):
     _run_hook(monkeypatch, "rachel", "claude-uuid")
 
     assert agents_db.live_backend_session(agent_id) == "claude-uuid"
+
+
+# --- trace ownership ------------------------------------------------------
+#
+# Mochi-PR-REVIEW, 2026-10-05: a Clarp-dispatched claude -p turn took trace
+# 19f671f72ccfa877 at 16:11Z and was still working at 17:38Z when a
+# background-task notification fired UserPromptSubmit inside the same
+# process. The 1 h trace TTL had passed, so the hook minted
+# local-1a10d256179, replaced the turn's trace with it, and the runtime took
+# its own running turn for superseded and leaked the slot.
+
+def _age_trace(agent_id, ms):
+    from lib import agents as agents_db
+    from lib.db import conn
+    conn().execute("UPDATE traces SET updated_at = updated_at - ? WHERE agent_id = ?",
+                   (ms, agent_id))
+
+
+def _stored_trace(agent_id):
+    from lib.db import conn
+    row = conn().execute("SELECT trace_id FROM traces WHERE agent_id = ?",
+                         (agent_id,)).fetchone()
+    return row["trace_id"] if row else None
+
+
+def _turn_traces(agent_id):
+    from lib.db import conn
+    return [r["trace_id"] for r in conn().execute(
+        "SELECT trace_id FROM turns WHERE agent_id = ? ORDER BY turn_id", (agent_id,))]
+
+
+def _long_turn(tmp_path, state="tool"):
+    from lib import agents as agents_db
+    agent_id = agents_db.create_agent(
+        persona="Mochi", voice_id="V", cwd=str(tmp_path), session="mochi")
+    agents_db.set_trace(agent_id, "19f671f72ccfa877")
+    agents_db.record_state(agent_id, state)
+    _age_trace(agent_id, agents_db.TRACE_TTL_MS + 27 * 60_000)
+    return agent_id
+
+
+def test_a_running_turns_trace_does_not_expire(tmp_path):
+    from lib import agents as agents_db
+    agent_id = _long_turn(tmp_path)
+
+    assert agents_db.get_trace(agent_id) == "19f671f72ccfa877"
+
+
+def test_a_settled_agents_trace_still_expires(tmp_path):
+    from lib import agents as agents_db
+    agent_id = _long_turn(tmp_path, state="done")
+
+    assert agents_db.get_trace(agent_id) is None
+
+
+def test_hook_inside_a_long_clarp_turn_keeps_the_turns_trace(tmp_path, monkeypatch):
+    agent_id = _long_turn(tmp_path)
+
+    _run_hook(monkeypatch, "mochi", "claude-uuid")
+
+    assert _stored_trace(agent_id) == "19f671f72ccfa877"
+    assert _turn_traces(agent_id) == ["19f671f72ccfa877"]
+
+
+def test_hook_in_a_clarp_process_never_replaces_an_expired_trace(tmp_path, monkeypatch):
+    # The turn's state already reads settled (or was never recorded), yet the
+    # prompt still arrives inside the process Clarp started for that trace.
+    # Only the dispatcher hands out traces there.
+    agent_id = _long_turn(tmp_path, state="done")
+
+    _run_hook(monkeypatch, "mochi", "claude-uuid")
+
+    assert _stored_trace(agent_id) == "19f671f72ccfa877"
+    assert _turn_traces(agent_id) == ["19f671f72ccfa877"]
+
+
+def test_hook_in_a_clarp_process_with_no_trace_yet_still_opens_a_turn(tmp_path, monkeypatch):
+    from lib import agents as agents_db
+    agent_id = agents_db.create_agent(
+        persona="Mochi", voice_id="V", cwd=str(tmp_path), session="mochi")
+
+    _run_hook(monkeypatch, "mochi", "claude-uuid")
+
+    minted = _stored_trace(agent_id)
+    assert minted and minted.startswith("local-")
+    assert _turn_traces(agent_id) == [minted]
+
+
+def test_terminal_prompt_after_an_expired_trace_still_starts_a_new_one(tmp_path, monkeypatch):
+    # A local terminal session is not a Clarp turn: once the previous trace
+    # has expired and the agent is settled, its next prompt is a new turn.
+    import io
+    import json
+    from lib import agents as agents_db
+    agent_id = _long_turn(tmp_path, state="done")
+    agents_db.bind_backend_session(agent_id, "terminal-uuid")
+    monkeypatch.delenv("CLAUDE_PWA_SESSION", raising=False)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(
+        {"session_id": "terminal-uuid", "prompt": "hi"})))
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+
+    pwa_source_flag.main()
+
+    fresh = _stored_trace(agent_id)
+    assert fresh != "19f671f72ccfa877" and fresh.startswith("local-")
+    assert _turn_traces(agent_id) == [fresh]

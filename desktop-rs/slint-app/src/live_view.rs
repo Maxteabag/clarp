@@ -137,6 +137,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
         stamp: SharedString::new(),
         meta: SharedString::new(),
         pending: false,
+        status_due: false,
         failed: false,
         activity_label: SharedString::new(),
         group_id: SharedString::new(),

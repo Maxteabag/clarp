@@ -65,6 +65,12 @@ mod customize_checks;
 // ---- the chat's own zoom
 #[path = "zoom_checks.rs"]
 mod zoom_checks;
+// ---- vim mode: the keyboard without Ctrl
+#[path = "vim_checks.rs"]
+mod vim_checks;
+// ---- a send as it is drawn: the grace period and the send animation
+#[path = "send_checks.rs"]
+mod send_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -77,6 +83,17 @@ thread_local! {
     static THEME_BEFORE: RefCell<String> = const { RefCell::new(String::new()) };
     static WIDTH_BEFORE: Cell<f32> = const { Cell::new(0.0) };
     static TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+}
+
+thread_local! {
+    /// The send check's no-destination case: the next send reports a row
+    /// no chat draws, so its copy has nowhere to go.
+    static LOSE_SEND_ROW: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether the next send's row is to be one no chat draws (once).
+pub fn lose_send_row() -> bool {
+    LOSE_SEND_ROW.with(|l| l.replace(false))
 }
 
 pub fn exit_code() -> i32 {
@@ -423,6 +440,14 @@ fn explorer_row(name: &str) -> Option<Rect> {
 /// details the Host left out), a reader scrolling up stops following while
 /// rows arrive, and End resumes it. Needs the fake Host.
 pub fn start_check(name: &str, out: String) {
+    // The other checks drive the classic keymap (J/K onto cards, Space for
+    // the switcher, the composer after a split); the vim check drives vim
+    // mode, which is on by default.
+    if name != "vim" {
+        if let Some(app) = crate::app() {
+            app.engine.borrow_mut().settings_mut().set(crate::vim_view::SETTING, false);
+        }
+    }
     match name {
         "transcript" => {
             row_overlap_checks::watch();
@@ -475,6 +500,7 @@ pub fn start_check(name: &str, out: String) {
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
         "refocus" => refocus_checks::refocus_check(out),
+        "vim" => vim_checks::vim_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         "fonts" => font_checks::fonts_check(out),
@@ -502,6 +528,10 @@ pub fn start_check(name: &str, out: String) {
         "chat-zoom" => {
             row_overlap_checks::watch();
             zoom_checks::zoom_check(out)
+        }
+        "send" => {
+            row_overlap_checks::watch();
+            send_checks::send_check(out)
         }
         _ => {
             check(false, &format!("no check named {name}"));

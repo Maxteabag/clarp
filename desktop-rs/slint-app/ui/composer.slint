@@ -1,5 +1,5 @@
 import { Field, Editor, PlainEditor } from "fields.slint";
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, RevealText } from "theme.slint";
 
 export struct Attachment {
     id: string,
@@ -173,6 +173,13 @@ export component Composer inherits FocusScope {
     callback queue-requested();
 
     out property <bool> editor-focused: editor.has-focus;
+    // Where the editor is drawn (in the window) and how tall its text is:
+    // the send animation lifts the text out of it.
+    out property <length> editor-x: editor.absolute-position.x;
+    out property <length> editor-y: editor.absolute-position.y;
+    out property <length> editor-width: editor.width;
+    out property <length> editor-height: editor.height;
+    out property <length> editor-text-height: editor.text-height;
     property <bool> sendable: root.can-send && (root.draft != "" || root.attachments.length > 0);
     function submit(queue: bool) {
         if (root.sendable) {
@@ -220,7 +227,9 @@ export component Composer inherits FocusScope {
             overflow: elide;
             accessible-label: root.quota-notice;
         }
-        if root.queued > 0: Text {
+        // The count waits the grace period after a rise (view.rs
+        // queued_shown) and fades in.
+        if root.queued > 0: RevealText {
             text: root.queued + (root.queued == 1 ? " message queued" : " messages queued") + "  ·  Ctrl+Enter queues next";
             color: Palette.muted;
             font-size: 12 * Look.unit;
@@ -287,6 +296,7 @@ export component Composer inherits FocusScope {
             // scrolls.
             height: clamp(self.text-height, Palette.body-size * 1.6, 240px);
             accessible-label: "Message to " + root.agent-name;
+            accessible-id: "composer-editor";
             edited(text) => {
                 root.edited(text);
                 MentionBridge.scan(root.pane-id, text, self.cursor);

@@ -137,13 +137,14 @@ fn without_explanations_the_second_line_is_the_command() {
 fn a_settled_turn_folds_its_work_and_keeps_what_failed_or_stopped_in_view() {
     let view = turn_full(after(23));
     let p = present(&view, &[], &options(&[], 1759480012000));
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "Ran npm test", "", "Stopped npm test"]);
+    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "", "Stopped npm test"]);
     assert_eq!(p.entries[0].kind, Kind::Fold);
     assert_eq!(p.entries[0].key, "live:fold:tr-1");
-    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:msg_01:1", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"]);
-    assert_eq!(p.entries[2].text, "The failure came from an off-by-one", "as written: trimmed, like `/log`");
-    assert_eq!(p.entries[2].status, "interrupted");
-    assert_eq!(p.entries[3].meta, "interrupted");
+    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
+    assert_eq!(p.entries[1].text, "Let me look at the parser and its tests.", "the commentary stays in view");
+    assert_eq!(p.entries[3].text, "The failure came from an off-by-one", "as written: trimmed, like `/log`");
+    assert_eq!(p.entries[3].status, "interrupted");
+    assert_eq!(p.entries[4].meta, "interrupted");
     let open = present(&view, &[], &options(&["live:fold:tr-1"], 1759480012000));
     assert_eq!(open.entries.len(), 1 + 7, "the fold opened shows every row again");
     assert!(open.entries[0].expanded);
@@ -184,10 +185,49 @@ fn a_settled_turn_that_landed_in_the_log_keeps_its_fold() {
     let tools: Vec<Value> = ["toolu_01", "toolu_02", "toolu_03", "toolu_04", "toolu_05"].iter().map(|id| json!({"id": id})).collect();
     let durable = row(json!({"id": "live-abc", "role": "assistant", "text": "…", "revision": 9, "tools": tools}));
     let p = present(&view, &[durable], &options(&[], 0));
-    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "Ran npm test", "", "Stopped npm test"]);
-    assert_eq!(p.entries[2].row, "live-abc", "the row shows where the answer that stays was");
-    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold; the row carries the commentary");
+    // The row carries both messages: it shows once, where the first is.
+    assert_eq!(titles(&p), ["Worked for 12s · 5 tools", "", "Ran npm test", "Stopped npm test"]);
+    assert_eq!(p.entries[1].row, "live-abc", "the row shows where its first message was");
+    assert_eq!(p.entries[0].items, ["cl:msg_01:0", "cl:toolu_01", "cl:toolu_02", "cl:toolu_04"], "the reasoning and the tools fold");
     assert_eq!(p.stripped_calls.len(), 5);
+}
+
+/// A settled turn of message, two tools, message, tool, answer.
+fn commentary_turn() -> LiveView {
+    let message = |id: &str, ordinal: i64, phase: &str, text: &str| {
+        json!({"id": id, "kind": "message", "rev": 1, "conv": "c-1", "turn_id": "tr-c", "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1_000 + ordinal * 1_000, "ended_at_ms": 1_500 + ordinal * 1_000, "phase": phase, "text": text})
+    };
+    let tool = |call: &str, ordinal: i64, command: &str| {
+        json!({"id": format!("cl:{call}"), "kind": "tool", "rev": 1, "conv": "c-1", "turn_id": "tr-c", "status": "completed", "ordinal": ordinal,
+            "started_at_ms": 1_000 + ordinal * 1_000, "ended_at_ms": 1_500 + ordinal * 1_000,
+            "tool": {"name": "Bash", "call_id": call, "category": "exec", "group": null, "label": command, "command": command}})
+    };
+    let snapshot = json!({"conv": "c-1", "session": "s", "agent_id": "a", "epoch": "e", "lseq": 1, "server_now_ms": 20_000,
+        "activity": {"state": "idle", "turn_id": "tr-c"},
+        "turn": {"turn_id": "tr-c", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 13_000, "worked_ms": 12_000, "tool_count": 3},
+        "items": [
+            message("cl:m:0", 1, "commentary", "Building it first."),
+            tool("c1", 2, "make build"),
+            tool("c2", 3, "make lint"),
+            message("cl:m:1", 4, "commentary", "Built. Now the tests."),
+            tool("c3", 5, "make test"),
+            message("cl:m:2", 6, "final", "All green."),
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    view
+}
+
+#[test]
+fn commentary_between_tools_stays_visible() {
+    let view = commentary_turn();
+    let p = present(&view, &[], &options(&[], 0));
+    let read = |p: &Presented| p.entries.iter().map(|e| if e.kind == Kind::Message { e.text.clone() } else { e.title.clone() }).collect::<Vec<_>>();
+    assert_eq!(read(&p), ["Building it first.", "Worked for 12s · 3 tools", "Built. Now the tests.", "All green."], "every message in its place, the fold where the work begins");
+    assert_eq!(p.entries[1].items, ["cl:c1", "cl:c2", "cl:c3"], "only the tools fold");
+    let open = present(&view, &[], &options(&["live:fold:tr-c"], 0));
+    assert_eq!(read(&open), ["Building it first.", "Worked for 12s · 3 tools", "Ran make build", "Ran make lint", "Built. Now the tests.", "Ran make test", "All green."]);
 }
 
 /// The real Host's settled turn (tests/fixtures/live-real-settled-turn.json):
@@ -262,12 +302,28 @@ fn a_tool_waiting_for_its_explanation_says_explaining() {
     let p = present(&view, &[], &options(&[], 1759480005000));
     let tool = p.entries.last().unwrap();
     assert_eq!(tool.secondary, "");
-    assert!(tool.explaining && tool.reserve_secondary, "running, nothing explained yet: Explaining… in the reserved line");
+    assert!(!tool.explaining && tool.reserve_secondary, "running, none requested (null): no Explaining…, the line kept for one");
     let pending = json!({"type": "live", "conv": "conv-1", "epoch": "boot-a", "lseq": 14, "ops": [
         {"op": "upsert", "conv": "conv-1", "id": "cl:toolu_03", "kind": "tool", "rev": 2, "item": {"tool": {"explain": {"level": 2, "status": "pending"}}}},
     ]});
     view.apply_event(pending.as_object().unwrap());
     assert!(present(&view, &[], &options(&[], 1759480005000)).entries.last().unwrap().explaining, "pending");
+    // Contract 55 settles every explanation ready or failed (with a reason);
+    // anything but pending is not coming, and a failed one shows nothing.
+    for explain in [
+        json!({"level": 2, "status": "failed", "reason": "skipped"}),
+        json!({"level": 2, "status": "failed", "reason": "error", "text": "explainer timed out"}),
+        json!({"level": 2, "status": "skipped"}),
+        json!({"level": 2, "status": "queued"}),
+    ] {
+        let mut settled = view.clone();
+        let op = json!({"type": "live", "conv": "conv-1", "epoch": "boot-a", "lseq": 15, "ops": [
+            {"op": "upsert", "conv": "conv-1", "id": "cl:toolu_03", "kind": "tool", "rev": 3, "item": {"tool": {"explain": explain}}},
+        ]});
+        settled.apply_event(op.as_object().unwrap());
+        let tool = present(&settled, &[], &options(&[], 1759480005000)).entries.last().unwrap().clone();
+        assert!(!tool.explaining && tool.secondary.is_empty(), "{explain}: nothing");
+    }
     let explained = present(&turn_full(after(15)), &[], &options(&[], 1759480005300));
     let tool = explained.entries.last().unwrap();
     assert_eq!(tool.secondary, "Runs the parser tests");
@@ -312,16 +368,30 @@ fn a_running_tool_whose_log_row_landed_at_its_start_keeps_its_live_row() {
     assert_eq!(titles(&p), ["Running python3 -c 'import time; time.sleep(120)'"]);
     let tool = &p.entries[0];
     assert_eq!((tool.status.as_str(), tool.meta.as_str()), ("running", "0:13"), "the running tool ticks");
-    assert!(tool.explaining);
+    assert!(!tool.explaining && tool.reserve_secondary, "the real Host sends explain: null until it asks: nothing yet, the line kept");
+    let id = "cl:toolu_017NGGuPh5DkHZyPKu7aJyz5";
+    let pending = json!({"type": "live", "conv": "c-probe", "epoch": "26f356fdabe6", "lseq": 43, "ops": [
+        {"op": "upsert", "conv": "c-probe", "id": id, "kind": "tool", "rev": 2, "item": {"tool": {"explain": {"level": 2, "status": "pending"}}}},
+    ]});
+    view.apply_event(pending.as_object().unwrap());
+    assert!(present(&view, &rows, &options(&[], started + 14_000)).entries[0].explaining, "pending: Explaining…");
     assert_eq!(p.absorbed_rows, ["msg-e60c25b9161ac8b660ca"], "its /log row is shown by the item row");
     let mut done = body["next"]["done"].clone();
-    done["lseq"] = json!(43);
+    done["lseq"] = json!(44);
+    done["ops"][0]["rev"] = json!(3);
     view.apply_event(done.as_object().unwrap());
     let p = present(&view, &rows, &options(&[], started + 20_000));
     let tool = &p.entries[0];
     assert_eq!((tool.title.as_str(), tool.status.as_str(), tool.meta.as_str()), ("Ran python3 -c 'import time; time.sleep(120)'", "failed", "exit 1 · 19.9s"));
     assert_eq!(tool.lines, ["Exit code 137"], "the failed tool keeps its tail");
     assert_eq!(p.absorbed_rows, ["msg-e60c25b9161ac8b660ca"]);
+    assert!(tool.explaining, "the turn still running, the explanation still pending");
+    let ended = json!({"type": "live", "conv": "c-probe", "epoch": "26f356fdabe6", "lseq": 45, "ops": [
+        {"op": "turn", "conv": "c-probe", "turn": {"turn_id": "2b2b466e35457fb0", "status": "failed", "started_at_ms": 1791028403856_i64, "ended_at_ms": 1791028426000_i64, "worked_ms": 22144, "tool_count": 1}},
+    ]});
+    view.apply_event(ended.as_object().unwrap());
+    let p = present(&view, &rows, &options(&[], started + 21_000));
+    assert!(p.entries.iter().all(|e| !e.explaining && !(e.reserve_secondary && e.secondary.is_empty())), "the turn ended: no Explaining…, no line held: {:?}", p.entries.iter().map(|e| (&e.key, e.explaining)).collect::<Vec<_>>());
 }
 
 /// A user message written at `ms` (Host time), from another turn.

@@ -145,7 +145,12 @@ def _slot_is_spawning(agent_id: str) -> bool:
 def free_stale_slot(agent_id: str) -> str | None:
     """INV3 (lib.reconcile): free an in-flight slot that has no live turn and
     nothing queued behind it. Returns the dead trace id, or None if nothing
-    was freed. Spawning slots and terminal sentinels are left alone."""
+    was freed. Spawning slots and terminal sentinels are left alone.
+
+    With an external runtime the slots are its own, so the runtime decides
+    with its guarded leak check (TurnDispatchService.release_leaked_slots)."""
+    if _RUNTIME_CLIENT is not None:
+        return _RUNTIME_CLIENT.release_leaked_slots(agent_id).get(agent_id)
     return _SLOTS.free_stale(agent_id)
 
 
@@ -2164,6 +2169,7 @@ class TurnDispatchService:
 
     def release_leaked_slots(
         self, *, grace_ms: int = LEAKED_SLOT_GRACE_MS,
+        agent_id: str | None = None,
     ) -> dict[str, str]:
         """Release every slot no process owns once its turn has settled.
 
@@ -2172,11 +2178,16 @@ class TurnDispatchService:
         slot is leaked when the agent has no live process, terminal or spawn,
         and its newest state is terminal for at least ``grace_ms`` (a finishing
         turn records DONE just before it releases). Queued work behind it takes
-        the slot as after a normal finish. Returns {agent_id: released trace}.
+        the slot as after a normal finish. ``agent_id`` limits the check to
+        one agent (the Host's reconcile asks per agent). Returns
+        {agent_id: released trace}.
         """
         released: dict[str, str] = {}
         now = db.now_ms()
+        only = agent_id
         for agent_id, trace_id in _SLOTS.snapshot()["active"].items():
+            if only is not None and agent_id != only:
+                continue
             try:
                 agent = agents_db.get_by_agent_id(agent_id)
                 if agent is None:

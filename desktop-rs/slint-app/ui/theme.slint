@@ -42,6 +42,108 @@ export global ChatLook {
     in property <bool> live-status-line;
     in property <bool> reduced-motion;
     in property <bool> window-shown: true;
+    // Settings → Send animation (on by default): a sent message flies from
+    // the composer to its place in the chat.
+    in property <bool> send-animation: true;
+}
+
+// A send as it is drawn (workspace.slint): how its animations move, the
+// grace period before an unsent message or a queued turn says so (Rust's
+// SEND_STATUS_GRACE), and the last send's animation, for the checks: its
+// row and phase: "wait" (the copy waits on the composer until the bubble
+// is laid out), "flight" (it springs to the bubble), "settle" (landed: the
+// bubble shows under the copy as it fades), "fade" (no copy: the bubble
+// fades in) or "" once it is over; where it started and where it is (in
+// the window). The numbers are the iPhone's (clarp-ios 7bdc0d3), so both
+// move alike.
+export global SendFlight {
+    // The flight: once the bubble is laid out, a spring of 0.32 s with a
+    // little bounce (SwiftUI's spring(duration:bounce:)) to the bubble's
+    // frame; on the way the corners go 24 to 8, the text 0.88 to 1 of the
+    // bubble's size and the user wash 0 to 1.
+    out property <duration> flight: 320ms;
+    out property <float> flight-bounce: 0.12;
+    out property <length> from-radius: 24px;
+    out property <length> to-radius: 8px;
+    out property <float> from-text-scale: 0.88;
+    // No bubble laid out this long after the send: no copy, the bubble
+    // shows.
+    out property <duration> destination-wait: 600ms;
+    // Landed, the real bubble shows at once under the copy, which fades
+    // over 0.14 s and is gone at 0.2 s.
+    out property <duration> settle-fade: 140ms;
+    out property <duration> settle: 200ms;
+    // The composer clears and shrinks with a 0.3 s spring (no bounce);
+    // its height moves this way only within 0.6 s of a send.
+    out property <duration> composer: 300ms;
+    out property <float> composer-bounce: 0;
+    out property <duration> composer-window: 600ms;
+    // Reduce Motion, or a send with no text (voice), with attachments or
+    // longer than the composer shows: no copy, the bubble fades in,
+    // ease-out 0.2 s.
+    out property <duration> fade: 200ms;
+    // An unsent message's status, a queued-turn label: shown only after
+    // the grace period (a failure at once), each fading in, ease-out 0.2 s.
+    in property <duration> status-grace: 1750ms;
+    out property <duration> reveal: 200ms;
+    // Ease-out (CSS's cubic-bezier(0, 0, 0.58, 1), near enough).
+    public pure function ease-out(x: float) -> float {
+        return 1 - (1 - Math.clamp(x, 0, 1)) * (1 - Math.clamp(x, 0, 1));
+    }
+    in-out property <int> dropped;
+    // Status lines revealed (RevealText): started, finished, the last
+    // one's text and how long its fade took.
+    in-out property <int> reveals;
+    in-out property <int> revealed;
+    in-out property <string> reveal-text;
+    in-out property <duration> reveal-took;
+    // The last send's moments by the animation clock: its first frame, the
+    // bubble laid out, landed, and the copy (or fade) gone.
+    in-out property <duration> sent-at;
+    in-out property <duration> placed-at;
+    in-out property <duration> settled-at;
+    in-out property <duration> gone-at;
+    // When the pane's clock (a frame at a time) saw it land.
+    in-out property <duration> settle-seen-at;
+    in-out property <string> id;
+    in-out property <string> phase;
+    in-out property <int> started;
+    in-out property <int> landed;
+    in-out property <length> from-x;
+    in-out property <length> from-y;
+    in-out property <length> from-width;
+    in-out property <length> from-height;
+    // Each frame of the animation: how far it is (0 to 1, sprung), the
+    // copy's box and the composer's height.
+    in-out property <float> progress;
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <length> width;
+    in-out property <length> height;
+    in-out property <length> composer-height;
+}
+
+// A status line that appears (an unsent or failed message's, a queued
+// turn's): it fades in, ease-out 0.2 s, then holds still. Each reveal is
+// counted in SendFlight (its text, and how long it took), for the checks.
+export component RevealText inherits Text {
+    property <duration> born;
+    property <bool> revealing: true;
+    init => {
+        self.born = animation-tick();
+        SendFlight.reveals += 1;
+        SendFlight.reveal-text = self.text;
+    }
+    opacity: self.revealing ? SendFlight.ease-out((animation-tick() - self.born) / SendFlight.reveal) : 1;
+    Timer {
+        interval: SendFlight.reveal;
+        running: root.revealing;
+        triggered => {
+            root.revealing = false;
+            SendFlight.revealed += 1;
+            SendFlight.reveal-took = animation-tick() - root.born;
+        }
+    }
 }
 
 // The reader's own look (Settings → Typography and Layout; clarp_core::prefs),
@@ -89,12 +191,52 @@ export global Look {
     callback zoom-by(int);
 }
 
+// The chat rows' sizes: tool calls, live rows, the Worked-for fold,
+// reasoning, plans, receipts, prompts, cards and their stamps and names.
+// They follow the reading size (Font size × Chat zoom), not Interface
+// size, each at the ratio it had to the default theme's 15px text: a tool
+// row's 12px beside 15px text stays 0.8 of it at any size.
+export global ChatText {
+    // The message text itself.
+    out property <length> body: Palette.body-size * Look.zoom;
+    // How far the reading size is from the default's 15px: a row's marks,
+    // avatars, line heights and padding that sit against its text.
+    out property <float> scale: Palette.body-size * Look.zoom / 15px;
+    // A receipt's question, a card's title (14px beside 15px).
+    out property <length> lead: Palette.body-size * Look.zoom * 14 / 15;
+    // A live row's label, reasoning and plan lines, a prompt's line (13).
+    out property <length> label: Palette.body-size * Look.zoom * 13 / 15;
+    // Tool rows, explanations, a live row's time and second line, the
+    // activity toggle, names (12).
+    out property <length> detail: Palette.body-size * Look.zoom * 12 / 15;
+    // Stamps, output tails, tool details, "more" lines (11).
+    out property <length> note: Palette.body-size * Look.zoom * 11 / 15;
+    // A receipt's or card's kind line (10).
+    out property <length> caption: Palette.body-size * Look.zoom * 10 / 15;
+    // A card's smallest label (9).
+    out property <length> tiny: Palette.body-size * Look.zoom * 9 / 15;
+}
+
+// The chrome's own text (explorer, tabs, panels, Ctrl+K, settings, the
+// status bar, dialogs and overlays): Interface size, never Font size, which
+// is the chat's reading text and the composer's alone. The window's default
+// size, so a chrome text without its own size takes it too.
+export global ChromeText {
+    out property <length> body: 15 * Look.unit;
+}
+
 // Where the keyboard is: the keyboard map's state (commands::context), set
 // from Rust with the shortcut bar. Every region that owns a state draws the
 // one FocusRing when it is the one; lists mark their cursor with Cursor.
 export global Focus {
     in property <string> mode: "pane";
     out property <color> cursor: Palette.accent.with-alpha(0.16);
+}
+
+// Vim mode: its mode ("" while it is off) and the chat row its cursor is on.
+export global VimBridge {
+    in property <string> mode;
+    in property <string> cursor;
 }
 
 // The focus style: a ring over the region the keyboard is in. Place it last

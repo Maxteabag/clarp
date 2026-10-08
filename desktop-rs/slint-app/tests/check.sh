@@ -5,7 +5,7 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
 # Every artifact type and its interactions run in one long check.
-case $name in artifacts|scroll-jump|live) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac
+case $name in artifacts|scroll-jump|live|row-overlap) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac
 # desktop reports presence, which needs an unlocked login session: its own,
 # not the machine's (a CI runner has none).
 [ "$name" = desktop ] && export CLARP_TEST_LOGIN=unlocked

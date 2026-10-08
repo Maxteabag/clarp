@@ -1,4 +1,4 @@
-import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, ChatLook, Look, VimBridge, ChatText, SendFlight, ChromeText } from "theme.slint";
 import { Composer, Attachment, MentionRow } from "composer.slint";
 import { Transcript, MessageRow, MeasureRow } from "transcript.slint";
 import { AgentDialogs } from "agent_dialogs.slint";
@@ -77,6 +77,9 @@ export struct PaneView {
     // One more than where the cursor goes when `draft-set` replaces the
     // draft (a completed mention); 0 leaves it.
     draft-cursor: int,
+    // What the amount counts: px (""), "pages" of the view, or the "row"
+    // to bring to the top (vim mode's jumps).
+    scroll-kind: string,
 }
 
 export struct SplitView {
@@ -99,7 +102,9 @@ export struct WorkspaceTab {
 export component Pane inherits Rectangle {
     in property <PaneView> pane;
     callback activate();
-    callback send(string, bool);
+    // Sends the draft; the id of the message's row in this chat, or "" (not
+    // sent, or sent to another agent's chat).
+    callback send(string, bool) -> string;
     callback stop();
     callback draft-edited(string);
     callback attach();
@@ -115,7 +120,7 @@ export component Pane inherits Rectangle {
     callback paste-image() -> bool;
     // The transcript and composer tell the window where the keyboard is and
     // whether the reader follows, for shortcuts and checks.
-    callback reported(bool, bool, length, bool, bool);
+    callback reported(bool, bool, length, bool, bool, int);
     background: root.pane.active ? Palette.control : Palette.raised;
     border-width: 0px;
     border-radius: 3px;
@@ -124,7 +129,7 @@ export component Pane inherits Rectangle {
     animate opacity { duration: 120ms; }
 
     function report() {
-        root.reported(transcript.follow, transcript.at-end, transcript.offset, transcript.has-focus, composer.editor-focused);
+        root.reported(transcript.follow, transcript.at-end, transcript.offset, transcript.has-focus, composer.editor-focused, transcript.top-row);
     }
     // A pane made for a request (a split's focus) acts on it at once.
     // An old scroll request is not replayed into a pane made later.
@@ -152,7 +157,13 @@ export component Pane inherits Rectangle {
         }
         if (root.scroll-request-seen != root.pane.scroll-request) {
             root.scroll-request-seen = root.pane.scroll-request;
-            transcript.scroll-by(root.pane.scroll-amount * 1px, "seek");
+            if (root.pane.scroll-kind == "row") {
+                transcript.go-to-row(Math.round(root.pane.scroll-amount));
+            } else if (root.pane.scroll-kind == "pages") {
+                transcript.scroll-pages(root.pane.scroll-amount);
+            } else {
+                transcript.scroll-by(root.pane.scroll-amount * 1px, "seek");
+            }
         }
         if (root.seek-request-seen != root.pane.seek-request) {
             root.seek-request-seen = root.pane.seek-request;
@@ -174,6 +185,164 @@ export component Pane inherits Rectangle {
             root.pending-focus = "";
         }
     }
+    // The send animation (Telegram's, timed as the iPhone's: SendFlight).
+    // A copy of the composer's text waits on the composer until the new
+    // bubble is laid out, then springs to the bubble's frame, taking on its
+    // corners, text size and wash; landed, the real bubble shows at once
+    // under it and the copy fades out. The composer clears and shrinks with
+    // a spring of its own. One overlay moves; the chat's rows stay as they
+    // are laid out (the new one hidden until the copy lands on it). Reduce
+    // Motion, a send with no text, one with attachments or a draft longer
+    // than the box shows fades the bubble in instead. No bubble laid out
+    // in time: no copy, the bubble shows. A reader scrolled up gets the
+    // usual jump to the latest, with no copy.
+    property <string> flight-id;
+    // A copy flies (else the bubble fades in).
+    property <bool> copying;
+    // The clocks start on the first frame after the send (the send itself
+    // and the frame that lays out the new row can take a while on a slow
+    // machine): the first frame drawn shows the copy still in the box.
+    property <bool> armed;
+    property <duration> sent-at;
+    // The bubble is laid out (where the copy goes is known), and when.
+    property <bool> placed;
+    property <duration> placed-at;
+    // The composer is shrinking after a send.
+    property <bool> boxing;
+    property <duration> since-send: root.armed && (root.flight-id != "" || root.boxing) ? animation-tick() - root.sent-at : 0ms;
+    property <duration> since-placed: root.placed && root.flight-id != "" ? animation-tick() - root.placed-at : 0ms;
+    // A damped spring's progress `elapsed` into one of `length` and
+    // `bounce` (as SwiftUI's spring(duration:bounce:): a period of
+    // `length`, damping 1 - bounce), taken as there at `length`.
+    pure function spring(elapsed: duration, length: duration, bounce: float) -> float {
+        if (elapsed >= length) { return 1; }
+        if (elapsed <= 0ms) { return 0; }
+        let w = 2 * 3.14159265 / (length / 1s);
+        let z = 1 - bounce;
+        let t = elapsed / 1s;
+        if (z >= 1) { return 1 - Math.exp(-w * t) * (1 + w * t); }
+        let wd = w * Math.sqrt(1 - z * z);
+        return 1 - Math.exp(-z * w * t) * (Math.cos(wd * t * 1rad) + z * w / wd * Math.sin(wd * t * 1rad));
+    }
+    // Where the copy is between the composer and the bubble.
+    property <float> flight-t: !root.copying ? 1 : !root.placed ? 0 : root.spring(root.since-placed, SendFlight.flight, SendFlight.flight-bounce);
+    property <float> box-t: root.spring(root.since-send, SendFlight.composer, SendFlight.composer-bounce);
+    // Landed: the bubble shows under the copy, which fades and is gone.
+    property <bool> settled: root.copying && root.placed && root.since-placed >= SendFlight.flight;
+    property <float> copy-opacity: root.settled ? Math.clamp(1 - (root.since-placed - SendFlight.flight) / SendFlight.settle-fade, 0, 1) : 1;
+    // Drawn from the send until 0.2 s after landing, to the frame.
+    property <bool> copy-shown: root.copying && !(root.settled && root.since-placed >= SendFlight.flight + SendFlight.settle);
+    // A fade's progress.
+    property <float> fade-t: root.copying ? 1 : SendFlight.ease-out(root.since-send / SendFlight.fade);
+    property <bool> flight-done: root.armed && (root.copying ? root.settled && root.since-placed >= SendFlight.flight + SendFlight.settle : root.since-send >= SendFlight.fade);
+    // Where it flies from (in the pane) and the box's height then.
+    property <length> from-x;
+    property <length> from-y;
+    property <length> from-width;
+    property <length> from-height;
+    property <length> box-from;
+    property <string> flown-text;
+    property <string> sent-id;
+    // Where the bubble is drawn, once the chat has drawn it (else where
+    // the copy started).
+    property <bool> landing: transcript.flight-drawn-id == root.flight-id && root.flight-id != "";
+    property <length> to-x: root.landing ? transcript.flight-x - root.absolute-position.x : root.from-x;
+    property <length> to-y: root.landing ? transcript.flight-y - root.absolute-position.y : root.from-y;
+    property <length> to-width: root.landing ? transcript.flight-width : root.from-width;
+    property <length> to-height: root.landing ? transcript.flight-height : root.from-height;
+    property <length> fly-x: root.from-x + (root.to-x - root.from-x) * root.flight-t;
+    property <length> fly-y: root.from-y + (root.to-y - root.from-y) * root.flight-t;
+    property <length> fly-width: root.from-width + (root.to-width - root.from-width) * root.flight-t;
+    property <length> fly-height: root.from-height + (root.to-height - root.from-height) * root.flight-t;
+    function sent(text: string, queue: bool) {
+        // A copy needs text, all of it in view, and to be the bubble's
+        // text: an attachment adds its path, and a draft longer than the
+        // box shows fades in instead.
+        let can-fly = text != "" && composer.attachments.length == 0 && composer.editor-text-height <= composer.editor-height + 1px;
+        let at-end = transcript.follow && transcript.at-end;
+        root.from-x = composer.editor-x - root.absolute-position.x;
+        root.from-y = composer.editor-y - root.absolute-position.y;
+        root.from-width = composer.editor-width;
+        root.from-height = Math.min(composer.editor-text-height, composer.editor-height);
+        root.box-from = composer-box.height;
+        root.flown-text = text;
+        root.land();
+        root.sent-id = root.send(text, queue);
+        if (root.sent-id == "" || !ChatLook.send-animation) {
+            return;
+        }
+        root.boxing = !ChatLook.reduced-motion;
+        root.armed = false;
+        if (!at-end) {
+            return;
+        }
+        root.copying = can-fly && !ChatLook.reduced-motion;
+        root.placed = false;
+        root.flight-id = root.sent-id;
+        SendFlight.id = root.sent-id;
+        SendFlight.phase = root.copying ? "wait" : "fade";
+        SendFlight.from-x = composer.editor-x;
+        SendFlight.from-y = composer.editor-y;
+        SendFlight.from-width = root.from-width;
+        SendFlight.from-height = root.from-height;
+        SendFlight.started += 1;
+    }
+    // The animation is over (or another send takes its place): the row
+    // shows as it is.
+    function land() {
+        root.boxing = false;
+        if (root.flight-id != "") {
+            SendFlight.gone-at = animation-tick();
+            root.flight-id = "";
+            root.copying = false;
+            root.placed = false;
+            SendFlight.phase = "";
+            SendFlight.landed += 1;
+        }
+    }
+    Timer {
+        interval: 16ms;
+        running: root.flight-id != "" || root.boxing;
+        triggered => {
+            if (!root.armed) {
+                root.sent-at = animation-tick();
+                root.armed = true;
+                SendFlight.sent-at = root.sent-at;
+            }
+            if (root.copying && !root.placed) {
+                if (root.landing) {
+                    root.placed = true;
+                    root.placed-at = animation-tick();
+                    SendFlight.placed-at = root.placed-at;
+                    SendFlight.phase = "flight";
+                } else if (root.since-send >= SendFlight.destination-wait) {
+                    // No bubble to fly to: no copy, the bubble shows.
+                    SendFlight.dropped += 1;
+                    root.land();
+                    return;
+                }
+            }
+            SendFlight.progress = root.flight-t;
+            SendFlight.x = root.absolute-position.x + root.fly-x;
+            SendFlight.y = root.absolute-position.y + root.fly-y;
+            SendFlight.width = root.fly-width;
+            SendFlight.height = root.fly-height;
+            SendFlight.composer-height = composer-box.height;
+            // Its spring is done by 0.3 s; the height follows a send's
+            // spring only within 0.6 s of it.
+            if (root.boxing && root.since-send >= SendFlight.composer-window) {
+                root.boxing = false;
+            }
+            // The bookkeeping follows a frame behind what is drawn: the
+            // moment it landed is the spring's end.
+            if (root.settled && SendFlight.phase == "flight") {
+                SendFlight.phase = "settle";
+                SendFlight.settled-at = root.placed-at + SendFlight.flight;
+                SendFlight.settle-seen-at = animation-tick();
+            }
+            if (root.flight-id != "" && root.flight-done) { root.land(); }
+        }
+    }
     property <int> draft-set-seen;
     property <int> focus-composer-seen;
     property <int> focus-transcript-seen;
@@ -189,6 +358,8 @@ export component Pane inherits Rectangle {
     changed follows => { root.report(); }
     changed at-end => { root.report(); }
     changed offset => { root.report(); }
+    property <int> top-row: transcript.top-row;
+    changed top-row => { root.report(); }
     changed transcript-focused => { root.report(); if (self.transcript-focused) { root.activate(); } }
     changed composer-focused => { root.report(); if (self.composer-focused) { root.activate(); } }
 
@@ -215,6 +386,9 @@ export component Pane inherits Rectangle {
             measure: root.pane.measure;
             before: root.pane.before;
             marked: root.pane.marked;
+            flight-id: root.flight-id;
+            flight-reveal: root.copying ? (root.settled ? 1 : 0) : root.fade-t;
+            flight-pinning: root.copying || root.boxing;
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }
@@ -234,7 +408,10 @@ export component Pane inherits Rectangle {
                     : root.pane.default-effort != "" ? "effort " + root.pane.default-effort + " (default)" : "effort default")
                 + (root.pane.busy ? "  ·  working" : "");
             info-clicked => { if (root.pane.session != "" && !root.pane.pair) { ProfileBridge.open-for-pane(root.pane.id); } }
-            key: root.pane.active && Focus.mode == "composer" ? "ctrl+h" : "h"; label: "Chat"; active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
+            // In vim mode the title says the mode, as Vim's last line does.
+            key: root.pane.active && Focus.mode == "composer" ? (VimBridge.mode != "" ? "esc" : "ctrl+h") : "h";
+            label: "Chat";
+            active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
         }
         // Live items' one status line (docs/live-items.md §7.4): what runs
         // and for how long by the Host's clock, and the key that stops it
@@ -278,12 +455,16 @@ export component Pane inherits Rectangle {
             }
         }
         // Pair rooms are the Host's read-only projection: no composer.
-        Rectangle {
+        composer-box := Rectangle {
           visible: !root.pane.pair;
+          accessible-role: groupbox;
+          accessible-id: "composer-box:" + root.pane.id;
           // Folded to its "[i] Insert" line until it has the keyboard (or
           // holds a draft, which stays in view).
           property <bool> folded: !composer.editor-focused && composer.draft == "";
-          height: root.pane.pair ? 0px : self.folded ? 16px : composer.preferred-height + Frame.top + Frame.bottom;
+          property <length> natural: root.pane.pair ? 0px : self.folded ? 16px : composer.preferred-height + Frame.top + Frame.bottom;
+          // After a send it shrinks from its height then, with a spring.
+          height: root.boxing ? root.box-from + (self.natural - root.box-from) * root.box-t : self.natural;
           clip: true;
           composer := Composer {
             x: Frame.side;
@@ -308,7 +489,7 @@ export component Pane inherits Rectangle {
             mentions: root.pane.mentions;
             mention-current: root.pane.mention-current;
             route: root.pane.route;
-            send(text, queue) => { root.send(text, queue); }
+            send(text, queue) => { root.sent(text, queue); }
             stop => { root.stop(); }
             edited(text) => { root.draft-edited(text); }
             attach => { root.attach(); }
@@ -317,7 +498,42 @@ export component Pane inherits Rectangle {
             jump-to-latest => { transcript.scroll-to-latest(); }
             queue-requested => { AgentDialogs.queue-open(root.pane.session); }
           }
-          PaneFrame { key: "i"; label: "Insert"; active: root.pane.active && Focus.mode == "composer"; surface: root.background; }
+          PaneFrame {
+            key: "i";
+            label: "Insert";
+            active: root.pane.active && Focus.mode == "composer";
+            surface: root.background;
+          }
+        }
+    }
+    // The sent text in flight: from the editor to the bubble, taking on
+    // the bubble's colour, corners, padding and text size on the way; at
+    // the bubble it fades over the real one.
+    if root.copy-shown: Rectangle {
+        accessible-role: text;
+        accessible-id: "send-flight";
+        accessible-label: flown.text;
+        x: root.fly-x;
+        y: root.fly-y;
+        width: root.fly-width;
+        height: root.fly-height;
+        opacity: root.copy-opacity;
+        background: Palette.bubble.with-alpha(Math.min(1, root.flight-t));
+        // From the composer field's corners to the bubble's own.
+        border-radius: Math.max(0px, SendFlight.from-radius + (SendFlight.to-radius - SendFlight.from-radius) * root.flight-t);
+        clip: true;
+        // The bubble's own padding (transcript.slint) at the reading size.
+        property <length> inset: 10px * ChatText.scale * root.flight-t;
+        flown := Text {
+            x: parent.inset;
+            y: parent.inset;
+            width: parent.width - 2 * parent.inset;
+            text: root.flown-text;
+            color: Palette.text;
+            font-size: ChatText.body * (SendFlight.from-text-scale + (1 - SendFlight.from-text-scale) * root.flight-t);
+            font-family: Palette.body-family;
+            wrap: word-wrap;
+            vertical-alignment: top;
         }
     }
 }
@@ -369,7 +585,7 @@ export component Workspace inherits Rectangle {
     in property <string> save-warning-keep-key;
     in property <bool> bar-visible;
     callback activate(string);
-    callback send(string, string, bool);
+    callback send(string, string, bool) -> string;
     callback stop(string);
     callback draft-edited(string, string);
     callback attach(string);
@@ -382,7 +598,7 @@ export component Workspace inherits Rectangle {
     callback silence();
     callback cancel-transcription(string);
     callback paste-image(string) -> bool;
-    callback reported(string, bool, bool, length, bool, bool);
+    callback reported(string, bool, bool, length, bool, bool, int);
     callback switch-workspace(string);
     callback create-workspace();
     callback save-layout-instead();
@@ -436,6 +652,7 @@ export component Workspace inherits Rectangle {
         padding-right: 8px;
         spacing: 8px;
         Text {
+            font-size: ChromeText.body;
             text: root.save-warning;
             color: Palette.warning;
             wrap: word-wrap;
@@ -465,7 +682,7 @@ export component Workspace inherits Rectangle {
         height: Math.max(1px, Math.round(pane.height * root.area-height / 1px) * 1px - root.gap);
         pane: pane;
         activate => { root.activate(pane.id); }
-        send(text, queue) => { root.send(pane.id, text, queue); }
+        send(text, queue) => { return root.send(pane.id, text, queue); }
         stop => { root.stop(pane.id); }
         draft-edited(text) => { root.draft-edited(pane.id, text); }
         attach => { root.attach(pane.id); }
@@ -478,7 +695,7 @@ export component Workspace inherits Rectangle {
         silence => { root.silence(); }
         cancel-transcription => { root.cancel-transcription(pane.id); }
         paste-image => { return root.paste-image(pane.id); }
-        reported(follows, at-end, offset, transcript, composer) => { root.reported(pane.id, follows, at-end, offset, transcript, composer); }
+        reported(follows, at-end, offset, transcript, composer, top) => { root.reported(pane.id, follows, at-end, offset, transcript, composer, top); }
     }
     for split in root.splits: Handle {
         split: split;

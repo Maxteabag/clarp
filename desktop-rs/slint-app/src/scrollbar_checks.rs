@@ -155,7 +155,7 @@ fn turn(session: &str, i: usize, turns: &mut Vec<Value>) {
             turns.push(reply(format!("> {}\n\n> Keep the main checkout untouched.\n\nAnd {}", LOREM.repeat(size), LOREM)));
         }
         4 => {
-            // A turn that works: tool calls and a note fold behind "Worked for".
+            // A turn that works: tool calls fold behind "Worked for", the note stays.
             turns.push(user(format!("Run the tests for {i}.")));
             for n in 0..1 + size % 3 {
                 turns.push(json!({"id": id(&format!("tool{n}")), "role": "assistant", "timestamp": at, "text": "", "origin": "agent", "trace_id": trace,

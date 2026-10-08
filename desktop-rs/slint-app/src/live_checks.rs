@@ -319,7 +319,7 @@ pub fn live_check(out: String) {
             check(titles().last().map(String::as_str) == Some("Running npm test"), &format!("the command's row: {:?}", titles()));
             check(titles().contains(&"Explored 1 file, 1 search".to_owned()), &format!("the group settled: {:?}", titles()));
             let command = live_row("live:cl:toolu_03").unwrap_or_default();
-            check(command.live.explaining && command.live.secondary.is_empty(), "the explanation line says Explaining… until it lands");
+            check(!command.live.explaining && command.live.secondary.is_empty(), "no explanation requested yet (explain: null): no Explaining…");
             shot(&out7, "live-00-explaining");
             let bar: Vec<String> = crate::window().map(|w| w.get_hints().iter().map(|h| format!("{} {}", h.keys, h.label)).collect()).unwrap_or_default();
             check(bar.iter().any(|h| h == "Ctrl+. Stop"), &format!("with the status line hidden, the shortcut bar names the stop key: {bar:?}"));
@@ -540,7 +540,9 @@ pub fn live_check(out: String) {
             }
             check(status() == "■ Interrupted", &format!("the status line says Interrupted: {:?}", status()));
             check(!view().live_busy, "and the agent is no longer busy");
-            check(titles() == ["Worked for 12s · 5 tools", "Ran npm test", "", "Stopped npm test"], &format!("the settled turn folds; what failed or stopped stays: {:?}", titles()));
+            check(titles() == ["Worked for 12s · 5 tools", "", "Ran npm test", "", "Stopped npm test"], &format!("the settled turn folds its reasoning and tools; every message and what failed or stopped stays: {:?}", titles()));
+            let commentary = live_row("live:cl:msg_01:1").unwrap_or_default();
+            check(message_text(&commentary) == "Let me look at the parser and its tests.", &format!("the commentary stays, in its place: {:?}", message_text(&commentary)));
             let stopped = live_row("live:cl:msg_02:0").unwrap_or_default();
             check(message_text(&stopped) == "The failure came from an off-by-one", &format!("the stopped answer stays: {:?}", message_text(&stopped)));
             check(stopped.live.meta == "interrupted", "and says it was interrupted");
@@ -591,7 +593,7 @@ pub fn live_check(out: String) {
             check(titles() == ["Worked for 12s · 5 tools", "Ran npm test", "Stopped npm test"], &format!("the turn keeps its fold and what failed or stopped: {:?}", titles()));
             let shown = rows(&crate::window().expect("window"));
             let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);
-            check(at("live-abc").is_some_and(|i| at("live:cl:toolu_03") == Some(i - 1) && at("live:cl:toolu_05") == Some(i + 1)), "the durable answer is where the answer was");
+            check(at("live-abc").is_some_and(|i| at("live:fold:tr-1") == Some(i - 1) && at("live:cl:toolu_03") == Some(i + 1)), "the durable row, carrying both messages, is where its first message was");
             check(shown.iter().all(|r| !r.id.starts_with("row-toolu")), "the tool rows show as the item rows, not again as activity");
             let (_, inserted_before) = *before2.borrow();
             let (_, inserted) = crate::view::sync_stats();
@@ -731,7 +733,7 @@ pub fn live_check(out: String) {
             let tool = live_row(REAL_RUNNING).unwrap_or_default();
             check(tool.live.title == "Running python3 -c 'import time; time.sleep(120)'", &format!("the running tool keeps its live row after its /log row landed: {:?}", tool.live.title));
             check(tool.live.meta.starts_with("0:1"), &format!("with its timer from the Host's clock: {:?}", tool.live.meta));
-            check(tool.live.explaining, "and Explaining… while its explanation comes");
+            check(!tool.live.explaining, "and no Explaining… while the Host has none pending (explain: null)");
             let shown = rows(&crate::window().expect("window"));
             check(shown.iter().all(|r| r.id != REAL_RUNNING_ROW), "its /log row is not shown again as a 'Show · 1 tool call' row");
             let at = |id: &str| shown.iter().position(|r| r.id == id || r.live.key == id);

@@ -1,5 +1,5 @@
 import { Palette as WidgetPalette } from "std-widgets.slint";
-import { Palette, Focus, FocusRing, ChatLook, Look } from "theme.slint";
+import { Palette, Focus, FocusRing, ChatLook, Look, VimBridge, SendFlight, ChromeText } from "theme.slint";
 import { Sidebar, ChatRow } from "sidebar.slint";
 import { NavRail } from "navrail.slint";
 import { Attachment, MentionRow, MentionBridge } from "composer.slint";
@@ -40,8 +40,8 @@ import { PrefEditorDialog, PrefConfirmDialog, PrefEditor, Swatch } from "prefs.s
 export { PrefEditor, Swatch }
 export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint }
 
-export { ScrollBook, MeasureRow }
-export { Palette, Focus, ChatLook, Look, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
+export { ScrollBook, MeasureRow, VimBridge }
+export { Palette, Focus, ChatLook, SendFlight, Look, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
 
@@ -50,11 +50,22 @@ export struct Hint {
     keys: string,
 }
 
+// A group of the ? help's keys.
+export struct HelpGroup {
+    title: string,
+    items: [Hint],
+}
+
 // ShortcutBar.qml: where the keyboard is, and what it can do there.
 component ShortcutBar inherits Rectangle {
     in property <string> mode;
     in property <[Hint]> hints;
     in property <string> connection;
+    // Vim mode: its mode, the command line while one is open (it takes
+    // the hints' place, as Vim's last line), and the last command's word.
+    in property <string> vim-mode;
+    in property <string> vim-line;
+    in property <string> vim-message;
     height: 30px;
     background: Palette.sunken;
     Rectangle { y: 0; height: 1px; background: Palette.border; }
@@ -62,9 +73,42 @@ component ShortcutBar inherits Rectangle {
         padding-left: 8px;
         padding-right: 8px;
         spacing: 16px;
+        if root.vim-mode != "": VerticalLayout {
+            alignment: center;
+            Rectangle {
+            accessible-role: text;
+            accessible-id: "vim-mode";
+            accessible-label: root.vim-mode;
+            height: 18px;
+            width: mode-text.preferred-width + 12px;
+            border-radius: 3px;
+            background: root.vim-mode == "INSERT" ? Palette.success : root.vim-mode == "NORMAL" ? Palette.accent : Palette.warning;
+            mode-text := Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.vim-mode;
+                color: Palette.sunken;
+                font-size: 11 * Look.unit;
+                font-weight: 700;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+            }
+        }
+        if root.vim-line != "": Text {
+            accessible-role: text;
+            accessible-id: "vim-line";
+            accessible-label: root.vim-line;
+            horizontal-stretch: 1;
+            text: root.vim-line + "▏";
+            color: Palette.chrome-text;
+            font-size: 12 * Look.unit;
+            vertical-alignment: center;
+            overflow: elide;
+        }
         // The hints clip at the window's edge: however many the state has,
         // they never widen the layout above them.
-        Rectangle {
+        if root.vim-line == "": Rectangle {
             horizontal-stretch: 1;
             min-width: 0px;
             clip: true;
@@ -78,6 +122,14 @@ component ShortcutBar inherits Rectangle {
                     Text { text: hint.keys; color: Palette.accent; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
                 }
             }
+        }
+        if root.vim-message != "": Text {
+            text: root.vim-message;
+            color: Palette.muted;
+            font-size: 11 * Look.unit;
+            vertical-alignment: center;
+            max-width: 360px;
+            overflow: elide;
         }
         Text {
             text: root.connection;
@@ -93,10 +145,11 @@ export component AppWindow inherits Window {
     preferred-width: 1100px;
     preferred-height: 700px;
     background: Palette.window;
-    // The chrome keeps the terminal face; the reading theme styles the
-    // transcript and the composer (as in the Qt app).
+    // The chrome keeps the terminal face and Interface size; the reading
+    // theme styles the transcript and the composer (as in the Qt app), each
+    // text with its own size.
     default-font-family: "JetBrains Mono";
-    default-font-size: Palette.body-size;
+    default-font-size: ChromeText.body;
     default-font-weight: Look.weight;
 
     in property <[ChatRow]> chats;
@@ -125,6 +178,19 @@ export component AppWindow inherits Window {
     in-out property <bool> sidebar-visible: true;
     in-out property <bool> shortcuts-visible: true;
     in property <string> keyboard-mode;
+    // Vim mode: NORMAL, INSERT, COMMAND or SEARCH ("" when it is off), the
+    // command line as typed (":vs", "/Table"), the keys of a sequence so
+    // far and what may follow them (the which-key panel), and the last
+    // command's word ("Copied", an error).
+    in property <string> vim-mode;
+    in property <string> vim-line;
+    in property <string> vim-pending;
+    in property <[Hint]> vim-which;
+    // The ? help: what it is for, its groups, and where the rest is.
+    in property <string> help-title;
+    in property <[HelpGroup]> help-groups;
+    in property <string> help-footer;
+    in property <string> vim-message;
     in property <[Hint]> hints;
     // The chat the sidebar's keyboard cursor is on.
     in property <string> sidebar-cursor;
@@ -153,7 +219,7 @@ export component AppWindow inherits Window {
     callback focus-moved();
     // Pane events carry the pane's id.
     callback pane-activated(string);
-    callback send(string, string, bool);
+    callback send(string, string, bool) -> string;
     callback stop(string);
     callback draft-edited(string, string);
     callback attach(string);
@@ -165,7 +231,7 @@ export component AppWindow inherits Window {
     callback silence();
     callback cancel-transcription(string);
     callback paste-image(string) -> bool;
-    callback pane-reported(string, bool, bool, length, bool, bool);
+    callback pane-reported(string, bool, bool, length, bool, bool, int);
     callback switch-workspace(string);
     callback create-workspace();
     callback save-layout-instead();
@@ -387,6 +453,7 @@ export component AppWindow inherits Window {
                         padding-left: 16px;
                         padding-right: 16px;
                         Text {
+                            font-size: ChromeText.body;
                             text: root.error;
                             color: Palette.danger;
                             vertical-alignment: center;
@@ -430,7 +497,7 @@ export component AppWindow inherits Window {
                     save-warning-keep-key: root.save-warning-keep-key;
                     bar-visible: root.workspace-bar;
                     activate(id) => { root.pane-activated(id); }
-                    send(id, text, queue) => { root.send(id, text, queue); }
+                    send(id, text, queue) => { return root.send(id, text, queue); }
                     stop(id) => { root.stop(id); }
                     draft-edited(id, text) => { root.draft-edited(id, text); }
                     attach(id) => { root.attach(id); }
@@ -443,8 +510,8 @@ export component AppWindow inherits Window {
                     silence => { root.silence(); }
                     cancel-transcription(id) => { root.cancel-transcription(id); }
                     paste-image(id) => { return root.paste-image(id); }
-                    reported(id, follows, at-end, offset, transcript, composer) => {
-                        root.pane-reported(id, follows, at-end, offset, transcript, composer);
+                    reported(id, follows, at-end, offset, transcript, composer, top) => {
+                        root.pane-reported(id, follows, at-end, offset, transcript, composer, top);
                     }
                     switch-workspace(id) => { root.switch-workspace(id); }
                     create-workspace => { root.create-workspace(); }
@@ -518,6 +585,33 @@ export component AppWindow inherits Window {
             mode: root.keyboard-mode;
             connection: root.connection;
             hints: root.hints;
+            vim-mode: root.vim-mode;
+            vim-line: root.vim-line;
+            vim-message: root.vim-message;
+        }
+        // Vim mode's which-key panel: after the leader (or g, z) the keys
+        // that may follow and what each does.
+        if root.vim-which.length > 0: Rectangle {
+            accessible-role: list;
+            accessible-id: "vim-which";
+            x: parent.width - self.width - 16px;
+            y: parent.height - (root.shortcuts-visible ? footer.height : 0px) - self.height - 10px;
+            width: 270px;
+            height: which-list.preferred-height;
+            background: Palette.raised;
+            border-width: 1px;
+            border-color: Palette.border;
+            border-radius: 6px;
+            which-list := VerticalLayout {
+                padding: 10px;
+                spacing: 2px;
+                Text { text: root.vim-pending; color: Palette.accent; font-size: 12 * Look.unit; font-weight: 700; }
+                for hint in root.vim-which: HorizontalLayout {
+                    spacing: 12px;
+                    Text { text: hint.keys; width: 52px; color: Palette.accent; font-size: 12 * Look.unit; font-weight: 700; horizontal-alignment: right; }
+                    Text { text: hint.label; color: Palette.chrome-text; font-size: 12 * Look.unit; overflow: elide; horizontal-stretch: 1; }
+                }
+            }
         }
         connection-page := ConnectionPage {
             visible: root.overlay == "connection";
@@ -533,6 +627,48 @@ export component AppWindow inherits Window {
             pair(url, code) => { root.pair-host(url, code); }
             forget => { root.forget-host(); }
             cancel => { root.overlay-closed(); }
+        }
+        // ? : the keys that matter where the keyboard is. Esc, ? or a
+        // click outside closes it.
+        if root.overlay == "help": Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: #00000080;
+            TouchArea { clicked => { root.overlay-closed(); } }
+            Rectangle {
+                accessible-role: list;
+                accessible-id: "help";
+                accessible-label: root.help-title;
+                width: Math.min(parent.width - 40px, 820px);
+                height: help-column.preferred-height;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                background: Palette.raised;
+                border-width: 1px;
+                border-color: Palette.border;
+                border-radius: 8px;
+                TouchArea { }
+                help-column := VerticalLayout {
+                    padding: 18px;
+                    spacing: 12px;
+                    Text { text: root.help-title; color: Palette.chrome-text; font-size: 15 * Look.unit; font-weight: 700; }
+                    HorizontalLayout {
+                        spacing: 28px;
+                        alignment: start;
+                        for group in root.help-groups: VerticalLayout {
+                            spacing: 4px;
+                            alignment: start;
+                            Text { text: group.title; color: Palette.muted; font-size: 11 * Look.unit; font-weight: 700; }
+                            for item in group.items: HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: item.keys; min-width: 72px; color: Palette.accent; font-size: 12 * Look.unit; font-weight: 700; }
+                                Text { text: item.label; color: Palette.chrome-text; font-size: 12 * Look.unit; }
+                            }
+                        }
+                    }
+                    Text { text: root.help-footer; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
+                }
+            }
         }
         keymap := KeymapEditor {
             visible: root.overlay == "keymap";

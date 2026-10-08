@@ -25,6 +25,8 @@ export component AgentAvatar inherits Rectangle {
     in property <length> size: 40px;
     // The first letter, upper-cased (set from Rust: Slint has no slicing).
     in property <string> initial;
+    // The initial's smallest size (a chat row's avatar follows its text).
+    in property <length> min-letter: 9 * Look.unit;
     in property <color> initial-color: Palette.text;
     // A ring round the avatar in `ring-color` (working, needs attention).
     in property <bool> ringed;
@@ -45,7 +47,7 @@ export component AgentAvatar inherits Rectangle {
         text: root.symbol != "" ? root.symbol : root.initial;
         color: root.initial-color;
         font-family: "JetBrains Mono";
-        font-size: Math.max(9 * Look.unit, root.size * 0.38);
+        font-size: Math.max(root.min-letter, root.size * 0.38);
         font-weight: 600;
     }
     if root.has-portrait: Image {

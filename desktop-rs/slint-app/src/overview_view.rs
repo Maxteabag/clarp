@@ -62,7 +62,7 @@ fn fill(app: &App, window: &AppWindow) {
                 backend: row.backend.as_str().into(),
                 model: row.model.as_str().into(),
                 folder: row.working_directory.as_str().into(),
-                queued: row.queue_count,
+                queued: crate::view::queued_shown(&row.session, row.queue_count),
                 context: if row.context_window > 0 { row.context_tokens as f32 / row.context_window as f32 } else { -1.0 },
                 busy: row.busy,
                 muted: row.muted,

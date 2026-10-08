@@ -266,3 +266,106 @@ def test_any_other_error_settles_the_batch_instead_of_leaving_it_pending(monkeyp
     explainer.observe(_tool_event())
     assert _wait(lambda: _final(patches)["cl:toolu_1"]["status"] == "failed")
     assert logged == ["liveExplainFail"]
+
+
+def test_a_patch_the_runtime_cannot_take_is_retried_until_it_lands(started):
+    """06:15:19 on the live Host: live_patch timed out (RuntimeUnavailable)
+    and the item's explanation was lost, leaving it null forever."""
+    from lib.runtime_bridge import RuntimeUnavailable
+    patches, down = [], [3]
+
+    def flaky(aid, iid, fields):
+        if down[0]:
+            down[0] -= 1
+            raise RuntimeUnavailable("agent runtime unavailable: timed out")
+        patches.append((aid, iid, fields))
+
+    explainer = LiveExplainer(lambda: FakeService([]), flaky, poll_interval=0.02)
+    try:
+        explainer.observe(_tool_event())        # must not raise into the relay
+        assert _wait(lambda: _final(patches).get("cl:toolu_1", {}).get("status") == "ready")
+    finally:
+        explainer.close()
+
+
+def test_an_older_pending_patch_never_overwrites_a_newer_answer():
+    from lib.runtime_bridge import RuntimeUnavailable
+    patches, calls = [], []
+
+    def first_fails(aid, iid, fields):
+        calls.append(fields)
+        if len(calls) == 1:
+            raise RuntimeUnavailable("timed out")
+        patches.append((aid, iid, fields))
+
+    explainer = LiveExplainer(lambda: FakeService([]), first_fails, poll_interval=0.0, synchronous=True)
+    explainer.observe(_tool_event())
+    explainer.observe(_tool_event("npm run lint"))   # a later round flushes again
+    assert [p[2]["tool"]["explain"]["status"] for p in patches][-1] == "ready"
+    assert _final(patches)["cl:toolu_1"]["status"] == "ready"
+
+
+def test_a_tool_the_explainer_never_saw_is_explained_when_the_relay_connects(tmp_path):
+    """Tools that ran while the HTTP process restarted were never observed,
+    and their rows said Explaining... forever. The relay's connect hook
+    re-admits every tool item the runtime hub shows without a settled
+    explanation, over the same socket the patches travel."""
+    from lib.audio_stream import AudioStream
+    from lib.live_hub import LiveFanout, LiveHub, LiveRelay
+    from lib.runtime_bridge import RuntimeClient, RuntimeRPCServer
+
+    class _Dispatch:
+        pass
+
+    fanout = LiveFanout()
+    hub = LiveHub(sink=fanout.publish)
+    hub.begin_turn(agent_id="a1", session="dagger", conv="c", turn_id="t1")
+    for n, command in enumerate(["timeout 20 tail -f /dev/null; echo done", "ls", "pwd"]):
+        hub.tool_start("a1", f"cl:toolu_{n}", name="Bash", call_id=f"toolu_{n}", category="exec",
+                       label=command, command=command, input_preview={"command": command})
+        hub.done("a1", f"cl:toolu_{n}")
+    hub.patch("a1", "cl:toolu_1", {"tool": {"explain": {"text": "Lists files", "level": 2, "status": "ready"}}})
+    hub.patch("a1", "cl:toolu_2", {"tool": {"explain": {"text": None, "level": 2, "status": "failed"}}})
+    hub.end_turn("a1")
+    socket_path = tmp_path / "rt.sock"
+    runtime = RuntimeRPCServer(socket_path, dispatch_service=_Dispatch(), status_provider=lambda: {})
+    runtime.live_fanout, runtime.live_hub = fanout, hub
+    threading.Thread(target=runtime.serve_forever, daemon=True).start()
+    client = RuntimeClient(socket_path)
+    service = FakeService([])
+    explainer = LiveExplainer(lambda: service, client.live_patch, poll_interval=0.02)
+    relay = LiveRelay(socket_path, AudioStream(tmp_path / "audio"), on_event=explainer.observe,
+                      on_connect=lambda: explainer.resync(client.live_snapshot(agent_id="a1")))
+    relay.start()
+
+    def explain(n):
+        items = {i["id"]: i for i in hub.snapshot(agent_id="a1")["items"]}
+        return items[f"cl:toolu_{n}"]["tool"]["explain"]
+    try:
+        assert _wait(lambda: (explain(0) or {}).get("status") == "ready")
+        assert explain(0)["text"] == "Runs the test suite once"
+        assert explain(1)["text"] == "Lists files" and explain(2)["status"] == "failed"
+        assert [items[0]["activity"]["command"] for _, items, _ in service.calls] == [
+            "timeout 20 tail -f /dev/null; echo done"]
+    finally:
+        relay.stop()
+        explainer.close()
+        runtime.shutdown()
+        runtime.server_close()
+
+
+def test_items_resynced_after_their_turn_ended_still_settle():
+    import lib.live_explain as module
+    now = [1000.0]
+    service, patches = PendingService(), []
+    explainer = LiveExplainer(lambda: service, lambda aid, iid, f: patches.append((aid, iid, f)),
+                              poll_interval=0.02, clock=lambda: now[0])
+    try:
+        explainer.resync({"agent_id": "a1", "turn": {"turn_id": "t1", "status": "completed"},
+                          "items": [{"id": "cl:toolu_1", "kind": "tool", "status": "completed",
+                                     "tool": {"name": "Bash", "command": "frobnicate", "explain": None}}]})
+        assert _wait(lambda: service.calls)
+        now[0] += module.TURN_END_GRACE_SEC + 0.1
+        assert _wait(lambda: _final(patches)["cl:toolu_1"].get("reason") == "skipped")
+    finally:
+        explainer.close()

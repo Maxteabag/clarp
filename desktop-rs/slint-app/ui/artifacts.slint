@@ -1,4 +1,4 @@
-import { Palette, Focus, Look } from "theme.slint";
+import { Palette, Focus, Look, ChatText } from "theme.slint";
 
 // One answer a decision or question offers.
 export struct ArtifactOption {
@@ -184,9 +184,12 @@ export component KeyHint inherits Rectangle {
     in property <string> label;
     in property <bool> emphasised;
     in property <bool> chosen;
+    // In a chat row: sized with the row's text (ChatText), not the chrome.
+    in property <bool> chat;
+    property <float> scale: root.chat ? ChatText.scale : 1;
     callback clicked();
-    height: 20px;
-    min-width: key-text.preferred-width + 12px;
+    height: 20px * root.scale;
+    min-width: key-text.preferred-width + 12px * root.scale;
     preferred-width: row.preferred-width;
     border-radius: 4px;
     background: area.has-hover ? Palette.hover : root.chosen ? Palette.accent.with-alpha(0.16) : transparent;
@@ -195,20 +198,20 @@ export component KeyHint inherits Rectangle {
     accessible-label: root.key + " " + root.label;
     accessible-action-default => { root.clicked(); }
     row := HorizontalLayout {
-        padding-left: 4px;
-        padding-right: 4px;
-        spacing: 5px;
+        padding-left: 4px * root.scale;
+        padding-right: 4px * root.scale;
+        spacing: 5px * root.scale;
         key-text := Text {
             text: root.key;
             color: root.emphasised || root.chosen ? Palette.accent : Palette.accent.with-alpha(0.6);
-            font-size: 11 * Look.unit;
+            font-size: root.chat ? ChatText.note : 11 * Look.unit;
             font-weight: 700;
             vertical-alignment: center;
         }
         Text {
             text: root.label;
             color: root.emphasised || root.chosen ? Palette.text : Palette.muted;
-            font-size: 11 * Look.unit;
+            font-size: root.chat ? ChatText.note : 11 * Look.unit;
             font-weight: root.chosen ? 600 : 400;
             vertical-alignment: center;
             overflow: elide;
@@ -229,11 +232,12 @@ component HintRow inherits Rectangle {
     property <[CardHint]> none;
     min-width: 0px;
     clip: true;
-    height: 20px;
+    height: 20px * ChatText.scale;
     HorizontalLayout {
         alignment: start;
         spacing: 8px;
         for hint in root.live || root.decision ? root.artifact.hints : root.none: KeyHint {
+            chat: true;
             key: root.live ? hint.key : "";
             label: hint.label;
             chosen: hint.chosen;
@@ -252,19 +256,19 @@ component CountdownBody inherits VerticalLayout {
     if !root.artifact.countdown-set: Text {
         text: root.artifact.countdown-note;
         color: root.artifact.countdown-note == "Cancelled" ? Palette.muted : Palette.warning;
-        font-size: 13 * Look.unit * Look.zoom;
+        font-size: ChatText.label;
     }
     if root.artifact.countdown-set: Text {
         text: ArtifactBridge.countdown-phase(root.artifact.countdown-at, ArtifactBridge.now);
         color: Palette.muted;
-        font-size: 11 * Look.unit * Look.zoom;
+        font-size: ChatText.note;
     }
     if root.artifact.countdown-set: Text {
-        height: 30px;
+        height: 30px * ChatText.scale;
         text: ArtifactBridge.countdown-clock(root.artifact.countdown-at, ArtifactBridge.now);
         color: Palette.text;
         font-family: "JetBrains Mono";
-        font-size: 24 * Look.unit * Look.zoom;
+        font-size: 24px * ChatText.scale;
         font-weight: 600;
         vertical-alignment: center;
         accessible-role: text;
@@ -272,7 +276,7 @@ component CountdownBody inherits VerticalLayout {
     if root.artifact.countdown-set: Text {
         text: root.artifact.countdown-line;
         color: Palette.muted;
-        font-size: 12 * Look.unit * Look.zoom;
+        font-size: ChatText.detail;
         overflow: elide;
     }
 }
@@ -305,10 +309,10 @@ component OptionRow inherits Rectangle {
         padding-right: 6px;
         spacing: 8px;
         Text {
-            width: 14px;
+            width: 14px * ChatText.scale;
             text: root.chosen ? (root.enabled ? "●" : "✓") : "○";
             color: root.chosen ? Palette.accent : Palette.faint;
-            font-size: 12 * Look.unit * Look.zoom;
+            font-size: ChatText.detail;
             vertical-alignment: center;
         }
         VerticalLayout {
@@ -318,11 +322,11 @@ component OptionRow inherits Rectangle {
                 alignment: start;
                 spacing: 8px;
                 // Its key, only while it works.
-                if root.show-number: Text { text: root.number; color: root.emphasised ? Palette.accent : Palette.accent.with-alpha(0.6); font-size: 11 * Look.unit * Look.zoom; font-weight: 700; vertical-alignment: center; }
-                Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: 12 * Look.unit * Look.zoom; font-weight: root.chosen ? 600 : 400; overflow: elide; }
-                if root.recommended: Text { text: "Recommended"; color: Palette.success; font-size: 10 * Look.unit * Look.zoom; vertical-alignment: center; }
+                if root.show-number: Text { text: root.number; color: root.emphasised ? Palette.accent : Palette.accent.with-alpha(0.6); font-size: ChatText.note; font-weight: 700; vertical-alignment: center; }
+                Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: ChatText.detail; font-weight: root.chosen ? 600 : 400; overflow: elide; }
+                if root.recommended: Text { text: "Recommended"; color: Palette.success; font-size: ChatText.caption; vertical-alignment: center; }
             }
-            if root.detail != "": Text { text: root.detail; color: Palette.muted; font-size: 11 * Look.unit * Look.zoom; overflow: elide; }
+            if root.detail != "": Text { text: root.detail; color: Palette.muted; font-size: ChatText.note; overflow: elide; }
         }
     }
 }
@@ -335,18 +339,18 @@ component OwnAnswer inherits HorizontalLayout {
     in property <bool> measuring;
     in property <int> number;
     property <bool> chosen: root.artifact.chosen == root.artifact.options.length;
-    height: 30px;
+    height: 30px * ChatText.scale;
     padding-left: 6px;
     spacing: 8px;
     Text {
-        width: 14px;
+        width: 14px * ChatText.scale;
         text: root.chosen ? (root.artifact.pending ? "●" : "✓") : "○";
         color: root.chosen ? Palette.accent : Palette.faint;
-        font-size: 12 * Look.unit * Look.zoom;
+        font-size: ChatText.detail;
         vertical-alignment: center;
     }
     // Its key, only while it works.
-    if root.artifact.pending && root.artifact.selected && Focus.mode == "pane": Text { text: root.number; color: Palette.accent; font-size: 11 * Look.unit * Look.zoom; font-weight: 700; vertical-alignment: center; }
+    if root.artifact.pending && root.artifact.selected && Focus.mode == "pane": Text { text: root.number; color: Palette.accent; font-size: ChatText.note; font-weight: 700; vertical-alignment: center; }
     // Asked once, after the row is in the window (focus during its
     // creation is ignored); Escape gives the keyboard back for good.
     property <bool> asked;
@@ -354,7 +358,7 @@ component OwnAnswer inherits HorizontalLayout {
         horizontal-stretch: 1;
         Rectangle {
             horizontal-stretch: 1;
-            height: 26px;
+            height: 26px * ChatText.scale;
             border-radius: 4px;
             border-width: 1px;
             border-color: field.has-focus ? Palette.accent : Palette.border;
@@ -364,7 +368,7 @@ component OwnAnswer inherits HorizontalLayout {
                 height: parent.height;
                 text: "Write my own answer";
                 color: Palette.faint;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 vertical-alignment: center;
             }
             field := TextInput {
@@ -373,7 +377,7 @@ component OwnAnswer inherits HorizontalLayout {
                 height: parent.height;
                 text: root.artifact.draft;
                 color: Palette.text;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 single-line: true;
                 vertical-alignment: center;
                 accessible-label: "Write my own answer";
@@ -407,7 +411,7 @@ component OwnAnswer inherits HorizontalLayout {
     if !root.artifact.pending: Text {
         text: root.chosen ? root.artifact.draft : "Write my own answer";
         color: root.chosen ? Palette.text : Palette.faint;
-        font-size: 12 * Look.unit * Look.zoom;
+        font-size: ChatText.detail;
         overflow: elide;
         vertical-alignment: center;
         horizontal-stretch: 1;
@@ -426,14 +430,14 @@ component DecisionBody inherits VerticalLayout {
     // Its digits work while it is selected and the chat has the keyboard.
     property <bool> live: root.artifact.selected && Focus.mode == "pane";
     spacing: 5px;
-    if root.artifact.question != "": Text { text: root.artifact.question; color: Palette.text; font-size: 13 * Look.unit * Look.zoom; font-weight: 600; wrap: word-wrap; }
-    if root.artifact.context != "": Text { text: root.artifact.context; color: Palette.muted; font-size: 12 * Look.unit * Look.zoom; wrap: word-wrap; }
+    if root.artifact.question != "": Text { text: root.artifact.question; color: Palette.text; font-size: ChatText.label; font-weight: 600; wrap: word-wrap; }
+    if root.artifact.context != "": Text { text: root.artifact.context; color: Palette.muted; font-size: ChatText.detail; wrap: word-wrap; }
     // Settled with nothing to say, a decision has no line to keep.
     if root.artifact.keep-line: Text {
-        height: 15px;
+        height: 15px * ChatText.scale;
         text: root.artifact.pending ? root.artifact.meta : root.artifact.delivery;
         color: root.artifact.pending ? Palette.warning : Palette.muted;
-        font-size: 11 * Look.unit * Look.zoom;
+        font-size: ChatText.note;
         overflow: elide;
     }
     // A question's options, pending and answered alike (the answer marked).
@@ -457,7 +461,7 @@ component DecisionBody inherits VerticalLayout {
         }
     }
     if root.artifact.question != "" || root.artifact.resolved != "": HorizontalLayout {
-        height: 28px;
+        height: 28px * ChatText.scale;
         alignment: start;
         spacing: 8px;
         // Its keys: an approval's answers, send and discard.
@@ -467,16 +471,16 @@ component DecisionBody inherits VerticalLayout {
             Text {
                 text: root.artifact.resolved-ok ? "✓" : "–";
                 color: root.artifact.resolved-ok ? Palette.success : Palette.muted;
-                font-size: 13 * Look.unit * Look.zoom;
+                font-size: ChatText.label;
                 vertical-alignment: center;
             }
-            Text { text: root.artifact.resolved; color: root.artifact.resolved-ok ? Palette.success : Palette.muted; font-size: 12 * Look.unit * Look.zoom; font-weight: 600; vertical-alignment: center; }
-            if root.artifact.answer != "": Text { text: "· " + root.artifact.answer; color: Palette.text; font-size: 12 * Look.unit * Look.zoom; overflow: elide; vertical-alignment: center; }
+            Text { text: root.artifact.resolved; color: root.artifact.resolved-ok ? Palette.success : Palette.muted; font-size: ChatText.detail; font-weight: 600; vertical-alignment: center; }
+            if root.artifact.answer != "": Text { text: "· " + root.artifact.answer; color: Palette.text; font-size: ChatText.detail; overflow: elide; vertical-alignment: center; }
         }
         if root.artifact.status-text != "": Text {
             text: root.artifact.status-text;
             color: root.artifact.status-text.starts-with("Not ") || root.artifact.status-text.starts-with("Choose") ? Palette.danger : Palette.muted;
-            font-size: 12 * Look.unit * Look.zoom;
+            font-size: ChatText.detail;
             overflow: elide;
             vertical-alignment: center;
         }
@@ -501,11 +505,11 @@ component VideoBody inherits VerticalLayout {
             image-fit: contain;
         }
         if root.artifact.action != "": Rectangle {
-            width: 44px;
-            height: 44px;
-            border-radius: 22px;
+            width: 44px * ChatText.scale;
+            height: 44px * ChatText.scale;
+            border-radius: self.width / 2;
             background: Palette.window.with-alpha(0.7);
-            Text { width: parent.width; height: parent.height; text: "▶"; color: root.tint; font-size: 18 * Look.unit * Look.zoom; horizontal-alignment: center; vertical-alignment: center; }
+            Text { width: parent.width; height: parent.height; text: "▶"; color: root.tint; font-size: 18px * ChatText.scale; horizontal-alignment: center; vertical-alignment: center; }
         }
         if root.artifact.media-length != "": Text {
             x: parent.width - self.width - 8px;
@@ -513,10 +517,10 @@ component VideoBody inherits VerticalLayout {
             text: root.artifact.media-length;
             color: Palette.text;
             font-family: "JetBrains Mono";
-            font-size: 11 * Look.unit * Look.zoom;
+            font-size: ChatText.note;
         }
     }
-    if root.artifact.media-text != "": Text { text: root.artifact.media-text; color: Palette.warning; font-size: 11 * Look.unit * Look.zoom; }
+    if root.artifact.media-text != "": Text { text: root.artifact.media-text; color: Palette.warning; font-size: ChatText.note; }
 }
 
 // An audio card's player (iOS: play/pause, progress, m:ss / m:ss and a
@@ -530,7 +534,7 @@ component MediaBody inherits VerticalLayout {
     // Played from the keyboard (its hints): the bar and the clock.
     if root.artifact.action != "": HorizontalLayout {
         spacing: 10px;
-        height: 20px;
+        height: 20px * ChatText.scale;
         Rectangle {
             y: (parent.height - self.height) / 2;
             height: 4px;
@@ -549,15 +553,15 @@ component MediaBody inherits VerticalLayout {
             text: root.position + (root.artifact.media-length != "" ? " / " + root.artifact.media-length : "");
             color: Palette.muted;
             font-family: "JetBrains Mono";
-            font-size: 11 * Look.unit * Look.zoom;
+            font-size: ChatText.note;
             vertical-alignment: center;
         }
     }
     Text {
-        height: 15px;
+        height: 15px * ChatText.scale;
         text: root.artifact.media-text;
         color: root.artifact.media-state == "failed" || root.artifact.action == "" ? Palette.warning : Palette.muted;
-        font-size: 11 * Look.unit * Look.zoom;
+        font-size: ChatText.note;
         overflow: elide;
     }
 }
@@ -585,7 +589,7 @@ component ProgressBody inherits VerticalLayout {
                 background: root.tint;
             }
         }
-        if root.artifact.progress-count != "": Text { text: root.artifact.progress-count; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11 * Look.unit * Look.zoom; vertical-alignment: center; }
+        if root.artifact.progress-count != "": Text { text: root.artifact.progress-count; color: Palette.muted; font-family: "JetBrains Mono"; font-size: ChatText.note; vertical-alignment: center; }
     }
     // One line, there whenever the plan is known: a step finishing, the
     // next beginning or the plan completing never changes the height.
@@ -594,16 +598,16 @@ component ProgressBody inherits VerticalLayout {
         if root.artifact.current != "" && root.artifact.progress-value >= 0: Text {
             text: root.artifact.current-blocked ? "■" : "▶";
             color: root.artifact.current-blocked ? Palette.danger : root.tint;
-            font-size: 10 * Look.unit * Look.zoom;
+            font-size: ChatText.caption;
             vertical-alignment: center;
         }
         Text {
             text: root.artifact.current != "" ? root.artifact.current
                 : root.artifact.progress-value >= 0.999 ? "All steps done" : "Nothing under way";
             color: root.artifact.current == "" ? Palette.muted : root.artifact.progress-value >= 0 ? Palette.text : Palette.warning;
-            font-size: 12 * Look.unit * Look.zoom;
+            font-size: ChatText.detail;
             overflow: elide;
-            height: 16px;
+            height: 16px * ChatText.scale;
             vertical-alignment: center;
             horizontal-stretch: 1;
         }
@@ -645,8 +649,8 @@ export component ArtifactCard inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
             Rectangle {
-                width: 24px;
-                height: 24px;
+                width: 24px * ChatText.scale;
+                height: 24px * ChatText.scale;
                 border-radius: 6px;
                 background: root.tint.with-alpha(0.14);
                 Text {
@@ -654,26 +658,26 @@ export component ArtifactCard inherits Rectangle {
                     height: parent.height;
                     text: ArtifactLook.glyph(root.artifact.kind);
                     color: root.tint;
-                    font-size: 14 * Look.unit * Look.zoom;
+                    font-size: ChatText.lead;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
             }
             VerticalLayout {
                 horizontal-stretch: 1;
-                Text { text: root.artifact.label; color: Palette.faint; font-size: 9 * Look.unit * Look.zoom; font-weight: 600; letter-spacing: 0.8 * Look.unit * Look.zoom; }
-                Text { text: root.artifact.title; color: Palette.text; font-size: 14 * Look.unit * Look.zoom; font-weight: 600; wrap: word-wrap; }
+                Text { text: root.artifact.label; color: Palette.faint; font-size: ChatText.tiny; font-weight: 600; letter-spacing: 0.8px * ChatText.scale; }
+                Text { text: root.artifact.title; color: Palette.text; font-size: ChatText.lead; font-weight: 600; wrap: word-wrap; }
             }
             if root.artifact.badge != "": Rectangle {
                 y: 2px;
-                height: 18px;
+                height: 18px * ChatText.scale;
                 width: badge-text.preferred-width + 12px;
-                border-radius: 9px;
+                border-radius: self.height / 2;
                 background: (root.artifact.badge == "Failed" ? Palette.danger : Palette.muted).with-alpha(0.16);
                 badge-text := Text {
                     text: root.artifact.badge;
                     color: root.artifact.badge == "Failed" ? Palette.danger : Palette.muted;
-                    font-size: 11 * Look.unit * Look.zoom;
+                    font-size: ChatText.note;
                 }
             }
         }
@@ -685,7 +689,7 @@ export component ArtifactCard inherits Rectangle {
         if root.artifact.preview != "": Text {
             text: root.artifact.preview;
             color: Palette.muted;
-            font-size: 12 * Look.unit * Look.zoom;
+            font-size: ChatText.detail;
             wrap: word-wrap;
             overflow: elide;
             max-height: (root.artifact.kind == "research" ? 5 : 4) * 16px;
@@ -696,32 +700,32 @@ export component ArtifactCard inherits Rectangle {
             spacing: 1px;
             HorizontalLayout {
                 spacing: 6px;
-                for cell in root.artifact.head: Text { text: cell; color: Palette.chrome-text; font-size: 11 * Look.unit * Look.zoom; font-weight: 600; overflow: elide; horizontal-stretch: 1; min-width: 0; preferred-width: 0; }
+                for cell in root.artifact.head: Text { text: cell; color: Palette.chrome-text; font-size: ChatText.note; font-weight: 600; overflow: elide; horizontal-stretch: 1; min-width: 0; preferred-width: 0; }
             }
             if root.artifact.first-row.length > 0: HorizontalLayout {
                 spacing: 6px;
-                for cell in root.artifact.first-row: Text { text: cell; color: Palette.text; font-family: "JetBrains Mono"; font-size: 11 * Look.unit * Look.zoom; overflow: elide; horizontal-stretch: 1; min-width: 0; preferred-width: 0; }
+                for cell in root.artifact.first-row: Text { text: cell; color: Palette.text; font-family: "JetBrains Mono"; font-size: ChatText.note; overflow: elide; horizontal-stretch: 1; min-width: 0; preferred-width: 0; }
             }
-            Text { text: root.artifact.rows-count; color: Palette.faint; font-size: 11 * Look.unit * Look.zoom; }
+            Text { text: root.artifact.rows-count; color: Palette.faint; font-size: ChatText.note; }
         }
-        if root.artifact.data-note != "": Text { text: root.artifact.data-note; color: Palette.warning; font-size: 12 * Look.unit * Look.zoom; }
+        if root.artifact.data-note != "": Text { text: root.artifact.data-note; color: Palette.warning; font-size: ChatText.detail; }
         // A change's where and how much, one line each (iOS's monospaced row).
-        if root.artifact.kind == "code_change" || root.artifact.kind == "directory" || root.artifact.kind == "workflow_run": Text { text: root.artifact.repo; color: Palette.text; font-family: "JetBrains Mono"; font-size: 12 * Look.unit * Look.zoom; overflow: elide; }
+        if root.artifact.kind == "code_change" || root.artifact.kind == "directory" || root.artifact.kind == "workflow_run": Text { text: root.artifact.repo; color: Palette.text; font-family: "JetBrains Mono"; font-size: ChatText.detail; overflow: elide; }
         if root.artifact.files != "" || root.artifact.additions != "" || root.artifact.deletions != "": HorizontalLayout {
             alignment: start;
             spacing: 10px;
-            if root.artifact.files != "": Text { text: root.artifact.files; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 12 * Look.unit * Look.zoom; }
-            if root.artifact.additions != "": Text { text: root.artifact.additions; color: Palette.success; font-family: "JetBrains Mono"; font-size: 12 * Look.unit * Look.zoom; }
-            if root.artifact.deletions != "": Text { text: root.artifact.deletions; color: Palette.danger; font-family: "JetBrains Mono"; font-size: 12 * Look.unit * Look.zoom; }
+            if root.artifact.files != "": Text { text: root.artifact.files; color: Palette.muted; font-family: "JetBrains Mono"; font-size: ChatText.detail; }
+            if root.artifact.additions != "": Text { text: root.artifact.additions; color: Palette.success; font-family: "JetBrains Mono"; font-size: ChatText.detail; }
+            if root.artifact.deletions != "": Text { text: root.artifact.deletions; color: Palette.danger; font-family: "JetBrains Mono"; font-size: ChatText.detail; }
         }
         // iOS's release row: the revision large, its state marked.
         if root.artifact.kind == "release": HorizontalLayout {
             spacing: 8px;
-            Text { text: root.artifact.revision; color: Palette.text; font-family: "JetBrains Mono"; font-size: 15 * Look.unit * Look.zoom; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
+            Text { text: root.artifact.revision; color: Palette.text; font-family: "JetBrains Mono"; font-size: ChatText.body; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
             Text {
                 text: root.artifact.release-state == "ready" ? "✓ Released" : root.artifact.release-state == "failed" ? "✕ Failed" : root.artifact.release-state == "active" ? "● Rolling out" : "○ Release";
                 color: root.artifact.release-state == "ready" ? Palette.success : root.artifact.release-state == "failed" ? Palette.danger : root.artifact.release-state == "active" ? Palette.warning : Palette.muted;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 vertical-alignment: center;
             }
         }
@@ -729,10 +733,10 @@ export component ArtifactCard inherits Rectangle {
             text: root.artifact.file-info;
             color: root.artifact.action == "" ? Palette.warning : Palette.muted;
             font-family: "JetBrains Mono";
-            font-size: 11 * Look.unit * Look.zoom;
+            font-size: ChatText.note;
             overflow: elide;
         }
-        if root.artifact.sources != "": Text { text: root.artifact.sources; color: Palette.faint; font-size: 11 * Look.unit * Look.zoom; }
+        if root.artifact.sources != "": Text { text: root.artifact.sources; color: Palette.faint; font-size: ChatText.note; }
         if root.artifact.kind == "audio": MediaBody { artifact: root.artifact; tint: root.tint; }
         if root.artifact.kind == "video": VideoBody { artifact: root.artifact; tint: root.tint; }
         if root.artifact.kind == "plan" || root.artifact.kind == "workflow_run": ProgressBody { artifact: root.artifact; tint: root.tint; }
@@ -742,23 +746,23 @@ export component ArtifactCard inherits Rectangle {
         if root.artifact.summary != "" && root.artifact.preview == "": Text {
             text: root.artifact.summary;
             color: Palette.text;
-            font-size: 12 * Look.unit * Look.zoom;
+            font-size: ChatText.detail;
             wrap: word-wrap;
             overflow: elide;
-            height: 32px;
+            height: 32px * ChatText.scale;
             vertical-alignment: top;
         }
         if root.artifact.note != "": StyledText {
             text: root.artifact.note-styled;
             default-color: Palette.text;
-            default-font-size: 13px;
+            default-font-size: ChatText.label;
             default-font-family: Palette.body-family;
             link-color: Palette.link;
             link-clicked(url) => { ArtifactBridge.link-clicked(url); }
         }
         // The bar's count says it already.
-        if root.artifact.progress != "" && root.artifact.progress-count == "": Text { text: root.artifact.progress; color: Palette.text; font-size: 12 * Look.unit * Look.zoom; }
-        if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: 12 * Look.unit * Look.zoom; wrap: word-wrap; }
+        if root.artifact.progress != "" && root.artifact.progress-count == "": Text { text: root.artifact.progress; color: Palette.text; font-size: ChatText.detail; }
+        if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
         // Its keys as hints (a decision shows them, and its send's status,
         // in its own row), and how its action went.
         if root.artifact.kind != "decision" && root.artifact.kind != "question" && (root.artifact.hints.length > 0 || root.artifact.status-text != ""): HorizontalLayout {
@@ -767,7 +771,7 @@ export component ArtifactCard inherits Rectangle {
             if root.artifact.status-text != "": Text {
                 text: root.artifact.status-text;
                 color: root.artifact.status-text.starts-with("Not ") ? Palette.danger : root.artifact.status-text == "Answers accepted" ? Palette.success : Palette.muted;
-                font-size: 12 * Look.unit * Look.zoom;
+                font-size: ChatText.detail;
                 overflow: elide;
                 vertical-alignment: center;
                 horizontal-stretch: 1;

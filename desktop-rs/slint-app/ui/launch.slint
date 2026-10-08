@@ -1,6 +1,6 @@
 import { Button, CheckBox, ComboBox, ListView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, ChromeText } from "theme.slint";
 import { Modal } from "dialogs.slint";
 
 // ---- launch dialogs: shared pieces ------------------------------------------
@@ -280,6 +280,7 @@ component DirectoryPicker inherits VerticalLayout {
                 height: 32px;
                 background: index == LaunchHub.directory-current ? Palette.border : transparent;
                 Text {
+                    font-size: ChromeText.body;
                     x: 10px;
                     width: parent.width - 20px;
                     text: row.label;
@@ -291,6 +292,7 @@ component DirectoryPicker inherits VerticalLayout {
             }
         }
         if LaunchHub.directory-empty != "": Text {
+            font-size: ChromeText.body;
             text: LaunchHub.directory-empty;
             color: Palette.muted;
         }
@@ -380,6 +382,7 @@ export component NewSessionHub inherits Modal {
             if !LaunchHub.connected: HorizontalLayout {
                 spacing: 12px;
                 Text {
+                    font-size: ChromeText.body;
                     text: "Connect to a server first";
                     color: Palette.warning;
                     wrap: word-wrap;
@@ -413,6 +416,7 @@ export component NewSessionHub inherits Modal {
                     Caption { text: "MODEL"; }
                     KeyTag { text: "ctrl+m"; }
                     Text {
+                        font-size: ChromeText.body;
                         text: LaunchHub.model-summary;
                         color: Palette.text;
                         overflow: elide;
@@ -448,6 +452,7 @@ export component NewSessionHub inherits Modal {
                 Caption { text: "DIRECTORY"; }
                 KeyTag { text: "ctrl+d"; }
                 Text {
+                    font-size: ChromeText.body;
                     text: LaunchHub.directory;
                     color: Palette.muted;
                     overflow: elide;
@@ -525,6 +530,7 @@ export component NewSessionHub inherits Modal {
             }
             if !LaunchHub.connected: Rectangle { vertical-stretch: 1; }
             if LaunchHub.error != "": Text {
+                font-size: ChromeText.body;
                 text: LaunchHub.error;
                 color: Palette.warning;
                 wrap: word-wrap;
@@ -709,7 +715,7 @@ export component StartAgentDialog inherits Modal {
                         }
                     }
                 }
-                if StartAgent.past-loading: Text { text: "Loading…"; color: Palette.muted; }
+                if StartAgent.past-loading: Text { font-size: ChromeText.body; text: "Loading…"; color: Palette.muted; }
             }
             if StartAgent.error != "": Text { text: StartAgent.error; color: Palette.warning; wrap: word-wrap; font-size: 12 * Look.unit; }
             Rectangle { vertical-stretch: 1; }
