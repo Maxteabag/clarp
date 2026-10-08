@@ -5,9 +5,10 @@ import sys
 
 
 def main() -> None:
-    if len(sys.argv) < 3 or sys.argv[1] not in {"context", "review"}:
-        raise SystemExit("usage: janitor_run.py context RUN_ID | review RUN_ID [review flags]")
-    action = "run-context" if sys.argv[1] == "context" else "review"
+    if len(sys.argv) < 3 or sys.argv[1] not in {"context", "review", "outcome"}:
+        raise SystemExit("usage: janitor_run.py context RUN_ID | review RUN_ID [review flags]"
+                         " | outcome RUN_ID --status worked|idle|failed --summary TEXT")
+    action = "run-context" if sys.argv[1] == "context" else sys.argv[1]
     os.execvp("clarp-admin", ["clarp-admin", "janitor", action, *sys.argv[2:]])
 
 

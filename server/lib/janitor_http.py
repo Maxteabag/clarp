@@ -218,6 +218,11 @@ def handle(handler, method: str) -> None:
                 result["cancellation_pending"] = pending or result.get("cancellation_pending", False)
                 _changed(handler)
                 return _send(handler, 200, {"janitor": result, "cancellation_pending": pending})
+            if len(parts) == 3 and parts[0] == "janitor-runs" and parts[2] == "activity":
+                result = janitors.report_activity(parts[1], str(data.get("activity") or ""),
+                                                  str(data.get("summary") or ""))
+                _changed(handler)
+                return _send(handler, 200, {"activity": result})
             if len(parts) == 3 and parts[0] == "janitor-runs" and parts[2] == "review":
                 result = janitors.review(parts[1],
                     target_session=str(data.get("target_session") or ""),

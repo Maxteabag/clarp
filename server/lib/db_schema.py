@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 112
+_SCHEMA_VERSION = 113
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -1249,7 +1249,9 @@ CREATE TABLE IF NOT EXISTS janitor_runs (
     created_at INTEGER NOT NULL,
     started_at INTEGER,
     finished_at INTEGER,
-    error TEXT NOT NULL DEFAULT ''
+    error TEXT NOT NULL DEFAULT '',
+    activity TEXT NOT NULL DEFAULT '',
+    activity_summary TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_janitor_runs_agent
     ON janitor_runs(agent_id, created_at DESC);
