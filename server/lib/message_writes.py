@@ -389,6 +389,56 @@ def record_interruption_marker(*, agent_id: str, backend_session_id: str,
     }
 
 
+def record_call_notice(*, agent_id: str, backend_session_id: str,
+                       notice_id: str, text: str) -> dict[str, Any] | None:
+    """A quiet group-call notice in an agent's chat (docs/group-calls.md).
+
+    An assistant-role row with origin ``system``, like the interruption
+    marker: it renders in the chat, never pushes or marks unread, and is never
+    spoken. Keyed by ``notice_id`` so a retried change cannot post it twice.
+    """
+    if not agent_id or not backend_session_id or not notice_id or not str(text or "").strip():
+        return None
+    database = conn()
+    msg_id = f"call:{notice_id}"
+    row = database.execute(
+        """SELECT COALESCE(MIN(seq), 0) - 1 AS next_seq
+             FROM messages
+            WHERE agent_id = ? AND backend_session_id = ?""",
+        (agent_id, backend_session_id),
+    ).fetchone()
+    seq = min(int(row["next_seq"]), -1)
+    timestamp_ms = now_ms()
+    timestamp = _iso_from_ms(timestamp_ms)
+    revision = _next_revision(database)
+    inserted = database.execute(
+        """INSERT INTO messages (
+               message_id, agent_id, backend_session_id, source_file, seq,
+               role, timestamp, text, kind, tool_name, tools_json,
+               display_cells_json, updated_at, revision, origin,
+               sender_agent_id
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(message_id) DO NOTHING""",
+        (
+            msg_id, agent_id, backend_session_id, msg_id,
+            seq, "assistant", timestamp, str(text), None, None, "[]", "[]",
+            timestamp_ms, revision, MARKER_ORIGIN, None,
+        ),
+    )
+    if inserted.rowcount != 1:
+        return None
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (agent_id, backend_session_id, revision),
+    )
+    return {"id": msg_id, "role": "assistant", "timestamp": timestamp,
+            "text": text, "origin": MARKER_ORIGIN, "revision": revision}
+
+
 def record_dream_digest(*, agent_id: str, backend_session_id: str,
                         run_id: str, text: str) -> dict[str, Any] | None:
     """Put a finished Dream Digest into the conversation.

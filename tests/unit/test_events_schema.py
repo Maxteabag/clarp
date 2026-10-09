@@ -98,6 +98,8 @@ FULL_SAMPLES = {
         target_session="s", confidence=0.9, reason="r"),
     SSEType.ORACLE_HANDOFF: lambda: events.oracle_handoff(**{
         key: "x" for key in events.FIELDS[SSEType.ORACLE_HANDOFF]}),
+    SSEType.GROUP_CALL: lambda: events.group_call(**{
+        key: "x" for key in events.FIELDS[SSEType.GROUP_CALL]}),
 }
 
 

@@ -1080,6 +1080,42 @@ def cmd_oracle(args) -> int:
     return 0
 
 
+CALL_CHANGES = ("add", "remove", "hold", "resume", "switch", "transfer")
+
+
+def cmd_call(args) -> int:
+    """Manage the user's group call (docs/group-calls.md)."""
+    command = args.call_command
+    scope = {key: value for key, value in (("call_id", args.call), ("principal", args.principal)) if value}
+    by = os.environ.get("CLAUDE_PWA_SESSION", "").strip()
+    if by:
+        scope["by"] = by
+    try:
+        if command == "status":
+            query = f"?principal={urllib.parse.quote(args.principal)}" if args.principal else ""
+            result = api_request("GET", "/calls" + query)
+        elif command == "start":
+            body = {"agents": list(args.agents), **{k: v for k, v in scope.items() if k != "call_id"}}
+            result = api_request("POST", "/calls", body)
+        elif command == "end":
+            result = api_request("POST", "/calls/end", scope)
+        else:
+            if len(args.agents) != 1:
+                print(json.dumps({"ok": False, "error": f"call {command} takes one agent"}))
+                return 2
+            result = api_request("POST", f"/calls/{command}", {"agent": args.agents[0], **scope})
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        try:
+            detail = json.loads(raw) if raw else {"error": f"HTTP {exc.code}"}
+        except ValueError:
+            detail = {"error": raw.decode("utf-8", "replace") or f"HTTP {exc.code}"}
+        print(json.dumps(detail, indent=2))
+        return 1
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_explanations(args) -> int:
     from lib import tool_explanation_learning as learning
     from lib import tool_explanation_templates as templates
@@ -2574,6 +2610,28 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     oracle_connect.add_argument("--principal", default="",
                                 help="paired device id, when several calls are live")
     oracle_connect.set_defaults(func=cmd_oracle)
+    call = sub.add_parser(
+        "call", help="manage the user's group call: who is in it, on hold, or has the floor").add_subparsers(
+        dest="call_command", required=True)
+    for name, helptext, nargs in (
+            ("status", "print the live call", 0),
+            ("start", "start a call with these agents (the first gets the floor)", "+"),
+            ("end", "end the call", 0),
+            ("add", "add an agent to the call", 1),
+            ("remove", "take an agent out of the call", 1),
+            ("hold", "put an agent on hold", 1),
+            ("resume", "take an agent off hold", 1),
+            ("switch", "give an agent the floor (resume or add it if needed)", 1),
+            ("transfer", "hold whoever has the floor and call this agent instead", 1)):
+        command = call.add_parser(name, help=helptext)
+        if nargs:
+            command.add_argument("agents", nargs=nargs, metavar="AGENT",
+                                 help="session id, persona, or a spoken name")
+        else:
+            command.set_defaults(agents=[])
+        command.add_argument("--call", default="", help="call id (default: the live call)")
+        command.add_argument("--principal", default="", help="device principal when several calls are live")
+        command.set_defaults(func=cmd_call)
     onboard = sub.add_parser("onboard")
     onboard.add_argument("--url", default="")
     onboard.add_argument("--name", default="")

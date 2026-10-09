@@ -93,6 +93,9 @@ class SendRequest:
     # The app that sent it, as it names itself (``"desktop"``). A reply to a
     # desktop message is not pushed to the phone.
     client: str = ""
+    # The group call this utterance belongs to (docs/group-calls.md): the Host
+    # then routes only among the call's reachable participants.
+    call_id: str = ""
 
     @property
     def channel(self) -> str:
@@ -167,6 +170,7 @@ class SendRequest:
             sender_agent_id=sender_agent_id, origin=origin,
             authenticated=bool(authenticated),
             client=_client(data.get("client")),
+            call_id=str(data.get("call_id") or "").strip()[:64],
         )
 
     def admit(self) -> PromptAdmission:

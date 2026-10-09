@@ -4,6 +4,7 @@
     {"id": "clarp-media", "pack": "core", "description": "Publish files into Clarp chat"},
     {"id": "clarp-sessions", "pack": "core", "description": "Resolve Clarp agents and sessions"},
     {"id": "clarp-oracle-contact", "pack": "core", "description": "Put a live Oracle call through to an agent and back"},
+    {"id": "clarp-calls", "pack": "core", "description": "Add, remove, hold and switch agents in the user's group call"},
     {"id": "clarp-adopt", "pack": "core", "description": "Resume a terminal CLI conversation as a Clarp agent"},
     {"id": "clarp-self-prompt", "pack": "core", "description": "Prompt an agent now or later"},
     {"id": "clarp-background-jobs", "pack": "core", "description": "Track watchers, detached/systemd/nohup workers with visible purpose, status, output and cancel"},

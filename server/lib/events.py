@@ -38,6 +38,11 @@ _ORACLE_HANDOFF_FIELDS = (
     "issued_at", "server_now", "ttl_ms", "expires_at",
 )
 
+_GROUP_CALL_FIELDS = (
+    "call_id", "host_id", "principal", "state", "reason", "revision", "started_at",
+    "ended_at", "floor", "participants", "change", "server_now",
+)
+
 FIELDS: dict[str, tuple[str, ...]] = {
     SSEType.AUDIO: (
         "clip_id", "url", "name", "session", "agent_id", "persona",
@@ -98,6 +103,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "confidence", "reason",
     ),
     SSEType.ORACLE_HANDOFF: _ORACLE_HANDOFF_FIELDS,
+    SSEType.GROUP_CALL: _GROUP_CALL_FIELDS,
     SSEType.HEARTBEAT: ("ts",),
     SSEType.LIVE: (
         "agent_id", "session", "conv", "epoch", "lseq", "server_now_ms", "ops",
@@ -422,6 +428,11 @@ def oracle_handoff(**fields: Any) -> Event:
     return _build(SSEType.ORACLE_HANDOFF, [(key, fields.get(key)) for key in _ORACLE_HANDOFF_FIELDS])
 
 
+def group_call(**fields: Any) -> Event:
+    """One group call record plus the change that produced it (docs/group-calls.md)."""
+    return _build(SSEType.GROUP_CALL, [(key, fields.get(key)) for key in _GROUP_CALL_FIELDS])
+
+
 CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.AUDIO: audio,
     SSEType.SERVER_VERSION: server_version,
@@ -443,6 +454,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.GOAL_UPDATED: goal_updated,
     SSEType.ORCHESTRATOR_DECISION: orchestrator_decision,
     SSEType.ORACLE_HANDOFF: oracle_handoff,
+    SSEType.GROUP_CALL: group_call,
     SSEType.LIVE: live,
     SSEType.HEARTBEAT: heartbeat,
 }
