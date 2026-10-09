@@ -282,7 +282,7 @@ class JanitorRunner:
                 config = attachment["config"]
                 # One current-state reconciliation, never a catch-up loop.
                 state["next_run_at"] = compute_next_run(config["cron"], config["timezone"], now)
-                self._open_occurrence(state, now)
+                self._open_occurrence(state, due)
 
         active = state.get("active_run_id")
         if active:
@@ -394,7 +394,7 @@ class JanitorRunner:
         # One run for this occurrence, never a catch-up loop; the provisional
         # next run is replaced when the occurrence closes.
         state["next_run_at"] = compute_next_run(config["cron"], config["timezone"], now)
-        self._open_occurrence(state, now)
+        self._open_occurrence(state, due)
         run_id = "janitor-" + hashlib.sha256(json.dumps([aid, generation, "scheduled", due]).encode()).hexdigest()[:32]
         state["occurrence"]["runs"] = 1
         state.update(active_run_id=run_id, delivery_accepted=False, next_delivery_at=now, last_admitted_at=now)
@@ -489,10 +489,14 @@ class JanitorRunner:
                                         max_seconds=self._max_seconds(attachment))
 
     @staticmethod
-    def _open_occurrence(state: dict, now: int) -> None:
-        """A due tick opens one occurrence; a due tick while it is open joins it."""
+    def _open_occurrence(state: dict, at: int) -> None:
+        """A due tick opens one occurrence; a due tick while it is open joins it.
+
+        ``at`` is when the occurrence was due, not when the tick noticed it: a
+        tick a moment after a cron time must not push the next run past the
+        following occurrence (a 30-minute wait read 45 on 2026-10-09)."""
         if not state.get("occurrence"):
-            state["occurrence"] = {"at": now, "runs": 0, "activities": [], "summary": ""}
+            state["occurrence"] = {"at": at, "runs": 0, "activities": [], "summary": ""}
 
     @staticmethod
     def _note_run_activity(attachment: dict, state: dict, run: dict) -> None:
