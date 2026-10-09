@@ -63,7 +63,7 @@
           "persona": "Mike",
           "state": "active",
           "joined_at": 1791160001000,
-          "changed_at": 1791160006000
+          "changed_at": 1791160007000
         }
       ],
       "change": {
@@ -71,7 +71,7 @@
         "session": "mike-86db",
         "by": ""
       },
-      "server_now": 1791160008000
+      "server_now": 1791160009000
     },
     {
       "type": "group-call",
@@ -99,15 +99,15 @@
           "persona": "Mike",
           "state": "active",
           "joined_at": 1791160001000,
-          "changed_at": 1791160006000
+          "changed_at": 1791160007000
         },
         {
           "session": "nadia-1a2b",
           "agent_id": "a-nadia",
           "persona": "Nadia",
           "state": "invited",
-          "joined_at": 1791160010000,
-          "changed_at": 1791160010000
+          "joined_at": 1791160011000,
+          "changed_at": 1791160011000
         }
       ],
       "change": {
@@ -115,7 +115,7 @@
         "session": "nadia-1a2b",
         "by": "mike-86db"
       },
-      "server_now": 1791160012000
+      "server_now": 1791160013000
     },
     {
       "type": "group-call",
@@ -135,7 +135,7 @@
           "persona": "Theo",
           "state": "on_hold",
           "joined_at": 1791160001000,
-          "changed_at": 1791160015000
+          "changed_at": 1791160016000
         },
         {
           "session": "mike-86db",
@@ -143,15 +143,15 @@
           "persona": "Mike",
           "state": "active",
           "joined_at": 1791160001000,
-          "changed_at": 1791160006000
+          "changed_at": 1791160007000
         },
         {
           "session": "nadia-1a2b",
           "agent_id": "a-nadia",
           "persona": "Nadia",
           "state": "invited",
-          "joined_at": 1791160010000,
-          "changed_at": 1791160010000
+          "joined_at": 1791160011000,
+          "changed_at": 1791160011000
         }
       ],
       "change": {
@@ -159,7 +159,7 @@
         "session": "theo-97e5",
         "by": ""
       },
-      "server_now": 1791160017000
+      "server_now": 1791160018000
     },
     {
       "type": "group-call",
@@ -179,7 +179,7 @@
           "persona": "Theo",
           "state": "on_hold",
           "joined_at": 1791160001000,
-          "changed_at": 1791160015000
+          "changed_at": 1791160016000
         },
         {
           "session": "mike-86db",
@@ -187,23 +187,23 @@
           "persona": "Mike",
           "state": "on_hold",
           "joined_at": 1791160001000,
-          "changed_at": 1791160024000
+          "changed_at": 1791160025000
         },
         {
           "session": "nadia-1a2b",
           "agent_id": "a-nadia",
           "persona": "Nadia",
           "state": "invited",
-          "joined_at": 1791160010000,
-          "changed_at": 1791160010000
+          "joined_at": 1791160011000,
+          "changed_at": 1791160011000
         },
         {
           "session": "omar-5e6f",
           "agent_id": "a-omar",
           "persona": "Omar",
           "state": "active",
-          "joined_at": 1791160023000,
-          "changed_at": 1791160025000
+          "joined_at": 1791160024000,
+          "changed_at": 1791160026000
         }
       ],
       "change": {
@@ -211,7 +211,7 @@
         "session": "omar-5e6f",
         "by": ""
       },
-      "server_now": 1791160027000
+      "server_now": 1791160028000
     },
     {
       "type": "group-call",
@@ -231,7 +231,7 @@
           "persona": "Theo",
           "state": "on_hold",
           "joined_at": 1791160001000,
-          "changed_at": 1791160015000
+          "changed_at": 1791160016000
         },
         {
           "session": "mike-86db",
@@ -239,23 +239,23 @@
           "persona": "Mike",
           "state": "on_hold",
           "joined_at": 1791160001000,
-          "changed_at": 1791160024000
+          "changed_at": 1791160025000
         },
         {
           "session": "nadia-1a2b",
           "agent_id": "a-nadia",
           "persona": "Nadia",
           "state": "left",
-          "joined_at": 1791160010000,
-          "changed_at": 1791160030000
+          "joined_at": 1791160011000,
+          "changed_at": 1791160031000
         },
         {
           "session": "omar-5e6f",
           "agent_id": "a-omar",
           "persona": "Omar",
           "state": "active",
-          "joined_at": 1791160023000,
-          "changed_at": 1791160025000
+          "joined_at": 1791160024000,
+          "changed_at": 1791160026000
         }
       ],
       "change": {
@@ -263,7 +263,7 @@
         "session": "nadia-1a2b",
         "by": ""
       },
-      "server_now": 1791160032000
+      "server_now": 1791160033000
     },
     {
       "type": "group-call",
@@ -274,7 +274,7 @@
       "reason": "ended",
       "revision": 7,
       "started_at": 1791160001000,
-      "ended_at": 1791160038000,
+      "ended_at": 1791160039000,
       "floor": "",
       "participants": [
         {
@@ -283,7 +283,7 @@
           "persona": "Theo",
           "state": "left",
           "joined_at": 1791160001000,
-          "changed_at": 1791160035000
+          "changed_at": 1791160036000
         },
         {
           "session": "mike-86db",
@@ -291,23 +291,23 @@
           "persona": "Mike",
           "state": "left",
           "joined_at": 1791160001000,
-          "changed_at": 1791160036000
+          "changed_at": 1791160037000
         },
         {
           "session": "nadia-1a2b",
           "agent_id": "a-nadia",
           "persona": "Nadia",
           "state": "left",
-          "joined_at": 1791160010000,
-          "changed_at": 1791160030000
+          "joined_at": 1791160011000,
+          "changed_at": 1791160031000
         },
         {
           "session": "omar-5e6f",
           "agent_id": "a-omar",
           "persona": "Omar",
           "state": "left",
-          "joined_at": 1791160023000,
-          "changed_at": 1791160037000
+          "joined_at": 1791160024000,
+          "changed_at": 1791160038000
         }
       ],
       "change": {
@@ -315,7 +315,7 @@
         "session": "",
         "by": ""
       },
-      "server_now": 1791160040000
+      "server_now": 1791160041000
     }
   ],
   "snapshots": [
@@ -341,7 +341,7 @@
             "persona": "Theo",
             "state": "on_hold",
             "joined_at": 1791160001000,
-            "changed_at": 1791160015000
+            "changed_at": 1791160016000
           },
           {
             "session": "mike-86db",
@@ -349,24 +349,24 @@
             "persona": "Mike",
             "state": "active",
             "joined_at": 1791160001000,
-            "changed_at": 1791160006000
+            "changed_at": 1791160007000
           },
           {
             "session": "nadia-1a2b",
             "agent_id": "a-nadia",
             "persona": "Nadia",
             "state": "invited",
-            "joined_at": 1791160010000,
-            "changed_at": 1791160010000
+            "joined_at": 1791160011000,
+            "changed_at": 1791160011000
           }
         ],
-        "server_now": 1791160020000
+        "server_now": 1791160021000
       },
-      "server_now": 1791160021000
+      "server_now": 1791160022000
     },
     {
       "call": null,
-      "server_now": 1791160042000
+      "server_now": 1791160043000
     }
   ]
 }
