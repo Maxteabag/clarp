@@ -833,3 +833,11 @@ def test_the_header_never_changes_the_record(stream, monkeypatch):
     monkeypatch.setattr(calls, "now_ms", lambda: later)
     assert calls.prompt_header("mike-86db") == ""
     assert settings_store.get(calls.KEY + PHONE) == before and len(stream.events) == events
+
+
+def test_the_skill_lets_agents_bring_others_in_only_aloud_and_when_asked_or_clearly_helpful():
+    skill = (ROOT / "skills/clarp-calls/SKILL.md").read_text()
+    section = skill[skill.index("## Bringing someone in yourself"):skill.index("## The call header")]
+    assert "clarp-admin call add" in section and "clarp-admin call switch" in section
+    assert "aloud" in section and "asked for" in section and "clearly" in section
+    assert "[Group call]" in skill
