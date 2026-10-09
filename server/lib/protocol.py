@@ -42,6 +42,9 @@ class SSEType:
     # An Oracle handoff changed state: the call is being put through to an
     # agent's hands-free session or back to Oracle (docs/oracle-handoff.md).
     ORACLE_HANDOFF = "oracle-handoff"
+    # A group call changed: started, a participant added, removed, held,
+    # resumed, given the floor, or the call ended (docs/group-calls.md).
+    GROUP_CALL = "group-call"
     # Item ops for a conversation's open turn, only to connections that asked
     # with GET /events?live=… (docs/live-items.md). Ephemeral, never replayed.
     LIVE = "live"

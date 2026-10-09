@@ -450,6 +450,7 @@ class OrchestratorService:
         unheard_audio_sessions: tuple[str, ...] = (),
         dispatch: Callable[..., Any],
         fallback_request: bool = False,
+        only_sessions: tuple[str, ...] | None = None,
     ) -> OrchestratorOutcome | None:
         client_id = (prompt_admissions.message_id(prompt_admission.client_admission_id)
                      if prompt_admission else trace_id)
@@ -492,6 +493,7 @@ class OrchestratorService:
             settings=settings,
             context_scope="focused",
             fallback_request=fallback_request,
+            only_sessions=only_sessions,
         )
         try:
             run = janitor_builtins.begin_run(
@@ -534,6 +536,7 @@ class OrchestratorService:
                     settings=settings,
                     context_scope="all",
                     fallback_request=fallback_request,
+                    only_sessions=only_sessions,
                 )
                 try:
                     self._require_current(run_id)
@@ -1183,7 +1186,10 @@ def build_context_packet(
     settings: OrchestratorSettings,
     context_scope: str = "all",
     fallback_request: bool = False,
+    only_sessions: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
+    """The routing packet. ``only_sessions`` limits the candidate agents to a
+    group call's reachable participants (docs/group-calls.md)."""
     focus_agent_id = agents_db.get_focus()
     focus = identity.lookup(focus_agent_id)
     focus_session = (focus or {}).get("session") or requested_session
@@ -1194,6 +1200,8 @@ def build_context_packet(
     all_agents = [agent for agent in agents_db.list_agents()
                   if not agent.get("archived_at")
                   and agents_db.interaction_capabilities(agent)["can_voice_target"]]
+    if only_sessions is not None:
+        all_agents = [agent for agent in all_agents if agent["session"] in only_sessions]
     if fallback_request:
         cutoff = now_ms() - RECENT_AGENT_WINDOW_MS
         all_agents = [

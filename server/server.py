@@ -490,6 +490,7 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/contact": "_handle_oracle_contact_get",
         "/oracle/voice-provider": "_handle_oracle_voice_provider_get",
         "/oracle/handoff": "_handle_oracle_handoff_get",
+        "/calls": "_handle_calls_get",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
         "/oracle/v2": "_handle_oracle_v2",
@@ -594,6 +595,14 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/contact": "_handle_oracle_contact_post",
         "/oracle/voice-provider": "_handle_oracle_voice_provider_post",
         "/oracle/connect": "_handle_oracle_connect",
+        "/calls": "_handle_calls_start",
+        "/calls/add": "_handle_calls_add",
+        "/calls/remove": "_handle_calls_remove",
+        "/calls/hold": "_handle_calls_hold",
+        "/calls/resume": "_handle_calls_resume",
+        "/calls/switch": "_handle_calls_switch",
+        "/calls/transfer": "_handle_calls_transfer",
+        "/calls/end": "_handle_calls_end",
         "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
         "/oracle/v2/calls/close": "_handle_oracle_live_call_close",
         "/oracle/v2/calls/control": "_handle_oracle_live_call_control",
@@ -994,7 +1003,7 @@ class Handler(BaseHTTPRequestHandler):
         "/orchestrator/", "/herald/", "/personalities/",
         "/automation-settings", "/avatar-settings", "/paired-devices",
         "/tts/providers", "/network/", "/server-terminal",
-        "/oracle/", "/agent-file", "/janitor-runs/",
+        "/oracle/", "/agent-file", "/janitor-runs/", "/calls",
     )
     _LIMITED_DEVICE_POST_EXACT = frozenset({
         "/send", "/transcribe", "/upload", "/select", "/focus",
@@ -4168,6 +4177,117 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(exc.status, exc.body())
         return self._json_ok(result)
 
+    # ---- group calls (docs/group-calls.md) ----
+
+    def _calls_principal(self):
+        """The full-scope caller, or None after answering 401."""
+        from lib.http_utils import principal_of, require_full_scope
+        who = principal_of(self)
+        denied = require_full_scope(who, message="Group calls require full-device authentication")
+        if denied:
+            self._json_error(401, denied)
+            return None
+        return who.principal
+
+    def _calls_by(self, data: dict) -> str:
+        """The agent making a change: its turn identity, else the session it names."""
+        from lib import turn_identity
+        from lib.provider_background_jobs import TURN_ENV
+        try:
+            agent_id = turn_identity.caller_agent_id(
+                {TURN_ENV: (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")})
+        except Exception:  # noqa: BLE001 - attribution only
+            agent_id = ""
+        agent = identity.lookup(agent_id) if agent_id else None
+        if agent:
+            return str(agent["session"])
+        named = identity.lookup(str(data.get("by") or "").strip()) if data.get("by") else None
+        return str(named["session"]) if named else ""
+
+    def _handle_calls_get(self):
+        from lib import group_calls
+        principal = self._calls_principal()
+        if principal is None:
+            return
+        wanted = (self._query().get("principal") or [""])[0] if principal == group_calls.ADMINISTRATOR else ""
+        group_calls.bind(self.ctx)
+        try:
+            return self._json_ok(group_calls.snapshot(principal, principal=wanted))
+        except group_calls.CallError as exc:
+            return self._json(exc.status, exc.body())
+
+    def _handle_calls_start(self):
+        from lib import group_calls
+        principal = self._calls_principal()
+        if principal is None:
+            return
+        data = self._read_json()
+        if not isinstance(data, dict) or not isinstance(data.get("agents"), list):
+            return self._json_error(400, "agents must be a list")
+        group_calls.bind(self.ctx)
+        try:
+            return self._json_ok(group_calls.start(
+                principal, [str(a) for a in data["agents"]], request_id=str(data.get("request_id") or ""),
+                principal=str(data.get("principal") or ""), by=self._calls_by(data)))
+        except group_calls.CallError as exc:
+            return self._json(exc.status, exc.body())
+
+    def _handle_calls_action(self, action: str):
+        from lib import group_calls
+        principal = self._calls_principal()
+        if principal is None:
+            return
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        group_calls.bind(self.ctx)
+        scope = {"call_id": str(data.get("call_id") or ""), "principal": str(data.get("principal") or ""),
+                 "by": self._calls_by(data)}
+        try:
+            if action == "end":
+                return self._json_ok(group_calls.end(principal, **scope))
+            return self._json_ok(group_calls.change(principal, action, str(data.get("agent") or ""), **scope))
+        except group_calls.CallError as exc:
+            return self._json(exc.status, exc.body())
+
+    def _handle_calls_add(self):
+        return self._handle_calls_action("add")
+
+    def _handle_calls_remove(self):
+        return self._handle_calls_action("remove")
+
+    def _handle_calls_hold(self):
+        return self._handle_calls_action("hold")
+
+    def _handle_calls_resume(self):
+        return self._handle_calls_action("resume")
+
+    def _handle_calls_switch(self):
+        return self._handle_calls_action("switch")
+
+    def _handle_calls_transfer(self):
+        return self._handle_calls_action("transfer")
+
+    def _handle_calls_end(self):
+        return self._handle_calls_action("end")
+
+    def _apply_group_call(self, req):
+        """A /send in a group call: (request routed to a reachable participant,
+        the participants the orchestrator may pick), or (None, None) after
+        answering 409. A send without ``call_id`` passes through unchanged."""
+        if not req.call_id:
+            return req, None
+        from dataclasses import replace
+        from lib import group_calls
+        from lib.http_utils import principal_of
+        group_calls.bind(self.ctx)
+        try:
+            routed = group_calls.route(principal_of(self).principal, req.call_id, req.session)
+        except group_calls.CallError as exc:
+            self._json(exc.status, exc.body())
+            return None, None
+        return replace(req, session=routed["session"]), tuple(routed["reachable"])
+
     def _handle_oracle_handoff_get(self):
         from lib import oracle_handoffs
         principal = self._oracle_handoff_principal()
@@ -5339,8 +5459,11 @@ class Handler(BaseHTTPRequestHandler):
             req.require_text()
         except SendRequestError as e:
             return self._send_request_error(e)
+        req, call_sessions = self._apply_group_call(req)
+        if req is None:
+            return
         if not req.force_session:
-            handled = self._send_via_orchestrator(req, prompt_admission)
+            handled = self._send_via_orchestrator(req, prompt_admission, only_sessions=call_sessions)
             if handled:
                 return
         self._send_direct(req, prompt_admission)
@@ -5352,7 +5475,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(e.status, str(e))
         return self._send(e.status, str(e).encode())
 
-    def _send_via_orchestrator(self, req: SendRequest, prompt_admission) -> bool:
+    def _send_via_orchestrator(self, req: SendRequest, prompt_admission,
+                               only_sessions: tuple[str, ...] | None = None) -> bool:
         """Hands-free routing. Returns True when a reply was written; False
         means the orchestrator declined and the caller dispatches directly."""
         from lib import transcription_results
@@ -5366,7 +5490,13 @@ class Handler(BaseHTTPRequestHandler):
             unheard_audio_sessions=req.unheard_audio_sessions,
             dispatch=TurnDispatchService(self.ctx).dispatch,
             fallback_request=req.orchestrator_fallback,
+            only_sessions=only_sessions,
         )
+        if (req.call_id and orchestrated is not None and orchestrated.ok
+                and orchestrated.session and orchestrated.session != req.session):
+            from lib import group_calls
+            from lib.http_utils import principal_of
+            group_calls.routed(principal_of(self).principal, req.call_id, orchestrated.session)
         if orchestrated is None and req.orchestrator_fallback:
             body = {
                 "ok": True,

@@ -1,0 +1,372 @@
+{
+  "principal": "device_fixture",
+  "events": [
+    {
+      "type": "group-call",
+      "call_id": "gcl_00000000000000000000000000000001",
+      "host_id": "host_fixture",
+      "principal": "device_fixture",
+      "state": "live",
+      "reason": "",
+      "revision": 1,
+      "started_at": 1791160001000,
+      "ended_at": null,
+      "floor": "theo-97e5",
+      "participants": [
+        {
+          "session": "theo-97e5",
+          "agent_id": "a-theo",
+          "persona": "Theo",
+          "state": "active",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160001000
+        },
+        {
+          "session": "mike-86db",
+          "agent_id": "a-mike",
+          "persona": "Mike",
+          "state": "invited",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160001000
+        }
+      ],
+      "change": {
+        "action": "start",
+        "session": "theo-97e5",
+        "by": ""
+      },
+      "server_now": 1791160003000
+    },
+    {
+      "type": "group-call",
+      "call_id": "gcl_00000000000000000000000000000001",
+      "host_id": "host_fixture",
+      "principal": "device_fixture",
+      "state": "live",
+      "reason": "",
+      "revision": 2,
+      "started_at": 1791160001000,
+      "ended_at": null,
+      "floor": "mike-86db",
+      "participants": [
+        {
+          "session": "theo-97e5",
+          "agent_id": "a-theo",
+          "persona": "Theo",
+          "state": "active",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160001000
+        },
+        {
+          "session": "mike-86db",
+          "agent_id": "a-mike",
+          "persona": "Mike",
+          "state": "active",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160006000
+        }
+      ],
+      "change": {
+        "action": "route",
+        "session": "mike-86db",
+        "by": ""
+      },
+      "server_now": 1791160008000
+    },
+    {
+      "type": "group-call",
+      "call_id": "gcl_00000000000000000000000000000001",
+      "host_id": "host_fixture",
+      "principal": "device_fixture",
+      "state": "live",
+      "reason": "",
+      "revision": 3,
+      "started_at": 1791160001000,
+      "ended_at": null,
+      "floor": "mike-86db",
+      "participants": [
+        {
+          "session": "theo-97e5",
+          "agent_id": "a-theo",
+          "persona": "Theo",
+          "state": "active",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160001000
+        },
+        {
+          "session": "mike-86db",
+          "agent_id": "a-mike",
+          "persona": "Mike",
+          "state": "active",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160006000
+        },
+        {
+          "session": "nadia-1a2b",
+          "agent_id": "a-nadia",
+          "persona": "Nadia",
+          "state": "invited",
+          "joined_at": 1791160010000,
+          "changed_at": 1791160010000
+        }
+      ],
+      "change": {
+        "action": "add",
+        "session": "nadia-1a2b",
+        "by": "mike-86db"
+      },
+      "server_now": 1791160012000
+    },
+    {
+      "type": "group-call",
+      "call_id": "gcl_00000000000000000000000000000001",
+      "host_id": "host_fixture",
+      "principal": "device_fixture",
+      "state": "live",
+      "reason": "",
+      "revision": 4,
+      "started_at": 1791160001000,
+      "ended_at": null,
+      "floor": "mike-86db",
+      "participants": [
+        {
+          "session": "theo-97e5",
+          "agent_id": "a-theo",
+          "persona": "Theo",
+          "state": "on_hold",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160015000
+        },
+        {
+          "session": "mike-86db",
+          "agent_id": "a-mike",
+          "persona": "Mike",
+          "state": "active",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160006000
+        },
+        {
+          "session": "nadia-1a2b",
+          "agent_id": "a-nadia",
+          "persona": "Nadia",
+          "state": "invited",
+          "joined_at": 1791160010000,
+          "changed_at": 1791160010000
+        }
+      ],
+      "change": {
+        "action": "hold",
+        "session": "theo-97e5",
+        "by": ""
+      },
+      "server_now": 1791160017000
+    },
+    {
+      "type": "group-call",
+      "call_id": "gcl_00000000000000000000000000000001",
+      "host_id": "host_fixture",
+      "principal": "device_fixture",
+      "state": "live",
+      "reason": "",
+      "revision": 5,
+      "started_at": 1791160001000,
+      "ended_at": null,
+      "floor": "omar-5e6f",
+      "participants": [
+        {
+          "session": "theo-97e5",
+          "agent_id": "a-theo",
+          "persona": "Theo",
+          "state": "on_hold",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160015000
+        },
+        {
+          "session": "mike-86db",
+          "agent_id": "a-mike",
+          "persona": "Mike",
+          "state": "on_hold",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160024000
+        },
+        {
+          "session": "nadia-1a2b",
+          "agent_id": "a-nadia",
+          "persona": "Nadia",
+          "state": "invited",
+          "joined_at": 1791160010000,
+          "changed_at": 1791160010000
+        },
+        {
+          "session": "omar-5e6f",
+          "agent_id": "a-omar",
+          "persona": "Omar",
+          "state": "active",
+          "joined_at": 1791160023000,
+          "changed_at": 1791160025000
+        }
+      ],
+      "change": {
+        "action": "transfer",
+        "session": "omar-5e6f",
+        "by": ""
+      },
+      "server_now": 1791160027000
+    },
+    {
+      "type": "group-call",
+      "call_id": "gcl_00000000000000000000000000000001",
+      "host_id": "host_fixture",
+      "principal": "device_fixture",
+      "state": "live",
+      "reason": "",
+      "revision": 6,
+      "started_at": 1791160001000,
+      "ended_at": null,
+      "floor": "omar-5e6f",
+      "participants": [
+        {
+          "session": "theo-97e5",
+          "agent_id": "a-theo",
+          "persona": "Theo",
+          "state": "on_hold",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160015000
+        },
+        {
+          "session": "mike-86db",
+          "agent_id": "a-mike",
+          "persona": "Mike",
+          "state": "on_hold",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160024000
+        },
+        {
+          "session": "nadia-1a2b",
+          "agent_id": "a-nadia",
+          "persona": "Nadia",
+          "state": "left",
+          "joined_at": 1791160010000,
+          "changed_at": 1791160030000
+        },
+        {
+          "session": "omar-5e6f",
+          "agent_id": "a-omar",
+          "persona": "Omar",
+          "state": "active",
+          "joined_at": 1791160023000,
+          "changed_at": 1791160025000
+        }
+      ],
+      "change": {
+        "action": "remove",
+        "session": "nadia-1a2b",
+        "by": ""
+      },
+      "server_now": 1791160032000
+    },
+    {
+      "type": "group-call",
+      "call_id": "gcl_00000000000000000000000000000001",
+      "host_id": "host_fixture",
+      "principal": "device_fixture",
+      "state": "ended",
+      "reason": "ended",
+      "revision": 7,
+      "started_at": 1791160001000,
+      "ended_at": 1791160038000,
+      "floor": "",
+      "participants": [
+        {
+          "session": "theo-97e5",
+          "agent_id": "a-theo",
+          "persona": "Theo",
+          "state": "left",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160035000
+        },
+        {
+          "session": "mike-86db",
+          "agent_id": "a-mike",
+          "persona": "Mike",
+          "state": "left",
+          "joined_at": 1791160001000,
+          "changed_at": 1791160036000
+        },
+        {
+          "session": "nadia-1a2b",
+          "agent_id": "a-nadia",
+          "persona": "Nadia",
+          "state": "left",
+          "joined_at": 1791160010000,
+          "changed_at": 1791160030000
+        },
+        {
+          "session": "omar-5e6f",
+          "agent_id": "a-omar",
+          "persona": "Omar",
+          "state": "left",
+          "joined_at": 1791160023000,
+          "changed_at": 1791160037000
+        }
+      ],
+      "change": {
+        "action": "end",
+        "session": "",
+        "by": ""
+      },
+      "server_now": 1791160040000
+    }
+  ],
+  "snapshots": [
+    {
+      "call": null,
+      "server_now": 1791160000000
+    },
+    {
+      "call": {
+        "call_id": "gcl_00000000000000000000000000000001",
+        "host_id": "host_fixture",
+        "principal": "device_fixture",
+        "state": "live",
+        "reason": "",
+        "revision": 4,
+        "started_at": 1791160001000,
+        "ended_at": null,
+        "floor": "mike-86db",
+        "participants": [
+          {
+            "session": "theo-97e5",
+            "agent_id": "a-theo",
+            "persona": "Theo",
+            "state": "on_hold",
+            "joined_at": 1791160001000,
+            "changed_at": 1791160015000
+          },
+          {
+            "session": "mike-86db",
+            "agent_id": "a-mike",
+            "persona": "Mike",
+            "state": "active",
+            "joined_at": 1791160001000,
+            "changed_at": 1791160006000
+          },
+          {
+            "session": "nadia-1a2b",
+            "agent_id": "a-nadia",
+            "persona": "Nadia",
+            "state": "invited",
+            "joined_at": 1791160010000,
+            "changed_at": 1791160010000
+          }
+        ],
+        "server_now": 1791160020000
+      },
+      "server_now": 1791160021000
+    },
+    {
+      "call": null,
+      "server_now": 1791160042000
+    }
+  ]
+}
