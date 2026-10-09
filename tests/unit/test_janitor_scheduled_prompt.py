@@ -154,3 +154,17 @@ def test_only_the_schedule_trigger_is_offered():
     assert template["supported_trigger_ids"] == ["schedule"]
     with pytest.raises(janitors.JanitorError):
         janitors.validate_configuration("scheduled-prompt", attachments=[{"trigger_id": "agent-work-completed"}])
+
+
+def test_a_tick_just_after_the_due_time_does_not_push_the_next_run_a_quarter_later(lane):
+    source, calls, clock, tick = lane
+    tick()
+    clock[0] = _next_run() + 144  # the runner noticed the 00:00 occurrence at 00:00:00.144
+    occurrence = clock[0] - 144
+    assert tick() == 1
+    run, _ = calls[-1]
+    janitors.report_activity(run["run_id"], "idle", "Nothing new")
+    source.ended[run["run_id"]] = "done"
+    clock[0] += 24_000
+    tick()
+    assert _next_run() == occurrence + 2 * QUARTER  # 00:30, not 00:45

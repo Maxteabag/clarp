@@ -540,3 +540,13 @@ def test_the_prompt_asks_the_janitor_to_close_the_run_with_its_activity():
     prompt = prompt_for_run({"run_id": "run"})
     assert "clarp-admin janitor outcome run --status STATUS --summary SUMMARY" in prompt
     assert all(word in prompt for word in ("worked", "idle", "failed"))
+
+
+def test_a_late_tick_measures_the_back_off_from_the_scheduled_time(lane):
+    store, source, calls, clock, make = lane
+    _scheduled(store)
+    make().tick()
+    due = store.progress["attachment"]["next_run_at"]
+    clock[0] = due + 144
+    make().tick()  # nothing to review: idle
+    assert store.progress["attachment"]["next_run_at"] == due + 2 * QUARTER
