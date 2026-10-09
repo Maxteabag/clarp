@@ -32,6 +32,12 @@ STALE_MS = 12 * 60 * 60 * 1000
 ACTIONS = frozenset({"add", "remove", "hold", "resume", "switch", "transfer"})
 # Participant states that take speech and may hold the floor.
 REACHABLE = frozenset({"active", "invited"})
+# The call header in a participant's prompt (docs/group-calls.md "Shared context").
+HEADER_QUOTES = 12
+HEADER_CHARS = 1500
+QUOTE_CHARS = 280
+# A turn counts as the call's when its utterance was routed this recently.
+ROUTE_FRESH_MS = 10 * 60 * 1000
 # Spoken-name matching (docs/group-calls.md "Names").
 MIN_PREFIX = 3
 MIN_SIMILARITY = 0.75
@@ -542,10 +548,99 @@ def _take_floor(who: str, data: dict, call: dict, session: str) -> None:
     part = _participant(call, session)
     if part is None or part["state"] not in REACHABLE:
         return
+    call["_routed"] = {"session": session, "at": now_ms()}
     changed = _set_state(call, part, "active")
     changed |= _give_floor(call, session)
     if changed:
         _commit(who, data, call, {"action": "route", "session": session, "by": ""}, quiet_notices=True)
+    else:
+        _save(who, data)
+
+
+# ---- shared context ------------------------------------------------------------
+
+def prompt_header(session: str) -> str:
+    """The call header for ``session``'s turn, or "" (docs/group-calls.md "Shared context").
+
+    Only for a reachable participant of a live call whose latest utterance was
+    routed to it: who is in the call, who has the floor, and the call's turns
+    since this agent last spoke, as short attributed quotes. It goes into the
+    agent's instructions, never into the user's message.
+    """
+    try:
+        with _lock:
+            call = _call_turn_for(session)
+            if call is None:
+                return ""
+            quotes = _quotes(call, session)
+    except Exception as exc:  # noqa: BLE001 - a prompt addition must never fail a turn
+        log_exception("groupCallHeaderFail", exc, f"session={session}")
+        return ""
+    me = _participant(call, session)
+    others = [p for p in call["participants"] if p["session"] != session and p["state"] in REACHABLE]
+    held = [p for p in call["participants"] if p["state"] == "on_hold"]
+    lines = [f"[Group call] You are {me['persona']}, on a voice call with the user"
+             + (f", {_names(others)}" if others else "") + "."
+             + (f" On hold: {_names(held)}." if held else "")
+             + " The user is talking to you now. The other participants do not hear this turn;"
+             " they see it quoted like the lines below when they speak next."]
+    if quotes:
+        lines.append("Since you last spoke:")
+        lines.extend(quotes)
+    return "\n".join(lines)
+
+
+def _call_turn_for(session: str) -> dict | None:
+    for principal in _principals():
+        # Read-only: this also runs in the runtime process, which has no event
+        # stream, so it must never end a stale call itself.
+        raw = settings_store.get(KEY + principal)
+        call = _live(json.loads(raw)) if raw else None
+        if call is None or now_ms() - call["_changed_at"] > STALE_MS:
+            continue
+        part = _participant(call, session)
+        routed = call.get("_routed") or {}
+        if (part is not None and part["state"] in REACHABLE and routed.get("session") == session
+                and now_ms() - int(routed.get("at") or 0) <= ROUTE_FRESH_MS):
+            return call
+    return None
+
+
+def _quotes(call: dict, session: str) -> list[str]:
+    """Newest-last quotes since ``session`` last replied, within the caps."""
+    from . import db, origins
+    from .message_writes import _message_activity_sql
+    from .voice_markup import clean_for_display
+    members = {p["agent_id"]: p for p in call["participants"]}
+    me = _participant(call, session)
+    skip = sorted(origins.ROUTINE_AUTOMATION_ORIGINS | {origins.MARKER_ORIGIN})
+    activity = _message_activity_sql()
+    rows = db.conn().execute(
+        f"""SELECT agent_id, role, text, {activity} AS at FROM messages
+             WHERE agent_id IN ({",".join("?" for _ in members)})
+               AND {activity} >= ? AND role IN ('user', 'assistant')
+               AND COALESCE(tool_name, '') = '' AND TRIM(COALESCE(text, '')) != ''
+               AND COALESCE(phase, 'final') != 'commentary'
+               AND COALESCE(origin, 'user') NOT IN ({",".join("?" for _ in skip)})
+             ORDER BY at, seq""",
+        (*members, call["started_at"], *skip)).fetchall()
+    entries = [(row["agent_id"], row["role"], clean_for_display(row["text"], oneline=True)) for row in rows]
+    mine = [i for i, (agent, role, _) in enumerate(entries) if agent == me["agent_id"] and role == "assistant"]
+    entries = entries[mine[-1] + 1:] if mine else entries
+    # The utterance this turn answers is the prompt itself.
+    while entries and entries[-1][0] == me["agent_id"] and entries[-1][1] == "user":
+        entries.pop()
+    quotes: list[str] = []
+    used = 0
+    for agent, role, text in reversed(entries):
+        persona = members[agent]["persona"]
+        text = text if len(text) <= QUOTE_CHARS else text[:QUOTE_CHARS - 1].rstrip() + "…"
+        line = f"User -> {persona}: {text}" if role == "user" else f"{persona}: {text}"
+        if len(quotes) >= HEADER_QUOTES or used + len(line) > HEADER_CHARS:
+            break
+        quotes.append(line)
+        used += len(line)
+    return list(reversed(quotes))
 
 
 def _result(call: dict, changed: bool, summary: str) -> dict:

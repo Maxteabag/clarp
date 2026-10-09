@@ -111,7 +111,18 @@ def app_turn_instructions(*, voice: bool, session: str = "") -> str:
     body = _APP_TURN_GUIDANCE
     if voice:
         body = f"{body}\n\n{voice_instructions(session)}"
+    header = _group_call_header(session)
+    if header:
+        body = f"{body}\n\n{header}"
     return body
+
+
+def _group_call_header(session: str) -> str:
+    """Who else is in the agent's group call and what they said (lib.group_calls)."""
+    if not session:
+        return ""
+    from . import group_calls
+    return group_calls.prompt_header(session)
 
 
 def voice_instructions(session: str = "") -> str:

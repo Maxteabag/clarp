@@ -12,6 +12,7 @@ import io
 import json
 import pathlib
 import threading
+import time
 import urllib.error
 
 import pytest
@@ -711,3 +712,124 @@ def test_the_skill_is_managed_and_names_the_cli():
     assert skill.startswith("---\nname: clarp-calls\n")
     for command in ("call status", "call add", "call hold", "call switch", "call transfer", "call remove"):
         assert command in skill
+
+
+# ---- shared context: the call header in the agent's prompt -----------------
+
+def _said(agent_id, text, *, at, role="user", origin="user"):
+    """A chat row at a pinned activity time (ms)."""
+    msg_id = f"m-{agent_id}-{at}-{role}"
+    db.conn().execute(
+        "INSERT INTO messages(message_id, agent_id, backend_session_id, seq, role, text, timestamp,"
+        " updated_at, origin) VALUES (?,?,?,?,?,?,?,?,?)",
+        (msg_id, agent_id, "bs-" + agent_id, at % 100000, role, text,
+         time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(at / 1000)) + f".{at % 1000:03d}Z", at, origin))
+
+
+def _in_call():
+    call = calls.start(PHONE, ["Theo", "Mike", "Nadia"])["call"]
+    base = call["started_at"] + 1000
+    _said("a-theo", "Theo, what's the plan for Friday?", at=base)
+    _said("a-theo", "Ship the <speak>beta on Friday</speak> and keep the flag off.", at=base + 1000,
+          role="assistant")
+    _said("a-nadia", "Nadia, any risk?", at=base + 2000)
+    _said("a-nadia", "The migration is the only risk.", at=base + 3000, role="assistant")
+    _said("a-theo", "Group call: Mike joined.", at=base + 3500, role="assistant", origin="system")
+    _said("a-mike", "Mike, what do you think of Theo's idea?", at=base + 4000)
+    calls.route(PHONE, call["call_id"], "mike-86db")
+    return call, base
+
+
+def test_the_call_header_quotes_the_turns_since_the_agent_last_spoke(stream):
+    _in_call()
+    header = calls.prompt_header("mike-86db")
+    assert header.startswith("[Group call]")
+    assert "Theo" in header and "Nadia" in header and "talking to you now" in header
+    assert "User -> Theo: Theo, what's the plan for Friday?" in header
+    assert "Theo: Ship the beta on Friday and keep the flag off." in header
+    assert "Nadia: The migration is the only risk." in header
+    # The utterance this turn answers is the prompt itself, not a quote; and
+    # the Host's own notices are not part of the conversation.
+    assert "what do you think of Theo's idea" not in header
+    assert "Mike joined" not in header and "<speak>" not in header
+
+
+def test_the_header_starts_after_the_agents_own_last_reply(stream):
+    call, base = _in_call()
+    _said("a-mike", "I like it, but test the migration first.", at=base + 5000, role="assistant")
+    _said("a-theo", "Theo, can you do that?", at=base + 6000)
+    _said("a-theo", "Yes, today.", at=base + 7000, role="assistant")
+    _said("a-mike", "Mike, anything else?", at=base + 8000)
+    header = calls.prompt_header("mike-86db")
+    assert "Theo, can you do that?" in header and "Theo: Yes, today." in header
+    assert "plan for Friday" not in header and "only risk" not in header
+
+
+def test_the_header_is_capped(stream):
+    call = calls.start(PHONE, ["Theo", "Mike"])["call"]
+    base = call["started_at"] + 1000
+    for i in range(40):
+        _said("a-theo", f"question {i} " + "x" * 300, at=base + i * 2000)
+        _said("a-theo", f"answer {i} " + "y" * 300, at=base + i * 2000 + 1000, role="assistant")
+    _said("a-mike", "Mike?", at=base + 100000)
+    calls.route(PHONE, call["call_id"], "mike-86db")
+    header = calls.prompt_header("mike-86db")
+    quotes = [line for line in header.splitlines() if line.startswith(("User -> ", "Theo: "))]
+    assert 0 < len(quotes) <= calls.HEADER_QUOTES
+    assert sum(len(q) for q in quotes) <= calls.HEADER_CHARS
+    assert "answer 39" in header and "answer 0 " not in header
+
+
+def test_no_header_outside_a_call_on_hold_or_for_a_turn_not_routed_from_the_call(stream):
+    assert calls.prompt_header("mike-86db") == ""
+    call, _ = _in_call()
+    assert calls.prompt_header("theo-97e5") == ""        # the call's last utterance went to Mike
+    assert calls.prompt_header("omar-5e6f") == ""        # not in the call
+    calls.change(PHONE, "hold", "Mike")
+    assert calls.prompt_header("mike-86db") == ""
+    calls.change(PHONE, "resume", "Mike")
+    calls.route(PHONE, call["call_id"], "mike-86db")
+    assert calls.prompt_header("mike-86db")
+    calls.end(PHONE)
+    assert calls.prompt_header("mike-86db") == ""
+
+
+def test_the_header_reaches_the_model_but_never_the_users_message(stream):
+    from lib import voice_preamble
+    _in_call()
+    prompt = voice_preamble.apply_voice_preamble("Mike, what do you think of Theo's idea?",
+                                                 voice=True, persona="Mike", session="mike-86db")
+    assert "[Group call]" in prompt and "Theo: Ship the beta" in prompt
+    # The transcript parsers strip the preamble: the chat row is exactly what was said.
+    assert voice_preamble.strip_voice_preamble(prompt) == "Mike, what do you think of Theo's idea?"
+    context = voice_preamble.app_turn_instructions(voice=True, session="mike-86db")
+    assert "[Group call]" in context
+    assert "[Group call]" not in voice_preamble.app_turn_instructions(voice=True, session="theo-97e5")
+
+
+def test_the_claude_hook_adds_the_header_as_context(stream):
+    import sys
+    sys.path.insert(0, str(ROOT / "plugin/hooks"))
+    try:
+        hook = importlib.import_module("pwa_source_flag")
+    finally:
+        sys.path.pop(0)
+    _in_call()
+    mike = agents_db.get_by_session("mike-86db")
+    context = hook._build_additional_context(app_dispatched=True, voiced=True, agent=mike)
+    assert "[Group call]" in context and "Nadia: The migration" in context
+    theo = agents_db.get_by_session("theo-97e5")
+    assert "[Group call]" not in hook._build_additional_context(app_dispatched=True, voiced=True, agent=theo)
+    assert hook._build_additional_context(app_dispatched=False, voiced=False, agent=mike) == ""
+
+
+def test_the_header_never_changes_the_record(stream, monkeypatch):
+    """The runtime process builds prompts without an event stream: reading the
+    header must not end a stale call (or emit anything)."""
+    call, _ = _in_call()
+    before = settings_store.get(calls.KEY + PHONE)
+    events = len(stream.events)
+    later = calls.now_ms() + calls.STALE_MS + 1
+    monkeypatch.setattr(calls, "now_ms", lambda: later)
+    assert calls.prompt_header("mike-86db") == ""
+    assert settings_store.get(calls.KEY + PHONE) == before and len(stream.events) == events

@@ -230,7 +230,22 @@ def _build_additional_context(*, app_dispatched: bool, voiced: bool,
         parts.append(guidance)
     if voiced:
         parts.append(_SPEAK_INSTRUCTIONS + _natural_delivery(agent))
+    header = _group_call_header(agent) if app_dispatched else ""
+    if header:
+        parts.append(header)
     return "\n\n".join(parts)
+
+
+def _group_call_header(agent: dict | None) -> str:
+    """The agent's group-call header (lib.group_calls), or ""."""
+    session = str((agent or {}).get("session") or "")
+    if not session:
+        return ""
+    try:
+        from lib import group_calls
+        return group_calls.prompt_header(session)
+    except Exception:
+        return ""
 
 
 def _natural_delivery(agent: dict | None) -> str:

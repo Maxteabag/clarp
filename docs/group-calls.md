@@ -1,6 +1,6 @@
 # Group calls
 
-Status: **implemented, Host contract 60 (proposed), feature `group_calls`.**
+Status: **implemented, Host contract 60, feature `group_calls`.**
 
 A group call is Car Mode's multi-agent hands-free conversation, presented with
 the call UI: the participants' avatars, who is speaking or thinking, a timer,
@@ -138,10 +138,44 @@ Replies are ordinary turns: `audio` events carry the agent's own voice, and
 
 Call changes never stop an agent's work. When a participant is held or
 removed, or the call ends, while that agent is mid-turn, the turn finishes and
-its reply lands in the agent's chat as usual. The phone does not play audio
-from a participant that is `on_hold` or `left`, nor after the call has ended;
-the reply stays readable in the chat. A send that arrives after the change is
-routed by the new record, so a held agent cannot receive the next utterance.
+its reply lands in the agent's chat as usual. A send that arrives after the
+change is routed by the new record, so a held agent cannot receive the next
+utterance.
+
+The phone never drops a held participant's reply. Clips from an `on_hold`
+participant are kept on the phone, and the participant's tile says it has an
+update. When it is resumed or gets the floor, the kept clips play in order.
+Clips from a participant that `left`, or that arrive after the call ended, are
+not played; the reply stays readable in the chat.
+
+## Shared context
+
+In a call, participants hear each other. The Host gives the agent that is
+answering a compact call header in its instructions (never in the user's
+message, so it does not show up in the chat or `/log`):
+
+```
+[Group call] You are Mike, on a voice call with the user, Theo and Nadia. On hold: Omar. The user is talking to you now. …
+Since you last spoke:
+User -> Theo: What's the plan for Friday?
+Theo: Ship the beta on Friday and keep the flag off.
+Nadia: The migration is the only risk.
+```
+
+- The header is added when the agent is a reachable participant of a live call
+  and the call's latest utterance (within 10 minutes) was routed to it. Any
+  other turn of that agent gets no header.
+- The quotes are the call's user messages to participants and the
+  participants' final replies, from the call's start, after this agent's own
+  last reply in the call. The utterance being answered is the prompt itself
+  and is not quoted. Host notices, automation and tool rows are left out, and
+  voice markup is stripped.
+- The quotes are capped: the newest 12, at most 1,500 characters in total and
+  280 per quote.
+- Claude receives it as UserPromptSubmit `additionalContext`; Codex,
+  AGY, Grok and OpenCode receive it in the app-turn instruction block that the
+  transcript parsers strip back off (`lib.voice_preamble`). The header is read
+  only; building it never changes the call.
 
 ## Events
 
@@ -194,7 +228,10 @@ clarp-admin call end
 ```
 
 The managed skill `skills/clarp-calls/SKILL.md` teaches agents when to use
-them and to confirm aloud what happened, using the response's `summary`.
+them and to confirm aloud what happened, using the response's `summary`. An
+agent in the call may bring someone in itself ("let me bring in Nadia"): it
+says so aloud, and adds only agents the user asked for, unless the addition is
+clearly helpful and it says why.
 
 ## iOS
 
