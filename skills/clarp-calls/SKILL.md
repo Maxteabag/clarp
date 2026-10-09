@@ -51,6 +51,10 @@ Errors print `"ok": false` and an `error`. Tell the user plainly:
 - `several live calls`: add `--principal <device>` from `clarp-admin call
   status --principal …`, or ask.
 
+In a call the user's words go to whoever has the floor, unless they open with
+a participant's name ("Nadia, what do you think?"). So "Solu, go on hold" may
+reach Solu: holding or removing yourself is fine, say a one-line goodbye.
+
 Holding or removing an agent never stops its work. A reply it is already
 writing still lands in its chat but is not played on the call.
 
