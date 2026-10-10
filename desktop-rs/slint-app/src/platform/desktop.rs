@@ -218,6 +218,14 @@ fn watch_window() {
                     eprintln!("clarp-slint: dropped a scale change: {error}");
                 }
             }
+            // A frame: Slint draws it as soon as this returns; the first
+            // thing the loop runs after it ends the frame's clock.
+            WindowEvent::RedrawRequested => {
+                crate::perf::redraw_started();
+                if let Err(error) = slint::invoke_from_event_loop(crate::perf::redraw_finished) {
+                    eprintln!("clarp-slint: dropped a frame's clock: {error}");
+                }
+            }
             WindowEvent::Focused(focused) => {
                 let focused = *focused;
                 SERVICES.with(|slot| {

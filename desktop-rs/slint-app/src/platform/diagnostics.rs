@@ -1,7 +1,9 @@
 //! What the desktop logs about itself (the Qt app's `Diagnostics`): moments
 //! the UI thread was blocked (`stall_monitor`), and once a minute a
 //! `memory {...}` line with what the process holds, so an out-of-memory
-//! kill leaves a trend in the journal.
+//! kill leaves a trend in the journal, and how the window drew since the
+//! last line: the UI thread's CPU, frames per second and frame time (mean,
+//! 95th percentile, longest; ms).
 //!
 //! `CLARP_STALL_THRESHOLD_MS` (150; 0 disables), `CLARP_STALL_MEMORY_MB`
 //! (1536), `CLARP_STALL_LOG` and `CLARP_MEMORY_LOG_SECONDS` (60; 0
@@ -18,6 +20,9 @@ thread_local! {
     static MONITOR: RefCell<Option<StallMonitor>> = const { RefCell::new(None) };
     static CPU: RefCell<clarp_core::diagnostics::CpuRate> = RefCell::new(clarp_core::diagnostics::CpuRate::default());
     static TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    /// When the last line's frames were counted, and the UI thread's CPU
+    /// time then.
+    static FRAMES_SINCE: std::cell::Cell<Option<(std::time::Instant, Duration)>> = const { std::cell::Cell::new(None) };
 }
 
 fn env_ms(name: &str, default: i64) -> i64 {
@@ -56,6 +61,7 @@ fn start_now(headless: bool) {
     }
     let seconds = env_ms("CLARP_MEMORY_LOG_SECONDS", 60);
     if seconds > 0 {
+        FRAMES_SINCE.with(|f| f.set(Some((std::time::Instant::now(), crate::perf::thread_cpu()))));
         let timer = slint::Timer::default();
         timer.start(slint::TimerMode::Repeated, Duration::from_secs(seconds as u64), log_memory);
         TIMER.with(|slot| *slot.borrow_mut() = Some(timer));
@@ -95,6 +101,17 @@ pub fn log_memory() {
     let now = chrono::Utc::now().timestamp_millis();
     let rate = cpu.map_or(0, |ticks| CPU.with(|c| c.borrow_mut().sample(ticks, now, hz)));
     report.insert("cpuMsPerSec".into(), json!(rate));
+    let frames = crate::perf::take_frames();
+    let ui_cpu = crate::perf::thread_cpu();
+    let since = FRAMES_SINCE.with(|f| f.replace(Some((std::time::Instant::now(), ui_cpu))));
+    let seconds = since.map_or(0.0, |(at, _)| at.elapsed().as_secs_f64().max(0.001));
+    let round = |value: f64| (value * 10.0).round() / 10.0;
+    // The UI thread alone (the process's figure includes the network).
+    report.insert("uiCpuMsPerSec".into(), json!(since.map_or(0.0, |(_, cpu)| round(ui_cpu.saturating_sub(cpu).as_secs_f64() * 1000.0 / seconds))));
+    report.insert("fps".into(), json!(if seconds > 0.0 { round(frames.count as f64 / seconds) } else { 0.0 }));
+    report.insert("frameMs".into(), json!(round(f64::from(frames.mean))));
+    report.insert("frameP95Ms".into(), json!(round(f64::from(frames.p95))));
+    report.insert("frameMaxMs".into(), json!(round(f64::from(frames.max))));
     let (stalls, longest) = MONITOR.with(|slot| slot.borrow().as_ref().map_or((0, 0), |m| m.shared().take_counters()));
     report.insert("stalls".into(), json!(stalls));
     report.insert("longestStallMs".into(), json!(longest));
