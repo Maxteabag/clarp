@@ -202,12 +202,23 @@ def test_admit_carries_the_client(monkeypatch):
     assert seen["client"] == "desktop"
 
 
-def test_a_sender_other_than_the_calling_turns_agent_is_refused():
-    resolve = {"theo": "theo-id", "koko": "koko-id"}.get
+def test_a_sender_other_than_the_calling_turns_agent_is_refused(tmp_path):
+    theo = agents_db.create_agent(persona="Theo", voice_id="", cwd=str(tmp_path), session="theo")
+    koko = agents_db.create_agent(persona="Koko", voice_id="", cwd=str(tmp_path), session="koko")
+    resolve = {"theo": theo, "koko": koko}.get
     with pytest.raises(SendRequestError) as refused:
         _parse({"text": "hi", "sender": "theo", "session": "marcus"},
-               resolve_sender=lambda raw: resolve(raw, ""), caller_agent_id="koko-id")
-    assert refused.value.status == 403
+               resolve_sender=lambda raw: resolve(raw, ""), caller_agent_id=koko)
+    assert refused.value.status == 403 and "koko" in str(refused.value)
     own = _parse({"text": "hi", "sender": "koko", "session": "marcus"},
-                 resolve_sender=lambda raw: resolve(raw, ""), caller_agent_id="koko-id")
-    assert own.sender_agent_id == "koko-id"
+                 resolve_sender=lambda raw: resolve(raw, ""), caller_agent_id=koko)
+    assert own.sender_agent_id == koko
+
+
+def test_a_token_of_an_agent_that_no_longer_exists_proves_nothing():
+    # A detached worker can carry the token of an agent since deleted (or
+    # recreated under the same session with a new id): no refusal on it.
+    resolve = {"theo": "theo-id"}.get
+    req = _parse({"text": "hi", "sender": "theo", "session": "marcus"},
+                 resolve_sender=lambda raw: resolve(raw, ""), caller_agent_id="gone-agent-id")
+    assert req.sender_agent_id == "theo-id"

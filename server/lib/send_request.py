@@ -141,12 +141,16 @@ class SendRequest:
         queue_if_busy = data.get("queue_if_busy", False) is True
         force_session = (data.get("force_session", False) is True) or (not hands_free)
         sender_agent_id = resolve_sender((data.get("sender") or "").strip())
+        caller = None
         if caller_agent_id and sender_agent_id and caller_agent_id != sender_agent_id:
+            from . import identity
+            # A token of an agent that no longer exists (deleted, or recreated
+            # under the same session with a new id) proves nothing.
+            caller = identity.lookup(caller_agent_id)
+        if caller:
             # The caller's Host-issued turn identity (X-Clarp-Turn) names a
             # different agent than the sender it typed: a fork or copied
             # conversation speaking as its source. Refuse; say who it is.
-            from . import identity
-            caller = identity.lookup(caller_agent_id) or {}
             own = caller.get("session") or caller_agent_id
             raise SendRequestError(
                 403, f"this turn belongs to {own}, not to the sender it named; "

@@ -24,8 +24,9 @@ The agent responsible for a planned runtime restart owns continuation:
    has already resumed, has a valid continuation queued, is legitimately waiting,
    or now reports completion, do not send another prompt. Keep the same native
    thread and task constraints.
-4. Directly message only genuinely stranded targets from the restarting agent:
-   `clarp-admin prompt --to EXACT_SESSION --from VERIFIED_OWNER --text TEXT`.
+4. Directly message only genuinely stranded targets from the restarting agent,
+   as itself: `clarp-admin prompt --to EXACT_SESSION --from YOUR_OWN_SESSION --text TEXT`.
+   The Host refuses a `--from` that is not the calling turn's own agent.
    Compose a task-specific instruction naming the original request/checkpoint,
    operations whose results need reconciliation, acceptance criteria and limits.
    A generic instruction to search historical chats is not a handoff.

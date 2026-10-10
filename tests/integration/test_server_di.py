@@ -4249,3 +4249,26 @@ def test_a_turn_cannot_send_as_another_agent(running_server):
     assert send("koko", token)[0] == 200
     # No turn token (a plain shell): the Host has no proof either way.
     assert send("theo", "")[0] == 200
+
+
+def test_an_agent_cannot_delete_itself_from_its_own_turn(running_server):
+    # Koko, a copy of Theo's conversation, deleted itself as a stray.
+    import os
+    base, ctx, _srv = running_server
+    from lib import agents as agents_db, provider_background_jobs as turns
+    koko = agents_db.create_agent(persona="Koko", voice_id="v", cwd=str(ctx.root), session="koko")
+    token = turns.new_turn_token()
+    turns.turn_started(token, agent_id=koko, provider="claude", pid=os.getpid())
+
+    def delete(turn):
+        req = urllib.request.Request(base + "/agents/koko", method="DELETE",
+                                     headers={"X-Clarp-Turn": turn} if turn else {})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
+        except urllib.error.HTTPError as error:
+            return error.code
+
+    assert delete(token) == 403
+    assert agents_db.get_by_session("koko") is not None
+    assert delete("") == 200          # the user (no turn) still can

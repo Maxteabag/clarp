@@ -5416,6 +5416,13 @@ class Handler(BaseHTTPRequestHandler):
         agent = identity.lookup(session)
         if self._reject_janitor_control({"session": session}):
             return
+        if agent and self._turn_caller() == agent["agent_id"]:
+            # An agent deleting itself from its own turn: Koko, a copy of
+            # Theo, deleted itself as a stray on 2026-10-10. Only the user
+            # (the apps, or a shell without a turn) removes an agent's self.
+            return self._json(403, {"error": "self_delete",
+                                    "message": "an agent cannot delete itself from its own turn; "
+                                               "ask the user"})
         if agent and getattr(self.ctx, "runtime_client", None) is None:
             # Invalidate dispatch state before delete interrupts the backend;
             # its terminal callback must not drain queued work after deletion.
