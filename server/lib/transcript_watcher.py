@@ -27,6 +27,13 @@ import pathlib
 import sys
 from typing import Callable, Iterable
 
+from .log import log_exception
+
+# A backend streams a reply as many small appends. Gathering a burst's events
+# for this long before ticking imports each agent once per burst instead of
+# once per append; every import re-reads the whole transcript.
+INOTIFY_COALESCE_SEC = 0.1
+
 TextHandler = Callable[[str], None]
 
 
@@ -362,6 +369,13 @@ class InotifyDispatcher:
                 continue
             if self._inotify is None or self._inotify.fileno() not in ready:
                 continue
+            # Let the rest of the burst land; a stop request still ends the wait.
+            try:
+                select.select([self._stop_pipe_r], [], [], INOTIFY_COALESCE_SEC)
+            except (OSError, ValueError):
+                return
+            if self._stop:
+                return
             try:
                 events = self._inotify.read(timeout=0)
             except OSError:
@@ -379,5 +393,5 @@ class InotifyDispatcher:
                     continue
                 try:
                     w.tick()
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001 - one agent must not stop the rest
+                    log_exception("transcriptWatcherTickFail", exc, detail=aid)
