@@ -936,6 +936,7 @@ class Handler(BaseHTTPRequestHandler):
         self._request_auth_validated = False
         self._request_device_scope = ""
         self._request_principal = ""
+        self._request_auth_source = ""
         if hasattr(self.server, "register_device_connection"):
             self.server.register_device_connection(self.connection)
         token = getattr(self.ctx, "auth_token", "") or ""
@@ -955,6 +956,7 @@ class Handler(BaseHTTPRequestHandler):
         if auth.lower().startswith("bearer "):
             supplied = auth.split(None, 1)[1].strip()
             if self._accept_credential(supplied, token):
+                self._request_auth_source = "header"
                 return True
         # Cookie: claude_pwa_token=<token>. Used by EventSource/iframe where
         # custom Authorization headers are not available.
@@ -964,6 +966,7 @@ class Handler(BaseHTTPRequestHandler):
             supplied = (cookie.get("claude_pwa_token").value
                         if cookie.get("claude_pwa_token") else "")
             if supplied and self._accept_credential(supplied.strip(), token):
+                self._request_auth_source = "cookie"
                 return True
         except Exception as e:  # noqa: BLE001
             log_exception("authCookieParseFail", e)
@@ -974,6 +977,7 @@ class Handler(BaseHTTPRequestHandler):
         qs = self._query()
         for v in qs.get("token", []):
             if self._accept_credential((v or "").strip(), token):
+                self._request_auth_source = "query"
                 return True
         return False
 
@@ -4884,6 +4888,10 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_artifact_html(self, artifact_id: str):
         if getattr(self, "_request_device_scope", "") == "limited":
             return self._json_error(403, "full device access required")
+        # The page's own scripts can read document.URL and may fetch declared
+        # connect_origins, so a ?token= credential would leak to them.
+        if getattr(self, "_request_auth_source", "") == "query":
+            return self._json_error(403, "send the credential in a header or cookie, not the URL")
         from lib import artifacts, html_forms
         row = artifacts.get(artifact_id)
         if not row or row["type"] != "html_form":

@@ -194,3 +194,28 @@ def test_network_cli_and_authenticated_renderer_preserve_version_policy(host, tm
     report = cli._create_report(['theo', 'Report', str(page), '--artifact-id', 'report-network', '--version', '1', '--connect', 'https://Storage.Googleapis.Com:443'])
     assert report['payload']['connect_origins'] == ['https://storage.googleapis.com']
     assert not host.deliveries and not html_forms.pending()
+
+
+def test_rendered_page_never_accepts_a_url_credential(host):
+    import urllib.request
+    import urllib.error
+    from lib import device_pairing
+    from tests.integration.test_attention_questions_http import TOKEN
+    row = artifacts.create(session='theo', type='html_form', title='Report', payload={
+        'content': '<main>Report</main>', 'version': '1', 'read_only': True,
+        'connect_origins': ['https://storage.googleapis.com']})
+    path = host.base + '/artifacts/' + row['artifact_id'] + '/html'
+
+    def status(url, headers):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers)) as response:
+                return response.status, response.headers.get('Cache-Control')
+        except urllib.error.HTTPError as error:
+            return error.code, None
+
+    assert status(path + '?token=' + TOKEN, {})[0] == 403, 'Page scripts can read document.URL'
+    assert status(path, {'Authorization': 'Bearer ' + TOKEN}) == (200, 'no-store')
+    assert status(path, {'Cookie': 'claude_pwa_token=' + TOKEN}) == (200, 'no-store')
+    limited = device_pairing.exchange(device_pairing.issue(scope='limited')['code'],
+                                      device_name='Limited report reader')['token']
+    assert status(path, {'Authorization': 'Bearer ' + limited})[0] == 403
