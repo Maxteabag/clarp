@@ -512,6 +512,7 @@ pub fn start_check(name: &str, out: String) {
         }
         "form-events" => artifact_checks::form_events_check(out),
         "form-log" => artifact_checks::form_log_check(out),
+        "artifact-open" => artifact_checks::artifact_open_check(out),
         "artifact-keys" => artifact_key_checks::artifact_keys_check(out),
         "banner" => banner_checks::banner_check(out),
         "refocus" => refocus_checks::refocus_check(out),

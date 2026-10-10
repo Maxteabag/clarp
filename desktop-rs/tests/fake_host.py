@@ -382,6 +382,21 @@ def artifact_fixtures(kind, session, now_ms):
              "title": "Lunch order", "summary": "", "content": "<form><input name=\"dish\"></form>",
              "answer_schema": {"type": "object", "properties": {"dish": {"type": "string"}}}},
         ]
+    if kind == "html_open":
+        # Pages that reach out: an external script, picture, font and fetch.
+        outside = ("<script src=\"https://cdn.example.com/chart.js\"></script>"
+                   "<link rel=\"stylesheet\" href=\"https://fonts.example.com/css\">"
+                   "<img src=\"https://images.example.com/logo.png\" alt=\"logo\">"
+                   "<script>fetch('https://api.example.com/rates').catch(() => {});</script>")
+        return [
+            {"artifact_id": "open-report", "type": "html_form", "status": "ready", "session": s, "version": 1, "read_only": True,
+             "title": "Exchange rates", "summary": "Live rates, read only.", "connect_origins": ["https://api.example.com"],
+             "content": "<h1>Rates</h1><p id=\"rates\">Loading</p>" + outside,
+             "answer_schema": {"type": "object", "properties": {}}},
+            {"artifact_id": "open-form", "type": "html_form", "status": "active", "session": s, "version": 1,
+             "title": "Pick a currency", "summary": "", "content": "<form><input name=\"currency\"></form>" + outside,
+             "answer_schema": {"type": "object", "properties": {"currency": {"type": "string"}}}},
+        ]
     if kind == "decision":
         def decision(did, status, revision=4, **more):
             return {"decision_id": did, "question": "", "context": "", "status": status, "revision": revision,

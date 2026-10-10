@@ -28,6 +28,25 @@ mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
 # since CLARP_TEST_TERMINAL_LOG records the launch instead.
 mkdir -p "$scratch/bin"
 for program in claude xdg-terminal-exec; do printf '#!/bin/sh\nexit 1\n' > "$scratch/bin/$program"; chmod +x "$scratch/bin/$program"; done
+# artifact-open opens pages for real, in a fake default browser that
+# fetches the page as a browser would, then logs its pid and arguments.
+open_log="$scratch/urls"
+if [ "$name" = artifact-open ]; then
+    open_log=""
+    export CLARP_TEST_BROWSER_LOG="$scratch/browser.log"
+    printf '#!/bin/sh\necho fake-browser.desktop\n' > "$scratch/bin/xdg-settings"
+    cat > "$scratch/bin/google-chrome-stable" <<'SH'
+#!/bin/sh
+for url; do :; done
+/usr/bin/python3 -c 'import sys, urllib.request as u
+r = u.build_opener(u.ProxyHandler({})).open(sys.argv[1], timeout=5)
+open(sys.argv[2], "w").write("HTTP/1.1 %d\r\n%s\r\n%s" % (r.status, r.headers, r.read().decode()))' "$url" "$CLARP_TEST_BROWSER_LOG.page$$"
+echo "$$ $*" >> "$CLARP_TEST_BROWSER_LOG"
+SH
+    chmod +x "$scratch/bin/xdg-settings" "$scratch/bin/google-chrome-stable"
+    mkdir -p "$scratch/d/applications"
+    printf '[Desktop Entry]\nName=Fake browser\nExec=%s --ozone-platform=wayland %%U\n' "$scratch/bin/google-chrome-stable" > "$scratch/d/applications/fake-browser.desktop"
+fi
 /usr/bin/python3 tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" "${host_args[@]}" &
 host=$!
 for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
@@ -51,7 +70,7 @@ CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP
     HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/run" \
     XDG_CONFIG_HOME="$scratch/c" XDG_CACHE_HOME="$scratch/k" XDG_DATA_HOME="$scratch/d" XDG_STATE_HOME="$scratch/s" \
     CLARP_AUDIO_OUTPUT=null CLARP_AUDIO_INPUT="file:$scratch/voice.wav" CLARP_KEYRING=off \
-    CLARP_TEST_OPEN_URL="$scratch/urls" CLARP_TEST_HOST_LOG="$scratch/host.log" \
+    CLARP_TEST_OPEN_URL="$open_log" CLARP_TEST_HOST_LOG="$scratch/host.log" \
     CLARP_TEST_ATTACH_FILE="$scratch/photo.png" CLARP_TEST_NOTIFY_LOG="$scratch/notifications" \
     CLARP_TEST_FOREGROUND=1 CLARP_TEST_CLIPBOARD="$scratch/clipboard" \
     CLARP_TEST_TERMINAL_LOG="$scratch/terminal.jsonl" PATH="$scratch/bin:$PATH" \

@@ -104,6 +104,12 @@ sends it with its own credential under the same wire fields and limits, and
 sends what a previous run left queued as soon as it reconnects, without the
 form being reopened. A followed draft key is honoured the same way.
 
+The desktop opens a form or report page in a new window of the default
+browser (Chromium-family browsers and Firefox, by their desktop entry), not
+a tab of the browser's last window: that window may be on another workspace,
+and a compositor that follows activation would take Clarp out of view with it.
+Other browsers get the system opener, which is waited for so it is reaped.
+
 ## Version-bound network connections (Host contract 59)
 
 Forms and read-only reports default to blocking external connections. Publish

@@ -178,7 +178,7 @@ pub(crate) fn open_file_url(url: &str) {
         eprintln!("clarp-slint: not opening {url}: only local folders open here");
         return;
     }
-    if let Some(path) = std::env::var_os("CLARP_TEST_OPEN_URL") {
+    if let Some(path) = std::env::var_os("CLARP_TEST_OPEN_URL").filter(|p| !p.is_empty()) {
         use std::io::Write;
         let written = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| writeln!(f, "{url}"));
         if let Err(error) = written {
@@ -186,9 +186,7 @@ pub(crate) fn open_file_url(url: &str) {
         }
         return;
     }
-    if let Err(error) = std::process::Command::new(crate::platform::OPENER).arg(url).spawn() {
-        eprintln!("clarp-slint: could not open {url}: {error}");
-    }
+    crate::platform::opener::open(url, false);
 }
 
 // ---- the profile ---------------------------------------------------------------

@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod keyboard;
 pub mod stall_monitor;
 pub mod mpris;
+pub mod opener;
 pub mod runtime;
 
 /// The desktop's opener for files and URLs.

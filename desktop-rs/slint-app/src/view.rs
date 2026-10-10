@@ -228,12 +228,13 @@ pub(crate) fn prompt_open(expanded: &std::collections::HashSet<String>, key: &st
 /// Opens a local file with the desktop's app for it; checks record it to
 /// `CLARP_TEST_OPEN_URL` instead.
 pub(crate) fn open_file(path: &std::path::Path) -> Result<(), String> {
-    if let Some(record) = std::env::var_os("CLARP_TEST_OPEN_URL") {
+    if let Some(record) = std::env::var_os("CLARP_TEST_OPEN_URL").filter(|p| !p.is_empty()) {
         use std::io::Write;
         let mut log = std::fs::OpenOptions::new().create(true).append(true).open(record).map_err(|e| e.to_string())?;
         return writeln!(log, "file://{}", path.display()).map_err(|e| e.to_string());
     }
-    std::process::Command::new(crate::platform::OPENER).arg(path).spawn().map(drop).map_err(|e| format!("could not open {}: {e}", path.display()))
+    crate::platform::opener::open(&path.to_string_lossy(), false);
+    Ok(())
 }
 
 pub(crate) fn stamp(epoch_millis: i64) -> String {
@@ -337,6 +338,17 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
 /// Only web and mail links open, in the desktop's browser; tests record
 /// them to `CLARP_TEST_OPEN_URL` instead.
 pub(crate) fn open_link(url: &str) {
+    open_url(url, false);
+}
+
+/// An HTML artifact's loopback page, in a browser window of its own (see
+/// `platform::opener`): a tab in the browser's last window could take the
+/// compositor, and Clarp with it, to another workspace.
+pub(crate) fn open_page(url: &str) {
+    open_url(url, true);
+}
+
+fn open_url(url: &str, own_window: bool) {
     let openable = url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:");
     if !openable {
         eprintln!("clarp-slint: not opening {url}: only web and mail links open");
@@ -350,7 +362,8 @@ pub(crate) fn open_link(url: &str) {
         }
         return;
     }
-    if let Some(path) = std::env::var_os("CLARP_TEST_OPEN_URL") {
+    // Empty: open for real (the artifact-open check runs a fake browser).
+    if let Some(path) = std::env::var_os("CLARP_TEST_OPEN_URL").filter(|p| !p.is_empty()) {
         use std::io::Write;
         let written = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| writeln!(f, "{url}"));
         if let Err(error) = written {
@@ -358,9 +371,7 @@ pub(crate) fn open_link(url: &str) {
         }
         return;
     }
-    if let Err(error) = std::process::Command::new(crate::platform::OPENER).arg(url).spawn() {
-        eprintln!("clarp-slint: could not open {url}: {error}");
-    }
+    crate::platform::opener::open(url, own_window);
 }
 
 /// A composer chip; images show a thumbnail of the local file.
