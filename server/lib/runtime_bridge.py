@@ -791,6 +791,8 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             if blockers:
                 return blockers
             self._draining = True
+            # The held work now waits for the next runtime, which recovers it.
+            self.dispatch_service.clear_hold_headlines()
             return {}
 
     def cancel_handover(self) -> None:

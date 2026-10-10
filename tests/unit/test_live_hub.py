@@ -275,3 +275,23 @@ def test_a_completed_or_stopped_turn_has_no_error():
     hub.begin_turn(agent_id="a1", session="rachel", conv="conv-1", turn_id="tr-2")
     hub.end_turn("a1", status="interrupted")
     assert "error" not in hub.snapshot(session="rachel")["turn"]
+
+
+def test_an_update_hold_reads_limited_on_a_settled_turn_and_clears():
+    events = []
+    hub = LiveHub(sink=events.append, clock_ms=lambda: 5000)
+    hub.begin_turn(agent_id="a", session="s", conv="c", turn_id="t1")
+    hub.set_update_holds({"a"}, "Waiting for the Clarp update")
+    assert hub.activities()["a"]["state"] == "thinking"   # a running turn wins
+
+    hub.end_turn("a")
+    activity = hub.activities()["a"]
+    assert activity["state"] == "limited"
+    assert activity["headline"] == "Waiting for the Clarp update"
+    assert activity["turn_id"] is None
+    assert events[-1]["ops"][-1]["activity"]["state"] == "limited"
+
+    hub.set_update_holds(set(), "Waiting for the Clarp update")
+    assert (hub.activities()["a"]["state"], hub.activities()["a"]["headline"]) == (
+        "idle", None)
+
