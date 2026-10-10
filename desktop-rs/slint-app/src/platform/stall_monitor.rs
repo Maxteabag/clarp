@@ -306,7 +306,9 @@ mod tests {
 
     #[test]
     fn a_frame_is_named_and_placed_in_its_file() {
-        let address = symbolize as usize;
+        // Inside the function: a frame's address is where it returns to, so
+        // resolving looks a byte back.
+        let address = symbolize as *const () as usize + 4;
         let text = symbolize(&[address]);
         assert!(text.contains("symbolize"), "{text}");
         let offset = module_offset(address);
