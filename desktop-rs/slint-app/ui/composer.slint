@@ -300,6 +300,8 @@ export component Composer inherits FocusScope {
         }
         editor := PlainEditor {
             text <=> root.draft;
+            // The editor wraps to the pane: it never sets the pane's width.
+            min-width: 0px;
             enabled: root.active;
             wrap: word-wrap;
             font-size: Palette.body-size;

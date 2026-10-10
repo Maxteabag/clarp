@@ -514,6 +514,9 @@ export component AppWindow inherits Window {
                 // (its panes keep their place) while another shows.
                 Rectangle {
                     vertical-stretch: 1;
+                    // The workspace area may shrink to the window: the panes
+                    // inside wrap rather than widening the layout past it.
+                    min-width: 0px;
                     Workspace {
                     visible: root.surface != "settings" && root.surface != "updates" && root.surface != "teams";
                     width: parent.width;
