@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clarp.local/contract/schemas/repair-slot.json",
+  "title": "POST /repair-slot",
+  "description": "Contract 61. Frees an agent's turn slot that no process, launch, account recovery, terminal or Stop owns (busy with no process) and lets its queued work run. Not a Stop: nothing is interrupted and the queue's and goals' pause state is unchanged. Request body: session, reason (required), optional actor. The agent's state gains an audit row repeating its kind with detail {source: \"slot_repair\", repair_actor, repair_actor_verified, repair_reason, released_trace}. released_trace is empty when nothing was stale. repair_actor_verified has the same meaning as stop_actor_verified on /stop.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "ok",
+    "session",
+    "released_trace",
+    "queue_recovered",
+    "repair_actor",
+    "repair_actor_verified",
+    "repair_reason"
+  ],
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "session": {
+      "type": "string"
+    },
+    "released_trace": {
+      "type": "string"
+    },
+    "queue_recovered": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "repair_actor": {
+      "type": "string"
+    },
+    "repair_actor_verified": {
+      "type": "boolean"
+    },
+    "repair_reason": {
+      "type": "string"
+    }
+  }
+}

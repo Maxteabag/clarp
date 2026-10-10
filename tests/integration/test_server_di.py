@@ -3174,6 +3174,176 @@ def test_turn_queue_can_be_listed_edited_deleted_and_paused_by_stop(running_serv
     assert turn_queue.get("queue-http") is None
 
 
+def test_stop_records_its_actor_and_reason_and_still_pauses(running_server):
+    from lib import agents as agents_db, turn_queue
+    base, _ctx, _srv = running_server
+    agent = agents_db.get_by_session("claude")
+    turn_queue.enqueue(
+        queue_id="queue-held", agent_id=agent["agent_id"], session="claude",
+        text="held", trace_id="trace-held", client_msg_id="queue-held",
+        synthesize_audio=False, origin="agent", sender_agent_id="")
+
+    status, body = _post(base + "/stop", {"session": "claude", "actor": "agent:theo-97e5",
+                                          "reason": "Pebble busy with no process"})
+
+    assert status == 200
+    reply = json.loads(body)
+    # Without a Host-issued turn identity the actor is only a claim.
+    assert (reply["stop_actor"], reply["stop_actor_verified"]) == ("agent:theo-97e5", False)
+    assert reply["stop_reason"] == "Pebble busy with no process"
+    # Committed effects, read back after the Stop.
+    assert reply["queue_paused"] is True
+    assert reply["goals_paused"] == 0
+    detail = agents_db.latest_state(agent["agent_id"])["detail"]
+    assert detail["source"] == "user_stop"  # what older clients read
+    assert detail["stop_actor"] == "agent:theo-97e5"
+    assert detail["stop_actor_verified"] is False
+    assert detail["stop_reason"] == "Pebble busy with no process"
+    assert turn_queue.is_paused(agent["agent_id"]) is True
+    assert turn_queue.get("queue-held") is not None
+
+
+def test_stop_actor_comes_from_the_turn_identity_not_the_claim(running_server):
+    import os
+    from lib import agents as agents_db, provider_background_jobs as turns
+    base, ctx, _srv = running_server
+    theo = agents_db.create_agent(persona="Theo", voice_id="v", cwd=str(ctx.root), session="theo-97e5")
+    token = turns.new_turn_token()
+    turns.turn_started(token, agent_id=theo, provider="claude", pid=os.getpid())
+
+    status, body = _post_with_headers(base + "/stop", {
+        "session": "claude", "actor": "agent:someone-else", "reason": "stuck"},
+        {"X-Clarp-Turn": token})
+
+    assert status == 200
+    reply = json.loads(body)
+    assert (reply["stop_actor"], reply["stop_actor_verified"]) == ("agent:theo-97e5", True)
+
+
+def test_stop_from_a_paired_device_is_the_verified_user(running_server):
+    from lib import device_pairing
+    base, ctx, srv = running_server
+    srv.ctx = ctx.with_(auth_token="local-administrator")
+    device = device_pairing.exchange(device_pairing.issue()["code"])
+    auth = {"Authorization": "Bearer " + device["token"]}
+
+    _status, raw = _post_with_headers(base + "/stop", {"session": "claude"}, auth)
+    assert (json.loads(raw)["stop_actor"], json.loads(raw)["stop_actor_verified"]) == ("user", True)
+    # A device cannot speak for an agent: that stays a claim.
+    _status, raw = _post_with_headers(
+        base + "/stop", {"session": "claude", "actor": "agent:theo-97e5"}, auth)
+    assert json.loads(raw)["stop_actor_verified"] is False
+
+
+def test_stop_pause_reason_keeps_the_user_wording_and_names_other_actors(running_server, monkeypatch):
+    from lib import task_plans
+    base, _ctx, _srv = running_server
+    reasons = []
+    monkeypatch.setattr(task_plans, "pause_recovery_for_agent",
+                        lambda _agent_id, reason: reasons.append(reason) or 2)
+
+    for body in ({}, {"reason": "wrong branch"}, {"actor": "agent:theo-97e5"},
+                 {"actor": "agent:theo-97e5", "reason": "wedged"}):
+        status, raw = _post(base + "/stop", {"session": "claude", **body})
+        assert status == 200
+        assert json.loads(raw)["goals_paused"] == 2
+
+    assert reasons == [
+        "User stopped this agent",
+        "User stopped this agent: wrong branch",
+        "Stopped by agent:theo-97e5 (unverified)",
+        "Stopped by agent:theo-97e5 (unverified): wedged"]
+
+
+def test_stop_leaves_effects_unknown_when_bookkeeping_fails(running_server, monkeypatch):
+    from lib import task_plans
+    base, _ctx, _srv = running_server
+
+    def fail(*_args, **_kw):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(task_plans, "pause_recovery_for_agent", fail)
+    status, raw = _post(base + "/stop", {"session": "claude"})
+
+    assert status == 200
+    assert "goals_paused" not in json.loads(raw)
+
+
+def test_stop_without_actor_defaults_to_the_user(running_server):
+    from lib import agents as agents_db
+    base, _ctx, _srv = running_server
+    status, body = _post(base + "/stop", {"session": "claude"})
+    assert status == 200
+    reply = json.loads(body)
+    # The test server's admin token is not a paired device: a claimed user.
+    assert (reply["stop_actor"], reply["stop_actor_verified"]) == ("user", False)
+    detail = agents_db.latest_state(agents_db.get_by_session("claude")["agent_id"])["detail"]
+    assert (detail["source"], detail["stop_actor"], detail["stop_reason"]) == (
+        "user_stop", "user", "")
+
+
+def test_repair_slot_needs_a_reason_and_never_pauses(running_server):
+    from lib import agents as agents_db, turn_queue
+    base, _ctx, _srv = running_server
+    agent = agents_db.get_by_session("claude")
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + "/repair-slot", {"session": "claude", "reason": " "})
+    assert error.value.code == 400
+    with pytest.raises(urllib.error.HTTPError) as error:
+        _post(base + "/repair-slot", {"session": "nobody", "reason": "x"})
+    assert error.value.code == 404
+
+    status, body = _post(base + "/repair-slot", {
+        "session": "claude", "actor": "user", "reason": "busy with no process"})
+
+    assert status == 200
+    reply = json.loads(body)
+    assert reply["ok"] is True and reply["released_trace"] == ""
+    assert isinstance(reply["queue_recovered"], int)
+    assert turn_queue.is_paused(agent["agent_id"]) is False
+
+
+def test_repair_slot_asks_the_external_runtime(fake_ctx):
+    from lib import agents as agents_db
+
+    asked = []
+
+    class RuntimeOwner:
+        def ping(self):
+            return True
+
+        def recover_queued(self):
+            return 0
+
+        def status(self):
+            return {"active": {}, "spawning": [], "terminals": []}
+
+        def repair_slot(self, agent_id, *, actor, reason, actor_verified=False):
+            asked.append((agent_id, actor, reason, actor_verified))
+            return {"released_trace": "trace-stranded", "queue_recovered": 3}
+
+    fake_ctx.replace_service("runtime_client", RuntimeOwner())
+    port = _free_port()
+    srv = build_server(fake_ctx, port, bind_addr="127.0.0.1")
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _post(f"http://127.0.0.1:{port}/repair-slot", {
+            "session": "claude", "actor": "agent:theo-97e5", "reason": "stuck"})
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+    assert status == 200
+    assert json.loads(body)["released_trace"] == "trace-stranded"
+    # A claimed agent without a Host-issued turn identity stays a claim.
+    assert asked == [(agents_db.get_by_session("claude")["agent_id"],
+                      "agent:theo-97e5", "stuck", False)]
+    reply = json.loads(body)
+    assert (reply["repair_actor"], reply["repair_actor_verified"],
+            reply["repair_reason"]) == ("agent:theo-97e5", False, "stuck")
+
+
 def test_stop_barrier_is_executed_by_external_runtime(fake_ctx):
     from lib import agents as agents_db, turn_queue
     from lib.runtime_bridge import StopLease

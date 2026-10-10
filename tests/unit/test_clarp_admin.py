@@ -1427,3 +1427,19 @@ def test_skill_links_reach_antigravity_where_it_is_installed(tmp_path, monkeypat
     assert (agy / "clarp-x").resolve() == source.resolve()
     admin.unlink_skill("clarp-x")
     assert not (agy / "clarp-x").exists()
+
+
+@pytest.mark.parametrize("command,path", [("stop", "/stop"), ("repair", "/repair-slot")])
+def test_stop_and_repair_record_who_and_why(monkeypatch, capsys, command, path):
+    calls = []
+    monkeypatch.setattr(admin, "api_request",
+                        lambda method, p, body=None, **_kw: calls.append((method, p, body)) or {"ok": True})
+
+    for extra, actor in (([], "user"), (["--from", "theo-97e5"], "agent:theo-97e5")):
+        args = admin.parser().parse_args(
+            [command, "--session", "pebble-2596", "--reason", "busy with no process", *extra])
+        assert args.func(args) == 0
+        assert calls[-1] == ("POST", path, {
+            "session": "pebble-2596", "actor": actor, "reason": "busy with no process"})
+    with pytest.raises(SystemExit):
+        admin.parser().parse_args([command, "--session", "pebble-2596"])

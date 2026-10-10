@@ -866,8 +866,10 @@ def _goal_mutate(plan_id, *, revision, action, data=None):
     return task_plans.get(plan_id)
 
 
-def pause_recovery_for_agent(agent_id: str, reason: str) -> None:
-    """Persist explicit Stop beyond a later unrelated user turn unpausing queues."""
+def pause_recovery_for_agent(agent_id: str, reason: str) -> int:
+    """Persist explicit Stop beyond a later unrelated user turn unpausing queues.
+
+    Returns how many active goals this call paused (each one committed)."""
     rows = (
         db.conn()
         .execute(
@@ -876,6 +878,7 @@ def pause_recovery_for_agent(agent_id: str, reason: str) -> None:
         )
         .fetchall()
     )
+    paused = 0
     for row in rows:
         _goal_mutate(
             row["plan_id"],
@@ -883,6 +886,8 @@ def pause_recovery_for_agent(agent_id: str, reason: str) -> None:
             action="pause",
             data={"reason": reason},
         )
+        paused += 1
+    return paused
 
 
 def carry_native_session(agent_id: str, from_session_id: str, to_session_id: str,

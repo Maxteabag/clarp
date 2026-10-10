@@ -30,5 +30,20 @@ Use an exact ID from `available`; do not substitute a model the catalog does
 not list. The change applies from the agent's next turn, so the turn that ran
 the command keeps its current model. Janitors refuse model changes.
 
+## An agent stays busy with no process
+
+Repair the slot; do not Stop the agent. Stop pauses its queue and goals until
+someone resumes them, while a repair interrupts nothing and changes no pause:
+
+```bash
+clarp-admin repair --session pebble-2596 --from "$CLAUDE_PWA_SESSION" \
+  --reason "busy since 07:25 with no process"
+```
+
+`released_trace` is empty when a process, launch, account recovery or Stop
+still owns the slot; then the agent is not stuck. Stop only when the work
+itself must end: `clarp-admin stop --session X --from "$CLAUDE_PWA_SESSION"
+--reason "..."` records you as the actor.
+
 To resume an existing terminal conversation as a Clarp agent, use the
 `clarp-adopt` skill.
