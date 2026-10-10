@@ -604,7 +604,8 @@ fn main() {
     let options = launch::options(&launch_arguments(&args));
     // Checks run alone; a desktop launch shares one process per desktop.
     let socket = if headless && std::env::var_os("CLARP_TEST_INSTANCE").is_none() { None } else { launch::forward_or_socket(&launch_arguments(&args)) };
-    if headless && let Err(error) = headless::install(1280, 800, 1.0) {
+    let (width, height, scale) = headless::size_from_env();
+    if headless && let Err(error) = headless::install(width, height, scale) {
         eprintln!("clarp-slint: {error}");
         std::process::exit(1);
     }
@@ -634,8 +635,9 @@ fn main() {
     window.set_nav_rail_visible(settings.boolean("appearance/navRail", true));
     window.set_explorer_compact(settings.boolean("explorer/compact", false));
     window.set_shortcuts_visible(settings.boolean("appearance/shortcutsVisible", true));
-    // The reader's interface scale (1.15 as in the Qt app); checks draw at 1.0.
-    let ui_scale = if headless { 1.0 } else { settings.get("appearance/uiScale").and_then(serde_json::Value::as_f64).unwrap_or(1.15) as f32 };
+    // The reader's interface scale (1.15 as in the Qt app); checks draw at
+    // 1.0 unless CLARP_HEADLESS_SIZE gives a scale.
+    let ui_scale = if headless { scale } else { settings.get("appearance/uiScale").and_then(serde_json::Value::as_f64).unwrap_or(1.15) as f32 };
     let prefs = Prefs::load(&settings);
     let engine = match Engine::new(Config::from_env(settings), || {
         if let Err(error) = slint::invoke_from_event_loop(pump) {

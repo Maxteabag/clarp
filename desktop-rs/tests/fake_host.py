@@ -1327,9 +1327,32 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 job_logs[body["job_id"]] = job_logs.get(body["job_id"], "") + body.get("append", "")
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/activity":
+            # Test control: of the --roster agents, `working` work (the rest
+            # idle) and `jobs` others each run one background job, spread
+            # through the list; then the snapshot and the job list are
+            # announced (the frame-budget check's busy fleet).
+            global jobs
+            filled = [a for a in agents if a["agent_id"].startswith("g")]
+            working, running = int(body.get("working", 0)), int(body.get("jobs", 0))
+            now = int(time.time() * 1000)
+            with state_lock:
+                for agent in filled:
+                    agent["latest_state"], agent["status_text"] = "idle", ""
+                step = max(1, len(filled) // max(1, working))
+                for agent in filled[::step][:working]:
+                    agent.update(latest_state="working", status_text="Running the tests")
+                idle = [a for a in filled if a["latest_state"] != "working"]
+                step = max(1, len(idle) // max(1, running))
+                jobs = [{"job_id": f"bg-{n}", "agent_id": a["agent_id"], "session": a["session"], "status": "running",
+                         "kind": "watcher", "title": f"Watch build {n}", "started_at": now - 60_000,
+                         "heartbeat_at": now, "updated_at": now, "generation": 1}
+                        for n, a in enumerate(idle[::step][:running])]
+            broadcast({"type": "agent-roster", "session": "", "kind": "updated"})
+            broadcast({"type": "background-job-updated", "job": jobs[0] if jobs else {}})
+            return self.reply(200, {"ok": True, "working": working, "jobs": len(jobs)})
         if url.path == "/__control/jobs":
             # Test control: replace the job list, then push an optional event.
-            global jobs
             with state_lock:
                 jobs = body.get("jobs", [])
             if body.get("event"):

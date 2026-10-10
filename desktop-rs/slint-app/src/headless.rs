@@ -2,7 +2,7 @@
 //! memory buffer, with our own event loop (so engine wakes and timers work),
 //! for checks and screenshots. Nothing is shown on the user's desktop.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,7 +43,34 @@ impl EventLoopProxy for Proxy {
     }
 }
 
+/// How headless frames are drawn (the frame-budget check): `partial`
+/// repaints only what changed into the kept buffer, as the real window does;
+/// `hz` above 0 draws at most that many frames a second, as a display's
+/// frame callbacks allow. The default draws every frame whole, at once.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Pacing {
+    pub partial: bool,
+    pub hz: u32,
+}
+
+/// Sets how frames are drawn from now on.
+pub fn pace(pacing: Pacing) {
+    PACING.with(|p| p.set(pacing));
+}
+
+/// The next frame repaints the whole window (and is drawn even if nothing
+/// changed): one full frame's cost.
+pub fn full_frame() {
+    FULL_NEXT.with(|f| f.set(true));
+    if let Some(window) = window() {
+        window.request_redraw();
+    }
+}
+
 thread_local! {
+    static PACING: Cell<Pacing> = const { Cell::new(Pacing { partial: false, hz: 0 }) };
+    static LAST_DRAWN: Cell<Option<std::time::Instant>> = const { Cell::new(None) };
+    static FULL_NEXT: Cell<bool> = const { Cell::new(false) };
     static WINDOW: RefCell<Option<Rc<MinimalSoftwareWindow>>> = const { RefCell::new(None) };
     /// The last frame drawn (width, height, pixels) and how many so far.
     static FRAME: RefCell<(usize, usize, Vec<PremultipliedRgbaColor>, u64)> = const { RefCell::new((0, 0, Vec::new(), 0)) };
@@ -79,24 +106,45 @@ impl Platform for Headless {
             // scales to 1.5).
             let size = self.window.size();
             let (width, height) = (size.width as usize, size.height as usize);
-            self.window.draw_if_needed(|renderer| {
-                FRAME.with(|frame| {
-                    let mut frame = frame.borrow_mut();
-                    // A margin: at a fractional scale the renderer may round
-                    // the window a pixel past its size. Saving crops it.
-                    let stride = width + MARGIN;
-                    if frame.0 != width || frame.1 != height {
-                        *frame = (width, height, vec![PremultipliedRgbaColor::default(); stride * (height + MARGIN)], frame.3);
-                    }
-                    let started = std::time::Instant::now();
-                    renderer.render(&mut frame.2, stride);
-                    crate::perf::drawn(started);
-                    frame.3 += 1;
+            // The frame-budget check paces frames as a display does; the
+            // others draw as soon as something asks.
+            let pacing = PACING.with(Cell::get);
+            let interval = (pacing.hz > 0).then(|| Duration::from_secs_f64(1.0 / f64::from(pacing.hz)));
+            let since = LAST_DRAWN.with(Cell::get).map(|at| at.elapsed());
+            let early = interval.zip(since).and_then(|(interval, since)| interval.checked_sub(since)).filter(|left| !left.is_zero());
+            if early.is_none() {
+                let drew = self.window.draw_if_needed(|renderer| {
+                    FRAME.with(|frame| {
+                        let mut frame = frame.borrow_mut();
+                        // A margin: at a fractional scale the renderer may round
+                        // the window a pixel past its size. Saving crops it.
+                        let stride = width + MARGIN;
+                        let forced = FULL_NEXT.with(|f| f.replace(false));
+                        let mut full = !pacing.partial || forced;
+                        if frame.0 != width || frame.1 != height {
+                            *frame = (width, height, vec![PremultipliedRgbaColor::default(); stride * (height + MARGIN)], frame.3);
+                            full = true;
+                        }
+                        // Partial: only what changed is repainted into the kept
+                        // buffer, as the real window's softbuffer does with a
+                        // buffer age of one.
+                        renderer.set_repaint_buffer_type(if full { RepaintBufferType::NewBuffer } else { RepaintBufferType::ReusedBuffer });
+                        let started = std::time::Instant::now();
+                        let region = renderer.render(&mut frame.2, stride);
+                        let painted: u64 = region.iter().map(|(_, size)| u64::from(size.width) * u64::from(size.height)).sum();
+                        let dirty = (painted as f64 / (width.max(1) * height.max(1)) as f64).min(1.0) as f32;
+                        crate::perf::drawn(started, dirty);
+                        frame.3 += 1;
+                    });
                 });
-            });
+                if drew {
+                    LAST_DRAWN.with(|l| l.set(Some(std::time::Instant::now())));
+                }
+            }
             let wait = slint::platform::duration_until_next_timer_update()
                 .unwrap_or(Duration::from_millis(50))
-                .min(Duration::from_millis(16));
+                .min(Duration::from_millis(16))
+                .min(early.unwrap_or(Duration::MAX));
             if let Ok(tasks) = self.queue.tasks.lock()
                 && tasks.is_empty()
                 && !self.queue.quit.load(Ordering::SeqCst)
@@ -105,6 +153,22 @@ impl Platform for Headless {
             }
         }
     }
+}
+
+/// The headless window's logical size and scale: 1280×800 at 1, unless
+/// `CLARP_HEADLESS_SIZE` says otherwise ("1600x1000@1.5", as the
+/// frame-budget check draws a laptop's panel).
+pub fn size_from_env() -> (u32, u32, f32) {
+    let Ok(value) = std::env::var("CLARP_HEADLESS_SIZE") else { return (1280, 800, 1.0) };
+    let parsed = (|| {
+        let (size, scale) = value.split_once('@').unwrap_or((value.as_str(), "1"));
+        let (width, height) = size.split_once('x')?;
+        Some((width.parse().ok()?, height.parse().ok()?, scale.parse().ok()?))
+    })();
+    parsed.unwrap_or_else(|| {
+        eprintln!("clarp-slint: CLARP_HEADLESS_SIZE={value} is not WIDTHxHEIGHT[@SCALE]; drawing 1280x800");
+        (1280, 800, 1.0)
+    })
 }
 
 /// Installs the headless platform for a `width`×`height` logical window.

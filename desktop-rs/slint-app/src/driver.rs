@@ -83,6 +83,9 @@ mod roster_checks;
 // ---- a narrow window: the panes stay inside it
 #[path = "narrow_checks.rs"]
 mod narrow_checks;
+// ---- what animating costs the UI thread
+#[path = "budget_checks.rs"]
+mod budget_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -529,6 +532,7 @@ pub fn start_check(name: &str, out: String) {
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),
+        "frame-budget" => budget_checks::frame_budget_check(out),
         "a2a" => {
             row_overlap_checks::watch();
             a2a_checks::a2a_check(out)

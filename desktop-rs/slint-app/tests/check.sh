@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../.."
 [ "$1" = pair ] && exec slint-app/tests/pair-check.sh "${2:-slint-app/docs/checks/pair}"
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
 # Every artifact type and its interactions run in one long check.
-case $name in artifacts|scroll-jump|live|row-overlap) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac
+case $name in artifacts|scroll-jump|live|row-overlap|frame-budget) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac
 # desktop reports presence, which needs an unlocked login session: its own,
 # not the machine's (a CI runner has none).
 [ "$name" = desktop ] && export CLARP_TEST_LOGIN=unlocked
@@ -18,6 +18,8 @@ case $name in artifacts|artifact-keys) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; 
 scratch=$(mktemp -d /var/tmp/clarp-slint-check.XXXXXX)
 trap 'kill "$host" 2>/dev/null; wait "$host" 2>/dev/null; rm -rf "$scratch"' EXIT
 host_args=(); [ "$name" = startup ] && host_args=(--roster 100)
+# frame-budget: a real fleet on a laptop's panel (2400x1500 px).
+[ "$name" = frame-budget ] && { host_args=(--roster 180); export CLARP_HEADLESS_SIZE=1600x1000@1.5; }
 cp slint-app/docs/screens/markdown-paper.png "$scratch/photo.png"
 # The "microphone": a second of tone, never the user's device.
 /usr/bin/python3 -c "import math,struct,wave,sys; w=wave.open(sys.argv[1],'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(i/8))) for i in range(16000))); w.close()" "$scratch/voice.wav"
