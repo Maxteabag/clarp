@@ -117,6 +117,8 @@ older_delay = 0.0
 # Seconds a /send takes to be filed and answered (a slow Host's ack);
 # /__control/send-delay sets it.
 send_delay = 0.0
+# Seconds GET /artifacts takes (a slow list); /__control/artifacts-delay sets it.
+artifacts_delay = 0.0
 CLOSE = object()
 # Live items (docs/live-items.md): off until /__control/live turns the
 # feature on. The recorded streams in contract/live/ are replayed as `live`
@@ -732,6 +734,8 @@ class Handler(BaseHTTPRequestHandler):
                                     "progress": {"text": job.get("progress_text", ""), "at": None},
                                     "timeline": timeline, "log": log})
         if url.path == "/artifacts":
+            if artifacts_delay:
+                time.sleep(artifacts_delay)
             with state_lock:
                 return self.reply(200, {"artifacts": artifacts})
         if url.path.startswith("/artifacts/") and url.path.endswith("/events"):
@@ -1042,6 +1046,11 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: older pages arrive after `seconds`.
             global older_delay
             older_delay = float(body.get("seconds", 0))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/artifacts-delay":
+            # Test control: each GET /artifacts answers after `seconds`.
+            global artifacts_delay
+            artifacts_delay = float(body.get("seconds", 0))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/send-delay":
             # Test control: each /send is filed and answered after `seconds`.
