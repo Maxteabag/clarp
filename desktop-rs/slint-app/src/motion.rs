@@ -7,8 +7,8 @@
 //!
 //! The clock has two hands, moved on alternate ticks so that no frame
 //! repaints both: `spin` (the explorer's spinners and shimmering names,
-//! ten times a second) and `glow` (what animates in a chat: the running
-//! row's shimmer, the typing dots; twenty times a second). The renderer
+//! about ten times a second) and `glow` (what animates in a chat: the
+//! running row's shimmer, the typing dots; about twenty). The renderer
 //! repaints at most three rectangles, merging the rest: an explorer row and
 //! a chat row moving in the same frame became one box over everything
 //! between them. Neither hand moves while the window is hidden or motion is
@@ -19,11 +19,13 @@ use std::time::{Duration, Instant};
 
 use slint::ComponentHandle;
 
-/// The clock's tick; each hand moves on its own ticks (`hand`).
-pub const TICK: Duration = Duration::from_millis(25);
+/// The clock's tick, about a 60 Hz frame; each hand moves on its own ticks
+/// (`hand`). A 25 ms tick fell between the chat's 16 ms timers and moved
+/// where a send's flight was sampled against its bubble.
+pub const TICK: Duration = Duration::from_millis(17);
 
-/// Which hand moves on tick `n`: `glow` on odd ticks (every 50 ms), `spin`
-/// on every fourth (every 100 ms), never both.
+/// Which hand moves on tick `n`: `glow` on every third (51 ms, ~20 a
+/// second), `spin` on every sixth, offset (102 ms, ~10), never both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hand {
     Spin,
@@ -31,9 +33,9 @@ pub enum Hand {
 }
 
 pub fn hand(n: u64) -> Option<Hand> {
-    if n % 2 == 1 {
+    if n % 3 == 1 {
         Some(Hand::Glow)
-    } else if n % 4 == 0 {
+    } else if n % 6 == 3 {
         Some(Hand::Spin)
     } else {
         None
@@ -78,10 +80,13 @@ mod tests {
 
     #[test]
     fn spin_moves_ten_times_a_second_glow_twenty_and_never_together() {
-        let per_second = (1000 / TICK.as_millis()) as u64;
-        let hands: Vec<Option<Hand>> = (1..=per_second).map(hand).collect();
-        assert_eq!(hands.iter().filter(|h| **h == Some(Hand::Spin)).count(), 10);
-        assert_eq!(hands.iter().filter(|h| **h == Some(Hand::Glow)).count(), 20);
-        assert_eq!((hand(1), hand(2), hand(3), hand(4)), (Some(Hand::Glow), None, Some(Hand::Glow), Some(Hand::Spin)));
+        // Six seconds of ticks: at most 10 and 20 moves a second.
+        let ticks = 6000 / TICK.as_millis() as u64;
+        let hands: Vec<Option<Hand>> = (1..=ticks).map(hand).collect();
+        let spins = hands.iter().filter(|h| **h == Some(Hand::Spin)).count();
+        let glows = hands.iter().filter(|h| **h == Some(Hand::Glow)).count();
+        assert!((55..=60).contains(&spins), "{spins} spins in 6 s");
+        assert!((110..=120).contains(&glows), "{glows} glows in 6 s");
+        assert_eq!(hands[..6], [Some(Hand::Glow), None, Some(Hand::Spin), Some(Hand::Glow), None, None]);
     }
 }
