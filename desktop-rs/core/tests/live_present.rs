@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use clarp_core::live::LiveView;
-use clarp_core::live_present::{Kind, Options, Presented, present, status_line};
+use clarp_core::live_present::{Kind, Options, Presented, held, present, status_line};
 use clarp_core::protocol::Message;
 use serde_json::{Value, json};
 
@@ -588,4 +588,24 @@ fn a_live_item_never_goes_above_a_row_written_before_it_started() {
     let place = |id: &str| order.iter().position(|o| o == id).unwrap_or_else(|| panic!("{id} in {order:?}"));
     assert!(place("live:cl:msg_a2:0") < place("u-note") && place("u-note") < place("live:cl:toolu_a3"), "{order:?}");
     assert!(place("u-stale-second") < place("live:cl:msg_b1:0"), "{order:?}");
+}
+
+fn limited(turn_id: Value, turn_started_ms: Value) -> LiveView {
+    let mut view = LiveView::new();
+    let activity = json!({"state": "limited", "headline": "Waiting for the Clarp update", "turn_id": turn_id,
+        "turn_started_ms": turn_started_ms, "since_ms": 1_000, "tool": null, "running_tools": 0});
+    view.apply_snapshot(json!({"epoch": "e", "lseq": 1, "activity": activity, "items": []}).as_object().unwrap());
+    view
+}
+
+#[test]
+fn a_turn_held_by_the_release_drain_is_not_busy_but_limited_under_a_turn_is() {
+    let waiting = limited(Value::Null, Value::Null);
+    assert!(held(&waiting));
+    let line = status_line(&waiting, 90_000).expect("the headline shows");
+    assert_eq!((line.text.as_str(), line.busy), ("◌ Waiting for the Clarp update", false), "no stop key, no timer");
+    let running = limited(json!("turn-7"), json!(1_000));
+    assert!(!held(&running));
+    let line = status_line(&running, 90_000).unwrap();
+    assert!(line.busy, "a running turn under a limit can still be stopped");
 }

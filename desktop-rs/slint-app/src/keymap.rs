@@ -28,6 +28,9 @@ pub enum Guard {
     Send,
     /// The open agent is working (thinking, a tool, compacting).
     Busy,
+    /// Stop has something to say: the agent works, or its next turn is held
+    /// by the release drain (Stop then only says nothing runs).
+    Stoppable,
     /// A voice reply is playing.
     Playing,
     /// The reader has scrolled up from the latest message.
@@ -85,7 +88,7 @@ fn parent(state: &str) -> Option<&'static str> {
 }
 
 fn state(name: &str) -> Vec<Binding> {
-    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, LayoutWarning, None as Always, Playing, Rows, Send, Work};
+    use Guard::{Agent, Artifact, Artifacts, Attention, Behind, Busy, Folds, LayoutWarning, None as Always, Playing, Rows, Send, Stoppable, Work};
     let b = binding;
     match name {
         "main" => vec![
@@ -238,7 +241,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("focus-sidebar", &["Ctrl+E"], "Explorer", false, Always, false),
             // The composer has no buttons: its actions are keys, shown here.
             b("attach", &["Ctrl+Shift+O"], "Attach", true, Agent, true),
-            b("stop-agent", &["Ctrl+."], "Stop", true, Busy, false),
+            b("stop-agent", &["Ctrl+."], "Stop", false, Stoppable, false).hinted_while(Busy),
             b("silence", &["Ctrl+Shift+M"], "Stop voice", true, Playing, false),
         ],
         "search" => vec![
@@ -302,6 +305,8 @@ pub struct Facts {
     pub rows: bool,
     pub can_send: bool,
     pub busy: bool,
+    /// The open chat's next turn is held by the release drain.
+    pub held: bool,
     pub playing: bool,
     pub behind: bool,
     pub folds: bool,
@@ -320,6 +325,7 @@ impl Facts {
             Guard::Rows => self.rows,
             Guard::Send => self.can_send,
             Guard::Busy => self.busy,
+            Guard::Stoppable => self.busy || self.held,
             Guard::Playing => self.playing,
             Guard::Behind => self.behind,
             Guard::Folds => self.folds,
@@ -944,7 +950,7 @@ mod tests {
     use super::*;
 
     fn all() -> Facts {
-        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true, layout_warning: true, work: true }
+        Facts { attention: true, agent: true, rows: true, can_send: true, busy: true, held: true, playing: true, behind: true, folds: true, artifacts: true, artifact: true, layout_warning: true, work: true }
     }
 
     #[test]
@@ -1044,6 +1050,14 @@ mod tests {
             assert!(!hints(state, &none, idle).iter().any(|b| b.action == "stop-agent"), "{state}: not while idle");
         }
         assert_eq!(action_for("pane", "Ctrl+.", &none, idle), Some("stop-agent"), "the key works idle as before");
+        // Held by the release drain: the key reaches Stop (which only says
+        // nothing runs) but the bar never offers it.
+        let held = Facts { held: true, ..idle };
+        for state in ["pane", "composer", "sidebar"] {
+            assert!(!hints(state, &none, held).iter().any(|b| b.action == "stop-agent"), "{state}: not offered while held");
+        }
+        assert_eq!(action_for("composer", "Ctrl+.", &none, held), Some("stop-agent"));
+        assert_eq!(action_for("composer", "Ctrl+.", &none, idle), None, "idle in the composer, as before");
     }
 
     fn peter() -> Overrides {

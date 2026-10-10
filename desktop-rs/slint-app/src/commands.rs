@@ -64,6 +64,7 @@ fn facts(app: &App, window: &AppWindow) -> Facts {
         // The Host's word, or its live items' while they say it works.
         busy: engine.roster().find(selected).is_some_and(|a| matches!(a.latest_state.as_str(), "thinking" | "tool" | "compacting"))
             || crate::live_view::status(&engine, selected).1,
+        held: engine.live_held(selected),
         playing: crate::platform::audio::with(|audio| audio.playing()).unwrap_or(false),
         behind: !app.active_report().at_end,
         folds: window.get_chats().iter().any(|c| c.fold_count > 0),

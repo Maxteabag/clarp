@@ -517,6 +517,14 @@ pub fn confirm_first(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
     if CONFIRMED.with(Cell::take) {
         return false;
     }
+    // Nothing runs in a held chat: Stop only says so, with nothing to confirm.
+    let held = {
+        let engine = app.engine.borrow();
+        engine.live_held(engine.selected_session())
+    };
+    if action == "stop-agent" && held {
+        return false;
+    }
     let name = {
         let engine = app.engine.borrow();
         engine.chat_name(engine.selected_session())

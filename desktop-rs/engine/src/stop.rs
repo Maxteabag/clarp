@@ -21,18 +21,43 @@ pub(crate) struct Stops {
     receipts: HashMap<String, (StopReceipt, Instant)>,
     /// Chats whose own `/stop` has not answered yet.
     pending: HashSet<String>,
+    /// Chats Stop was pressed in while their next turn was held.
+    held: HashSet<String>,
 }
+
+/// What Stop says when nothing runs: the next turn waits for the update.
+const HELD_NOTE: &str = "Nothing is running; the next turn waits for the Clarp update";
 
 impl Engine {
     /// The chat's Stop line ("" when none): what the last Stop did, who
     /// stopped it and why.
     pub fn stop_notice(&self, session: &str) -> String {
+        if self.stops.held.contains(session) && self.live_held(session) {
+            return HELD_NOTE.to_owned();
+        }
         let Some((receipt, _)) = self.stops.receipts.get(session) else { return String::new() };
         let name = |s: &str| self.roster.find(s).map(|a| display_name(a).to_owned());
         match receipt.said(&name) {
             Said::Line(line) => line,
             Said::Error(_) => String::new(),
         }
+    }
+
+    /// The chat's next turn is held by the runtime's release drain
+    /// (`clarp_core::live_present::held`): nothing runs, so nothing stops.
+    pub fn live_held(&self, session: &str) -> bool {
+        self.live_active(session) && self.live_view(session).is_some_and(clarp_core::live_present::held)
+    }
+
+    /// Stop in a held chat: a note instead of `/stop`, which would only
+    /// pause the queue and drop the parked sends. True when it was held.
+    pub(crate) fn stop_held(&mut self, session: &str) -> bool {
+        if !self.live_held(session) {
+            return false;
+        }
+        self.stops.held.insert(session.to_owned());
+        self.changes.push(Change::Stopped(session.to_owned()));
+        true
     }
 
     pub(crate) fn stop_requested(&mut self, session: &str) {
@@ -85,6 +110,9 @@ impl Engine {
         }
         let kind = json::string(event, "kind");
         if clarp_core::protocol::is_busy_state(&kind) {
+            if self.stops.held.remove(session) {
+                self.changes.push(Change::Stopped(session.to_owned()));
+            }
             self.set_receipt(session, None);
             return;
         }
