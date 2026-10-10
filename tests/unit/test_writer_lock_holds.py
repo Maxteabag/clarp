@@ -404,3 +404,71 @@ def test_critical_turn_writes_wait_out_a_long_writer(tmp_path):
     assert turn_id
     assert db.conn().execute("PRAGMA busy_timeout").fetchone()[0] == 200, \
         "the caller's own busy timeout is restored"
+
+
+def _delegator(monkeypatch):
+    import importlib
+    from lib import backends
+    monkeypatch.setattr(backends, "active_handles", lambda *args: [])
+    builtins = importlib.import_module("lib.janitor_builtins")
+    builtins.ensure_builtins(cwd="/tmp", initial={"message-delegator": {"enabled": True}})
+    return builtins
+
+
+def _write_locks(run) -> list[str]:
+    con = db.conn()
+    seen = _statements(con)
+    try:
+        run()
+    finally:
+        con.set_trace_callback(None)
+    return [sql for sql in seen if sql.startswith("BEGIN IMMEDIATE")]
+
+
+def test_a_demand_request_with_nothing_to_admit_takes_no_write_lock(monkeypatch):
+    # Every tool-explanation drain asked for a run; most found one already
+    # active and returned None, after holding BEGIN IMMEDIATE for nothing.
+    # On the IO-starved host such a hold stalled for up to 47 s (2026-10-10).
+    builtins = _delegator(monkeypatch)
+    run = builtins.begin_run("message-delegator", "first")
+    assert run is not None
+    assert _write_locks(lambda: builtins.begin_run("message-delegator", "second")) == []
+    assert builtins.begin_run("message-delegator", "second") is None
+    assert _write_locks(lambda: builtins.begin_run("message-delegator", "first")) == [], \
+        "repeating a request reads its run without the write lock"
+    assert builtins.begin_run("message-delegator", "first") == run
+
+
+def test_an_expired_demand_run_is_still_recovered_before_the_next_admission(monkeypatch):
+    builtins = _delegator(monkeypatch)
+    stale = builtins.begin_run("message-delegator", "stale")
+    db.conn().execute("""UPDATE janitor_runs SET configuration_json=json_set(configuration_json,'$.expires_at',1)
+                          WHERE run_id=?""", (stale["run_id"],))
+    fresh = builtins.begin_run("message-delegator", "fresh")
+    assert fresh is not None and fresh["run_id"] != stale["run_id"]
+    assert janitors_run_status(stale["run_id"]) == "cancelled"
+
+
+def janitors_run_status(run_id: str) -> str:
+    return db.conn().execute("SELECT status FROM janitor_runs WHERE run_id=?", (run_id,)).fetchone()[0]
+
+
+def test_an_admission_that_wins_the_race_after_the_check_is_respected(monkeypatch):
+    from contextlib import contextmanager
+    from lib import janitors
+    builtins = _delegator(monkeypatch)
+    write, raced = janitors._write, []
+
+    @contextmanager
+    def racing():
+        if not raced:
+            raced.append(None)  # the winner's own admission goes straight through
+            raced[0] = builtins.begin_run("message-delegator", "winner")
+        with write() as c:
+            yield c
+
+    monkeypatch.setattr(janitors, "_write", racing)
+    assert builtins.begin_run("message-delegator", "loser") is None
+    assert raced and raced[0] is not None
+    active = db.conn().execute("SELECT COUNT(*) FROM janitor_runs WHERE status IN ('queued','running')").fetchone()[0]
+    assert active == 1, "only the winner is admitted"
