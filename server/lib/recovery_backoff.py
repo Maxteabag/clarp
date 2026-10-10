@@ -36,6 +36,15 @@ def signature(error: BaseException) -> str:
     return re.sub(r"[0-9a-f]{6,}|\d+", "#", text)[:300]
 
 
+def _brief(text: str, limit: int = 240) -> str:
+    """Keep both ends of a long error: providers nest the cause at the end
+    ("... failed to read session metadata <path>: rollout <path> is empty")."""
+    if len(text) <= limit:
+        return text
+    head = limit // 3
+    return f"{text[:head]} … {text[-(limit - head - 3):]}"
+
+
 class RecoveryBackoff:
     """Per-agent backoff state, owned by the runtime's turn dispatcher."""
 
@@ -72,7 +81,7 @@ class RecoveryBackoff:
             state.failures += 1
             state.identical = state.identical + 1 if sig == state.signature else 1
             state.signature = sig
-            state.error = str(error)[:200]
+            state.error = _brief(str(error))
             state.retry_at = now + min(MAX_S, BASE_S * 2 ** min(state.failures - 1, 16))
             state.parked = state.identical >= PARK_AFTER
             return replace(state)
