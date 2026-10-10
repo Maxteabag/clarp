@@ -574,6 +574,60 @@ IMPORT_COMMIT_EVERY = 200
 IMPORT_WRITE_BUDGET_SECONDS = 0.025
 IMPORT_WRITER_YIELD_SECONDS = 0.010
 
+_WRITE_VERBS = frozenset({"INSERT", "UPDATE", "DELETE", "REPLACE"})
+
+
+class _WriteNeeded(Exception):
+    """The probe pass of an import found a row to change."""
+
+
+class _ImportWriter:
+    """The import's connection, in one of two passes.
+
+    An import re-reads the whole transcript on every watcher tick, and almost
+    every time nothing changed (11,385 of 11,396 upserts over twelve live
+    imports on 2026-10-10 rewrote an identical row). The probe pass reads
+    without any lock and stops at the first write it would make; an
+    unchanged transcript therefore never takes the write lock. Otherwise the
+    import runs again as the locked pass: every statement inside BEGIN
+    IMMEDIATE, as before, so a decision read from a live row cannot go stale
+    before the write that acts on it, committed in budgeted batches.
+    """
+
+    def __init__(self, database, *, locked: bool):
+        self._database = database
+        self.locked = locked
+        self.began_at: float | None = None
+        self.began_seq = 0
+        self.seq = 0
+
+    def execute(self, sql, parameters=()):
+        if not self.locked:
+            if str(sql).lstrip().split(None, 1)[0].upper() in _WRITE_VERBS:
+                raise _WriteNeeded
+        elif self.began_at is None:
+            self._database.execute("BEGIN IMMEDIATE")
+            self.began_at = time.monotonic()
+            self.began_seq = self.seq
+        return self._database.execute(sql, parameters)
+
+    def due(self) -> bool:
+        """Whether the open batch has reached its row count or time budget."""
+        if self.began_at is None:
+            return False
+        every = _facade().IMPORT_COMMIT_EVERY
+        return (every > 0 and self.seq - self.began_seq >= every) or \
+            time.monotonic() - self.began_at >= _facade().IMPORT_WRITE_BUDGET_SECONDS
+
+    def commit(self) -> None:
+        """End the batch; the next statement opens the following one."""
+        if self.began_at is not None:
+            self._database.execute("COMMIT")
+            self.began_at = None
+
+    def __getattr__(self, name):
+        return getattr(self._database, name)
+
 
 def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                            source_file: str, turns: list[dict[str, Any]]
@@ -587,19 +641,23 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
             if text:
                 final_assistant_texts.append(text)
     database = _facade().conn()
-    database.execute("BEGIN IMMEDIATE")
-    try:
-        out = _store_transcript_turns_txn(
-            database, agent_id=agent_id,
-            backend_session_id=backend_session_id,
-            source_file=source_file, turns=turns,
-            final_assistant_texts=final_assistant_texts)
-        database.execute("COMMIT")
-        return out
-    except Exception:
-        if database.in_transaction:
-            database.execute("ROLLBACK")
-        raise
+    for locked in (False, True):
+        writer = _ImportWriter(database, locked=locked)
+        try:
+            out = _store_transcript_turns_txn(
+                writer, agent_id=agent_id,
+                backend_session_id=backend_session_id,
+                source_file=source_file, turns=turns,
+                final_assistant_texts=final_assistant_texts)
+            writer.commit()
+            return out
+        except _WriteNeeded:
+            continue
+        except Exception:
+            if database.in_transaction:
+                database.execute("ROLLBACK")
+            raise
+    raise AssertionError("the locked import pass cannot need a write")
 
 
 _FINAL_TWIN_WINDOW_S = 600
@@ -633,9 +691,10 @@ class _FinalRows:
     Every assistant turn of an import looks for its request's final row or a
     twin among them. Asking SQLite each time scanned the whole conversation
     per turn (no index covers ``source_file``): ~33 s of a 45 s import of a
-    13k-row transcript, all of it holding the writer lock. Within a batch nothing else can write
-    (BEGIN IMMEDIATE), so the rows only change through this import's own
-    deletes and upserts, which ``discard`` follows.
+    13k-row transcript, all of it holding the writer lock. Between commits the
+    rows change through this import's own deletes and upserts, which
+    ``discard`` follows; each commit drops the cache, since other writers
+    may run then.
     """
 
     def __init__(self, database, agent_id: str, backend_session_id: str):
@@ -708,6 +767,21 @@ def _final_twins(final_rows: _FinalRows, *, text: str, timestamp: Any,
     return twins
 
 
+def _delete_slot(database, agent_id: str, backend_session_id: str,
+                 source_file: str, seq: int) -> int:
+    """Clear an import slot, taking the write lock only when it is occupied."""
+    if database.execute(
+            """SELECT 1 FROM messages WHERE agent_id = ? AND backend_session_id = ?
+                  AND source_file = ? AND seq = ? LIMIT 1""",
+            (agent_id, backend_session_id, source_file, seq)).fetchone() is None:
+        return 0
+    return database.execute(
+        """DELETE FROM messages
+            WHERE agent_id = ? AND backend_session_id = ?
+              AND source_file = ? AND seq = ?""",
+        (agent_id, backend_session_id, source_file, seq)).rowcount
+
+
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
@@ -763,32 +837,33 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
     final_rows = _FinalRows(database, agent_id, backend_session_id)
-    batch_started = time.monotonic()
+
+    def commit_batch() -> None:
+        nonlocal latest_revision
+        # Publish the revision with each committed chunk, including
+        # removals, so a later lock failure cannot hide durable changes.
+        if skipped_slot_removed:
+            latest_revision = max(latest_revision, _next_revision(database))
+        database.execute(
+            """INSERT INTO conversation_heads
+                   (agent_id, backend_session_id, revision, replace_revision)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+                   revision = MAX(conversation_heads.revision, excluded.revision),
+                   replace_revision = MAX(conversation_heads.replace_revision,
+                                          excluded.replace_revision)""",
+            (agent_id, backend_session_id, latest_revision,
+             latest_revision if skipped_slot_removed else 0))
+        database.commit()
+        # SQLite does not promise fair immediate writer reacquisition.
+        # Yield outside the transaction so admissions can take the writer.
+        time.sleep(_facade().IMPORT_WRITER_YIELD_SECONDS)
+        final_rows.invalidate()
+
     for seq, turn in enumerate(turns):
-        if seq and _facade().IMPORT_COMMIT_EVERY > 0 and (
-                seq % _facade().IMPORT_COMMIT_EVERY == 0
-                or time.monotonic() - batch_started >= _facade().IMPORT_WRITE_BUDGET_SECONDS):
-            # Publish the revision with each committed chunk, including
-            # removals, so a later lock failure cannot hide durable changes.
-            if skipped_slot_removed:
-                latest_revision = max(latest_revision, _next_revision(database))
-            database.execute(
-                """INSERT INTO conversation_heads
-                       (agent_id, backend_session_id, revision, replace_revision)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
-                       revision = MAX(conversation_heads.revision, excluded.revision),
-                       replace_revision = MAX(conversation_heads.replace_revision,
-                                              excluded.replace_revision)""",
-                (agent_id, backend_session_id, latest_revision,
-                 latest_revision if skipped_slot_removed else 0))
-            database.execute("COMMIT")
-            # SQLite does not promise fair immediate writer reacquisition.
-            # Yield outside the transaction so admissions can take the writer.
-            time.sleep(_facade().IMPORT_WRITER_YIELD_SECONDS)
-            database.execute("BEGIN IMMEDIATE")
-            final_rows.invalidate()
-            batch_started = time.monotonic()
+        database.seq = seq
+        if database.due():
+            commit_batch()
         role = turn.get("role")
         if role == "user":
             closed_authority.update(authority_tools)
@@ -872,11 +947,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # A retry's copy: the matched client row already stands for
                 # it. Imported, it showed the message twice and later replies
                 # lost their sender. Clear whatever an earlier import left here.
-                removed = database.execute(
-                    """DELETE FROM messages
-                        WHERE agent_id = ? AND backend_session_id = ?
-                          AND source_file = ? AND seq = ?""",
-                    (agent_id, backend_session_id, source_file, seq)).rowcount
+                removed = _delete_slot(database, agent_id, backend_session_id,
+                                       source_file, seq)
                 skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
             if rows:
@@ -893,11 +965,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # import left here would outlive it. When the parser starts
                 # hiding a message every later turn shifts down, and the old
                 # occupant of this slot stayed visible as a duplicate.
-                removed = database.execute(
-                    """DELETE FROM messages
-                        WHERE agent_id = ? AND backend_session_id = ?
-                          AND source_file = ? AND seq = ?""",
-                    (agent_id, backend_session_id, source_file, seq)).rowcount
+                removed = _delete_slot(database, agent_id, backend_session_id,
+                                       source_file, seq)
                 skipped_slot_removed = skipped_slot_removed or removed > 0
                 continue
             current_origin, current_sender_agent_id = "user", ""
@@ -964,7 +1033,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         existing = database.execute(
             """SELECT role, timestamp, text, kind, tool_name, tools_json,
                       display_cells_json, updated_at, revision,
-                      origin, sender_agent_id, trace_id, phase
+                      origin, sender_agent_id, trace_id, phase, source_file, seq
                  FROM messages WHERE message_id = ?""",
             (msg_id,),
         ).fetchone()
@@ -990,34 +1059,39 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         revision = int(existing["revision"]) if unchanged else _next_revision(database)
         updated_at = int(existing["updated_at"]) if unchanged else now_ms()
         latest_revision = max(latest_revision, revision)
-        database.execute(
-            """INSERT INTO messages (
-               message_id, agent_id, backend_session_id, source_file, seq,
-               role, timestamp, text, kind, tool_name, tools_json,
-               display_cells_json, updated_at, revision, origin,
-               sender_agent_id, trace_id, phase
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(message_id) DO UPDATE SET
-               trace_id = COALESCE(excluded.trace_id, messages.trace_id),
-               phase = excluded.phase,
-               source_file = excluded.source_file,
-               seq = excluded.seq,
-               role = excluded.role,
-               timestamp = excluded.timestamp,
-               text = excluded.text,
-               kind = excluded.kind,
-               tool_name = excluded.tool_name,
-               tools_json = excluded.tools_json,
-               display_cells_json = excluded.display_cells_json,
-               updated_at = excluded.updated_at,
-               revision = excluded.revision,
-               origin = excluded.origin,
-               sender_agent_id = excluded.sender_agent_id""",
-        (msg_id, agent_id, backend_session_id, source_file, seq,
-             role, timestamp, text, kind, tool_name, tools_json,
-             display_cells_json, updated_at,
-             revision, origin, sender_agent_id, row_trace or None, phase),
-        )
+        # The upsert of an identical row still rewrites its pages into the WAL;
+        # skip it when every column it sets already holds that value.
+        rewrite = not unchanged or existing["source_file"] != source_file \
+            or existing["seq"] != seq
+        if rewrite:
+            database.execute(
+                """INSERT INTO messages (
+                   message_id, agent_id, backend_session_id, source_file, seq,
+                   role, timestamp, text, kind, tool_name, tools_json,
+                   display_cells_json, updated_at, revision, origin,
+                   sender_agent_id, trace_id, phase
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(message_id) DO UPDATE SET
+                   trace_id = COALESCE(excluded.trace_id, messages.trace_id),
+                   phase = excluded.phase,
+                   source_file = excluded.source_file,
+                   seq = excluded.seq,
+                   role = excluded.role,
+                   timestamp = excluded.timestamp,
+                   text = excluded.text,
+                   kind = excluded.kind,
+                   tool_name = excluded.tool_name,
+                   tools_json = excluded.tools_json,
+                   display_cells_json = excluded.display_cells_json,
+                   updated_at = excluded.updated_at,
+                   revision = excluded.revision,
+                   origin = excluded.origin,
+                   sender_agent_id = excluded.sender_agent_id""",
+            (msg_id, agent_id, backend_session_id, source_file, seq,
+                 role, timestamp, text, kind, tool_name, tools_json,
+                 display_cells_json, updated_at,
+                 revision, origin, sender_agent_id, row_trace or None, phase),
+            )
         if source_file.lower().startswith("final:"):
             final_rows.invalidate()
         else:
@@ -1054,6 +1128,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         })
     # The turns this import touched: their last row carries the summary.
     for trace in sorted(touched_traces | ({newest_trace} if newest_trace else set())):
+        if database.due():
+            commit_batch()
         latest_revision = max(latest_revision, stamp_turn(
             database, agent_id, trace, _next_revision))
     # Compare markup-normalized so a streamed live row (with <speak>/<vox>/…)
@@ -1086,14 +1162,15 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             LIMIT 1""",
         (agent_id, backend_session_id, len(turns)),
     ).fetchone()
-    database.execute(
-        """DELETE FROM messages
-            WHERE agent_id = ? AND backend_session_id = ? AND seq >= ?
-              AND source_file NOT LIKE 'client:%'
-              AND source_file NOT LIKE 'live:%'
-              AND source_file NOT LIKE 'final:%'""",
-        (agent_id, backend_session_id, len(turns)),
-    )
+    if stale is not None:
+        database.execute(
+            """DELETE FROM messages
+                WHERE agent_id = ? AND backend_session_id = ? AND seq >= ?
+                  AND source_file NOT LIKE 'client:%'
+                  AND source_file NOT LIKE 'live:%'
+                  AND source_file NOT LIKE 'final:%'""",
+            (agent_id, backend_session_id, len(turns)),
+        )
     stale_replace_revision = (
         _next_revision(database)
         if stale is not None or skipped_slot_removed else 0)
@@ -1101,6 +1178,14 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     latest_revision = max(latest_revision, replace_revision)
     latest_revision = max(latest_revision,
                           _attach_authority_tools(database, agent_id, authority_tools))
+    head = database.execute(
+        """SELECT revision, replace_revision FROM conversation_heads
+            WHERE agent_id = ? AND backend_session_id = ?""",
+        (agent_id, backend_session_id)).fetchone()
+    if database.began_at is None and head is not None \
+            and head["revision"] >= latest_revision \
+            and head["replace_revision"] >= replace_revision:
+        return out  # nothing written, and the head already covers every row
     database.execute(
         """INSERT INTO conversation_heads (
                agent_id, backend_session_id, revision, replace_revision

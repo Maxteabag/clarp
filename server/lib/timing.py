@@ -37,6 +37,10 @@ SQLITE_BUSY_TIMEOUT_MS = 5000
 # process's maintenance worker. That worker used to run on the same second
 # as interrupt recovery and skip the INTERRUPTED mark (SQLITE_BUSY).
 SQLITE_RECOVERY_BUSY_TIMEOUT_MS = 30_000
+# Writes whose loss wedges an agent (opening or closing a turn, a lifecycle
+# state receipt) wait out a long writer instead of failing at the interactive
+# budget: on 2026-10-10 a 5 s miss stranded queued handoffs.
+SQLITE_CRITICAL_BUSY_TIMEOUT_MS = 20_000
 SQLITE_LOCK_RETRIES = 3
 SQLITE_LOCK_RETRY_SLEEP_SEC = 0.05
 # Let recover_runtime finish before taking PRAGMA wal_checkpoint(TRUNCATE).

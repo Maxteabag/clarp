@@ -179,6 +179,14 @@ def janitor_agent_ids(c=None) -> list[str]:
     return [r[0] for r in _c(c).execute("SELECT a.agent_id FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.is_janitor=1 AND a.deleted_at IS NULL AND a.archived_at IS NULL ORDER BY a.persona")]
 
 
+def admission_fingerprint(agent_id: str, c=None):
+    """What a resolved demand configuration must still match to be admitted."""
+    row = _c(c).execute("""SELECT j.revision,j.generation,j.enabled,a.backend,a.model,a.effort,
+                                  a.archived_at IS NULL AND a.deleted_at IS NULL AS live
+        FROM agents a JOIN janitor_configs j ON j.agent_id=a.agent_id WHERE a.agent_id=?""", (agent_id,)).fetchone()
+    return tuple(row) if row else None
+
+
 def agent_config_row(agent_id: str, c=None):
     """The agent's backend/model/effort next to its configuration, one row."""
     return _c(c).execute("""SELECT a.backend,a.model,a.effort,j.template_id,j.scope_json,j.execution_json,j.options_json

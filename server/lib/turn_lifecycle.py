@@ -33,12 +33,15 @@ transition from the current state.
 from __future__ import annotations
 
 import collections
+import contextlib
 import json
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from . import db
 from .db import conn, now_ms
+from .timing import SQLITE_CRITICAL_BUSY_TIMEOUT_MS
 from .log import log
 from .protocol import AgentState, TurnSource
 
@@ -207,6 +210,11 @@ class IllegalTransition(Exception):
             f"{from_state or 'none'} -> {to_state}")
 
 
+
+def _critical_write():
+    """Wait out a long writer: losing this write wedges the agent's turn."""
+    return db.busy_timeout(SQLITE_CRITICAL_BUSY_TIMEOUT_MS)
+
 @dataclass(frozen=True)
 class Transition:
     agent_id: str
@@ -297,12 +305,15 @@ class TurnStateMachine:
         detail = _detail_with_origin(agent_id, target, detail, stamp)
         from . import agents as agents_db
         runtime_id = agents_db.current_runtime_id(agent_id)
-        cursor = conn().execute(
-            """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
-               VALUES (?, ?, ?, ?, ?)""",
-            (agent_id, runtime_id, stamp, target,
-             json.dumps(detail) if detail else None))
-        _settle_turn(agent_id, event, target, detail, stamp)
+        # A phase delta is noise if lost; a lifecycle receipt is not.
+        with (contextlib.nullcontext() if event == TurnEvent.TEXT_STREAMED
+              else _critical_write()):
+            cursor = conn().execute(
+                """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (agent_id, runtime_id, stamp, target,
+                 json.dumps(detail) if detail else None))
+            _settle_turn(agent_id, event, target, detail, stamp)
         from . import live_hub
         live_hub.observe_transition(agent_id, event, target,
                                     {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
@@ -376,27 +387,30 @@ class TurnStateMachine:
             raise ValueError(f"invalid turn source: {source}")
         from . import agents as agents_db
         runtime_id = agents_db.current_runtime_id(agent_id)
-        cursor = conn().execute(
-            """INSERT INTO turns
-                   (agent_id, runtime_id, source, trace_id, synthesize_audio,
-                    started_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (agent_id, runtime_id, source, trace_id,
-             1 if synthesize_audio else 0, now_ms()))
+        with _critical_write():
+            cursor = conn().execute(
+                """INSERT INTO turns
+                       (agent_id, runtime_id, source, trace_id, synthesize_audio,
+                        started_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (agent_id, runtime_id, source, trace_id,
+                 1 if synthesize_audio else 0, now_ms()))
         return int(cursor.lastrowid or 0)
 
     @staticmethod
     def close_turn(turn_id: int) -> None:
-        conn().execute("UPDATE turns SET ended_at = ? WHERE turn_id = ?",
-                       (now_ms(), turn_id))
+        with _critical_write():
+            conn().execute("UPDATE turns SET ended_at = ? WHERE turn_id = ?",
+                           (now_ms(), turn_id))
 
     @staticmethod
     def close_turns_for_trace(agent_id: str, trace_id: str) -> int:
         """End every open turn row of ``trace_id``; returns how many."""
-        cursor = conn().execute(
-            """UPDATE turns SET ended_at = ?
-                WHERE agent_id = ? AND trace_id = ? AND ended_at IS NULL""",
-            (now_ms(), agent_id, trace_id))
+        with _critical_write():
+            cursor = conn().execute(
+                """UPDATE turns SET ended_at = ?
+                    WHERE agent_id = ? AND trace_id = ? AND ended_at IS NULL""",
+                (now_ms(), agent_id, trace_id))
         return int(cursor.rowcount or 0)
 
     @staticmethod

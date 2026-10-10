@@ -157,34 +157,47 @@ def get_request_run(role: str, request_id: str) -> dict | None:
 def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str | None = None) -> dict | None:
     run_id = _request_run_id(role, request_id)
     metadata = _metadata(context)
-    with janitors._write() as c:
-        _recover_expired(c, db.now_ms())
-        existing = store.run_row(run_id, c)
-        if existing:
-            frozen = janitors._decode(existing["configuration_json"], {})
-            if frozen.get("context") != metadata or frozen.get("target_agent_id") != target_agent_id:
-                raise janitors.JanitorError("Request identity already refers to different work", 409, "run_conflict")
-            return janitors.get_run(run_id)
+    from .janitor_design_policy import effective_chain
+    # Resolving builds every Janitor's full view; under BEGIN IMMEDIATE on a
+    # swapping host that held the write lock 20-50 s (2026-10-10). Resolve
+    # first, then admit only if the chosen configuration is still current.
+    for _attempt in range(3):
         config = resolve(role, target_agent_id=target_agent_id)
-        if (not config or config["execution"].get("executor") != "ephemeral" or janitors.has_active_run(config["agent_id"])
-                or janitors._pending_demand_claim(c, config["agent_id"])):
-            return None
-        attachment = next(v for v in config["attachments"] if v["enabled"]
-                          and v["trigger_id"] == janitors.template(role)["default_trigger_id"])
-        janitors._active_attachment(c, attachment["attachment_id"], config["generation"])
-        now = db.now_ms()
-        from .janitor_design_policy import effective_chain
-        effective = effective_chain(config["session"])
-        frozen = {"template_id": role, "executor": "ephemeral", "provider": config["execution"]["provider"],
-            "backend": config["backend"], "model": config["model"], "effort": config["effort"],
-            "scope": config["scope"], "options": config["options"], "trigger_id": attachment["trigger_id"],
-            "trigger_version": attachment["trigger_version"], "config": attachment["config"],
-            "context": metadata, "target_agent_id": target_agent_id, "expires_at": now + DEMAND_RUN_TTL_MS,
-            "effective_chain": effective}
-        store.insert_run(c, run_id=run_id, agent_id=config["agent_id"], session=config["session"],
-                         attachment_id=attachment["attachment_id"], generation=config["generation"], trace_id=run_id,
-                         status="running", candidates=[], configuration=frozen, created_at=now, started_at=now)
-    return janitors.get_run(run_id)
+        effective = effective_chain(config["session"]) if config else None
+        with janitors._write() as c:
+            _recover_expired(c, db.now_ms())
+            existing = store.run_row(run_id, c)
+            if existing:
+                frozen = janitors._decode(existing["configuration_json"], {})
+                if frozen.get("context") != metadata or frozen.get("target_agent_id") != target_agent_id:
+                    raise janitors.JanitorError("Request identity already refers to different work", 409, "run_conflict")
+                return janitors.get_run(run_id)
+            if config and store.admission_fingerprint(config["agent_id"], c) != (
+                    config["revision"], config["generation"], 1, config["backend"],
+                    config["model"], config["effort"], 1):
+                continue  # reconfigured since it was resolved
+            if (not config or config["execution"].get("executor") != "ephemeral" or janitors.has_active_run(config["agent_id"])
+                    or janitors._pending_demand_claim(c, config["agent_id"])):
+                return None
+            _insert_demand_run(c, role, run_id, config, effective, metadata, target_agent_id)
+        return janitors.get_run(run_id)
+    return None  # reconfigured under every attempt; the next request retries
+
+
+def _insert_demand_run(c, role, run_id, config, effective, metadata, target_agent_id) -> None:
+    attachment = next(v for v in config["attachments"] if v["enabled"]
+                      and v["trigger_id"] == janitors.template(role)["default_trigger_id"])
+    janitors._active_attachment(c, attachment["attachment_id"], config["generation"])
+    now = db.now_ms()
+    frozen = {"template_id": role, "executor": "ephemeral", "provider": config["execution"]["provider"],
+        "backend": config["backend"], "model": config["model"], "effort": config["effort"],
+        "scope": config["scope"], "options": config["options"], "trigger_id": attachment["trigger_id"],
+        "trigger_version": attachment["trigger_version"], "config": attachment["config"],
+        "context": metadata, "target_agent_id": target_agent_id, "expires_at": now + DEMAND_RUN_TTL_MS,
+        "effective_chain": effective}
+    store.insert_run(c, run_id=run_id, agent_id=config["agent_id"], session=config["session"],
+                     attachment_id=attachment["attachment_id"], generation=config["generation"], trace_id=run_id,
+                     status="running", candidates=[], configuration=frozen, created_at=now, started_at=now)
 
 
 def _recover_expired(c, now: int) -> int:

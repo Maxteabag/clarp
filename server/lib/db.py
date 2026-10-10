@@ -396,13 +396,15 @@ def is_locked_error(exc: BaseException) -> bool:
 
 @contextmanager
 def busy_timeout(timeout_ms: int) -> Iterator[sqlite3.Connection]:
-    """Temporarily raise this thread's SQLite busy timeout, then restore it."""
+    """Temporarily set this thread's SQLite busy timeout, then restore the
+    previous one, so a nested use cannot cut an outer, longer wait short."""
     connection = conn()
-    connection.execute(f"PRAGMA busy_timeout = {int(timeout_ms)}")
+    previous = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+    connection.execute(f"PRAGMA busy_timeout = {max(int(timeout_ms), previous)}")
     try:
         yield connection
     finally:
-        connection.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
+        connection.execute(f"PRAGMA busy_timeout = {previous}")
 
 
 def best_effort_write(sql: str, parameters=(), *, timeout_ms: int = 20) -> bool:
