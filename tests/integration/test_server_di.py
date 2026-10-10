@@ -3269,6 +3269,61 @@ def test_stop_leaves_effects_unknown_when_bookkeeping_fails(running_server, monk
     assert "goals_paused" not in json.loads(raw)
 
 
+def test_snapshot_after_stop_carries_its_provenance(running_server):
+    # Wire proof for clients that reconnect: the snapshot row (not only the
+    # replayed agent-state detail) says who stopped the agent and why.
+    base, _ctx, _srv = running_server
+    _post(base + "/stop", {"session": "claude", "actor": "agent:theo-97e5",
+                           "reason": "Pebble busy with no process"})
+
+    status, body = _get(base + "/agents/snapshot")
+
+    assert status == 200
+    row = next(a for a in json.loads(body)["agents"] if a["session"] == "claude")
+    assert row["latest_state"] == "interrupted"
+    activity = row["activity"]
+    assert (activity["stop_actor"], activity["stop_actor_verified"],
+            activity["stop_reason"]) == ("agent:theo-97e5", False,
+                                         "Pebble busy with no process")
+
+
+def test_immediate_stop_event_and_the_durable_state_agree_on_ts_and_provenance(running_server):
+    # A client that stamps a ts-less event with its own clock would later
+    # reject the watcher's event (persisted, older ts) as stale and lose the
+    # provenance. The Stop's own agent-state must carry the persisted row's
+    # ts and detail, exactly as the watcher replays it and the snapshot shows.
+    from lib import agents as agents_db, db
+    from lib.state_watcher import StateLogWatcher
+    base, ctx, _srv = running_server
+    agent_id = agents_db.get_by_session("claude")["agent_id"]
+    _post(base + "/stop", {"session": "claude", "actor": "agent:theo-97e5",
+                           "reason": "busy with no process"})
+    row = db.conn().execute(
+        "SELECT state_id, ts FROM state_log WHERE agent_id = ? AND kind = 'interrupted'"
+        " ORDER BY state_id DESC LIMIT 1", (agent_id,)).fetchone()
+    watcher = StateLogWatcher(ctx.stream)
+    watcher._last_id = int(row["state_id"]) - 1
+    watcher._poll_once()
+
+    payloads = [json.loads(r["payload"]) for r in db.conn().execute(
+        "SELECT payload FROM sse_events WHERE agent_id = ? AND type IN"
+        " ('agent-state', 'agent-activity') ORDER BY event_id", (agent_id,))]
+    states = [p for p in payloads if p["type"] == "agent-state" and p["kind"] == "interrupted"]
+    activities = [p for p in payloads if p["type"] == "agent-activity" and p["kind"] == "interrupted"]
+    assert len(states) == 2, "the Stop's own event and the watcher's"
+    for event in states:
+        assert event["ts"] == row["ts"]
+        assert (event["detail"]["source"], event["detail"]["stop_actor"],
+                event["detail"]["stop_actor_verified"], event["detail"]["stop_reason"]) == (
+            "user_stop", "agent:theo-97e5", False, "busy with no process")
+    assert activities and all(a["ts"] == row["ts"] and a["stop_actor"] == "agent:theo-97e5"
+                              for a in activities)
+    _status, body = _get(base + "/agents/snapshot")
+    snap = next(a for a in json.loads(body)["agents"] if a["session"] == "claude")
+    assert snap["latest_state_ts"] == row["ts"] == snap["activity"]["ts"]
+    assert snap["activity"]["stop_reason"] == "busy with no process"
+
+
 def test_stop_without_actor_defaults_to_the_user(running_server):
     from lib import agents as agents_db
     base, _ctx, _srv = running_server

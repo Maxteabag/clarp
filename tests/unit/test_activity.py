@@ -106,3 +106,37 @@ def test_account_parked_turn_without_a_message_still_explains_itself():
     )
     assert ev["phase"] == "account_recovery"
     assert ev["summary"] == "Waiting for an account with available usage"
+
+
+def test_stop_and_repair_provenance_reach_the_activity_projection():
+    # Contract 61: the snapshot row's activity and the agent-activity SSE
+    # carry who stopped or repaired the agent, not only agent-state's detail.
+    from lib import events
+    stopped = state_activity_event(
+        agent_id="a1", session="pebble", persona="Pebble",
+        kind=AgentState.INTERRUPTED, ts=1,
+        detail={"source": "user_stop", "message": "Turn stopped",
+                "stop_actor": "agent:theo-97e5", "stop_actor_verified": False,
+                "stop_reason": "busy with no process"})
+    assert (stopped["stop_actor"], stopped["stop_actor_verified"],
+            stopped["stop_reason"]) == ("agent:theo-97e5", False, "busy with no process")
+    repaired = state_activity_event(
+        agent_id="a1", session="pebble", persona="Pebble", kind=AgentState.DONE,
+        ts=2, detail={"source": "slot_repair", "repair_actor": "user",
+                      "repair_actor_verified": True, "repair_reason": "stuck",
+                      "released_trace": "t1"})
+    assert (repaired["repair_actor"], repaired["repair_actor_verified"],
+            repaired["repair_reason"], repaired["released_trace"]) == (
+        "user", True, "stuck", "t1")
+    for event in (stopped, repaired):
+        assert events.as_event(event)["type"] == SSEType.AGENT_ACTIVITY
+
+
+def test_activity_without_provenance_omits_the_fields():
+    # An older Stop (source user_stop alone) or any other state: absent, so a
+    # client never reads an actor that was not recorded.
+    for detail in ({"source": "user_stop", "message": "Turn stopped"}, {}):
+        event = state_activity_event(agent_id="a1", session="s", persona="P",
+                                     kind=AgentState.INTERRUPTED, ts=1, detail=detail)
+        assert not {"stop_actor", "stop_actor_verified", "stop_reason",
+                    "repair_actor"} & set(event)

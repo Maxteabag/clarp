@@ -4672,15 +4672,25 @@ class Handler(BaseHTTPRequestHandler):
                         agent_id, f"{stopped_by}: {reason}" if reason else stopped_by)
                 if effects is not None:
                     effects["goals_paused"] = int(goals_paused)
-                turn_lifecycle.try_transition(
+                stopped = turn_lifecycle.try_transition(
                     agent_id, TurnEvent.STOP_REQUESTED,
                     {"source": "user_stop", "message": "Turn stopped",
                      "stop_actor": actor, "stop_actor_verified": actor_verified,
                      "stop_reason": reason})
                 if getattr(self.ctx, "stream", None) is not None:
-                    events.broadcast(self.ctx.stream, events.agent_state(
-                        session=session, agent_id=agent_id,
-                        kind=AgentState.INTERRUPTED))
+                    if stopped is not None:
+                        # The persisted row's ts and detail, as the state
+                        # watcher replays it: a ts-less event gets a client's
+                        # clock, and the watcher's older ts then looks stale.
+                        events.broadcast(self.ctx.stream, events.agent_state(
+                            session=session, agent_id=agent_id,
+                            kind=stopped.to_state, persona=agent.get("persona"),
+                            ts=stopped.ts, detail=stopped.detail))
+                    else:
+                        # Nothing was recorded (an agent with no state yet).
+                        events.broadcast(self.ctx.stream, events.agent_state(
+                            session=session, agent_id=agent_id,
+                            kind=AgentState.INTERRUPTED))
                     queue_state = turn_queue.state(agent_id)
                     events.broadcast(self.ctx.stream, events.queue_updated(
                         session=session, agent_id=agent_id,
