@@ -229,7 +229,7 @@ pub fn frame_budget_check(out: String) {
         scenario("idle, 0 working", rows1, |_, _| {}),
         ("busy fleet", Box::new({
             let mut sent = false;
-            move |app: &crate::App, _: &crate::AppWindow, _: Duration| {
+            move |app: &crate::App, _: &crate::AppWindow, elapsed: Duration| {
                 if !sent {
                     sent = true;
                     let started = control("/__control/activity", &json!({"working": 16, "jobs": 30}))
@@ -238,6 +238,9 @@ pub fn frame_budget_check(out: String) {
                     return false;
                 }
                 if busy_agents(app) < 16 || !any_shimmering() {
+                    if elapsed.as_millis() / 100 == 120 {
+                        println!("perf budget waiting: {} agents busy, shimmering {}", busy_agents(app), any_shimmering());
+                    }
                     return false;
                 }
                 let agents = app.engine.borrow().roster().agents().len();
