@@ -32,13 +32,20 @@ def pause(config):
     return janitors.set_enabled(current["session"], current["revision"], False)
 
 
-def wait_for(check):
-    for _ in range(200):
+def wait_for(check, timeout=10.0):
+    # A wall-clock deadline, not a poll count. A ready() poll is itself a
+    # request that notifies the worker and takes the write lock, so on a
+    # loaded runner 200 polls ran out first while the worker was still about
+    # to finish (Docker CI, 2026-10-10: 3439e591, c385a2dd, e2365ef6, with the
+    # worker's batch logged as ready right after).
+    deadline = time.monotonic() + timeout
+    while True:
         result = check()
         if result:
             return result
+        if time.monotonic() >= deadline:
+            pytest.fail("explanation worker did not finish")
         time.sleep(.01)
-    pytest.fail("explanation worker did not finish")
 
 
 def ready(service, item=ITEM, *, target_agent_id=None):
