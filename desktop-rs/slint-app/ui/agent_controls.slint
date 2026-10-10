@@ -1,4 +1,4 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, Motion } from "theme.slint";
 import { Switch } from "std-widgets.slint";
 
 // A square icon button with a tooltip-style accessible label.
@@ -103,7 +103,7 @@ export component ToggleRow inherits HorizontalLayout {
 export component Busy inherits HorizontalLayout {
     in property <bool> running: true;
     in property <bool> reduced-motion;
-    property <float> phase: root.running && !root.reduced-motion ? Math.mod(animation-tick() / 900ms, 1.0) : 0.0;
+    property <float> phase: root.running && !root.reduced-motion ? Math.mod(Motion.spin / 900ms, 1.0) : 0.0;
     spacing: 3px;
     alignment: center;
     accessible-role: progress-indicator;

@@ -1,4 +1,4 @@
-import { Palette, Focus, ChatLook, Look, VimBridge, ChatText, SendFlight, RevealText } from "theme.slint";
+import { Palette, Focus, ChatLook, Look, VimBridge, ChatText, SendFlight, RevealText, Motion } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
@@ -393,7 +393,7 @@ component LiveItem inherits Rectangle {
                 accessible-id: "shimmer:" + root.live.key;
                 accessible-label: root.live.title;
                 // The glow's centre runs a little past both ends.
-                property <float> phase: Math.mod(animation-tick() / 1800ms, 1.0) * 1.6 - 0.3;
+                property <float> phase: Math.mod(Motion.glow / 1800ms, 1.0) * 1.6 - 0.3;
                 property <int> count: root.live.letters.length;
                 property <color> low: root.live.shimmer == "muted" ? Palette.shimmer-muted-low : Palette.shimmer-accent-low;
                 property <color> high: root.live.shimmer == "muted" ? Palette.shimmer-muted-high : Palette.shimmer-accent-high;

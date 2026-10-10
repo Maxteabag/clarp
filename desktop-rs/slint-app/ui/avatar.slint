@@ -1,4 +1,4 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, Motion } from "theme.slint";
 
 // The avatar sizes (Settings: Agent picture size) and the soft rings
 // drawn round avatars. Rust sets the sizes and makes each ring at the
@@ -79,7 +79,7 @@ export component AvatarActivity inherits Rectangle {
     in property <bool> working;
     in property <bool> reduced-motion;
     // One breath every 1.6 s; only a working, moving avatar follows the clock.
-    out property <float> phase: root.working && !root.reduced-motion ? Math.mod(animation-tick() / 1600ms, 1.0) : 0.0;
+    out property <float> phase: root.working && !root.reduced-motion ? Math.mod(Motion.glow / 1600ms, 1.0) : 0.0;
     width: root.size;
     height: root.size;
     AgentAvatar {

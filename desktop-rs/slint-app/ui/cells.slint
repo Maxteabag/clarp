@@ -1,4 +1,4 @@
-import { Palette, Look, ChatText } from "theme.slint";
+import { Palette, Look, ChatText, Motion } from "theme.slint";
 
 export struct CellLine {
     // diff_old, diff_new, error, or ""
@@ -121,7 +121,7 @@ export component DisplayCellCard inherits Rectangle {
 // its reply waits to be shown whole ("Show when ready").
 export component TypingIndicator inherits Rectangle {
     in property <bool> reduced-motion;
-    property <float> phase: root.reduced-motion ? 0.0 : Math.mod(animation-tick() / 1200ms, 1.0);
+    property <float> phase: root.reduced-motion ? 0.0 : Math.mod(Motion.spin / 1200ms, 1.0);
     width: 132px;
     height: 32px;
     border-radius: 2px;
