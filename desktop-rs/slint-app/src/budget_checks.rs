@@ -21,7 +21,7 @@ use serde_json::json;
 use slint::ComponentHandle;
 use slint::platform::Key;
 
-use super::{Stage, check, control, quiet, run_stages};
+use super::{Stage, check, control, quiet, report, run_stages};
 use crate::headless::{self, Pacing};
 
 /// Busy CPU budget (ms of UI thread per second) and frame budget (ms, p95).
@@ -127,6 +127,27 @@ fn any_shimmering() -> bool {
         .is_some()
 }
 
+/// The process's resident and peak memory (VmRSS, VmHWM), in MB.
+fn memory_mb() -> (f64, f64) {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let field = |name: &str| {
+        status.lines().find_map(|l| l.strip_prefix(name)).and_then(|v| v.split_whitespace().next()?.parse::<f64>().ok()).map_or(0.0, |kb| kb / 1024.0)
+    };
+    (field("VmRSS:"), field("VmHWM:"))
+}
+
+/// Starts the peak (VmHWM) again from what is resident now.
+fn reset_peak() -> Result<(), String> {
+    std::fs::write("/proc/self/clear_refs", "5").map_err(|e| format!("clear_refs: {e}"))
+}
+
+/// The UI thread's longest single piece of work since `from` (a frame or
+/// an engine wake), in ms.
+fn longest_since(from: Duration) -> f64 {
+    let stats = crate::perf::stats();
+    stats.frames.iter().chain(stats.wakes.iter()).filter(|e| e.at >= from).map(|e| crate::perf::ms(e.took)).fold(0.0, f64::max)
+}
+
 fn busy_agents(app: &crate::App) -> usize {
     app.engine.borrow().roster().agents().iter().filter(|a| a.busy).count()
 }
@@ -169,10 +190,20 @@ pub fn frame_budget_check(out: String) {
     let (rows1, rows2, rows3, rows4, rows5, rows6, rows7) =
         (rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone());
     let full1 = full.clone();
+    // The pictures stage: RSS before and after, the peak, the longest block.
+    let memory: Rc<RefCell<(f64, f64, f64, f64)>> = Rc::default();
+    let memory1 = memory.clone();
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _, _| {
-            let loaded = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
-            if !loaded || app.engine.borrow().roster().agents().len() < 180 {
+            let loaded = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
+            if !loaded || !report().composer_focused || app.engine.borrow().roster().agents().len() < 180 {
+                return false;
+            }
+            headless::press_with(&[Key::Control, Key::Alt], "v");
+            true
+        })),
+        ("split", Box::new(|app, _, _| {
+            if app.engine.borrow().panes().pane_count() != 2 {
                 return false;
             }
             let sent = control("/__control/rich", &json!({"session": "rachel", "count": 250}))
@@ -180,11 +211,10 @@ pub fn frame_budget_check(out: String) {
                 .and_then(|()| control("/__control/live", &json!({"on": true})));
             check(sent.is_ok(), &format!("the Host serves 180 agents and a 250-row chat, all idle: {sent:?}"));
             app.engine.borrow_mut().reconnect();
-            headless::press_with(&[Key::Control, Key::Alt], "v");
             true
         })),
         ("two panes", Box::new(|app, _, elapsed| {
-            let ready = app.pane_drafts().len() == 2
+            let ready = app.engine.borrow().panes().pane_count() == 2
                 && app.engine.borrow().conversation("rachel").is_some_and(|c| c.len() >= 250)
                 && app.engine.borrow().live_items()
                 && busy_agents(app) == 0;
@@ -264,6 +294,34 @@ pub fn frame_budget_check(out: String) {
                 false
             }
         })),
+        ("pictures", Box::new({
+            // Six 4K screenshots land in the chat: the peak memory they
+            // take and the UI thread's longest block while they land.
+            let mut started: Option<(u64, f64, Duration)> = None;
+            let memory = memory1.clone();
+            move |_: &crate::App, _: &crate::AppWindow, _: Duration| {
+                let landed = crate::artifacts_view::pictures_landed();
+                let Some((before, rss, from)) = started else {
+                    let (rss, _) = memory_mb();
+                    let reset = reset_peak();
+                    check(reset.is_ok(), &format!("the peak starts again from {rss:.0} MB {:?}", reset.err()));
+                    let gallery: String = (1..=6).map(|n| format!("![Screenshot {n}](clarp-media://asset/screenshot-{n})\n")).collect();
+                    let sent = control("/__control/upsert", &json!({"session": "rachel", "turns": [
+                        {"id": "budget-shots", "role": "assistant", "text": format!("Six screenshots:\n\n```clarp-gallery\n{gallery}```")}]}));
+                    check(sent.is_ok(), &format!("Rachel posts six 4K screenshots: {sent:?}"));
+                    started = Some((landed, rss, crate::perf::now()));
+                    return false;
+                };
+                if landed < before + 6 {
+                    return false;
+                }
+                let (after, peak) = memory_mb();
+                let longest = longest_since(from);
+                println!("perf budget pictures: RSS {rss:.0} → {after:.0} MB, peak {peak:.0} MB, longest UI block {longest:.0} ms");
+                *memory.borrow_mut() = (rss, after, peak, longest);
+                true
+            }
+        })),
         ("verdict", Box::new(move |_, window, _| {
             let rows = rows7.borrow();
             let full = full.borrow();
@@ -279,6 +337,10 @@ pub fn frame_budget_check(out: String) {
                 table.push_str(&row.line());
                 table.push('\n');
             }
+            let (rss, after, peak, longest) = *memory.borrow();
+            table.push_str(&format!(
+                "\nSix 4K screenshots landing in the chat: RSS {rss:.0} → {after:.0} MB, peak {peak:.0} MB, longest UI-thread block {longest:.0} ms\n"
+            ));
             println!("perf budget full frame: {one:.2} ms ({}x{} px)", size.width, size.height);
             let saved = std::fs::write(format!("{out}/budget.md"), &table);
             check(saved.is_ok(), &format!("wrote {out}/budget.md {:?}", saved.err()));
