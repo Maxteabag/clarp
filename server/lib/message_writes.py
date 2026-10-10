@@ -587,11 +587,13 @@ class _ImportWriter:
     An import re-reads the whole transcript on every watcher tick, and almost
     every time nothing changed (11,385 of 11,396 upserts over twelve live
     imports on 2026-10-10 rewrote an identical row). The probe pass reads
-    without any lock and stops at the first write it would make; an
-    unchanged transcript therefore never takes the write lock. Otherwise the
-    import runs again as the locked pass: every statement inside BEGIN
-    IMMEDIATE, as before, so a decision read from a live row cannot go stale
-    before the write that acts on it, committed in budgeted batches.
+    one snapshot (a deferred BEGIN) without the write lock and stops at the
+    first write it would make; it records nothing, so an unchanged transcript
+    writes nothing at all. Otherwise the import runs again as the locked
+    pass: every statement inside BEGIN IMMEDIATE, as before, so a decision
+    read from a live row cannot go stale before the write that acts on it,
+    committed in budgeted batches. Only the locked pass runs the recording
+    helpers (team messages, Oracle delegations, Dreaming, heartbeats), once.
     """
 
     def __init__(self, database, *, locked: bool):
@@ -605,6 +607,11 @@ class _ImportWriter:
         if not self.locked:
             if str(sql).lstrip().split(None, 1)[0].upper() in _WRITE_VERBS:
                 raise _WriteNeeded
+            if not self._database.in_transaction:
+                # One snapshot for the whole probe: separate autocommit reads
+                # could see a concurrent write half-applied and wrongly
+                # conclude there is nothing to write.
+                self._database.execute("BEGIN")
         elif self.began_at is None:
             self._database.execute("BEGIN IMMEDIATE")
             self.began_at = time.monotonic()
@@ -650,8 +657,12 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                 source_file=source_file, turns=turns,
                 final_assistant_texts=final_assistant_texts)
             writer.commit()
+            if not locked and database.in_transaction:
+                database.execute("COMMIT")  # the probe's read snapshot
             return out
         except _WriteNeeded:
+            if database.in_transaction:
+                database.execute("ROLLBACK")  # end the probe's read snapshot
             continue
         except Exception:
             if database.in_transaction:
@@ -922,12 +933,15 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 if current_origin == "heartbeat":
                     heartbeat_accounting = "noop"
                 text = "Heartbeat check: no action needed."
-            skip, text = dreaming.process_assistant_text(agent_id, text)
+            # The probe only transforms; the locked pass records, once.
+            skip, text = dreaming.process_assistant_text(
+                agent_id, text, live=not database.locked)
             if skip:
                 text = "Dreaming check: no action needed."
             skip, text = team_leader.strip_leader_noop(text)
             if skip:
-                team_leader.record_leader_noop(agent_id)
+                if database.locked:
+                    team_leader.record_leader_noop(agent_id)
                 text = "Leader check: no action needed."
             if (
                 current_origin == "heartbeat"
@@ -1097,13 +1111,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         else:
             # The row now carries this transcript's source_file, not final:.
             final_rows.discard((msg_id,))
-        if role == "assistant" and not unchanged:
+        if role == "assistant" and not unchanged and database.locked:
             if heartbeat_accounting == "noop":
                 heartbeat.record_heartbeat_noop_once(agent_id, current_heartbeat_key)
             elif heartbeat_accounting == "activity":
                 heartbeat.record_heartbeat_activity_once(
                     agent_id, current_heartbeat_key)
-        if role == "assistant":
+        if role == "assistant" and database.locked:
             trace_id = str(turn.get("trace_id") or "")
             team_store.capture_assistant_message(
                 agent_id=agent_id,

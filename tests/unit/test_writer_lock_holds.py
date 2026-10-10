@@ -46,7 +46,8 @@ class _Recording:
             self.holds.append(time.monotonic() - self._began)
             self._began = None
         result = self._inner.execute(sql, *args)
-        if verb == "BEGIN":
+        if " ".join(str(sql).split()).upper() == "BEGIN IMMEDIATE":
+            # Only the write lock counts; the probe's read snapshot is a BEGIN.
             self.begins += 1
             self._began = time.monotonic()
         return result
@@ -108,6 +109,108 @@ def test_unchanged_reimport_takes_no_write_lock_and_keeps_rows(tmp_path, monkeyp
     assert recording.begins == 0, "an unchanged transcript must not take the write lock"
     assert _rows(agent_id) == rows
     assert _head(agent_id) == head
+
+
+def _side_effect_turns(count: int) -> list[dict]:
+    """Assistant turns that reach every recording helper: a <team> block, a
+    trace (Oracle delegations) and a Dreaming no-op acknowledgement."""
+    turns = _turns(count, traced=True)
+    for i, turn in enumerate(turns):
+        if turn["role"] == "assistant":
+            turn["trace_id"] = f"trace-{i // 2}"
+            turn["text"] += " <team>status for the team</team>"
+    return turns
+
+
+def _statements(con) -> list[str]:
+    seen: list[str] = []
+    con.set_trace_callback(lambda sql: seen.append(" ".join(sql.split()).upper()))
+    return seen
+
+
+def test_unchanged_reimport_writes_nothing_at_all(tmp_path, monkeypatch):
+    # The probe used to run the recording helpers on the raw connection: a
+    # <team> block took BEGIN IMMEDIATE and a traced reply an UPDATE on every
+    # watcher tick, though nothing in the transcript had changed.
+    agent_id = _agent(tmp_path)
+    turns = _side_effect_turns(6)
+    _store(agent_id, turns)
+    con = db.conn()
+    seen = _statements(con)
+    try:
+        _store(agent_id, turns)
+    finally:
+        con.set_trace_callback(None)
+    writes = [sql for sql in seen if sql.split(" ", 1)[0] in {"INSERT", "UPDATE", "DELETE", "REPLACE"}
+              or sql.startswith("BEGIN IMMEDIATE") or sql.startswith("SAVEPOINT")]
+    assert not writes, writes
+
+
+def test_recording_helpers_run_once_per_real_import(tmp_path, monkeypatch):
+    from lib import oracle_delegations, team_store
+    agent_id = _agent(tmp_path)
+    turns = _side_effect_turns(6)
+    _store(agent_id, turns)
+    calls = {"team": 0, "oracle": 0}
+    capture, complete = team_store.capture_assistant_message, oracle_delegations.complete_for_trace
+
+    def counted_capture(**kwargs):
+        calls["team"] += 1
+        return capture(**kwargs)
+
+    def counted_complete(**kwargs):
+        calls["oracle"] += 1
+        return complete(**kwargs)
+
+    monkeypatch.setattr(team_store, "capture_assistant_message", counted_capture)
+    monkeypatch.setattr(oracle_delegations, "complete_for_trace", counted_complete)
+    changed = [dict(turn) for turn in turns]
+    changed[-1]["text"] = "answer 5, revised <team>status for the team</team>"
+    _store(agent_id, changed)
+    assistant_rows = sum(turn["role"] == "assistant" for turn in changed)
+    assert calls == {"team": assistant_rows, "oracle": assistant_rows}, \
+        "the probe pass must not run them before the locked pass runs them again"
+
+
+def test_the_probe_reads_one_snapshot(tmp_path, monkeypatch):
+    # A write committed while the probe runs must not be half-seen: a mixed
+    # view can decide "nothing to write" and leave the rows stale until the
+    # transcript changes again.
+    agent_id = _agent(tmp_path)
+    turns = _turns(10)
+    _store(agent_id, turns)
+    inner = db.conn()
+    injected = []
+
+    class MidProbeWriter:
+        def execute(self, sql, *args):
+            result = inner.execute(sql, *args)
+            if not injected and str(sql).lstrip().upper().startswith("SELECT"):
+                injected.append(True)
+                other = sqlite3.connect(str(db.DB_PATH), timeout=5, isolation_level=None)
+                # A transcript row past the end, as a previous longer import
+                # would have left: the import deletes such rows.
+                other.execute(
+                    """INSERT INTO messages (message_id, agent_id, backend_session_id, source_file,
+                           seq, role, timestamp, text, tools_json, updated_at, revision)
+                       VALUES ('late-stale', ?, 'bs', 'rollout.jsonl', 99, 'assistant', '', 'x', '[]', 1, 1)""",
+                    (agent_id,))
+                other.close()
+            return result
+
+        def __getattr__(self, name):
+            return getattr(inner, name)
+
+    wrapper = MidProbeWriter()
+    monkeypatch.setattr(message_store, "conn", lambda: wrapper)
+    _store(agent_id, turns)
+    assert injected
+    # The probe read its snapshot from the first statement on, so it saw no
+    # stale row and wrote nothing; the next import removes it.
+    assert db.conn().execute("SELECT 1 FROM messages WHERE message_id='late-stale'").fetchone()
+    monkeypatch.undo()
+    _store(agent_id, turns)
+    assert db.conn().execute("SELECT 1 FROM messages WHERE message_id='late-stale'").fetchone() is None
 
 
 def test_changed_import_rewrites_only_changed_rows(tmp_path, monkeypatch):
