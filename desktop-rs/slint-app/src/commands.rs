@@ -214,7 +214,13 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     window.set_keyboard_mode(mode.into());
     // The one focus ring follows the same state.
     window.global::<Focus>().set_mode(state.into());
-    window.set_hints(ModelRc::new(VecModel::from(hints)));
+    // Every scroll report comes here: a new model for the same hints would
+    // rebuild the shortcut bar and repaint it with the chat's every frame
+    // (merged with the chat's repaint into a box over most of the window).
+    let current = window.get_hints();
+    if current.row_count() != hints.len() || current.iter().zip(hints.iter()).any(|(a, b)| a != *b) {
+        window.set_hints(ModelRc::new(VecModel::from(hints)));
+    }
 }
 
 thread_local! {
