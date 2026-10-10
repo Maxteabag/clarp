@@ -16,7 +16,7 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
-from . import turn_lifecycle, turn_slots
+from . import recovery_backoff, turn_lifecycle, turn_slots
 from . import events
 from .turn_lifecycle import TurnEvent
 from .turn_slots import OwnershipLock, defer_on
@@ -78,6 +78,10 @@ _INFLIGHT: dict[str, str] = _SLOTS.inflight
 _QUEUED: dict[str, list] = _SLOTS.queued
 _CLAIMED_AT: dict[str, float] = _SLOTS.claimed_at
 _RECOVERY_LOCK = threading.Lock()
+_RECOVERY_BACKOFF = recovery_backoff.RecoveryBackoff()
+# A fresh send from these asks for the agent again and clears a parked or
+# backing-off queued recovery (lib.recovery_backoff); automation does not.
+_RECOVERY_RESUMING_ORIGINS = frozenset({"user", "agent", "oracle"})
 _NO_LOCK = contextlib.nullcontext()
 _RUNTIME_CLIENT: Any | None = None
 # Weak values: a lock lives only while a caller holds it (`with` keeps a strong
@@ -139,6 +143,7 @@ def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
 
 def reset_for_tests() -> None:
     _SLOTS.reset_for_tests()
+    _RECOVERY_BACKOFF.reset_for_tests()
 
 
 def _terminal_live(agent_id: str) -> bool:
@@ -569,7 +574,14 @@ class TurnDispatchService:
         turn_queue.reset_stale_claims()
         recovered = 0
         deferred = False
+        # Agents whose head row is backing off or failed in this pass: their
+        # later rows wait too, so a broken agent keeps its order and costs one
+        # launch per step, not one per queued row.
+        held: set[str] = set()
+        next_try = None
         for row in turn_queue.pending():
+            if row["agent_id"] in held:
+                continue
             agent = agents_db.get_by_agent_id(row["agent_id"])
             # Permanent fences are independent of paused/busy execution. Retire
             # obsolete automatic work before those gates can hide it forever.
@@ -600,6 +612,13 @@ class TurnDispatchService:
                 lambda spec, queue_id=row["queue_id"]: spec.queue_id == queue_id)
             if already_memory_queued:
                 continue
+            backoff = _RECOVERY_BACKOFF.hold(
+                row["agent_id"], str(row["queue_id"]), self.now())
+            if backoff is not None:
+                held.add(row["agent_id"])
+                if not backoff.parked:
+                    next_try = min(next_try or backoff.retry_at, backoff.retry_at)
+                continue
             try:
                 self.submit(DispatchCommand(
                     text=row["text"], requested_session=row["session"],
@@ -615,6 +634,7 @@ class TurnDispatchService:
                     janitor_run_id=_recovered_janitor_run(row),
                 ))
                 recovered += 1
+                _RECOVERY_BACKOFF.clear(row["agent_id"])
             except JanitorDispatchError as exc:
                 _remove_queued_run(str(row["queue_id"]))
                 log("janitorQueueRejected", str(exc))
@@ -622,10 +642,60 @@ class TurnDispatchService:
                 if exc.permanent:
                     self._retire_goal_queue(row, exc)
             except Exception as exc:  # keep ledger row for the next retry/restart
-                log_exception("queuedRecoveryFail", exc, detail=row["session"])
+                held.add(row["agent_id"])
+                backoff = self._recovery_failed(row, exc)
+                if not backoff.parked:
+                    next_try = min(next_try or backoff.retry_at, backoff.retry_at)
         if deferred or turn_queue.claimed_count() > 0:
             self.retry_scheduler(1.0, self.recover_queued)
+        if next_try is not None and _RECOVERY_BACKOFF.claim_wake(next_try):
+            def wake(at=next_try):
+                _RECOVERY_BACKOFF.wake_fired(at)
+                self.recover_queued()
+            self.retry_scheduler(max(0.0, next_try - self.now()), wake)
         return recovered
+
+    def _recovery_failed(self, row, exc: BaseException) -> recovery_backoff.Backoff:
+        """Back off one agent's queued recovery after a launch that failed
+        before its backend started; park it after repeated identical
+        failures. The queued rows stay exactly as they are."""
+        agent_id = str(row["agent_id"])
+        backoff = _RECOVERY_BACKOFF.failed(
+            agent_id, str(row["queue_id"]), exc, self.now())
+        if backoff.failures == 1:
+            log_exception("queuedRecoveryFail", exc, detail=row["session"])
+        if backoff.parked:
+            log("queuedRecoveryParked",
+                f"session={row['session']} queue={row['queue_id']} "
+                f"failures={backoff.failures} error={backoff.error!r}")
+            message = (f"Queued messages are waiting: the backend failed to start "
+                       f"{backoff.failures} times ({backoff.error}). Send a message "
+                       f"or retry to try again.")
+            try:
+                turn_lifecycle.try_transition(agent_id, TurnEvent.UNLAUNCHED, {
+                    "trace_id": str(row["trace_id"]), "dispatch_not_started": True,
+                    "queued_recovery_parked": True, "failures": backoff.failures,
+                    "error": backoff.error, "message": message})
+            except Exception as state_error:  # noqa: BLE001 - the park still holds
+                log_exception("queuedRecoveryParkStateFail", state_error,
+                              detail=row["session"])
+        else:
+            log("queuedRecoveryBackoff",
+                f"session={row['session']} queue={row['queue_id']} "
+                f"failures={backoff.failures} "
+                f"retry_in={backoff.retry_at - self.now():.0f}s")
+        return backoff
+
+    def clear_recovery_backoff(self, agent_id: str, *, reason: str) -> None:
+        """A new send, explicit send or repair asks for the agent again: its
+        queued recovery tries at once."""
+        cleared = _RECOVERY_BACKOFF.clear(agent_id)
+        if cleared is None:
+            return
+        log("queuedRecoveryResumed",
+            f"agent={agent_id} reason={reason} failures={cleared.failures} "
+            f"parked={int(cleared.parked)}")
+        self.retry_scheduler(0.0, self.recover_queued)
 
     def _retire_goal_queue(self, row, rejection) -> None:
         if not turn_queue.cancel(str(row["queue_id"])):
@@ -762,6 +832,8 @@ class TurnDispatchService:
             raise DispatchError(409, "Durable goal owns continuation")
         _validate_goal_dispatch(agent, client_msg_id)
         agent_id = agent["agent_id"]
+        if not skip_admission and origin in _RECOVERY_RESUMING_ORIGINS:
+            self.clear_recovery_backoff(agent_id, reason=f"send:{origin}")
         request = admission_policy.LiveWork(
             client_msg_id=client_msg_id, durable_queue_id=durable_queue_id,
             janitor_run_id=janitor_run_id, sender_agent_id=sender_agent_id,
@@ -1093,6 +1165,7 @@ class TurnDispatchService:
         if not row:
             raise DispatchError(404, "queued message not found")
         agent_id = str(row["agent_id"])
+        self.clear_recovery_backoff(agent_id, reason="send_queued")
         agent = agents_db.get_by_agent_id(agent_id)
         try:
             _validate_goal_dispatch(agent or {}, row["client_msg_id"])
@@ -2376,6 +2449,7 @@ class TurnDispatchService:
         actor = (actor or "").strip()[:80] or "user"
         if not reason:
             raise ValueError("a repair needs a reason")
+        self.clear_recovery_backoff(agent_id, reason="repair")
         released = self.release_leaked_slots(
             agent_id=agent_id, grace_ms=0, orphan_grace_s=REPAIR_SPAWN_GRACE_S)
         trace = released.get(agent_id, "")
