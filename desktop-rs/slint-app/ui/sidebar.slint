@@ -96,7 +96,7 @@ component Row inherits Rectangle {
     in property <bool> reduced-motion;
     // Shown and scrolled into view: its process spinner may turn.
     in property <bool> on-screen: true;
-    property <bool> shimmering: root.chat.busy && root.on-screen && !root.reduced-motion && ChatLook.window-shown && root.chat.letters.length > 0;
+    property <bool> shimmering: root.chat.busy && !root.reduced-motion && ChatLook.window-shown && root.chat.letters.length > 0;
     // The cursor landed here: its place in the list, to scroll it into view.
     callback reveal(length, length);
     changed cursor => { if (self.cursor) { root.reveal(self.y, self.height); } }
@@ -155,8 +155,9 @@ component Row inherits Rectangle {
                     }
                 }
                 // A working agent's name is green, and a glow travels through
-                // its letters (still green, with Reduce Motion, and while
-                // the row is scrolled out of view).
+                // its letters (still green, with Reduce Motion). Scrolled out
+                // of view the glow holds still (the phase only: the row's
+                // layout must not depend on where it is).
                 if !root.shimmering: Text {
                     font-size: ChromeText.body;
                     text: root.chat.name;
@@ -170,7 +171,7 @@ component Row inherits Rectangle {
                     min-width: 0px;
                     clip: true;
                     // The glow's centre runs a little past both ends.
-                    property <float> phase: Math.mod(Motion.glow / 1800ms, 1.0) * 1.6 - 0.3;
+                    property <float> phase: root.on-screen ? Math.mod(Motion.glow / 1800ms, 1.0) * 1.6 - 0.3 : -0.3;
                     property <int> count: root.chat.letters.length;
                     HorizontalLayout {
                         alignment: start;
