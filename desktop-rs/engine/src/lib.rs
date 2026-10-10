@@ -1252,7 +1252,7 @@ impl Engine {
     }
 
     pub fn stop_session(&mut self, session: &str) {
-        if !session.is_empty() {
+        if !session.is_empty() && !self.stop_held(session) {
             self.stop_requested(session);
             self.api.post_json(&format!("stop:{session}"), "/stop", json!({"session": session}), None);
         }

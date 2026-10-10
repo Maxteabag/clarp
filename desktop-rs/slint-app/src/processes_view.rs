@@ -623,6 +623,11 @@ fn confirm_stop(app: &App, _window: &AppWindow) {
         // The Host fences it to the run shown (`expected_generation`).
         Target::Job { id, generation, .. } => app.engine.borrow_mut().cancel_background_job_run(&id, generation),
         // A helper has no job of its own to cancel: its turn stops (`/stop`).
+        // A held helper runs nothing: its line says so (no `/stop`).
+        Target::Helper { session, .. } if app.engine.borrow().live_held(&session) => {
+            app.engine.borrow_mut().stop_session(&session);
+            PANEL.with(|p| p.borrow_mut().note = app.engine.borrow().stop_notice(&session));
+        }
         Target::Helper { session, name } => {
             app.engine.borrow_mut().stop_session(&session);
             PANEL.with(|p| {

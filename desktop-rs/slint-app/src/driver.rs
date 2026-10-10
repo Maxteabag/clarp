@@ -534,6 +534,7 @@ pub fn start_check(name: &str, out: String) {
         "mention" => search_checks::mention_check(out),
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),
+        "stop-held" => stop_checks::stop_held_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),
         "explorer" => explorer_checks::explorer_check(out),
         "frame-budget" => budget_checks::frame_budget_check(out),
