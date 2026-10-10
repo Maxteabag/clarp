@@ -1835,6 +1835,30 @@ def parse_delay(value: str) -> int:
     return int(value[:-1]) * units[value[-1]]
 
 
+def _control_actor(args) -> str:
+    return f"agent:{args.from_session}" if args.from_session else "user"
+
+
+def cmd_stop(args) -> int:
+    """Stop an agent's turn. Like the app's Stop it pauses its queue and goals
+    until someone resumes them; the actor and reason are recorded."""
+    result = api_request("POST", "/stop", {
+        "session": args.session, "actor": _control_actor(args),
+        "reason": args.reason})
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def cmd_repair(args) -> int:
+    """Free an agent's slot that nothing owns (busy with no process). Not a
+    Stop: nothing is interrupted and no queue or goal is paused or resumed."""
+    result = api_request("POST", "/repair-slot", {
+        "session": args.session, "actor": _control_actor(args),
+        "reason": args.reason})
+    print(json.dumps(result, indent=2))
+    return 0
+
+
 def cmd_prompt(args) -> int:
     if args.from_session and args.origin:
         raise SystemExit("--origin cannot be combined with --from")
@@ -2768,6 +2792,20 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     helper_state.add_argument("--from", dest="from_session",
                               help="the session marking it (its parent)")
     helper_state.set_defaults(func=cmd_agent)
+    stop_cmd = sub.add_parser(
+        "stop", help="stop an agent's turn; pauses its queue and goals until resumed")
+    stop_cmd.add_argument("--session", required=True)
+    stop_cmd.add_argument("--reason", required=True)
+    stop_cmd.add_argument("--from", dest="from_session",
+                          help="your session, recorded as the actor")
+    stop_cmd.set_defaults(func=cmd_stop)
+    repair_cmd = sub.add_parser(
+        "repair", help="free a slot nothing owns (busy with no process); never pauses")
+    repair_cmd.add_argument("--session", required=True)
+    repair_cmd.add_argument("--reason", required=True)
+    repair_cmd.add_argument("--from", dest="from_session",
+                            help="your session, recorded as the actor")
+    repair_cmd.set_defaults(func=cmd_repair)
     prompt_cmd = sub.add_parser("prompt")
     prompt_cmd.add_argument("--to", required=True)
     prompt_cmd.add_argument("--from", dest="from_session")

@@ -204,10 +204,12 @@ class RuntimeClient:
         return {str(k): str(v) for k, v in result.items()} \
             if isinstance(result, dict) else {}
 
-    def repair_slot(self, agent_id: str, *, actor: str, reason: str) -> dict:
+    def repair_slot(self, agent_id: str, *, actor: str, reason: str,
+                    actor_verified: bool = False) -> dict:
         """Have the runtime give back this agent's unowned slot (not a Stop)."""
         response = self._request("repair_slot", {
-            "agent_id": agent_id, "actor": actor, "reason": reason})
+            "agent_id": agent_id, "actor": actor, "reason": reason,
+            "actor_verified": bool(actor_verified)})
         if not response.get("ok"):
             raise RuntimeProtocolError(
                 str(response.get("error") or "runtime slot repair failed"))
@@ -628,7 +630,8 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                         "error": "this runtime cannot repair slots"}
             try:
                 result = repair(agent_id, actor=str(params.get("actor") or ""),
-                                reason=str(params.get("reason") or ""))
+                                reason=str(params.get("reason") or ""),
+                                actor_verified=params.get("actor_verified") is True)
             except ValueError as exc:
                 return {"ok": False, "status": 400, "error": str(exc)}
             return {"ok": True, "result": result}

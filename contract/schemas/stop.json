@@ -2,12 +2,35 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://clarp.local/contract/schemas/stop.json",
   "title": "POST /stop",
-  "description": "Terminates the running turn. Queue state travels over SSE (queue-updated), not in this response.",
+  "description": "Terminates the running turn and pauses the agent's queue and goals until resumed. Request body: session, optional actor (default \"user\"; agents send \"agent:<session>\") and reason (up to 200 chars). Queue state also travels over SSE (queue-updated). Contract 61 adds the fields below. stop_actor_verified is true only when the Host verified the actor (a Host-issued agent turn identity, or a paired device acting as \"user\"); otherwise stop_actor is the caller's claim. queue_paused and goals_paused are committed effects read back after the Stop; absent means unknown, as on older Hosts.",
   "type": "object",
   "additionalProperties": true,
-  "required": ["ok", "terminated"],
+  "required": [
+    "ok",
+    "terminated"
+  ],
   "properties": {
-    "ok": {"type": "boolean"},
-    "terminated": {"type": "integer"}
+    "ok": {
+      "type": "boolean"
+    },
+    "terminated": {
+      "type": "integer"
+    },
+    "stop_actor": {
+      "type": "string"
+    },
+    "stop_reason": {
+      "type": "string"
+    },
+    "stop_actor_verified": {
+      "type": "boolean"
+    },
+    "queue_paused": {
+      "type": "boolean"
+    },
+    "goals_paused": {
+      "type": "integer",
+      "minimum": 0
+    }
   }
 }

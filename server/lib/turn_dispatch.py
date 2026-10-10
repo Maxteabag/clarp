@@ -2344,7 +2344,8 @@ class TurnDispatchService:
         age = _SLOTS.claim_age(agent_id)
         return age is not None and age >= min_age_s
 
-    def repair_slot(self, agent_id: str, *, actor: str, reason: str) -> dict:
+    def repair_slot(self, agent_id: str, *, actor: str, reason: str,
+                    actor_verified: bool = False) -> dict:
         """Give back a slot no process, launch, account recovery, terminal or
         Stop owns, and let queued work run. Not a Stop: nothing is
         interrupted and the queue's and goals' pause state is left exactly as
@@ -2358,13 +2359,15 @@ class TurnDispatchService:
             agent_id=agent_id, grace_ms=0, orphan_grace_s=REPAIR_SPAWN_GRACE_S)
         trace = released.get(agent_id, "")
         log("slotRepair",
-            f"agent={agent_id} actor={actor} released={trace or '∅'} "
-            f"reason={reason!r}")
+            f"agent={agent_id} actor={actor} verified={int(actor_verified)} "
+            f"released={trace or '∅'} reason={reason!r}")
         eventlog.emit("server", "slotRepair", detail={
-            "agent_id": agent_id, "actor": actor, "reason": reason,
+            "agent_id": agent_id, "actor": actor,
+            "actor_verified": actor_verified, "reason": reason,
             "released_trace": trace})
         turn_lifecycle.try_transition(agent_id, TurnEvent.AUDIT_NOTED, {
             "source": "slot_repair", "repair_actor": actor,
+            "repair_actor_verified": actor_verified,
             "repair_reason": reason, "released_trace": trace})
         self._retry_handoff(agent_id)
         return {"released_trace": trace,

@@ -577,6 +577,7 @@ class Handler(BaseHTTPRequestHandler):
         "/avatar-settings": "_handle_avatar_settings_post",
         "/preview": "_handle_preview",
         "/stop": "_handle_stop",
+        "/repair-slot": "_handle_repair_slot",
         "/remote-action": "_handle_remote_action",
         "/focus": "_handle_focus",
         "/clips/ack": "_handle_clip_ack",
@@ -4511,11 +4512,91 @@ class Handler(BaseHTTPRequestHandler):
         if self._reject_janitor_control(data):
             return
         session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
-        n = self._stop_agent_session(session, strict=False)
-        return self._json_ok({"ok": True, "terminated": n})
+        actor, verified = self._control_actor(data)
+        reason = str(data.get("reason") or "").strip()[:200]
+        effects: dict = {}
+        n = self._stop_agent_session(session, strict=False, actor=actor,
+                                     actor_verified=verified, reason=reason,
+                                     effects=effects)
+        # queue_paused and goals_paused appear only as committed effects read
+        # back after the Stop; absent means unknown, never "not paused".
+        return self._json_ok({"ok": True, "terminated": n, "stop_actor": actor,
+                              "stop_actor_verified": verified,
+                              "stop_reason": reason, **effects})
+
+    def _control_actor(self, data: dict) -> tuple[str, bool]:
+        """Who is stopping or repairing, and whether the Host verified it.
+
+        An agent is verified by the Host-issued identity of the turn its tool
+        runs in (X-Clarp-Turn, lib.turn_identity); a paired device acts for
+        its user. Anything else is the caller's claim (default "user") and is
+        reported as unverified; a verified identity replaces the claim."""
+        from lib import turn_identity
+        from lib.provider_background_jobs import TURN_ENV
+        claimed = str(data.get("actor") or "").strip()[:80] or "user"
+        try:
+            agent_id = turn_identity.caller_agent_id(
+                {TURN_ENV: (self.headers.get("X-Clarp-Turn") or "")})
+        except Exception as exc:  # noqa: BLE001 - attribution falls back to the claim
+            log_exception("controlActorIdentityFail", exc)
+            agent_id = ""
+        agent = identity.lookup(agent_id) if agent_id else None
+        if agent:
+            actor = f"agent:{agent['session']}"
+            if claimed not in {"user", actor}:
+                log("controlActorClaimReplaced",
+                    f"claimed={claimed!r} verified={actor}")
+            return actor, True
+        principal = str(getattr(self, "_request_principal", "") or "")
+        if claimed == "user" and principal and principal != "administrator":
+            return "user", True
+        return claimed, False
+
+    def _handle_repair_slot(self):
+        """Give back an agent's slot that no process, launch, account recovery,
+        terminal or Stop owns, and let its queued work run. Unlike Stop it
+        interrupts nothing and leaves the queue's and goals' pause alone."""
+        from lib.turn_dispatch import TurnDispatchService
+        data = self._read_json()
+        if data is None:
+            return self._json_error(400, "bad json")
+        if self._reject_janitor_control(data):
+            return
+        session = str(data.get("session") or "").strip()
+        agent = identity.lookup(session) if session else None
+        if not agent:
+            return self._json_error(404, "agent not found")
+        actor, verified = self._control_actor(data)
+        reason = str(data.get("reason") or "").strip()[:200]
+        if not reason:
+            return self._json_error(400, "reason is required")
+        runtime_client = getattr(self.ctx, "runtime_client", None)
+        try:
+            if runtime_client is not None:
+                result = runtime_client.repair_slot(
+                    agent["agent_id"], actor=actor, reason=reason,
+                    actor_verified=verified)
+            else:
+                result = TurnDispatchService(self.ctx).repair_slot(
+                    agent["agent_id"], actor=actor, reason=reason,
+                    actor_verified=verified)
+        except ValueError as exc:
+            return self._json_error(400, str(exc))
+        except Exception as exc:  # noqa: BLE001 - the caller sees the failure
+            log_exception("slotRepairFail", exc, detail=session)
+            return self._json_error(502, f"slot repair failed: {exc}")
+        self._broadcast_turn_queue(agent["agent_id"], session)
+        return self._json_ok({"ok": True, "session": session,
+                              "released_trace": result["released_trace"],
+                              "queue_recovered": result["queue_recovered"],
+                              "repair_actor": actor,
+                              "repair_actor_verified": verified,
+                              "repair_reason": reason})
 
     def _stop_agent_session(
-        self, session: str, *, strict: bool, defer_finish: bool = False
+        self, session: str, *, strict: bool, defer_finish: bool = False,
+        actor: str = "user", actor_verified: bool = False, reason: str = "",
+        effects: dict | None = None,
     ):
         """Authoritative local stop shared by /stop and Oracle cancellation."""
         from lib import turn_dispatch
@@ -4571,11 +4652,21 @@ class Handler(BaseHTTPRequestHandler):
             # stopping work must never silently delete acknowledged messages.
             try:
                 from lib import goal_ledger, task_plans
+                if actor == "user":
+                    stopped_by = "User stopped this agent"
+                else:
+                    stopped_by = f"Stopped by {actor}" + (
+                        "" if actor_verified else " (unverified)")
                 with goal_ledger.acting_as("user"):
-                    task_plans.pause_recovery_for_agent(agent_id, "User stopped this agent")
+                    goals_paused = task_plans.pause_recovery_for_agent(
+                        agent_id, f"{stopped_by}: {reason}" if reason else stopped_by)
+                if effects is not None:
+                    effects["goals_paused"] = int(goals_paused)
                 turn_lifecycle.try_transition(
                     agent_id, TurnEvent.STOP_REQUESTED,
-                    {"source": "user_stop", "message": "Turn stopped"})
+                    {"source": "user_stop", "message": "Turn stopped",
+                     "stop_actor": actor, "stop_actor_verified": actor_verified,
+                     "stop_reason": reason})
                 if getattr(self.ctx, "stream", None) is not None:
                     events.broadcast(self.ctx.stream, events.agent_state(
                         session=session, agent_id=agent_id,
@@ -4589,6 +4680,12 @@ class Handler(BaseHTTPRequestHandler):
                         queue_revision=queue_state["revision"]))
             except Exception as exc:  # stop already succeeded
                 log_exception("turnStopBookkeepingFail", exc, detail=agent_id)
+            if effects is not None:
+                try:
+                    effects["queue_paused"] = bool(
+                        turn_queue.state(agent_id)["paused"])
+                except Exception as exc:  # noqa: BLE001 - absent means unknown
+                    log_exception("turnStopQueueReadFail", exc, detail=agent_id)
             if defer_finish:
                 def release(cancelled_trace_ids: set[str]) -> None:
                     if remote_lease is not None:
@@ -4606,7 +4703,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 turn_dispatch.finish_stop(
                     self.ctx, agent_id, backend_registry=backends)
-        log("turnStop", f"session={session} terminated={n} queued_preserved={turn_queue.pending_count(agent_id) if agent else 0}")
+        log("turnStop", f"session={session} terminated={n} actor={actor} "
+                        f"reason={reason!r} queued_preserved={turn_queue.pending_count(agent_id) if agent else 0}")
         if defer_finish:
             return n, (lambda _trace_ids: None)
         return n

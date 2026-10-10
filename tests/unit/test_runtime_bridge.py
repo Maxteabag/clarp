@@ -359,10 +359,10 @@ def test_runtime_rpc_repairs_one_agents_slot_with_actor_and_reason(tmp_path):
     asked = []
 
     class RepairingRuntime(RecordingRuntime):
-        def repair_slot(self, agent_id, *, actor, reason):
+        def repair_slot(self, agent_id, *, actor, reason, actor_verified=False):
             if not reason.strip():
                 raise ValueError("a repair needs a reason")
-            asked.append((agent_id, actor, reason))
+            asked.append((agent_id, actor, reason, actor_verified))
             return {"released_trace": "trace-1", "queue_recovered": 2}
 
     socket_path = tmp_path / "runtime.sock"
@@ -371,9 +371,10 @@ def test_runtime_rpc_repairs_one_agents_slot_with_actor_and_reason(tmp_path):
     thread.start()
     try:
         client = RuntimeClient(socket_path)
-        assert client.repair_slot("agent-1", actor="user", reason="stuck") == {
+        assert client.repair_slot("agent-1", actor="agent:theo", reason="stuck",
+                                  actor_verified=True) == {
             "released_trace": "trace-1", "queue_recovered": 2}
-        assert asked == [("agent-1", "user", "stuck")]
+        assert asked == [("agent-1", "agent:theo", "stuck", True)]
         for agent_id, reason in (("", "stuck"), ("agent-1", " ")):
             with pytest.raises(RuntimeProtocolError):
                 client.repair_slot(agent_id, actor="user", reason=reason)

@@ -47,6 +47,7 @@ SCHEMAS = {
     "log": _load("log.json"),
     "send": _load("send.json"),
     "stop": _load("stop.json"),
+    "repair-slot": _load("repair-slot.json"),
     "select": _load("select.json"),
     "clips-ack": _load("clips-ack.json"),
     "transcribe": _load("transcribe.json"),
@@ -435,6 +436,11 @@ def test_stop_select_ack_recoverable_transcribe(core_server):
     base, agent = core_server["base"], core_server["agent"]
     _drive_turn(agent)
     ctx, audio = core_server["ctx"], core_server["audio"]
+
+    status, body = _post_json(base, "/repair-slot",
+                              {"session": "rachel", "reason": "contract check"})
+    assert status == 200
+    check("repair-slot", body)
 
     status, body = _post_json(base, "/stop", {"session": "rachel"})
     assert status == 200
