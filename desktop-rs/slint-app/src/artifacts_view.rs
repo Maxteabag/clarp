@@ -289,20 +289,7 @@ pub fn settle_downloads(app: &App, session: &str) {
         let Some(result) = app.engine.borrow_mut().take_artifact_bytes(&id, &purpose) else { continue };
         FETCHING.with(|f| f.borrow_mut().remove(&(id.clone(), purpose.clone())));
         match (purpose.as_str(), result) {
-            ("image", Ok(bytes)) => {
-                let picture = match image::load_from_memory(&bytes) {
-                    Ok(decoded) => {
-                        let rgba = decoded.to_rgba8();
-                        Picture::Loaded(slint::Image::from_rgba8(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height())))
-                    }
-                    Err(error) => {
-                        eprintln!("clarp-slint: {id} is not an image: {error}");
-                        Picture::Failed
-                    }
-                };
-                PICTURES.with(|p| p.borrow_mut().insert(id.clone(), picture));
-                PICTURES_LANDED.with(|l| l.set(l.get() + 1));
-            }
+            ("image", Ok(bytes)) => decode_picture_later(id, bytes),
             ("image", Err(error)) => {
                 eprintln!("clarp-slint: no image at {id}: {error}");
                 PICTURES.with(|p| p.borrow_mut().insert(id.clone(), Picture::Failed));
@@ -423,6 +410,46 @@ thread_local! {
     static PICTURES: std::cell::RefCell<std::collections::HashMap<String, Picture>> = std::cell::RefCell::default();
     /// Bumped whenever a picture lands, so rows with images are drawn again.
     static PICTURES_LANDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The longest side a chat picture is kept at, in pixels. A 4K screenshot
+/// decoded whole is 33 MB, and making it took three copies on the UI
+/// thread; the window never shows one larger than this.
+const PICTURE_SIDE: u32 = 2048;
+
+/// Decodes a chat picture off the UI thread; it lands in `picture_landed`.
+fn decode_picture_later(id: String, bytes: Vec<u8>) {
+    crate::platform::runtime::handle().spawn_blocking(move || {
+        let pixels = picture_pixels(&bytes);
+        drop(bytes);
+        if let Err(error) = slint::invoke_from_event_loop(move || picture_landed(id, pixels)) {
+            eprintln!("clarp-slint: dropped a decoded picture: {error}");
+        }
+    });
+}
+
+/// A picture's pixels, at most `PICTURE_SIDE` on its longest side, made
+/// with one copy beyond the decode.
+fn picture_pixels(bytes: &[u8]) -> Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String> {
+    let decoded = image::load_from_memory(bytes).map_err(|e| e.to_string())?;
+    let decoded = if decoded.width().max(decoded.height()) > PICTURE_SIDE { decoded.thumbnail(PICTURE_SIDE, PICTURE_SIDE) } else { decoded };
+    let rgba = decoded.into_rgba8();
+    Ok(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height()))
+}
+
+fn picture_landed(id: String, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
+    let picture = match pixels {
+        Ok(pixels) => Picture::Loaded(slint::Image::from_rgba8(pixels)),
+        Err(error) => {
+            eprintln!("clarp-slint: {id} is not an image: {error}");
+            Picture::Failed
+        }
+    };
+    PICTURES.with(|p| p.borrow_mut().insert(id, picture));
+    PICTURES_LANDED.with(|l| l.set(l.get() + 1));
+    if let Some(app) = crate::app() {
+        app.refresh(&[Change::Updates]);
+    }
 }
 
 /// iOS `mediaRequest`: clarp-media://asset/<id> and /media/... (or
@@ -1850,6 +1877,28 @@ pub fn bind(window: &AppWindow) {
 
 thread_local! {
     static CLOCK: std::cell::RefCell<Option<slint::Timer>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+mod picture_tests {
+    use super::{PICTURE_SIDE, picture_pixels};
+
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::RgbImage::new(width, height)
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .expect("encodes");
+        bytes
+    }
+
+    #[test]
+    fn a_large_picture_is_kept_at_most_picture_side_and_a_small_one_whole() {
+        let big = picture_pixels(&png(3840, 2160)).expect("decodes");
+        assert_eq!((big.width(), big.height()), (PICTURE_SIDE, 1152));
+        let small = picture_pixels(&png(400, 240)).expect("decodes");
+        assert_eq!((small.width(), small.height()), (400, 240));
+        assert!(picture_pixels(b"not an image").is_err());
+    }
 }
 
 #[cfg(test)]
