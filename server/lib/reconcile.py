@@ -94,7 +94,8 @@ def _runtime_slot_may_have_leaked(agent_id: str) -> bool:
     """Whether to ask the external runtime to check this agent's slot.
 
     Only when the runtime holds a slot (not a terminal) for an agent whose
-    newest state has been terminal for the runtime's grace period, and at
+    newest state has been terminal for the runtime's grace period, or holds
+    queued work for an agent with no slot owner at all, and at
     most once per grace period per agent: snapshots reconcile every agent on
     every read, and the runtime may rightly keep the slot. A slot that is
     still "spawning" is asked about too: only the runtime knows whether a
@@ -106,14 +107,19 @@ def _runtime_slot_may_have_leaked(agent_id: str) -> bool:
         status = backends.runtime_status()
     except Exception:  # noqa: BLE001 - runtime_status logs once per window
         return False
-    if (agent_id not in (status.get("active") or {})
-            or agent_id in set(status.get("terminals") or ())):
+    if agent_id in set(status.get("terminals") or ()):
         return False
-    state = agents_db.latest_state(agent_id) or {}
     grace_ms = turn_dispatch.LEAKED_SLOT_GRACE_MS
-    if (state.get("kind") not in turn_lifecycle.TERMINAL
-            or db.now_ms() - int(state.get("ts") or 0) < grace_ms):
-        return False
+    if agent_id not in (status.get("active") or {}):
+        # Work queued behind no owner never starts by itself (Nadia,
+        # 2026-10-10); the runtime's leak check starts its head.
+        if not (status.get("queued") or {}).get(agent_id):
+            return False
+    else:
+        state = agents_db.latest_state(agent_id) or {}
+        if (state.get("kind") not in turn_lifecycle.TERMINAL
+                or db.now_ms() - int(state.get("ts") or 0) < grace_ms):
+            return False
     now = time.monotonic()
     with _LEAK_CHECK_LOCK:
         asked = _LEAK_CHECK_ASKED.get(agent_id)
