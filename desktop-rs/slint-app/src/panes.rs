@@ -387,10 +387,13 @@ impl App {
     }
 
     /// A pane's report, from its transcript and composer.
-    pub fn reported(&self, id: &str, report: Report) {
-        if let Some(pane) = self.pane_state.borrow_mut().iter_mut().find(|p| p.id == id) {
-            pane.report = report;
-        }
+    /// A pane's report; true when more than where it is scrolled to (the
+    /// offset, the top row) changed.
+    pub fn reported(&self, id: &str, report: Report) -> bool {
+        let Some(old) = self.pane_state.borrow_mut().iter_mut().find(|p| p.id == id).map(|pane| std::mem::replace(&mut pane.report, report)) else {
+            return true;
+        };
+        Report { offset: report.offset, top: report.top, ..old } != report
     }
 
     /// Typing in one pane updates the chat's draft; other panes on the same

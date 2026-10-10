@@ -835,9 +835,14 @@ fn main() {
     window.on_pane_reported(|pane, follows, at_end, offset, transcript, composer, top| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
             let report = panes::Report { follows, at_end, offset, transcript_focused: transcript, composer_focused: composer, top };
-            app.reported(&pane, report);
-            link_hints::reported(&window, &pane, offset, &app.active_id());
-            commands::show_hints(&app, &window);
+            let changed = app.reported(&pane, report);
+            let cancelled = link_hints::reported(&window, &pane, offset, &app.active_id());
+            // A scroll alone reports every frame: the hints change with it
+            // only while the keyboard is on a card (which may scroll away),
+            // and working them out walks the chat's rows.
+            if changed || cancelled || !app.artifact_cursor.borrow().is_empty() {
+                commands::show_hints(&app, &window);
+            }
         }
     });
     window.on_focus_moved(|| {
