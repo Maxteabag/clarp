@@ -171,6 +171,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 114:
             _migrate_to_v114(con)
 
+        if version < 115:
+            _migrate_to_v115(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -843,6 +846,15 @@ def _migrate_to_v114(con: sqlite3.Connection) -> None:
     con.execute("DROP INDEX IF EXISTS idx_messages_agent_revision")
     con.execute("CREATE INDEX idx_messages_agent_revision"
                 " ON messages(agent_id, backend_session_id, revision, updated_at)")
+
+
+def _migrate_to_v115(con: sqlite3.Connection) -> None:
+    """Index the artifact list's two orders. Without them GET /artifacts sorted
+    every live artifact, payloads included, to return one page."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_updated"
+                " ON artifacts(updated_at DESC, artifact_id DESC)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_created"
+                " ON artifacts(created_at DESC, artifact_id DESC)")
 
 
 def _migrate_to_v112(con: sqlite3.Connection) -> None:

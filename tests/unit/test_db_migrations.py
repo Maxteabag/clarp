@@ -389,6 +389,31 @@ def test_v94_indexes_tool_explanation_release_expiry(tmp_path):
     assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
 
 
+def test_v115_indexes_the_artifact_list_orders(tmp_path):
+    # GET /artifacts sorted every live artifact, payload included, to pick a
+    # 50-row page: 77.8 MB read per poll on the 2026-10-10 database.
+    path = tmp_path / "v114.sqlite"
+    con = _fresh(path)
+    con.executescript("""
+        DROP INDEX idx_artifacts_updated;
+        DROP INDEX idx_artifacts_created;
+        PRAGMA user_version = 114;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert {"idx_artifacts_updated", "idx_artifacts_created"} <= _names(upgraded, "index")
+    for column, index in (("updated_at", "idx_artifacts_updated"), ("created_at", "idx_artifacts_created")):
+        plan = " ".join(r[3] for r in upgraded.execute(
+            f"""EXPLAIN QUERY PLAN SELECT a.artifact_id FROM artifacts a JOIN agents g
+                  ON g.agent_id=a.agent_id WHERE a.deleted_at IS NULL
+                 ORDER BY a.{column} DESC,a.artifact_id DESC LIMIT 50"""))
+        assert index in plan and "TEMP B-TREE" not in plan, plan
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+
+
 def test_v95_adds_background_job_inspection_columns(tmp_path):
     path = tmp_path / "v94.sqlite"
     con = _fresh(path)

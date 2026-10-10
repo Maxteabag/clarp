@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 114
+_SCHEMA_VERSION = 115
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -788,6 +788,8 @@ CREATE TABLE artifacts (
 );
 CREATE INDEX idx_artifacts_agent_updated ON artifacts(agent_id, updated_at DESC);
 CREATE INDEX idx_artifacts_session_updated ON artifacts(session, updated_at DESC);
+CREATE INDEX idx_artifacts_updated ON artifacts(updated_at DESC, artifact_id DESC);
+CREATE INDEX idx_artifacts_created ON artifacts(created_at DESC, artifact_id DESC);
 CREATE UNIQUE INDEX idx_artifacts_reference ON artifacts(agent_id, type, reference_id) WHERE reference_id != '' AND deleted_at IS NULL;
 
 CREATE TABLE artifact_decisions (
