@@ -457,7 +457,11 @@ def context_tokens_from_jsonl(path: pathlib.Path, tail_bytes: int = 1_000_000) -
                                   tail_bytes)
 
 
-@lru_cache(maxsize=256)
+# Every snapshot asks once per bound Claude agent. The fleet passed 256 such
+# agents, and a cache smaller than the fleet evicts each entry just before
+# its next use: every snapshot re-read a 1 MB tail per agent. Entries are
+# small integers, so size it well past any plausible fleet.
+@lru_cache(maxsize=8192)
 def _context_tokens_cached(path_string: str, device: int, inode: int,
                            size: int, mtime_ns: int, ctime_ns: int,
                            tail_bytes: int) -> int | None:
