@@ -1311,6 +1311,7 @@ export component Transcript inherits FocusScope {
     // ten frames: the list keeps correcting its estimates for a while).
     // Once it has moved and shows the end, the reader follows again.
     property <bool> settling;
+    changed settling => { Motion.held = root.settling; }
     property <length> start-y;
     property <length> settled-y;
     property <int> still-ticks;

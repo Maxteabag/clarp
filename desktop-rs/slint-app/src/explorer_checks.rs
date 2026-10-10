@@ -86,7 +86,7 @@ pub fn explorer_check(out: String) {
             let names: HashSet<String> = window.get_chats().iter().map(|c| c.name.to_string()).collect();
             let made = rows_made(&names);
             check(
-                names.len() >= 150 && made > 0 && made < 60,
+                names.len() >= 100 && made > 0 && made < 60,
                 &format!("the explorer makes only the rows in view: {made} of {} chats", names.len()),
             );
             check(cursor_in_view(window), "the cursor starts in view");

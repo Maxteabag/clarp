@@ -12,7 +12,9 @@
 //! repaints at most three rectangles, merging the rest: an explorer row and
 //! a chat row moving in the same frame became one box over everything
 //! between them. Neither hand moves while the window is hidden or motion is
-//! reduced.
+//! reduced. While a chat scrolls (`held`) each moves twice a second: every
+//! scroll frame repaints the chat, and a spinner moving in the same frame
+//! merged with it into a box over most of the window.
 
 use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
@@ -42,11 +44,27 @@ pub fn hand(n: u64) -> Option<Hand> {
     }
 }
 
+/// Which hand moves on tick `n` while a chat scrolls: each every thirtieth
+/// (510 ms), apart.
+pub fn held_hand(n: u64) -> Option<Hand> {
+    match n % 30 {
+        1 => Some(Hand::Glow),
+        16 => Some(Hand::Spin),
+        _ => None,
+    }
+}
+
 thread_local! {
     static TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     static ORIGIN: Instant = Instant::now();
     static TICKS: Cell<u64> = const { Cell::new(0) };
+    /// Since when the clock has been held.
+    static HELD: Cell<Option<Instant>> = const { Cell::new(None) };
 }
+
+/// A hold lasts this long at most: a pane closed while it scrolled leaves
+/// no one to let go.
+const HOLD_AT_MOST: Duration = Duration::from_secs(3);
 
 /// Starts the clock (once the window exists).
 pub fn start() {
@@ -60,14 +78,29 @@ fn tick() {
         t.set(t.get() + 1);
         t.get()
     });
-    let Some(hand) = hand(n) else { return };
+    if hand(n).is_none() && held_hand(n).is_none() {
+        return;
+    }
     let Some(window) = crate::window() else { return };
     let look = window.global::<crate::ChatLook>();
     if !look.get_window_shown() || look.get_reduced_motion() {
         return;
     }
-    let now = ORIGIN.with(Instant::elapsed).as_millis() as i64;
     let motion = window.global::<crate::Motion>();
+    if motion.get_held() {
+        let since = HELD.with(|h| {
+            let since = h.get().unwrap_or_else(Instant::now);
+            h.set(Some(since));
+            since
+        });
+        if since.elapsed() > HOLD_AT_MOST {
+            motion.set_held(false);
+        }
+    } else {
+        HELD.with(|h| h.set(None));
+    }
+    let Some(hand) = (if motion.get_held() { held_hand(n) } else { hand(n) }) else { return };
+    let now = ORIGIN.with(Instant::elapsed).as_millis() as i64;
     match hand {
         Hand::Spin => motion.set_spin(now),
         Hand::Glow => motion.set_glow(now),
@@ -76,7 +109,17 @@ fn tick() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Hand, TICK, hand};
+    use super::{Hand, TICK, hand, held_hand};
+
+    #[test]
+    fn while_a_chat_scrolls_each_hand_moves_twice_a_second_apart() {
+        let ticks = 6000 / TICK.as_millis() as u64;
+        let hands: Vec<Option<Hand>> = (1..=ticks).map(held_hand).collect();
+        let spins = hands.iter().filter(|h| **h == Some(Hand::Spin)).count();
+        let glows = hands.iter().filter(|h| **h == Some(Hand::Glow)).count();
+        assert!((11..=12).contains(&spins), "{spins} spins in 6 s");
+        assert!((11..=12).contains(&glows), "{glows} glows in 6 s");
+    }
 
     #[test]
     fn spin_moves_ten_times_a_second_glow_twenty_and_never_together() {

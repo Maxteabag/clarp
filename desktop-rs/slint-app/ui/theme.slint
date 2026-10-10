@@ -59,6 +59,9 @@ export global ChatLook {
 export global Motion {
     in property <duration> spin;
     in property <duration> glow;
+    // A chat is scrolling: the hands move twice a second, so a spinner
+    // elsewhere seldom shares the scroll's frames (motion.rs).
+    in-out property <bool> held;
 }
 
 // A send as it is drawn (workspace.slint): how its animations move, the
