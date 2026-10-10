@@ -10,8 +10,14 @@
 //! typing over it, and the same fleet drawn whole every frame. Then one
 //! full frame's cost. The table goes to `budget.md` beside the shots.
 //!
-//! The budget: the busy fleet under 150 ms/s, and scrolling and typing
-//! over it under 16 ms a frame (95th percentile).
+//! The budget, in ms and also in the run's own full frames (a runner twice
+//! as fast draws a full frame in half the time, so the ratio holds where
+//! the ms do not): the busy fleet under 120 ms/s and 9 full frames a
+//! second; typing, in one pane or mirrored into both, under 12 full frames
+//! a second with its frames under 8 ms (mirrored: 0.8 of a full frame; 95th
+//! percentile); scrolling, which
+//! repaints its pane every frame of the wheel's animation, under 36 full
+//! frames a second and its frames under one full frame (95th percentile).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,9 +30,13 @@ use slint::platform::Key;
 use super::{Stage, check, control, quiet, report, run_stages};
 use crate::headless::{self, Pacing};
 
-/// Busy CPU budget (ms of UI thread per second) and frame budget (ms, p95).
-const CPU_BUDGET: f64 = 150.0;
-const FRAME_BUDGET: f64 = 16.0;
+/// Busy CPU budget (ms of UI thread per second), typing's frame budget
+/// (ms, p95), and the budgets in full frames (ms/s over one full frame).
+const CPU_BUDGET: f64 = 120.0;
+const FRAME_BUDGET: f64 = 8.0;
+const BUSY_FULL_FRAMES: f64 = 9.0;
+const TYPING_FULL_FRAMES: f64 = 12.0;
+const SCROLLING_FULL_FRAMES: f64 = 36.0;
 /// How long a scenario settles, then how long it is measured.
 const SETTLE: Duration = Duration::from_millis(1500);
 const MEASURE: Duration = Duration::from_secs(5);
@@ -413,10 +423,21 @@ pub fn frame_budget_check(out: String) {
             let offsets = SCROLLED.with(|s| s.borrow().clone());
             let (low, high) = offsets.iter().fold((f32::MAX, f32::MIN), |(l, h), o| (l.min(*o), h.max(*o)));
             check(offsets.len() > 50 && high - low > 300.0, &format!("the scrolling scenario scrolled the chat: offsets {low:.0} to {high:.0} over {} wheel turns", offsets.len()));
-            for name in ["same, scrolling", "same, typing"] {
+            let full_frames = |row: &Row| row.cpu / one.max(0.1);
+            check(full_frames(&busy) < BUSY_FULL_FRAMES, &format!("the busy fleet: {:.1} full frames a second (budget {BUSY_FULL_FRAMES:.0})", full_frames(&busy)));
+            // Mirrored, a key repaints both composers: its frames may take
+            // up to 0.8 of a full frame.
+            for (name, p95) in [("same, typing", FRAME_BUDGET), ("typing, both panes on one chat", one * 0.8)] {
                 let row = find(name);
-                check(row.frames > 0 && row.p95 < FRAME_BUDGET, &format!("{name}: frame p95 {:.2} ms over {} frames (budget {FRAME_BUDGET:.0})", row.p95, row.frames));
+                check(row.frames > 0 && row.p95 < p95, &format!("{name}: frame p95 {:.2} ms over {} frames (budget {p95:.1})", row.p95, row.frames));
+                check(full_frames(&row) < TYPING_FULL_FRAMES, &format!("{name}: {:.0} ms/s, {:.1} full frames a second (budget {TYPING_FULL_FRAMES:.0})", row.cpu, full_frames(&row)));
             }
+            let scrolling = find("same, scrolling");
+            check(
+                scrolling.frames > 0 && scrolling.p95 < one,
+                &format!("scrolling: frame p95 {:.2} ms over {} frames (budget one full frame, {one:.2} ms)", scrolling.p95, scrolling.frames),
+            );
+            check(full_frames(&scrolling) < SCROLLING_FULL_FRAMES, &format!("scrolling: {:.0} ms/s, {:.1} full frames a second (budget {SCROLLING_FULL_FRAMES:.0})", scrolling.cpu, full_frames(&scrolling)));
             true
         })),
     ];

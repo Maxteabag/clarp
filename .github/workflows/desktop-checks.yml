@@ -26,6 +26,10 @@ on:
         type: boolean
         required: false
         default: false
+      compare_ref:
+        description: "Also measure this ref's release build on the same runner (frame budget, 60 and 120 Hz)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -180,6 +184,23 @@ jobs:
           sudo apt-get install -y --no-install-recommends linux-tools-common "linux-tools-$(uname -r)" || sudo apt-get install -y --no-install-recommends linux-tools-azure
           sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0
           slint-app/tests/budget-profile.sh /tmp/budget/profile
+      - name: Frame budget of the compared ref, same runner
+        if: (success() || failure()) && github.event.inputs.compare_ref != ''
+        env:
+          COMPARE_REF: ${{ github.event.inputs.compare_ref }}
+        run: |
+          set -o pipefail
+          git fetch --no-tags origin "$COMPARE_REF"
+          git worktree add /tmp/compare FETCH_HEAD
+          cd /tmp/compare/desktop-rs
+          cargo build --release --locked -p clarp-slint
+          { echo; echo "### Compared: $COMPARE_REF ($(git rev-parse --short HEAD)), same runner"; } >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          for hz in 60 120; do
+            CLARP_CHECK_PROFILE=release CLARP_BUDGET_HZ=$hz slint-app/tests/check.sh frame-budget /tmp/budget/compare-$hz 2>&1 | tee /tmp/budget/compare-$hz.log || status=$?
+            if [ -f /tmp/budget/compare-$hz/budget.md ]; then { echo; cat /tmp/budget/compare-$hz/budget.md; } >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+          echo "compared ref's own budget verdict: $status (informational)"
       - name: The stripped release names a stall's frames
         if: success() || failure()
         working-directory: desktop-rs
