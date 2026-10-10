@@ -77,13 +77,20 @@ fn measured(name: &str, mark: Mark) -> Row {
     let summary = crate::perf::summarize(times);
     let row = Row {
         name: name.to_owned(),
-        cpu: (crate::perf::thread_cpu() - mark.cpu).as_secs_f64() * 1000.0 / seconds,
+        cpu: crate::perf::thread_cpu().saturating_sub(mark.cpu).as_secs_f64() * 1000.0 / seconds,
         fps: summary.count as f64 / seconds,
         mean: f64::from(summary.mean),
         p95: f64::from(summary.p95),
         dirty: if dirty.is_empty() { 0.0 } else { dirty.iter().map(|d| f64::from(*d)).sum::<f64>() / dirty.len() as f64 },
         frames: summary.count,
     };
+    // What three frames through it repainted (px), to see what moves.
+    let rects = &stats.frame_rects[mark.frames..];
+    for at in [rects.len() / 4, rects.len() / 2, rects.len() * 3 / 4] {
+        if let Some(frame) = rects.get(at) {
+            println!("perf budget {name} frame {at} repainted {frame:?}");
+        }
+    }
     println!(
         "perf budget {}: UI thread {:.0} ms/s, {:.1} fps, frame mean {:.2} ms, p95 {:.2} ms, repaints {:.0}% of the window ({} frames)",
         row.name, row.cpu, row.fps, row.mean, row.p95, row.dirty * 100.0, row.frames
@@ -153,6 +160,7 @@ fn busy_agents(app: &crate::App) -> usize {
 /// `done` (after the input stops).
 fn scenario(
     name: &'static str,
+    out: String,
     rows: Rc<RefCell<Vec<Row>>>,
     mut setup: impl FnMut(&crate::App, &crate::AppWindow) + 'static,
 ) -> Stage {
@@ -177,6 +185,9 @@ fn scenario(
         }
         stop_input();
         rows.borrow_mut().push(measured(name, mark));
+        let file = name.replace([' ', ',', '+'], "-").replace("--", "-");
+        let saved = headless::save_frame(&format!("{}/{file}.png", out));
+        check(saved.is_ok(), &format!("captured {name} {}", saved.err().unwrap_or_default()));
         true
     }))
 }
@@ -223,7 +234,7 @@ pub fn frame_budget_check(out: String) {
             headless::pace(PARTIAL_60HZ);
             true
         })),
-        scenario("idle, 0 working", rows1, |_, _| {}),
+        scenario("idle, 0 working", out.clone(), rows1, |_, _| {}),
         ("busy fleet", Box::new({
             let mut sent = false;
             move |app: &crate::App, _: &crate::AppWindow, elapsed: Duration| {
@@ -246,9 +257,9 @@ pub fn frame_budget_check(out: String) {
                 true
             }
         })),
-        scenario("16 working + 30 jobs, shimmer", rows2, |_, _| {}),
-        scenario("same, Reduce Motion", rows3, |_, _| super::live_checks::set_reduced_motion(true)),
-        scenario("same, scrolling", rows4, |_, _| {
+        scenario("16 working + 30 jobs, shimmer", out.clone(), rows2, |_, _| {}),
+        scenario("same, Reduce Motion", out.clone(), rows3, |_, _| super::live_checks::set_reduced_motion(true)),
+        scenario("same, scrolling", out.clone(), rows4, |_, _| {
             super::live_checks::set_reduced_motion(false);
             let mut up = true;
             let mut turns = 0;
@@ -262,7 +273,7 @@ pub fn frame_budget_check(out: String) {
                 }
             });
         }),
-        scenario("same, typing", rows5, |_, _| {
+        scenario("same, typing", out.clone(), rows5, |_, _| {
             let mut typed = 0;
             input_every(Duration::from_millis(50), move || {
                 typed += 1;
@@ -275,7 +286,7 @@ pub fn frame_budget_check(out: String) {
                 }
             });
         }),
-        scenario("same, every frame whole", rows6, |_, _| headless::pace(WHOLE_60HZ)),
+        scenario("same, every frame whole", out.clone(), rows6, |_, _| headless::pace(WHOLE_60HZ)),
         ("full frame", Box::new({
             // Ten frames drawn whole, one at a time: each the first frame
             // after its request.
