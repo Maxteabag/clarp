@@ -184,6 +184,63 @@ fn a_job_event_updates_the_tracker_and_a_job_can_be_cancelled() {
     assert_eq!(host.requests("DELETE", "/background-jobs/j1").len(), 1);
 }
 
+/// Pumps for `quiet` so replies and trailing refetches land.
+fn settle(d: &mut Driver, quiet: Duration) {
+    let until = Instant::now() + quiet;
+    while Instant::now() < until {
+        d.until("pump", |_| true);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn job_events_refetch_only_the_job_list() {
+    // A busy fleet sends job events every second; each one used to refetch
+    // attention and the 50-artifact list too (2026-10-09: up to 36 a minute,
+    // 9.8 MB each, until the Host's socket writes timed out).
+    let host = Host::start("job-events");
+    let mut d = Driver::live(&host);
+    d.until("updates loaded", |e| e.update_artifacts().len() == 4 && !e.updates_loading());
+    let (artifacts, attention) = (host.requests("GET", "/artifacts").len(), host.requests("GET", "/attention").len());
+    for n in 0..5 {
+        let job = json!({"job_id": "j1", "agent_id": "a1", "session": "rachel", "status": "running", "title": "Index",
+                         "metadata": {"completed": n, "total": 5}, "updated_at": 10 + n});
+        host.control("jobs", json!({"jobs": [job], "event": {"type": "background-job-updated", "job": job}}));
+    }
+    d.until("job listed", |e| e.background_jobs().len() == 1);
+    settle(&mut d, Duration::from_millis(600));
+    assert_eq!(host.requests("GET", "/artifacts").len(), artifacts, "a job event does not refetch artifacts");
+    assert_eq!(host.requests("GET", "/attention").len(), attention, "a job event does not refetch attention");
+    let jobs = host.requests("GET", "/background-jobs").len();
+    assert!(jobs >= 2, "the job list is refetched");
+    assert_eq!(d.engine.background_jobs()[0]["metadata"]["completed"], json!(4), "the newest list wins");
+}
+
+#[test]
+fn a_burst_of_events_while_updates_load_refetches_once_more() {
+    let host = Host::start("coalesce");
+    let mut d = Driver::live(&host);
+    d.until("updates loaded", |e| e.update_artifacts().len() == 4 && !e.updates_loading());
+    let before = host.requests("GET", "/artifacts").len();
+    host.control("artifacts-delay", json!({"seconds": 0.8}));
+    host.control("event", json!({"type": "attention-updated"}));
+    d.until("a reload started", |e| e.updates_loading());
+    // Ten more changes arrive while that reload is in flight; the last one
+    // replaces the list, so the trailing refetch must still see it.
+    for _ in 0..9 {
+        host.control("event", json!({"type": "artifact-updated"}));
+    }
+    host.control("artifacts", json!({"artifacts": [{"artifact_id": "late", "session": "rachel", "type": "document",
+                                                     "title": "Late", "status": "ready", "payload": {}}]}));
+    d.until("the newest list", |e| e.update_artifacts().len() == 1 && !e.updates_loading());
+    settle(&mut d, Duration::from_millis(1200));
+    host.control("artifacts-delay", json!({"seconds": 0}));
+    let fetched = host.requests("GET", "/artifacts").len() - before;
+    assert_eq!(fetched, 2, "one reload in flight and one trailing refetch, not one per event");
+    assert_eq!(d.engine.update_artifacts()[0]["artifact_id"], json!("late"));
+    assert!(!d.engine.updates_loading());
+}
+
 #[test]
 fn a_job_shows_its_log_and_a_stop_names_the_run() {
     let host = Host::start("job-detail");

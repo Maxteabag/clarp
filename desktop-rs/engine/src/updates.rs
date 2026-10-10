@@ -17,6 +17,10 @@ use crate::{Change, Engine, Message};
 /// with it for the Host on a cold start.
 pub const FIRST_UPDATES_DELAY: Duration = Duration::from_millis(1500);
 
+/// One reload is in flight at a time, so a reply that never comes would hold
+/// every later one back: each request gives up after this.
+pub const UPDATES_TIMEOUT: Duration = Duration::from_secs(60);
+
 #[derive(Default)]
 pub(crate) struct Updates {
     attention_items: Vec<Value>,
@@ -24,6 +28,15 @@ pub(crate) struct Updates {
     artifacts: Vec<Value>,
     generation: u64,
     pending: i32,
+    /// Something changed while a reload was in flight: reload once more
+    /// when it finishes. A busy fleet's events used to start one reload
+    /// each (36 a minute, 37 in flight, a 9.8 MB artifact list apiece).
+    dirty: bool,
+    /// A job-list-only refetch (a job event) is in flight; replies tagged
+    /// with an older `jobs_generation` are dropped.
+    jobs_pending: bool,
+    jobs_dirty: bool,
+    jobs_generation: u64,
     error: String,
     /// `decision:<id>` / `job:<id>` while its request is in flight.
     pending_actions: HashSet<String>,
@@ -195,14 +208,35 @@ impl Engine {
     }
 
     pub fn load_updates(&mut self) {
+        if self.updates.pending > 0 {
+            self.updates.dirty = true;
+            return;
+        }
+        self.updates.dirty = false;
+        self.updates.jobs_dirty = false;
+        // This reload's job list supersedes a job-only refetch in flight.
+        self.updates.jobs_generation += 1;
         self.updates.generation += 1;
         self.updates.error.clear();
         self.updates.pending = 3;
         self.changes.push(Change::Updates);
         let generation = self.updates.generation;
-        self.api.get(&format!("updates:{generation}:attention"), "/attention", &[]);
-        self.api.get(&format!("updates:{generation}:jobs"), "/background-jobs", &[]);
-        self.api.get(&format!("updates:{generation}:artifacts"), "/artifacts", &[("limit", "50"), ("order", "updated")]);
+        self.api.get_with_timeout(&format!("updates:{generation}:attention"), "/attention", UPDATES_TIMEOUT);
+        self.api.get_with_timeout(&format!("updates:{generation}:jobs"), "/background-jobs", UPDATES_TIMEOUT);
+        self.api.get_with_timeout(&format!("updates:{generation}:artifacts"), "/artifacts?limit=50&order=updated", UPDATES_TIMEOUT);
+    }
+
+    /// A job changed: only the job list is refetched, once at a time.
+    fn load_background_jobs(&mut self) {
+        if self.updates.pending > 0 || self.updates.jobs_pending {
+            self.updates.jobs_dirty = true;
+            return;
+        }
+        self.updates.jobs_dirty = false;
+        self.updates.jobs_pending = true;
+        self.updates.jobs_generation += 1;
+        let tag = format!("updates-jobs:{}", self.updates.jobs_generation);
+        self.api.get_with_timeout(&tag, "/background-jobs", UPDATES_TIMEOUT);
     }
 
     /// Answers a decision: `yes`/`accepted` or `no`/`rejected`, against the
@@ -268,6 +302,28 @@ impl Engine {
         }
         self.updates.pending = (self.updates.pending - 1).max(0);
         self.changes.push(Change::Updates);
+        if self.updates.pending == 0 {
+            if self.updates.dirty {
+                self.load_updates();
+            } else if self.updates.jobs_dirty {
+                self.load_background_jobs();
+            }
+        }
+    }
+
+    /// A job-only refetch ended; a job event during it asks for one more.
+    fn finish_jobs_request(&mut self) {
+        self.updates.jobs_pending = false;
+        if self.updates.jobs_dirty {
+            self.load_background_jobs();
+        }
+    }
+
+    fn apply_job_list(&mut self, object: &Object) {
+        self.updates.background_jobs = json::array(object, "jobs");
+        if self.updates.jobs.apply_list(object) {
+            self.jobs_changed();
+        }
     }
 
     /// The tracker changed: roster counts follow, and views re-read processes.
@@ -282,7 +338,13 @@ impl Engine {
     }
 
     pub(crate) fn updates_json(&mut self, tag: &str, object: &Object) -> bool {
-        if let Some(rest) = tag.strip_prefix("updates:") {
+        if let Some(generation) = tag.strip_prefix("updates-jobs:") {
+            if generation.parse::<u64>().ok() == Some(self.updates.jobs_generation) {
+                self.apply_job_list(object);
+                self.changes.push(Change::Updates);
+            }
+            self.finish_jobs_request();
+        } else if let Some(rest) = tag.strip_prefix("updates:") {
             let (generation, kind) = rest.split_once(':').unwrap_or((rest, ""));
             let Ok(generation) = generation.parse::<u64>() else { return true };
             if generation != self.updates.generation {
@@ -290,12 +352,7 @@ impl Engine {
             }
             match kind {
                 "attention" => self.updates.attention_items = json::array(object, "items"),
-                "jobs" => {
-                    self.updates.background_jobs = json::array(object, "jobs");
-                    if self.updates.jobs.apply_list(object) {
-                        self.jobs_changed();
-                    }
-                }
+                "jobs" => self.apply_job_list(object),
                 "artifacts" => self.updates.artifacts = json::array(object, "artifacts"),
                 _ => {}
             }
@@ -348,7 +405,13 @@ impl Engine {
             self.changes.push(Change::Updates);
             return true;
         }
-        if let Some(rest) = tag.strip_prefix("updates:") {
+        if let Some(generation) = tag.strip_prefix("updates-jobs:") {
+            if generation.parse::<u64>().ok() == Some(self.updates.jobs_generation) {
+                self.updates.error = detail.to_owned();
+                self.changes.push(Change::Updates);
+            }
+            self.finish_jobs_request();
+        } else if let Some(rest) = tag.strip_prefix("updates:") {
             let generation = rest.split(':').next().and_then(|g| g.parse::<u64>().ok());
             if generation == Some(self.updates.generation) {
                 self.updates.error = detail.to_owned();
@@ -392,7 +455,8 @@ impl Engine {
                     if self.updates.jobs.loaded() && self.updates.jobs.apply_event(event) {
                         self.jobs_changed();
                     }
-                    self.load_updates();
+                    // Attention and artifacts did not change.
+                    self.load_background_jobs();
                 }
                 "artifact-updated" | "attention-updated" => self.load_updates(),
                 _ => {}
