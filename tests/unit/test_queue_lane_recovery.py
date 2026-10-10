@@ -231,6 +231,31 @@ def test_spawning_slot_with_an_owner_is_never_released(tmp_path, monkeypatch, ow
         _td.account_failover("claude").attempts.pop(agent_id, None)
 
 
+def test_queued_work_without_an_owner_is_handed_the_free_slot(tmp_path, monkeypatch):
+    # Nadia and psa-billing, 2026-10-10 09:24: the older runtime freed a failed
+    # spawn's slot but kept the messages queued behind it, so nothing started
+    # them and the runtime's idle drain (which refuses while anything is
+    # queued) could never hand over to a new release. The leak check that the
+    # drain and the Host run first now starts the head of such a queue.
+    service, backends, agent_id, scheduled = _service(tmp_path)
+    service.dispatch(text="first", requested_session="pebble", trace_id="tA",
+                     synthesize_audio=False)
+    _queue(service, "tB")
+    _queue(service, "tC")
+    _lock_once(monkeypatch, _td.turn_lifecycle, "open_turn")
+    _finish(backends, 0)
+    scheduled.clear()  # the retry timer was lost (the older runtime had none)
+    assert _td.runtime_status()["queued"] == {agent_id: 2}
+    assert agent_id not in _td.runtime_status()["active"]
+
+    service.release_leaked_slots()
+
+    assert _texts(backends) == ["first", "message tB"]
+    assert _td.runtime_status()["active"][agent_id] == "tB"
+    _finish(backends, 1)
+    assert _texts(backends)[-1] == "message tC"
+
+
 # --- (b) queue receipts end with their turn -----------------------------------
 
 @pytest.mark.parametrize("ok,status", [(True, "done"), (False, "failed")])

@@ -2329,7 +2329,28 @@ class TurnDispatchService:
                     self.retry_scheduler(1.0, self.recover_queued)
             except Exception as exc:  # noqa: BLE001 - check the other slots
                 log_exception("leakedSlotCheckFail", exc, detail=agent_id)
+        self._start_ownerless_queues(only)
         return released
+
+    def _start_ownerless_queues(self, only: str | None) -> None:
+        """Hand a free slot to work queued in memory behind no owner.
+
+        Nothing else starts such a queue but a new send, and the idle drain
+        refuses while it is non-empty: an older runtime freed failed spawns'
+        slots and kept the messages behind them (Nadia and psa-billing,
+        2026-10-10 09:24)."""
+        for agent_id, depth in _SLOTS.snapshot()["queued"].items():
+            if only is not None and agent_id != only:
+                continue
+            if _SLOTS.get(agent_id):
+                continue  # an owner (turn, terminal or Stop) drains it
+            log("ownerlessQueueStarted",
+                f"agent={agent_id} depth={depth} — queued work with a free "
+                f"slot and no owner; starting its head")
+            try:
+                self._retry_handoff(agent_id)
+            except Exception as exc:  # noqa: BLE001 - check the other queues
+                log_exception("ownerlessQueueStartFail", exc, detail=agent_id)
 
     @staticmethod
     def _orphaned_spawn(agent_id: str, trace_id: str, backend: str, *,

@@ -157,7 +157,7 @@ class _Runtime:
 
     def status(self):
         return {"active": dict(self.active), "spawning": list(self.spawning),
-                "terminals": []}
+                "terminals": [], "queued": dict(getattr(self, "queued", {}))}
 
     def release_leaked_slots(self, agent_id):
         self.asked.append(agent_id)
@@ -236,6 +236,19 @@ def test_inv3_asks_the_runtime_about_a_settled_agents_spawning_slot(
 
     assert runtime.asked == [agent_id]
     assert repaired.get("slot") == "tA"
+
+
+def test_inv3_asks_the_runtime_about_queued_work_with_no_owner(tmp_path, runtime_owned):
+    agent_id = _agent(tmp_path)
+    _settled(agent_id, kind="idle")
+    runtime = _Runtime(agent_id, releases=False)
+    runtime.active.clear()
+    runtime.queued = {agent_id: 8}
+    runtime_owned(runtime)
+
+    reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+
+    assert runtime.asked == [agent_id]
 
 
 def test_inv3_asks_the_runtime_at_most_once_per_grace_window(tmp_path, runtime_owned):
