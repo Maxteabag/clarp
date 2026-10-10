@@ -45,6 +45,11 @@ pub fn roster_stale_check(out: String) {
             if !open || engine.roster_freshness() != State::Fresh {
                 return false;
             }
+            // Startup's own snapshots are over: the failures meet the command.
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+            if snapshot_times().last().is_some_and(|last| now - last < 1.5) {
+                return false;
+            }
             check(window.get_roster_note().is_empty(), &format!("a fresh list has no note: {:?}", window.get_roster_note()));
             agents.set(engine.roster().agents().len());
             drop(engine);
