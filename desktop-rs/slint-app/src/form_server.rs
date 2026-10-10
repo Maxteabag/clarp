@@ -317,12 +317,13 @@ pub(super) fn validated_origins(value: &Value) -> Vec<String> {
     result
 }
 
-/// A read-only report's policy on the desktop (agreed with the Host's
+/// A read-only report's policy on the desktop (agreed with the contract-59
 /// owner for tokenless loopback reports): it may load scripts, styles,
-/// pictures, fonts, media and frames and fetch, over HTTPS only (no http:,
-/// ws: or this loopback origin), and submits no forms. The page has no
-/// bridge, no token, no cookie and never names the Host, so nothing it
-/// reaches can learn a credential; the response sends no referrer.
+/// pictures, fonts, media and frames and fetch from any HTTPS origin, local,
+/// private and tailnet ones included; never over http:, ws: or wss:, and it
+/// submits no forms. The page has no bridge, no token, no cookie and never
+/// names the Host, so nothing it reaches can learn a credential; the
+/// response sends no referrer.
 pub(super) const REPORT_POLICY: &str = "default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; \
 img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; connect-src https:; frame-src https:; \
 form-action 'none'; base-uri 'none'; object-src 'none'";
@@ -336,7 +337,8 @@ const a = e.target.closest && e.target.closest('a[href]'); if (!a) return;\
 const u = new URL(a.href, location.href); if (u.origin === location.origin && u.pathname === location.pathname) return;\
 if (!a.target) a.target = '_blank'; a.rel = 'noopener noreferrer';}, true);</script>";
     let note = "<details style=\"position:fixed;top:8px;right:8px;background:#1a1b26;color:#e7e1dc;padding:6px;font:14px sans-serif\">\
-<summary>Network access</summary>HTTPS resources from the web; Clarp sends them no credentials</details>";
+<summary>Network access</summary>HTTPS connections allowed (any HTTPS address, local networks included). \
+No http:, ws: or wss:. Clarp sends no credentials.</details>";
     format!(
         "<!doctype html><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">\
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\

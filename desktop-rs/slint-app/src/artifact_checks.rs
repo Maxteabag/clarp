@@ -2383,6 +2383,12 @@ fn check_third_party_report(pid: &str) {
     }
     let dom = std::fs::read_to_string(format!("{}.page{pid}.dom", std::env::var("CLARP_TEST_BROWSER_LOG").unwrap_or_default())).unwrap_or_default();
     check(dom.contains("<title>fetched 42</title>"), &format!("and its fetch read the answer: {:?}", dom.split("</title>").next().unwrap_or_default()));
+    // Never in the clear: Chrome refused each, and none reached the web.
+    let refused = dom.split("id=\"refused\">").nth(1).and_then(|r| r.split("</p>").next()).unwrap_or_default().to_owned();
+    for scheme in ["ws://sock.example.com", "wss://sock.example.com", "http://plain.example.com/http-fetch", "http://plain.example.com/http-img"] {
+        check(refused.contains(&format!("REFUSED[{scheme}")), &format!("the report's policy refuses {scheme}: {refused:?}"));
+    }
+    check(!paths.iter().any(|p| p.contains("plain") || p.contains("secure") || p.contains("http-")), &format!("and none of them reached the web: {paths:?}"));
 }
 
 /// `--check artifact-open`: HTML artifacts open for real (check.sh gives
