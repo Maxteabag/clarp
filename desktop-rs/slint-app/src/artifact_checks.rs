@@ -2281,3 +2281,134 @@ pub(super) fn form_log_check(_out: String) {
         })),
     ]);
 }
+
+// ---- opening an HTML artifact in the browser
+
+/// The fake browser's launches (`CLARP_TEST_BROWSER_LOG`): its pid, then
+/// its arguments, once it has fetched the page as a browser would.
+fn browser_launches() -> Vec<(String, Vec<String>)> {
+    let log = std::env::var("CLARP_TEST_BROWSER_LOG").unwrap_or_default();
+    std::fs::read_to_string(&log).unwrap_or_default().lines().filter_map(|line| {
+        let mut words = line.split_whitespace().map(str::to_owned);
+        Some((words.next()?, words.collect()))
+    }).collect()
+}
+
+/// The response the fake browser launched as `pid` got for its page.
+fn browser_page(pid: &str) -> String {
+    let log = std::env::var("CLARP_TEST_BROWSER_LOG").unwrap_or_default();
+    std::fs::read_to_string(format!("{log}.page{pid}")).unwrap_or_default()
+}
+
+/// Whether the window is shown, as the compositor would be told.
+fn shown(window: &crate::AppWindow) -> (bool, bool) {
+    (window.window().is_visible(), window.window().is_minimized())
+}
+
+/// What a page and its URL must not carry: the Host's credential or address.
+fn leaks(text: &str) -> Vec<&'static str> {
+    let token = std::env::var("CLARP_TOKEN").unwrap_or_default();
+    let host = std::env::var("CLARP_BASE_URL").unwrap_or_default();
+    let mut found = Vec::new();
+    if !token.is_empty() && text.contains(&token) { found.push("the token"); }
+    if !host.is_empty() && text.contains(host.trim_end_matches('/')) { found.push("the Host's address"); }
+    if text.to_ascii_lowercase().contains("set-cookie") { found.push("a cookie"); }
+    found
+}
+
+/// Checks one launch: a new window of the default browser, with its own
+/// options kept, on a loopback page that names no credential.
+fn check_launch(what: &str, args: &[String], page: &str, content: &str) {
+    let url = args.last().cloned().unwrap_or_default();
+    check(args.iter().any(|a| a == "--new-window") && args.iter().any(|a| a == "--ozone-platform=wayland"),
+        &format!("the {what} opens in a new window of the default browser, with its own options: {args:?}"));
+    check(url.starts_with("http://127.0.0.1:") && url.contains("/form/"), &format!("from a loopback page: {url}"));
+    check(leaks(&url).is_empty(), &format!("its address names no credential: {:?}", leaks(&url)));
+    check(page.starts_with("HTTP/1.1 200") && page.contains(content), &format!("the browser got the {what}: {:?}", page.lines().next()));
+    check(page.to_ascii_lowercase().contains("referrer-policy: no-referrer"), "which sends no referrer to the origins it reaches");
+    check(leaks(page).is_empty(), &format!("and carries no credential: {:?}", leaks(page)));
+}
+
+/// `--check artifact-open`: HTML artifacts open for real (check.sh gives
+/// the app a fake default browser), by a click and by the keyboard, and
+/// Clarp stays: the window is still shown, the browser was not left as a
+/// zombie, and nothing it got names the Host or its token.
+pub(super) fn artifact_open_check(out: String) {
+    let before: Rc<Cell<(bool, bool)>> = Rc::default();
+    let (before2, before3) = (before.clone(), before.clone());
+    let mut stages = load_chat("art-open", &["html_open"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("cards", Box::new(move |_, window, elapsed| {
+            if !placed(window, &["open-report", "open-form"], elapsed) {
+                return false;
+            }
+            before.set(shown(window));
+            // As a click on the card does.
+            window.global::<ArtifactBridge>().invoke_open("open-report".into());
+            true
+        })),
+        ("report opens", Box::new(move |app, window, elapsed| {
+            let launches = browser_launches();
+            if launches.is_empty() {
+                if elapsed > Duration::from_secs(8) {
+                    check(false, "a click on the report opens it in the browser");
+                    return true;
+                }
+                return false;
+            }
+            let (pid, args) = &launches[0];
+            check_launch("report", args, &browser_page(pid), "<h1>Rates</h1>");
+            check(window.get_overlay().is_empty(), &format!("and not in Clarp's viewer: overlay {:?}", window.get_overlay()));
+            check(shown(window) == before2.get() && !shown(window).1, &format!("Clarp's window stays shown: {:?} before {:?}", shown(window), before2.get()));
+            // The keyboard leaves the card the click selected.
+            crate::artifacts_view::leave(app);
+            app.focus_transcript();
+            true
+        })),
+        ("keyboard on the chat", Box::new(|_, _, _| {
+            if !report().transcript_focused {
+                return false;
+            }
+            headless::press("k");
+            true
+        })),
+        ("form selected", Box::new(|_, window, elapsed| {
+            if selected(window) != "open-form" {
+                if elapsed > Duration::from_secs(2) {
+                    check(false, &format!("K selects the form: {:?}", selected(window)));
+                    return true;
+                }
+                return false;
+            }
+            headless::press("o");
+            true
+        })),
+        ("form opens", Box::new(move |_, window, elapsed| {
+            let launches = browser_launches();
+            if launches.len() < 2 {
+                if elapsed > Duration::from_secs(8) {
+                    check(false, &format!("O opens the form in the browser: {launches:?}"));
+                    return true;
+                }
+                return false;
+            }
+            let (pid, args) = &launches[1];
+            let page = browser_page(pid);
+            check_launch("form", args, &page, "name=\"currency\"");
+            check(page.contains("window.clarpForm"), "with its answer bridge");
+            check(shown(window) == before3.get() && !shown(window).1, &format!("Clarp's window stays shown: {:?}", shown(window)));
+            true
+        })),
+        ("openers reaped", Box::new(move |_, _, elapsed| {
+            // A reaped child is gone from /proc; a zombie stays there.
+            let lingering: Vec<String> = browser_launches().into_iter().map(|(pid, _)| pid).filter(|pid| std::path::Path::new(&format!("/proc/{pid}")).exists()).collect();
+            if !lingering.is_empty() && elapsed < Duration::from_secs(3) {
+                return false;
+            }
+            check(lingering.is_empty(), &format!("the browsers it started were waited for, not left as zombies: {lingering:?}"));
+            shot(&out, "artifact-open");
+            true
+        })),
+    ]);
+    run_stages(stages);
+}

@@ -330,12 +330,13 @@ fn save_and_open(id: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let path = folder.join(file);
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
-    if let Some(record) = std::env::var_os("CLARP_TEST_OPEN_URL") {
+    if let Some(record) = std::env::var_os("CLARP_TEST_OPEN_URL").filter(|p| !p.is_empty()) {
         use std::io::Write;
         let mut log = std::fs::OpenOptions::new().create(true).append(true).open(record).map_err(|e| e.to_string())?;
         return writeln!(log, "file://{}", path.display()).map_err(|e| e.to_string());
     }
-    std::process::Command::new(crate::platform::OPENER).arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+    crate::platform::opener::open(&path.to_string_lossy(), false);
+    Ok(())
 }
 
 /// Downloads an artifact's file from the Host to open it.
@@ -1775,7 +1776,12 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
             };
             let owner_origin = app.engine.borrow().form_event_origin();
             match crate::form_server::serve(id, version, &text(&artifact, "content"), events, &network, interactive, &owner_origin) {
-                Ok(url) => crate::open_link(&url),
+                Ok(url) => {
+                    let kind = if interactive { "form" } else { "report" };
+                    eprintln!("clarp-slint: opening the {kind} {id} in the browser (pid {}); window {}", std::process::id(), window_state(window));
+                    crate::view::open_page(&url);
+                    watch_window(id);
+                }
                 Err(error) => {
                     eprintln!("clarp-slint: {error}");
                     app.engine.borrow_mut().set_artifact_status(id, &format!("Not opened: {error}"));
@@ -1811,6 +1817,23 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
         _ => {}
     }
     app.refresh(&[Change::Updates]);
+}
+
+/// Whether the window is shown, for the log around a browser open.
+fn window_state(window: &AppWindow) -> String {
+    let w = window.window();
+    format!("visible={} minimized={} maximized={} fullscreen={}", w.is_visible(), w.is_minimized(), w.is_maximized(), w.is_fullscreen())
+}
+
+/// The window two seconds after a page opened, to tell a hidden or
+/// minimized window from one the compositor took out of view.
+fn watch_window(id: &str) {
+    let id = id.to_owned();
+    slint::Timer::single_shot(Duration::from_secs(2), move || {
+        if let Some(window) = crate::window() {
+            eprintln!("clarp-slint: 2 s after opening {id}: window {}", window_state(&window));
+        }
+    });
 }
 
 /// A countdown's target on the cards' clock, and its date in the target's
