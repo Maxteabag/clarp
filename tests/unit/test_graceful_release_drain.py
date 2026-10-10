@@ -595,3 +595,29 @@ def test_an_idle_agent_whose_next_turn_is_held_says_so(tmp_path):
 
     service.lower_admission_fence()
     assert hub.activities()[agent]["headline"] is None
+
+
+def test_recovery_behind_the_fence_holds_rows_without_counting_a_backoff(tmp_path):
+    agent = _agent(tmp_path, "mike")
+    retries = []
+    service, provider = _service(tmp_path, retries=retries)
+    for text in ("first", "second"):
+        turn_queue.enqueue(
+            queue_id=text, agent_id=agent, session="mike", text=text,
+            trace_id=f"t-{text}", client_msg_id=text, synthesize_audio=False,
+            origin="user", sender_agent_id="")
+    service.begin_admission_fence()
+
+    service.recover_queued()
+    _send(service, "fresh user send")       # clears any backoff, reschedules recovery
+    for _delay, retry in list(retries):
+        retry()
+
+    assert provider.spawned == []
+    assert td._RECOVERY_BACKOFF.snapshot() == {}
+    assert td._SLOTS.queue_depth(agent) == 3
+    service.lower_admission_fence()
+    service.start_held_work()
+    provider.finish("first")
+    provider.finish("second")
+    assert provider.texts() == ["first", "second", "fresh user send"]
