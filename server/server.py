@@ -1623,8 +1623,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
-        body = json.dumps(build_agent_snapshot(self.ctx)).encode()
-        self._send(200, body, "application/json")
+        from lib import snapshot
+        self._send(200, snapshot.SHARED.body(self.ctx), "application/json")
 
     def _handle_prompt_history(self):
         """Authenticated history of prospectively evidenced user prompts."""
