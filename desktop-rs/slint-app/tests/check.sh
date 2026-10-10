@@ -95,6 +95,8 @@ for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
 # A check runs the app once; startup runs it twice, with an empty portrait
 # cache and then with the one the first run filled (a usual launch).
 # CLARP_CHECK_PROFILE=release runs the release build.
+# CLARP_CHECK_WRAP runs the app under a command (perf record ... --).
+wrap=(); [ -n "${CLARP_CHECK_WRAP:-}" ] && read -ra wrap <<< "$CLARP_CHECK_WRAP"
 passes=(once); [ "$name" = startup ] && passes=(cold warm)
 # keymap saves its bindings (fonts its font) to a scratch settings file and
 # starts again (restart) to find them; the others keep settings in memory.
@@ -117,7 +119,7 @@ CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP
     CLARP_TEST_FOREGROUND=1 CLARP_TEST_CLIPBOARD="$scratch/clipboard" \
     CLARP_TEST_TERMINAL_LOG="$scratch/terminal.jsonl" PATH="$scratch/bin:$PATH" \
     timeout "$limit" dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
-    "target/${CLARP_CHECK_PROFILE:-debug}/clarp-slint" --check "$name" --out "$out" 2>&1 | tee -a "$scratch/run.log" | grep -E "^(ok|FAIL|E2E|perf)|panicked"
+    "${wrap[@]}" "target/${CLARP_CHECK_PROFILE:-debug}/clarp-slint" --check "$name" --out "$out" 2>&1 | tee -a "$scratch/run.log" | grep -E "^(ok|FAIL|E2E|perf)|panicked"
 done
 # The app's whole log beside the shots, to read when a stage times out.
 cp "$scratch/run.log" "$out/app.log"

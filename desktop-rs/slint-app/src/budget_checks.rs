@@ -31,8 +31,19 @@ const FRAME_BUDGET: f64 = 16.0;
 const SETTLE: Duration = Duration::from_millis(1500);
 const MEASURE: Duration = Duration::from_secs(5);
 
-const PARTIAL_60HZ: Pacing = Pacing { partial: true, hz: 60 };
-const WHOLE_60HZ: Pacing = Pacing { partial: false, hz: 60 };
+/// The display's rate: 60 Hz, or CLARP_BUDGET_HZ (120 for a laptop panel
+/// like Peter's).
+fn hz() -> u32 {
+    std::env::var("CLARP_BUDGET_HZ").ok().and_then(|v| v.parse().ok()).filter(|hz| *hz > 0).unwrap_or(60)
+}
+
+fn partial() -> Pacing {
+    Pacing { partial: true, hz: hz() }
+}
+
+fn whole() -> Pacing {
+    Pacing { partial: false, hz: hz() }
+}
 
 /// One scenario's numbers.
 #[derive(Debug, Clone, Default)]
@@ -61,11 +72,23 @@ struct Mark {
     cpu: Duration,
     frames: usize,
     at: Instant,
+    clock: f64,
+}
+
+/// CLOCK_MONOTONIC in seconds: perf record -k CLOCK_MONOTONIC stamps its
+/// samples with it, so a profile can be cut to one scenario's window.
+fn monotonic() -> f64 {
+    // SAFETY: clock_gettime fills the zeroed timespec it is given.
+    let mut time: libc::timespec = unsafe { std::mem::zeroed() };
+    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time) } != 0 {
+        eprintln!("perf: clock_gettime: {}", std::io::Error::last_os_error());
+    }
+    time.tv_sec as f64 + time.tv_nsec as f64 / 1e9
 }
 
 fn mark() -> Mark {
     quiet(true);
-    Mark { cpu: crate::perf::thread_cpu(), frames: crate::perf::stats().frames.len(), at: Instant::now() }
+    Mark { cpu: crate::perf::thread_cpu(), frames: crate::perf::stats().frames.len(), at: Instant::now(), clock: monotonic() }
 }
 
 fn measured(name: &str, mark: Mark) -> Row {
@@ -84,6 +107,7 @@ fn measured(name: &str, mark: Mark) -> Row {
         dirty: if dirty.is_empty() { 0.0 } else { dirty.iter().map(|d| f64::from(*d)).sum::<f64>() / dirty.len() as f64 },
         frames: summary.count,
     };
+    println!("perf budget window {} {:.6} {:.6} {}", file_name(name), mark.clock, monotonic(), std::process::id());
     // What three frames through it repainted (px), to see what moves.
     let rects = &stats.frame_rects[mark.frames..];
     for at in [rects.len() / 4, rects.len() / 2, rects.len() * 3 / 4] {
@@ -156,6 +180,11 @@ fn busy_agents(app: &crate::App) -> usize {
     app.engine.borrow().roster().agents().iter().filter(|a| a.busy).count()
 }
 
+/// A scenario's name as a file name.
+fn file_name(name: &str) -> String {
+    name.replace([' ', ',', '+'], "-").replace("--", "-")
+}
+
 /// A measured scenario as a stage: `setup` once, settle, measure, then
 /// `done` (after the input stops).
 fn scenario(
@@ -185,7 +214,7 @@ fn scenario(
         }
         stop_input();
         rows.borrow_mut().push(measured(name, mark));
-        let file = name.replace([' ', ',', '+'], "-").replace("--", "-");
+        let file = file_name(name);
         let saved = headless::save_frame(&format!("{}/{file}.png", out));
         check(saved.is_ok(), &format!("captured {name} {}", saved.err().unwrap_or_default()));
         true
@@ -237,7 +266,7 @@ pub fn frame_budget_check(out: String) {
             }
             let (width, height, scale) = headless::size_from_env();
             check(true, &format!("two panes, Rachel's chat and Mike's, nothing working, {width}x{height} at {scale}"));
-            headless::pace(PARTIAL_60HZ);
+            headless::pace(partial());
             true
         })),
         scenario("idle, 0 working", out.clone(), rows1, |_, _| {}),
@@ -292,7 +321,7 @@ pub fn frame_budget_check(out: String) {
                 }
             });
         }),
-        scenario("same, every frame whole", out.clone(), rows6, |_, _| headless::pace(WHOLE_60HZ)),
+        scenario("same, every frame whole", out.clone(), rows6, |_, _| headless::pace(whole())),
         ("full frame", Box::new({
             // Ten frames drawn whole, one at a time: each the first frame
             // after its request.
@@ -300,7 +329,7 @@ pub fn frame_budget_check(out: String) {
             move |_: &crate::App, _: &crate::AppWindow, _: Duration| {
                 let frames = crate::perf::stats().frames;
                 match waiting {
-                    None => headless::pace(PARTIAL_60HZ),
+                    None => headless::pace(partial()),
                     Some(before) if frames.len() > before => full1.borrow_mut().push(crate::perf::ms(frames[before].took)),
                     Some(_) => return false,
                 }
@@ -347,9 +376,9 @@ pub fn frame_budget_check(out: String) {
             let (width, height, scale) = headless::size_from_env();
             let size = window.window().size();
             let mut table = format!(
-                "Frame budget: {width}x{height} logical at {scale} ({}x{} px), 60 Hz pacing, partial repaint; one full frame {one:.2} ms\n\n\
+                "Frame budget: {width}x{height} logical at {scale} ({}x{} px), {} Hz pacing, partial repaint; one full frame {one:.2} ms\n\n\
                  | scenario | UI thread ms/s | fps | frame mean ms | frame p95 ms | repainted |\n|---|---|---|---|---|---|\n",
-                size.width, size.height
+                size.width, size.height, hz()
             );
             for row in rows.iter() {
                 table.push_str(&row.line());
