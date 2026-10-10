@@ -419,7 +419,12 @@ impl App {
             commands::show_hints(self, &window);
         }
         whole.lap("status");
-        if changes.iter().any(|c| matches!(c, Change::Roster | Change::Preferences | Change::Search)) {
+        if changes.contains(&Change::RosterFreshness) {
+            let (note, detail) = commands::roster_note(&self.engine.borrow());
+            window.set_roster_note(note.into());
+            window.set_roster_note_detail(detail.into());
+        }
+        if changes.iter().any(|c| matches!(c, Change::Roster | Change::RosterFreshness | Change::Preferences | Change::Search)) {
             commands::refresh_switcher(self, &window);
         }
         whole.lap("switcher");

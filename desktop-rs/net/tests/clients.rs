@@ -344,3 +344,26 @@ async fn api_client_asks_for_gzip_and_reads_a_compressed_reply() {
         other => panic!("expected the decompressed JSON, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn a_get_with_a_timeout_fails_when_the_body_stalls() {
+    let (server, url) = listen().await;
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = server.accept().await {
+            read_request(&mut socket).await;
+            // The headers come at once; the megabyte never finishes.
+            let _ = socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000000\r\n\r\n{\"agents\":[").await;
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+    });
+    let (client, mut replies) = api_client();
+    client.set_endpoint(url, "");
+    client.get_with_timeout("snapshot:1", "/agents/snapshot", Duration::from_millis(300));
+    match next(&mut replies).await {
+        ApiReply::Failed { tag, message, .. } => {
+            assert_eq!(tag, "snapshot:1");
+            assert!(message.contains("did not answer within 0.3 s"), "{message}");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}

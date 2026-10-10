@@ -272,6 +272,10 @@ export component Sidebar inherits Rectangle {
     in property <[ChatRow]> rooms;
     in property <[ChatRow]> archived;
     in property <int> unread-rooms;
+    // Empty while the agent list is current; else when it is from and that
+    // it is retrying, with why in `roster-note-detail`.
+    in property <string> roster-note;
+    in property <string> roster-note-detail;
     in-out property <bool> showing-pairs;
     in-out property <bool> showing-archive;
     in-out property <string> scope: "all";
@@ -353,6 +357,21 @@ export component Sidebar inherits Rectangle {
             count: root.rooms.length;
             unread: root.unread-rooms;
             clicked => { root.showing-pairs = !root.showing-pairs; }
+        }
+        if root.roster-note != "": HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            vertical-stretch: 0;
+            Text {
+                text: root.roster-note;
+                color: Palette.faint;
+                font-size: 11 * Look.unit;
+                overflow: elide;
+                accessible-role: text;
+                accessible-id: "roster-note";
+                accessible-label: root.roster-note;
+                accessible-description: root.roster-note-detail;
+            }
         }
         // Holds the keyboard for J/K/Enter navigation (the keyboard map).
         list := FocusScope {

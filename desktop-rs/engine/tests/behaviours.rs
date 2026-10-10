@@ -153,3 +153,34 @@ fn message_search_finds_loaded_chats_and_chats_only_the_cache_holds() {
     let help = d.engine.search_messages("can I help", 10);
     assert_eq!(help.hits.first().map(|h| (h.session.as_str(), h.id.as_str(), h.source)), Some(("rachel", "r2", Source::Memory)), "a loaded chat is searched as loaded");
 }
+
+/// A failed snapshot keeps the roster, says it is stale (no banner) and is
+/// retried on its own; a roster event while it fails is not lost.
+#[test]
+fn a_failed_snapshot_keeps_the_roster_and_retries_on_its_own() {
+    use clarp_engine::roster_freshness::State;
+    let host = Host::start("stale-roster");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("fresh", |e| e.roster_freshness() == State::Fresh);
+    let before = d.engine.roster().agents().len();
+    host.control("/__control/fail", json!({"path": "/agents/snapshot", "status": 504, "count": 2}));
+    let snapshots = host.requests("GET", "/agents/snapshot").len();
+    d.engine.refresh_agents();
+    d.until("stale", |e| e.roster_freshness().is_stale());
+    assert_eq!(d.engine.roster().agents().len(), before, "the roster is kept");
+    assert!(d.engine.error().is_empty(), "no banner for a background refresh: {:?}", d.engine.error());
+    // An announced agent while it fails: the event only marks the roster
+    // dirty (no request of its own), and the retry brings it.
+    host.control("/__control/add-agent", json!({"session": "koko", "persona": "Koko"}));
+    std::thread::sleep(Duration::from_millis(500));
+    d.until("still waiting", |_| true);
+    assert_eq!(host.requests("GET", "/agents/snapshot").len(), snapshots + 1, "no request stacked before the back-off");
+    d.until("the second failure", |e| matches!(e.roster_freshness(), State::Stale { failures: 2, .. }));
+    d.until("koko after the next retry", |e| e.roster().find("koko").is_some());
+    assert_eq!(d.engine.roster_freshness(), State::Fresh);
+    let times: Vec<f64> = host.requests("GET", "/agents/snapshot")[snapshots..].iter().map(|r| r["at"].as_f64().unwrap()).collect();
+    assert_eq!(times.len(), 3, "a request per try: {times:?}");
+    let (first, second) = (times[1] - times[0], times[2] - times[1]);
+    assert!((1.8..4.0).contains(&first) && (4.8..8.0).contains(&second), "backed off 2 s then 5 s: {first:.2} {second:.2}");
+}

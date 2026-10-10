@@ -74,6 +74,9 @@ mod send_checks;
 // ---- an agent's background processes by keyboard: list, output, stop
 #[path = "processes_checks.rs"]
 mod processes_checks;
+// ---- the agent list kept, marked stale and retried when the snapshot fails
+#[path = "roster_checks.rs"]
+mod roster_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -517,6 +520,7 @@ pub fn start_check(name: &str, out: String) {
         "message-search" => search_checks::message_search_check(out),
         "mention" => search_checks::mention_check(out),
         "processes" => processes_checks::processes_check(out),
+        "roster-stale" => roster_checks::roster_stale_check(out),
         "a2a" => {
             row_overlap_checks::watch();
             a2a_checks::a2a_check(out)

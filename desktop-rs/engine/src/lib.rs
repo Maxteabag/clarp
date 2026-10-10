@@ -23,6 +23,7 @@ mod queue;
 pub mod search;
 mod panels;
 pub mod profile;
+pub mod roster_freshness;
 mod teams;
 mod updates;
 pub mod workspace;
@@ -114,6 +115,8 @@ pub enum Change {
     Avatars,
     /// Message search's cached chats were read (`search_messages`).
     Search,
+    /// The roster became fresh, refreshing or stale (`roster_freshness`).
+    RosterFreshness,
 }
 
 enum Message {
@@ -121,6 +124,8 @@ enum Message {
     Sse(SseSignal),
     Credential { base: String, token: String },
     SnapshotDue,
+    /// The back-off after a failed snapshot is over (its token).
+    SnapshotRetryDue(u64),
     RoomsDue(u64),
     DeliveryDue { client_id: String, token: u64 },
     DraftsDue(u64),
@@ -220,6 +225,12 @@ pub struct Engine {
     snapshot_dirty: bool,
     snapshot_scheduled: bool,
     snapshot_last: Option<Instant>,
+    /// A retry after a failed snapshot is waiting: its token (0: none).
+    /// While it waits, roster events only mark the roster dirty.
+    snapshot_retry: u64,
+    snapshot_retry_counter: u64,
+    snapshot_timeout: Duration,
+    freshness: roster_freshness::Freshness,
     log_in_flight: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
@@ -338,6 +349,10 @@ impl Engine {
             snapshot_dirty: false,
             snapshot_scheduled: false,
             snapshot_last: None,
+            snapshot_retry: 0,
+            snapshot_retry_counter: 0,
+            snapshot_timeout: roster_freshness::snapshot_timeout(),
+            freshness: Default::default(),
             log_in_flight: HashSet::new(),
             pending_log_mode: HashMap::new(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
@@ -402,6 +417,7 @@ impl Engine {
                     self.snapshot_scheduled = false;
                     self.request_snapshot();
                 }
+                Message::SnapshotRetryDue(token) => self.snapshot_retry_due(token),
                 Message::DeliveryDue { client_id, token } => self.delivery_timed_out(&client_id, token),
                 Message::DraftsDue(token) => self.drafts_due(token),
                 Message::PanesWritten(result) => self.panes_written(result),
@@ -447,6 +463,11 @@ impl Engine {
     }
     pub fn roster(&self) -> &Roster {
         &self.roster
+    }
+    /// Whether the roster is current, being fetched, or stale since a
+    /// failed snapshot (kept while the engine retries).
+    pub fn roster_freshness(&self) -> roster_freshness::State {
+        self.freshness.state()
     }
     pub fn archived(&self) -> &Roster {
         &self.archived
@@ -679,13 +700,16 @@ impl Engine {
         self.set_connecting(true);
         self.set_connection_state("connecting");
         self.api.get("server-info", "/server-info", &[]);
-        self.request_snapshot();
+        self.force_snapshot();
     }
 
     fn reset_transient_state(&mut self) {
         self.snapshot_generation += 1;
         self.snapshot_in_flight = false;
         self.snapshot_dirty = false;
+        self.snapshot_retry = 0;
+        self.freshness.abandoned();
+        self.changes.push(Change::RosterFreshness);
         self.pending_log_mode.clear();
         for session in std::mem::take(&mut self.log_in_flight) {
             self.with_conversation(&session, |c| c.set_loading(false));
@@ -737,12 +761,23 @@ impl Engine {
 
     // ---- roster --------------------------------------------------------
 
+    /// Fetches the roster now (the Refresh agents command), even while a
+    /// retry after a failure is waiting.
     pub fn refresh_agents(&mut self) {
+        self.force_snapshot();
+    }
+
+    /// A snapshot now: a waiting retry is cancelled (this request is it).
+    fn force_snapshot(&mut self) {
+        self.snapshot_retry = 0;
         self.request_snapshot();
     }
 
+    /// A snapshot soon. While one is on its way, or a retry after a failure
+    /// waits, the roster is only marked dirty: that request (or the one
+    /// after it) brings the change, and requests never stack.
     fn request_snapshot(&mut self) {
-        if self.snapshot_in_flight {
+        if self.snapshot_in_flight || self.snapshot_retry != 0 {
             self.snapshot_dirty = true;
             return;
         }
@@ -756,14 +791,41 @@ impl Engine {
         self.snapshot_in_flight = true;
         self.snapshot_last = Some(Instant::now());
         self.snapshot_generation += 1;
-        self.api.get(&format!("snapshot:{}", self.snapshot_generation), "/agents/snapshot", &[]);
+        self.freshness.started();
+        self.changes.push(Change::RosterFreshness);
+        self.api.get_with_timeout(&format!("snapshot:{}", self.snapshot_generation), "/agents/snapshot", self.snapshot_timeout);
     }
 
     fn complete_snapshot_request(&mut self) {
         self.snapshot_in_flight = false;
+        self.snapshot_retry = 0;
+        self.freshness.succeeded(std::time::SystemTime::now());
+        self.changes.push(Change::RosterFreshness);
         if std::mem::take(&mut self.snapshot_dirty) {
             self.after(Duration::from_millis(100), Message::SnapshotDue);
         }
+    }
+
+    /// The roster shown is kept and marked stale; the next try waits out
+    /// the back-off and also covers any roster change marked meanwhile.
+    fn snapshot_failed(&mut self, detail: &str) {
+        self.snapshot_in_flight = false;
+        let failures = self.freshness.failed(detail);
+        self.changes.push(Change::RosterFreshness);
+        let delay = roster_freshness::retry_delay(failures);
+        eprintln!("Engine: the agent list is stale ({failures} failed in a row: {detail}); retrying in {} s", delay.as_secs());
+        self.snapshot_retry_counter += 1;
+        self.snapshot_retry = self.snapshot_retry_counter;
+        self.after(delay, Message::SnapshotRetryDue(self.snapshot_retry));
+    }
+
+    fn snapshot_retry_due(&mut self, token: u64) {
+        if token != self.snapshot_retry {
+            return;
+        }
+        self.snapshot_retry = 0;
+        self.snapshot_dirty = false;
+        self.request_snapshot();
     }
 
     fn mutate_roster<R>(&mut self, change: impl FnOnce(&mut Roster) -> R) -> R {
@@ -1248,7 +1310,7 @@ impl Engine {
             self.server_version = json::string(object, "clarp_version");
             self.changes.push(Change::ServerInfo);
             self.set_connecting(false);
-            self.request_snapshot();
+            self.force_snapshot();
             self.live_server_info(object);
             self.form_events_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
@@ -1308,10 +1370,12 @@ impl Engine {
             return;
         }
         if let Some(generation) = tag.strip_prefix("snapshot:") {
-            if generation.parse::<u64>().ok() != Some(self.snapshot_generation) {
-                return;
+            // Not a banner: the explorer and the switcher say the list is
+            // stale, and the engine retries on its own.
+            if generation.parse::<u64>().ok() == Some(self.snapshot_generation) {
+                self.snapshot_failed(&detail);
             }
-            self.complete_snapshot_request();
+            return;
         }
         if tag == "agent-conversations" {
             self.rooms_in_flight = false;
@@ -1368,7 +1432,7 @@ impl Engine {
                     if self.error_is_transport {
                         self.set_error("");
                     }
-                    self.request_snapshot();
+                    self.force_snapshot();
                     self.live_reconnected();
                     self.live_resubscribed();
                 } else {

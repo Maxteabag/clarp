@@ -129,6 +129,7 @@ fn state(name: &str) -> Vec<Binding> {
             b("recent-agents", &["Ctrl+R"], "Recent", true, Always, false),
             b("search-messages", &["Ctrl+F"], "Search messages", false, Always, false),
             b("refresh", &["F5"], "Refresh", false, Always, false),
+            b("refresh-agents", &["Shift+F5"], "Refresh agents", false, Always, false),
             b("mute", &["Ctrl+M"], "Mute", false, Always, false),
             b("overview", &["Ctrl+Shift+O"], "Overview", false, Always, false),
             b("tools", &["Ctrl+Shift+T"], "Tools", false, Always, false),
@@ -1268,6 +1269,17 @@ mod tests {
             assert_eq!(action_for(state, "Ctrl+F", &none, all()), Some("search-messages"), "{state}");
         }
         assert_eq!(action_for("sidebar", "/", &none, all()), Some("agent-search"), "/ still filters the explorer");
+    }
+
+    #[test]
+    fn shift_f5_refreshes_the_agents_and_f5_the_chat() {
+        let none = Overrides::new();
+        let f5 = slint::SharedString::from(slint::platform::Key::F5).to_string();
+        assert_eq!(chord(&f5, false, false, true).as_deref(), Some("Shift+F5"));
+        for state in ["pane", "sidebar"] {
+            assert_eq!(action_for(state, "Shift+F5", &none, all()), Some("refresh-agents"), "{state}");
+            assert_eq!(action_for(state, "F5", &none, all()), Some("refresh"), "{state}");
+        }
     }
 
     #[test]

@@ -13,6 +13,8 @@ case $name in artifacts|scroll-jump|live|row-overlap) limit=300 ;; artifact-keys
 [ "$name" = desktop ] && export CLARP_TEST_LOGIN=unlocked
 # The null sink "plays" a clip this long, so a check can pause it.
 case $name in artifacts|artifact-keys) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; esac
+# roster-stale lets a slow snapshot time out in 1.5 s, not a minute.
+[ "$name" = roster-stale ] && export CLARP_SNAPSHOT_TIMEOUT_MS=1500
 scratch=$(mktemp -d /var/tmp/clarp-slint-check.XXXXXX)
 trap 'kill "$host" 2>/dev/null; wait "$host" 2>/dev/null; rm -rf "$scratch"' EXIT
 host_args=(); [ "$name" = startup ] && host_args=(--roster 100)

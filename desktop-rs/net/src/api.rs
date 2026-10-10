@@ -114,6 +114,12 @@ impl ApiClient {
         self.send_json(tag, Method::GET, url, Body::None, None);
     }
 
+    /// A GET that fails with a timeout once `timeout` passes without the
+    /// whole reply (body included).
+    pub fn get_with_timeout(&self, tag: &str, path: &str, timeout: Duration) {
+        self.send_json(tag, Method::GET, self.resolve(path), Body::None, Some(timeout));
+    }
+
     pub fn post_json(&self, tag: &str, path: &str, body: Value, timeout: Option<Duration>) {
         self.send_json(tag, Method::POST, self.resolve(path), Body::Json(body), timeout);
     }
@@ -211,17 +217,18 @@ impl ApiClient {
                 request
             }
         };
-        if let Some(timeout) = timeout.filter(|t| !t.is_zero()) {
+        let timeout = timeout.filter(|t| !t.is_zero());
+        if let Some(timeout) = timeout {
             request = request.timeout(timeout);
         }
         let this = self.clone();
         self.runtime.spawn(async move {
             let reply = match request.send().await {
-                Err(error) => ApiReply::Failed { tag, message: error.to_string(), status: 0 },
+                Err(error) => ApiReply::Failed { tag, message: request_error(&error, timeout), status: 0 },
                 Ok(response) => {
                     let status = response.status();
                     match response.bytes().await {
-                        Err(error) => ApiReply::Failed { tag, message: error.to_string(), status: status.as_u16() },
+                        Err(error) => ApiReply::Failed { tag, message: request_error(&error, timeout), status: status.as_u16() },
                         Ok(body) if !status.is_success() => ApiReply::Failed {
                             tag,
                             message: error_message(&body, &http_status_text(status)),
@@ -245,6 +252,14 @@ impl ApiClient {
             };
             this.deliver(generation, reply);
         });
+    }
+}
+
+/// A timeout says how long it waited; anything else is reqwest's own words.
+fn request_error(error: &reqwest::Error, timeout: Option<Duration>) -> String {
+    match timeout {
+        Some(timeout) if error.is_timeout() => format!("The Host did not answer within {} s", timeout.as_secs_f32()),
+        _ => error.to_string(),
     }
 }
 

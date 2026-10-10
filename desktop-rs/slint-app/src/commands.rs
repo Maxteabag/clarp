@@ -676,6 +676,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "next-attention" => crate::updates_view::next_attention(app, window),
         "refresh" if window.get_surface() == "updates" => app.engine.borrow_mut().load_updates(),
         "refresh" => app.engine.borrow_mut().refresh_session(&selected),
+        "refresh-agents" => app.engine.borrow_mut().refresh_agents(),
         "tools" => {
             let mode = app.engine.borrow().activity_mode();
             let always = clarp_core::presentation::ALWAYS_VISIBLE;
@@ -823,6 +824,13 @@ fn close_picker(app: &App, window: &AppWindow) {
     refresh_switcher(app, window);
 }
 
+/// The explorer's and the switcher's note while the agent list is stale,
+/// and why (both empty while it is current).
+pub fn roster_note(engine: &clarp_engine::Engine) -> (String, String) {
+    let state = engine.roster_freshness();
+    (state.note(clarp_engine::roster_freshness::local_clock), state.detail())
+}
+
 /// Rebuilds the results (a query typed, or the roster changed while open).
 pub fn refresh_switcher(app: &App, window: &AppWindow) {
     if !app.switcher.borrow().open {
@@ -856,6 +864,13 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
         }
         switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings))
     };
+    // Agents and contacts come from the roster: say when it is stale.
+    if picker.is_empty() && !messages_only {
+        let (stale, _) = roster_note(&app.engine.borrow());
+        if !stale.is_empty() {
+            note = if note.is_empty() { stale } else { format!("{stale}. {note}") };
+        }
+    }
     window.set_switcher_note(note.into());
     // The commands' keys as the user bound them.
     let overrides = overrides(app);
