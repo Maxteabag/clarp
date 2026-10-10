@@ -36,19 +36,68 @@ def enqueue(*, queue_id: str, agent_id: str, session: str, text: str,
 def park(*, queue_id: str, agent_id: str, session: str, text: str,
          trace_id: str, client_msg_id: str, synthesize_audio: bool,
          origin: str, sender_agent_id: str,
-         prompt_admission_id: str = "") -> bool:
+         prompt_admission_id: str = "", allow_paused: bool = False) -> bool:
     cursor = db.conn().execute(
         """INSERT INTO queued_turns (
                queue_id, agent_id, session, text, trace_id, client_msg_id,
                synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?)
+               prompt_admission_id, allow_paused
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, ?)
            ON CONFLICT(queue_id) DO NOTHING""",
         (queue_id, agent_id, session, text, trace_id, client_msg_id,
          int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id),
+         prompt_admission_id, int(allow_paused)),
     )
     return cursor.rowcount == 1
+
+
+# --- release drain ---------------------------------------------------------------
+#
+# Work the release drain holds keeps the right to run past a Stop pause when it
+# had that right on arrival (a normal send, or fresh user intent). The runtime
+# that recovers it after the handoff reads ``allow_paused``.
+
+def allow_paused(queue_id: str) -> bool:
+    cursor = db.conn().execute(
+        """UPDATE queued_turns SET allow_paused = 1
+            WHERE queue_id = ? AND allow_paused = 0
+              AND status IN ('queued', 'claimed', 'parked')""",
+        (queue_id,))
+    return bool(cursor.rowcount)
+
+
+def move_to_back(queue_id: str) -> bool:
+    """Give an open row a new, newest position, everything else unchanged,
+    so rows written later for older work can be ordered in front of it."""
+    con = db.conn()
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        row = con.execute(
+            """SELECT * FROM queued_turns WHERE queue_id = ?
+                 AND status IN ('queued', 'parked')""", (queue_id,)).fetchone()
+        if row is not None:
+            columns = [key for key in row.keys() if key != "queue_seq"]
+            con.execute("DELETE FROM queued_turns WHERE queue_id = ?", (queue_id,))
+            con.execute(
+                f"INSERT INTO queued_turns ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' * len(columns))})",
+                [row[key] for key in columns])
+            _bump_revision(str(row["agent_id"]))
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    return row is not None
+
+
+def holds_client_message(client_msg_id: str) -> bool:
+    """Whether an open (queued, claimed or parked) row carries this message."""
+    if not client_msg_id:
+        return False
+    return db.conn().execute(
+        """SELECT 1 FROM queued_turns WHERE client_msg_id = ?
+             AND status IN ('queued', 'claimed', 'parked') LIMIT 1""",
+        (client_msg_id,)).fetchone() is not None
 
 
 def unpark(queue_id: str) -> bool:

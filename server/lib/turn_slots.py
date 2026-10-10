@@ -15,6 +15,11 @@ behind one lock. Memory is a written-through view; the durable authority is:
 ``rehydrate()`` rebuilds the view from those rows after a restart; the
 dispatcher's ``recover_queued`` then re-admits what was queued or parked.
 
+The admission fence (``fence()``) is the release drain's switch: while it is
+up no queued spec takes a slot (``pop_next`` frees the slot and keeps the
+queue), so in-flight turns finish and nothing new starts until the runtime
+hands over or the fence is lifted.
+
 ``live_work()`` is the one query for "is anything happening for this agent",
 folding in the two facts other modules own: an attached interactive terminal
 (``terminal_ws``) and a running compaction (``compaction``).
@@ -170,6 +175,9 @@ class TurnSlots:
         # Durable rows are reinstated once per process, at the first queue
         # recovery after boot (see TurnDispatchService.recover_queued).
         self._rehydrated = False
+        # The release drain's admission fence. Memory only: a new process
+        # starts unfenced and its release monitor decides again.
+        self.fenced = False
 
     def first_rehydration(self) -> bool:
         """True exactly once per process (and after reset_for_tests)."""
@@ -218,7 +226,43 @@ class TurnSlots:
                     agent_id: len(items)
                     for agent_id, items in self.queued.items() if items
                 },
+                "fenced": self.fenced,
             }
+
+    # --- admission fence ---------------------------------------------------
+
+    def set_fenced(self, fenced: bool) -> bool:
+        """Raise or lower the fence; returns whether it changed."""
+        with self.lock:
+            changed = self.fenced != bool(fenced)
+            self.fenced = bool(fenced)
+            return changed
+
+    def held(self) -> dict[str, int]:
+        """Agents whose next turn waits only on the fence: work queued and
+        no owner (turn, terminal or Stop) on the slot."""
+        with self.lock:
+            if not self.fenced:
+                return {}
+            return {agent_id: len(items)
+                    for agent_id, items in self.queued.items()
+                    if items and agent_id not in self.inflight}
+
+    def queued_specs(self) -> dict[str, list]:
+        """A copy of every agent's queue, in order."""
+        with self.lock:
+            return {agent_id: list(items)
+                    for agent_id, items in self.queued.items() if items}
+
+    def swap_queued(self, agent_id: str, old: Any, new: Any) -> bool:
+        """Replace the queued spec ``old`` (by identity) with ``new``."""
+        with self.lock:
+            items = self.queued.get(agent_id) or []
+            for index, item in enumerate(items):
+                if item is old:
+                    items[index] = new
+                    return True
+            return False
 
     def live_work(self, agent_id: str, *, session: str = "") -> LiveWork:
         """Everything that counts as work for the agent, from every owner."""
@@ -333,9 +377,14 @@ class TurnSlots:
 
         With ``expected`` the handover happens only while that trace (or
         sentinel) still owns the slot. Returns the spec now owning the slot,
-        or None when the slot was freed (or ownership had moved)."""
+        or None when the slot was freed (or ownership had moved). Behind the
+        admission fence the slot is freed and the queue kept."""
         with self.lock:
             if expected is not None and self.inflight.get(agent_id) != expected:
+                return None
+            if self.fenced:
+                self.inflight.pop(agent_id, None)
+                self.claimed_at.pop(agent_id, None)
                 return None
             queue = self.queued.get(agent_id)
             next_spec = queue.pop(0) if queue else None
@@ -462,6 +511,7 @@ class TurnSlots:
             self.queued.clear()
             self.claimed_at.clear()
             self._rehydrated = False
+            self.fenced = False
         with self._launch_lock:
             self.launches.clear()
 

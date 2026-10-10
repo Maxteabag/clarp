@@ -18,6 +18,7 @@ from lib.runtime_release import (  # noqa: E402
     RuntimeReleaseMonitor,
     consume_clean_handoff,
     mark_clean_handoff,
+    read_installed_release_id,
     read_runtime_release_id,
 )
 from lib.runtime_startup import recover_runtime  # noqa: E402
@@ -45,10 +46,11 @@ def main() -> int:
     release_monitor = RuntimeReleaseMonitor(
         runtime,
         running_release_id=running_release_id,
-        desired_release_id=lambda: read_runtime_release_id(
+        desired_release_id=lambda: read_installed_release_id(
             paths.data_dir / "current"),
         before_shutdown=lambda: mark_clean_handoff(handoff_marker),
     )
+    runtime.release_monitor = release_monitor
 
     # SIGTERM is used only for a deliberate runtime drain or host shutdown.
     # Raising here lets serve_forever unwind without calling shutdown() from

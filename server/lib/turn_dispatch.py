@@ -126,6 +126,11 @@ def runtime_status() -> dict[str, Any]:
     from . import live_hub
     hub = live_hub.current()
     status.update({
+        # The release drain (runtime_release): agents whose next turn waits on
+        # the admission fence, and held work not yet durable.
+        "held": _SLOTS.held(),
+        "unpersisted": unpersisted_held(),
+        "provider_turns": provider_turns(),
         "compactions": compaction.active_sessions(),
         # The status line per agent (docs/live-items.md §1.3), for the
         # HTTP process's /agents/snapshot.
@@ -134,6 +139,36 @@ def runtime_status() -> dict[str, Any]:
            for pool, coordinator in _FAILOVERS.items()},
     })
     return status
+
+
+def unpersisted_held() -> list[str]:
+    """Agents with queued work that would not survive a runtime handoff:
+    no durable queue row and no park row."""
+    return sorted(agent_id for agent_id, specs in _SLOTS.queued_specs().items()
+                  if any(not spec.queue_id and not spec.park_id for spec in specs))
+
+
+def provider_turns() -> list[str]:
+    """Agents with a turn a shared provider runs without a Clarp slot (a Codex
+    app-server goal continuation). A handoff would end it with the process."""
+    try:
+        from . import codex_app_server
+        return sorted(codex_app_server.busy_agents())
+    except Exception as exc:  # noqa: BLE001 - unknown is reported, not idle
+        log_exception("providerTurnsCheckFail", exc)
+        return ["<unknown>"]
+
+
+UPDATE_HOLD_HEADLINE = "Waiting for the Clarp update"
+
+
+def refresh_hold_headlines() -> None:
+    """Say why an agent with work is idle: its next turn waits for the update.
+    Cleared when the fence is lifted or the agent's next turn begins."""
+    from . import live_hub
+    hub = live_hub.current()
+    if hub is not None:
+        hub.set_update_holds(set(_SLOTS.held()), UPDATE_HOLD_HEADLINE)
 
 
 def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
@@ -235,11 +270,18 @@ class _TurnSpec:
     # Launches of this spec that failed before the backend started; spaces
     # out the retries of a queued handoff (see _requeue_failed_handoff).
     handoff_failures: int = 0
+    # Whether a Stop pause could not hold this request when it arrived (a
+    # normal send, fresh user intent, an explicit send-now). The release drain
+    # writes it to the durable row so the next runtime honours it too.
+    bypass_pause: bool = False
+    # The release drain already made this held spec durable.
+    drain_persisted: bool = False
 
 
-def _park(spec: _TurnSpec) -> str:
-    """Persist a send that is about to wait behind the Stop barrier."""
-    park_id = f"stop-park-{spec.trace_id}"
+def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
+    """Persist a send that is about to wait behind the Stop barrier (or, with
+    ``prefix="drain-park"``, behind the release drain's admission fence)."""
+    park_id = f"{prefix}-{spec.trace_id}"
     try:
         turn_queue.park(
             queue_id=park_id, agent_id=spec.agent_id, session=spec.session,
@@ -247,9 +289,11 @@ def _park(spec: _TurnSpec) -> str:
             client_msg_id=spec.client_msg_id,
             synthesize_audio=spec.synthesize_audio, origin=spec.origin,
             sender_agent_id=spec.sender_agent_id,
-            prompt_admission_id=spec.prompt_admission_id)
+            prompt_admission_id=spec.prompt_admission_id,
+            allow_paused=prefix == "drain-park" and spec.bypass_pause)
     except Exception as exc:  # noqa: BLE001 - memory still holds the send
-        log_exception("stopParkPersistFail", exc, detail=spec.agent_id)
+        log_exception(f"{'drain' if prefix == 'drain-park' else 'stop'}ParkPersistFail",
+                      exc, detail=spec.agent_id)
         return ""
     return park_id
 
@@ -528,6 +572,83 @@ class TurnDispatchService:
         # real timer thread.
         self.retry_scheduler = retry_scheduler or _default_retry_scheduler
 
+    # --- release drain ------------------------------------------------------
+
+    def begin_admission_fence(self) -> bool:
+        """Stop starting turns; in-flight turns finish. New sends, queued
+        handoffs and recovery all wait, durably, behind the fence."""
+        changed = _SLOTS.set_fenced(True)
+        if changed:
+            snapshot = _SLOTS.snapshot()
+            log("admissionFenceRaised",
+                f"active={len(snapshot['active'])} "
+                f"queued={sum(snapshot['queued'].values())}")
+        self.persist_held()
+        refresh_hold_headlines()
+        return changed
+
+    @staticmethod
+    def admission_fenced() -> bool:
+        return bool(_SLOTS.fenced)
+
+    @staticmethod
+    def refresh_hold_headlines() -> None:
+        refresh_hold_headlines()
+
+    def lower_admission_fence(self) -> bool:
+        """Let turns start again; ``start_held_work`` starts the held ones."""
+        changed = _SLOTS.set_fenced(False)
+        if changed:
+            log("admissionFenceLowered", f"held={len(_SLOTS.queued_specs())}")
+        refresh_hold_headlines()
+        return changed
+
+    def start_held_work(self) -> None:
+        """Start the head of every queue the fence left without an owner."""
+        self._start_ownerless_queues(None)
+
+    def persist_held(self, only: str | None = None) -> int:
+        """Make held work survive the handoff, keeping its order.
+
+        A queued spec with neither a durable queue row nor a park row (a normal
+        send queued behind a spawning slot, a terminal or a process) gets a
+        ``drain-park`` row. Rows are numbered by arrival, so any durable spec
+        behind a newly parked one moves to the back after it, preserving the
+        agent's FIFO order for the runtime that recovers them. A spec whose
+        arrival was exempt from the Stop pause keeps that on its row. Runs
+        with no lock held (the turn-lock write rule); returns new park rows."""
+        parked = 0
+        for agent_id, specs in _SLOTS.queued_specs().items():
+            if only is not None and agent_id != only:
+                continue
+            reorder = False
+            for spec in specs:
+                if spec.drain_persisted and not reorder:
+                    continue
+                durable = spec
+                if not spec.queue_id and not spec.park_id:
+                    park_id = _park(spec, prefix="drain-park")
+                    if not park_id:
+                        continue  # still unpersisted; the handoff waits
+                    durable = replace(spec, park_id=park_id)
+                    parked += 1
+                    reorder = True
+                else:
+                    row_id = spec.queue_id or spec.park_id
+                    if reorder:
+                        turn_queue.move_to_back(row_id)
+                    if spec.bypass_pause and not spec.drain_persisted:
+                        turn_queue.allow_paused(row_id)
+                durable = replace(durable, drain_persisted=True)
+                if not _SLOTS.swap_queued(agent_id, spec, durable):
+                    # Stop or a cancel took it meanwhile; a park row written
+                    # for it here must not resurrect it after a restart.
+                    if durable.park_id and durable.park_id != spec.park_id:
+                        turn_queue.unpark(durable.park_id)
+        if parked:
+            log("drainHeldPersisted", f"parked={parked}")
+        return parked
+
     def recover_queued(self) -> int:
         """Re-admit durable explicit queues after a server restart."""
         runtime = getattr(self.ctx, "runtime_client", None)
@@ -601,7 +722,9 @@ class TurnDispatchService:
             goal_wake = (
                 str(row["client_msg_id"]).startswith(task_goal_recovery.PREFIX)
                 and task_goal_recovery.allows_paused_queue(row["client_msg_id"]))
-            if turn_queue.is_paused(row["agent_id"]) and not goal_wake:
+            # Work the release drain held past a pause it was never subject to.
+            pause_exempt = goal_wake or bool(row.get("allow_paused"))
+            if turn_queue.is_paused(row["agent_id"]) and not pause_exempt:
                 continue
             if agent and self.backends.active_handles(
                     self.backends.normalize(agent.get("backend")), row["agent_id"]):
@@ -630,7 +753,7 @@ class TurnDispatchService:
                     prompt_admission_id=row["prompt_admission_id"],
                     queue_if_busy=True, skip_admission=True,
                     durable_queue_id=row["queue_id"],
-                    allow_paused_queue=goal_wake,
+                    allow_paused_queue=pause_exempt,
                     janitor_run_id=_recovered_janitor_run(row),
                 ))
                 recovered += 1
@@ -1035,10 +1158,18 @@ class TurnDispatchService:
                 session=session, backend=backend, queued=True,
                 queue_depth=queue_state["count"],
                 queue_revision=queue_state["revision"])
+        peer_waits = (decision.effective.protected_peer
+                      and not command.queue_if_busy)
+        spec = replace(spec, bypass_pause=(
+            not queue_if_busy or peer_waits or allow_paused_queue
+            or decision.effective.paused_bypass))
 
         # A live Codex turn accepts follow-ups through the official turn/steer
         # protocol. Other backends retain their existing dispatch behavior.
-        if decision.effective.steer_allowed and self._steer_if_supported(spec):
+        # Behind the release drain's fence a follow-up waits instead: steering
+        # would stretch the very turn the drain is waiting for.
+        if (decision.effective.steer_allowed and not _SLOTS.fenced
+                and self._steer_if_supported(spec)):
             return DispatchResult(session=session, backend=backend)
         if self._enqueue_if_busy(spec, queue_if_busy=queue_if_busy):
             if queue_if_busy:
@@ -1140,6 +1271,8 @@ class TurnDispatchService:
         trace = message_store.client_message_trace(client_msg_id)
         if not trace:
             return False
+        if turn_queue.holds_client_message(client_msg_id):
+            return False  # it is waiting (queued, or held by Stop or a drain)
         status = agents_db.trace_launch_status(spec.agent_id, trace)
         if slot is None:
             slot = self._slot_snapshot(spec)
@@ -1240,6 +1373,9 @@ class TurnDispatchService:
         finally:
             if park_id and not parked:
                 turn_queue.unpark(park_id)
+        if decision and _SLOTS.fenced:
+            # Held behind the release drain: durable before anything else.
+            self.persist_held(spec.agent_id)
         return decision
 
     def _claim_or_queue(self, spec: _TurnSpec, *, queue_if_busy: bool,
@@ -1284,6 +1420,8 @@ class TurnDispatchService:
             # and take it over now instead of queuing behind a phantom
             # forever. Checked here, on every send — no timer/interval.
             if not self._has_live_turn(spec):
+                if _SLOTS.fenced:
+                    return self._hold_for_drain(spec, "behind a stale slot")
                 defer_on(_TURN_LOCK, lambda: (
                     eventlog.emit("server", "staleInflightCleared",
                                   context=spec.context,
@@ -1304,6 +1442,9 @@ class TurnDispatchService:
                         f"agent={agent_id} depth={depth} "
                         f"trace={spec.trace_id or '∅'}")))
                 return False, True
+            if _SLOTS.fenced:
+                # The release drain waits for this turn; never preempt it.
+                return self._hold_for_drain(spec, "behind a live turn")
             # Take the slot first so the preempted turn's dying callback is
             # already superseded, then interrupt once the lock is released.
             _SLOTS.claim(agent_id, spec.trace_id)
@@ -1320,6 +1461,8 @@ class TurnDispatchService:
             depth = _SLOTS.enqueue(agent_id, spec)
             defer_on(_TURN_LOCK, lambda: self._wait_for_process_exit(spec, owner, depth))
             return False, True
+        if _SLOTS.fenced:
+            return self._hold_for_drain(spec, "free slot")
         if _SLOTS.queue_depth(agent_id):
             # A free slot with work still queued: a failed handoff gave the
             # slot back and is waiting to retry its head. Wait behind that
@@ -1334,6 +1477,19 @@ class TurnDispatchService:
             return False, True
         _SLOTS.claim(agent_id, spec.trace_id)
         return False, False
+
+    def _hold_for_drain(self, spec: _TurnSpec, where: str) -> tuple[bool, bool]:
+        """Queue a send behind the release drain's admission fence (the caller
+        holds _TURN_LOCK). It starts after the handoff, from its durable row,
+        or here when the fence is lifted."""
+        depth = _SLOTS.enqueue(spec.agent_id, spec)
+        defer_on(_TURN_LOCK, lambda: (
+            eventlog.emit("server", "turnHeldForUpdate", context=spec.context,
+                          detail={"depth": depth}),
+            log("turnHeldForUpdate",
+                f"agent={spec.agent_id} depth={depth} trace={spec.trace_id or '∅'} "
+                f"— {where}; the runtime is draining for an update")))
+        return False, True
 
     def _running_processes(self, spec: _TurnSpec) -> list:
         """The agent's turn processes that are positively still running."""
@@ -2412,6 +2568,8 @@ class TurnDispatchService:
         refuses while it is non-empty: an older runtime freed failed spawns'
         slots and kept the messages behind them (Nadia and psa-billing,
         2026-10-10 09:24)."""
+        if _SLOTS.fenced:
+            return  # the release drain holds them; lifting it starts them
         for agent_id, depth in _SLOTS.snapshot()["queued"].items():
             if only is not None and agent_id != only:
                 continue

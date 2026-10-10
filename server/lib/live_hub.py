@@ -79,6 +79,7 @@ class _Conv:
     ordinal: int = 0
     explore_group: str | None = None
     account_wait: str | None = None
+    update_wait: str | None = None
 
 
 class LiveHub:
@@ -120,6 +121,7 @@ class LiveHub:
             self._flush(state)
             state.explore_group = None
             state.account_wait = None
+            state.update_wait = None
             started = int(started_at_ms or self._clock_ms())
             self._emit(state, [{"op": "turn", "conv": conv, "turn": {
                 "turn_id": turn_id, "status": "running", "started_at_ms": started,
@@ -162,6 +164,18 @@ class LiveHub:
             self._flush(state)
             state.account_wait = message
             self._emit(state, [], status_after=True)
+
+    def set_update_holds(self, agent_ids: set[str], message: str) -> None:
+        """Agents whose next turn waits for the runtime update say so in their
+        status line headline while idle; every other agent's is cleared."""
+        with self._lock:
+            for agent_id, state in self._by_agent.items():
+                wanted = message if agent_id in agent_ids else None
+                if state.update_wait == wanted:
+                    continue
+                self._flush(state)
+                state.update_wait = wanted
+                self._emit(state, [], status_after=True)
 
     def message_text(self, agent_id: str, item_id: str, text: str, *,
                      phase: str | None = None, row_id: str | None = None,
@@ -468,7 +482,7 @@ class LiveHub:
         if ended or turn.get("status") not in (None, "running"):
             final = ended or str(turn.get("status") or "completed")
             state_name = "interrupted" if final in ("interrupted", "failed") else "idle"
-            headline = None
+            headline = state.update_wait if state_name == "idle" else None
             if state_name == "interrupted":
                 headline = str((turn.get("error") or {}).get("message") or "Interrupted")
             return {**base, "state": state_name, "turn_started_ms": None,

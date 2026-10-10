@@ -441,6 +441,8 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         self._stop_lease_lock = threading.Lock()
         self._admission_lock = threading.RLock()
         self._draining = False
+        # The RuntimeReleaseMonitor, when this runtime watches for releases.
+        self.release_monitor = None
         self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
             self.socket_path.parent.chmod(0o700)
@@ -497,6 +499,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 "capabilities": {"janitor_runs": True},
                 "draining": self._draining,
                 "release_id": self.release_id,
+                "drain": self._drain_status(),
                 **dict(self.status_provider()),
             }}
         if method == "recover_queued":
@@ -720,6 +723,84 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 return False
             self._draining = True
             return True
+
+    # --- graceful release drain (driven by runtime_release) -----------------
+    #
+    # The soft fence lives in turn_dispatch (no turn starts; sends are admitted
+    # to the durable queue). ``seal_if_drained`` turns it into today's hard
+    # fence (``_draining``: dispatch RPCs answer 503) at the moment nothing the
+    # runtime owns is left, so the handoff and the new runtime's recovery are
+    # exactly as before.
+
+    def begin_admission_fence(self) -> None:
+        with self._admission_lock:
+            self.dispatch_service.begin_admission_fence()
+
+    def release_admission_fence(self) -> None:
+        """Lift the soft fence and start the held work, losing and repeating
+        nothing: every held spec is still queued exactly once."""
+        with self._admission_lock:
+            if self._draining:
+                raise RuntimeProtocolError("runtime is sealed for its handoff")
+            self.dispatch_service.lower_admission_fence()
+        # Launches run outside the admission lock, like any queued handoff.
+        self.dispatch_service.start_held_work()
+
+    def handover_blockers(self) -> dict[str, list[str]]:
+        """Everything the runtime genuinely owns that a handoff would cut
+        short, by kind (empty when the runtime may hand over).
+
+        Held queued work is not a blocker once it is durable: the next
+        runtime recovers it. A slot whose turn settled without releasing it is
+        given back first (it would otherwise block for ever)."""
+        with self._stop_lease_lock:
+            leases = sorted(agent for agent, _ in self._stop_leases.values())
+        release_leaked = getattr(
+            self.dispatch_service, "release_leaked_slots", None)
+        if release_leaked is not None:
+            release_leaked()
+        status = dict(self.status_provider())
+        blockers = {
+            "stop_leases": leases,
+            "active": sorted(status.get("active") or ()),
+            "spawning": sorted(status.get("spawning") or ()),
+            "terminals": sorted(status.get("terminals") or ()),
+            "compactions": sorted(status.get("compactions") or ()),
+            "provider_turns": sorted(status.get("provider_turns") or ()),
+            "unpersisted": sorted(status.get("unpersisted") or ()),
+        }
+        for key, value in status.items():
+            if key.endswith("_account_recovery") and isinstance(value, dict):
+                waiting = sorted(value.get("waiting") or ())
+                if value.get("recovering") and not waiting:
+                    waiting = ["<recovering>"]
+                blockers[key] = waiting
+        return {key: value for key, value in blockers.items() if value}
+
+    def seal_if_drained(self) -> dict[str, list[str]]:
+        """Behind the soft fence, raise the hard fence when nothing is owned.
+        Returns the blockers; empty means sealed (``draining``)."""
+        with self._admission_lock:
+            if self._draining:
+                return {}
+            if not self.dispatch_service.admission_fenced():
+                return {"fence": ["not raised"]}
+            self.dispatch_service.persist_held()
+            self.dispatch_service.refresh_hold_headlines()
+            blockers = self.handover_blockers()
+            if blockers:
+                return blockers
+            self._draining = True
+            return {}
+
+    def cancel_handover(self) -> None:
+        """Undo a seal whose target vanished before shutdown (a rollback)."""
+        with self._admission_lock:
+            self._draining = False
+
+    def _drain_status(self) -> dict[str, Any]:
+        monitor = self.release_monitor
+        return monitor.status() if monitor is not None else {"phase": "idle"}
 
     def _expire_stop_lease(self, lease_id: str) -> None:
         with self._stop_lease_lock:
