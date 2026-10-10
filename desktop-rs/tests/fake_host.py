@@ -414,7 +414,14 @@ def artifact_fixtures(kind, session, now_ms):
         # Pages that reach out: an external script, stylesheet, picture and
         # fetch, each marked with the page it came from, and a link away.
         def outside(page):
-            return ("<script src=\"https://cdn.example.com/chart.js?from=%s\"></script>"
+            # First: each request the page's policy refuses is written down.
+            return ("<p id=\"refused\"></p><script>document.addEventListener('securitypolicyviolation', (e) => {"
+                    "document.getElementById('refused').textContent += ' REFUSED[' + e.blockedURI + ']';});"
+                    "try { new WebSocket('ws://sock.example.com/plain?from=" + page + "'); } catch (e) {}"
+                    "try { new WebSocket('wss://sock.example.com/secure?from=" + page + "'); } catch (e) {}"
+                    "fetch('http://plain.example.com/http-fetch?from=" + page + "').catch(() => {});</script>"
+                    "<img src=\"http://plain.example.com/http-img?from=" + page + "\" alt=\"\">"
+                    "<script src=\"https://cdn.example.com/chart.js?from=%s\"></script>"
                     "<link rel=\"stylesheet\" href=\"https://fonts.example.com/css?from=%s\">"
                     "<img src=\"https://images.example.com/logo.png?from=%s\" alt=\"logo\">"
                     "<script>fetch('https://api.example.com/rates?from=%s').then(r => r.text()).then(t => {"

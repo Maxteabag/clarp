@@ -112,9 +112,11 @@ Other browsers get the system opener, which is waited for so it is reaped.
 
 On the desktop a read-only report opens on its own loopback page without
 any bridge (no `window.clarpForm`), and may load scripts, styles, pictures,
-fonts, media and frames and fetch over HTTPS only: no `http:`, `ws:` or
-loopback source, no form submission, `Referrer-Policy: no-referrer`, the
-policy sent as a header too. The page holds no Host token, cookie or
+fonts, media and frames and fetch from any HTTPS origin, private, loopback
+and tailnet HTTPS origins included (nothing blocks those); never `http:`,
+`ws:` or `wss:`, no form submission, `Referrer-Policy: no-referrer`, the
+policy sent as a header too. Its "Network access" box says "HTTPS
+connections allowed". The page holds no Host token, cookie or
 origin. Links that leave the page open in a new browser tab. A report with
 pictures, styling, scripts, tables, media or frames opens this way from its
 card (click or O); a plain one opens in Clarp's quick Markdown preview, as
