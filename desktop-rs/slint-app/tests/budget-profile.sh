@@ -7,7 +7,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 out=$(realpath -m "$1"); mkdir -p "$out"
 data=/var/tmp/budget-perf.data
-CLARP_CHECK_PROFILE=release CLARP_CHECK_WRAP="perf record -k CLOCK_MONOTONIC -F 499 --call-graph dwarf,16384 -o $data --" \
+# A release build with frame pointers (target/profiling), so perf can walk
+# the app's and Slint's frames cheaply.
+RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release --locked -p clarp-slint --target-dir target/fp
+mkdir -p target/profiling && cp target/fp/release/clarp-slint target/profiling/clarp-slint
+CLARP_CHECK_PROFILE=profiling CLARP_CHECK_WRAP="perf record -k CLOCK_MONOTONIC -F 999 --call-graph fp -o $data --" \
   slint-app/tests/check.sh frame-budget "$out/run" > "$out/run.log" 2>&1 || echo "the profiled run failed (its numbers are perf-inflated): see run.log"
 grep "^perf budget window" "$out/run/app.log" | while read -r _ _ _ name start end pid; do
   {
@@ -21,3 +25,8 @@ grep "^perf budget window" "$out/run/app.log" | while read -r _ _ _ name start e
   } > "$out/profile-$name.txt"
   echo "wrote $out/profile-$name.txt"
 done
+# Every UI-thread sample with its stack, for folding offline.
+pid=$(grep -m1 "^perf budget window" "$out/run/app.log" | awk '{print $7}')
+grep "^perf budget window" "$out/run/app.log" > "$out/windows.txt"
+perf script -i "$data" --tid "$pid" -F time,ip,sym 2>/dev/null | gzip > "$out/samples.txt.gz"
+ls -l "$out"
