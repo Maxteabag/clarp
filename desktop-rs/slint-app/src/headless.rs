@@ -131,9 +131,10 @@ impl Platform for Headless {
                         renderer.set_repaint_buffer_type(if full { RepaintBufferType::NewBuffer } else { RepaintBufferType::ReusedBuffer });
                         let started = std::time::Instant::now();
                         let region = renderer.render(&mut frame.2, stride);
-                        let painted: u64 = region.iter().map(|(_, size)| u64::from(size.width) * u64::from(size.height)).sum();
+                        let rects: Vec<[u32; 4]> = region.iter().map(|(at, size)| [at.x.max(0) as u32, at.y.max(0) as u32, size.width, size.height]).collect();
+                        let painted: u64 = rects.iter().map(|r| u64::from(r[2]) * u64::from(r[3])).sum();
                         let dirty = (painted as f64 / (width.max(1) * height.max(1)) as f64).min(1.0) as f32;
-                        crate::perf::drawn(started, dirty);
+                        crate::perf::drawn(started, dirty, rects);
                         frame.3 += 1;
                     });
                 });

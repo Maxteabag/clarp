@@ -43,6 +43,8 @@ pub struct Stats {
     pub frames: Vec<Event>,
     /// Per frame (as `frames`): the share of the window it repainted, 0 to 1.
     pub frame_dirty: Vec<f32>,
+    /// Per frame: the rectangles it repainted (x, y, width, height; px).
+    pub frame_rects: Vec<Vec<[u32; 4]>>,
 }
 
 thread_local! {
@@ -74,14 +76,16 @@ pub fn woke(started: Instant, what: String) {
     STATS.with(|s| s.borrow_mut().wakes.push(event));
 }
 
-/// A headless frame drawn since `started`, repainting `dirty` of the window.
-pub fn drawn(started: Instant, dirty: f32) {
+/// A headless frame drawn since `started`, repainting `rects`, `dirty` of
+/// the window.
+pub fn drawn(started: Instant, dirty: f32, rects: Vec<[u32; 4]>) {
     let event = Event { at: now(), took: started.elapsed(), what: String::new() };
     frame_took(event.took);
     STATS.with(|s| {
         let mut stats = s.borrow_mut();
         stats.frames.push(event);
         stats.frame_dirty.push(dirty);
+        stats.frame_rects.push(rects);
     });
 }
 
