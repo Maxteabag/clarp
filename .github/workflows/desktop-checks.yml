@@ -153,6 +153,7 @@ jobs:
         working-directory: desktop-rs
         env:
           CLARP_CHECK_PROFILE: release
+          CLARP_BUDGET_RECTS: "1"
         run: |
           set -o pipefail
           status=0

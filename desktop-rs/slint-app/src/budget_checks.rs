@@ -110,6 +110,11 @@ fn measured(name: &str, mark: Mark) -> Row {
     println!("perf budget window {} {:.6} {:.6} {}", file_name(name), mark.clock, monotonic(), std::process::id());
     // What three frames through it repainted (px), to see what moves.
     let rects = &stats.frame_rects[mark.frames..];
+    if std::env::var_os("CLARP_BUDGET_RECTS").is_some() {
+        for (at, frame) in rects.iter().enumerate() {
+            println!("perf budget {name} rects {at} {frame:?}");
+        }
+    }
     for at in [rects.len() / 4, rects.len() / 2, rects.len() * 3 / 4] {
         if let Some(frame) = rects.get(at) {
             println!("perf budget {name} frame {at} repainted {frame:?}");
