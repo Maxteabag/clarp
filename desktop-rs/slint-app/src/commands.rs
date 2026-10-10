@@ -465,6 +465,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             Some(id) => crate::artifacts_view::discard(app, &id),
             None => return false,
         },
+        "open-in-browser" => return crate::artifacts_view::open_in_browser_here(app, window),
         "artifact-open" => match crate::artifacts_view::selected(app) {
             Some(id) => crate::artifacts_view::activate(app, window, &id),
             None => return false,

@@ -274,19 +274,33 @@ fn html_form_stages(out: &str) -> Vec<Stage> {
             window.global::<ArtifactBridge>().invoke_open("form-report".into());
             true
         })),
-        ("report opens in the browser", Box::new(move |_, window, elapsed| {
+        ("plain report previews", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "report" {
+                if elapsed > Duration::from_secs(2) {
+                    check(false, &format!("a plain report opens in Clarp's preview: overlay {:?}", window.get_overlay()));
+                    return true;
+                }
+                return false;
+            }
+            check(window.get_report_title() == "Quarterly cost report" && window.get_report_blocks().row_count() > 0, "a plain report opens in Clarp's preview");
+            check(window.get_report_browser(), "which offers its whole page in the browser (B)");
+            headless::press("b");
+            true
+        })),
+        ("B opens it in the browser", Box::new(move |_, window, elapsed| {
             let page = opened().last().filter(|u| u.contains("/form/")).map(|u| (u.clone(), fetch("GET", u, "", None)));
             let Some((url, Ok((200, body)))) = page.filter(|(_, p)| p.as_ref().is_ok_and(|(_, b)| b.contains("<h1>Costs</h1>"))) else {
                 if elapsed > Duration::from_secs(3) {
-                    check(false, &format!("a report opens in the browser: {:?}", opened().last()));
+                    check(false, &format!("B in the preview opens the report in the browser: {:?}", opened().last()));
                     return true;
                 }
                 return false;
             };
-            check(window.get_overlay().is_empty(), "a report opens in the browser, not Clarp's viewer");
             check(body.contains(crate::form_server::REPORT_POLICY) && !body.contains("clarpForm"), "on a bridge-free page that may reach the web over HTTPS");
             let posted = fetch("POST", &format!("{url}/submit"), "{}", None);
             check(posted.as_ref().is_ok_and(|(status, _)| *status == 403), &format!("which takes no answers: {:?}", posted.map(|(s, _)| s)));
+            check(window.get_overlay() == "report", "and the preview stays open");
+            headless::press(slint::platform::Key::Escape);
             true
         })),
         ("stale form", Box::new(move |_, window, elapsed| {
@@ -2489,28 +2503,31 @@ fn launched(what: &'static str, before: Rc<Cell<usize>>, content: &'static str) 
             && page.matches("data:image/webp").count() == 12 && page.contains(content),
             &format!("{what}: the big report is served whole to a new browser window: {} bytes", page.len()));
         check(leaks(&page).is_empty(), &format!("{what}: with no credential"));
-        check(window.get_overlay().is_empty() && shown(window) == (true, false), &format!("{what}: Clarp stays shown: {:?}", shown(window)));
+        check(shown(window) == (true, false), &format!("{what}: Clarp stays shown: {:?}", shown(window)));
         before.set(launches.len());
         true
     }))
 }
 
 /// A report of the shape that was said to close Clarp: 1.16 MB, twelve
-/// data: pictures, a data: font, an inline script, plain links. Opened by
-/// every route, in the browser; Clarp must stay shown and responsive.
+/// data: pictures, a data: font, an inline script, plain links. With
+/// pictures it opens in the browser from its card (click, O, B, Ctrl+K);
+/// Updates shows the quick preview, B there the whole page. Clarp must
+/// stay shown and responsive throughout.
 fn big_report_stages(_out: &str) -> Vec<Stage> {
     let rss = Rc::new(Cell::new(0u64));
     let rss2 = rss.clone();
     let seen = Rc::new(Cell::new(0usize));
-    let (s1, s2, s3, s4, s5, s6, s7) = (seen.clone(), seen.clone(), seen.clone(), seen.clone(), seen.clone(), seen.clone(), seen);
+    let cells: Vec<Rc<Cell<usize>>> = (0..9).map(|_| seen.clone()).collect();
     let mut stages = load_chat("art-big", &["html_big"]);
+    let c0 = cells[0].clone();
     stages.extend::<Vec<Stage>>(vec![
         ("big cards", Box::new(move |_, window, elapsed| {
             if !placed(window, &["big-report", "big-net"], elapsed) {
                 return false;
             }
             rss.set(rss_kb());
-            s1.set(browser_launches().len());
+            c0.set(browser_launches().len());
             let started = std::time::Instant::now();
             // As a click on the card does.
             window.global::<ArtifactBridge>().invoke_open("big-report".into());
@@ -2518,12 +2535,28 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
             check(took < 1_500, &format!("the click held the window {took} ms (a debug build)"));
             true
         })),
-        launched("click", s2, "Agentretten"),
+        launched("click", cells[1].clone(), "Agentretten"),
         ("from Updates", Box::new(|_, window, _| {
             window.invoke_open_report("big-report".into());
             true
         })),
-        launched("Updates", s3, "Agentretten"),
+        ("Updates previews", Box::new(|_, window, elapsed| {
+            if window.get_overlay() != "report" && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_overlay() == "report" && window.get_report_blocks().row_count() > 0 && window.get_report_browser(),
+                &format!("Updates shows the big report's quick preview, the browser a key away: overlay {:?}", window.get_overlay()));
+            headless::press("b");
+            true
+        })),
+        launched("B in the preview", cells[2].clone(), "Agentretten"),
+        ("preview closes", Box::new(|_, window, elapsed| {
+            if window.get_overlay() == "report" {
+                headless::press(slint::platform::Key::Escape);
+                return elapsed > Duration::from_secs(2);
+            }
+            true
+        })),
         ("keyboard", Box::new(|app, _, _| {
             crate::artifacts_view::leave(app);
             app.focus_transcript();
@@ -2549,26 +2582,65 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
             headless::press("o");
             true
         })),
-        launched("O", s4, "Agentretten"),
+        launched("O", cells[3].clone(), "Agentretten"),
+        ("B on the card", Box::new(|_, _, _| {
+            headless::press("b");
+            true
+        })),
+        launched("B on the card", cells[4].clone(), "Agentretten"),
+        ("Ctrl+K", Box::new(|app, _, _| {
+            crate::artifacts_view::leave(app);
+            headless::press_with(&[slint::platform::Key::Control], "k");
+            true
+        })),
+        ("Ctrl+K open", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() {
+                if elapsed > Duration::from_secs(3) {
+                    check(false, "Ctrl+K opens the commands");
+                    return true;
+                }
+                return false;
+            }
+            headless::type_text("open report in browser");
+            true
+        })),
+        ("Ctrl+K row", Box::new(|_, window, elapsed| {
+            let rows: Vec<(String, String)> = window.get_switcher_rows().iter().map(|r| (r.label.to_string(), r.key.to_string())).collect();
+            let Some(index) = rows.iter().position(|(label, _)| label == "Open report in browser") else {
+                if elapsed > Duration::from_secs(3) {
+                    check(false, &format!("Ctrl+K finds Open report in browser: {rows:?}"));
+                    return true;
+                }
+                return false;
+            };
+            check(rows[index].1 == "B", &format!("Ctrl+K lists Open report in browser with its key: {:?}", rows[index]));
+            // As Enter on that row does.
+            window.invoke_switcher_chosen(index as i32);
+            true
+        })),
+        launched("Ctrl+K", cells[5].clone(), "Agentretten"),
         ("connected copy", Box::new(|_, window, _| {
             window.global::<ArtifactBridge>().invoke_open("big-net".into());
             true
         })),
-        launched("a report with a grant", s5, "Agentretten"),
-        ("pointer click", Box::new(move |app, window, _| {
-            app.focus_transcript();
-            let mut clicked = None;
-            for y in (300..=700).rev().step_by(12) {
-                super::click_at(window, 560.0, y as f32);
-                if browser_launches().len() > s6.get() {
-                    clicked = Some(y);
-                    break;
+        launched("a report with a grant", cells[6].clone(), "Agentretten"),
+        ("pointer click", Box::new({
+            let before = cells[7].clone();
+            move |app, window, _| {
+                app.focus_transcript();
+                let mut clicked = None;
+                for y in (300..=700).rev().step_by(12) {
+                    super::click_at(window, 560.0, y as f32);
+                    if browser_launches().len() > before.get() {
+                        clicked = Some(y);
+                        break;
+                    }
                 }
+                check(clicked.is_some(), &format!("a real click on the latest big card opens it (at y {clicked:?})"));
+                true
             }
-            check(clicked.is_some(), &format!("a real click on the latest big card opens it (at y {clicked:?})"));
-            true
         })),
-        launched("pointer", s7, "Agentretten"),
+        launched("pointer", cells[8].clone(), "Agentretten"),
         ("alive", Box::new(move |_, window, _| {
             let grew = rss_kb().saturating_sub(rss2.get());
             check(shown(window) == (true, false), &format!("Clarp is alive and shown after every route; memory grew {grew} kB"));

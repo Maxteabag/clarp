@@ -22,6 +22,9 @@ export component ReportView inherits Modal {
     // How many links its body has: 1-9 open them, in order.
     in property <int> links;
     callback open-link(int);
+    // An HTML report: B opens its whole page in the browser.
+    in property <bool> browser;
+    callback open-browser();
     // The keyboard reads it: arrows and Page keys scroll it.
     public function focus-body() { keys.focus(); }
     // Home and End: the list measures rows as they draw, so the top or the
@@ -67,6 +70,7 @@ export component ReportView inherits Modal {
                 Text { text: root.kind != "" ? root.kind : root.html ? "HTML" : "MARKDOWN"; color: Palette.faint; font-size: 11 * Look.unit; vertical-alignment: center; }
                 KeyHint { key: "↑/↓"; label: "Scroll"; emphasised: true; }
                 if root.links > 0: KeyHint { key: root.links == 1 ? "1" : "1-" + Math.min(9, root.links); label: root.links == 1 ? "Open link" : "Open links"; emphasised: true; clicked => { root.open-link(0); } }
+                if root.browser: KeyHint { key: "B"; label: "Open in browser"; emphasised: true; clicked => { root.open-browser(); } }
                 KeyHint { key: "Esc"; label: "Close"; emphasised: true; clicked => { root.done(); } }
             }
             Rectangle { height: 1px; background: Palette.border; }
@@ -85,6 +89,7 @@ export component ReportView inherits Modal {
                     if (event.text == Key.PageDown || event.text == " ") { root.scroll(body.visible-height * 0.9); return accept; }
                     if (event.text == Key.Home) { root.pin(false); return accept; }
                     if (event.text == Key.End) { root.pin(true); return accept; }
+                    if (root.browser && (event.text == "b" || event.text == "B")) { root.open-browser(); return accept; }
                     if (event.text.character-count == 1 && event.text.is-float() && event.text != "0") {
                         root.open-link(event.text.to-float() - 1);
                         return accept;

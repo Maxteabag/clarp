@@ -115,7 +115,12 @@ any bridge (no `window.clarpForm`), and may load scripts, styles, pictures,
 fonts, media and frames and fetch over HTTPS only: no `http:`, `ws:` or
 loopback source, no form submission, `Referrer-Policy: no-referrer`, the
 policy sent as a header too. The page holds no Host token, cookie or
-origin. Links that leave the page open in a new browser tab. Forms keep the
+origin. Links that leave the page open in a new browser tab. A report with
+pictures, styling, scripts, tables, media or frames opens this way from its
+card (click or O); a plain one opens in Clarp's quick Markdown preview, as
+does Updates' Read. B on a card or in the preview, and Ctrl+K's "Open
+report in browser", open any HTML report's whole page (a document or
+research written in HTML too). Forms keep the
 contract-59 policy above unchanged. This is desktop-only, agreed with the
 contract owner; the Host's `/artifacts/<id>/html` is unchanged.
 
