@@ -864,6 +864,21 @@ def active_handles(agent_id: str) -> list[AppTurnHandle]:
     return [active.handle] if active and active.handle.is_alive() else []
 
 
+def busy_agents() -> set[str]:
+    """Agents with a live turn on any app-server connection, including goal
+    continuations the server started itself (adopted, without a Clarp slot)."""
+    with _LOCK:
+        clients = list({id(client): client for client in _CLIENTS.values()}.values())
+    busy: set[str] = set()
+    for client in clients:
+        turns = list(getattr(client, "_actives", {}).values())
+        if getattr(client, "active", None) is not None:
+            turns.append(client.active)
+        busy.update(str(turn.agent_id) for turn in turns
+                    if turn is not None and not turn.handle._done.is_set())
+    return busy
+
+
 def interrupt(agent_id: str) -> int:
     handles = active_handles(agent_id)
     if handles:

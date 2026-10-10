@@ -91,4 +91,5 @@ def test_reset_for_tests_empties_every_view():
     slots.claim("a", "t")
     slots.enqueue("a", SimpleNamespace(trace_id="q"))
     slots.reset_for_tests()
-    assert slots.snapshot() == {"active": {}, "terminals": [], "spawning": [], "queued": {}}
+    assert slots.snapshot() == {"active": {}, "terminals": [], "spawning": [],
+                                "queued": {}, "fenced": False}

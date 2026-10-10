@@ -109,16 +109,18 @@ runtime availability, and `clarp-admin doctor` afterwards.
 
 The supported installer restarts the HTTP Host and enables the runtime service;
 it does not force-restart an already-running runtime. Current `runtime.py` starts
-`RuntimeReleaseMonitor`, which watches the installed `RUNTIME_RELEASE_ID` only
-when `RUNTIME_READY` exists. It hands off to the new release after
-`begin_drain_if_idle()` succeeds. Busy turns remain on their existing runtime.
-Verify this mechanism in the candidate and deployed source rather than applying
-older advice that no idle handoff exists.
+`RuntimeReleaseMonitor`, which watches the installed `RUNTIME_RELEASE_ID` once
+`RUNTIME_READY` and `INSTALL_OK` exist. A busy runtime fences admissions (new
+work queues durably, in-flight turns finish), hands over when nothing is owned,
+and lifts the fence after 15 minutes with a growing backoff; see
+`docs/runtime-restarts.md` "Graceful release drain". Runtimes from before that
+change hand over only when fully idle. Verify the mechanism in the candidate
+and deployed source.
 
 HTTP endpoints and schema migrations activate with the Host restart. Runner
 code becomes active after the natural idle handoff; installer success alone
-is not proof of that transition. Read the runtime status `release_id` and
-`draining` fields and compare with the installed release.
+is not proof of that transition. Read the runtime status `release_id`,
+`draining` and `drain` fields and compare with the installed release.
 
 The standard Claude runner launches one CLI process per turn. Its plugin path
 resolves through `share/plugin -> current/plugin` on each launch, so the next

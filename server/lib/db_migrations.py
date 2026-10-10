@@ -174,6 +174,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 115:
             _migrate_to_v115(con)
 
+        if version < 116:
+            _migrate_to_v116(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -880,3 +883,12 @@ def _migrate_to_v111(con: sqlite3.Connection) -> None:
         if sqlite3.complete_statement(statement):
             con.execute(statement); statement = ""
     if statement.strip(): raise RuntimeError("incomplete form event schema")
+
+
+def _migrate_to_v116(con: sqlite3.Connection) -> None:
+    """Queued work the release drain held remembers whether it may run past a
+    Stop pause (a normal send or fresh user intent could when it arrived)."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(queued_turns)")}
+    if "allow_paused" not in columns:
+        con.execute("ALTER TABLE queued_turns"
+                    " ADD COLUMN allow_paused INTEGER NOT NULL DEFAULT 0")

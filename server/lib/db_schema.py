@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 115
+_SCHEMA_VERSION = 116
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -695,7 +695,8 @@ CREATE TABLE queued_turns (
     enqueued_at INTEGER NOT NULL,
     started_at INTEGER,
     claimed_at INTEGER,
-    prompt_admission_id TEXT NOT NULL DEFAULT ''
+    prompt_admission_id TEXT NOT NULL DEFAULT '',
+    allow_paused INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_queued_turns_agent_time ON queued_turns(agent_id, enqueued_at);
 CREATE INDEX idx_queued_turns_status_seq ON queued_turns(status, queue_seq);
