@@ -184,6 +184,8 @@ def test_status_reports_external_runtime_health(fake_ctx):
             "protocol_version": 1,
             "release_id": "runtime-42",
             "draining": False,
+            "drain": {"phase": "draining", "target_release": "runtime-43",
+                      "blockers": {"active": ["agent-1"]}},
             "active": {"agent-1": "trace-1"},
         },
     ))
@@ -199,6 +201,8 @@ def test_status_reports_external_runtime_health(fake_ctx):
             "available": True,
             "release_id": "runtime-42",
             "draining": False,
+            "drain": {"phase": "draining", "target_release": "runtime-43",
+                      "blockers": {"active": ["agent-1"]}},
             "active_turns": 1,
         }
     finally:
