@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from lib import agents as agents_db
-from lib import live_hub, message_store, turn_queue
+from lib import live_activity, live_hub, message_store, turn_queue
 from lib import turn_dispatch as td
 from lib.runtime_bridge import RuntimeRPCServer
 from lib.runtime_release import RuntimeReleaseMonitor
@@ -575,26 +575,56 @@ def test_runtime_status_shows_the_drain_and_who_waits_for_it(tmp_path):
         runtime.server_close()
 
 
-def test_an_idle_agent_whose_next_turn_is_held_says_so(tmp_path):
+def test_an_agent_whose_next_turn_is_held_shows_limited_until_the_fence_lifts(tmp_path):
+    """Clients render ``limited`` with its headline (as for account recovery);
+    an idle headline is never read. Set while held, cleared on revert."""
     agent = _agent(tmp_path, "mike")
     service, provider = _service(tmp_path)
     hub = live_hub.LiveHub(sink=lambda _event: None)
     live_hub.install(hub)
     hub.begin_turn(agent_id=agent, session="mike", conv="c", turn_id="t0")
-    hub.end_turn(agent)
     _send(service, "running")
     service.begin_admission_fence()
     _send(service, "next", queue=True)
+    td.refresh_hold_headlines()
+    assert hub.activities()[agent]["state"] == "thinking"  # its turn still runs
+
     provider.finish("running")
     hub.end_turn(agent)
-
     td.refresh_hold_headlines()
     activity = hub.activities()[agent]
     assert (activity["state"], activity["headline"]) == (
-        "idle", td.UPDATE_HOLD_HEADLINE)
+        "limited", td.UPDATE_HOLD_HEADLINE)
+    assert activity["turn_id"] is None and activity["turn_started_ms"] is None
+    assert live_activity.content_state(
+        {agent: {"session": "mike", "persona": "Mike", "activity": activity}},
+        0)["agents"][0]["headline"] == td.UPDATE_HOLD_HEADLINE
 
     service.lower_admission_fence()
-    assert hub.activities()[agent]["headline"] is None
+    activity = hub.activities()[agent]
+    assert (activity["state"], activity["headline"]) == ("idle", None)
+
+
+def test_the_held_status_clears_when_the_runtime_seals_for_its_handoff(tmp_path):
+    agent = _agent(tmp_path, "mike")
+    service, provider = _service(tmp_path)
+    runtime, _ = _runtime(tmp_path, service)
+    hub = live_hub.LiveHub(sink=lambda _event: None)
+    live_hub.install(hub)
+    hub.begin_turn(agent_id=agent, session="mike", conv="c", turn_id="t0")
+    try:
+        _send(service, "running")
+        service.begin_admission_fence()
+        _send(service, "next", queue=True)
+        provider.finish("running")
+        hub.end_turn(agent)
+        td.refresh_hold_headlines()
+        assert hub.activities()[agent]["state"] == "limited"
+
+        assert runtime.seal_if_drained() == {}
+        assert hub.activities()[agent]["state"] == "idle"
+    finally:
+        runtime.server_close()
 
 
 def test_recovery_behind_the_fence_holds_rows_without_counting_a_backoff(tmp_path):

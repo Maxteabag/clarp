@@ -163,8 +163,9 @@ UPDATE_HOLD_HEADLINE = "Waiting for the Clarp update"
 
 
 def refresh_hold_headlines() -> None:
-    """Say why an agent with work is idle: its next turn waits for the update.
-    Cleared when the fence is lifted or the agent's next turn begins."""
+    """Say why an agent with work does not start: its next turn waits for the
+    update (live state ``limited``). Cleared when the fence is lifted, at the
+    handoff seal, or when the agent's next turn begins."""
     from . import live_hub
     hub = live_hub.current()
     if hub is not None:
@@ -608,6 +609,13 @@ class TurnDispatchService:
     @staticmethod
     def refresh_hold_headlines() -> None:
         refresh_hold_headlines()
+
+    @staticmethod
+    def clear_hold_headlines() -> None:
+        from . import live_hub
+        hub = live_hub.current()
+        if hub is not None:
+            hub.set_update_holds(set(), UPDATE_HOLD_HEADLINE)
 
     def lower_admission_fence(self) -> bool:
         """Let turns start again; ``start_held_work`` starts the held ones."""

@@ -80,14 +80,15 @@ to a newly installed release without interrupting anything:
    repeated, and the next attempt waits 5, 10, 20, 40, then 60 minutes. A
    rollback or lost readiness aborts the drain and forgets the backoff.
 
-Runtime status (and `runtime.drain` in `GET /status`, docs/protocol.md; no
-contract bump, diagnostic only) shows `drain` (phase, target and running release, attempt,
+Runtime status shows `drain` (phase, target and running release, attempt,
 `fenced_since`, `deadline`, `next_attempt_at`, `blockers` by kind,
-`last_outcome`) and `held` (agents whose next turn waits on the fence). An idle
-agent with held work carries the live headline "Waiting for the Clarp update",
-but current clients do not render a headline on an idle agent (iOS, desktop
-and web all return no status line for idle); held messages show as queued.
-Rendering a held-for-update state is a possible client follow-up.
+`last_outcome`) and `held` (agents whose next turn waits on the fence); only
+the HTTP side and diagnostics read it. An agent whose next turn is held shows,
+once its own turn has settled, the live status `limited` with the headline
+"Waiting for the Clarp update" and no turn (docs/live-items.md §1.3), cleared
+when the fence lifts or the runtime seals for its handoff. The iOS lock-screen
+Live Activity and desktop show it; the iOS in-app status line hides a `limited`
+state without a running turn, and held messages show as queued everywhere.
 The fence lives in process memory: a runtime that crashes mid-drain restarts
 unfenced, recovers the durable queue, and its monitor decides again.
 
