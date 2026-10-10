@@ -203,6 +203,14 @@ fn plural(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
 }
 
+/// The chat's next turn is held while the runtime drains for an update:
+/// `limited` with no turn (`turn_id` null). Nothing runs to stop or time;
+/// `limited` under a running turn (a usage limit) is still working.
+pub fn held(view: &LiveView) -> bool {
+    let activity = view.activity();
+    text(activity, "state") == "limited" && text(activity, "turn_id").is_empty()
+}
+
 /// The one status line (§7.4), or none when idle.
 pub fn status_line(view: &LiveView, host_now_ms: i64) -> Option<StatusLine> {
     let activity = view.activity();
@@ -223,7 +231,8 @@ pub fn status_line(view: &LiveView, host_now_ms: i64) -> Option<StatusLine> {
         "thinking" => (format!("◌ {}{}", if headline.is_empty() { "Thinking" } else { headline }, since(turn_started)), true),
         "responding" => (format!("◌ Responding{}", since(turn_started)), true),
         "compacting" => (format!("◌ Compacting{}", since(turn_started)), true),
-        "limited" => (format!("◌ {}", if headline.is_empty() { "Waiting for the usage limit" } else { headline }), true),
+        // A turn held by the release drain runs nothing: not busy.
+        "limited" => (format!("◌ {}", if headline.is_empty() { "Waiting for the usage limit" } else { headline }), !held(view)),
         "waiting" => (format!("◆ {}", if headline.is_empty() { "Waiting for you" } else { headline }), false),
         "interrupted" => ("■ Interrupted".to_owned(), false),
         "background" => (format!("◇ {}", if headline.is_empty() { "Working in the background" } else { headline }), false),

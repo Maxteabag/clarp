@@ -6,6 +6,12 @@
 //! command (Ctrl+K) the rest. Another device's or agent's Stop, read from
 //! the interrupted state's `user_stop` detail, shows the same line. A queue
 //! the Stop paused says so in the composer and the explorer.
+//!
+//! `--check stop-held`: a chat whose next turn is held by the release drain
+//! (live `limited` with no turn) shows its headline but is not working: no
+//! stop key, no timer, nothing busy; Ctrl+. and the Stop command only say
+//! nothing runs and never send `/stop`. `limited` under a running turn
+//! still stops.
 
 use std::time::Duration;
 
@@ -162,6 +168,112 @@ pub fn stop_receipt_check(out: String) {
                 return false;
             }
             shot(&out_queue, "stop-07-queue-paused");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+const HELD: &str = "Nothing is running; the next turn waits for the Clarp update";
+
+fn live_status(activity: Value, turn: Option<Value>) -> Result<(), String> {
+    let mut ops = Vec::new();
+    if let Some(turn) = turn {
+        ops.push(json!({"op": "turn", "conv": "conv-1", "turn": turn}));
+    }
+    ops.push(json!({"op": "status", "conv": "conv-1", "activity": activity}));
+    control("/__control/live-event", &json!({"session": "rachel", "event": {"server_now_ms": now(), "ops": ops}}))
+}
+
+fn shortcut_bar(window: &crate::AppWindow) -> Vec<String> {
+    window.get_hints().iter().map(|h| format!("{} {}", h.keys, h.label)).collect()
+}
+
+pub fn stop_held_check(out: String) {
+    let (out_held, out_running) = (out.clone(), out.clone());
+    let stages: Vec<Stage> = vec![
+        ("ready", Box::new(|app, _, _| {
+            let loaded = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
+            if !loaded || !report().composer_focused {
+                return false;
+            }
+            check(control("/__control/live", &json!({"on": true})).is_ok(), "the Host turns live items on");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("subscribed", Box::new(|app, _, _| {
+            let engine = app.engine.borrow();
+            engine.live_items() && engine.live_active("rachel") && engine.live_view("rachel").is_some_and(|v| v.lseq().is_some() && !v.awaiting_snapshot())
+        })),
+        // The release drain holds Rachel's next turn: limited, no turn.
+        ("held", Box::new(|_, _, _| {
+            let activity = json!({"state": "limited", "headline": "Waiting for the Clarp update", "turn_id": null, "turn_started_ms": null,
+                "since_ms": now(), "tool": null, "running_tools": 0, "item_id": null});
+            let sent = live_status(activity, None);
+            check(sent.is_ok(), &format!("the Host holds Rachel's next turn: {sent:?}"));
+            true
+        })),
+        ("held shown", Box::new(move |app, window, elapsed| {
+            let pane = view();
+            if pane.live_status != "◌ Waiting for the Clarp update" || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(true, "the status line shows the headline");
+            check(!pane.live_busy, "and does not say the agent works");
+            check(pane.live_stop_key.is_empty(), &format!("no stop key: {:?}", pane.live_stop_key));
+            check(!pane.busy && !pane.working, "the composer is not busy");
+            check(!crate::live_view::ticking(&app.engine.borrow(), "rachel"), "nothing ticks");
+            check(window.get_chats().iter().find(|c| c.session == "rachel").is_some_and(|c| !c.busy), "the explorer shows Rachel not working");
+            let bar = shortcut_bar(window);
+            check(!bar.iter().any(|h| h.ends_with(" Stop")), &format!("the shortcut bar offers no Stop: {bar:?}"));
+            headless::press_with(&[Key::Control], ".");
+            true
+        })),
+        ("ctrl+. says so", Box::new(move |_, window, elapsed| {
+            if notice().is_empty() || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(notice() == HELD, &format!("Ctrl+. says nothing runs: {:?}", notice()));
+            check(posts("/stop").is_empty(), "and sends no /stop");
+            check(crate::commands::run(&app_now(), window, "stop-agent"), "the Stop command runs");
+            true
+        })),
+        ("command says so", Box::new(move |_, _, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(posts("/stop").is_empty(), "the Stop command (Ctrl+K) sends no /stop either");
+            check(notice() == HELD, &format!("and the note stays: {:?}", notice()));
+            shot(&out_held, "stop-held-01-drain");
+            // A running turn under a usage limit: still working.
+            let started = now() - 5_000;
+            let turn = json!({"turn_id": "tr-limit", "status": "running", "started_at_ms": started, "ended_at_ms": null, "worked_ms": null, "tool_count": 0});
+            let activity = json!({"state": "limited", "headline": "Waiting for the usage limit", "turn_id": "tr-limit", "turn_started_ms": started,
+                "since_ms": now(), "tool": null, "running_tools": 0, "item_id": null});
+            let sent = live_status(activity, Some(turn));
+            check(sent.is_ok(), &format!("Rachel's running turn waits for a usage limit: {sent:?}"));
+            true
+        })),
+        ("limited turn", Box::new(move |_, window, elapsed| {
+            let pane = view();
+            if pane.live_status != "◌ Waiting for the usage limit" || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            check(pane.live_busy, "a running turn under a limit works");
+            check(pane.live_stop_key == "Ctrl+.", &format!("and names the stop key: {:?}", pane.live_stop_key));
+            check(notice().is_empty(), &format!("the held note is gone: {:?}", notice()));
+            let bar = shortcut_bar(window);
+            check(bar.iter().any(|h| h == "Ctrl+. Stop"), &format!("the shortcut bar offers Stop: {bar:?}"));
+            shot(&out_running, "stop-held-02-limited-turn");
+            headless::press_with(&[Key::Control], ".");
+            true
+        })),
+        ("stopped", Box::new(|_, _, elapsed| {
+            let posted = posts("/stop");
+            if posted.is_empty() && elapsed < Duration::from_secs(3) {
+                return false;
+            }
+            check(posted.len() == 1 && posted[0]["body"]["session"] == "rachel", &format!("Ctrl+. stops the running turn: {posted:?}"));
             true
         })),
     ];
