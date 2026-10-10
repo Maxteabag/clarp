@@ -1443,3 +1443,23 @@ def test_stop_and_repair_record_who_and_why(monkeypatch, capsys, command, path):
             "session": "pebble-2596", "actor": actor, "reason": "busy with no process"})
     with pytest.raises(SystemExit):
         admin.parser().parse_args([command, "--session", "pebble-2596"])
+
+
+def test_request_from_a_turn_refuses_to_send_as_another_agent(tmp_path, monkeypatch, capsys):
+    import os
+    from lib import agents, provider_background_jobs as turns
+    for session in ("theo", "koko", "marcus"):
+        agents.create_agent(persona=session.title(), voice_id="", cwd=str(tmp_path), session=session)
+    token = turns.new_turn_token()
+    turns.turn_started(token, agent_id=agents.get_by_session("koko")["agent_id"],
+                       provider="claude", pid=os.getpid())
+    monkeypatch.setenv("CLARP_PROVIDER_TURN", token)
+    sent = []
+    monkeypatch.setattr(admin, "api_request", lambda *a, **k: sent.append(a) or {})
+    args = argparse.Namespace(from_session="theo", to="marcus", text="Theo here", goal=None,
+                              deadline=None)
+    assert admin.cmd_request(args) == 4
+    assert sent == []
+    assert "this turn belongs to koko" in capsys.readouterr().err
+    args.from_session = "koko"
+    assert admin.cmd_request(args) == 0 and len(sent) == 1

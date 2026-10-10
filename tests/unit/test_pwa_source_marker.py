@@ -273,3 +273,9 @@ def test_terminal_prompt_after_an_expired_trace_still_starts_a_new_one(tmp_path,
     fresh = _stored_trace(agent_id)
     assert fresh != "19f671f72ccfa877" and fresh.startswith("local-")
     assert _turn_traces(agent_id) == [fresh]
+
+
+def test_a_claude_turn_is_told_whose_turn_it_is():
+    context = pwa_source_flag._build_additional_context(
+        app_dispatched=True, voiced=False, agent={"persona": "Koko", "session": "koko-5850"})
+    assert "This turn belongs to Koko (Clarp session koko-5850)" in context

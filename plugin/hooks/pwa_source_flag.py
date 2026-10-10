@@ -228,12 +228,25 @@ def _build_additional_context(*, app_dispatched: bool, voiced: bool,
     guidance = _clarp_guidance() if app_dispatched else ""
     if guidance:
         parts.append(guidance)
+    identity = _identity(agent) if app_dispatched else ""
+    if identity:
+        parts.append(identity)
     if voiced:
         parts.append(_SPEAK_INSTRUCTIONS + _natural_delivery(agent))
     header = _group_call_header(agent) if app_dispatched else ""
     if header:
         parts.append(header)
     return "\n\n".join(parts)
+
+
+def _identity(agent: dict | None) -> str:
+    """Who this turn belongs to (lib.clarp_guidance.identity_line), or ""."""
+    agent = agent or {}
+    try:
+        from lib.clarp_guidance import identity_line
+    except ImportError:
+        return ""
+    return identity_line(str(agent.get("persona") or ""), str(agent.get("session") or ""))
 
 
 def _group_call_header(agent: dict | None) -> str:

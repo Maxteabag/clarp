@@ -1901,6 +1901,20 @@ def _peer_requests():
     return peer_requests
 
 
+def _own_turn(pr, agent: dict, role: str) -> None:
+    """Refuse to act as another agent: when this process runs inside a Clarp
+    turn, --from must be that turn's own agent (lib.turn_identity). A fork or
+    copied conversation otherwise speaks as its source (Koko as Theo,
+    2026-10-10). Without a turn token (a plain shell, the shared Codex
+    app-server) the Host has no proof either way and the named sender stands."""
+    from lib import identity, turn_identity
+    caller = turn_identity.caller_agent_id()
+    if caller and caller != agent.get("agent_id"):
+        own = (identity.lookup(caller) or {}).get("session") or caller
+        raise pr.RequestError(f"this turn belongs to {own}, not the {role} {agent.get('session')}; "
+                              f"use --from {own}")
+
+
 def cmd_request(args) -> int:
     """A prompt that comes back: the recipient answers with ``reply``, and the
     requester's goal (``--goal``) waits on it with a deadline."""
@@ -1910,6 +1924,7 @@ def cmd_request(args) -> int:
             raise pr.RequestError("--deadline needs --goal: without a goal nothing waits")
         deadline = pr.check_deadline(args.deadline if args.deadline is not None else pr.DEFAULT_DEADLINE_S)
         requester = pr._agent(args.from_session, "requester")
+        _own_turn(pr, requester, "requester")
         recipient = pr._agent(args.to, "recipient")
         request_id = pr.new_id()
         if args.goal:
@@ -1977,6 +1992,7 @@ def cmd_reply(args) -> int:
     for attempt in range(4):
         try:
             replier = pr._agent(args.from_session, "replier")
+            _own_turn(pr, replier, "replier")
             decision = pr.plan_reply(replier, args.request, args.kind, args.text)
             if decision["action"] == "dependency" and not force_message:
                 pr.record_result(decision["plan"], decision["data"], replier=replier)

@@ -107,6 +107,7 @@ class SendRequest:
                      authenticated: bool,
                      orchestrator_fallback: bool = False,
                      resolve_sender: Callable[[str], str] = _resolve_sender_agent_id,
+                     caller_agent_id: str = "",
                      ) -> "SendRequest":
         """Interpret a decoded /send body.
 
@@ -140,6 +141,16 @@ class SendRequest:
         queue_if_busy = data.get("queue_if_busy", False) is True
         force_session = (data.get("force_session", False) is True) or (not hands_free)
         sender_agent_id = resolve_sender((data.get("sender") or "").strip())
+        if caller_agent_id and sender_agent_id and caller_agent_id != sender_agent_id:
+            # The caller's Host-issued turn identity (X-Clarp-Turn) names a
+            # different agent than the sender it typed: a fork or copied
+            # conversation speaking as its source. Refuse; say who it is.
+            from . import identity
+            caller = identity.lookup(caller_agent_id) or {}
+            own = caller.get("session") or caller_agent_id
+            raise SendRequestError(
+                403, f"this turn belongs to {own}, not to the sender it named; "
+                f"send as --from {own}", trace_id=trace_id)
         if sender_agent_id:
             from . import goal_ledger, identity
             target = identity.lookup(session) or {}

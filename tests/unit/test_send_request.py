@@ -200,3 +200,14 @@ def test_admit_carries_the_client(monkeypatch):
                         lambda **kw: seen.update(kw) or "admission")
     _parse({"text": "x", "client": "desktop"}).admit()
     assert seen["client"] == "desktop"
+
+
+def test_a_sender_other_than_the_calling_turns_agent_is_refused():
+    resolve = {"theo": "theo-id", "koko": "koko-id"}.get
+    with pytest.raises(SendRequestError) as refused:
+        _parse({"text": "hi", "sender": "theo", "session": "marcus"},
+               resolve_sender=lambda raw: resolve(raw, ""), caller_agent_id="koko-id")
+    assert refused.value.status == 403
+    own = _parse({"text": "hi", "sender": "koko", "session": "marcus"},
+                 resolve_sender=lambda raw: resolve(raw, ""), caller_agent_id="koko-id")
+    assert own.sender_agent_id == "koko-id"

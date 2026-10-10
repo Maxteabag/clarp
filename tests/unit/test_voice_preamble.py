@@ -106,12 +106,14 @@ def test_identity_is_placed_after_instructions_before_split():
 
 def test_narration_clause_follows_agent_level(tmp_path):
     agent_id = agents.create_agent(persona="Iris", voice_id="v", cwd=str(tmp_path), session="iris-1")
-    assert vp.app_turn_instructions(voice=True, session="iris-1") == vp.app_turn_instructions(voice=True)
+    identity = "\n\n" + vp._identity_line("iris-1")
+    assert vp.app_turn_instructions(voice=True, session="iris-1").replace(identity, "") \
+        == vp.app_turn_instructions(voice=True)
     agents.update_agent(agent_id, voice_verbosity=voice_verbosity.STEPS)
     body = vp.app_turn_instructions(voice=True, session="iris-1")
     assert body.endswith("\n\n" + voice_verbosity.narration_clause(voice_verbosity.STEPS))
     # Narration is spoken-only: a text turn never carries it.
-    assert vp.app_turn_instructions(voice=False, session="iris-1") == vp._APP_TURN_GUIDANCE
+    assert vp.app_turn_instructions(voice=False, session="iris-1") == vp._APP_TURN_GUIDANCE + identity
 
 
 def test_narration_clause_missing_session_is_quiet():
@@ -125,7 +127,9 @@ def test_narration_lookup_failure_never_breaks_the_turn(monkeypatch):
 
     monkeypatch.setattr(agents, "get_by_session", boom)
     assert vp._narration_clause("any") == ""
-    assert vp.app_turn_instructions(voice=True, session="any") == vp.app_turn_instructions(voice=True)
+    # The turn still says whose it is (the session is known without the lookup).
+    assert vp.app_turn_instructions(voice=True, session="any").replace(
+        "\n\n" + vp._identity_line("any"), "") == vp.app_turn_instructions(voice=True)
 
 
 def test_strip_handles_the_quoted_prompt_opencode_stores():
@@ -143,3 +147,13 @@ def test_voice_preamble_requests_conversational_delivery_for_all_speech():
     assert "do not reserve them for uncertainty" in spoken
     assert "When you're unsure or working through something complex" not in spoken
     assert "few or no fillers" not in spoken
+
+
+def test_every_turn_says_whose_turn_it_is(tmp_path):
+    # A copy of Theo's conversation adopted as Koko kept acting as Theo
+    # (2026-10-10); each turn now names its own agent and session.
+    agents.create_agent(persona="Koko", voice_id="v", cwd=str(tmp_path), session="koko-5850")
+    body = vp.app_turn_instructions(voice=False, session="koko-5850")
+    assert "This turn belongs to Koko (Clarp session koko-5850)" in body
+    assert "--from, it is koko-5850" in body
+    assert vp.app_turn_instructions(voice=False) == vp._APP_TURN_GUIDANCE
