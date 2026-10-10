@@ -47,12 +47,15 @@ export global ChatLook {
     in property <bool> send-animation: true;
 }
 
-// The one clock of what animates while something works (spinners,
-// shimmers, busy dots, breathing rings), advanced from Rust (motion.rs) at
-// a bounded rate rather than every frame: `spin` ten times a second, `glow`
-// twenty. A binding on animation-tick() redraws at the display's rate for
-// as long as it lives; these redraw only what moves, when it moves. The
-// clock stands still while the window is hidden or motion is reduced.
+// The one clock of what animates while something works, advanced from Rust
+// (motion.rs) at a bounded rate rather than every frame: `spin` (the
+// explorer's spinners and shimmering names, process spinners, busy dots)
+// ten times a second, `glow` (a chat's running row and typing dots, the
+// overview's breathing rings) twenty, on alternate ticks so a frame never
+// repaints both the explorer and a chat. A binding on animation-tick()
+// redraws at the display's rate for as long as it lives; these redraw only
+// what moves, when it moves. The clock stands still while the window is
+// hidden or motion is reduced.
 export global Motion {
     in property <duration> spin;
     in property <duration> glow;
