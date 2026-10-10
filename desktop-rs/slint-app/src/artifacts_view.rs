@@ -1809,7 +1809,8 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
             crate::updates_view::open_report(app, window, id);
             RETURN_TO_CHAT.with(|r| r.set(true));
         }
-        _ if app.engine.borrow().report_for_artifact(id).is_some() => {
+        // Not report_for_artifact: it sanitizes the whole body to answer.
+        _ if artifact.as_object().is_some_and(clarp_core::text::artifact_is_viewable_report) => {
             crate::updates_view::open_report(app, window, id);
             RETURN_TO_CHAT.with(|r| r.set(true));
         }
@@ -1834,6 +1835,24 @@ fn watch_window(id: &str) {
             eprintln!("clarp-slint: 2 s after opening {id}: window {}", window_state(&window));
         }
     });
+}
+
+/// An HTML form artifact's body for the report viewer, read as Markdown
+/// straight from its HTML. The viewer keeps text and links only, so the
+/// Host-resource sanitizing of report_for_artifact (capture regexes over
+/// every data: picture and font) would be thrown away; on a 1.16 MB report
+/// it held the window for seconds.
+pub fn html_report(app: &App, id: &str) -> Option<clarp_core::json::Object> {
+    let engine = app.engine.borrow();
+    let artifact = engine.update_artifacts().iter().find(|a| text(a, "artifact_id") == id)?;
+    let content = artifact.get("content").and_then(Value::as_str)?;
+    if text(artifact, "type") != "html_form" || content.trim().is_empty() || !clarp_core::text::looks_like_html_report(content) {
+        return None;
+    }
+    let body = crate::updates_view::html_markdown(content);
+    serde_json::json!({"artifact_id": id, "title": text(artifact, "title"), "summary": text(artifact, "summary"), "type": "html_form", "isHtml": true, "converted": true, "body": body})
+        .as_object()
+        .cloned()
 }
 
 /// A countdown's target on the cards' clock, and its date in the target's

@@ -222,7 +222,10 @@ fn show_report(app: &App, window: &AppWindow) {
     let id = REPORT.with(|r| r.borrow().clone());
     // What a card stands for (a plan, research with its sources...),
     // else the artifact's report body.
-    let report = crate::artifacts_view::detail(app, &id).or_else(|| app.engine.borrow().report_for_artifact(&id)).unwrap_or_default();
+    let report = crate::artifacts_view::detail(app, &id)
+        .or_else(|| crate::artifacts_view::html_report(app, &id))
+        .or_else(|| app.engine.borrow().report_for_artifact(&id))
+        .unwrap_or_default();
     let html = json::boolean(&report, "isHtml");
     let body = text(&report, "body");
     let markdown = if html && !json::boolean(&report, "converted") { html_markdown(&body) } else { body };
