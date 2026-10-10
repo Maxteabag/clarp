@@ -2741,7 +2741,8 @@ fn updates_check(out: String) {
                 return false;
             }
             let (fps, cpu, over) = live_checks::since_mark();
-            check(fps >= 2.0 * live_checks::NO_SHIMMER_FPS, &format!("the spinners turn: {fps:.0} frames/s, CPU {cpu:.0}% over {over:.1?}"));
+            // The shared clock turns spinners ten times a second (motion.rs).
+            check(fps > live_checks::NO_SHIMMER_FPS && fps <= 13.0, &format!("the spinners turn, at most ten times a second: {fps:.0} frames/s, CPU {cpu:.0}% over {over:.1?}"));
             shot(&out5, "updates-03-spinner-terminal");
             *spinner_theme.borrow_mut() = app.engine.borrow().reading_theme();
             app.engine.borrow_mut().set_reading_theme("word");
