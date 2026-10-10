@@ -471,6 +471,7 @@ impl Engine {
         self.snapshot_generation += 1;
         self.snapshot_in_flight = false;
         self.snapshot_dirty = false;
+        self.freshness.abandoned();
         if upserted {
             self.launch.pending_created_session.clear();
             self.launch.starting_contact.clear();
@@ -482,7 +483,7 @@ impl Engine {
         // it, ignoring any snapshot already in flight from before the creation.
         self.launch.pending_created_session = session;
         self.launch.created_snapshot_attempts = 0;
-        self.request_snapshot();
+        self.force_snapshot();
     }
 
     fn finish_created(&mut self, session: &str) {

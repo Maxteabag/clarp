@@ -107,6 +107,9 @@ failures = {}
 form_events = {}
 form_event_config = {}
 form_event_lost_receipts = 0
+# [seconds, count]: the next `count` roster snapshots take `seconds` (a slow
+# Host); /__control/snapshot-delay sets it.
+snapshot_delay = [0.0, 0]
 # Seconds an older page (/log?before=) takes; /__control/older-delay sets it.
 older_delay = 0.0
 # Seconds a /send takes to be filed and answered (a slow Host's ack);
@@ -645,7 +648,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         record({"method": "GET", "path": url.path, "query": query,
                 "authorization": self.headers.get("Authorization", ""),
-                "last_event_id": self.headers.get("Last-Event-ID", "")})
+                "last_event_id": self.headers.get("Last-Event-ID", ""), "at": time.time()})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
         failure = failures.get(url.path)
@@ -663,6 +666,9 @@ class Handler(BaseHTTPRequestHandler):
                     "capabilities": {"version": 1, "features": features}}
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
+            if snapshot_delay[1] > 0:
+                snapshot_delay[1] -= 1
+                time.sleep(snapshot_delay[0])
             with state_lock:
                 return self.reply(200, {"agents": agents, "personas": personas,
                                         "tool_explanations": tool_explanation_settings,
@@ -960,7 +966,10 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 turns.setdefault(session, [])
                 agents.append(row)
-            broadcast({"type": "agent-roster", "session": session, "kind": "created"})
+            # "announce": false adds it silently, as a Host whose event the
+            # desktop missed: only a snapshot finds it.
+            if body.get("announce", True):
+                broadcast({"type": "agent-roster", "session": session, "kind": "created"})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/fill":
             # Test control: replace a chat's history with `count` rows, under
@@ -1017,6 +1026,10 @@ class Handler(BaseHTTPRequestHandler):
                     if agent["session"] == session:
                         agent["head_revision"] = revision
             broadcast({"type": "transcript-updated", "session": session})
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/snapshot-delay":
+            # Test control: the next `count` snapshots answer after `seconds`.
+            snapshot_delay[:] = [float(body.get("seconds", 0)), int(body.get("count", 1))]
             return self.reply(200, {"ok": True})
         if url.path == "/__control/older-delay":
             # Test control: older pages arrive after `seconds`.

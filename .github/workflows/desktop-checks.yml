@@ -34,7 +34,7 @@ env:
     scrollbar transcript scroll scroll-jump row-overlap composer live a2a receipts
     artifacts form-events artifact-keys link-hints keymap switcher panes sidebar banner
     layout-warning updates settings themes fonts startup refocus avatars message-search mention customize chat-zoom
-    send desktop vim processes pair
+    send desktop vim processes roster-stale pair
 
 jobs:
   test:

@@ -156,6 +156,9 @@ export component AppWindow inherits Window {
     in property <[ChatRow]> rooms;
     in property <[ChatRow]> archived;
     in property <int> unread-rooms;
+    // The explorer's note while the agent list is stale (Sidebar).
+    in property <string> roster-note;
+    in property <string> roster-note-detail;
     in property <int> attention;
     in property <bool> muted;
     in property <string> server-initial;
@@ -449,6 +452,8 @@ export component AppWindow inherits Window {
                 rooms: root.rooms;
                 archived: root.archived;
                 unread-rooms: root.unread-rooms;
+                roster-note: root.roster-note;
+                roster-note-detail: root.roster-note-detail;
                 cursor: root.sidebar-cursor;
                 minimal: root.minimal-ui;
                 compact: root.explorer-compact;
