@@ -1347,9 +1347,9 @@ class Handler(BaseHTTPRequestHandler):
                 for agent in filled:
                     agent["latest_state"], agent["status_text"] = "idle", ""
                 step = max(1, len(filled) // max(1, working))
-                for agent in filled[::step][:working]:
-                    agent.update(latest_state="working", status_text="Running the tests")
-                idle = [a for a in filled if a["latest_state"] != "working"]
+                for n, agent in enumerate(filled[::step][:working]):
+                    agent.update(latest_state=("thinking", "tool")[n % 2], status_text="Running the tests")
+                idle = [a for a in filled if a["latest_state"] == "idle"]
                 step = max(1, len(idle) // max(1, running))
                 jobs = [{"job_id": f"bg-{n}", "agent_id": a["agent_id"], "session": a["session"], "status": "running",
                          "kind": "watcher", "title": f"Watch build {n}", "started_at": now - 60_000,
