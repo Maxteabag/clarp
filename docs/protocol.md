@@ -647,6 +647,18 @@ Returns 404 for an unknown job, otherwise:
   `agent-roster` with `kind: "stale-work"` asks for a refetch. Janitor
   labels keep their own validity window.
 
+### Runtime status in `GET /status`
+
+`runtime` carries `available`, `release_id`, `draining` (the runtime is sealed
+and about to hand over to a new release), `active_turns` and `drain`, the
+graceful release drain of [runtime-restarts.md](runtime-restarts.md):
+`{"phase": "idle | draining | backoff | handed_over", "running_release",
+"target_release", "attempt", "fenced_since", "deadline", "next_attempt_at",
+"blockers": {kind: [agent ids]}, "last_outcome"}` with times in epoch ms.
+`drain` is `null` when the runtime is unavailable or predates the drain, and
+`{"phase": "idle"}` on an embedded Host. It is diagnostic: no client contract
+depends on it, and clients must tolerate it missing.
+
 ### Read-only HTML reports: `html_form` with `read_only`
 
 An `html_form` artifact (see `docs/html-forms/README.md`) may be a read-only

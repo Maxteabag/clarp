@@ -76,7 +76,8 @@ to a newly installed release without interrupting anything:
    repeated, and the next attempt waits 5, 10, 20, 40, then 60 minutes. A
    rollback or lost readiness aborts the drain and forgets the backoff.
 
-Runtime status shows `drain` (phase, target and running release, attempt,
+Runtime status (and `runtime.drain` in `GET /status`, docs/protocol.md; no
+contract bump, diagnostic only) shows `drain` (phase, target and running release, attempt,
 `fenced_since`, `deadline`, `next_attempt_at`, `blockers` by kind,
 `last_outcome`) and `held` (agents whose next turn waits on the fence). An idle
 agent with held work shows the live headline "Waiting for the Clarp update".
