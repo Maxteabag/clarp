@@ -168,6 +168,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 113:
             _migrate_to_v113(con)
 
+        if version < 114:
+            _migrate_to_v114(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -832,6 +835,14 @@ def _migrate_to_v113(con: sqlite3.Connection) -> None:
         con.execute("ALTER TABLE janitor_runs ADD COLUMN activity TEXT NOT NULL DEFAULT ''")
     if "activity_summary" not in columns:
         con.execute("ALTER TABLE janitor_runs ADD COLUMN activity_summary TEXT NOT NULL DEFAULT ''")
+
+
+def _migrate_to_v114(con: sqlite3.Connection) -> None:
+    """Widen idx_messages_agent_revision with updated_at so the dashboard
+    revision map is an index-only scan instead of a read of every message."""
+    con.execute("DROP INDEX IF EXISTS idx_messages_agent_revision")
+    con.execute("CREATE INDEX idx_messages_agent_revision"
+                " ON messages(agent_id, backend_session_id, revision, updated_at)")
 
 
 def _migrate_to_v112(con: sqlite3.Connection) -> None:
