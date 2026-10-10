@@ -84,7 +84,10 @@ Runtime status (and `runtime.drain` in `GET /status`, docs/protocol.md; no
 contract bump, diagnostic only) shows `drain` (phase, target and running release, attempt,
 `fenced_since`, `deadline`, `next_attempt_at`, `blockers` by kind,
 `last_outcome`) and `held` (agents whose next turn waits on the fence). An idle
-agent with held work shows the live headline "Waiting for the Clarp update".
+agent with held work carries the live headline "Waiting for the Clarp update",
+but current clients do not render a headline on an idle agent (iOS, desktop
+and web all return no status line for idle); held messages show as queued.
+Rendering a held-for-update state is a possible client follow-up.
 The fence lives in process memory: a runtime that crashes mid-drain restarts
 unfenced, recovers the durable queue, and its monitor decides again.
 
