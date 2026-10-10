@@ -16,7 +16,7 @@
 //! second; typing, in one pane or mirrored into both, under 12 full frames
 //! a second with its frames under 8 ms (mirrored: 0.8 of a full frame; 95th
 //! percentile); scrolling, which
-//! repaints its pane every frame of the wheel's animation, under 36 full
+//! repaints its pane every frame of the wheel's animation, under 32 full
 //! frames a second and its frames under one full frame (95th percentile).
 
 use std::cell::RefCell;
@@ -36,7 +36,7 @@ const CPU_BUDGET: f64 = 120.0;
 const FRAME_BUDGET: f64 = 8.0;
 const BUSY_FULL_FRAMES: f64 = 9.0;
 const TYPING_FULL_FRAMES: f64 = 12.0;
-const SCROLLING_FULL_FRAMES: f64 = 36.0;
+const SCROLLING_FULL_FRAMES: f64 = 32.0;
 /// How long a scenario settles, then how long it is measured.
 const SETTLE: Duration = Duration::from_millis(1500);
 const MEASURE: Duration = Duration::from_secs(5);
