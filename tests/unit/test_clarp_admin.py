@@ -1463,3 +1463,41 @@ def test_request_from_a_turn_refuses_to_send_as_another_agent(tmp_path, monkeypa
     assert "this turn belongs to koko" in capsys.readouterr().err
     args.from_session = "koko"
     assert admin.cmd_request(args) == 0 and len(sent) == 1
+
+
+def _koko_turn(tmp_path, monkeypatch):
+    import os
+    from lib import agents, provider_background_jobs as turns
+    for session in ("theo", "koko", "marcus"):
+        if not agents.get_by_session(session):
+            agents.create_agent(persona=session.title(), voice_id="", cwd=str(tmp_path), session=session)
+    token = turns.new_turn_token()
+    turns.turn_started(token, agent_id=agents.get_by_session("koko")["agent_id"],
+                       provider="claude", pid=os.getpid())
+    monkeypatch.setenv("CLARP_PROVIDER_TURN", token)
+
+
+def test_a_delayed_prompt_is_checked_when_it_is_scheduled(tmp_path, monkeypatch, capsys):
+    # The delayed send runs later without this turn's token, so the check
+    # cannot wait for it.
+    _koko_turn(tmp_path, monkeypatch)
+    launched = []
+    monkeypatch.setattr(admin.service_manager, "launch_detached",
+                        lambda *a, **k: launched.append(a) or (True, ""))
+    args = argparse.Namespace(to="marcus", text="hi", from_session="theo", origin=None,
+                              delay="1s", server=None)
+    assert admin.cmd_prompt(args) == 4
+    assert launched == []
+    assert "this turn belongs to koko" in capsys.readouterr().err
+
+
+def test_a_refused_prompt_says_why_instead_of_a_traceback(tmp_path, monkeypatch, capsys):
+    import io, urllib.error
+    def refuse(*a, **k):
+        raise urllib.error.HTTPError("http://h/send", 403, "Forbidden", {},
+                                     io.BytesIO(b'{"error": "this turn belongs to koko; send as --from koko"}'))
+    monkeypatch.setattr(admin, "api_request", refuse)
+    args = argparse.Namespace(to="marcus", text="hi", from_session=None, origin=None,
+                              delay=None, server=None)
+    assert admin.cmd_prompt(args) == 4
+    assert "send as --from koko" in capsys.readouterr().err

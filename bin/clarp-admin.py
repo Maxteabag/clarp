@@ -1862,6 +1862,17 @@ def cmd_repair(args) -> int:
 def cmd_prompt(args) -> int:
     if args.from_session and args.origin:
         raise SystemExit("--origin cannot be combined with --from")
+    if args.from_session and not args.server:
+        # Checked now: a delayed send runs later without this turn's token.
+        pr = _peer_requests()
+        from lib import identity
+        sender = identity.lookup(args.from_session)
+        try:
+            if sender:  # an unknown sender is still the Host's to judge
+                _own_turn(pr, sender, "sender")
+        except pr.RequestError as error:
+            print(f"clarp-admin prompt: {error}; nothing was sent", file=sys.stderr)
+            return 4
     if args.delay:
         executable = shutil.which("clarp-admin") or str(Path(__file__).resolve())
         command = [executable, "prompt", "--to", args.to, "--text", args.text]
@@ -1891,7 +1902,19 @@ def cmd_prompt(args) -> int:
         from lib.server_peers import send
         result = send(args.server, payload)
     else:
-        result = api_request("POST", "/send", payload, retries=SEND_RETRIES)
+        try:
+            result = api_request("POST", "/send", payload, retries=SEND_RETRIES)
+        except urllib.error.HTTPError as error:
+            if not 400 <= error.code < 500:
+                raise
+            detail = error.read().decode(errors="replace")
+            try:
+                detail = json.loads(detail).get("error") or detail
+            except (ValueError, AttributeError):
+                pass
+            print(f"clarp-admin prompt: the Host refused it (HTTP {error.code}): {detail}",
+                  file=sys.stderr)
+            return 4
     print(json.dumps(result, indent=2))
     return 0
 
@@ -1909,8 +1932,12 @@ def _own_turn(pr, agent: dict, role: str) -> None:
     app-server) the Host has no proof either way and the named sender stands."""
     from lib import identity, turn_identity
     caller = turn_identity.caller_agent_id()
-    if caller and caller != agent.get("agent_id"):
-        own = (identity.lookup(caller) or {}).get("session") or caller
+    if not caller or caller == agent.get("agent_id"):
+        return
+    # A token of an agent that no longer exists (deleted, or recreated with a
+    # new id under the same session) proves nothing.
+    own = (identity.lookup(caller) or {}).get("session")
+    if own:
         raise pr.RequestError(f"this turn belongs to {own}, not the {role} {agent.get('session')}; "
                               f"use --from {own}")
 
