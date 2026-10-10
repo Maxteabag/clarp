@@ -2458,7 +2458,7 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
             let took = started.elapsed().as_millis();
             check(window.get_overlay() == "report" && window.get_report_blocks().row_count() > 0,
                 &format!("a click on the 1.16 MB report opens it in Clarp's viewer: overlay {:?}, {} blocks", window.get_overlay(), window.get_report_blocks().row_count()));
-            check(took < 5_000, &format!("big report shown in {took} ms on the GUI thread"));
+            check(took < 1_500, &format!("big report shown in {took} ms on the GUI thread (a debug build)"));
             check(shown(window) == (true, false), &format!("the window stays shown: {:?}", shown(window)));
             check(window.get_report_links() >= 4, &format!("its web links are listed: {}", window.get_report_links()));
             // A fragment link has nowhere to go outside the page.
@@ -2498,7 +2498,7 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
             headless::press("k");
             true
         })),
-        ("Enter on the report", Box::new(|_, window, elapsed| {
+        ("O on the report", Box::new(|_, window, elapsed| {
             if selected(window) != "big-report" {
                 if elapsed > Duration::from_secs(2) {
                     check(false, &format!("K K selects the big report: {:?}", selected(window)));
@@ -2506,18 +2506,19 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
                 }
                 return false;
             }
-            headless::press(slint::platform::Key::Return);
+            // O, not Enter: Enter belongs to the composer.
+            headless::press("o");
             true
         })),
-        ("report by Enter", Box::new(|_, window, elapsed| {
+        ("report by O", Box::new(|_, window, elapsed| {
             if window.get_overlay() != "report" && elapsed < Duration::from_secs(2) {
                 return false;
             }
-            check(window.get_overlay() == "report", &format!("Enter opens the big report: overlay {:?}", window.get_overlay()));
+            check(window.get_overlay() == "report", &format!("O opens the big report: overlay {:?}", window.get_overlay()));
             headless::press(slint::platform::Key::Escape);
             true
         })),
-        back_to_chat("after Enter"),
+        back_to_chat("after O"),
         ("connected copy", Box::new(move |_, window, _| {
             launches_before.set(browser_launches().len());
             window.global::<ArtifactBridge>().invoke_open("big-net".into());
