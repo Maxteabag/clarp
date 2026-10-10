@@ -1,6 +1,9 @@
 """Agent dashboard read model."""
 from __future__ import annotations
 
+import json
+import threading
+import time
 from typing import Any
 
 
@@ -69,6 +72,36 @@ def _live_activities() -> dict[str, Any]:
         return result if isinstance(result, dict) else {}
     hub = live_hub.current()
     return hub.activities() if hub is not None else {}
+
+
+class SharedSnapshot:
+    """One snapshot build at a time, shared by every request that waited for it.
+
+    Each app polls the snapshot and reloads it on every roster or state
+    event, so several requests usually arrive together. Building one per
+    request multiplied the same full-fleet projection by the client count
+    and, under load, pushed requests past the clients' 60 s timeout. A
+    request reuses a body whose build started after the request arrived:
+    that build saw every write the request could have expected to see.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last: tuple[float, Any, bytes] | None = None
+
+    def body(self, ctx) -> bytes:
+        arrived = time.monotonic()
+        with self._lock:
+            last = self._last
+            if last is not None and last[0] >= arrived and last[1] is ctx:
+                return last[2]
+            started = time.monotonic()
+            body = json.dumps(build_agent_snapshot(ctx)).encode()
+            self._last = (started, ctx, body)
+            return body
+
+
+SHARED = SharedSnapshot()
 
 
 def build_agent_snapshot(ctx) -> dict[str, Any]:
