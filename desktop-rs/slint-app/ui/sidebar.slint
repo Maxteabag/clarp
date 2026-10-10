@@ -1,3 +1,4 @@
+import { ListView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook, ChromeText, RevealText, Motion } from "theme.slint";
 import { CompactWork, ProcessIndicator } from "processes.slint";
@@ -97,9 +98,13 @@ component Row inherits Rectangle {
     // Shown and scrolled into view: its process spinner may turn.
     in property <bool> on-screen: true;
     property <bool> shimmering: root.chat.busy && !root.reduced-motion && ChatLook.window-shown && root.chat.letters.length > 0;
-    // The cursor landed here: its place in the list, to scroll it into view.
+    // The cursor is here and the list is bringing it into view: its place
+    // in the list (again as the list places the row), to scroll it there.
+    in property <bool> seeking;
     callback reveal(length, length);
-    changed cursor => { if (self.cursor) { root.reveal(self.y, self.height); } }
+    property <string> cursor-place: root.cursor && root.seeking ? (root.y / 1px) + ":" + (root.height / 1px) : "";
+    changed cursor-place => { if (self.cursor && self.seeking) { root.reveal(self.y, self.height); } }
+    init => { if (self.cursor && self.seeking) { root.reveal(self.y, self.height); } }
     callback clicked();
     // The process indicator was clicked: its bottom right, in the window.
     callback processes(length, length);
@@ -302,6 +307,9 @@ export component Sidebar inherits Rectangle {
     callback fold-toggled(string);
     callback hide();
     callback new-agent();
+    // Where `session` is in the list shown ("chats", "rooms" or "archived"),
+    // or -1.
+    pure callback row-index(string, string) -> int;
     // Minimal UI hides the hide button (Ctrl+B still works).
     in property <bool> minimal;
     in property <bool> compact;
@@ -313,6 +321,53 @@ export component Sidebar inherits Rectangle {
     public function focus-search() { root.searching = true; search.focus(); }
     public function clear-search() { search.text = ""; root.searching = search.has-focus; root.filter-changed(); }
     background: Palette.raised;
+    property <string> shown-kind: root.showing-pairs ? "rooms" : root.showing-archive ? "archived" : "chats";
+    property <[ChatRow]> shown: root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows;
+    // The cursor's row reveals itself once the list has made it. The list
+    // makes only the rows in view, so for one it has not (J past the last
+    // row in view, a cursor far down) it scrolls there by its estimate of
+    // the rows' heights, a frame at a time, until the row is made. Then the
+    // row's own report (where it is, `cursor-placed`) puts it in view.
+    property <string> cursor-drawn;
+    property <string> cursor-placed;
+    property <length> cursor-y;
+    property <length> cursor-h;
+    property <bool> revealing: list.has-focus && root.visible && root.cursor != "" && root.cursor-drawn != root.cursor;
+    property <int> reveal-ticks;
+    changed revealing => { root.reveal-ticks = 0; }
+    changed shown-kind => { root.cursor-drawn = ""; }
+    Timer {
+        interval: 16ms;
+        running: root.revealing;
+        triggered => {
+            root.reveal-ticks += 1;
+            if (root.cursor-placed == root.cursor) {
+                if (root.cursor-y + flick.content-y >= -0.5px && root.cursor-y + root.cursor-h + flick.content-y <= flick.visible-height + 0.5px) {
+                    root.cursor-drawn = root.cursor;
+                } else if (root.cursor-y + flick.content-y < 0px) {
+                    flick.content-y = -root.cursor-y;
+                } else {
+                    flick.content-y = flick.visible-height - root.cursor-y - root.cursor-h;
+                }
+                return;
+            }
+            let index = root.row-index(root.cursor, root.shown-kind);
+            if (index < 0 || root.reveal-ticks > 30) {
+                root.cursor-drawn = root.cursor;
+                return;
+            }
+            // The list places row n at about n times the rows' average
+            // height: just into view by that, or, once that has not made
+            // it, in the middle.
+            let each = flick.content-height / Math.max(1, root.shown.length);
+            let top = index * each;
+            let y = top + flick.content-y < 0px ? -top
+                : top + each + flick.content-y > flick.visible-height ? flick.visible-height - top - each
+                : root.reveal-ticks > 2 ? -(top - (flick.visible-height - each) / 2)
+                : flick.content-y;
+            flick.content-y = Math.max(Math.min(0px, flick.visible-height - flick.content-height), Math.min(0px, y));
+        }
+    }
     // The [e] Explorer frame holds the whole sidebar: search, New agent,
     // scope and the list.
     property <bool> explorer-active: Focus.mode == "sidebar" || Focus.mode == "search";
@@ -380,36 +435,45 @@ export component Sidebar inherits Rectangle {
         // Holds the keyboard for J/K/Enter navigation (the keyboard map).
         list := FocusScope {
           vertical-stretch: 1;
-          flick := Flickable {
-            viewport := VerticalLayout {
-                for row in root.showing-pairs ? root.rooms : root.showing-archive ? root.archived : root.rows: Row {
-                    chat: row;
-                    cursor: list.has-focus && row.session == root.cursor;
-                    compact: root.compact;
-                    reduced-motion: ProfileBridge.reduced-motion;
-                    on-screen: root.visible && self.y + self.height + flick.content-y > 0px && self.y + flick.content-y < flick.height;
-                    // J/K keep the cursor's row in view.
-                    reveal(y, h) => {
-                        if (y + flick.content-y < 0px) {
-                            flick.content-y = -y;
-                        } else if (y + h + flick.content-y > flick.height) {
-                            flick.content-y = flick.height - y - h;
-                        }
+          // A ListView makes only the rows in view, so a frame walks a
+          // screenful of rows, not the whole fleet.
+          flick := ListView {
+            width: parent.width;
+            height: parent.height;
+            vertical-scrollbar-policy: always-off;
+            for row in root.shown: Row {
+                chat: row;
+                cursor: list.has-focus && row.session == root.cursor;
+                compact: root.compact;
+                reduced-motion: ProfileBridge.reduced-motion;
+                seeking: root.revealing;
+                on-screen: root.visible && self.y + self.height + flick.content-y > 0px && self.y + flick.content-y < flick.visible-height;
+                // J/K keep the cursor's row in view.
+                reveal(y, h) => {
+                    root.cursor-y = y;
+                    root.cursor-h = h;
+                    root.cursor-placed = root.cursor;
+                    if (y + flick.content-y < 0px) {
+                        flick.content-y = -y;
+                    } else if (y + h + flick.content-y > flick.visible-height) {
+                        flick.content-y = flick.visible-height - y - h;
                     }
-                    clicked => { if (!row.archived) { root.chosen(row.session); } }
-                    done-toggled(parent) => { root.done-toggled(parent); }
-                    fold-toggled => { root.fold-toggled(row.session); }
-                    restore => { root.restore(row.session); }
-                    processes(x, y) => { root.processes(row.session, x, y); }
                 }
-                if root.showing-pairs && root.rooms.length == 0: Text {
-                    text: "No agent-to-agent conversations yet.";
-                    color: Palette.muted;
-                    font-size: 12 * Look.unit;
-                    horizontal-alignment: center;
-                }
+                clicked => { if (!row.archived) { root.chosen(row.session); } }
+                done-toggled(parent) => { root.done-toggled(parent); }
+                fold-toggled => { root.fold-toggled(row.session); }
+                restore => { root.restore(row.session); }
+                processes(x, y) => { root.processes(row.session, x, y); }
             }
-        }
+          }
+          if root.showing-pairs && root.rooms.length == 0: Text {
+              y: 0;
+              width: parent.width;
+              text: "No agent-to-agent conversations yet.";
+              color: Palette.muted;
+              font-size: 12 * Look.unit;
+              horizontal-alignment: center;
+          }
         }
         if !root.showing-pairs && (!root.minimal || root.showing-archive): ListSwitch {
             glyph: root.showing-archive ? "‹" : "≡";

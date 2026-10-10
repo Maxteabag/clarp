@@ -696,6 +696,15 @@ fn main() {
         app.engine.borrow_mut().set_agent_archived(&session, false);
         pump_now(app);
     }));
+    window.on_sidebar_row_index(|session, kind| {
+        let Some(window) = window() else { return -1 };
+        let rows = match kind.as_str() {
+            "rooms" => window.get_rooms(),
+            "archived" => window.get_archived(),
+            _ => window.get_chats(),
+        };
+        rows.iter().position(|row| row.session == session).map_or(-1, |at| at as i32)
+    });
     window.on_chat_chosen(|session| {
         if let Some(app) = app() {
             app.engine.borrow_mut().select(&session);

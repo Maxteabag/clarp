@@ -406,15 +406,30 @@ impl App {
         self.replace_draft(&session, text, Some(id));
     }
 
-    /// Puts `text` in every composer on `session` (but `except`).
+    /// Puts `text` in every composer on `session` (but `except`). Typing
+    /// (`except`, the pane typed in) changes only the other composers'
+    /// text, through DraftMirror; otherwise their rows are replaced.
     pub fn replace_draft(&self, session: &str, text: &str, except: Option<&str>) {
         let mut panes = self.pane_state.borrow_mut();
+        let mut mirrored = false;
         for index in 0..panes.len() {
             let pane = &mut panes[index];
             if pane.session != session || Some(pane.id.as_str()) == except || pane.draft == text {
                 continue;
             }
             pane.draft = text.to_owned();
+            if let Some(except) = except {
+                if !mirrored && let Some(window) = crate::window() {
+                    use slint::ComponentHandle;
+                    let mirror = window.global::<crate::DraftMirror>();
+                    mirror.set_session(session.into());
+                    mirror.set_except(except.into());
+                    mirror.set_text(text.into());
+                    mirror.set_set(mirror.get_set().wrapping_add(1));
+                }
+                mirrored = true;
+                continue;
+            }
             pane.draft_set += 1;
             let view = self.pane_view(pane);
             pane.view = view.clone();

@@ -5,7 +5,7 @@ import { NavRail } from "navrail.slint";
 import { Attachment, MentionRow, MentionBridge } from "composer.slint";
 export { MentionRow, MentionBridge }
 import { MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, MeasureRow, ScrollBook } from "transcript.slint";
-import { Workspace, PaneView, SplitView, WorkspaceTab } from "workspace.slint";
+import { Workspace, PaneView, SplitView, WorkspaceTab, DraftMirror } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
 import { KeymapEditor, KeymapRow, ConnectionPage } from "dialogs.slint";
@@ -40,7 +40,7 @@ import { PrefEditorDialog, PrefConfirmDialog, PrefEditor, Swatch } from "prefs.s
 export { PrefEditor, Swatch }
 export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, ProfileArtifact, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint }
 
-export { ScrollBook, MeasureRow, VimBridge }
+export { ScrollBook, MeasureRow, VimBridge, DraftMirror }
 export { Palette, Focus, ChatLook, Motion, SendFlight, Look, ChatRow, MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
@@ -208,6 +208,9 @@ export component AppWindow inherits Window {
     public function focus-sidebar() { sidebar.focus-list(); }
 
     callback chat-chosen(string);
+    // Where `session` is in the explorer's list `kind` ("chats", "rooms",
+    // "archived"), or -1.
+    pure callback sidebar-row-index(string, string) -> int;
     callback done-helpers-toggled(string);
     callback fold-toggled(string);
     callback restore-agent(string);
@@ -467,6 +470,7 @@ export component AppWindow inherits Window {
                 done-toggled(parent) => { root.done-helpers-toggled(parent); }
                 fold-toggled(session) => { root.fold-toggled(session); }
                 restore(session) => { root.restore-agent(session); }
+                row-index(session, kind) => { return root.sidebar-row-index(session, kind); }
             }
             VerticalLayout {
                 if root.preview-enabled && (root.preview-update-label != "" || root.preview-pinned || root.preview-error != ""): PreviewBanner {

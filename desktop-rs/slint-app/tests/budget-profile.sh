@@ -3,7 +3,7 @@
 # release build): slint-app/tests/budget-profile.sh OUT. Each scenario's
 # measured window (the app's "perf budget window" lines) gets a flat and a
 # caller-inclusive report in OUT/profile-<scenario>.txt.
-set -euo pipefail
+set -uo pipefail
 cd "$(dirname "$0")/../.."
 out=$(realpath -m "$1"); mkdir -p "$out"
 data=/var/tmp/budget-perf.data

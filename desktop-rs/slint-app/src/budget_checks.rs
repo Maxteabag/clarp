@@ -125,6 +125,8 @@ fn measured(name: &str, mark: Mark) -> Row {
 thread_local! {
     /// Input sent while a scenario is measured (wheel turns, keys).
     static INPUT: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    /// The active chat's offset at each wheel turn of the scrolling scenario.
+    static SCROLLED: Rc<RefCell<Vec<f32>>> = Rc::default();
 }
 
 fn input_every(interval: Duration, mut send: impl FnMut() + 'static) {
@@ -133,20 +135,24 @@ fn input_every(interval: Duration, mut send: impl FnMut() + 'static) {
     INPUT.with(|i| *i.borrow_mut() = Some(timer));
 }
 
-fn stop_input() {
-    INPUT.with(|i| i.borrow_mut().take());
+/// Types a key every 50 ms (twenty a second); every fortieth deletes the
+/// line typed.
+fn type_keys() {
+    let mut typed = 0;
+    input_every(Duration::from_millis(50), move || {
+        typed += 1;
+        if typed % 40 == 0 {
+            for _ in 0..39 {
+                headless::press(Key::Backspace);
+            }
+        } else {
+            headless::press("a");
+        }
+    });
 }
 
-/// The active pane's chat: its box in the window.
-fn chat_box() -> Option<(f32, f32, f32, f32)> {
-    use i_slint_backend_testing::ElementQuery;
-    let window = crate::window()?;
-    ElementQuery::from_root(&window)
-        .match_predicate(|e| e.accessible_id().is_some_and(|id| id.starts_with("chat:")) && e.size().width > 0.0)
-        .find_all()
-        .into_iter()
-        .map(|e| (e.absolute_position().x, e.absolute_position().y, e.size().width, e.size().height))
-        .next()
+fn stop_input() {
+    INPUT.with(|i| i.borrow_mut().take());
 }
 
 /// A row of the active chat shimmers (its live label, while it runs).
@@ -224,8 +230,8 @@ fn scenario(
 pub fn frame_budget_check(out: String) {
     let rows: Rc<RefCell<Vec<Row>>> = Rc::default();
     let full: Rc<RefCell<Vec<f64>>> = Rc::default();
-    let (rows1, rows2, rows3, rows4, rows5, rows6, rows7) =
-        (rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone());
+    let (rows1, rows2, rows3, rows4, rows5, rows6, rows7, rows8) =
+        (rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone(), rows.clone());
     let full1 = full.clone();
     // The pictures stage: RSS before and after, the peak, the longest block.
     let memory: Rc<RefCell<(f64, f64, f64, f64)>> = Rc::default();
@@ -298,35 +304,33 @@ pub fn frame_budget_check(out: String) {
             super::live_checks::set_reduced_motion(false);
             let mut up = true;
             let mut turns = 0;
-            // Found once: a query walks the whole window (and, in a release
-            // build without Slint's debug info, logs a line per element), so
-            // per wheel turn it cost more than the scrolling it measured.
-            let chat = chat_box();
-            check(chat.is_some(), "the active chat is on screen to scroll");
+            // A point in the active (right) pane's chat. Not found by a
+            // query: a release build has no element debug info, so a query
+            // finds nothing (and walks the whole window, logging a line per
+            // element, which then was all this scenario measured).
+            let (width, height, _) = headless::size_from_env();
+            let (x, y) = (width as f32 * 0.8, height as f32 * 0.45);
+            let offsets = SCROLLED.with(|s| s.clone());
+            offsets.borrow_mut().clear();
             input_every(Duration::from_millis(33), move || {
-                if let Some((x, y, width, height)) = chat {
-                    headless::wheel(x + width / 2.0, y + height / 2.0, if up { 60.0 } else { -60.0 });
-                }
+                headless::wheel(x, y, if up { 60.0 } else { -60.0 });
+                offsets.borrow_mut().push(report().offset);
                 turns += 1;
                 if turns % 15 == 0 {
                     up = !up;
                 }
             });
         }),
-        scenario("same, typing", out.clone(), rows5, |_, _| {
-            let mut typed = 0;
-            input_every(Duration::from_millis(50), move || {
-                typed += 1;
-                if typed % 40 == 0 {
-                    for _ in 0..39 {
-                        headless::press(Key::Backspace);
-                    }
-                } else {
-                    headless::press("a");
-                }
-            });
-        }),
+        scenario("same, typing", out.clone(), rows5, |_, _| type_keys()),
         scenario("same, every frame whole", out.clone(), rows6, |_, _| headless::pace(whole())),
+        // Both panes on Rachel's chat: each key shows in the other pane too.
+        scenario("typing, both panes on one chat", out.clone(), rows8, |app, _| {
+            headless::pace(partial());
+            app.engine.borrow_mut().select("rachel");
+            crate::pump();
+            app.focus_composer();
+            type_keys();
+        }),
         ("full frame", Box::new({
             // Ten frames drawn whole, one at a time: each the first frame
             // after its request.
@@ -396,9 +400,14 @@ pub fn frame_budget_check(out: String) {
             println!("perf budget full frame: {one:.2} ms ({}x{} px)", size.width, size.height);
             let saved = std::fs::write(format!("{out}/budget.md"), &table);
             check(saved.is_ok(), &format!("wrote {out}/budget.md {:?}", saved.err()));
+            let sessions: Vec<String> = crate::app().map(|app| app.pane_drafts().into_iter().map(|(_, session, _)| session).collect()).unwrap_or_default();
+            check(sessions.iter().all(|s| s == "rachel") && sessions.len() == 2, &format!("both panes showed Rachel's chat for the last typing: {sessions:?}"));
             let find = |name: &str| rows.iter().find(|r| r.name == name).cloned().unwrap_or_default();
             let busy = find("16 working + 30 jobs, shimmer");
             check(busy.cpu < CPU_BUDGET, &format!("the busy fleet costs the UI thread {:.0} ms/s (budget {CPU_BUDGET:.0})", busy.cpu));
+            let offsets = SCROLLED.with(|s| s.borrow().clone());
+            let (low, high) = offsets.iter().fold((f32::MAX, f32::MIN), |(l, h), o| (l.min(*o), h.max(*o)));
+            check(offsets.len() > 50 && high - low > 300.0, &format!("the scrolling scenario scrolled the chat: offsets {low:.0} to {high:.0} over {} wheel turns", offsets.len()));
             for name in ["same, scrolling", "same, typing"] {
                 let row = find(name);
                 check(row.frames > 0 && row.p95 < FRAME_BUDGET, &format!("{name}: frame p95 {:.2} ms over {} frames (budget {FRAME_BUDGET:.0})", row.p95, row.frames));
