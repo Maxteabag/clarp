@@ -80,6 +80,9 @@ mod stop_checks;
 // ---- the agent list kept, marked stale and retried when the snapshot fails
 #[path = "roster_checks.rs"]
 mod roster_checks;
+// ---- a narrow window: the panes stay inside it
+#[path = "narrow_checks.rs"]
+mod narrow_checks;
 
 pub const PROMPT: &str = "Hello from the Slint desktop end-to-end run, please answer";
 
@@ -512,6 +515,7 @@ pub fn start_check(name: &str, out: String) {
         "vim" => vim_checks::vim_check(out),
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
+        "narrow" => narrow_checks::narrow_check(out),
         "fonts" => font_checks::fonts_check(out),
         "avatars" => avatar_checks::avatars_check(out),
         "link-hints" => link_hint_checks::link_hints_check(out),
