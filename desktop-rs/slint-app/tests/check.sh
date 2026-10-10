@@ -19,6 +19,8 @@ scratch=$(mktemp -d /var/tmp/clarp-slint-check.XXXXXX)
 trap 'kill "$host" ${third_party:-} 2>/dev/null; wait "$host" ${third_party:-} 2>/dev/null; rm -rf "$scratch"' EXIT
 host_args=(); [ "$name" = startup ] && host_args=(--roster 100)
 # frame-budget: a real fleet on a laptop's panel (2400x1500 px).
+# explorer: a fleet longer than the explorer shows.
+[ "$name" = explorer ] && host_args=(--roster 180)
 [ "$name" = frame-budget ] && { host_args=(--roster 180); export CLARP_HEADLESS_SIZE=1600x1000@1.5; }
 cp slint-app/docs/screens/markdown-paper.png "$scratch/photo.png"
 # The "microphone": a second of tone, never the user's device.

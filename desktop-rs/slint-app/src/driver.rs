@@ -80,6 +80,8 @@ mod stop_checks;
 // ---- the agent list kept, marked stale and retried when the snapshot fails
 #[path = "roster_checks.rs"]
 mod roster_checks;
+#[path = "explorer_checks.rs"]
+mod explorer_checks;
 // ---- a narrow window: the panes stay inside it
 #[path = "narrow_checks.rs"]
 mod narrow_checks;
@@ -533,6 +535,7 @@ pub fn start_check(name: &str, out: String) {
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),
+        "explorer" => explorer_checks::explorer_check(out),
         "frame-budget" => budget_checks::frame_budget_check(out),
         "a2a" => {
             row_overlap_checks::watch();

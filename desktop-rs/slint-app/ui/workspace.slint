@@ -6,6 +6,16 @@ import { TypingIndicator } from "cells.slint";
 import { ProfileBridge } from "profile.slint";
 import { KeyHint } from "artifacts.slint";
 
+// Typing in one pane shows in the others on the same chat: the text goes
+// here (bumping `set`) for each pane on `session` but `except`, so a key
+// changes the composers' text, not every pane's whole row.
+export global DraftMirror {
+    in-out property <string> session;
+    in-out property <string> except;
+    in-out property <string> text;
+    in-out property <int> set;
+}
+
 // One pane of the workspace: where it sits (fractions of the workspace),
 // the chat it shows, and that chat's composer state. The counters ask the
 // pane to act (focus its composer or transcript, jump to the latest) when
@@ -142,6 +152,12 @@ export component Pane inherits Rectangle {
     // An old scroll request is not replayed into a pane made later.
     init => { root.scroll-request-seen = root.pane.scroll-request; root.seek-request-seen = root.pane.seek-request; root.reveal-request-seen = root.pane.reveal-request; root.apply-requests(); }
     changed pane => { root.apply-requests(); }
+    property <int> mirror-set: DraftMirror.set;
+    changed mirror-set => {
+        if (DraftMirror.session == root.pane.session && DraftMirror.except != root.pane.id) {
+            composer.draft = DraftMirror.text;
+        }
+    }
     function apply-requests() {
         if (root.draft-set-seen != root.pane.draft-set) {
             root.draft-set-seen = root.pane.draft-set;
