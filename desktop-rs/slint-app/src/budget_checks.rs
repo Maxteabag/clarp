@@ -118,13 +118,10 @@ fn chat_box() -> Option<(f32, f32, f32, f32)> {
         .next()
 }
 
+/// A row of the active chat shimmers (its live label, while it runs).
 fn any_shimmering() -> bool {
-    use i_slint_backend_testing::ElementQuery;
-    let Some(window) = crate::window() else { return false };
-    ElementQuery::from_root(&window)
-        .match_predicate(|e| e.accessible_id().is_some_and(|a| a.starts_with("shimmer:")) && e.size().width > 0.0)
-        .find_first()
-        .is_some()
+    use slint::Model;
+    crate::app().and_then(|app| app.active_messages()).is_some_and(|rows| rows.iter().any(|r| !r.live.shimmer.is_empty()))
 }
 
 /// The process's resident and peak memory (VmRSS, VmHWM), in MB.
@@ -239,7 +236,8 @@ pub fn frame_budget_check(out: String) {
                 }
                 if busy_agents(app) < 16 || !any_shimmering() {
                     if elapsed.as_millis() / 100 == 120 {
-                        println!("perf budget waiting: {} agents busy, shimmering {}", busy_agents(app), any_shimmering());
+                        let lseq = app.engine.borrow().live_view("rachel").and_then(|v| v.lseq());
+                        println!("perf budget waiting: {} agents busy, shimmering {}, live lseq {lseq:?}", busy_agents(app), any_shimmering());
                     }
                     return false;
                 }
