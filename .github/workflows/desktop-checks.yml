@@ -137,6 +137,29 @@ jobs:
         with:
           name: clarp-slint-x86_64-linux
           path: /tmp/clarp-slint
+      # What animating costs the UI thread, on the release build a person
+      # runs (budget_checks.rs): the table lands in the run's summary.
+      - name: Frame budget dependencies
+        run: |
+          sudo apt-get install -y --no-install-recommends dbus gnome-keyring python3 \
+            fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
+      - name: Frame budget
+        working-directory: desktop-rs
+        env:
+          CLARP_CHECK_PROFILE: release
+        run: |
+          set -o pipefail
+          status=0
+          slint-app/tests/check.sh frame-budget /tmp/budget 2>&1 | tee /tmp/budget.log || status=$?
+          if [ -f /tmp/budget/budget.md ]; then cat /tmp/budget/budget.md >> "$GITHUB_STEP_SUMMARY"; else echo "no budget.md: the check stopped early"; fi
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: budget
+          path: |
+            /tmp/budget
+            /tmp/budget.log
 
   macos:
     runs-on: macos-15
