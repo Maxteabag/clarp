@@ -4277,11 +4277,14 @@ def test_a_bookkeeping_delegate_cannot_start_agents_whatever_parent_it_names(run
     assert create("helper-c", "boss", token(boss_id)) == 200
 
 
-def test_a_turn_cannot_send_as_another_agent(running_server):
+def test_a_turn_cannot_send_as_another_agent(running_server, monkeypatch):
     # 2026-10-10: Koko, a copy of Theo's conversation, kept acting as Theo and
     # sent requests --from theo-97e5 from its own turn.
     import os
+    from lib.backend.registry import by_id
     base, ctx, _srv = running_server
+    monkeypatch.setattr(by_id("claude"), "start_turn",
+                        lambda **_metadata: type("Handle", (), {"pid": 99})())
     from lib import agents as agents_db, provider_background_jobs as turns
     theo = agents_db.create_agent(persona="Theo", voice_id="v", cwd=str(ctx.root), session="theo")
     koko = agents_db.create_agent(persona="Koko", voice_id="v", cwd=str(ctx.root), session="koko")
