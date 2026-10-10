@@ -669,8 +669,8 @@ fn open_stages(out: &str) -> Vec<Stage> {
         ("vid-demo-k", "O Play video", |u| u.starts_with("file://") && u.ends_with("cards-demo.mp4")),
         ("file-pdf-k", "O Open file", |u| u.starts_with("file://") && u.ends_with("contract-2026-signed.pdf")),
         ("wf-ci-k", "O Open in GitHub", |u| u == "https://github.com/example/clarp/actions/runs/901"),
-        // A report opens in the browser too, on its own loopback page.
-        ("form-report-k", "O Open report", |u| u.contains("/form/")),
+        // A plain report opens in Clarp's preview.
+        ("form-report-k", "O Open report", |_| false),
     ];
     for (id, hint, wanted) in opens {
         let before = std::rc::Rc::new(std::cell::Cell::new(0usize));
@@ -683,7 +683,7 @@ fn open_stages(out: &str) -> Vec<Stage> {
             true
         })));
         stages.push((Box::leak(format!("{id} opened").into_boxed_str()), Box::new(move |_, window, elapsed| {
-            let done = opened().iter().skip(before2.get()).any(|u| wanted(u));
+            let done = opened().iter().skip(before2.get()).any(|u| wanted(u)) || (id == "form-report-k" && window.get_overlay() == "report");
             if !done && elapsed < Duration::from_secs(8) {
                 return false;
             }

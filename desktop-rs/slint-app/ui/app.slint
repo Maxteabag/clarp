@@ -298,6 +298,8 @@ export component AppWindow inherits Window {
     // The report's links (1-9 open them) and its keyboard.
     in property <int> report-links;
     callback report-link(int);
+    in property <bool> report-browser;
+    callback report-open-browser();
     public function focus-report() { report-view.focus-body(); }
     in property <[TeamView]> team-list;
     in property <[TeamMessageView]> team-messages;
@@ -732,6 +734,8 @@ export component AppWindow inherits Window {
             blocks: root.report-blocks;
             links: root.report-links;
             open-link(index) => { root.report-link(index); }
+            browser: root.report-browser;
+            open-browser => { root.report-open-browser(); }
             link-clicked(url) => { root.link-clicked(url); }
             done => { root.overlay-closed(); }
         }

@@ -115,6 +115,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("list-rooms", ""),
         ("list-archive", ""),
         ("link-hints", "F"),
+        ("open-in-browser", "B"),
         ("jump-latest", "Ctrl+End"),
         ("retry-message", "Ctrl+Alt+R"),
         ("dismiss-error", "Esc"),

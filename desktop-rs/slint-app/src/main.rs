@@ -986,6 +986,9 @@ fn main() {
     window.on_job_output(|id| with_window(|app, window| processes_view::open_job(app, window, &id, false)));
     window.on_open_report(|id| with_window(|app, window| updates_view::open_report(app, window, &id)));
     window.on_report_link(updates_view::open_report_link);
+    window.on_report_open_browser(|| with_window(|app, window| {
+        artifacts_view::open_in_browser_here(app, window);
+    }));
     window.on_image_view_moved(|delta| with_window(|app, window| artifacts_view::image_view_moved(app, window, delta)));
     window.on_open_chat(|session| with_window(|app, window| updates_view::open_chat(app, window, &session)));
     window.on_show_processes(|session, x, y| with_window(|app, window| processes_view::open_at(app, window, &session, x, y)));

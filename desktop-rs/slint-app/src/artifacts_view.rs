@@ -224,9 +224,11 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             let content = text(artifact, "content");
             if !content.trim().is_empty() {
                 // HTML reads as its text, Markdown without its marks.
-                let markdown = if clarp_core::text::looks_like_html_report(&content) { crate::updates_view::html_markdown(&content) } else { content };
+                let html = clarp_core::text::looks_like_html_report(&content);
+                let markdown = if html { crate::updates_view::html_markdown(&content) } else { content };
                 item.preview = preview_text(&markdown).chars().take(600).collect::<String>().into();
                 item.action = if kind == "document" { "Open document" } else { "Open research" }.into();
+                item.browser = html;
             }
             let sources = https_sources(artifact).len();
             if sources > 0 {
@@ -238,6 +240,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
             item.label = if report { "REPORT" } else { "FORM" }.into();
             item.action = if report { "Open report" } else { "Open form" }.into();
             item.form = false;
+            item.browser = report && !opens_in_browser(artifact);
         }
         _ => {}
     }
@@ -719,6 +722,9 @@ fn card_hints(item: &ArtifactItem, overrides: &crate::keymap::Overrides) -> Vec<
         return hints;
     }
     hints.push(hint(&key("artifact-open"), &item.action, "open"));
+    if item.browser {
+        hints.push(hint(&key("open-in-browser"), "Open in browser", "browser"));
+    }
     if item.kind == "audio" {
         hints.push(hint(&format!("{}/{}", key("artifact-back"), key("artifact-forward")).replace("Left/Right", "←/→"), "Seek", "seek"));
         hints.push(hint(&key("artifact-stop"), "Stop", "stop"));
@@ -1428,6 +1434,9 @@ fn hint_clicked(app: &App, window: &AppWindow, id: &str, action: &str) {
     *app.artifact_cursor.borrow_mut() = id.to_owned();
     match action {
         "open" => open(app, window, id),
+        "browser" => {
+            open_in_browser(app, id);
+        }
         "send" => send(app, id),
         "discard" => discard(app, id),
         "keep-draft" => app.focus_transcript(),
@@ -1753,10 +1762,11 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
         .or_else(|| artifact.get("payload").and_then(|p| p.get("connect_origins")))
         .cloned().unwrap_or(Value::Null);
     match text(&artifact, "type").as_str() {
-        // Forms and reports both open in the browser: a report on a
-        // bridge-free page that may reach the web over HTTPS
-        // (form_server::REPORT_POLICY), a form under its exact grants.
-        "html_form" => {
+        // A form, and a report with pictures or layout, open in the
+        // browser: a report on a bridge-free page that may reach the web
+        // over HTTPS (form_server::REPORT_POLICY), a form under its exact
+        // grants. A plain report is Clarp's quick preview (B: the browser).
+        "html_form" if opens_in_browser(&artifact) => {
             let interactive = !is_report(&artifact);
             let version = artifact.get("version").cloned().unwrap_or(Value::Null);
             let events = {
@@ -1837,9 +1847,107 @@ fn watch_window(id: &str) {
     });
 }
 
-/// Whether `id` is an HTML form or report (they open in the browser).
-pub fn is_html_form(app: &App, id: &str) -> bool {
-    app.engine.borrow().update_artifacts().iter().any(|a| text(a, "artifact_id") == id && text(a, "type") == "html_form")
+/// Whether HTML would lose much as Markdown: pictures, styling, scripts,
+/// tables, media or frames. Case-insensitive, without copying the page.
+pub fn rich_html(html: &str) -> bool {
+    const TAGS: &[&str] = &["img", "style", "script", "svg", "canvas", "video", "audio", "iframe", "table", "link", "picture"];
+    let bytes = html.as_bytes();
+    html.match_indices('<').any(|(at, _)| {
+        let rest = &bytes[at + 1..];
+        TAGS.iter().any(|tag| {
+            rest.len() > tag.len()
+                && rest[..tag.len()].eq_ignore_ascii_case(tag.as_bytes())
+                && !rest[tag.len()].is_ascii_alphanumeric()
+        })
+    })
+}
+
+thread_local! {
+    /// rich_html per report and version, as cards are built on every refresh.
+    static RICH: std::cell::RefCell<std::collections::HashMap<String, bool>> = std::cell::RefCell::default();
+}
+
+/// What O on an html_form does: a form, or a report with pictures or
+/// layout, opens in the browser; a plain report in Clarp's preview.
+fn opens_in_browser(artifact: &Value) -> bool {
+    if !is_report(artifact) {
+        return true;
+    }
+    let key = format!("{}\u{0}{}\u{0}{}", text(artifact, "artifact_id"), artifact.get("version").unwrap_or(&Value::Null), text(artifact, "updated_at"));
+    if let Some(rich) = RICH.with(|r| r.borrow().get(&key).copied()) {
+        return rich;
+    }
+    let rich = rich_html(artifact.get("content").and_then(Value::as_str).unwrap_or_default());
+    RICH.with(|r| r.borrow_mut().insert(key, rich));
+    rich
+}
+
+/// An HTML report's whole page in a new browser window, whatever O does
+/// with it: a read-only html_form, or a document or research written in
+/// HTML, on the bridge-free report page. A form opens as it always does.
+pub fn open_in_browser(app: &App, id: &str) -> bool {
+    let Some(artifact) = artifact(app, id) else { return false };
+    let kind = text(&artifact, "type");
+    let content = artifact.get("content").and_then(Value::as_str).unwrap_or_default();
+    let html = match kind.as_str() {
+        "html_form" => true,
+        "document" | "research" => clarp_core::text::looks_like_html_report(content),
+        _ => false,
+    };
+    if !html || content.trim().is_empty() {
+        eprintln!("clarp-slint: {id} ({kind}) has no HTML page to open");
+        return false;
+    }
+    let interactive = kind == "html_form" && !is_report(&artifact);
+    let version = artifact.get("version").cloned().unwrap_or(Value::Null);
+    let owner_origin = app.engine.borrow().form_event_origin();
+    // A form's events and grants come with its own open.
+    if interactive {
+        if let Some(window) = crate::window() {
+            open(app, &window, id);
+        }
+        return true;
+    }
+    match crate::form_server::serve(id, version, content, None, &Value::Null, false, &owner_origin) {
+        Ok(url) => {
+            eprintln!("clarp-slint: opening the report {id} in the browser (pid {})", std::process::id());
+            crate::view::open_page(&url);
+            watch_window(id);
+            true
+        }
+        Err(error) => {
+            eprintln!("clarp-slint: {error}");
+            app.engine.borrow_mut().set_artifact_status(id, &format!("Not opened: {error}"));
+            false
+        }
+    }
+}
+
+/// B, or Ctrl+K's "Open in browser": the report on screen in Clarp's
+/// viewer, else the selected card, else the latest HTML report on screen.
+pub fn open_in_browser_here(app: &App, window: &AppWindow) -> bool {
+    if window.get_overlay() == "report" {
+        return open_in_browser(app, &crate::updates_view::current_report());
+    }
+    if let Some(id) = selected(app) {
+        return open_in_browser(app, &id);
+    }
+    let html = |id: &String| artifact_quiet(app, id).is_some_and(|a| {
+        let content = a.get("content").and_then(Value::as_str).unwrap_or_default();
+        match text(&a, "type").as_str() {
+            "html_form" => is_report(&a),
+            "document" | "research" => clarp_core::text::looks_like_html_report(content),
+            _ => false,
+        }
+    });
+    match on_screen(app).into_iter().rev().find(html) {
+        Some(id) => open_in_browser(app, &id),
+        None => false,
+    }
+}
+
+fn artifact_quiet(app: &App, id: &str) -> Option<Value> {
+    app.engine.borrow().update_artifacts().iter().find(|a| text(a, "artifact_id") == id).cloned()
 }
 
 /// An HTML form artifact's body for the report viewer, read as Markdown

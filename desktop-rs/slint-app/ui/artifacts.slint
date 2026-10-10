@@ -43,6 +43,9 @@ export struct ArtifactItem {
     note-styled: styled-text,
     // What Enter or a click does ("" for nothing), and how it went.
     action: string,
+    // An HTML report O shows as Clarp's preview: B opens the whole page in
+    // the browser.
+    browser: bool,
     status-text: string,
     // The keyboard's card in the chat (J/K).
     selected: bool,

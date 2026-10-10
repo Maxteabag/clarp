@@ -181,11 +181,6 @@ pub fn next_attention(app: &Rc<App>, window: &AppWindow) {
 // ---- the report viewer ------------------------------------------------------
 
 pub fn open_report(app: &App, window: &AppWindow, artifact_id: &str) {
-    // An HTML report opens in the browser, as from its card.
-    if crate::artifacts_view::is_html_form(app, artifact_id) {
-        crate::artifacts_view::open(app, window, artifact_id);
-        return;
-    }
     REPORT.with(|r| *r.borrow_mut() = artifact_id.to_owned());
     commands::open_overlay(app, window, "report");
     let started = std::time::Instant::now();
@@ -212,6 +207,11 @@ fn links(markdown: &str) -> Vec<String> {
         }
     }
     found
+}
+
+/// The report the viewer shows (or showed last).
+pub fn current_report() -> String {
+    REPORT.with(|r| r.borrow().clone())
 }
 
 /// 1-9 in the report: opens its link.
@@ -241,6 +241,8 @@ fn show_report(app: &App, window: &AppWindow) {
     window.set_report_title(text(&report, "title").into());
     window.set_report_summary(text(&report, "summary").into());
     window.set_report_html(html);
+    // Its whole page, with pictures and layout, is a key away.
+    window.set_report_browser(html);
     window.set_report_kind(text(&report, "kind").into());
     window.set_report_blocks(model(blocks));
 }
