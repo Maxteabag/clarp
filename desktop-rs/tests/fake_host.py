@@ -43,6 +43,7 @@ def solid_png(width, height, rgba):
 
 AVATAR_PNG = solid_png(64, 48, (30, 120, 200, 255))
 MEDIA_PNG = solid_png(8, 8, (250, 200, 0, 255))
+SCREENSHOT_PNG = None  # made on first request
 # Pairing mints this device token; it is accepted like TOKEN afterwards.
 PAIRED_TOKEN = "cld_probe_paired_device"
 state_lock = threading.Lock()
@@ -789,6 +790,12 @@ class Handler(BaseHTTPRequestHandler):
             colours = {"/media/img-chart": (200, 80, 40, 255), "/media/img-a": (40, 120, 200, 255),
                        "/media/img-b": (60, 180, 90, 255), "/media/img-c": (220, 190, 40, 255)}
             return self.reply_bytes(200, solid_png(400, 240, colours[url.path]), "image/png")
+        if url.path.startswith("/media/screenshot-"):
+            # A 4K screenshot (the frame-budget check's memory stage).
+            global SCREENSHOT_PNG
+            if SCREENSHOT_PNG is None:
+                SCREENSHOT_PNG = solid_png(3840, 2160, (70, 90, 120, 255))
+            return self.reply_bytes(200, SCREENSHOT_PNG, "image/png")
         if url.path == "/media/img-slow":
             # An image that takes its time: the message must not grow when it lands.
             time.sleep(1.5)
