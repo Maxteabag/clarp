@@ -179,7 +179,7 @@ in `GET /live` and on `/agents/snapshot` agents as `live_activity`:
 | `waiting` | the agent needs the user (a provider notification) | no |
 | `interrupted` | the last turn was stopped or died | no |
 | `background` | the turn ended but a helper or background job will wake the agent | no |
-| `limited` | parked behind a provider usage limit (account recovery) | yes |
+| `limited` | parked behind a provider usage limit (account recovery), or its next turn is held while the runtime drains for an update (`headline` "Waiting for the Clarp update", `turn_id` and `turn_started_ms` null) | yes |
 
 State rules on the Host:
 - A tool finishing returns the state to `thinking`, not `tool`. With parallel

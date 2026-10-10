@@ -1744,7 +1744,6 @@ class Handler(BaseHTTPRequestHandler):
             "available": True,
             "release_id": "embedded",
             "draining": False,
-            "drain": {"phase": "idle"},
             "active_turns": int(busy),
         }
         runtime_client = getattr(self.ctx, "runtime_client", None)
@@ -1755,9 +1754,6 @@ class Handler(BaseHTTPRequestHandler):
                     "available": True,
                     "release_id": str(runtime_status.get("release_id") or ""),
                     "draining": bool(runtime_status.get("draining")),
-                    # The graceful release drain; runtimes from before it
-                    # report none (docs/runtime-restarts.md).
-                    "drain": runtime_status.get("drain"),
                     "active_turns": len(runtime_status.get("active") or {}),
                 }
             except Exception:
@@ -1765,7 +1761,6 @@ class Handler(BaseHTTPRequestHandler):
                     "available": False,
                     "release_id": "",
                     "draining": False,
-                    "drain": None,
                     "active_turns": 0,
                 }
         body = json.dumps({
