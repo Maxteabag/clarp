@@ -56,6 +56,7 @@ def recover_runtime(
     restore_agents: Callable = restore_persisted_agents,
     mark_interrupted: Callable | None = None,
     reconcile: Callable | None = None,
+    repair_receipts: Callable | None = None,
 ) -> dict:
     """Recover only after the process-owning runtime has restarted.
 
@@ -76,8 +77,25 @@ def recover_runtime(
                        mark_interrupted(stream=getattr(ctx, "stream", None)))
         reconciled = int(reconcile() or 0)
     queued = int(dispatch.recover_queued() or 0)
+    if repair_receipts is None:
+        repair_receipts = _terminalize_ended_receipts
+    try:
+        receipts = dict(repair_receipts() or {})
+    except Exception as exc:  # noqa: BLE001 - receipts never block a boot
+        log_exception("queueReceiptRepairFail", exc)
+        receipts = {}
     return {
         "interrupted": len(interrupted),
         "reconciled": reconciled,
         "queued": queued,
+        "receipts": receipts,
     }
+
+
+def _terminalize_ended_receipts() -> dict[str, int]:
+    """End queue receipts whose turn is over; a slot this runtime holds after
+    rehydration keeps its receipt ``started``."""
+    from . import turn_dispatch, turn_queue
+    live = set(turn_dispatch.runtime_status()["active"].values())
+    with db.busy_timeout(SQLITE_RECOVERY_BUSY_TIMEOUT_MS):
+        return turn_queue.terminalize_ended_receipts(live)

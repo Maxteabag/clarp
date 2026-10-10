@@ -114,16 +114,102 @@ def status(queue_id: str) -> str:
     return str(row["status"] or "") if row else ""
 
 
+# A queued message's receipt after it left the queue:
+#   started -> its turn is running;
+#   done / failed / interrupted -> its turn settled with that outcome;
+#   ended -> its turn is over but the ledger never recorded how (a later turn
+#            of the same agent began, which one agent's slot only allows after
+#            this one ended).
+# Every receipt, terminal or not, keeps deduplicating client retries.
+_RECEIPT_STATUS = {"completed": "done", "failed": "failed",
+                   "interrupted": "interrupted"}
+_SETTLEABLE = ("started", "done", "failed", "interrupted", "ended")
+
+
+def settle_receipt(agent_id: str, trace_id: str, outcome: str) -> int:
+    """Its turn settled: the receipt of the message that started it ends too.
+
+    The newest settlement wins, so a same-trace retry that later succeeds
+    turns a ``failed`` receipt into ``done``."""
+    if not trace_id:
+        return 0
+    status = _RECEIPT_STATUS.get(outcome, "ended")
+    cursor = db.conn().execute(
+        f"""UPDATE queued_turns SET status = ?
+              WHERE agent_id = ? AND trace_id = ? AND status <> ?
+                AND status IN ({','.join('?' * len(_SETTLEABLE))})""",
+        (status, agent_id, trace_id, status, *_SETTLEABLE))
+    return int(cursor.rowcount or 0)
+
+
+def terminalize_ended_receipts(live_traces: frozenset[str] | set[str] = frozenset()
+                               ) -> dict[str, int]:
+    """Startup repair: end every ``started`` receipt whose turn is over.
+
+    Before receipts were settled with their turn, every one stayed ``started``
+    forever (Pebble, 2026-10-10: 77 of them, read as stuck work). A receipt
+    ends when a turn row of its trace settled, or when a later turn of the
+    same agent began. A trace in ``live_traces`` (it holds a slot now) and a
+    receipt with neither signal stay ``started``. Idempotent; queued, claimed
+    and parked rows are never touched. Returns {status: count}."""
+    con = db.conn()
+    rows = con.execute(
+        """SELECT q.queue_id, q.trace_id,
+                  (SELECT t.outcome FROM turns t
+                    WHERE t.agent_id = q.agent_id AND t.trace_id = q.trace_id
+                      AND t.settled_at IS NOT NULL
+                    ORDER BY t.settled_at DESC, t.turn_id DESC LIMIT 1) AS outcome,
+                  EXISTS (SELECT 1 FROM turns t
+                           WHERE t.agent_id = q.agent_id
+                             AND t.trace_id <> q.trace_id
+                             AND t.started_at > COALESCE(q.started_at, q.enqueued_at)
+                         ) AS later
+             FROM queued_turns q
+            WHERE q.status = 'started'""").fetchall()
+    updates: dict[str, list[str]] = {}
+    for row in rows:
+        if row["trace_id"] in live_traces:
+            continue
+        if row["outcome"]:
+            status = _RECEIPT_STATUS.get(str(row["outcome"]), "ended")
+        elif row["later"]:
+            status = "ended"
+        else:
+            continue
+        updates.setdefault(status, []).append(str(row["queue_id"]))
+    if not updates:
+        return {}
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        counts = {}
+        for status, queue_ids in updates.items():
+            counts[status] = sum(
+                con.execute(
+                    """UPDATE queued_turns SET status = ?
+                        WHERE queue_id = ? AND status = 'started'""",
+                    (status, queue_id)).rowcount for queue_id in queue_ids)
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    counts = {status: n for status, n in counts.items() if n}
+    if counts:
+        log("queueReceiptsTerminalized",
+            " ".join(f"{status}={n}" for status, n in sorted(counts.items())))
+    return counts
+
+
 def mark_started(queue_id: str) -> None:
     """Keep a payload-free idempotency tombstone for as long as the message.
 
     Durable user messages do not currently expire, so deleting this receipt on
     a timer would allow an old client retry to execute completed work again.
     Agent deletion intentionally removes its receipts along with queued work.
+    The receipt is ``started`` while its turn runs; settle_receipt ends it.
     """
     if queue_id:
         row = db.conn().execute(
-            "SELECT agent_id, origin FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
+            "SELECT agent_id, origin, trace_id FROM queued_turns WHERE queue_id = ? AND status IN ('queued', 'claimed')",
             (queue_id,),
         ).fetchone()
         cursor = db.conn().execute(
@@ -134,6 +220,21 @@ def mark_started(queue_id: str) -> None:
             (db.now_ms(), queue_id))
         if cursor.rowcount and row:
             _bump_revision(str(row["agent_id"]))
+            # A fast backend may settle its turn before the dispatcher gets
+            # here; the receipt then ends at once.
+            settled = db.conn().execute(
+                """SELECT outcome FROM turns
+                    WHERE agent_id = ? AND trace_id = ? AND settled_at IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM turns o
+                           WHERE o.agent_id = turns.agent_id
+                             AND o.trace_id = turns.trace_id
+                             AND o.settled_at IS NULL AND o.ended_at IS NULL)
+                    ORDER BY settled_at DESC LIMIT 1""",
+                (row["agent_id"], row["trace_id"])).fetchone()
+            if settled:
+                settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
+                               str(settled["outcome"] or ""))
             if pending_count(str(row["agent_id"])) == 0 and set_paused(str(row["agent_id"]), False):
                 # Nothing is held any more, so a Stop's pause ends here. Say
                 # which item ended it: a peer message or goal wake can do so.

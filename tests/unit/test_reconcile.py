@@ -205,7 +205,7 @@ def test_inv3_asks_the_runtime_to_release_a_settled_turns_slot(tmp_path, runtime
     assert repaired.get("slot") == "tA"
 
 
-@pytest.mark.parametrize("case", ["running", "fresh_settle", "spawning", "no_slot"])
+@pytest.mark.parametrize("case", ["running", "fresh_settle", "no_slot"])
 def test_inv3_leaves_the_runtime_alone_while_a_turn_may_be_live(
         tmp_path, runtime_owned, case):
     agent_id = _agent(tmp_path)
@@ -221,6 +221,21 @@ def test_inv3_leaves_the_runtime_alone_while_a_turn_may_be_live(
 
     assert runtime.asked == []
     assert "slot" not in repaired
+
+
+def test_inv3_asks_the_runtime_about_a_settled_agents_spawning_slot(
+        tmp_path, runtime_owned):
+    # Pebble, 2026-10-10: a queued handoff failed on "database is locked" and
+    # left the slot "spawning" with no launch behind it. Only the runtime
+    # knows whether a launch or account recovery still owns such a slot.
+    agent_id = _agent(tmp_path)
+    _settled(agent_id)
+    runtime = runtime_owned(_Runtime(agent_id, spawning=True))
+
+    repaired = reconcile.reconcile_agent(agent_id, "claude", home=tmp_path)
+
+    assert runtime.asked == [agent_id]
+    assert repaired.get("slot") == "tA"
 
 
 def test_inv3_asks_the_runtime_at_most_once_per_grace_window(tmp_path, runtime_owned):

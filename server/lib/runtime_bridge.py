@@ -204,6 +204,17 @@ class RuntimeClient:
         return {str(k): str(v) for k, v in result.items()} \
             if isinstance(result, dict) else {}
 
+    def repair_slot(self, agent_id: str, *, actor: str, reason: str) -> dict:
+        """Have the runtime give back this agent's unowned slot (not a Stop)."""
+        response = self._request("repair_slot", {
+            "agent_id": agent_id, "actor": actor, "reason": reason})
+        if not response.get("ok"):
+            raise RuntimeProtocolError(
+                str(response.get("error") or "runtime slot repair failed"))
+        result = response.get("result") or {}
+        return {"released_trace": str(result.get("released_trace") or ""),
+                "queue_recovered": int(result.get("queue_recovered") or 0)}
+
     def interrupt(self, backend: str, agent_id: str) -> int:
         response = self._request("interrupt", {
             "backend": backend, "agent_id": agent_id})
@@ -606,6 +617,21 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 return {"ok": False, "status": 501,
                         "error": "this runtime cannot release leaked slots"}
             return {"ok": True, "result": release_leaked(agent_id=agent_id)}
+        if method == "repair_slot":
+            agent_id = str(params.get("agent_id") or "")
+            if not agent_id:
+                return {"ok": False, "status": 400,
+                        "error": "agent_id is required"}
+            repair = getattr(self.dispatch_service, "repair_slot", None)
+            if repair is None:
+                return {"ok": False, "status": 501,
+                        "error": "this runtime cannot repair slots"}
+            try:
+                result = repair(agent_id, actor=str(params.get("actor") or ""),
+                                reason=str(params.get("reason") or ""))
+            except ValueError as exc:
+                return {"ok": False, "status": 400, "error": str(exc)}
+            return {"ok": True, "result": result}
         if method == "release_agent":
             from . import agents as agents_db, backends, turn_dispatch
             agent_id = str(params.get("agent_id") or "")

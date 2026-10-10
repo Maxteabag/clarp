@@ -184,8 +184,11 @@ def _settle_turn(agent_id: str, event: str, target: str,
     try:
         trace = _record_outcome(agent_id, event, target, detail, stamp)
         if trace:
-            from . import message_writes
+            from . import message_writes, turn_queue
+            from .message_turns import outcome_for
             message_writes.restamp_turn(agent_id, trace)
+            turn_queue.settle_receipt(agent_id, trace,
+                                      outcome_for(event, target) or "")
     except Exception as exc:  # noqa: BLE001
         log("turnSettleFail", f"agent={agent_id} event={event} error={exc}")
 
