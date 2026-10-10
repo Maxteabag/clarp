@@ -1752,11 +1752,11 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
     let network = artifact.get("connect_origins")
         .or_else(|| artifact.get("payload").and_then(|p| p.get("connect_origins")))
         .cloned().unwrap_or(Value::Null);
-    // Keep legacy reports in their existing viewer. Only an explicit valid
-    // network grant needs the browser's HTML engine; malformed policy denies it.
-    let network_report = !crate::form_server::validated_origins(&network).is_empty();
     match text(&artifact, "type").as_str() {
-        "html_form" if !is_report(&artifact) || network_report => {
+        // Forms and reports both open in the browser: a report on a
+        // bridge-free page that may reach the web over HTTPS
+        // (form_server::REPORT_POLICY), a form under its exact grants.
+        "html_form" => {
             let interactive = !is_report(&artifact);
             let version = artifact.get("version").cloned().unwrap_or(Value::Null);
             let events = {
@@ -1835,6 +1835,11 @@ fn watch_window(id: &str) {
             eprintln!("clarp-slint: 2 s after opening {id}: window {}", window_state(&window));
         }
     });
+}
+
+/// Whether `id` is an HTML form or report (they open in the browser).
+pub fn is_html_form(app: &App, id: &str) -> bool {
+    app.engine.borrow().update_artifacts().iter().any(|a| text(a, "artifact_id") == id && text(a, "type") == "html_form")
 }
 
 /// An HTML form artifact's body for the report viewer, read as Markdown

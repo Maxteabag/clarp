@@ -16,7 +16,7 @@ case $name in artifacts|artifact-keys) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; 
 # roster-stale lets a slow snapshot time out in 1.5 s, not a minute.
 [ "$name" = roster-stale ] && export CLARP_SNAPSHOT_TIMEOUT_MS=1500
 scratch=$(mktemp -d /var/tmp/clarp-slint-check.XXXXXX)
-trap 'kill "$host" 2>/dev/null; wait "$host" 2>/dev/null; rm -rf "$scratch"' EXIT
+trap 'kill "$host" ${third_party:-} 2>/dev/null; wait "$host" ${third_party:-} 2>/dev/null; rm -rf "$scratch"' EXIT
 host_args=(); [ "$name" = startup ] && host_args=(--roster 100)
 # frame-budget: a real fleet on a laptop's panel (2400x1500 px).
 [ "$name" = frame-budget ] && { host_args=(--roster 180); export CLARP_HEADLESS_SIZE=1600x1000@1.5; }
@@ -35,12 +35,51 @@ if [ "$name" = artifact-open ]; then
     open_log=""
     export CLARP_TEST_BROWSER_LOG="$scratch/browser.log"
     printf '#!/bin/sh\necho fake-browser.desktop\n' > "$scratch/bin/xdg-settings"
+    # The "third-party" web: every *.example.com name, over HTTPS with a
+    # throwaway certificate; it logs each request's headers.
+    export CLARP_TEST_THIRD_PARTY_LOG="$scratch/third-party.log"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=example.com -addext "subjectAltName=DNS:*.example.com" \
+        -keyout "$scratch/tp-key.pem" -out "$scratch/tp-cert.pem" 2>/dev/null
+    cat > "$scratch/third_party.py" <<'PY'
+import http.server, json, ssl, sys
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *args): pass
+    def do_GET(self):
+        with open(sys.argv[1], "a") as log:
+            log.write(json.dumps({"path": self.path, "headers": dict(self.headers.items())}) + "\n")
+        body = b"window.chart = 1" if self.path.startswith("/chart.js") else b"42"
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(sys.argv[2], sys.argv[3])
+server.socket = context.wrap_socket(server.socket, server_side=True)
+open(sys.argv[4], "w").write(str(server.server_address[1]))
+server.serve_forever()
+PY
+    /usr/bin/python3 "$scratch/third_party.py" "$CLARP_TEST_THIRD_PARTY_LOG" "$scratch/tp-cert.pem" "$scratch/tp-key.pem" "$scratch/tp-port" &
+    third_party=$!
+    for _ in $(seq 50); do [ -s "$scratch/tp-port" ] && break; sleep 0.1; done
+    export CLARP_TEST_THIRD_PARTY_PORT=$(cat "$scratch/tp-port")
+    export CLARP_TEST_CHROME=$(command -v google-chrome-stable || command -v google-chrome || command -v chromium || true)
     cat > "$scratch/bin/google-chrome-stable" <<'SH'
 #!/bin/sh
 for url; do :; done
+page="$CLARP_TEST_BROWSER_LOG.page$$"
 /usr/bin/python3 -c 'import sys, urllib.request as u
 r = u.build_opener(u.ProxyHandler({})).open(sys.argv[1], timeout=5)
-open(sys.argv[2], "w").write("HTTP/1.1 %d\r\n%s\r\n%s" % (r.status, r.headers, r.read().decode()))' "$url" "$CLARP_TEST_BROWSER_LOG.page$$"
+open(sys.argv[2], "w").write("HTTP/1.1 %d\r\n%s\r\n%s" % (r.status, r.headers, r.read().decode()))' "$url" "$page"
+# A page that reaches the third-party web is also rendered by a real,
+# headless Chrome (its own profile), *.example.com pointing at the fake web.
+if grep -q 'chart.js?from=' "$page" && [ -n "$CLARP_TEST_CHROME" ]; then
+    timeout 30 "$CLARP_TEST_CHROME" --headless=new --no-sandbox --disable-gpu --no-first-run \
+        --user-data-dir="$page.profile" --ignore-certificate-errors \
+        --host-resolver-rules="MAP *.example.com 127.0.0.1:$CLARP_TEST_THIRD_PARTY_PORT" \
+        --virtual-time-budget=4000 --dump-dom "$url" > "$page.dom" 2> "$page.chrome-log"
+fi
 echo "$$ $*" >> "$CLARP_TEST_BROWSER_LOG"
 SH
     # Links go to the opener: a fake one logs what it was handed.
@@ -82,4 +121,6 @@ CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP
 done
 # The app's whole log beside the shots, to read when a stage times out.
 cp "$scratch/run.log" "$out/app.log"
+# artifact-open: what the third-party web saw, and what Chrome rendered.
+[ -f "$scratch/third-party.log" ] && cp "$scratch/third-party.log" "$scratch"/browser.log.page*.dom "$out/" 2>/dev/null
 grep -q "^E2E_PASS" "$scratch/run.log" && ! grep -q "^E2E_FAIL" "$scratch/run.log"

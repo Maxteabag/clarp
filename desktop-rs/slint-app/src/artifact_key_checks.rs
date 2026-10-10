@@ -669,17 +669,21 @@ fn open_stages(out: &str) -> Vec<Stage> {
         ("vid-demo-k", "O Play video", |u| u.starts_with("file://") && u.ends_with("cards-demo.mp4")),
         ("file-pdf-k", "O Open file", |u| u.starts_with("file://") && u.ends_with("contract-2026-signed.pdf")),
         ("wf-ci-k", "O Open in GitHub", |u| u == "https://github.com/example/clarp/actions/runs/901"),
-        ("form-report-k", "O Open report", |_| false),
+        // A report opens in the browser too, on its own loopback page.
+        ("form-report-k", "O Open report", |u| u.contains("/form/")),
     ];
     for (id, hint, wanted) in opens {
+        let before = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let before2 = before.clone();
         stages.extend(reach(id));
         stages.push((Box::leak(format!("{id} hint").into_boxed_str()), Box::new(move |_, window, _| {
             check(bar(window).iter().any(|h| h == hint), &format!("on {id} the shortcut bar shows {hint:?}: {:?}", bar(window)));
+            before.set(opened().len());
             headless::press("o");
             true
         })));
         stages.push((Box::leak(format!("{id} opened").into_boxed_str()), Box::new(move |_, window, elapsed| {
-            let done = opened().iter().any(|u| wanted(u)) || (id == "form-report-k" && window.get_overlay() == "report");
+            let done = opened().iter().skip(before2.get()).any(|u| wanted(u));
             if !done && elapsed < Duration::from_secs(8) {
                 return false;
             }
