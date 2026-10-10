@@ -21,6 +21,11 @@ on:
         description: "Space-separated check names (empty = the default set)"
         required: false
         default: ""
+      profile:
+        description: "Also profile the frame-budget check with perf (the budget artifact)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -154,6 +159,26 @@ jobs:
           slint-app/tests/check.sh frame-budget /tmp/budget 2>&1 | tee /tmp/budget.log || status=$?
           if [ -f /tmp/budget/budget.md ]; then cat /tmp/budget/budget.md >> "$GITHUB_STEP_SUMMARY"; else echo "no budget.md: the check stopped early"; fi
           exit $status
+      - name: Frame budget at 120 Hz
+        if: success() || failure()
+        working-directory: desktop-rs
+        env:
+          CLARP_CHECK_PROFILE: release
+          CLARP_BUDGET_HZ: "120"
+        run: |
+          set -o pipefail
+          status=0
+          slint-app/tests/check.sh frame-budget /tmp/budget/hz120 2>&1 | tee /tmp/budget-120.log || status=$?
+          if [ -f /tmp/budget/hz120/budget.md ]; then { echo; cat /tmp/budget/hz120/budget.md; } >> "$GITHUB_STEP_SUMMARY"; else echo "no budget.md: the check stopped early"; fi
+          exit $status
+      - name: Profile the frame budget
+        if: (success() || failure()) && github.event.inputs.profile == 'true'
+        continue-on-error: true
+        working-directory: desktop-rs
+        run: |
+          sudo apt-get install -y --no-install-recommends linux-tools-common "linux-tools-$(uname -r)" || sudo apt-get install -y --no-install-recommends linux-tools-azure
+          sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0
+          slint-app/tests/budget-profile.sh /tmp/budget/profile
       - name: The stripped release names a stall's frames
         if: success() || failure()
         working-directory: desktop-rs
@@ -174,6 +199,7 @@ jobs:
           path: |
             /tmp/budget
             /tmp/budget.log
+            /tmp/budget-120.log
 
   macos:
     runs-on: macos-15
