@@ -104,6 +104,45 @@ fn stopping_a_turn_and_the_states_a_chat_shows() {
     assert_eq!(host.requests("POST", "/stop")[0]["body"]["session"], "rachel");
 }
 
+#[test]
+fn a_stop_says_what_the_host_committed_and_who_stopped_it() {
+    let host = Host::start("stop-receipt");
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    host.control("/__control/add-agent", json!({"session": "theo-97e5", "persona": "Theo"}));
+    d.until("theo listed", |e| e.roster().find("theo-97e5").is_some());
+    host.control("/__control/stop", json!({"respond": {"ok": true, "terminated": 1, "stop_actor": "agent:theo-97e5",
+        "stop_actor_verified": true, "stop_reason": "Pebble busy with no process", "queue_paused": true, "goals_paused": 1}}));
+    d.engine.stop_session("rachel");
+    d.until("the receipt", |e| !e.stop_notice("rachel").is_empty());
+    assert_eq!(d.engine.stop_notice("rachel"), "Stopped by Theo (verified): Pebble busy with no process · queue paused · 1 goal paused");
+    // Its own state row, trailing the answer, does not replace the effects.
+    let detail = json!({"source": "user_stop", "message": "Turn stopped", "stop_actor": "agent:theo-97e5", "stop_actor_verified": true, "stop_reason": "Pebble busy with no process"});
+    host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "interrupted", "ts": chrono_now(), "detail": detail}));
+    d.until("interrupted", |e| e.roster().display_state("rachel").as_deref() == Some("interrupted"));
+    assert!(d.engine.stop_notice("rachel").ends_with("1 goal paused"));
+    // Work clears it; a Stop from elsewhere shows who and why.
+    host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "thinking", "ts": chrono_now()}));
+    d.until("cleared", |e| e.stop_notice("rachel").is_empty());
+    host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "interrupted", "ts": chrono_now() + 1, "detail": detail}));
+    d.until("the detail's line", |e| !e.stop_notice("rachel").is_empty());
+    assert_eq!(d.engine.stop_notice("rachel"), "Stopped by Theo (verified): Pebble busy with no process");
+    // An older Host: the effects are unknown, not "not paused".
+    host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "thinking", "ts": chrono_now() + 2}));
+    d.until("cleared again", |e| e.stop_notice("rachel").is_empty());
+    host.control("/__control/stop", json!({"respond": {"ok": true, "terminated": 1}}));
+    d.engine.stop_session("rachel");
+    d.until("the older receipt", |e| !e.stop_notice("rachel").is_empty());
+    assert_eq!(d.engine.stop_notice("rachel"), "Stopped · effects unknown");
+    // The runtime refused: no line, only the error.
+    host.control("/__control/event", json!({"type": "agent-state", "session": "rachel", "kind": "thinking", "ts": chrono_now() + 3}));
+    d.until("cleared once more", |e| e.stop_notice("rachel").is_empty());
+    host.control("/__control/stop", json!({"respond": {"ok": true, "terminated": 0, "stop_actor": "user", "stop_actor_verified": true, "stop_reason": ""}}));
+    d.engine.stop_session("rachel");
+    d.until("the error", |e| e.error() == "Stop did not take effect");
+    assert!(d.engine.stop_notice("rachel").is_empty());
+}
+
 fn chrono_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }

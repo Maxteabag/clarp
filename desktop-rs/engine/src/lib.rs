@@ -20,6 +20,7 @@ mod host_status;
 pub mod lifecycle;
 mod live;
 mod queue;
+mod stop;
 pub mod search;
 mod panels;
 pub mod profile;
@@ -117,6 +118,8 @@ pub enum Change {
     Search,
     /// The roster became fresh, refreshing or stale (`roster_freshness`).
     RosterFreshness,
+    /// A chat's Stop line changed (`stop_notice`).
+    Stopped(String),
 }
 
 enum Message {
@@ -255,6 +258,7 @@ pub struct Engine {
     has_stored_credential: bool,
     /// Optional requests whose failure was already logged once.
     quiet_failures: HashSet<String>,
+    stops: stop::Stops,
     /// The request whose failure the error shows (empty for other errors).
     error_source: String,
     narrator: std::cell::RefCell<clarp_core::narrator::Narrator>,
@@ -367,6 +371,7 @@ impl Engine {
             keyring,
             has_stored_credential: false,
             quiet_failures: HashSet::new(),
+            stops: stop::Stops::default(),
             error_source: String::new(),
             narrator,
             panes: workspace::Panes::new(workspace_store),
@@ -1248,6 +1253,7 @@ impl Engine {
 
     pub fn stop_session(&mut self, session: &str) {
         if !session.is_empty() {
+            self.stop_requested(session);
             self.api.post_json(&format!("stop:{session}"), "/stop", json!({"session": session}), None);
         }
     }
@@ -1287,7 +1293,7 @@ impl Engine {
         if self.voice_json(tag, object) || self.narrator_json(tag, object) {
             return;
         }
-        if self.host_status_json(tag, object) {
+        if self.host_status_json(tag, object) || self.stop_json(tag, object) {
             return;
         }
         if tag.starts_with("tool-details:") {
@@ -1336,12 +1342,13 @@ impl Engine {
             let session = self.deliveries.get(client_id).map(|(s, _)| s.clone()).unwrap_or_else(|| self.selected.clone());
             self.request_delta(&session);
         }
-        // select:, stop: and other acknowledgements need no action.
+        // select: and other acknowledgements need no action.
     }
 
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
+        self.stop_failure(tag);
         if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail) {
             return;
         }
@@ -1485,6 +1492,7 @@ impl Engine {
             "live" => self.live_event(event),
             "agent-state" => {
                 self.mutate_roster(|r| r.apply_state_event(event));
+                self.stop_state_event(&session, event);
                 let state = json::string(event, "kind");
                 // Live items show what the agent does: no placeholder rows.
                 if self.live_owns(&session) {

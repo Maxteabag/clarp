@@ -74,6 +74,9 @@ mod send_checks;
 // ---- an agent's background processes by keyboard: list, output, stop
 #[path = "processes_checks.rs"]
 mod processes_checks;
+// ---- what Stop did, who stopped it and why (Host contract 61)
+#[path = "stop_checks.rs"]
+mod stop_checks;
 // ---- the agent list kept, marked stale and retried when the snapshot fails
 #[path = "roster_checks.rs"]
 mod roster_checks;
@@ -520,6 +523,7 @@ pub fn start_check(name: &str, out: String) {
         "message-search" => search_checks::message_search_check(out),
         "mention" => search_checks::mention_check(out),
         "processes" => processes_checks::processes_check(out),
+        "stop-receipt" => stop_checks::stop_receipt_check(out),
         "roster-stale" => roster_checks::roster_stale_check(out),
         "a2a" => {
             row_overlap_checks::watch();

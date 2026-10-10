@@ -308,7 +308,7 @@ export component QueueDialog inherits Modal {
                     letter-spacing: 1.2px;
                 }
                 Text {
-                    text: AgentDialogs.queue-title + (AgentDialogs.queue-paused ? "  ·  paused" : "");
+                    text: AgentDialogs.queue-title + (AgentDialogs.queue-paused ? "  ·  paused  ·  Send now runs one" : "");
                     color: AgentDialogs.queue-paused ? Palette.warning : Palette.muted;
                     font-size: 10 * Look.unit;
                 }

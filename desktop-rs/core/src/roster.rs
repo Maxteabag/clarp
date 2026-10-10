@@ -93,6 +93,7 @@ pub struct AgentRow {
     pub context_tokens: i64,
     pub context_window: i64,
     pub queue_count: i32,
+    pub queue_paused: bool,
     pub alive: bool,
     pub busy: bool,
     pub focused: bool,
@@ -180,6 +181,7 @@ impl Roster {
             context_tokens: agent.context_tokens,
             context_window: agent.context_window,
             queue_count: agent.queued_turn_count,
+            queue_paused: agent.queue_paused,
             alive: live && agent.alive,
             busy: live && agent.busy,
             focused: agent.focused,
@@ -317,6 +319,7 @@ impl Roster {
                 if agent.queue_revision < old.queue_revision {
                     agent.queue_revision = old.queue_revision;
                     agent.queued_turn_count = old.queued_turn_count;
+                    agent.queue_paused = old.queue_paused;
                 }
             }
             if let Some(pending) = self.pending_queue_events.remove(&agent.session) {
@@ -324,6 +327,7 @@ impl Roster {
                 if revision >= agent.queue_revision {
                     agent.queue_revision = revision;
                     agent.queued_turn_count = json::integer(&pending, "queue_depth") as i32;
+                    agent.queue_paused = json::boolean(&pending, "queue_paused");
                 }
             }
             next.push(agent);
@@ -411,6 +415,7 @@ impl Roster {
         }
         agent.queue_revision = revision;
         agent.queued_turn_count = json::integer(event, "queue_depth") as i32;
+        agent.queue_paused = json::boolean(event, "queue_paused");
         self.notify_row(row, &[Role::QueueCount]);
     }
 

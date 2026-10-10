@@ -46,7 +46,11 @@ export struct PaneView {
     draft-set: int,
     attachments: [Attachment],
     queued: int,
+    // A Stop paused the queue: its messages wait until sent.
+    queue-paused: bool,
     quota-notice: string,
+    // What the last Stop did, who stopped it and why (engine stop_notice).
+    stop-notice: string,
     can-send: bool,
     transcribing: int,
     recording: bool,
@@ -474,7 +478,9 @@ export component Pane inherits Rectangle {
             init => { self.draft = root.pane.draft; root.draft-set-seen = root.pane.draft-set; }
             attachments: root.pane.attachments;
             queued: root.pane.queued;
+            queue-paused: root.pane.queue-paused;
             quota-notice: root.pane.quota-notice;
+            stop-notice: root.pane.stop-notice;
             busy: root.pane.busy;
             can-send: root.pane.can-send;
             transcribing: root.pane.transcribing;

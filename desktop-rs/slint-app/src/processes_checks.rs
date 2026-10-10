@@ -232,10 +232,11 @@ pub fn processes_check(out: String) {
             true
         })),
         ("helper stopped", Box::new(|_, window, _| {
-            if !posts("/stop").iter().any(|p| p["body"]["session"] == "mike") {
+            // The fake Host answers as an older one: what Stop did is unknown.
+            if !posts("/stop").iter().any(|p| p["body"]["session"] == "mike") || window.get_process_note() == "Asked Mike to stop." {
                 return false;
             }
-            check(window.get_process_note() == "Asked Mike to stop.", &format!("Enter stops the helper's turn: {:?}", window.get_process_note()));
+            check(window.get_process_note() == "Mike: Stopped · effects unknown", &format!("Enter stops the helper's turn and says what the Host did: {:?}", window.get_process_note()));
             headless::press(Key::Escape);
             true
         })),

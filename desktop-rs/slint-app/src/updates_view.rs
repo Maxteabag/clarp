@@ -152,7 +152,7 @@ pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
         }
         commands::show_hints(app, window);
     }
-    let processes = changes.iter().any(|c| matches!(c, Change::Processes | Change::Roster | Change::Updates));
+    let processes = changes.iter().any(|c| matches!(c, Change::Processes | Change::Roster | Change::Updates | Change::Stopped(_)));
     if processes {
         crate::processes_view::show(app, window);
     }

@@ -140,7 +140,9 @@ export component Composer inherits FocusScope {
     in-out property <string> draft;
     in property <[Attachment]> attachments;
     in property <int> queued;
+    in property <bool> queue-paused;
     in property <string> quota-notice;
+    in property <string> stop-notice;
     in property <string> starting;
     in property <int> transcribing;
     // Speech is playing (or paused): the Silence button shows.
@@ -227,10 +229,20 @@ export component Composer inherits FocusScope {
             overflow: elide;
             accessible-label: root.quota-notice;
         }
+        // What Stop did: never what happens next (Stop does not resume).
+        if root.stop-notice != "": Text {
+            text: "■ " + root.stop-notice;
+            color: Palette.muted;
+            font-size: 12 * Look.unit;
+            overflow: elide;
+            accessible-label: root.stop-notice;
+        }
         // The count waits the grace period after a rise (view.rs
-        // queued_shown) and fades in.
+        // queued_shown) and fades in. A paused queue's messages wait until
+        // sent: its dialog sends one now (the queue stays paused until empty).
         if root.queued > 0: RevealText {
-            text: root.queued + (root.queued == 1 ? " message queued" : " messages queued") + "  ·  Ctrl+Enter queues next";
+            text: root.queued + (root.queued == 1 ? " message queued" : " messages queued")
+                + (root.queue-paused ? "  ·  paused  ·  click to send one now" : "  ·  Ctrl+Enter queues next");
             color: Palette.muted;
             font-size: 12 * Look.unit;
             overflow: elide;
