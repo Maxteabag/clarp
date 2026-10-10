@@ -7,7 +7,7 @@ cd "$(dirname "$0")/../.."
 [ "$1" = pair ] && exec slint-app/tests/pair-check.sh "${2:-slint-app/docs/checks/pair}"
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
 # Every artifact type and its interactions run in one long check.
-case $name in artifacts|scroll-jump|live|row-overlap|frame-budget) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac
+case $name in artifacts|artifact-open|scroll-jump|live|row-overlap|frame-budget) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac
 # desktop reports presence, which needs an unlocked login session: its own,
 # not the machine's (a CI runner has none).
 [ "$name" = desktop ] && export CLARP_TEST_LOGIN=unlocked
@@ -43,7 +43,10 @@ r = u.build_opener(u.ProxyHandler({})).open(sys.argv[1], timeout=5)
 open(sys.argv[2], "w").write("HTTP/1.1 %d\r\n%s\r\n%s" % (r.status, r.headers, r.read().decode()))' "$url" "$CLARP_TEST_BROWSER_LOG.page$$"
 echo "$$ $*" >> "$CLARP_TEST_BROWSER_LOG"
 SH
-    chmod +x "$scratch/bin/xdg-settings" "$scratch/bin/google-chrome-stable"
+    # Links go to the opener: a fake one logs what it was handed.
+    export CLARP_TEST_OPENER_LOG="$scratch/opener.log"
+    printf '#!/bin/sh\necho "$*" >> "$CLARP_TEST_OPENER_LOG"\n' > "$scratch/bin/xdg-open"
+    chmod +x "$scratch/bin/xdg-settings" "$scratch/bin/google-chrome-stable" "$scratch/bin/xdg-open"
     mkdir -p "$scratch/d/applications"
     printf '[Desktop Entry]\nName=Fake browser\nExec=%s --ozone-platform=wayland %%U\n' "$scratch/bin/google-chrome-stable" > "$scratch/d/applications/fake-browser.desktop"
 fi
