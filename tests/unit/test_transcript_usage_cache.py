@@ -45,3 +45,49 @@ def test_a_fleet_larger_than_256_transcripts_is_answered_from_cache(tmp_path, mo
     monkeypatch.setattr(Path, 'open', observe)
     assert [context_tokens_from_jsonl(path) for path in paths] == list(range(600))
     assert opened == []
+
+
+def _usage(tokens):
+    return json.dumps({'type': 'assistant', 'message': {'usage': {'input_tokens': tokens}}}) + '\n'
+
+
+def _filler(size):
+    line = json.dumps({'type': 'user', 'message': {'content': 'x' * 200}}) + '\n'
+    return line * (size // len(line) + 1)
+
+
+def test_the_latest_usage_is_found_without_reading_the_whole_tail(tmp_path, monkeypatch):
+    """A cold Host start asks once per agent; reading 1 MB each took 38 s."""
+    path = tmp_path / 'long.jsonl'
+    path.write_text(_filler(2_000_000) + _usage(5) + _filler(1000) + _usage(7) + _filler(2000))
+    read = []
+    original = Path.open
+
+    class Counted:
+        def __init__(self, handle):
+            self.handle = handle
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            self.handle.close()
+        def __getattr__(self, name):
+            return getattr(self.handle, name)
+        def read(self, *args):
+            data = self.handle.read(*args)
+            read.append(len(data))
+            return data
+
+    def observe(self, *args, **kwargs):
+        return Counted(original(self, *args, **kwargs))
+    monkeypatch.setattr(Path, 'open', observe)
+    assert context_tokens_from_jsonl(path) == 7
+    assert sum(read) <= 128 * 1024
+
+
+def test_usage_further_back_is_still_found_within_the_tail(tmp_path):
+    path = tmp_path / 'sparse.jsonl'
+    path.write_text(_filler(100_000) + _usage(9) + _filler(300_000))
+    assert context_tokens_from_jsonl(path) == 9
+    beyond = tmp_path / 'beyond.jsonl'
+    beyond.write_text(_usage(9) + _filler(1_200_000))
+    assert context_tokens_from_jsonl(beyond) is None
