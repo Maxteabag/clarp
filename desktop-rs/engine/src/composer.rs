@@ -182,6 +182,12 @@ impl Engine {
         self.roster.find(session).map_or(0, |a| a.queued_turn_count)
     }
 
+    /// A Stop paused `session`'s queue (the snapshot's or `queue-updated`'s
+    /// `queue_paused`).
+    pub fn queue_paused(&self, session: &str) -> bool {
+        self.roster.find(session).is_some_and(|a| a.queue_paused)
+    }
+
     /// Said before the send, so an exhausted provider is not discovered
     /// through a failed reply.
     pub fn quota_notice(&self, session: &str) -> String {

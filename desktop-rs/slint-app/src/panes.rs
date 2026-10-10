@@ -506,6 +506,8 @@ impl App {
         view.can_send = engine.can_send(session);
         view.queued = crate::view::queued_shown(session, engine.queue_count(session));
         view.quota_notice = engine.quota_notice(session).into();
+        view.queue_paused = engine.queue_paused(session);
+        view.stop_notice = engine.stop_notice(session).into();
     }
 
     fn messages(&self, pane: &mut PaneState) {
@@ -930,7 +932,7 @@ impl App {
             if conversation {
                 self.messages(pane);
             }
-            let composer = fresh || everything || changes.iter().any(|c| matches!(c, Change::Composer(s) | Change::Live(s) if *s == session));
+            let composer = fresh || everything || changes.iter().any(|c| matches!(c, Change::Composer(s) | Change::Live(s) | Change::Stopped(s) if *s == session));
             if composer || everything {
                 let engine = self.engine.borrow();
                 let mut view = pane.view.clone();

@@ -92,6 +92,8 @@ personas = [{"id": "p", "name": "Paula"}]
 # /agent-model-options; /__control/catalog replaces it.
 model_options = {"backends": []}
 next_create_response = None
+# What POST /stop answers; /__control/stop scripts it (contract 61 receipts).
+stop_response = {"ok": True}
 pending_agents = []
 attention = [{"id": "d1", "session": "mike", "kind": "decision"}]
 subscribers = []
@@ -703,7 +705,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"messages": team_messages.get(team, [])})
         if url.path == "/turn-queue":
             with state_lock:
-                return self.reply(200, {"items": turn_queue.get(query.get("session", ""), []), "paused": False})
+                paused = any(a["session"] == query.get("session", "") and a.get("queue_paused") for a in agents)
+                return self.reply(200, {"items": turn_queue.get(query.get("session", ""), []), "paused": paused})
         if url.path == "/attention":
             return self.reply(200, {"items": attention})
         if url.path == "/background-jobs":
@@ -940,7 +943,11 @@ class Handler(BaseHTTPRequestHandler):
                 for subscriber in list(subscribers):
                     subscriber.put(CLOSE)
             return self.reply(200, {"ok": True})
-        global create_mode, next_create_response, pending_agents
+        global create_mode, next_create_response, pending_agents, stop_response
+        if url.path == "/__control/stop":
+            # Test control: what every following POST /stop answers.
+            stop_response = body.get("respond", {"ok": True})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/create":
             create_mode = body.get("mode", create_mode)
             next_create_response = body.get("respond")
@@ -1463,7 +1470,9 @@ class Handler(BaseHTTPRequestHandler):
                         agent["archived_at"] = int(time.time()) if body.get("archived") else None
             broadcast({"type": "agent-roster", "session": body.get("session"), "kind": "updated"})
             return self.reply(200, {"ok": True})
-        if url.path in ("/select", "/stop", "/compact", "/agent-schedules/toggle", "/team-nudging") or url.path.startswith("/agent-"):
+        if url.path == "/stop":
+            return self.reply(200, stop_response)
+        if url.path in ("/select", "/compact", "/agent-schedules/toggle", "/team-nudging") or url.path.startswith("/agent-"):
             return self.reply(200, {"ok": True})
         if url.path == "/agents":
             if next_create_response is not None:

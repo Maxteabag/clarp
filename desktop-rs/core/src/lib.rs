@@ -42,6 +42,7 @@ pub mod roster;
 pub mod settings;
 pub mod sidebar;
 pub mod sse;
+pub mod stop_receipt;
 pub mod stream_text;
 pub mod sync;
 pub mod text;

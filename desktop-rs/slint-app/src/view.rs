@@ -265,6 +265,7 @@ pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selecte
         activity: activity.into(),
         depth: depth as i32,
         queued: queued_shown(&row.session, row.queue_count),
+        queue_paused: row.queue_paused,
         busy: row.busy,
         unread: row.unread,
         muted: row.muted,

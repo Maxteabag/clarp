@@ -43,6 +43,9 @@ pub struct Agent {
     pub context_window: i64,
     pub queue_revision: i64,
     pub queued_turn_count: i32,
+    /// A Stop paused the queue: its turns wait until sent or resumed. False
+    /// when the Host predates the field.
+    pub queue_paused: bool,
     /// `background_jobs` from the snapshot: active jobs, and how many of them
     /// are Clarp sub-agents. Zero when the Host predates the field.
     pub background_job_count: i32,
@@ -97,6 +100,7 @@ impl Default for Agent {
             context_window: 0,
             queue_revision: 0,
             queued_turn_count: 0,
+            queue_paused: false,
             background_job_count: 0,
             background_sub_agent_count: 0,
             child_count: 0,
@@ -164,6 +168,7 @@ impl Agent {
             context_tokens: i("context_tokens"),
             context_window: i("context_window"),
             queued_turn_count: i("queued_turn_count") as i32,
+            queue_paused: b("queue_paused"),
             queue_revision: i("queue_revision"),
             alive: b("alive"),
             busy: b("busy") || is_busy_state(&latest_state),

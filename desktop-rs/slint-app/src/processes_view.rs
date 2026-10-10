@@ -55,6 +55,9 @@ struct Panel {
     confirm: Option<Target>,
     /// What the last stop of a helper did (jobs keep theirs in the engine).
     note: String,
+    /// The helper last stopped (session, name): its Stop line replaces the
+    /// note once the Host answers.
+    stopped: Option<(String, String)>,
     /// The keyboard map's state it was opened from.
     origin: &'static str,
     ticks: u32,
@@ -337,7 +340,14 @@ pub fn show(app: &App, window: &AppWindow) {
         let current = p.rows.get(p.cursor).cloned();
         p.cursor = current.and_then(|c| rows.iter().position(|r| *r == c)).unwrap_or(p.cursor).min(rows.len().saturating_sub(1));
         p.rows = rows.clone();
-        (p.cursor, p.confirm.clone(), p.note.clone(), p.back)
+        let note = match &p.stopped {
+            Some((stopped, name)) => {
+                let said = engine.stop_notice(stopped);
+                if said.is_empty() { p.note.clone() } else { format!("{name}: {said}") }
+            }
+            None => p.note.clone(),
+        };
+        (p.cursor, p.confirm.clone(), note, p.back)
     });
     window.set_process_name(name.into());
     window.set_process_count(count.into());
@@ -615,7 +625,11 @@ fn confirm_stop(app: &App, _window: &AppWindow) {
         // A helper has no job of its own to cancel: its turn stops (`/stop`).
         Target::Helper { session, name } => {
             app.engine.borrow_mut().stop_session(&session);
-            PANEL.with(|p| p.borrow_mut().note = format!("Asked {name} to stop."));
+            PANEL.with(|p| {
+                let p = &mut *p.borrow_mut();
+                p.note = format!("Asked {name} to stop.");
+                p.stopped = Some((session, name));
+            });
         }
     }
 }
