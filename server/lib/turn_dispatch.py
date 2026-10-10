@@ -98,6 +98,16 @@ _PROCESS_EXIT_POLL_S = 0.25
 # A settled turn whose slot is still held this long after it settled leaked
 # (see TurnDispatchService.release_leaked_slots).
 LEAKED_SLOT_GRACE_MS = 60_000
+# A slot still "spawning" this long after its claim, with no launch running
+# and no account recovery holding it, was left by a launch that failed without
+# giving it back (Pebble, 2026-10-10: "database is locked" in a queued
+# handoff stranded the slot for 41 minutes).
+ORPHAN_SPAWN_GRACE_S = 300.0
+# An explicit repair trusts a younger claim: a launch that is really running
+# is in _SLOTS.launches, and the claim-to-launch window is well under this.
+REPAIR_SPAWN_GRACE_S = 30.0
+_launching = _SLOTS.launching
+_launch_running = _SLOTS.launch_running
 
 
 def configure_runtime_client(client: Any | None) -> None:
@@ -217,6 +227,9 @@ class _TurnSpec:
     # queued_turns row (status 'parked') holding a send admitted behind the
     # Stop barrier, so it survives a runtime restart; "" when not parked.
     park_id: str = ""
+    # Launches of this spec that failed before the backend started; spaces
+    # out the retries of a queued handoff (see _requeue_failed_handoff).
+    handoff_failures: int = 0
 
 
 def _park(spec: _TurnSpec) -> str:
@@ -1186,7 +1199,11 @@ class TurnDispatchService:
         current = _SLOTS.get(agent_id)
         if agent_id in _INFLIGHT:
             if _slot_is_spawning(agent_id):
-                _SLOTS.enqueue(agent_id, spec)
+                depth = _SLOTS.enqueue(agent_id, spec)
+                defer_on(_TURN_LOCK, lambda: log(
+                    "turnQueued",
+                    f"agent={agent_id} depth={depth} trace={spec.trace_id or '∅'} "
+                    f"— behind a spawning slot ({current or '∅'})"))
                 return False, True
             # Self-heal a leaked slot: if the in-flight turn has no live
             # process (it died without firing its terminal callback — e.g.
@@ -1229,6 +1246,18 @@ class TurnDispatchService:
             _SLOTS.mark_spawned(agent_id, owner)
             depth = _SLOTS.enqueue(agent_id, spec)
             defer_on(_TURN_LOCK, lambda: self._wait_for_process_exit(spec, owner, depth))
+            return False, True
+        if _SLOTS.queue_depth(agent_id):
+            # A free slot with work still queued: a failed handoff gave the
+            # slot back and is waiting to retry its head. Wait behind that
+            # head instead of overtaking it, and start the head now.
+            depth = _SLOTS.enqueue(agent_id, spec)
+            head = _SLOTS.pop_next(agent_id)
+            defer_on(_TURN_LOCK, lambda: (
+                log("turnQueued",
+                    f"agent={agent_id} depth={depth} trace={spec.trace_id or '∅'} "
+                    f"— behind a requeued head"),
+                head is not None and self._spawn_next(agent_id, head)))
             return False, True
         _SLOTS.claim(agent_id, spec.trace_id)
         return False, False
@@ -1366,6 +1395,9 @@ class TurnDispatchService:
         over the in-flight slot and spawn it; otherwise free the slot. Guarded
         by trace so a duplicate terminal callback (or a superseded turn) is a
         no-op."""
+        if spec.park_id:
+            # A dropped or finished send needs no park row to survive restarts.
+            turn_queue.unpark(spec.park_id)
         self._finish_slot(spec.agent_id, spec.trace_id, spec.backend)
 
     def _finish_slot(self, agent_id: str, trace_id: str, backend: str) -> None:
@@ -1388,12 +1420,71 @@ class TurnDispatchService:
             log_exception("queuedSpawnFail", exc, detail=next_spec.session)
 
     def _resume_and_spawn(self, agent_id: str, next_spec: _TurnSpec) -> None:
-        """Spawn a queued spec that just took over the in-flight slot. The prior
-        owner (a finished turn, or a closed terminal) may have created/advanced
-        the backend session, so re-resolve it before spawning."""
-        if next_spec.park_id:
-            # It launches now; the durable park row has done its job.
-            turn_queue.unpark(next_spec.park_id)
+        """Spawn a queued spec that just took over the in-flight slot.
+
+        A failure before the backend starts gives the slot back and puts the
+        spec back at the head of the queue. Raising out of here used to leave
+        the slot claimed and "spawning" with no process, which every leak check
+        exempts: Pebble (2026-10-10 07:26) had its handoff's INSERT INTO turns
+        fail on "database is locked" and 18 messages queued behind nothing.
+        """
+        phase = {"value": "prepare"}
+        with _launching(agent_id, next_spec.trace_id):
+            try:
+                self._resume_and_spawn_claimed(agent_id, next_spec, phase)
+            except Exception as exc:  # noqa: BLE001 - the slot must not strand
+                if phase["value"] == "launched":
+                    # The backend owns the turn; its callbacks free the slot.
+                    log_exception("queuedSpawnBookkeepingFail", exc,
+                                  detail=next_spec.session)
+                    return
+                self._requeue_failed_handoff(agent_id, next_spec, exc,
+                                             phase=phase["value"])
+
+    def _requeue_failed_handoff(self, agent_id: str, spec: _TurnSpec,
+                                error: BaseException, *, phase: str) -> None:
+        log_exception("queuedSpawnFail", error, detail=spec.session)
+        if phase == "spawning" and self._agent_has_live_turn(agent_id, spec.backend):
+            # The launch may have started a process before it failed; that
+            # process owns the slot and releases it when it ends.
+            log("queuedSpawnFailLive",
+                f"agent={agent_id} trace={spec.trace_id} — a process is live; "
+                f"slot kept")
+            return
+        retry = replace(spec, handoff_failures=spec.handoff_failures + 1)
+        with _TURN_LOCK:
+            if not _SLOTS.owns(agent_id, spec.trace_id):
+                return  # Stop or a newer owner already took the slot over
+            _SLOTS.release(agent_id, spec.trace_id)
+            _SLOTS.requeue_front(agent_id, retry)
+        delay = min(60.0, float(2 ** (retry.handoff_failures - 1)))
+        log("queuedSpawnRequeued",
+            f"agent={agent_id} trace={spec.trace_id} failures="
+            f"{retry.handoff_failures} retry_in={delay:g}s — launch failed before "
+            f"the backend started; slot released, message kept at the queue head")
+        eventlog.emit("server", "queuedSpawnRequeued", context=spec.context,
+                      detail={"error": str(error)[:200],
+                              "failures": retry.handoff_failures})
+        try:
+            turn_lifecycle.close_turns_for_trace(agent_id, spec.trace_id)
+        except Exception as exc:  # noqa: BLE001 - the retry opens a new row
+            log_exception("queuedSpawnCloseFail", exc, detail=spec.session)
+        self.retry_scheduler(delay, lambda: self._retry_handoff(agent_id))
+
+    def _retry_handoff(self, agent_id: str) -> None:
+        """Hand a free slot to the head of the agent's queue."""
+        with _TURN_LOCK:
+            if _SLOTS.get(agent_id) or not _SLOTS.queue_depth(agent_id):
+                return  # someone owns the slot; its finish drains the queue
+            head = _SLOTS.pop_next(agent_id)
+        if head is not None:
+            self._resume_and_spawn(agent_id, head)
+
+    def _resume_and_spawn_claimed(self, agent_id: str, next_spec: _TurnSpec,
+                                  phase: dict) -> None:
+        """The prior owner (a finished turn, or a closed terminal) may have
+        created/advanced the backend session, so re-resolve it before
+        spawning."""
         if next_spec.queue_id:
             durable = turn_queue.get(next_spec.queue_id)
             if durable is None:
@@ -1443,8 +1534,14 @@ class TurnDispatchService:
                 agent_id=next_spec.agent_id, source="pwa",
                 trace_id=next_spec.trace_id,
                 synthesize_audio=next_spec.synthesize_audio)
+            phase["value"] = "spawning"
             if not self._spawn_attempt(next_spec, attempt=1):
                 return
+            phase["value"] = "launched"
+            if next_spec.park_id:
+                # It launched; the durable park row has done its job. A failed
+                # launch keeps it, so a restart still finds the send.
+                turn_queue.unpark(next_spec.park_id)
             self._mark_spawned(next_spec)
         except JanitorDispatchError:
             self._discard_fenced_janitor(next_spec)
@@ -1457,17 +1554,16 @@ class TurnDispatchService:
                 _SLOTS.release(agent_id, next_spec.trace_id)
                 self.retry_scheduler(1.0, self.recover_queued)
         except DispatchError as e:
-            log_exception("queuedSpawnFail", e, detail=next_spec.session)
             if not next_spec.queue_id:
                 # Legacy automatic terminal queue is memory-only; preserve its
                 # existing behavior and continue to the next waiting spec.
+                log_exception("queuedSpawnFail", e, detail=next_spec.session)
                 self._finish_turn(next_spec)
                 return
             # Keep the durable head and retry it before later queue entries.
             # The client already received queued=true, so dropping it here
             # would silently lose acknowledged work.
-            _SLOTS.release(agent_id, next_spec.trace_id)
-            self.retry_scheduler(1.0, self.recover_queued)
+            self._requeue_failed_handoff(agent_id, next_spec, e, phase="prepare")
 
     def _mark_spawned(self, spec: _TurnSpec) -> None:
         with _TURN_LOCK:
@@ -1597,6 +1693,10 @@ class TurnDispatchService:
 
     def _spawn_attempt(self, spec: _TurnSpec, *, attempt: int) -> bool:
         """Reject a stale attempt; AGY rechecks around state/Popen itself."""
+        with _launching(spec.agent_id, spec.trace_id):
+            return self._spawn_attempt_owned(spec, attempt=attempt)
+
+    def _spawn_attempt_owned(self, spec: _TurnSpec, *, attempt: int) -> bool:
         with _TURN_LOCK:
             if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
                 log("spawnAbandoned",
@@ -2170,6 +2270,7 @@ class TurnDispatchService:
     def release_leaked_slots(
         self, *, grace_ms: int = LEAKED_SLOT_GRACE_MS,
         agent_id: str | None = None,
+        orphan_grace_s: float = ORPHAN_SPAWN_GRACE_S,
     ) -> dict[str, str]:
         """Release every slot no process owns once its turn has settled.
 
@@ -2177,7 +2278,10 @@ class TurnDispatchService:
         slot forever, and a held slot blocks the runtime's idle handoff. A
         slot is leaked when the agent has no live process, terminal or spawn,
         and its newest state is terminal for at least ``grace_ms`` (a finishing
-        turn records DONE just before it releases). Queued work behind it takes
+        turn records DONE just before it releases). A slot still marked
+        spawning counts only when it is orphaned (``_orphaned_spawn``); the
+        spec it held is then gone from memory, so durable queue recovery runs
+        after the release to pick its row up again. Queued work behind it takes
         the slot as after a normal finish. ``agent_id`` limits the check to
         one agent (the Host's reconcile asks per agent). Returns
         {agent_id: released trace}.
@@ -2200,8 +2304,11 @@ class TurnDispatchService:
                 if (state.get("kind") not in turn_lifecycle.TERMINAL
                         or now - int(state.get("ts") or now) < grace_ms):
                     continue
-                if (_SLOTS.is_spawning(agent_id)
-                        or self._agent_has_live_turn(agent_id, backend)):
+                orphaned = _SLOTS.is_spawning(agent_id)
+                if orphaned and not self._orphaned_spawn(
+                        agent_id, trace_id, backend, min_age_s=orphan_grace_s):
+                    continue
+                if self._agent_has_live_turn(agent_id, backend):
                     continue
                 external = getattr(self.backends, "external_live_work", None)
                 if external is not None and external(backend, agent_id):
@@ -2210,16 +2317,58 @@ class TurnDispatchService:
                     continue
                 log("leakedSlotReleased",
                     f"agent={agent_id} trace={trace_id} state={state['kind']} "
-                    f"settled_ms_ago={now - int(state['ts'])} — slot held with "
+                    f"settled_ms_ago={now - int(state['ts'])} "
+                    f"orphaned_spawn={int(orphaned)} — slot held with "
                     f"no live process after its turn settled; releasing")
                 eventlog.emit("server", "leakedSlotReleased", detail={
                     "agent_id": agent_id, "trace_id": trace_id,
-                    "state": state["kind"]})
+                    "state": state["kind"], "orphaned_spawn": orphaned})
                 self._finish_slot(agent_id, trace_id, backend)
                 released[agent_id] = trace_id
+                if orphaned:
+                    self.retry_scheduler(1.0, self.recover_queued)
             except Exception as exc:  # noqa: BLE001 - check the other slots
                 log_exception("leakedSlotCheckFail", exc, detail=agent_id)
         return released
+
+    @staticmethod
+    def _orphaned_spawn(agent_id: str, trace_id: str, backend: str, *,
+                        min_age_s: float = ORPHAN_SPAWN_GRACE_S) -> bool:
+        """A spawning slot nobody is launching: no launch is running for it,
+        account recovery does not hold it, and it was claimed long ago."""
+        if _launch_running(agent_id):
+            return False
+        attempt = account_failover(backend).attempts.get(agent_id)
+        if attempt is not None and attempt.trace_id == trace_id:
+            return False
+        age = _SLOTS.claim_age(agent_id)
+        return age is not None and age >= min_age_s
+
+    def repair_slot(self, agent_id: str, *, actor: str, reason: str) -> dict:
+        """Give back a slot no process, launch, account recovery, terminal or
+        Stop owns, and let queued work run. Not a Stop: nothing is
+        interrupted and the queue's and goals' pause state is left exactly as
+        it was. The actor and reason are logged and kept on the agent's state
+        as an audit note."""
+        reason = (reason or "").strip()[:200]
+        actor = (actor or "").strip()[:80] or "user"
+        if not reason:
+            raise ValueError("a repair needs a reason")
+        released = self.release_leaked_slots(
+            agent_id=agent_id, grace_ms=0, orphan_grace_s=REPAIR_SPAWN_GRACE_S)
+        trace = released.get(agent_id, "")
+        log("slotRepair",
+            f"agent={agent_id} actor={actor} released={trace or '∅'} "
+            f"reason={reason!r}")
+        eventlog.emit("server", "slotRepair", detail={
+            "agent_id": agent_id, "actor": actor, "reason": reason,
+            "released_trace": trace})
+        turn_lifecycle.try_transition(agent_id, TurnEvent.AUDIT_NOTED, {
+            "source": "slot_repair", "repair_actor": actor,
+            "repair_reason": reason, "released_trace": trace})
+        self._retry_handoff(agent_id)
+        return {"released_trace": trace,
+                "queue_recovered": int(self.recover_queued() or 0)}
 
     def _superseded(self, spec: _TurnSpec, *, locked: bool = True) -> bool:
         """True if a newer turn has taken over this agent since `spec` was

@@ -93,10 +93,13 @@ def _slot_is_spawning(agent_id: str) -> bool:
 def _runtime_slot_may_have_leaked(agent_id: str) -> bool:
     """Whether to ask the external runtime to check this agent's slot.
 
-    Only when the runtime holds a slot (not mid-spawn, not a terminal) for an
-    agent whose newest state has been terminal for the runtime's grace
-    period, and at most once per grace period per agent: snapshots reconcile
-    every agent on every read, and the runtime may rightly keep the slot.
+    Only when the runtime holds a slot (not a terminal) for an agent whose
+    newest state has been terminal for the runtime's grace period, and at
+    most once per grace period per agent: snapshots reconcile every agent on
+    every read, and the runtime may rightly keep the slot. A slot that is
+    still "spawning" is asked about too: only the runtime knows whether a
+    launch or account recovery owns it, and one that failed without giving
+    the slot back wedged Pebble for 41 minutes (2026-10-10).
     """
     from . import turn_dispatch
     try:
@@ -104,7 +107,6 @@ def _runtime_slot_may_have_leaked(agent_id: str) -> bool:
     except Exception:  # noqa: BLE001 - runtime_status logs once per window
         return False
     if (agent_id not in (status.get("active") or {})
-            or agent_id in set(status.get("spawning") or ())
             or agent_id in set(status.get("terminals") or ())):
         return False
     state = agents_db.latest_state(agent_id) or {}

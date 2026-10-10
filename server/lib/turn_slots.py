@@ -21,6 +21,7 @@ folding in the two facts other modules own: an attached interactive terminal
 """
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from dataclasses import dataclass
@@ -160,6 +161,12 @@ class TurnSlots:
         self.inflight: dict[str, str] = {}
         self.queued: dict[str, list] = {}
         self.claimed_at: dict[str, float] = {}
+        # agent_id -> trace of a launch running on some thread right now. A
+        # spawning slot whose launch is here is owned, however old its claim.
+        self.launches: dict[str, str] = {}
+        # Its own plain lock: releasing the ownership lock runs deferred
+        # handoffs, which must not fire from inside a launch's bookkeeping.
+        self._launch_lock = threading.Lock()
         # Durable rows are reinstated once per process, at the first queue
         # recovery after boot (see TurnDispatchService.recover_queued).
         self._rehydrated = False
@@ -284,6 +291,36 @@ class TurnSlots:
                     f"{self.MAX_QUEUE_PER_AGENT} turns queued")
             items.append(spec)
             return len(items)
+
+    def requeue_front(self, agent_id: str, spec: Any) -> None:
+        """Put a spec whose launch failed back at the head of the queue."""
+        with self.lock:
+            self.queued.setdefault(agent_id, []).insert(0, spec)
+
+    def claim_age(self, agent_id: str) -> float | None:
+        """Seconds since the slot was claimed, or None when not spawning."""
+        with self.lock:
+            claimed = self.claimed_at.get(agent_id)
+            return None if claimed is None else self._clock() - claimed
+
+    @contextlib.contextmanager
+    def launching(self, agent_id: str, trace_id: str):
+        """Mark a launch of ``trace_id`` as running for the ``with`` body."""
+        with self._launch_lock:
+            previous = self.launches.get(agent_id)
+            self.launches[agent_id] = trace_id
+        try:
+            yield
+        finally:
+            with self._launch_lock:
+                if previous is not None:
+                    self.launches[agent_id] = previous
+                elif self.launches.get(agent_id) == trace_id:
+                    self.launches.pop(agent_id, None)
+
+    def launch_running(self, agent_id: str) -> bool:
+        with self._launch_lock:
+            return agent_id in self.launches
 
     def hold_for_terminal(self, agent_id: str, spec: Any) -> int:
         with self.lock:
@@ -425,6 +462,8 @@ class TurnSlots:
             self.queued.clear()
             self.claimed_at.clear()
             self._rehydrated = False
+        with self._launch_lock:
+            self.launches.clear()
 
 
 # --- facts other modules own ----------------------------------------------------

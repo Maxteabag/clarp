@@ -48,9 +48,11 @@ def test_clean_runtime_handoff_does_not_invent_an_interruption():
         restore_agents=lambda _ctx: order.append("restore"),
         mark_interrupted=lambda stream=None: order.append("interrupt") or [],
         reconcile=lambda: order.append("reconcile") or 0,
+        repair_receipts=lambda: order.append("receipts") or {"done": 2},
     )
 
-    assert order == ["restore", "reconcile", "queues"]
+    assert order == ["restore", "reconcile", "queues", "receipts"]
+    assert result["receipts"] == {"done": 2}
     assert result["interrupted"] == 0
 
 
@@ -75,4 +77,29 @@ def test_runtime_recovery_raises_sqlite_busy_timeout_during_boot(monkeypatch):
         mark_interrupted=lambda stream=None: [],
         reconcile=lambda: 0,
     )
-    assert seen == [SQLITE_RECOVERY_BUSY_TIMEOUT_MS]
+    # Boot recovery, then the queue receipt repair after queue recovery.
+    assert seen == [SQLITE_RECOVERY_BUSY_TIMEOUT_MS] * 2
+
+
+def test_runtime_recovery_ends_receipts_of_turns_the_restart_killed():
+    from lib import agents, turn_lifecycle, turn_queue
+    from lib.turn_lifecycle import TurnEvent
+
+    aid = agents.create_agent(persona="Pebble", voice_id="", cwd="/tmp", session="pebble")
+    agents.start_runtime(aid, "pebble")
+    turn_queue.enqueue(queue_id="q1", agent_id=aid, session="pebble", text="hi",
+                       trace_id="t1", client_msg_id="q1", synthesize_audio=False,
+                       origin="agent", sender_agent_id="")
+    turn_queue.mark_started("q1")
+    agents.open_turn(agent_id=aid, source="pwa", trace_id="t1")
+    turn_lifecycle.transition(aid, TurnEvent.SPAWN_STARTED, {"trace_id": "t1"})
+    turn_queue.enqueue(queue_id="q2", agent_id=aid, session="pebble", text="later",
+                       trace_id="t2", client_msg_id="q2", synthesize_audio=False,
+                       origin="user", sender_agent_id="")
+
+    recover_runtime(SimpleNamespace(stream=None),
+                    SimpleNamespace(recover_queued=lambda: 0),
+                    restore_agents=lambda _ctx: None)
+
+    assert turn_queue.status("q1") == "interrupted"
+    assert turn_queue.status("q2") == "queued"
