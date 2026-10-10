@@ -166,9 +166,8 @@ class LiveHub:
             self._emit(state, [], status_after=True)
 
     def set_update_holds(self, agent_ids: set[str], message: str) -> None:
-        """Agents whose next turn waits for the runtime update show it, once
-        their turn has settled, as ``limited`` with ``message`` as headline;
-        every other agent's hold is cleared."""
+        """Agents whose next turn waits for the runtime update say so in their
+        status line headline while idle; every other agent's is cleared."""
         with self._lock:
             for agent_id, state in self._by_agent.items():
                 wanted = message if agent_id in agent_ids else None
@@ -483,14 +482,7 @@ class LiveHub:
         if ended or turn.get("status") not in (None, "running"):
             final = ended or str(turn.get("status") or "completed")
             state_name = "interrupted" if final in ("interrupted", "failed") else "idle"
-            if state_name == "idle" and state.update_wait:
-                # Its next turn is held by the runtime's release drain. Shown
-                # as ``limited`` (clients render that headline; an idle one is
-                # never read), with no turn: nothing runs to stop or time.
-                return {**base, "state": "limited", "headline": state.update_wait,
-                        "turn_id": None, "turn_started_ms": None,
-                        "since_ms": _previous_since(state.view.activity, "limited", now)}
-            headline = None
+            headline = state.update_wait if state_name == "idle" else None
             if state_name == "interrupted":
                 headline = str((turn.get("error") or {}).get("message") or "Interrupted")
             return {**base, "state": state_name, "turn_started_ms": None,
