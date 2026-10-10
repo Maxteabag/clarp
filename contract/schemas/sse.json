@@ -57,7 +57,14 @@
         "action": {"type": "string"},
         "summary": {"type": "string"},
         "file_path": {"type": "string"},
-        "ts": {"type": "integer"}
+        "ts": {"type": "integer"},
+        "stop_actor": {"type": "string", "description": "Contract 61: only when this state is a Stop that recorded its actor; absent is unknown."},
+        "stop_actor_verified": {"type": "boolean"},
+        "stop_reason": {"type": "string"},
+        "repair_actor": {"type": "string", "description": "Contract 61: only on a slot_repair audit state."},
+        "repair_actor_verified": {"type": "boolean"},
+        "repair_reason": {"type": "string"},
+        "released_trace": {"type": "string"}
       }
     },
     "activity-status": {

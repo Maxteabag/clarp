@@ -64,6 +64,9 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "agent_id", "session", "persona", "kind", "phase", "status", "tool",
         "action", "summary", "file_path", "ts", "state", "call_id",
         "started_at_ms", "turn_started_ms",
+        "stop_actor", "stop_actor_verified", "stop_reason",
+        "repair_actor", "repair_actor_verified", "repair_reason",
+        "released_trace",
     ),
     SSEType.AGENT_ROSTER: (
         "kind", "session", "persona", "voice_id", "backend", "name",
@@ -203,7 +206,11 @@ def agent_activity(*, agent_id: str, session: str, persona: str, kind: str,
                    phase: str, status: str, tool: str, action: str,
                    summary: str, file_path: str, ts: int,
                    state: Any = OMIT, call_id: Any = OMIT,
-                   started_at_ms: Any = OMIT, turn_started_ms: Any = OMIT) -> Event:
+                   started_at_ms: Any = OMIT, turn_started_ms: Any = OMIT,
+                   stop_actor: Any = OMIT, stop_actor_verified: Any = OMIT,
+                   stop_reason: Any = OMIT, repair_actor: Any = OMIT,
+                   repair_actor_verified: Any = OMIT, repair_reason: Any = OMIT,
+                   released_trace: Any = OMIT) -> Event:
     return _build(SSEType.AGENT_ACTIVITY, [
         ("agent_id", agent_id),
         ("session", session),
@@ -220,6 +227,13 @@ def agent_activity(*, agent_id: str, session: str, persona: str, kind: str,
         ("call_id", call_id),
         ("started_at_ms", started_at_ms),
         ("turn_started_ms", turn_started_ms),
+        ("stop_actor", stop_actor),
+        ("stop_actor_verified", stop_actor_verified),
+        ("stop_reason", stop_reason),
+        ("repair_actor", repair_actor),
+        ("repair_actor_verified", repair_actor_verified),
+        ("repair_reason", repair_reason),
+        ("released_trace", released_trace),
     ])
 
 

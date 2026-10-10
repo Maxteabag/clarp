@@ -53,7 +53,9 @@ FULL_SAMPLES = {
         agent_id="a", session="s", persona="P", kind="tool", phase="tool",
         status="running", tool="Read", action="read", summary="x",
         file_path="/f", ts=1, state="tool", call_id="toolu_1",
-        started_at_ms=1, turn_started_ms=1),
+        started_at_ms=1, turn_started_ms=1, stop_actor="user",
+        stop_actor_verified=True, stop_reason="r", repair_actor="user",
+        repair_actor_verified=False, repair_reason="r", released_trace="t"),
     SSEType.HEARTBEAT: lambda: events.heartbeat(ts=1),
     SSEType.LIVE: lambda: events.live(
         agent_id="a", session="s", conv="c", epoch="e", lseq=1,

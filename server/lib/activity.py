@@ -238,7 +238,25 @@ def state_activity_event(
         "call_id": str(detail.get("call_id") or "") or None,
         "started_at_ms": int(ts) if kind == AgentState.TOOL else None,
         "turn_started_ms": _turn_started_ms(agent_id) if kind in AgentState.busy_states() else None,
+        **_control_provenance(detail),
     }
+
+
+# Contract 61: who stopped or repaired the agent, as recorded on the state.
+# Present only when the state carries it; absent never means "the user".
+_PROVENANCE_KEYS = ("stop_actor", "stop_actor_verified", "stop_reason",
+                    "repair_actor", "repair_actor_verified", "repair_reason",
+                    "released_trace")
+
+
+def _control_provenance(detail: dict[str, Any]) -> dict[str, Any]:
+    if detail.get("source") == "user_stop" and "stop_actor" in detail:
+        keys = _PROVENANCE_KEYS[:3]
+    elif detail.get("source") == "slot_repair":
+        keys = _PROVENANCE_KEYS[3:]
+    else:
+        return {}
+    return {key: detail[key] for key in keys if key in detail}
 
 
 def live_state(kind: str, detail: dict[str, Any] | None = None) -> str:
