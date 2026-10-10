@@ -298,8 +298,13 @@ pub fn frame_budget_check(out: String) {
             super::live_checks::set_reduced_motion(false);
             let mut up = true;
             let mut turns = 0;
+            // Found once: a query walks the whole window (and, in a release
+            // build without Slint's debug info, logs a line per element), so
+            // per wheel turn it cost more than the scrolling it measured.
+            let chat = chat_box();
+            check(chat.is_some(), "the active chat is on screen to scroll");
             input_every(Duration::from_millis(33), move || {
-                if let Some((x, y, width, height)) = chat_box() {
+                if let Some((x, y, width, height)) = chat {
                     headless::wheel(x + width / 2.0, y + height / 2.0, if up { 60.0 } else { -60.0 });
                 }
                 turns += 1;
