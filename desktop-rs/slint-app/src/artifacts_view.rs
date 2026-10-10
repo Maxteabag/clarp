@@ -417,15 +417,34 @@ thread_local! {
 /// thread; the window never shows one larger than this.
 const PICTURE_SIDE: u32 = 2048;
 
+/// One picture decodes at a time: a 4K one needs ~50 MB while it is made,
+/// and six landing together held 300 MB at once.
+static DECODING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Decodes a chat picture off the UI thread; it lands in `picture_landed`.
 fn decode_picture_later(id: String, bytes: Vec<u8>) {
     crate::platform::runtime::handle().spawn_blocking(move || {
-        let pixels = picture_pixels(&bytes);
-        drop(bytes);
+        let pixels = {
+            let _one = DECODING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let pixels = picture_pixels(&bytes);
+            drop(bytes);
+            give_back_freed_memory();
+            pixels
+        };
         if let Err(error) = slint::invoke_from_event_loop(move || picture_landed(id, pixels)) {
             eprintln!("clarp-slint: dropped a decoded picture: {error}");
         }
     });
+}
+
+/// Returns the decode's freed buffers to the system: glibc keeps freed
+/// memory in its arenas, so the RSS stayed at the peak.
+fn give_back_freed_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    // SAFETY: malloc_trim only releases free heap pages.
+    unsafe {
+        libc::malloc_trim(0);
+    }
 }
 
 /// A picture's pixels, at most `PICTURE_SIDE` on its longest side, made
