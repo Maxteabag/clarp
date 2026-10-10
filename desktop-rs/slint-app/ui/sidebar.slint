@@ -171,7 +171,7 @@ component Row inherits Rectangle {
                     min-width: 0px;
                     clip: true;
                     // The glow's centre runs a little past both ends.
-                    property <float> phase: root.on-screen ? Math.mod(Motion.glow / 1800ms, 1.0) * 1.6 - 0.3 : -0.3;
+                    property <float> phase: root.on-screen ? Math.mod(Motion.spin / 1800ms, 1.0) * 1.6 - 0.3 : -0.3;
                     property <int> count: root.chat.letters.length;
                     HorizontalLayout {
                         alignment: start;

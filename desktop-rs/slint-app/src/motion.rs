@@ -3,23 +3,47 @@
 //! `animation-tick()`. A binding on `animation-tick()` keeps Slint drawing
 //! at the display's rate for as long as it lives, and each of those frames
 //! walks the whole window (180 explorer rows and two chats on a busy fleet):
-//! on the software renderer that saturated the UI thread. This clock moves
-//! `spin` ten times a second and `glow` twenty, so a frame is drawn only
-//! when something moves, and stands still while the window is hidden or
-//! motion is reduced.
+//! on the software renderer that saturated the UI thread.
+//!
+//! The clock has two hands, moved on alternate ticks so that no frame
+//! repaints both: `spin` (the explorer's spinners and shimmering names,
+//! ten times a second) and `glow` (what animates in a chat: the running
+//! row's shimmer, the typing dots; twenty times a second). The renderer
+//! repaints at most three rectangles, merging the rest: an explorer row and
+//! a chat row moving in the same frame became one box over everything
+//! between them. Neither hand moves while the window is hidden or motion is
+//! reduced.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
 use slint::ComponentHandle;
 
-/// How often the clock moves: `glow` every tick, `spin` every other one.
-pub const TICK: Duration = Duration::from_millis(50);
-const SPIN_EVERY: u128 = 2;
+/// The clock's tick; each hand moves on its own ticks (`hand`).
+pub const TICK: Duration = Duration::from_millis(25);
+
+/// Which hand moves on tick `n`: `glow` on odd ticks (every 50 ms), `spin`
+/// on every fourth (every 100 ms), never both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hand {
+    Spin,
+    Glow,
+}
+
+pub fn hand(n: u64) -> Option<Hand> {
+    if n % 2 == 1 {
+        Some(Hand::Glow)
+    } else if n % 4 == 0 {
+        Some(Hand::Spin)
+    } else {
+        None
+    }
+}
 
 thread_local! {
     static TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     static ORIGIN: Instant = Instant::now();
+    static TICKS: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Starts the clock (once the window exists).
@@ -29,50 +53,35 @@ pub fn start() {
     TIMER.with(|t| *t.borrow_mut() = Some(timer));
 }
 
-/// The clock's readings `elapsed` after it started, in ms: (spin, glow),
-/// each a whole number of its own steps.
-pub fn readings(elapsed: Duration) -> (i64, i64) {
-    let tick = TICK.as_millis();
-    let ticks = elapsed.as_millis() / tick;
-    let glow = ticks * tick;
-    let spin = ticks / SPIN_EVERY * SPIN_EVERY * tick;
-    (spin as i64, glow as i64)
-}
-
 fn tick() {
+    let n = TICKS.with(|t| {
+        t.set(t.get() + 1);
+        t.get()
+    });
+    let Some(hand) = hand(n) else { return };
     let Some(window) = crate::window() else { return };
     let look = window.global::<crate::ChatLook>();
     if !look.get_window_shown() || look.get_reduced_motion() {
         return;
     }
-    let (spin, glow) = readings(ORIGIN.with(Instant::elapsed));
+    let now = ORIGIN.with(Instant::elapsed).as_millis() as i64;
     let motion = window.global::<crate::Motion>();
-    // Setting an unchanged value would still mark what reads it as dirty.
-    if motion.get_glow() != glow {
-        motion.set_glow(glow);
-    }
-    if motion.get_spin() != spin {
-        motion.set_spin(spin);
+    match hand {
+        Hand::Spin => motion.set_spin(now),
+        Hand::Glow => motion.set_glow(now),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::readings;
-    use std::time::Duration;
+    use super::{Hand, TICK, hand};
 
     #[test]
-    fn spin_moves_ten_times_a_second_and_glow_twenty() {
-        let at = |ms| readings(Duration::from_millis(ms));
-        assert_eq!(at(0), (0, 0));
-        assert_eq!(at(49), (0, 0));
-        assert_eq!(at(50), (0, 50));
-        assert_eq!(at(99), (0, 50));
-        assert_eq!(at(100), (100, 100));
-        assert_eq!(at(1234), (1200, 1200));
-        assert_eq!(at(1260), (1200, 1250));
-        let glows: std::collections::BTreeSet<i64> = (0..1000).map(|ms| at(ms).1).collect();
-        let spins: std::collections::BTreeSet<i64> = (0..1000).map(|ms| at(ms).0).collect();
-        assert_eq!((glows.len(), spins.len()), (20, 10));
+    fn spin_moves_ten_times_a_second_glow_twenty_and_never_together() {
+        let per_second = (1000 / TICK.as_millis()) as u64;
+        let hands: Vec<Option<Hand>> = (1..=per_second).map(hand).collect();
+        assert_eq!(hands.iter().filter(|h| **h == Some(Hand::Spin)).count(), 10);
+        assert_eq!(hands.iter().filter(|h| **h == Some(Hand::Glow)).count(), 20);
+        assert_eq!((hand(1), hand(2), hand(3), hand(4)), (Some(Hand::Glow), None, Some(Hand::Glow), Some(Hand::Spin)));
     }
 }
