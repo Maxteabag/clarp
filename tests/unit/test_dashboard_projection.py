@@ -159,6 +159,24 @@ def test_dashboard_message_ranking_walks_the_activity_index():
     assert 'idx_messages_dashboard_activity' in plan, plan
 
 
+def test_dashboard_revision_map_reads_only_an_index():
+    """The revision map runs after every committed write. Reading message rows
+    for MAX(updated_at) took 4-40 s on a 270k-message store and timed the
+    whole snapshot out; it must stay an index-only scan."""
+    aid = agents.create_agent(persona='Covered', voice_id='', cwd='/tmp', session='covered')
+    message_store.record_user_message(agent_id=aid, backend_session_id='c', client_msg_id='m', text='hi')
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        message_store.dashboard_messages()
+    finally:
+        db.conn().set_trace_callback(None)
+    revisions = next(s for s in statements if 'MAX(revision)' in s)
+    plan = [row[3] for row in db.conn().execute('EXPLAIN QUERY PLAN ' + revisions)]
+    scans = [step for step in plan if 'messages' in step.split(' USING')[0]]
+    assert scans and all('COVERING INDEX' in step for step in scans), plan
+
+
 def test_no_drift_snapshot_makes_no_repair_writes_and_no_per_agent_queries(tmp_path, monkeypatch):
     """The read-time reconciler must stay a pure in-memory check for a roster
     whose derived state already agrees with reality."""
