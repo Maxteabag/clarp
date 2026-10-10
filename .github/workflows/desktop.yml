@@ -57,7 +57,9 @@ jobs:
       - name: Package
         run: |
           name="clarp-slint-${{ steps.source.outputs.sha }}-x86_64-linux"
-          strip -o "$name" desktop-rs/target/release/clarp-slint
+          # Debug info goes, the symbol table stays: the stall log names
+          # the GUI thread's frames (stall_monitor.rs).
+          strip --strip-debug -o "$name" desktop-rs/target/release/clarp-slint
           gzip -9 "$name"
           sha256sum "$name.gz" > "$name.gz.sha256"
           echo "ASSET=$name.gz" >> "$GITHUB_ENV"

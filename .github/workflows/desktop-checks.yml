@@ -132,7 +132,8 @@ jobs:
           workspaces: desktop-rs
       - name: Release build
         working-directory: desktop-rs
-        run: cargo build --release --locked -p clarp-slint && strip -o /tmp/clarp-slint target/release/clarp-slint
+        # As desktop.yml publishes it: symbols kept for the stall log.
+        run: cargo build --release --locked -p clarp-slint && strip --strip-debug -o /tmp/clarp-slint target/release/clarp-slint && ls -l /tmp/clarp-slint
       - uses: actions/upload-artifact@v4
         with:
           name: clarp-slint-x86_64-linux
@@ -152,6 +153,19 @@ jobs:
           status=0
           slint-app/tests/check.sh frame-budget /tmp/budget 2>&1 | tee /tmp/budget.log || status=$?
           if [ -f /tmp/budget/budget.md ]; then cat /tmp/budget/budget.md >> "$GITHUB_STEP_SUMMARY"; else echo "no budget.md: the check stopped early"; fi
+          exit $status
+      - name: The stripped release names a stall's frames
+        if: success() || failure()
+        working-directory: desktop-rs
+        env:
+          CLARP_CHECK_PROFILE: stripped
+          CLARP_STALL_THRESHOLD_MS: "150"
+          CLARP_STALL_LOG: /tmp/budget/stall-stripped.log
+        run: |
+          mkdir -p target/stripped && cp /tmp/clarp-slint target/stripped/clarp-slint
+          status=0
+          slint-app/tests/check.sh diagnostics /tmp/budget/diagnostics || status=$?
+          if [ -f /tmp/budget/stall-stripped.log ]; then cat /tmp/budget/stall-stripped.log; else echo "no stall log written"; fi
           exit $status
       - uses: actions/upload-artifact@v4
         if: always()

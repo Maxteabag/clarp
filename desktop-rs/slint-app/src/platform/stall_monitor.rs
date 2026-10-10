@@ -6,7 +6,10 @@
 //! Resident memory crossing a mark (and every further 512 MB) captures the
 //! stack too, so a runaway allocation is caught before the launcher's
 //! memory limit kills the process. Unlike the C++ build, frames are named
-//! from debug info after the capture, not only from exported symbols.
+//! from debug info after the capture, not only from exported symbols; the
+//! release keeps its symbol table (desktop.yml strips debug info only), and
+//! each frame also says its file and offset, so one left unnamed can be
+//! named later from the same build.
 
 use std::ffi::c_void;
 use std::io::Write;
@@ -235,10 +238,10 @@ fn symbolize(frames: &[usize]) -> String {
                 (Some(file), Some(line)) => format!(" ({}:{line})", file.display()),
                 _ => String::new(),
             };
-            text += &format!("#{index:<2} {address:#x} {name}{place}\n");
+            text += &format!("#{index:<2} {address:#x} {name}{place}{}\n", module_offset(*address));
         });
         if !named {
-            text += &format!("#{index:<2} {address:#x}\n");
+            text += &format!("#{index:<2} {address:#x}{}\n", module_offset(*address));
         }
     }
     // Parsed debug info is large; a stall is rare, so do not keep it.
@@ -246,13 +249,29 @@ fn symbolize(frames: &[usize]) -> String {
     text
 }
 
+/// " [clarp-slint+0x1234]": the frame's file and its offset in it, which
+/// stays the same from run to run (unlike the address), so a frame the
+/// stripped release names "??" can be named later from the same build.
+fn module_offset(address: usize) -> String {
+    // SAFETY: dladdr only reads the loader's tables and fills the zeroed
+    // struct it is given; the name it returns lives as long as the module.
+    let mut info: libc::Dl_info = unsafe { std::mem::zeroed() };
+    if unsafe { libc::dladdr(address as *const c_void, &mut info) } == 0 || info.dli_fname.is_null() {
+        return String::new();
+    }
+    let file = unsafe { std::ffi::CStr::from_ptr(info.dli_fname) }.to_string_lossy();
+    let name = Path::new(file.as_ref()).file_name().map_or_else(|| file.to_string(), |n| n.to_string_lossy().into_owned());
+    format!(" [{name}+{:#x}]", address.wrapping_sub(info.dli_fbase as usize))
+}
+
 fn write_capture(log: &Path, reason: &str, measure: &str, frames: &[usize]) {
     rotate(log);
     let header = format!(
-        "== {reason} at {} pid={} {measure} build={}\n",
+        "== {reason} at {} pid={} {measure} build={} exe={}\n",
         chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f"),
         std::process::id(),
-        env!("CARGO_PKG_VERSION")
+        env!("CARGO_PKG_VERSION"),
+        std::env::current_exe().map_or_else(|e| format!("({e})"), |p| p.display().to_string())
     );
     let stack = if frames.is_empty() { "(stack not captured)\n".to_owned() } else { symbolize(frames) };
     append(log, &(header + &stack));
@@ -278,5 +297,20 @@ fn append(log: &Path, text: &str) {
         .and_then(|mut file| file.write_all(text.as_bytes()));
     if let Err(error) = written {
         eprintln!("StallMonitor: cannot write {}: {error}", log.display());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{module_offset, symbolize};
+
+    #[test]
+    fn a_frame_is_named_and_placed_in_its_file() {
+        let address = symbolize as usize;
+        let text = symbolize(&[address]);
+        assert!(text.contains("symbolize"), "{text}");
+        let offset = module_offset(address);
+        assert!(offset.starts_with(" [") && offset.contains("+0x") && offset.ends_with(']'), "{offset}");
+        assert!(text.contains(&offset), "{text}");
     }
 }
