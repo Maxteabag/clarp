@@ -697,7 +697,7 @@ fn main() {
         pump_now(app);
     }));
     window.on_sidebar_row_index(|session, kind| {
-        let Some(window) = window() else { return -1 };
+        let Some(window) = crate::window() else { return -1 };
         let rows = match kind.as_str() {
             "rooms" => window.get_rooms(),
             "archived" => window.get_archived(),
