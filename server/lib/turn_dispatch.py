@@ -279,6 +279,20 @@ class _TurnSpec:
     drain_persisted: bool = False
 
 
+def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:
+    """Whether a Stop pause could not hold this request when it arrived, so
+    the release drain may persist that right (``queued_turns.allow_paused``).
+    The same reading admission makes: a normal send and a peer message are
+    never paused; fresh user intent bypasses; an explicit send-now is allowed.
+    A goal wake is left out: recovery re-checks its right each time."""
+    from . import task_goal_recovery
+    if str(effective.client_msg_id or "").startswith(task_goal_recovery.PREFIX):
+        return False
+    peer_waits = effective.protected_peer and not command.queue_if_busy
+    return bool(not effective.queue_if_busy or peer_waits
+                or command.allow_paused_queue or effective.paused_bypass)
+
+
 def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
     """Persist a send that is about to wait behind the Stop barrier (or, with
     ``prefix="drain-park"``, behind the release drain's admission fence)."""
@@ -1166,11 +1180,8 @@ class TurnDispatchService:
                 session=session, backend=backend, queued=True,
                 queue_depth=queue_state["count"],
                 queue_revision=queue_state["revision"])
-        peer_waits = (decision.effective.protected_peer
-                      and not command.queue_if_busy)
-        spec = replace(spec, bypass_pause=(
-            not queue_if_busy or peer_waits or allow_paused_queue
-            or decision.effective.paused_bypass))
+        spec = replace(spec, bypass_pause=_pause_exempt_on_arrival(
+            command, decision.effective))
 
         # A live Codex turn accepts follow-ups through the official turn/steer
         # protocol. Other backends retain their existing dispatch behavior.
