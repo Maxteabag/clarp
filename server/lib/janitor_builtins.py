@@ -163,6 +163,12 @@ def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str 
     # first, then admit only if the chosen configuration is still current.
     for _attempt in range(3):
         config = resolve(role, target_agent_id=target_agent_id)
+        # Most requests (a tool-explanation drain each) find their run, or
+        # another, already active. Decide that without the write lock; the
+        # lock is taken only to admit, and everything is checked again there.
+        settled, answer = _settled_without_lock(run_id, config, metadata, target_agent_id)
+        if settled:
+            return answer
         effective = effective_chain(config["session"]) if config else None
         with janitors._write() as c:
             _recover_expired(c, db.now_ms())
@@ -182,6 +188,28 @@ def begin_run(role: str, request_id: str, *, context=None, target_agent_id: str 
             _insert_demand_run(c, role, run_id, config, effective, metadata, target_agent_id)
         return janitors.get_run(run_id)
     return None  # reconfigured under every attempt; the next request retries
+
+
+def _settled_without_lock(run_id, config, metadata, target_agent_id) -> tuple[bool, dict | None]:
+    """(True, answer) when the request needs no admission, from reads alone.
+
+    An expired demand run still counts as active until recovery cancels it
+    under the lock, so its presence always sends the request there.
+    """
+    c = db.conn()
+    existing = store.run_row(run_id, c)
+    if existing:
+        frozen = janitors._decode(existing["configuration_json"], {})
+        if frozen.get("context") != metadata or frozen.get("target_agent_id") != target_agent_id:
+            raise janitors.JanitorError("Request identity already refers to different work", 409, "run_conflict")
+        return True, janitors.get_run(run_id)
+    if store.expired_demand_runs(c, DEMAND_RUN_TTL_MS, db.now_ms()):
+        return False, None
+    if not config or config["execution"].get("executor") != "ephemeral":
+        return True, None
+    if store.has_active_run(config["agent_id"], c) or janitors._pending_demand_claim(c, config["agent_id"]):
+        return True, None
+    return False, None
 
 
 def _insert_demand_run(c, role, run_id, config, effective, metadata, target_agent_id) -> None:
