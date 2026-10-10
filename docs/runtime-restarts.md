@@ -60,9 +60,13 @@ to a newly installed release without interrupting anything:
    recovery, explicit send-now) is admitted to the durable queue in order and
    held; a normal send that would have preempted or steered waits instead.
    Held work without a queue row gets a `drain-park-<trace>` park row, rows are
-   reordered to the agent's arrival order, and work a Stop pause could not hold
-   on arrival keeps `queued_turns.allow_paused` so the next runtime honours it.
-   Pauses, cancels and Stop keep their meaning.
+   reordered to the agent's arrival order, and work an existing Stop pause
+   could not hold on arrival (a normal send, a peer message, fresh user intent,
+   an explicit send-now; never a goal wake) keeps `queued_turns.allow_paused`
+   so the next runtime honours it. It only persists that right: any later Stop
+   clears it, so nothing queued before a Stop runs past it after the handoff
+   (as after a restart today). Pauses, cancels and Stop keep their meaning;
+   `tests/unit/test_drain_pause_parity.py` pins the old behaviour.
 3. It seals (today's hard fence, `draining`, dispatch RPCs answer 503 for the
    moment before exit) only when nothing is owned: no active or spawning slot,
    terminal, compaction, Stop lease, account recovery park
