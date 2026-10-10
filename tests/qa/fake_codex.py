@@ -81,11 +81,14 @@ def app_server():
         emit({"method": "turn/completed", "params": {
             "threadId": thread_id, "turn": {"id": turn_id, "threadId": thread_id, "status": "completed"}}})
 
+    def sessions_root():
+        return Path(os.environ.get("CLARP_QA_PROVIDER_ROOT", "/nonexistent")) / "sessions"
+
     def persist(thread_id, kind, payload):
         root_env = os.environ.get("CLARP_QA_PROVIDER_ROOT")
         if not root_env:
             return
-        root = Path(root_env) / "sessions"
+        root = sessions_root()
         root.mkdir(parents=True, exist_ok=True)
         with (root / f"rollout-{thread_id}.jsonl").open("a") as stream:
             stream.write(json.dumps({
@@ -173,6 +176,18 @@ def app_server():
             result = {"thread": {"id": thread_id}}
         elif method == "thread/resume":
             thread_id = params.get("threadId") or current_thread
+            record(method, {"threadId": thread_id})
+            rollout = sessions_root() / f"rollout-{thread_id}.jsonl"
+            if rollout.is_file() and '"session_meta"' not in rollout.read_text():
+                # Real Codex on a transit rollout without session_meta (Miso,
+                # 2026-10-10): the thread store cannot read it.
+                emit({"id": request["id"], "error": {
+                    "code": -32603,
+                    "message": ("failed to read thread: thread-store internal error: "
+                                f"failed to read session metadata {rollout}: "
+                                f"rollout {rollout} is empty"),
+                }})
+                continue
             current_thread = thread_id
             lock = acquire(thread_id)
             if lock is False:
