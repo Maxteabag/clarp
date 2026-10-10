@@ -1,5 +1,5 @@
 import { Button } from "std-widgets.slint";
-import { Palette, Look, ChatLook } from "theme.slint";
+import { Palette, Look, ChatLook, Motion } from "theme.slint";
 
 export struct ProcessJob {
     id: string,
@@ -31,7 +31,7 @@ export component ProcessSpinner inherits Rectangle {
     in property <color> tone: Palette.link;
     in property <bool> running: true;
     out property <bool> turning: root.running && !ChatLook.reduced-motion && ChatLook.window-shown;
-    property <float> phase: root.turning ? Math.mod(animation-tick() / 900ms, 1.0) : 0.0;
+    property <float> phase: root.turning ? Math.mod(Motion.spin / 900ms, 1.0) : 0.0;
     property <length> dot: Math.max(2px, root.size * 0.2);
     width: root.size;
     height: root.size;

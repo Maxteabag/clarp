@@ -1,5 +1,5 @@
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook, ChromeText, RevealText } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook, ChromeText, RevealText, Motion } from "theme.slint";
 import { CompactWork, ProcessIndicator } from "processes.slint";
 import { ProfileBridge } from "profile.slint";
 import { AgentAvatar, AvatarArt } from "avatar.slint";
@@ -96,6 +96,7 @@ component Row inherits Rectangle {
     in property <bool> reduced-motion;
     // Shown and scrolled into view: its process spinner may turn.
     in property <bool> on-screen: true;
+    property <bool> shimmering: root.chat.busy && root.on-screen && !root.reduced-motion && ChatLook.window-shown && root.chat.letters.length > 0;
     // The cursor landed here: its place in the list, to scroll it into view.
     callback reveal(length, length);
     changed cursor => { if (self.cursor) { root.reveal(self.y, self.height); } }
@@ -154,8 +155,9 @@ component Row inherits Rectangle {
                     }
                 }
                 // A working agent's name is green, and a glow travels through
-                // its letters (still green, with Reduce Motion).
-                if !root.chat.busy || root.reduced-motion || !ChatLook.window-shown || root.chat.letters.length == 0: Text {
+                // its letters (still green, with Reduce Motion, and while
+                // the row is scrolled out of view).
+                if !root.shimmering: Text {
                     font-size: ChromeText.body;
                     text: root.chat.name;
                     color: root.chat.busy ? Palette.success : Palette.chrome-text;
@@ -163,12 +165,12 @@ component Row inherits Rectangle {
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
-                if root.chat.busy && !root.reduced-motion && ChatLook.window-shown && root.chat.letters.length > 0: shimmer := Rectangle {
+                if root.shimmering: shimmer := Rectangle {
                     horizontal-stretch: 1;
                     min-width: 0px;
                     clip: true;
                     // The glow's centre runs a little past both ends.
-                    property <float> phase: Math.mod(animation-tick() / 1800ms, 1.0) * 1.6 - 0.3;
+                    property <float> phase: Math.mod(Motion.glow / 1800ms, 1.0) * 1.6 - 0.3;
                     property <int> count: root.chat.letters.length;
                     HorizontalLayout {
                         alignment: start;

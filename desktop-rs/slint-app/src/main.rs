@@ -19,6 +19,7 @@ mod launch;
 mod pair;
 mod panes;
 mod perf;
+mod motion;
 mod scroll_book;
 mod scroll_journal;
 mod preview_view;
@@ -1034,6 +1035,7 @@ fn main() {
     // The window system's window exists once the loop runs: scale it then.
     slint::Timer::single_shot(std::time::Duration::from_millis(50), move || platform::desktop::set_ui_scale(ui_scale));
     platform::diagnostics::start(headless);
+    motion::start();
     if let Some(socket) = &socket {
         launch::listen(socket);
     }
