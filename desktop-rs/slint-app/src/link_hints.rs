@@ -391,11 +391,12 @@ pub fn key(window: &AppWindow, action: Option<&str>, chord: &str) -> bool {
 /// A pane reported where its chat is: the badges are drawn for the place
 /// they were made, so a chat that moves (a scroll, a streaming reply it
 /// follows, another pane) takes them away.
-pub fn reported(window: &AppWindow, pane: &str, offset: f32, active: &str) {
+pub fn reported(window: &AppWindow, pane: &str, offset: f32, active: &str) -> bool {
     let stale = STATE.with(|s| s.borrow().as_ref().is_some_and(|s| active != s.pane || (s.pane == pane && (offset - s.offset).abs() > 0.5)));
     if stale {
         cancel(window);
     }
+    stale
 }
 
 #[cfg(test)]
