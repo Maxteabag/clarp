@@ -417,12 +417,23 @@ def list_artifacts(*, session: str = "", agent_id: str = "", type: str = "", sea
     if created_to is not None: where.append("a.created_at<?"); params.append(created_to)
     params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
     order_column = "created_at" if order == "created" else "updated_at"
-    rows = db.conn().execute(
-        f"""SELECT a.*,g.persona AS agent_name FROM artifacts a JOIN agents g
+    # Choose the page on keys, then read only its payloads. Sorting `a.*`
+    # copied every live artifact's payload into the sorter (no index covers
+    # the order): 77.8 MB read for a 50-row page on the 2026-10-10 database.
+    page = [row[0] for row in db.conn().execute(
+        f"""SELECT a.artifact_id FROM artifacts a JOIN agents g
               ON g.agent_id=a.agent_id WHERE {' AND '.join(where)}
              ORDER BY a.{order_column} DESC,a.artifact_id DESC LIMIT ? OFFSET ?""",
-        tuple(params)).fetchall()
-    return [_public(row) for row in rows]
+        tuple(params)).fetchall()]
+    if not page:
+        return []
+    rows = {row["artifact_id"]: row for row in db.conn().execute(
+        f"""SELECT a.*,g.persona AS agent_name FROM artifacts a JOIN agents g
+              ON g.agent_id=a.agent_id
+             WHERE a.artifact_id IN ({','.join('?' * len(page))}) AND a.deleted_at IS NULL""",
+        page).fetchall()}
+    # A row deleted between the two reads is left out, as it would be next poll.
+    return [_public(rows[artifact_id]) for artifact_id in page if artifact_id in rows]
 
 
 def update(artifact_id: str, data: dict) -> dict:
