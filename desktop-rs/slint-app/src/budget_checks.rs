@@ -1,7 +1,7 @@
 //! `--check frame-budget`: what animating costs the UI thread, on a laptop's
 //! panel (CLARP_HEADLESS_SIZE, set by check.sh) with frames paced at 60 Hz
 //! and repainted partially, as the real window's softbuffer does. The fake
-//! Host serves 180 agents; two panes show a 250-row chat. Each scenario
+//! Host serves 180 agents; two panes show two 250-row chats. Each scenario
 //! runs for a few seconds with nothing else asking for frames and reports
 //! the UI thread's CPU (ms per second), frames per second, frame time
 //! (mean, 95th percentile) and the share of the window each frame
@@ -214,23 +214,29 @@ pub fn frame_budget_check(out: String) {
             if app.engine.borrow().panes().pane_count() != 2 {
                 return false;
             }
+            // The new pane shows Mike's chat, the first Rachel's: two
+            // chats of 250 rows.
             let sent = control("/__control/rich", &json!({"session": "rachel", "count": 250}))
+                .and_then(|()| control("/__control/rich", &json!({"session": "mike", "count": 250})))
                 .and_then(|()| control("/__control/activity", &json!({"working": 0, "jobs": 0})))
                 .and_then(|()| control("/__control/live", &json!({"on": true})));
-            check(sent.is_ok(), &format!("the Host serves 180 agents and a 250-row chat, all idle: {sent:?}"));
+            check(sent.is_ok(), &format!("the Host serves 180 agents and two 250-row chats, all idle: {sent:?}"));
+            app.engine.borrow_mut().select("mike");
             app.engine.borrow_mut().reconnect();
+            crate::pump();
             true
         })),
         ("two panes", Box::new(|app, _, elapsed| {
             let ready = app.engine.borrow().panes().pane_count() == 2
-                && app.engine.borrow().conversation("rachel").is_some_and(|c| c.len() >= 250)
+                && app.active_session() == "mike"
+                && ["rachel", "mike"].iter().all(|s| app.engine.borrow().conversation(s).is_some_and(|c| c.len() >= 250))
                 && app.engine.borrow().live_items()
                 && busy_agents(app) == 0;
             if !ready || elapsed < Duration::from_secs(2) {
                 return false;
             }
             let (width, height, scale) = headless::size_from_env();
-            check(true, &format!("two panes over the 250-row chat, nothing working, {width}x{height} at {scale}"));
+            check(true, &format!("two panes, Rachel's chat and Mike's, nothing working, {width}x{height} at {scale}"));
             headless::pace(PARTIAL_60HZ);
             true
         })),
@@ -241,13 +247,13 @@ pub fn frame_budget_check(out: String) {
                 if !sent {
                     sent = true;
                     let started = control("/__control/activity", &json!({"working": 16, "jobs": 30}))
-                        .and_then(|()| control("/__control/live-replay", &json!({"session": "rachel", "fixture": "turn-full", "through": 14})));
-                    check(started.is_ok(), &format!("16 agents start working, 30 run a background job, Rachel runs a command: {started:?}"));
+                        .and_then(|()| control("/__control/live-replay", &json!({"session": "mike", "fixture": "turn-full", "through": 14})));
+                    check(started.is_ok(), &format!("16 agents start working, 30 run a background job, Mike runs a command: {started:?}"));
                     return false;
                 }
                 if busy_agents(app) < 16 || !any_shimmering() {
                     if elapsed.as_millis() / 100 == 120 {
-                        let lseq = app.engine.borrow().live_view("rachel").and_then(|v| v.lseq());
+                        let lseq = app.engine.borrow().live_view("mike").and_then(|v| v.lseq());
                         println!("perf budget waiting: {} agents busy, shimmering {}, live lseq {lseq:?}", busy_agents(app), any_shimmering());
                     }
                     return false;
