@@ -104,6 +104,9 @@ export struct WorkspaceTab {
 
 // PaneLeaf.qml + ConversationPane.qml.
 export component Pane inherits Rectangle {
+    // A pane may shrink to whatever the window gives it (min-width 0): its
+    // chat and composer wrap or clip inside instead of widening the layout.
+    min-width: 0px;
     in property <PaneView> pane;
     callback activate();
     // Sends the draft; the id of the message's row in this chat, or "" (not
@@ -377,6 +380,9 @@ export component Pane inherits Rectangle {
         // as sqlit frames its panes.
         Rectangle {
           vertical-stretch: 1;
+          // The pane may shrink to the window: the chat wraps inside it
+          // rather than widening the layout past the window's edge.
+          min-width: 0px;
           transcript := Transcript {
             // The pane's chat, found by link hints and the checks.
             accessible-role: list;
@@ -461,6 +467,7 @@ export component Pane inherits Rectangle {
         // Pair rooms are the Host's read-only projection: no composer.
         composer-box := Rectangle {
           visible: !root.pane.pair;
+          min-width: 0px;
           accessible-role: groupbox;
           accessible-id: "composer-box:" + root.pane.id;
           // Folded to its "[i] Insert" line until it has the keyboard (or
@@ -583,6 +590,8 @@ component Handle inherits Rectangle {
 
 // Workspace.qml: the workspace tabs, then the panes where the tree puts them.
 export component Workspace inherits Rectangle {
+    // The panes' area may shrink to the window; the panes inside wrap.
+    min-width: 0px;
     in property <[PaneView]> panes;
     in property <[SplitView]> splits;
     in property <[WorkspaceTab]> workspaces;
