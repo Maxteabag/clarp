@@ -336,7 +336,9 @@ pub fn live_check(out: String) {
             check(shimmering("live:cl:toolu_03"), "the running command's label is drawn shimmering");
             let (fps, cpu, over) = since_mark();
             let (idle, idle_cpu) = IDLE.with(std::cell::Cell::get);
-            check(fps >= (idle + 8.0).max(2.0 * NO_SHIMMER_FPS), &format!("the shimmer animates: {fps:.0} frames/s (idle {idle:.1}), CPU {cpu:.0}% (idle {idle_cpu:.0}%) over {over:.1?}"));
+            // The shared clock moves the shimmer about twenty times a second
+            // (motion.rs): well above idle, and capped.
+            check(fps >= (idle + 5.0).max(NO_SHIMMER_FPS + 2.0) && fps <= 24.0, &format!("the shimmer animates, at most twenty times a second: {fps:.0} frames/s (idle {idle:.1}), CPU {cpu:.0}% (idle {idle_cpu:.0}%) over {over:.1?}"));
             let height = row_height("live:cl:toolu_03");
             check((height - *height3.borrow()).abs() < 0.5, &format!("shimmering keeps the row's height: {} → {height}", height3.borrow()));
             let (before, now) = (place2.borrow().clone(), place_of("live:cl:toolu_03"));
