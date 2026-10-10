@@ -2336,6 +2336,7 @@ fn check_launch(what: &str, args: &[String], page: &str, content: &str) {
 pub(super) fn artifact_open_check(out: String) {
     let before: Rc<Cell<(bool, bool)>> = Rc::default();
     let (before2, before3) = (before.clone(), before.clone());
+    let big = big_report_stages(&out);
     let mut stages = load_chat("art-open", &["html_open"]);
     stages.extend::<Vec<Stage>>(vec![
         ("cards", Box::new(move |_, window, elapsed| {
@@ -2410,7 +2411,7 @@ pub(super) fn artifact_open_check(out: String) {
             true
         })),
     ]);
-    stages.extend(big_report_stages(&out));
+    stages.extend(big);
     run_stages(stages);
 }
 
