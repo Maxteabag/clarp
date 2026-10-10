@@ -467,34 +467,51 @@ def _context_tokens_cached(path_string: str, device: int, inode: int,
                            tail_bytes: int) -> int | None:
     # File identity protects replacement/truncation; timestamps protect edits
     # of the same length. Only a small derived integer is retained per version.
+    # The latest usage is almost always in the last few KB, so read backwards
+    # from a small window and widen it only when that window has none. A
+    # cold Host start read a full 1 MB tail per agent: 38 s of a 44 s first
+    # snapshot on the live fleet. The answer is the same as scanning the
+    # whole tail_bytes window: the last complete line with usage.
     path = pathlib.Path(path_string)
+    window = min(64 * 1024, tail_bytes)
     try:
         with path.open("rb") as f:
-            if size > tail_bytes:
-                f.seek(size - tail_bytes)
-                f.readline()  # discard the partial first line
-            raw = f.read()
+            while True:
+                start = max(0, size - window)
+                f.seek(start)
+                raw = f.read(size - start)
+                lines = raw.splitlines()
+                if start > 0 and lines:
+                    lines = lines[1:]  # discard the partial first line
+                for line in reversed(lines):
+                    tokens = _usage_tokens(line)
+                    if tokens is not None:
+                        return tokens
+                if start == 0 or window >= tail_bytes:
+                    return None
+                window = min(window * 4, tail_bytes)
     except OSError:
         return None
-    latest: int | None = None
-    for line in raw.splitlines():
-        if b'"usage"' not in line:
-            continue
-        try:
-            d = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if d.get("type") != "assistant":
-            continue
-        usage = (d.get("message") or {}).get("usage") or {}
-        if not usage:
-            continue
-        latest = int(
-            (usage.get("input_tokens") or 0)
-            + (usage.get("cache_read_input_tokens") or 0)
-            + (usage.get("cache_creation_input_tokens") or 0)
-        )
-    return latest
+
+
+def _usage_tokens(line: bytes) -> int | None:
+    """Context occupancy from one transcript line, or None if it has none."""
+    if b'"usage"' not in line:
+        return None
+    try:
+        d = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(d, dict) or d.get("type") != "assistant":
+        return None
+    usage = (d.get("message") or {}).get("usage") or {}
+    if not usage:
+        return None
+    return int(
+        (usage.get("input_tokens") or 0)
+        + (usage.get("cache_read_input_tokens") or 0)
+        + (usage.get("cache_creation_input_tokens") or 0)
+    )
 
 
 class _TranscriptIndex:
