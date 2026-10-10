@@ -159,7 +159,12 @@ fn read_request(stream: &TcpStream) -> Result<Request, String> {
     Ok(Request { method, path, headers, body })
 }
 
-fn respond(mut stream: &TcpStream, status: u16, content_type: &str, body: &str) {
+fn respond(stream: &TcpStream, status: u16, content_type: &str, body: &str) {
+    respond_with(stream, status, content_type, "", body);
+}
+
+/// `extra`: more header lines, each ending in CRLF.
+fn respond_with(mut stream: &TcpStream, status: u16, content_type: &str, extra: &str, body: &str) {
     let reason = match status {
         200 => "OK",
         202 => "Accepted",
@@ -169,7 +174,7 @@ fn respond(mut stream: &TcpStream, status: u16, content_type: &str, body: &str) 
         _ => "Error",
     };
     let head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\n{extra}Connection: close\r\n\r\n",
         body.len()
     );
     if let Err(error) = stream.write_all(head.as_bytes()).and_then(|()| stream.write_all(body.as_bytes())) {
@@ -205,8 +210,11 @@ fn handle(stream: TcpStream, port: u16) {
     match (request.method.as_str(), action) {
         ("GET", "") => {
             let page = page(&form.html, &form.draft, form.events.is_some(), &form.connect_origins, &format!("http://{own}"), form.interactive);
+            let interactive = form.interactive;
             drop(forms);
-            respond(&stream, 200, "text/html; charset=utf-8", &page);
+            // A report's policy also as a header, which its HTML cannot reach.
+            let extra = if interactive { String::new() } else { format!("Content-Security-Policy: {REPORT_POLICY}\r\n") };
+            respond_with(&stream, 200, "text/html; charset=utf-8", &extra, &page);
         }
         ("POST", "log") => {
             let Some(events) = form.events.clone() else {
@@ -309,7 +317,37 @@ pub(super) fn validated_origins(value: &Value) -> Vec<String> {
     result
 }
 
+/// A read-only report's policy on the desktop (agreed with the Host's
+/// owner for tokenless loopback reports): it may load scripts, styles,
+/// pictures, fonts, media and frames and fetch, over HTTPS only (no http:,
+/// ws: or this loopback origin), and submits no forms. The page has no
+/// bridge, no token, no cookie and never names the Host, so nothing it
+/// reaches can learn a credential; the response sends no referrer.
+pub(super) const REPORT_POLICY: &str = "default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; \
+img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; connect-src https:; frame-src https:; \
+form-action 'none'; base-uri 'none'; object-src 'none'";
+
+/// A report: its HTML under REPORT_POLICY, without a bridge. A link that
+/// leaves the page opens in a new tab, so the report stays; one to a place
+/// in it (#section) moves within it.
+fn report_page(html: &str) -> String {
+    let links = "<script>document.addEventListener('click', (e) => {\
+const a = e.target.closest && e.target.closest('a[href]'); if (!a) return;\
+const u = new URL(a.href, location.href); if (u.origin === location.origin && u.pathname === location.pathname) return;\
+if (!a.target) a.target = '_blank'; a.rel = 'noopener noreferrer';}, true);</script>";
+    let note = "<details style=\"position:fixed;top:8px;right:8px;background:#1a1b26;color:#e7e1dc;padding:6px;font:14px sans-serif\">\
+<summary>Network access</summary>HTTPS resources from the web; Clarp sends them no credentials</details>";
+    format!(
+        "<!doctype html><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">\
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+<meta http-equiv=\"Content-Security-Policy\" content=\"{REPORT_POLICY}\">{links}{html}{note}"
+    )
+}
+
 fn page(html: &str, draft: &Value, event_log: bool, origins: &[String], internal_origin: &str, interactive: bool) -> String {
+    if !interactive {
+        return report_page(html);
+    }
     // Inside a script, "</" could close it early.
     let saved = draft.to_string().replace("</", "<\\/");
     let network = json!(origins).to_string();
@@ -318,9 +356,6 @@ fn page(html: &str, draft: &Value, event_log: bool, origins: &[String], internal
     let connect = if sources.is_empty() { "'none'".to_owned() } else { sources.join(" ") };
     let policy = format!("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src {connect}; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'");
     let network_info = format!("<details style=\"position:fixed;top:8px;right:8px;background:#1a1b26;color:#e7e1dc;padding:6px;font:14px sans-serif\"><summary>Network access</summary>{}</details>", if origins.is_empty() { "External connections blocked".to_owned() } else { origins.join("<br>") });
-    if !interactive {
-        return format!("<!doctype html><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"{policy}\"><script>window.clarpForm={{capabilities:{{network:{network}}}}};</script>{html}{network_info}");
-    }
     let bridge = format!(
         r#"(() => {{
   let saved = {saved}, custom = null;
@@ -402,6 +437,19 @@ mod tests {
         assert!(page("", &json!({}), true, &[], "http://127.0.0.1:1234", true).contains("capabilities: {eventLog: true, network: []}"));
         assert!(page("", &json!({}), false, &[], "http://127.0.0.1:1234", true).contains("capabilities: {eventLog: false, network: []}"));
     }
+    #[test]
+    fn a_report_reaches_the_web_over_https_without_a_bridge_and_a_form_keeps_its_policy() {
+        let report = page("<p>r</p>", &json!({}), false, &[], "http://127.0.0.1:1234", false);
+        assert!(report.contains(REPORT_POLICY) && report.contains("content=\"no-referrer\""), "{report}");
+        assert!(!report.contains("clarpForm") && !report.contains("127.0.0.1"), "{report}");
+        for source in REPORT_POLICY.split(';') {
+            assert!(!source.contains("http:") && !source.contains("ws:") && !source.contains("'self'") && !source.contains('*'), "{source}");
+        }
+        let form = page("<form></form>", &json!({}), false, &[], "http://127.0.0.1:1234", true);
+        assert!(form.contains("img-src data:; font-src data:; media-src data:; connect-src http://127.0.0.1:1234; frame-src 'none'"), "{form}");
+        assert!(!form.contains("https:") && form.contains("External connections blocked"), "{form}");
+    }
+
     #[test]
     fn untrusted_network_metadata_is_exact_and_bounded() {
         assert_eq!(validated_origins(&json!(["https://Storage.Googleapis.Com:443", "https://storage.googleapis.com", "https://api.example.com:8443"])), vec!["https://storage.googleapis.com", "https://api.example.com:8443"]);

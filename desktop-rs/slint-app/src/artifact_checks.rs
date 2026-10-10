@@ -274,16 +274,19 @@ fn html_form_stages(out: &str) -> Vec<Stage> {
             window.global::<ArtifactBridge>().invoke_open("form-report".into());
             true
         })),
-        ("report opens in the viewer", Box::new(move |_, window, elapsed| {
-            if window.get_overlay() != "report" {
-                if elapsed > Duration::from_secs(2) {
-                    check(false, &format!("a report opens in the report viewer: overlay {:?}", window.get_overlay()));
+        ("report opens in the browser", Box::new(move |_, window, elapsed| {
+            let page = opened().last().filter(|u| u.contains("/form/")).map(|u| (u.clone(), fetch("GET", u, "", None)));
+            let Some((url, Ok((200, body)))) = page.filter(|(_, p)| p.as_ref().is_ok_and(|(_, b)| b.contains("<h1>Costs</h1>"))) else {
+                if elapsed > Duration::from_secs(3) {
+                    check(false, &format!("a report opens in the browser: {:?}", opened().last()));
                     return true;
                 }
                 return false;
-            }
-            check(window.get_report_title() == "Quarterly cost report" && window.get_report_blocks().row_count() > 0, "a report opens in the report viewer");
-            headless::press(slint::platform::Key::Escape);
+            };
+            check(window.get_overlay().is_empty(), "a report opens in the browser, not Clarp's viewer");
+            check(body.contains(crate::form_server::REPORT_POLICY) && !body.contains("clarpForm"), "on a bridge-free page that may reach the web over HTTPS");
+            let posted = fetch("POST", &format!("{url}/submit"), "{}", None);
+            check(posted.as_ref().is_ok_and(|(status, _)| *status == 403), &format!("which takes no answers: {:?}", posted.map(|(s, _)| s)));
             true
         })),
         ("stale form", Box::new(move |_, window, elapsed| {
@@ -2329,6 +2332,45 @@ fn check_launch(what: &str, args: &[String], page: &str, content: &str) {
     check(leaks(page).is_empty(), &format!("and carries no credential: {:?}", leaks(page)));
 }
 
+/// The fake third-party web's requests (`CLARP_TEST_THIRD_PARTY_LOG`):
+/// each with its path and headers.
+fn third_party() -> Vec<Value> {
+    let log = std::env::var("CLARP_TEST_THIRD_PARTY_LOG").unwrap_or_default();
+    std::fs::read_to_string(&log).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
+}
+
+/// A report's page: the report policy in the header and the page, no
+/// bridge, links that leave it open in a new tab.
+fn check_report_page(page: &str) {
+    let head = page.split("\r\n\r\n").next().unwrap_or_default().to_ascii_lowercase();
+    check(head.contains(&format!("content-security-policy: {}", crate::form_server::REPORT_POLICY.to_ascii_lowercase())),
+        "the report's policy comes as a header, out of its HTML's reach");
+    check(page.contains(crate::form_server::REPORT_POLICY) && !page.contains("clarpForm") && page.contains("a.target = '_blank'"),
+        "a bridge-free page whose links away open in a new tab");
+}
+
+/// What the report rendered by a real Chrome reached on the third-party
+/// web: its script, stylesheet, picture and fetch, over HTTPS, and never a
+/// referrer, cookie, credential or the Host's address.
+fn check_third_party_report(pid: &str) {
+    check(!std::env::var("CLARP_TEST_CHROME").unwrap_or_default().is_empty(), "a real Chrome renders the pages");
+    let requests: Vec<Value> = third_party().into_iter().filter(|r| r["path"].as_str().is_some_and(|p| p.contains("from=report"))).collect();
+    let paths: Vec<&str> = requests.iter().filter_map(|r| r["path"].as_str()).collect();
+    for wanted in ["/chart.js", "/css", "/logo.png", "/rates"] {
+        check(paths.iter().any(|p| p.starts_with(wanted)), &format!("the report reached {wanted} over HTTPS: {paths:?}"));
+    }
+    check(!paths.iter().any(|p| p.starts_with("/away")), "and followed no link by itself");
+    for request in &requests {
+        let headers: Vec<String> = request["headers"].as_object().map(|h| h.keys().map(|k| k.to_ascii_lowercase()).collect()).unwrap_or_default();
+        let named = |name: &str| headers.iter().any(|h| h == name);
+        check(!named("referer") && !named("cookie") && !named("authorization"),
+            &format!("{} carried no referrer, cookie or credential: {headers:?}", request["path"]));
+        check(leaks(&request.to_string()).is_empty(), &format!("{} named neither the token nor the Host: {:?}", request["path"], leaks(&request.to_string())));
+    }
+    let dom = std::fs::read_to_string(format!("{}.page{pid}.dom", std::env::var("CLARP_TEST_BROWSER_LOG").unwrap_or_default())).unwrap_or_default();
+    check(dom.contains("<title>fetched 42</title>"), &format!("and its fetch read the answer: {:?}", dom.split("</title>").next().unwrap_or_default()));
+}
+
 /// `--check artifact-open`: HTML artifacts open for real (check.sh gives
 /// the app a fake default browser), by a click and by the keyboard, and
 /// Clarp stays: the window is still shown, the browser was not left as a
@@ -2350,15 +2392,19 @@ pub(super) fn artifact_open_check(out: String) {
         })),
         ("report opens", Box::new(move |app, window, elapsed| {
             let launches = browser_launches();
+            // The fake browser logs once a real Chrome rendered the page.
             if launches.is_empty() {
-                if elapsed > Duration::from_secs(8) {
+                if elapsed > Duration::from_secs(40) {
                     check(false, "a click on the report opens it in the browser");
                     return true;
                 }
                 return false;
             }
             let (pid, args) = &launches[0];
-            check_launch("report", args, &browser_page(pid), "<h1>Rates</h1>");
+            let page = browser_page(pid);
+            check_launch("report", args, &page, "<h1 id=\"top\">Rates</h1>");
+            check_report_page(&page);
+            check_third_party_report(pid);
             check(window.get_overlay().is_empty(), &format!("and not in Clarp's viewer: overlay {:?}", window.get_overlay()));
             check(shown(window) == before2.get() && !shown(window).1, &format!("Clarp's window stays shown: {:?} before {:?}", shown(window), before2.get()));
             // The keyboard leaves the card the click selected.
@@ -2387,7 +2433,7 @@ pub(super) fn artifact_open_check(out: String) {
         ("form opens", Box::new(move |_, window, elapsed| {
             let launches = browser_launches();
             if launches.len() < 2 {
-                if elapsed > Duration::from_secs(8) {
+                if elapsed > Duration::from_secs(40) {
                     check(false, &format!("O opens the form in the browser: {launches:?}"));
                     return true;
                 }
@@ -2397,6 +2443,12 @@ pub(super) fn artifact_open_check(out: String) {
             let page = browser_page(pid);
             check_launch("form", args, &page, "name=\"currency\"");
             check(page.contains("window.clarpForm"), "with its answer bridge");
+            check(page.contains("img-src data:; font-src data:; media-src data:; connect-src http://127.0.0.1:") && page.contains("frame-src 'none'")
+                && !page.contains("https:;") && !page.to_ascii_lowercase().contains("content-security-policy: default-src"),
+                "and the form's policy unchanged: no external sources");
+            let dom = std::fs::read_to_string(format!("{}.page{pid}.dom", std::env::var("CLARP_TEST_BROWSER_LOG").unwrap_or_default())).unwrap_or_default();
+            let reached = third_party().into_iter().filter(|r| r["path"].as_str().is_some_and(|p| p.contains("from=form"))).count();
+            check(dom.contains("currency") && reached == 0, &format!("rendered by Chrome, the form reached no third-party origin: {reached} requests"));
             check(shown(window) == before3.get() && !shown(window).1, &format!("Clarp's window stays shown: {:?}", shown(window)));
             true
         })),
@@ -2415,37 +2467,42 @@ pub(super) fn artifact_open_check(out: String) {
     run_stages(stages);
 }
 
-/// What the fake `xdg-open` was handed (`CLARP_TEST_OPENER_LOG`).
-fn opener_calls() -> Vec<String> {
-    let log = std::env::var("CLARP_TEST_OPENER_LOG").unwrap_or_default();
-    std::fs::read_to_string(&log).unwrap_or_default().lines().map(str::to_owned).collect()
-}
-
 fn rss_kb() -> u64 {
     std::fs::read_to_string("/proc/self/status").unwrap_or_default().lines()
         .find_map(|l| l.strip_prefix("VmRSS:")).and_then(|v| v.split_whitespace().next()?.parse().ok()).unwrap_or(0)
 }
 
-/// Waits for the report viewer to close, then checks Clarp is still shown
-/// with its chat.
-fn back_to_chat(what: &'static str) -> Stage {
+/// Waits for one more browser launch than `before`, then checks its page.
+fn launched(what: &'static str, before: Rc<Cell<usize>>, content: &'static str) -> Stage {
     (what, Box::new(move |_, window, elapsed| {
-        if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+        let launches = browser_launches();
+        if launches.len() <= before.get() {
+            if elapsed > Duration::from_secs(10) {
+                check(false, &format!("{what}: the big report opens in the browser"));
+                return true;
+            }
             return false;
         }
-        check(window.get_overlay().is_empty() && !rows(window).is_empty() && shown(window) == (true, false),
-            &format!("{what}: Escape returns to the chat, the window still shown: overlay {:?} {:?}", window.get_overlay(), shown(window)));
+        let (pid, args) = launches.last().cloned().unwrap_or_default();
+        let page = browser_page(&pid);
+        check(args.iter().any(|a| a == "--new-window") && page.starts_with("HTTP/1.1 200") && page.len() > 1_158_099
+            && page.matches("data:image/webp").count() == 12 && page.contains(content),
+            &format!("{what}: the big report is served whole to a new browser window: {} bytes", page.len()));
+        check(leaks(&page).is_empty(), &format!("{what}: with no credential"));
+        check(window.get_overlay().is_empty() && shown(window) == (true, false), &format!("{what}: Clarp stays shown: {:?}", shown(window)));
+        before.set(launches.len());
         true
     }))
 }
 
 /// A report of the shape that was said to close Clarp: 1.16 MB, twelve
 /// data: pictures, a data: font, an inline script, plain links. Opened by
-/// every route; Clarp must stay, and its links must open in the browser.
+/// every route, in the browser; Clarp must stay shown and responsive.
 fn big_report_stages(_out: &str) -> Vec<Stage> {
     let rss = Rc::new(Cell::new(0u64));
-    let (rss2, launches_before) = (rss.clone(), Rc::new(Cell::new(0usize)));
-    let launches_before2 = launches_before.clone();
+    let rss2 = rss.clone();
+    let seen = Rc::new(Cell::new(0usize));
+    let (s1, s2, s3, s4, s5, s6, s7) = (seen.clone(), seen.clone(), seen.clone(), seen.clone(), seen.clone(), seen.clone(), seen);
     let mut stages = load_chat("art-big", &["html_big"]);
     stages.extend::<Vec<Stage>>(vec![
         ("big cards", Box::new(move |_, window, elapsed| {
@@ -2453,38 +2510,20 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
                 return false;
             }
             rss.set(rss_kb());
+            s1.set(browser_launches().len());
             let started = std::time::Instant::now();
+            // As a click on the card does.
             window.global::<ArtifactBridge>().invoke_open("big-report".into());
             let took = started.elapsed().as_millis();
-            check(window.get_overlay() == "report" && window.get_report_blocks().row_count() > 0,
-                &format!("a click on the 1.16 MB report opens it in Clarp's viewer: overlay {:?}, {} blocks", window.get_overlay(), window.get_report_blocks().row_count()));
-            check(took < 1_500, &format!("big report shown in {took} ms on the GUI thread (a debug build)"));
-            check(shown(window) == (true, false), &format!("the window stays shown: {:?}", shown(window)));
-            check(window.get_report_links() >= 4, &format!("its web links are listed: {}", window.get_report_links()));
-            // A fragment link has nowhere to go outside the page.
-            crate::open_link("#historier");
-            crate::updates_view::open_report_link(0);
+            check(took < 1_500, &format!("the click held the window {took} ms (a debug build)"));
             true
         })),
-        ("a link in it", Box::new(move |_, window, elapsed| {
-            let calls = opener_calls();
-            if calls.is_empty() && elapsed < Duration::from_secs(5) {
-                return false;
-            }
-            check(calls == ["https://www.digdir.no/media/2291/download"], &format!("its first link opens in the system browser, the fragment link nowhere: {calls:?}"));
-            check(leaks(&calls.join(" ")).is_empty(), "with no credential");
-            check(window.get_overlay() == "report", "and the report stays open");
-            headless::press(slint::platform::Key::Escape);
-            true
-        })),
-        back_to_chat("after a click"),
+        launched("click", s2, "Agentretten"),
         ("from Updates", Box::new(|_, window, _| {
             window.invoke_open_report("big-report".into());
-            check(window.get_overlay() == "report" && window.get_report_blocks().row_count() > 0, &format!("Updates opens the big report: overlay {:?}", window.get_overlay()));
-            headless::press(slint::platform::Key::Escape);
             true
         })),
-        back_to_chat("after Updates"),
+        launched("Updates", s3, "Agentretten"),
         ("keyboard", Box::new(|app, _, _| {
             crate::artifacts_view::leave(app);
             app.focus_transcript();
@@ -2510,49 +2549,27 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
             headless::press("o");
             true
         })),
-        ("report by O", Box::new(|_, window, elapsed| {
-            if window.get_overlay() != "report" && elapsed < Duration::from_secs(2) {
-                return false;
-            }
-            check(window.get_overlay() == "report", &format!("O opens the big report: overlay {:?}", window.get_overlay()));
-            headless::press(slint::platform::Key::Escape);
-            true
-        })),
-        back_to_chat("after O"),
-        ("connected copy", Box::new(move |_, window, _| {
-            launches_before.set(browser_launches().len());
+        launched("O", s4, "Agentretten"),
+        ("connected copy", Box::new(|_, window, _| {
             window.global::<ArtifactBridge>().invoke_open("big-net".into());
             true
         })),
-        ("connected copy opens", Box::new(move |_, window, elapsed| {
-            let launches = browser_launches();
-            if launches.len() <= launches_before2.get() {
-                if elapsed > Duration::from_secs(8) {
-                    check(false, "the big report with a connection opens in the browser");
-                    return true;
-                }
-                return false;
-            }
-            let (pid, args) = launches.last().cloned().unwrap_or_default();
-            let page = browser_page(&pid);
-            check(args.iter().any(|a| a == "--new-window") && page.starts_with("HTTP/1.1 200") && page.len() > 1_158_099 && page.contains("data:image/webp"),
-                &format!("the big report with a connection is served whole to a new browser window: {} bytes", page.len()));
-            check(leaks(&page).is_empty(), "with no credential");
-            check(shown(window) == (true, false), &format!("the window stays shown: {:?}", shown(window)));
-            true
-        })),
+        launched("a report with a grant", s5, "Agentretten"),
         ("pointer click", Box::new(move |app, window, _| {
             app.focus_transcript();
-            let (launches, opener) = (browser_launches().len(), window.get_overlay());
             let mut clicked = None;
             for y in (300..=700).rev().step_by(12) {
                 super::click_at(window, 560.0, y as f32);
-                if browser_launches().len() > launches || window.get_overlay() != opener {
+                if browser_launches().len() > s6.get() {
                     clicked = Some(y);
                     break;
                 }
             }
             check(clicked.is_some(), &format!("a real click on the latest big card opens it (at y {clicked:?})"));
+            true
+        })),
+        launched("pointer", s7, "Agentretten"),
+        ("alive", Box::new(move |_, window, _| {
             let grew = rss_kb().saturating_sub(rss2.get());
             check(shown(window) == (true, false), &format!("Clarp is alive and shown after every route; memory grew {grew} kB"));
             true

@@ -110,6 +110,15 @@ a tab of the browser's last window: that window may be on another workspace,
 and a compositor that follows activation would take Clarp out of view with it.
 Other browsers get the system opener, which is waited for so it is reaped.
 
+On the desktop a read-only report opens on its own loopback page without
+any bridge (no `window.clarpForm`), and may load scripts, styles, pictures,
+fonts, media and frames and fetch over HTTPS only: no `http:`, `ws:` or
+loopback source, no form submission, `Referrer-Policy: no-referrer`, the
+policy sent as a header too. The page holds no Host token, cookie or
+origin. Links that leave the page open in a new browser tab. Forms keep the
+contract-59 policy above unchanged. This is desktop-only, agreed with the
+contract owner; the Host's `/artifacts/<id>/html` is unchanged.
+
 ## Version-bound network connections (Host contract 59)
 
 Forms and read-only reports default to blocking external connections. Publish

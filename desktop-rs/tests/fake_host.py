@@ -411,18 +411,22 @@ def artifact_fixtures(kind, session, now_ms):
              "answer_schema": {"type": "object", "properties": {"dish": {"type": "string"}}}},
         ]
     if kind == "html_open":
-        # Pages that reach out: an external script, picture, font and fetch.
-        outside = ("<script src=\"https://cdn.example.com/chart.js\"></script>"
-                   "<link rel=\"stylesheet\" href=\"https://fonts.example.com/css\">"
-                   "<img src=\"https://images.example.com/logo.png\" alt=\"logo\">"
-                   "<script>fetch('https://api.example.com/rates').catch(() => {});</script>")
+        # Pages that reach out: an external script, stylesheet, picture and
+        # fetch, each marked with the page it came from, and a link away.
+        def outside(page):
+            return ("<script src=\"https://cdn.example.com/chart.js?from=%s\"></script>"
+                    "<link rel=\"stylesheet\" href=\"https://fonts.example.com/css?from=%s\">"
+                    "<img src=\"https://images.example.com/logo.png?from=%s\" alt=\"logo\">"
+                    "<script>fetch('https://api.example.com/rates?from=%s').then(r => r.text()).then(t => {"
+                    "document.title = 'fetched ' + t;}, () => {});</script>"
+                    "<a href=\"https://links.example.com/away?from=%s\">away</a> <a href=\"#top\">top</a>") % ((page,) * 5)
         return [
             {"artifact_id": "open-report", "type": "html_form", "status": "ready", "session": s, "version": 1, "read_only": True,
-             "title": "Exchange rates", "summary": "Live rates, read only.", "connect_origins": ["https://api.example.com"],
-             "content": "<h1>Rates</h1><p id=\"rates\">Loading</p>" + outside,
+             "title": "Exchange rates", "summary": "Live rates, read only.",
+             "content": "<h1 id=\"top\">Rates</h1><p id=\"rates\">Loading</p>" + outside("report"),
              "answer_schema": {"type": "object", "properties": {}}},
             {"artifact_id": "open-form", "type": "html_form", "status": "active", "session": s, "version": 1,
-             "title": "Pick a currency", "summary": "", "content": "<form><input name=\"currency\"></form>" + outside,
+             "title": "Pick a currency", "summary": "", "content": "<form><input name=\"currency\"></form>" + outside("form"),
              "answer_schema": {"type": "object", "properties": {"currency": {"type": "string"}}}},
         ]
     if kind == "html_big":

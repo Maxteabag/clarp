@@ -181,6 +181,11 @@ pub fn next_attention(app: &Rc<App>, window: &AppWindow) {
 // ---- the report viewer ------------------------------------------------------
 
 pub fn open_report(app: &App, window: &AppWindow, artifact_id: &str) {
+    // An HTML report opens in the browser, as from its card.
+    if crate::artifacts_view::is_html_form(app, artifact_id) {
+        crate::artifacts_view::open(app, window, artifact_id);
+        return;
+    }
     REPORT.with(|r| *r.borrow_mut() = artifact_id.to_owned());
     commands::open_overlay(app, window, "report");
     let started = std::time::Instant::now();
