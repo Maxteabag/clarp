@@ -344,6 +344,34 @@ def iso_at(ms, offset_hours=0):
     return datetime.datetime.fromtimestamp(ms / 1000, zone).isoformat(timespec="seconds")
 
 
+def big_report():
+    """A 1.16 MB self-contained HTML report (see the html_big fixture)."""
+    import base64, random
+    rng = random.Random(7)
+    blob = lambda n: base64.b64encode(bytes(rng.getrandbits(8) for _ in range(n * 3 // 4))).decode()[:n]
+    links = ["https://www.digdir.no/media/2291/download", "https://lovdata.no/lov/2017-06-16-51/§18",
+             "https://info.altinn.no/nyheter/enklere-tilgangsstyring-i-nye-altinn/", "https://www.err.ee/1610076352/"]
+    style = ("@font-face{font-family:\"Archivo\";src:url(data:font/woff2;base64," + blob(150_000) + ") format(\"woff2\")}"
+             + "".join(".c%d{margin:%dpx;background:url(data:image/png;base64,%s)}" % (i, i, blob(3_000)) for i in range(16)))
+    script = ("(function(){const s=document.querySelectorAll('section');for(let i=0;i<s.length;i++){if(i<3&&s[i].offsetTop>0){"
+              "s[i].classList.add('seen')}}document.querySelectorAll('a[href^=\"#\"]').forEach(a=>a.addEventListener('click',e=>{}));"
+              "/* filler */" + "x".join(str(i) for i in range(4_000)) + "})();")
+    sizes = [114_551, 20_015, 20_547, 21_495, 79_895, 70_267, 60_559, 60_935, 50_755, 63_151, 53_271, 66_531]
+    parts = ['<!doctype html><html lang="nb"><head><meta charset="utf-8"><title>Agentretten</title><style>', style,
+             '</style></head><body><nav><a class="logo" href="#">§ Agentretten</a> <a href="#historier">Historiene</a> '
+             '<a href="#fakta">Fakta</a></nav>']
+    for i, size in enumerate(sizes):
+        parts.append('<section id="s%d"><h2>Del %d: Du er ikke en maskin</h2>' % (i, i))
+        parts.append('<img alt="illustrasjon %d" src="data:image/webp;base64,%s">' % (i, blob(size)))
+        for j in range(12):
+            parts.append('<p>Likevel bruker norske systemer kroppen og hodet ditt som grensesnitt &amp; det koster tid. '
+                         'Se <a href="%s">kilden</a> og <a href="#fakta">fakta</a>.</p>' % links[(i + j) % len(links)])
+        parts.append('</section>')
+    parts += ['<script>', script, '</script></body></html>']
+    html = "".join(parts)
+    return html + "<!--" + "p" * max(0, 1_158_099 - len(html) - 7) + "-->"
+
+
 def artifact_fixtures(kind, session, now_ms):
     """Realistic artifacts of one type, as the Host's flat-v1 list returns
     them: long titles, failed and expired states, missing parts."""
@@ -396,6 +424,18 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "open-form", "type": "html_form", "status": "active", "session": s, "version": 1,
              "title": "Pick a currency", "summary": "", "content": "<form><input name=\"currency\"></form>" + outside,
              "answer_schema": {"type": "object", "properties": {"currency": {"type": "string"}}}},
+        ]
+    if kind == "html_big":
+        # The shape of a real 1.16 MB report: a 200 KB style with a data: font,
+        # twelve data: WebP pictures, a 23 KB inline script, ~600 tags of
+        # text, fragment links and plain external links.
+        return [
+            {"artifact_id": "big-report", "type": "html_form", "status": "ready", "session": s, "version": "1", "read_only": True,
+             "title": "Agentretten, offentlig stil", "summary": "A long self-contained report.",
+             "content": big_report(), "answer_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
+            {"artifact_id": "big-net", "type": "html_form", "status": "ready", "session": s, "version": "1", "read_only": True,
+             "title": "The same report, with a connection", "summary": "", "connect_origins": ["https://api.example.com"],
+             "content": big_report(), "answer_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
         ]
     if kind == "decision":
         def decision(did, status, revision=4, **more):

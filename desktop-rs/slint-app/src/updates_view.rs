@@ -183,7 +183,9 @@ pub fn next_attention(app: &Rc<App>, window: &AppWindow) {
 pub fn open_report(app: &App, window: &AppWindow, artifact_id: &str) {
     REPORT.with(|r| *r.borrow_mut() = artifact_id.to_owned());
     commands::open_overlay(app, window, "report");
+    let started = std::time::Instant::now();
     show_report(app, window);
+    eprintln!("clarp-slint: report {artifact_id} shown in {} ms ({} blocks)", started.elapsed().as_millis(), slint::Model::row_count(&window.get_report_blocks()));
     // The keyboard reads it (arrows, Page keys, 1-9 for its links).
     window.invoke_focus_report();
 }

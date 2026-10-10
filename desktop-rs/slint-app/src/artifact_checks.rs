@@ -2410,5 +2410,151 @@ pub(super) fn artifact_open_check(out: String) {
             true
         })),
     ]);
+    stages.extend(big_report_stages(&out));
     run_stages(stages);
+}
+
+/// What the fake `xdg-open` was handed (`CLARP_TEST_OPENER_LOG`).
+fn opener_calls() -> Vec<String> {
+    let log = std::env::var("CLARP_TEST_OPENER_LOG").unwrap_or_default();
+    std::fs::read_to_string(&log).unwrap_or_default().lines().map(str::to_owned).collect()
+}
+
+fn rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status").unwrap_or_default().lines()
+        .find_map(|l| l.strip_prefix("VmRSS:")).and_then(|v| v.split_whitespace().next()?.parse().ok()).unwrap_or(0)
+}
+
+/// Waits for the report viewer to close, then checks Clarp is still shown
+/// with its chat.
+fn back_to_chat(what: &'static str) -> Stage {
+    (what, Box::new(move |_, window, elapsed| {
+        if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+            return false;
+        }
+        check(window.get_overlay().is_empty() && !rows(window).is_empty() && shown(window) == (true, false),
+            &format!("{what}: Escape returns to the chat, the window still shown: overlay {:?} {:?}", window.get_overlay(), shown(window)));
+        true
+    }))
+}
+
+/// A report of the shape that was said to close Clarp: 1.16 MB, twelve
+/// data: pictures, a data: font, an inline script, plain links. Opened by
+/// every route; Clarp must stay, and its links must open in the browser.
+fn big_report_stages(_out: &str) -> Vec<Stage> {
+    let rss = Rc::new(Cell::new(0u64));
+    let (rss2, launches_before) = (rss.clone(), Rc::new(Cell::new(0usize)));
+    let launches_before2 = launches_before.clone();
+    let mut stages = load_chat("art-big", &["html_big"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("big cards", Box::new(move |_, window, elapsed| {
+            if !placed(window, &["big-report", "big-net"], elapsed) {
+                return false;
+            }
+            rss.set(rss_kb());
+            let started = std::time::Instant::now();
+            window.global::<ArtifactBridge>().invoke_open("big-report".into());
+            let took = started.elapsed().as_millis();
+            check(window.get_overlay() == "report" && window.get_report_blocks().row_count() > 0,
+                &format!("a click on the 1.16 MB report opens it in Clarp's viewer: overlay {:?}, {} blocks", window.get_overlay(), window.get_report_blocks().row_count()));
+            check(took < 5_000, &format!("big report shown in {took} ms on the GUI thread"));
+            check(shown(window) == (true, false), &format!("the window stays shown: {:?}", shown(window)));
+            check(window.get_report_links() >= 4, &format!("its web links are listed: {}", window.get_report_links()));
+            // A fragment link has nowhere to go outside the page.
+            crate::open_link("#historier");
+            crate::updates_view::open_report_link(0);
+            true
+        })),
+        ("a link in it", Box::new(move |_, window, elapsed| {
+            let calls = opener_calls();
+            if calls.is_empty() && elapsed < Duration::from_secs(5) {
+                return false;
+            }
+            check(calls == ["https://www.digdir.no/media/2291/download"], &format!("its first link opens in the system browser, the fragment link nowhere: {calls:?}"));
+            check(leaks(&calls.join(" ")).is_empty(), "with no credential");
+            check(window.get_overlay() == "report", "and the report stays open");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        back_to_chat("after a click"),
+        ("from Updates", Box::new(|_, window, _| {
+            window.invoke_open_report("big-report".into());
+            check(window.get_overlay() == "report" && window.get_report_blocks().row_count() > 0, &format!("Updates opens the big report: overlay {:?}", window.get_overlay()));
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        back_to_chat("after Updates"),
+        ("keyboard", Box::new(|app, _, _| {
+            crate::artifacts_view::leave(app);
+            app.focus_transcript();
+            true
+        })),
+        ("keyboard on the chat", Box::new(|_, _, elapsed| {
+            if !report().transcript_focused && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            headless::press("k");
+            headless::press("k");
+            true
+        })),
+        ("Enter on the report", Box::new(|_, window, elapsed| {
+            if selected(window) != "big-report" {
+                if elapsed > Duration::from_secs(2) {
+                    check(false, &format!("K K selects the big report: {:?}", selected(window)));
+                    return true;
+                }
+                return false;
+            }
+            headless::press(slint::platform::Key::Return);
+            true
+        })),
+        ("report by Enter", Box::new(|_, window, elapsed| {
+            if window.get_overlay() != "report" && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            check(window.get_overlay() == "report", &format!("Enter opens the big report: overlay {:?}", window.get_overlay()));
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        back_to_chat("after Enter"),
+        ("connected copy", Box::new(move |_, window, _| {
+            launches_before.set(browser_launches().len());
+            window.global::<ArtifactBridge>().invoke_open("big-net".into());
+            true
+        })),
+        ("connected copy opens", Box::new(move |_, window, elapsed| {
+            let launches = browser_launches();
+            if launches.len() <= launches_before2.get() {
+                if elapsed > Duration::from_secs(8) {
+                    check(false, "the big report with a connection opens in the browser");
+                    return true;
+                }
+                return false;
+            }
+            let (pid, args) = launches.last().cloned().unwrap_or_default();
+            let page = browser_page(&pid);
+            check(args.iter().any(|a| a == "--new-window") && page.starts_with("HTTP/1.1 200") && page.len() > 1_158_099 && page.contains("data:image/webp"),
+                &format!("the big report with a connection is served whole to a new browser window: {} bytes", page.len()));
+            check(leaks(&page).is_empty(), "with no credential");
+            check(shown(window) == (true, false), &format!("the window stays shown: {:?}", shown(window)));
+            true
+        })),
+        ("pointer click", Box::new(move |app, window, _| {
+            app.focus_transcript();
+            let (launches, opener) = (browser_launches().len(), window.get_overlay());
+            let mut clicked = None;
+            for y in (300..=700).rev().step_by(12) {
+                super::click_at(window, 560.0, y as f32);
+                if browser_launches().len() > launches || window.get_overlay() != opener {
+                    clicked = Some(y);
+                    break;
+                }
+            }
+            check(clicked.is_some(), &format!("a real click on the latest big card opens it (at y {clicked:?})"));
+            let grew = rss_kb().saturating_sub(rss2.get());
+            check(shown(window) == (true, false), &format!("Clarp is alive and shown after every route; memory grew {grew} kB"));
+            true
+        })),
+    ]);
+    stages
 }
