@@ -109,12 +109,28 @@ def app_turn_instructions(*, voice: bool, session: str = "") -> str:
     quiet default, so a caller with no session in hand is unchanged.
     """
     body = _APP_TURN_GUIDANCE
+    identity = _identity_line(session)
+    if identity:
+        body = f"{body}\n\n{identity}"
     if voice:
         body = f"{body}\n\n{voice_instructions(session)}"
     header = _group_call_header(session)
     if header:
         body = f"{body}\n\n{header}"
     return body
+
+
+def _identity_line(session: str) -> str:
+    """This turn's own agent, stated every turn (lib.clarp_guidance.identity_line)."""
+    if not session:
+        return ""
+    try:
+        from . import agents as agents_db
+        persona = str((agents_db.get_by_session(session) or {}).get("persona") or "")
+    except Exception:  # noqa: BLE001 - a prompt line must never fail a turn
+        persona = ""
+    from .clarp_guidance import identity_line
+    return identity_line(persona, session)
 
 
 def _group_call_header(session: str) -> str:

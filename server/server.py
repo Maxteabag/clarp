@@ -4190,6 +4190,16 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return who.principal
 
+    def _turn_caller(self) -> str:
+        """The agent whose Clarp turn sent this request (X-Clarp-Turn), or ""."""
+        from lib import turn_identity
+        from lib.provider_background_jobs import TURN_ENV
+        try:
+            return turn_identity.caller_agent_id(
+                {TURN_ENV: (getattr(self, "headers", None) or {}).get("X-Clarp-Turn", "")})
+        except Exception:  # noqa: BLE001 - no proof means no refusal
+            return ""
+
     def _calls_by(self, data: dict) -> str:
         """The agent making a change: its turn identity, else the session it names."""
         from lib import turn_identity
@@ -5546,6 +5556,7 @@ class Handler(BaseHTTPRequestHandler):
                 ),
                 orchestrator_fallback=getattr(
                     self, "_orchestrator_fallback_request", False),
+                caller_agent_id=self._turn_caller(),
             )
         except SendRequestError as e:
             return self._send_request_error(e)

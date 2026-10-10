@@ -4220,3 +4220,32 @@ def test_a_bookkeeping_delegate_cannot_start_agents_whatever_parent_it_names(run
     assert not agents_db.get_by_session("ghost-a") and not agents_db.get_by_session("ghost-b")
     # The principal's own turn still starts helpers.
     assert create("helper-c", "boss", token(boss_id)) == 200
+
+
+def test_a_turn_cannot_send_as_another_agent(running_server):
+    # 2026-10-10: Koko, a copy of Theo's conversation, kept acting as Theo and
+    # sent requests --from theo-97e5 from its own turn.
+    import os
+    base, ctx, _srv = running_server
+    from lib import agents as agents_db, provider_background_jobs as turns
+    theo = agents_db.create_agent(persona="Theo", voice_id="v", cwd=str(ctx.root), session="theo")
+    koko = agents_db.create_agent(persona="Koko", voice_id="v", cwd=str(ctx.root), session="koko")
+    agents_db.create_agent(persona="Marcus", voice_id="v", cwd=str(ctx.root), session="marcus")
+    token = turns.new_turn_token()
+    turns.turn_started(token, agent_id=koko, provider="claude", pid=os.getpid())
+
+    def send(sender, turn):
+        body = {"session": "marcus", "text": "Theo here for Peter", "sender": sender,
+                "origin": "agent", "force_session": True, "synthesize_audio": False}
+        try:
+            return _post_with_headers(base + "/send", body, {"X-Clarp-Turn": turn} if turn else {})
+        except urllib.error.HTTPError as error:
+            return error.code, error.read()
+
+    status, detail = send("theo", token)
+    assert status == 403 and b"this turn belongs to koko" in detail
+    assert agents_db.conn().execute(
+        "SELECT COUNT(*) FROM messages WHERE sender_agent_id=?", (theo,)).fetchone()[0] == 0
+    assert send("koko", token)[0] == 200
+    # No turn token (a plain shell): the Host has no proof either way.
+    assert send("theo", "")[0] == 200

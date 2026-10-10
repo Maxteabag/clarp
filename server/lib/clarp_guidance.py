@@ -20,3 +20,23 @@ CLARP_SKILLS_GUIDANCE = (
     "inside those workflows and wherever no Clarp skill applies, and explicit "
     "user instructions come first."
 )
+
+
+def identity_line(persona: str, session: str) -> str:
+    """Who this turn belongs to, stated every turn.
+
+    A fork or a copied conversation keeps its source's whole history, in which
+    the model spoke as the source agent. On 2026-10-10 a copy of Theo, adopted
+    as Koko, kept acting as Theo: it sent requests --from theo-97e5 and deleted
+    its own agent as a stray. The Host refuses a sender that is not the turn's
+    own (lib.send_request); this line keeps the model from trying.
+    """
+    session = (session or "").strip()
+    if not session:
+        return ""
+    persona = (persona or "").strip()
+    who = f"{persona} (Clarp session {session})" if persona else f"Clarp session {session}"
+    return (f"This turn belongs to {who}. That is who you are now, even where earlier "
+            "conversation history says otherwise: a fork or a copied conversation keeps "
+            f"its source's history. Clarp tools act as you; where one asks for --from, "
+            f"it is {session}.")
