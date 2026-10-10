@@ -289,6 +289,9 @@ pub fn settle_downloads(app: &App, session: &str) {
         let Some(result) = app.engine.borrow_mut().take_artifact_bytes(&id, &purpose) else { continue };
         FETCHING.with(|f| f.borrow_mut().remove(&(id.clone(), purpose.clone())));
         match (purpose.as_str(), result) {
+            // A small picture decodes at once, in its row's first drawing;
+            // a large one off the UI thread.
+            ("image", Ok(bytes)) if picture_is_small(&bytes) => store_picture(id, picture_pixels(&bytes)),
             ("image", Ok(bytes)) => decode_picture_later(id, bytes),
             ("image", Err(error)) => {
                 eprintln!("clarp-slint: no image at {id}: {error}");
@@ -417,6 +420,18 @@ thread_local! {
 /// thread; the window never shows one larger than this.
 const PICTURE_SIDE: u32 = 2048;
 
+/// Pictures up to this many pixels (a 1280×800 screenshot) decode on the UI
+/// thread: a few milliseconds, and the row is drawn with them.
+const SMALL_PICTURE: u64 = 1280 * 800;
+
+fn picture_is_small(bytes: &[u8]) -> bool {
+    image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()
+        .and_then(|reader| reader.into_dimensions().ok())
+        .is_some_and(|(width, height)| u64::from(width) * u64::from(height) <= SMALL_PICTURE)
+}
+
 /// One picture decodes at a time: a 4K one needs ~50 MB while it is made,
 /// and six landing together held 300 MB at once.
 static DECODING: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -456,7 +471,15 @@ fn picture_pixels(bytes: &[u8]) -> Result<slint::SharedPixelBuffer<slint::Rgba8P
     Ok(slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height()))
 }
 
+/// A picture decoded off the UI thread: stored, and the chats drawn again.
 fn picture_landed(id: String, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
+    store_picture(id, pixels);
+    if let Some(app) = crate::app() {
+        app.refresh(&[Change::Updates]);
+    }
+}
+
+fn store_picture(id: String, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
     let picture = match pixels {
         Ok(pixels) => Picture::Loaded(slint::Image::from_rgba8(pixels)),
         Err(error) => {
@@ -466,9 +489,6 @@ fn picture_landed(id: String, pixels: Result<slint::SharedPixelBuffer<slint::Rgb
     };
     PICTURES.with(|p| p.borrow_mut().insert(id, picture));
     PICTURES_LANDED.with(|l| l.set(l.get() + 1));
-    if let Some(app) = crate::app() {
-        app.refresh(&[Change::Updates]);
-    }
 }
 
 /// iOS `mediaRequest`: clarp-media://asset/<id> and /media/... (or
@@ -1916,6 +1936,7 @@ mod picture_tests {
         assert_eq!((big.width(), big.height()), (PICTURE_SIDE, 1152));
         let small = picture_pixels(&png(400, 240)).expect("decodes");
         assert_eq!((small.width(), small.height()), (400, 240));
+        assert!(super::picture_is_small(&png(400, 240)) && !super::picture_is_small(&png(3840, 2160)));
         assert!(picture_pixels(b"not an image").is_err());
     }
 }
