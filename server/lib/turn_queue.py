@@ -53,9 +53,12 @@ def park(*, queue_id: str, agent_id: str, session: str, text: str,
 
 # --- release drain ---------------------------------------------------------------
 #
-# Work the release drain holds keeps the right to run past a Stop pause when it
-# had that right on arrival (a normal send, or fresh user intent). The runtime
-# that recovers it after the handoff reads ``allow_paused``.
+# Work the release drain holds keeps the right to run past an existing Stop
+# pause that it already had on arrival (a normal send, a peer message, fresh
+# user intent, an explicit send-now; never a goal wake, whose right recovery
+# re-checks). It only persists that right: any later Stop clears it
+# (``set_paused``). The runtime that recovers the work after the handoff reads
+# ``allow_paused``.
 
 def allow_paused(queue_id: str) -> bool:
     cursor = db.conn().execute(
@@ -546,6 +549,14 @@ def is_paused(agent_id: str) -> bool:
 
 
 def set_paused(agent_id: str, paused: bool) -> bool:
+    if paused:
+        # A Stop (the only pauser) takes back every right the release drain
+        # persisted for this agent's waiting work, as it does for work waiting
+        # in memory when the runtime restarts: nothing queued before this Stop
+        # runs past it after a handoff. Also when the queue was already paused.
+        db.conn().execute(
+            "UPDATE queued_turns SET allow_paused = 0"
+            " WHERE agent_id = ? AND allow_paused = 1", (agent_id,))
     if is_paused(agent_id) == paused:
         return False
     db.conn().execute(
