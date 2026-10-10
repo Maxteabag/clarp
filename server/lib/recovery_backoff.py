@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 BASE_S = 1.0
 MAX_S = 60.0
 PARK_AFTER = 8
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 
 
 @dataclass
@@ -33,6 +34,7 @@ class Backoff:
 def signature(error: BaseException) -> str:
     """Failures that differ only in ids, counts or times are identical."""
     text = f"{type(error).__name__}: {error}"
+    text = _UUID.sub("<id>", text)
     return re.sub(r"[0-9a-f]{6,}|\d+", "#", text)[:300]
 
 

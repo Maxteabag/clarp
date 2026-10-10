@@ -8,17 +8,18 @@ stopped, and leave a user pause and an account-recovery wait as they were.
 """
 import itertools
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
 
-from lib import activity, codex_app_server, turn_lifecycle, turn_queue
+from lib import activity, codex_app_server, recovery_backoff, turn_lifecycle, turn_queue
 from lib import agents as agents_db
 from lib.account_failover import Attempt
 from lib.protocol import AgentState
 from lib.turn_dispatch import DispatchError, TurnDispatchService
 import lib.turn_dispatch as _td
-from tests.unit.test_codex_app_server import _install_fake_codex
+from tests.unit.test_codex_app_server import _install_fake_codex, _spawn_fake_turn
 
 THREAD = "c59fbeda-de2d-4989-a7a8-4683580325e9"
 
@@ -80,8 +81,16 @@ def broken(tmp_path, monkeypatch):
         except DispatchError:
             pass
 
+    def requests(method):
+        log = home / "turn-requests.jsonl"
+        if not log.exists():
+            return []
+        return [line for line in log.read_text().splitlines()
+                if json.loads(line)["method"] == method]
+
     return SimpleNamespace(service=service, agent_id=agent_id, run_for=run_for,
-                           resumes=resumes, send=send, timers=timers)
+                           resumes=resumes, send=send, timers=timers, home=home,
+                           requests=requests, tmp_path=tmp_path)
 
 
 def test_an_unreadable_thread_is_retried_a_bounded_number_of_times(broken):
@@ -96,6 +105,10 @@ def test_an_unreadable_thread_is_retried_a_bounded_number_of_times(broken):
     # send plus eight recovery attempts, then nothing more is scheduled.
     assert broken.resumes() == 9
     assert not broken.timers
+    # Eight identical failures, the real Codex text each time.
+    backoff = _td._RECOVERY_BACKOFF.snapshot()[broken.agent_id]
+    assert backoff["parked"] and backoff["identical"] == 8
+    assert "thread/resume" in backoff["error"] and backoff["error"].endswith("is empty'}")
     # The message is still queued, exactly as it was.
     assert turn_queue.pending(broken.agent_id) == queued
     assert not turn_queue.is_paused(broken.agent_id)
@@ -144,6 +157,97 @@ def test_an_account_recovery_wait_is_not_overridden(broken):
         assert [row["trace_id"] for row in turn_queue.pending(agent_id)] == ["t1"]
         state = agents_db.latest_state(agent_id)
         assert activity.live_state(state["kind"], state["detail"]) == "limited"
+        assert _td._RECOVERY_BACKOFF.snapshot() == {}
+    finally:
+        failover.attempts.pop(agent_id, None)
+
+
+def test_the_codex_unreadable_thread_error_is_one_failure_whatever_the_thread(broken):
+    other = "0a1b2c3d-ab3f-4e5f-9a8b-112233445566"
+    (broken.home / "sessions" / f"rollout-{other}.jsonl").write_text("")
+    errors = []
+    for thread in (THREAD, other):
+        with pytest.raises(RuntimeError) as caught:
+            _spawn_fake_turn(broken.tmp_path, agent_id=broken.agent_id, session="miso",
+                             text="x", backend_session_id=thread, is_new_session=False)
+        errors.append(caught.value)
+
+    assert "is empty" in str(errors[0]) and other in str(errors[1])
+    assert recovery_backoff.signature(errors[0]) == recovery_backoff.signature(errors[1])
+
+
+def test_a_queue_paused_during_backoff_is_neither_resumed_nor_unpaused(broken):
+    broken.send("t1")
+    broken.run_for(10)
+    tried = broken.resumes()
+    assert 1 < tried < 9
+    turn_queue.set_paused(broken.agent_id, True)
+    queued = turn_queue.pending(broken.agent_id)
+
+    broken.run_for(3600)
+
+    assert turn_queue.is_paused(broken.agent_id)
+    assert broken.resumes() == tried
+    assert turn_queue.pending(broken.agent_id) == queued
+
+
+def test_clearing_a_park_does_not_start_a_paused_queue(broken):
+    broken.send("t1")
+    broken.run_for(3600)
+    assert _td._RECOVERY_BACKOFF.snapshot()[broken.agent_id]["parked"]
+    turn_queue.set_paused(broken.agent_id, True)
+    queued = turn_queue.pending(broken.agent_id)
+    tried = broken.resumes()
+
+    broken.service.repair_slot(broken.agent_id, actor="test", reason="retry")
+    broken.run_for(3600)
+
+    assert broken.agent_id not in _td._RECOVERY_BACKOFF.snapshot()
+    assert turn_queue.is_paused(broken.agent_id)
+    assert broken.resumes() == tried
+    assert turn_queue.pending(broken.agent_id) == queued
+
+
+def _account_wait(agent_id, trace):
+    failover = _td.account_failover("codex")
+    _td._SLOTS.claim(agent_id, trace)
+    failover.attempts[agent_id] = Attempt(
+        agent_id=agent_id, trace_id=trace, model="", state={"account_recovery": True},
+        owned=lambda: True, pause=lambda: None, resume=lambda: None)
+    turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.ACCOUNT_RECOVERY_WAIT, {
+        "trace_id": trace, "account_recovery": "waiting",
+        "message": "Waiting for a codex account with available usage"}, force=True)
+    return failover
+
+
+def test_an_account_recovery_release_launches_the_queued_message_once(broken):
+    agent_id = broken.agent_id
+    # The thread is readable here: the account wait is the only thing holding.
+    (broken.home / "sessions" / f"rollout-{THREAD}.jsonl").write_text(
+        json.dumps({"type": "session_meta", "payload": {"id": THREAD}}) + "\n")
+    failover = _account_wait(agent_id, "tA")
+    try:
+        broken.send("t1")
+        broken.run_for(600)
+        assert broken.requests("turn/start") == []
+
+        # The account frees up: the held turn settles and hands over, while
+        # a recovery pass runs at the same moment.
+        failover.attempts.pop(agent_id, None)
+        broken.service._finish_slot(agent_id, "tA", "codex")
+        broken.service.recover_queued()
+        deadline = time.time() + 8
+        while time.time() < deadline and turn_queue.pending(agent_id):
+            time.sleep(0.05)
+        broken.run_for(600)
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            time.sleep(0.05)
+            broken.run_for(1)
+
+        starts = [line for line in broken.requests("turn/start") if "message t1" in line]
+        assert len(starts) == 1
+        assert turn_queue.pending(agent_id) == []
         assert _td._RECOVERY_BACKOFF.snapshot() == {}
     finally:
         failover.attempts.pop(agent_id, None)
