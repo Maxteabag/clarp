@@ -49,7 +49,9 @@ def test_a_profile_agent_never_dreams(agents, monkeypatch):
     assert dreaming.dispatch_isolated_dream(_row(agents.eu), "dream") is False
 
 
-def test_the_routing_model_sees_a_profile_agents_name_but_not_its_messages(agents):
+def test_the_routing_model_never_sees_a_profile_agent(agents):
+    """Not a voice target (can_voice_target is false): the EU agent is not in
+    the routing packet at all, so neither its messages nor its state are."""
     from lib.orchestrator import build_context_packet, get_settings, record_routing_message
     record_routing_message(session="plain", role="user", text="check the logs")
     record_routing_message(session="eu", role="user", text="customer invoice 4711")
@@ -59,8 +61,7 @@ def test_the_routing_model_sees_a_profile_agents_name_but_not_its_messages(agent
 
     shown = {agent["session"]: agent for agent in packet["agents"]}
     assert shown["plain"]["recent_user_messages"][-1]["text"] == "check the logs"
-    assert shown["eu"]["recent_user_messages"] == []
-    assert shown["eu"]["state"] is None or "4711" not in json.dumps(shown["eu"]["state"])
+    assert "eu" not in shown
     assert "4711" not in json.dumps(packet)
 
 
