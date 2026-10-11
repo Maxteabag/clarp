@@ -160,3 +160,40 @@ def test_lifting_the_release_fence_after_a_stop_holds_pre_stop_work(tmp_path):
         "p1", "h1", "a1"]
     _resume(world)
     assert world.started == ["t0", "p1", "h1", "a1"]
+
+
+def _stop_with_arrivals(world, arrivals):
+    """A Stop with sends admitted while its barrier is up."""
+    snapshot, _dropped, _was = td.begin_stop(world.agent)
+    world.provider.interrupt("claude", world.agent)
+    for cid, origin, queue in arrivals:
+        world.send(cid, origin=origin, queue=queue)
+    td.complete_stop(world.service.ctx, world.agent, snapshot, set(),
+                     backend_registry=world.provider)
+
+
+def test_a_database_error_while_holding_loses_no_queued_work(tmp_path, monkeypatch):
+    """"database is locked" mid-hold: every spec taken from memory goes back,
+    in order; the retried handover then holds or starts each one."""
+    import sqlite3
+    world = World(tmp_path)
+    world.send("t0")
+    world.send("p_pre", origin="agent", queue=True)
+    world.send("p_pre2", origin="agent", queue=True)
+    real_get, failed = turn_queue.get, []
+
+    def flaky_get(queue_id):
+        if queue_id == "p_pre2" and not failed:
+            failed.append(queue_id)
+            raise sqlite3.OperationalError("database is locked")
+        return real_get(queue_id)
+
+    monkeypatch.setattr(turn_queue, "get", flaky_get)
+    _stop_with_arrivals(world, [("u_mid", "user", False)])
+    assert failed == ["p_pre2"]
+    world.service._retry_handoff(world.agent)   # the scheduled retry
+    world.settle()
+    assert world.started == ["t0", "u_mid"]
+    assert _waiting(world) == ["p_pre", "p_pre2"]
+    _resume(world)
+    assert world.started == ["t0", "u_mid", "p_pre", "p_pre2"]

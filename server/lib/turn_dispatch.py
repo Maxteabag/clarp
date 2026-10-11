@@ -2039,27 +2039,42 @@ class TurnDispatchService:
         with _TURN_LOCK:
             later = (_SLOTS.take_queued(agent_id)
                      if _SLOTS.owns(agent_id, spec.trace_id) else [])
+        taken = [spec, *later]
         kept: list[_TurnSpec] = []
         held: list[str] = []
         stuck: set[str] = set()
         reorder = False
-        for item in [spec, *later]:
-            if item is not spec and not _stop_holds(item):
-                kept.append(item)
-                continue
-            row_id = item.queue_id
-            if not row_id:
-                row_id = item.park_id or _park(item)
-                if not row_id:
-                    # It cannot be made durable: memory keeps it, unstarted.
+        try:
+            for index, item in enumerate(taken):
+                if item is not spec and not _stop_holds(item):
                     kept.append(item)
-                    stuck.add(item.trace_id)
                     continue
-                turn_queue.requeue_rows([row_id])
-                reorder = True
-            elif reorder:
-                turn_queue.move_to_back(row_id)
-            held.append(row_id)
+                row_id = item.queue_id
+                if not row_id:
+                    row_id = item.park_id or _park(item)
+                    if not row_id:
+                        # It cannot be made durable: memory keeps it, unstarted.
+                        kept.append(item)
+                        stuck.add(item.trace_id)
+                        continue
+                    turn_queue.requeue_rows([row_id])
+                    # From here its queue row is the work; a copy put back
+                    # below must not run it a second time beside that row.
+                    taken[index] = replace(item, queue_id=row_id, park_id="")
+                    reorder = True
+                elif reorder:
+                    turn_queue.move_to_back(row_id)
+                held.append(row_id)
+        except Exception as exc:  # noqa: BLE001 - nothing taken may be lost
+            # A failed write ("database is locked") leaves the split unknown:
+            # everything taken goes back, in order, and the head is tried again
+            # later, held or started then.
+            log_exception("queuedHoldFail", exc, detail=spec.session)
+            with _TURN_LOCK:
+                _SLOTS.put_front(agent_id, taken)
+                _SLOTS.release(agent_id, spec.trace_id)
+            self.retry_scheduler(1.0, lambda: self._retry_handoff(agent_id))
+            return
         log("queuedHeldByStop",
             f"agent={agent_id} rows={','.join(held) or '∅'} kept={len(kept)} "
             f"— queued before a Stop; waits for Resume")
