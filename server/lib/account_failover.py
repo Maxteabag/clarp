@@ -337,20 +337,23 @@ class AccountFailover:
                 self.attempts.pop(attempt.agent_id, None)
             return taken
 
-    def restore(self, attempts: list[Attempt]) -> None:
+    def restore(self, attempts: list[Attempt]) -> list[Attempt]:
         """Give back work ``take_parked`` removed whose hand-over failed. If
-        the recovery ended meanwhile it resumes now, like the rest did."""
-        resume = []
+        the recovery ended meanwhile it resumes now, like the rest did.
+        Returns the attempts parked again (only those still wait)."""
+        resume, parked = [], []
         with self.lock:
             for attempt in attempts:
                 if not attempt.owned():
                     continue
                 if self.recovering:
                     self.attempts.setdefault(attempt.agent_id, attempt)
+                    parked.append(attempt)
                 else:
                     resume.append(attempt)
             for attempt in resume:
                 attempt.resume()
+        return parked
 
     def carry_over(self, wall: float, agents=()) -> dict | None:
         """What the next runtime needs to keep this recovery's bound: when
