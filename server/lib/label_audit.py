@@ -20,7 +20,7 @@ import json
 from typing import Any
 
 from . import agents as agents_db
-from . import artifacts, background_jobs, janitors, snapshot, stale_work
+from . import artifacts, background_jobs, codex_profiles, janitors, snapshot, stale_work
 from .janitor_context import clip, redact
 
 ROLE = "label-auditor"
@@ -69,11 +69,13 @@ def candidates(now: int) -> list[dict[str, Any]]:
     tree = snapshot.helper_tree(rows, states, visible)
     jobs = background_jobs.active_by_agent()
     activity = stale_work.activities(rows)
+    profiled = codex_profiles.assigned()
     found: list[dict[str, Any]] = []
     for a in rows:
         agent_id = a["agent_id"]
         act = activity.get(agent_id)
-        if a.get("is_janitor") or a.get("archived_at") or act is None or act.busy:
+        if (a.get("is_janitor") or a.get("archived_at") or act is None or act.busy
+                or agent_id in profiled):
             continue
         if now - int(act.idle_since_ms or 0) < FRESH_GRACE_MS:
             continue

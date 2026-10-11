@@ -39,9 +39,11 @@ def _detail(event: dict) -> dict:
 
 
 def in_scope(agent: dict, attachment: dict) -> bool:
+    from . import codex_profiles
     scope = attachment.get("scope") or {}
     included, excluded = scope.get("agent_ids") or [], scope.get("exclude_agent_ids") or []
     return bool(agent.get("session") and not agent.get("is_janitor")
+                and not codex_profiles.is_profiled(str(agent.get("agent_id") or ""))
                 and not agent.get("deleted_at") and not agent.get("archived_at")
                 and agent.get("agent_id") != attachment["agent_id"]
                 and not agent["session"].startswith("dream-")

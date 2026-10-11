@@ -26,9 +26,13 @@ MAX_LENGTH = 160
 
 
 def roster() -> list[dict[str, Any]]:
-    """Live agents Oracle may delegate to: not archived, not janitors."""
+    """Live agents Oracle may delegate to: not archived, not janitors, not on
+    a provider profile (Oracle's voice provider would read their replies)."""
+    from . import codex_profiles
+    profiled = codex_profiles.assigned()
     return [a for a in agents_db.list_agents()
-            if not a.get("archived_at") and not a.get("is_janitor")]
+            if not a.get("archived_at") and not a.get("is_janitor")
+            and a["agent_id"] not in profiled]
 
 
 def resolve(name: str | None) -> dict[str, Any] | None:

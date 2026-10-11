@@ -432,10 +432,14 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
         n["redesignable"] = n["id"] in library["entities"]
         n["agents"] = sorted(n["agents"])         # JSON-serializable
 
+    # Unknown tools are designed by a model; a provider-profile agent's
+    # commands never go there.
+    from . import codex_profiles
+    profiled = codex_profiles.assigned()
     clusters = {}
     for ev in events:
         sample = ev.pop("sample", "")
-        if not ev["provisional"]:
+        if not ev["provisional"] or ev.get("agent_id") in profiled:
             continue
         hint = ev["target"].split(":", 1)[1]
         c = clusters.setdefault(hint, {"hint": hint, "count": 0, "clamped": 0, "example": sample})

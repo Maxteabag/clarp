@@ -24,7 +24,7 @@ from typing import Any, Callable
 
 from . import agents as agents_db
 from . import events, identity
-from . import backends, config, eventlog, janitor_builtins, janitors, settings_store
+from . import backends, codex_profiles, config, eventlog, janitor_builtins, janitors, settings_store
 from .db import conn, now_ms
 from .log import log_exception
 from .prompt_admissions import PromptAdmission
@@ -1209,9 +1209,13 @@ def build_context_packet(
             if agent["session"] in detailed_sessions
             or _agent_context_activity(agent) >= cutoff
         ]
+    # A provider-profile agent stays routable by name, but its messages and
+    # state never go to the routing model.
+    profiled = codex_profiles.assigned()
     for agent in all_agents:
         agent_id = agent["agent_id"]
-        include_detail = include_all_context or agent["session"] in detailed_sessions
+        include_detail = ((include_all_context or agent["session"] in detailed_sessions)
+                          and agent_id not in profiled)
         user_messages = (
             _recent_messages(agent_id, role="user", limit=RECENT_MESSAGES_PER_ROLE)
             if include_detail else []
