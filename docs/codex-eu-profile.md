@@ -137,6 +137,12 @@ Everything Codex sends to its model during the agent's turns:
   its turns are refused, nothing runs on OpenAI, and side channels still treat
   the agent as EU. Schema 118 backfilled the column from the old
   `agent.provider_profile.<id>` settings rows, which are no longer read.
+  The trigger guards UPDATE only. An `INSERT OR REPLACE` or a `DELETE` plus
+  `INSERT` of the same agent row bypasses it at the SQL level, and Clarp's code
+  does neither (`tests/unit/test_codex_profile_storage.py` pins that no
+  server code issues `REPLACE INTO agents` or `DELETE FROM agents`). So only
+  a direct write to the database can change a profile. That is the same
+  same-Unix-user limit as below, and no extra trigger is added (decision R2).
 
 ## What never leaves memory
 
@@ -186,7 +192,9 @@ tests are in `tests/unit/test_codex_profile_leak_paths.py`,
 | Bookkeeping delegates (`goal_ledger.enable`, `observe`) | the principal's last messages and goal events | the delegate's provider | `enable` refuses a delegate on another profile; `observe` refuses any existing cross-profile delegation (`provider_profile_boundary`) |
 | Request replies recorded into the requester's goal (`peer_requests.plan_reply`) | the EU agent's answer | the requester's provider | Refused (`provider_profile_boundary`) unless the requester is on the same profile |
 | Another agent's turn reading over the Host API | `/log` (with or without `session`), `/agents/<x>`, `/artifacts/<id>`, `/artifacts?agent_id=`, `/background-jobs/<id>` | that agent's provider | Refused (403) **when the request carries the caller's turn identity** (`X-Clarp-Turn`) and the owner is a profile agent on another profile |
-| Same, lists and events | the artifact list and search, `/attention`, the `/background-jobs` list, `/teams/<id>/messages`, `/agent-schedules`, the `/events` stream | that agent's provider | For an identified caller, every entry or event that names such an agent is dropped, at any depth |
+| Same, by owner id | `/identity/prompt-history` (`session_id=<computer>:<slug>` or `session=`), `/task-plan/document` and `/goal-ledger` by `plan_id`, `/transcription-audio` by `trace_id` | that agent's provider | Refused (403) when the owner is a profile agent on another profile |
+| Same, every JSON read | any JSON `GET`, including `/attention/inbox`, `/pinned-artifacts`, `/voice-events` and `/voice-events/utterances`, the artifact list and search, `/attention`, the `/background-jobs` list, `/teams/<id>/messages`, `/agent-schedules`, and endpoints added later | that agent's provider | For an identified caller, the response writer drops every entry that names such an agent, at any depth (the snapshot keeps its status-only view) |
+| Same, the event stream | `/events` | that agent's provider | Fails closed for an identified caller while a profile agent on another profile exists. Every event type in the typed registry declares its owner fields or is declared content-free (server version, remote action, attention count, provider limit, heartbeat). An event that names no owner, or names such an agent anywhere, is withheld. `tests/unit/test_codex_profile_r1.py` enumerates every type. |
 | Same, snapshot | `/agents/snapshot` | that agent's provider | For an identified caller (e.g. the EU agent's parent), the EU agent's row is status only: identity, busy/state, helper state, background job and queue counts, goal status. Never messages, status text, activity, goal text, or its working directory or any other path. |
 | Same, the user's devices | everything | — | Unfiltered: a request without a turn identity is the user |
 | Push notifications to Apple (`apns`, `user_notifications`, relay) | reply preview (≤180 characters), decision question and title | Apple Push Notification service, outside the EU | Every payload about an EU agent starts with `provider_profile` and `privacy_restricted: true`, and its alert text is generic ("New reply", "Needs your answer"). No preview, question, title or subtitle. Background syncs carry the marker too. |
@@ -280,3 +288,5 @@ customer DPA sub-processor list.** Until then, use synthetic data only.
   Hotseat) does not recycle profile processes: they are not OpenAI accounts.
 - Managed skills are linked from the profile home (`skills` → Clarp's
   managed Codex skills directory).
+- **Rollback.** **Before rolling back to a release older than schema 118 (contract 63), archive or stop every EU agent.** An older release has no provider profiles: it would run those agents as ordinary Codex agents on the OpenAI account. The same line is in docs/installation.md
+  and the clarp-server-admin skill.
