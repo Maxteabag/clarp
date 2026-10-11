@@ -36,7 +36,7 @@ def list_agents() -> list[dict[str, Any]]:
                custom_status, avatar_symbol, avatar_path, personality,
                archived_at, is_janitor, voice_verbosity,
                parent_agent_id, role, helper_state, helper_completed_at,
-               custom_status_at
+               custom_status_at, provider_profile
           FROM agents
          WHERE deleted_at IS NULL
          ORDER BY created_at
@@ -53,7 +53,7 @@ def get_by_session(session: str) -> dict[str, Any] | None:
                custom_status, avatar_symbol, avatar_path, personality,
                archived_at, is_janitor, voice_verbosity,
                parent_agent_id, role, helper_state, helper_completed_at,
-               custom_status_at
+               custom_status_at, provider_profile
           FROM agents
          WHERE session = ? AND deleted_at IS NULL
     """, (session,)).fetchone()
@@ -82,7 +82,8 @@ def get_by_backend_session(backend_session_id: str) -> dict[str, Any] | None:
                a.dreaming_last_local_date, a.muted, a.custom_status,
                a.avatar_symbol, a.avatar_path, a.personality, a.archived_at,
                a.is_janitor, a.voice_verbosity, a.parent_agent_id, a.role,
-               a.helper_state, a.helper_completed_at, a.custom_status_at
+               a.helper_state, a.helper_completed_at, a.custom_status_at,
+               a.provider_profile
           FROM agents a
           JOIN runtimes r ON r.agent_id = a.agent_id
          WHERE r.backend_session_id = ?
@@ -133,7 +134,7 @@ def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:
                custom_status, avatar_symbol, avatar_path, personality,
                archived_at, is_janitor, voice_verbosity,
                parent_agent_id, role, helper_state, helper_completed_at,
-               custom_status_at
+               custom_status_at, provider_profile
           FROM agents
          WHERE agent_id = ? AND deleted_at IS NULL
     """, (agent_id,)).fetchone()
@@ -178,28 +179,15 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
     Raises sqlite3.IntegrityError only if a LIVE agent already owns the
     name — caller should relaunch or pick a different session.
 
-    ``provider_profile`` (a Codex provider profile) is written in the same
-    transaction as the row: the agent never exists without it.
+    ``provider_profile`` (a Codex provider profile) is written by the same
+    INSERT as the row (schema 118): the agent never exists without it, and a
+    trigger keeps it from ever changing.
     """
     if provider_profile:
         if creation_request_id:
             raise ValueError("a reserved janitor agent has no provider profile")
         from . import codex_profiles
-        c = conn()
-        c.execute("BEGIN IMMEDIATE")
-        try:
-            agent_id, resurrected = _write_agent_row(
-                c, persona=persona, voice_id=voice_id, cwd=cwd, session=session,
-                backend=backend, model=model, effort=effort)
-            codex_profiles.write_for_new_agent(c, agent_id, provider_profile)
-            c.execute("COMMIT")
-        except BaseException:
-            c.execute("ROLLBACK")
-            raise
-        turn_lifecycle.transition(
-            agent_id, turn_lifecycle.TurnEvent.AGENT_CREATED,
-            {"session": session, **({"resurrected": True} if resurrected else {})})
-        return agent_id
+        codex_profiles.require(provider_profile)  # configured, or nothing is written
     if creation_request_id:
         from .janitors import create_reserved_agent
         return create_reserved_agent(
@@ -213,15 +201,19 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
     ).fetchone()
     if ghost is not None:
         agent_id = ghost["agent_id"]
+        # Naming the profile lets the immutability trigger refuse a
+        # resurrection that would change it; the row then stays deleted.
         c.execute("""
             UPDATE agents SET deleted_at = NULL, persona = ?, voice_id = ?,
                    cwd = ?, backend = ?, created_at = ?, model = ?, effort = ?,
                    custom_status = '', custom_status_at = NULL,
                    parent_agent_id = NULL,
                    role = CASE WHEN is_janitor = 1 THEN 'janitor' ELSE 'agent' END,
-                   helper_state = NULL, helper_completed_at = NULL
+                   helper_state = NULL, helper_completed_at = NULL,
+                   provider_profile = ?
              WHERE agent_id = ?
-        """, (persona, voice_id, cwd, backend, now_ms(), model, effort, agent_id))
+        """, (persona, voice_id, cwd, backend, now_ms(), model, effort,
+              provider_profile, agent_id))
         turn_lifecycle.transition(
             agent_id, turn_lifecycle.TurnEvent.AGENT_CREATED,
             {"session": session, "resurrected": True})
@@ -230,40 +222,13 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
     agent_id = _new_agent_id()
     c.execute("""
         INSERT INTO agents (agent_id, persona, voice_id, cwd, session, backend,
-                            created_at, model, effort)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            created_at, model, effort, provider_profile)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (agent_id, persona, voice_id, cwd, session, backend, now_ms(),
-          model, effort))
+          model, effort, provider_profile))
     turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.AGENT_CREATED,
                               {"session": session})
     return agent_id
-
-
-def _write_agent_row(c, *, persona: str, voice_id: str, cwd: str, session: str,
-                     backend: str, model: str, effort: str) -> tuple[str, bool]:
-    """Insert or resurrect the row inside the caller's transaction on ``c``;
-    returns (agent_id, resurrected). The same writes as ``create_agent``."""
-    ghost = c.execute(
-        "SELECT agent_id FROM agents WHERE session = ? AND deleted_at IS NOT NULL",
-        (session,)).fetchone()
-    if ghost is not None:
-        c.execute("""
-            UPDATE agents SET deleted_at = NULL, persona = ?, voice_id = ?,
-                   cwd = ?, backend = ?, created_at = ?, model = ?, effort = ?,
-                   custom_status = '', custom_status_at = NULL,
-                   parent_agent_id = NULL,
-                   role = CASE WHEN is_janitor = 1 THEN 'janitor' ELSE 'agent' END,
-                   helper_state = NULL, helper_completed_at = NULL
-             WHERE agent_id = ?
-        """, (persona, voice_id, cwd, backend, now_ms(), model, effort, ghost["agent_id"]))
-        return ghost["agent_id"], True
-    agent_id = _new_agent_id()
-    c.execute("""
-        INSERT INTO agents (agent_id, persona, voice_id, cwd, session, backend,
-                            created_at, model, effort)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (agent_id, persona, voice_id, cwd, session, backend, now_ms(), model, effort))
-    return agent_id, False
 
 
 def update_voice(agent_id: str, voice_id: str) -> None:

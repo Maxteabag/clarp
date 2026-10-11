@@ -382,14 +382,10 @@ def test_the_profile_is_written_with_the_agent_row_and_is_immutable(profile_env)
     assert codex_profiles.for_agent(_agent("plain")) == ""
 
     agents_db.soft_delete(agent)
-    with pytest.raises(codex_profiles.ProfileMismatch):  # same session, other profile
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(codex_profiles, "get", lambda pid: codex_profiles.CodexProfile(
-                id=pid, label="x", detail="", base_url="https://x.invalid",
-                models=(codex_profiles.ProfileModel("m", "m", ()),), default_model="m",
-                key_header="api-key", keyring_service="s", keyring_key="k"))
-            agents_db.create_agent(persona="Eu", voice_id="V", cwd="/tmp", session="eu",
-                                   backend="codex", provider_profile="other-eu")
+    import sqlite3
+    with pytest.raises(sqlite3.IntegrityError):  # same session, no profile: trigger refuses
+        agents_db.create_agent(persona="Eu", voice_id="V", cwd="/tmp", session="eu",
+                               backend="codex")
     assert codex_profiles.for_agent(agent) == "example-eu"
 
 
