@@ -88,7 +88,7 @@ reports `before`, `after`, `added` and `missing` counts per allowed table, or a
 schema error if comparison is impossible. It never prints the row contents.
 
 Keep backups private. Release rollback does not automatically undo a database
-migration. Prefer the supported `clarp-admin update --ref FULL_SHA` once the
+migration. **Before rolling back to a release older than schema 118 (contract 63), archive or stop every EU agent.** An older release has no provider profiles: it would run those agents as ordinary Codex agents on the OpenAI account. See docs/codex-eu-profile.md. Prefer the supported `clarp-admin update --ref FULL_SHA` once the
 candidate is verified; do not hand-edit generated releases.
 
 For an authorized update that must survive the HTTP connection restarting, run

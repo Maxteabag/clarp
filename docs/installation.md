@@ -208,6 +208,8 @@ switches the release atomically, restores its exact Python/toolchain metadata,
 and restarts systemd or launchd. Configuration and SQLite data are never stored
 inside a release.
 
+**Before rolling back to a release older than schema 118 (contract 63), archive or stop every EU agent.** An older release has no provider profiles: it would run those agents as ordinary Codex agents on the OpenAI account. See docs/codex-eu-profile.md.
+
 Native installations run two user services. `clarp.service` owns HTTP, SSE,
 and client-facing workers; `clarp-runtime.service` owns provider processes and
 continues across server updates. A runtime-affecting release rolls over only at
