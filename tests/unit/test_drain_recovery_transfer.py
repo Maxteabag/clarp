@@ -280,7 +280,7 @@ def _mutate_parked_spec(pool, agent, **fields):
 
 @pytest.mark.parametrize("change,reason", [
     (lambda pool, agent: pool.coordinator.attempts[agent].state.__setitem__(
-        "spawn_started", True), None),                      # a process ran
+        "spawn_started", True), "process_ran"),
     (lambda pool, agent: setattr(pool.coordinator.attempts[agent], "work",
         (pool.coordinator.attempts[agent].work[0], 2)), "retried"),
     (lambda pool, agent: _mutate_parked_spec(pool, agent, recovery_text="go on"),
@@ -506,3 +506,16 @@ def test_a_stale_or_unreadable_carry_is_ignored(tmp_path):
     assert consume_account_recovery_carry(path) == {}
     write_account_recovery_carry(path, {})
     assert not path.exists()
+
+
+def test_refusal_reasons_belong_to_the_attempt_that_tried(tmp_path, monkeypatch,
+                                                          selector_configured):
+    agent, service, provider, pool, runtime = _parked_scene(tmp_path, monkeypatch)
+    turn_queue.set_paused(agent, True)
+    try:
+        assert "account_recovery_refused" in runtime.seal_if_drained()
+        # A later attempt that tries no transfer (another owner) says nothing.
+        monkeypatch.setattr(td, "provider_turns", lambda: ["codex-agent"])
+        assert "account_recovery_refused" not in runtime.seal_if_drained()
+    finally:
+        runtime.server_close()

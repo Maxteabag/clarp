@@ -212,3 +212,20 @@ def test_surviving_descendant_is_killed_when_parent_exits_before_drain():
     item.handle.kill.assert_called_once()
     assert item.handle.wait.call_count == 2
     item.resume.assert_called_once()
+
+
+def test_overlapping_recovery_passes_keep_the_pass_marked_until_the_last_ends():
+    from lib.account_failover import AccountFailover
+    import threading
+    failover = AccountFailover(threading.RLock(), schedule=lambda *_a: None)
+    seen = []
+
+    def one_pass():
+        if not seen:
+            seen.append("outer")
+            failover.recover()           # a timer's pass overlaps this one
+            seen.append(failover.status()["checking"])
+    failover._recover = one_pass
+    failover.recover()
+    assert seen == ["outer", True]      # the outer pass still runs
+    assert failover.status()["checking"] is False
