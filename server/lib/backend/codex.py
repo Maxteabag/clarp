@@ -156,6 +156,7 @@ class CodexBackend(StreamJsonBackend):
     symbol = 'terminal'
     brand = BackendBrand('#2b2f3c', '#14161d', '#c0caf5', '#3c4257')
     supports_fork = True
+    supports_provider_profiles = True
     supports_steer = True
     supports_usage = True
     login_kind = 'device_code'
@@ -768,7 +769,9 @@ class CodexBackend(StreamJsonBackend):
                 return pathlib.Path(row[0])
         except sqlite3.Error:
             pass
-        return self.transcript.find_latest_jsonl(session_id, home / "sessions")
+        if agent_id is None:
+            return self.find_transcript(session_id)   # the binding decides the home
+        return self.transcript.find_latest_jsonl(session_id, agent_id=agent_id)
 
     def recorded_model(self, session_id: str, *, agent_id: str | None = None) -> str:
         """The thread index's model, else the rollout's last turn_context,

@@ -22,7 +22,6 @@ import secrets
 from dataclasses import dataclass, field
 from typing import Callable, Collection, Mapping, Sequence
 
-from .. import codex_profiles
 from .. import roster as contact_roster
 from ..voice import CARTESIA, resolve_voice
 from . import helper_state as helper_policy
@@ -60,6 +59,9 @@ class RosterView:
     resolve_agent: Callable[[str], str] = lambda _raw: ""  # session or id -> agent_id or ""
     ancestors: Callable[[str], Sequence[str]] = lambda _agent_id: ()
     agent_profile: Callable[[str], str] = lambda _agent_id: ""  # agent_id -> provider profile
+    # profile id -> the configured profile (has_model, efforts_for, models,
+    # default_model, label, id) or None; lib.codex_profiles.get in production
+    provider_profile: Callable[[str], object | None] = lambda _profile_id: None
     # (profile, Codex thread) -> whether that profile may resume the thread
     resume_profile_ok: Callable[[str, str], bool] = lambda _profile, _sid: True
 
@@ -260,7 +262,7 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
     effective_effort = (
         requested_effort if "effort" in data
         else ("" if clear_retained_effort else retained_effort))
-    profile = _provider_profile(data, backend=backend, roster=roster,
+    profile = _provider_profile(data, backend=backend, backends=backends, roster=roster,
                                 replace_sid=replace_sid, fork_id=fork_id,
                                 janitor=janitor)
     if isinstance(profile, SpecError):
@@ -367,7 +369,13 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
     )
 
 
-def _provider_profile(data: dict, *, backend: str, roster: RosterView,
+def _profiles_ok(backends, backend: str) -> bool:
+    """Whether the backend can run a provider profile (a Backend attribute;
+    an unknown backend cannot)."""
+    return bool(getattr(backends.by_id(backend), "supports_provider_profiles", False))
+
+
+def _provider_profile(data: dict, *, backend: str, backends, roster: RosterView,
                       replace_sid: str, fork_id: str, janitor: bool):
     """The Codex provider profile the agent runs on, None for the CLI's own
     account, or a refusal. A profile is chosen once, at creation: a relaunch
@@ -382,17 +390,18 @@ def _provider_profile(data: dict, *, backend: str, roster: RosterView,
         row = roster.existing_agent(replace_sid) or {}
         existing = roster.agent_profile(str(row.get("agent_id") or ""))
     if replace_sid and (existing or requested):
-        if (requested or existing) != existing or backend != "codex":
+        if ((requested or existing) != existing
+                or not _profiles_ok(backends, backend)):
             return SpecError(409, "provider_profile_locked", detail=(
                 "An agent's provider profile and backend are fixed when it is "
                 "created; start a new agent instead."))
         requested = existing
     profile = None
     if requested:
-        profile = codex_profiles.get(requested)
+        profile = roster.provider_profile(requested)
         if profile is None:
             return SpecError(400, "unknown provider_profile")
-        if backend != "codex":
+        if not _profiles_ok(backends, backend):
             return SpecError(400, "provider_profile requires the codex backend")
         if janitor:
             return SpecError(400, "janitors run on the CLI's own account")
@@ -400,7 +409,7 @@ def _provider_profile(data: dict, *, backend: str, roster: RosterView,
             return SpecError(400, "fork_unsupported", detail=(
                 "Fork a provider-profile agent with POST /agents/<session>/fork."))
     resume_id = str(data.get("resume_session_id") or "").strip()
-    if (resume_id and backend == "codex"
+    if (resume_id and _profiles_ok(backends, backend)
             and not roster.resume_profile_ok(profile.id if profile else "", resume_id)):
         return SpecError(409, "provider_profile_mismatch", detail=(
             "That Codex conversation belongs to another provider profile."))

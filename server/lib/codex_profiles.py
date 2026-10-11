@@ -46,12 +46,12 @@ import pathlib
 import re
 import subprocess
 import tempfile
-import threading
 import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from . import managed_skills
+from .revisioned_cache import RevisionedCache
 
 REDACTED = "[redacted]"
 # The one variable that carries a profile's key into its own app-server.
@@ -125,8 +125,9 @@ _SECRET_FIELD = re.compile(r"(?i)key|token|secret|passw|credential|auth")
 # and digits).
 _SECRETISH = re.compile(
     r"(?i)\b(sk|pk|rk)-[A-Za-z0-9_-]{8,}|bearer\s+\S{8,}|[A-Za-z0-9]{32,}")
-_REJECTED: dict[str, str] = {}
-_REJECTED_LOCK = threading.Lock()
+# The reason each invalid table was last logged for, so it is logged once
+# per distinct reason (a RevisionedCache keyed by profile id).
+_REJECTED: RevisionedCache[str, str] = RevisionedCache("codex_profile_rejections", 64)
 
 
 def _check_fields(where: str, table: dict, allowed: set[str]) -> None:
@@ -217,13 +218,15 @@ def profiles() -> dict[str, CodexProfile]:
         try:
             found[profile_id] = _validate(str(profile_id), table)
         except ValueError as exc:
-            with _REJECTED_LOCK:
-                fresh = _REJECTED.get(str(profile_id)) != str(exc)
-                _REJECTED[str(profile_id)] = str(exc)
-            if fresh:
-                from .log import log
-                log("codexProfileRejected", f"id={str(profile_id)[:40]} reason={exc}")
+            _REJECTED.get_or_compute(str(profile_id), str(exc),
+                                     lambda pid=str(profile_id), why=str(exc): _log_rejected(pid, why))
     return found
+
+
+def _log_rejected(profile_id: str, reason: str) -> str:
+    from .log import log
+    log("codexProfileRejected", f"id={profile_id[:40]} reason={reason}")
+    return reason
 
 
 def get(profile_id: str) -> CodexProfile | None:
@@ -444,8 +447,9 @@ def home_for(*, agent_id: str | None = None, thread_id: str = "") -> pathlib.Pat
         if not thread_id:
             return None
         from . import agents as agents_db
-        agent_id = agents_db.owner_of_backend_session(thread_id)
-    profile = for_agent(agent_id or "")
+        profile = agents_db.profile_of_backend_session(thread_id)
+    else:
+        profile = for_agent(agent_id or "")
     return home(profile) if profile else None
 
 
@@ -585,9 +589,17 @@ def redact(text: str, key: str) -> str:
     return text.replace(key, REDACTED)
 
 
-_LOCK = threading.Lock()
-_AVAILABLE: dict[str, tuple[float, bool]] = {}
+# Whether each profile's key is in the keyring, per profile definition and
+# minute (the revision), so the catalogue does not run secret-tool per call.
+_AVAILABLE: RevisionedCache[str, bool] = RevisionedCache("codex_profile_available", 32)
 _AVAILABLE_TTL = 60.0
+
+
+def _key_present(profile: CodexProfile) -> bool:
+    try:
+        return _lookup(profile, read=False).returncode == 0
+    except ProfileUnavailable:
+        return False
 
 
 def available(profile_id: str) -> bool:
@@ -596,25 +608,13 @@ def available(profile_id: str) -> bool:
     profile = get(profile_id)
     if profile is None:
         return False
-    now = time.monotonic()
-    with _LOCK:
-        cached = _AVAILABLE.get(profile.id)
-        if cached and now - cached[0] < _AVAILABLE_TTL:
-            return cached[1]
-    try:
-        ok = _lookup(profile, read=False).returncode == 0
-    except ProfileUnavailable:
-        ok = False
-    with _LOCK:
-        _AVAILABLE[profile.id] = (now, ok)
-    return ok
+    revision = (profile, int(time.monotonic() // _AVAILABLE_TTL))
+    return _AVAILABLE.get_or_compute(profile.id, revision, lambda: _key_present(profile))
 
 
 def clear_cache() -> None:
-    with _LOCK:
-        _AVAILABLE.clear()
-    with _REJECTED_LOCK:
-        _REJECTED.clear()
+    _AVAILABLE.reset()
+    _REJECTED.reset()
 
 
 # --- the catalogue ----------------------------------------------------------

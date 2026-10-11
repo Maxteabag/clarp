@@ -318,22 +318,9 @@ def seed_agents():
     return _seed_agents_via_db
 
 
-# A synthetic Codex provider profile and keyring (lib.codex_profiles). The
-# values are fakes; no real resource, deployment or keyring entry appears.
-FAKE_CODEX_PROFILE_ID = "example-eu"
-FAKE_CODEX_PROFILE_KEY = "sk-SENTINEL-azure-0f1e2d3c4b5a69788796a5b4c3d2e1f0"
-FAKE_CODEX_PROFILE = {
-    "label": "Codex (EU, example)",
-    "detail": "Synthetic EU test provider",
-    "base_url": "https://example.invalid/openai/v1",
-    "models": [{"id": "eu-model", "label": "EU Model",
-                "efforts": ["low", "medium", "high", "xhigh"]}],
-    "default_model": "eu-model",
-    "wire_api": "responses",
-    "key_header": "api-key",
-    "keyring_service": "clarp-test-keyring",
-    "keyring_key": "example-eu",
-}
+# A synthetic Codex provider profile and keyring (lib.codex_profiles).
+from tests.unit.codex_profile_fakes import (  # noqa: E402
+    FAKE_CODEX_PROFILE, FAKE_CODEX_PROFILE_ID, FAKE_CODEX_PROFILE_KEY)
 
 
 @pytest.fixture
