@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import agents as agents_db
-from . import backends, codex_profiles, identity
+from . import backends, identity
 from .backend.base import Unsupported
 from .log import log, log_exception
 from .trace import new_trace_id
@@ -61,7 +61,6 @@ class ChildSpec:
     backend: str = ""
     model: str = ""
     effort: str = ""
-    provider_profile: str = ""
 
 
 @dataclass
@@ -71,7 +70,6 @@ class _Parent:
     backend: str
     cwd: str
     conversation: str
-    provider_profile: str = ""
     _seed: str | None = field(default=None, repr=False)
 
 
@@ -83,16 +81,14 @@ def parse(data: dict) -> list[ChildSpec]:
     """The children a fork request asks for; ``ForkError`` when malformed.
 
     Either ``children: [{name, task, cwd?, worktree?: {repo, branch, base?,
-    path?}, backend?, model?, effort?, provider_profile?}]`` or ``count``
-    copies of one ``task`` named ``<name>-1`` .. ``<name>-N`` (``name``
-    defaults to ``fork``). ``backend``/``model``/``effort``/
-    ``provider_profile`` at the top apply to every child that does not name
-    its own.
+    path?}, backend?, model?, effort?}]`` or ``count`` copies of one ``task``
+    named ``<name>-1`` .. ``<name>-N`` (``name`` defaults to ``fork``).
+    ``backend``/``model``/``effort`` at the top apply to every child that
+    does not name its own.
     """
     if not isinstance(data, dict):
         raise ForkError(400, "bad_json")
-    shared = {key: _text(data.get(key))
-              for key in ("backend", "model", "effort", "provider_profile")}
+    shared = {key: _text(data.get(key)) for key in ("backend", "model", "effort")}
     raw = data.get("children")
     if raw is None and data.get("count") is not None:
         try:
@@ -153,7 +149,7 @@ def parse(data: dict) -> list[ChildSpec]:
             cwd=_text(item.get("cwd")), repo=repo, branch=branch, base=base,
             worktree_path=path,
             **{key: _text(item.get(key)) or shared[key]
-               for key in ("backend", "model", "effort", "provider_profile")}))
+               for key in ("backend", "model", "effort")}))
     return specs
 
 
@@ -168,8 +164,7 @@ def _parent(session: str) -> _Parent:
                         f"{row['session']} has no conversation to fork yet")
     return _Parent(agent_id=row["agent_id"], session=row["session"],
                    backend=backends.normalize(row.get("backend")),
-                   cwd=str(row.get("cwd") or ""), conversation=conversation,
-                   provider_profile=codex_profiles.for_agent(row["agent_id"]))
+                   cwd=str(row.get("cwd") or ""), conversation=conversation)
 
 
 # ---- worktrees ---------------------------------------------------------
@@ -252,9 +247,7 @@ def _native_fork(parent: _Parent, backend: str, cwd: str) -> str:
         return ""
     try:
         return backends.get(backend).fork_conversation(
-            parent.conversation, source_cwd=parent.cwd, cwd=cwd,
-            **({"provider_profile": parent.provider_profile}
-               if parent.provider_profile else {}))
+            parent.conversation, source_cwd=parent.cwd, cwd=cwd)
     except (Unsupported, FileNotFoundError, OSError, RuntimeError, TimeoutError) as exc:
         log_exception("forkNativeFail", exc, detail=f"{parent.session} -> {cwd}")
         return ""
@@ -330,20 +323,10 @@ def _fork_child(ctx, parent: _Parent, spec: ChildSpec, send: Callable) -> dict:
     if not pathlib.Path(cwd).is_dir():
         raise ForkError(400, "cwd_missing", f"No such directory: {cwd}")
     backend = backends.normalize(spec.backend or parent.backend)
-    # A child runs on its parent's provider profile: neither the native
-    # fork nor a seed may carry a conversation to another provider.
-    profile = parent.provider_profile
-    if ((spec.provider_profile or profile) != profile
-            or (profile and not backends.by_id(backend).supports_provider_profiles)):
-        raise ForkError(409, "provider_profile_mismatch",
-                        f"{parent.session} runs on provider profile "
-                        f"'{profile or 'default'}'; its forks stay there")
     conversation = _native_fork(parent, backend, cwd)
     request = {"name": spec.name, "cwd": cwd, "backend": backend,
                "parent": parent.session, "role": "helper",
                "voice_id": "{}", "synthesize_audio": False}
-    if profile:
-        request["provider_profile"] = profile
     if conversation:
         request["resume_session_id"] = conversation
     for key in ("model", "effort"):

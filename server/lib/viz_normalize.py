@@ -399,11 +399,7 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
     native_rows,covered=viz_native.tool_rows(con,since_ms,until)
     import itertools
     legacy=(row for row in viz_corpus.tool_rows(con,since_ms,until) if row['runtime_id'] not in covered)
-    # A provider-profile agent never enters the map: the world and unknown
-    # tools built from it are designed by a model on another provider.
-    from . import codex_profiles
-    profiled = codex_profiles.assigned()
-    rows=(row for row in itertools.chain(legacy,native_rows) if row['agent_id'] not in profiled)
+    rows=itertools.chain(legacy,native_rows)
     import heapq
     limit = max(1, min(limit, 10000))
     events = sorted(heapq.nlargest(limit, iter_normalize(rows, names, library),
@@ -450,11 +446,7 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
     specific = sum(1 for e in events if e["specific"])
     from . import viz_world, viz_work
     world = viz_world.build(events)
-    world["work"] = {key: ([item for item in value if isinstance(item, dict) and not (
-                             {item.get("agent_id"), item.get("from_agent_id"),
-                              item.get("to_agent_id")} & profiled.keys())]
-                           if isinstance(value, list) else value)
-                     for key, value in viz_work.build(con, since_ms, until, names).items()}
+    world["work"] = viz_work.build(con, since_ms, until, names)
     return {
         "world": world,
         "program": library.get("program"),

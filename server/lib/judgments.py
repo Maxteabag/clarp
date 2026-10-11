@@ -309,9 +309,6 @@ def judge(site: str, state: Any, questions: dict[str, dict], *,
     """
     if not questions:
         return None
-    from . import codex_profiles
-    if not codex_profiles.remote_allowed():
-        return None  # work for a provider-profile agent stays local
     if not site_enabled(site):
         return None
     key = api_key()

@@ -4,11 +4,6 @@ Unlike ``codex exec`` (one process per turn), app-server keeps a thread alive
 and exposes ``turn/steer``.  Clarp keeps **one** stdio app-server for the Host
 and multiplexes agents by ``threadId``. One process per agent left leftover
 writers that blocked ``thread/resume`` with JSON-RPC ``-32600``.
-
-An agent on a provider profile (``lib.codex_profiles``) gets that profile's
-own app-server instead: its own ``CODEX_HOME``, rollouts and writer locks, and
-the provider key in that process's environment only. The default account's
-process is unchanged.
 """
 from __future__ import annotations
 
@@ -23,7 +18,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import agent_goals, agents as agents_db, backend_usage, codex_profiles, eventlog, tts_queue
+from . import agent_goals, agents as agents_db, backend_usage, eventlog, tts_queue
 from .backend.codex import CodexBackend, TurnState
 from .backend.registry import by_id
 from .log import log, log_exception
@@ -102,28 +97,15 @@ class AppTurnHandle:
         self.client.interrupt_active(self.agent_id)
 
 
-def _base_env(session: str) -> dict[str, str]:
-    env = {**os.environ, "CLAUDE_PWA_SESSION": session}
-    env.pop("CLARP_PROVIDER_TURN", None)   # one shared server has no turn identity
-    return env
-
-
 class _Client:
-    def __init__(self, agent_id: str, session: str, stream=None, profile: str = "",
-                 prepared: tuple[dict[str, str], str] | None = None):
+    def __init__(self, agent_id: str, session: str, stream=None):
         argv = _codex_argv()
         self.agent_id = agent_id
-        self.profile = profile
-        self.auth_fingerprint = b"" if profile else _auth_fingerprint()
+        self.auth_fingerprint = _auth_fingerprint()
         self.refresh_requested = False
         self.rate_limits = {}
-        env = _base_env(session)
-        # The provider key lives in this process's environment and, for
-        # redaction, in memory; never on argv, disk or in a message. It is
-        # normally read (``_prepare``) before the pool lock is taken.
-        self._key = ""
-        if profile:
-            env, self._key = prepared or codex_profiles.spawn_env(profile, env)
+        env = {**os.environ, "CLAUDE_PWA_SESSION": session}
+        env.pop("CLARP_PROVIDER_TURN", None)   # one shared server has no turn identity
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -153,9 +135,6 @@ class _Client:
         })
         self.notify("initialized", {})
 
-    def _redact(self, text):
-        return codex_profiles.redact(text, getattr(self, "_key", ""))
-
     def _send(self, message: dict) -> None:
         line = json.dumps(message, separators=(",", ":")) + "\n"
         with self._write_lock:
@@ -177,7 +156,7 @@ class _Client:
                 self._pending.pop(rid, None)
             raise TimeoutError(f"Codex app-server timed out: {method}")
         if "error" in box:
-            raise RuntimeError(self._redact(f"{method}: {box['error']}"))
+            raise RuntimeError(f"{method}: {box['error']}")
         return box.get("result") or {}
 
     def notify(self, method: str, params: dict) -> None:
@@ -210,7 +189,7 @@ class _Client:
                     continue
                 self._notification(method, params)
         except Exception as exc:  # noqa: BLE001
-            failure = self._redact(str(exc)) or failure
+            failure = str(exc) or failure
             log_exception("codexAppServerReadFail", exc, detail=self.agent_id)
         finally:
             self._fail_all(failure)
@@ -221,12 +200,11 @@ class _Client:
         try:
             for line in self.proc.stderr:
                 if line.strip():
-                    log("codexAppServerStderr", self._redact(line.strip())[:1000])
+                    log("codexAppServerStderr", line.strip()[:1000])
         except Exception as exc:  # noqa: BLE001
             log_exception("codexAppServerStderrFail", exc, detail=self.agent_id)
 
     def _fail_all(self, message: str) -> None:
-        message = self._redact(message)
         with self._lock:
             pending = list(self._pending.values())
             self._pending.clear()
@@ -281,8 +259,6 @@ class _Client:
     def _notification(self, method: str, params: dict) -> None:
         active = self._pick_active(params)
         if method == "account/rateLimits/updated":
-            if getattr(self, "profile", ""):
-                return  # not an OpenAI account: no quota to record or switch on
             self.rate_limits = params
             try:
                 snapshot = backend_usage.capture_codex_rate_limits(params)
@@ -376,7 +352,7 @@ class _Client:
                 self.active = None
             active.handle._done.set()
             if status == "failed":
-                message = self._redact(str(error.get("message") or "codex turn failed"))
+                message = str(error.get("message") or "codex turn failed")
                 if active.on_error:
                     self._callback(active.on_error, CodexTurnFailure(
                         message, self, active.produced_output))
@@ -691,11 +667,6 @@ _LOCK = threading.RLock()
 _SHARED_KEY = "__shared__"
 
 
-def _pool_key(profile: str) -> str:
-    """The default account's shared process, or one process per profile."""
-    return f"profile:{profile}" if profile else _SHARED_KEY
-
-
 def _auth_fingerprint() -> bytes:
     # Private generation marker only; never log credential contents or hashes.
     try:
@@ -754,8 +725,7 @@ def recover_usage_failure(message: str) -> bool:
         return False
     with _LOCK:
         client = message.client
-        # A profile is not an OpenAI account: its limits are the provider's.
-        if getattr(client, "profile", "") or _CLIENTS.get(_SHARED_KEY) is not client:
+        if _CLIENTS.get(_SHARED_KEY) is not client:
             return False
         client.refresh_requested = True
         if _busy(client) or message.produced_output:
@@ -764,7 +734,7 @@ def recover_usage_failure(message: str) -> bool:
         # threads. Admission and retirement share this lock.
         previous = getattr(client, "rate_limits", {})
         client.shutdown()
-        _CLIENTS.pop(_SHARED_KEY, None)
+        _CLIENTS.clear()
         fresh = _Client(client.agent_id, "", stream=getattr(client, "stream", None))
         _CLIENTS[_SHARED_KEY] = fresh
         try:
@@ -777,41 +747,26 @@ def recover_usage_failure(message: str) -> bool:
         return not message.quota_confirmed
 
 
-def _prepare(profile: str, session: str) -> tuple[dict[str, str], str] | None:
-    """Read a profile's key (``secret-tool``, up to 15 s) without the pool
-    lock, when its process will have to start; None when one is running."""
-    if not profile:
-        return None
-    client = _CLIENTS.get(_pool_key(profile))
-    if client is not None and client.proc.poll() is None \
-            and not getattr(client, "refresh_requested", False):
-        return None
-    return codex_profiles.spawn_env(profile, _base_env(session))
-
-
-def _client(agent_id: str, session: str, stream=None, profile: str = "",
-            prepared: tuple[dict[str, str], str] | None = None) -> _Client:
-    """One app-server process for the Host, and one per provider profile.
+def _client(agent_id: str, session: str, stream=None) -> _Client:
+    """One app-server process for the Host.
 
     Codex serialises thread writes with an exclusive flock. One process per
     agent meant a leftover writer blocked ``thread/resume`` with -32600.
     """
-    key = _pool_key(profile)
     with _LOCK:
-        client = _CLIENTS.get(key)
+        client = _CLIENTS.get(_SHARED_KEY)
         if client is not None:
-            fingerprint = b"" if profile else _auth_fingerprint()
+            fingerprint = _auth_fingerprint()
             changed = getattr(client, "auth_fingerprint", fingerprint) != fingerprint
             if changed or getattr(client, "refresh_requested", False):
                 client.refresh_requested = True
                 if not _busy(client):
                     client.shutdown()
-                    _CLIENTS.pop(key, None)
+                    _CLIENTS.clear()
                     client = None
         if client is None or client.proc.poll() is not None:
-            client = _Client(agent_id, session, stream=stream,
-                             **({"profile": profile, "prepared": prepared} if profile else {}))
-            _CLIENTS[key] = client
+            client = _Client(agent_id, session, stream=stream)
+            _CLIENTS[_SHARED_KEY] = client
         elif stream is not None:
             client.stream = stream
         return client
@@ -822,15 +777,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
                on_session_init=None, on_result=None, on_error=None,
                trace_id: str = "", stream=None, enqueue=None,
                voice_preamble: bool = False, model: str = "", effort: str = "",
-               isolated: bool = False, provider_profile: str = "") -> AppTurnHandle:
-    if agent_id and codex_profiles.for_agent(agent_id) != provider_profile:
-        raise codex_profiles.ProfileMismatch(
-            "codex turn refused: the agent's provider profile is "
-            f"'{codex_profiles.for_agent(agent_id) or 'default'}', "
-            f"not '{provider_profile or 'default'}'")
-    if isolated and provider_profile:
-        raise codex_profiles.ProfileMismatch(
-            "codex exec has no provider profile; isolated jobs are refused")
+               isolated: bool = False) -> AppTurnHandle:
     if isolated:
         # Isolated jobs do not need steering and retain the hardened exec path.
         return _backend().start_turn(
@@ -841,10 +788,8 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
             voice_preamble=voice_preamble, model=model, effort=effort,
             isolated=True,
         )
-    prepared = _prepare(provider_profile, session)   # never under _LOCK
     with _LOCK:
-        client = _client(agent_id, session, stream=stream, profile=provider_profile,
-                         prepared=prepared)
+        client = _client(agent_id, session, stream=stream)
         handle = AppTurnHandle(client, agent_id=agent_id)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
@@ -860,15 +805,14 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
 
 
 
-def fork_thread(thread_id: str, *, cwd: str = "", provider_profile: str = "") -> str:
+def fork_thread(thread_id: str, *, cwd: str = "") -> str:
     """Fork ``thread_id`` into a new thread and return its id.
 
     A one-off app-server rather than the pool: the fork runs on the Host while
     the source thread may be mid-turn in the runtime's process, and Codex
-    forks without taking the source's writer lock (checked on 0.159). A
-    profile's thread forks in that profile's home.
+    forks without taking the source's writer lock (checked on 0.159).
     """
-    client = _Client("", "", **({"profile": provider_profile} if provider_profile else {}))
+    client = _Client("", "")
     try:
         result = client.request("thread/fork", {
             "threadId": thread_id, **({"cwd": cwd} if cwd else {})})
@@ -889,56 +833,35 @@ def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dic
     agent = agents_db.get_by_agent_id(agent_id)
     if not agent:
         raise ValueError("no such agent")
-    profile = codex_profiles.profile_of(agent)
-    prepared = _prepare(profile, agent["session"])   # never under _LOCK
     with _LOCK:
-        client = _client(agent_id, agent["session"], stream=stream, profile=profile,
-                         prepared=prepared)
+        client = _client(agent_id, agent["session"], stream=stream)
     return client.goal(agent, action, objective)
 
 
-def _client_for_agent(agent_id: str) -> _Client | None:
-    """The live process that runs ``agent_id``'s turns, if any."""
-    profile = codex_profiles.for_agent(agent_id) if agent_id else ""
+def _shared_client() -> _Client | None:
     with _LOCK:
-        if profile:
-            return _CLIENTS.get(_pool_key(profile))
         client = _CLIENTS.get(_SHARED_KEY)
         if client is None:
             for item in _CLIENTS.values():
-                if not getattr(item, "profile", ""):
-                    return item
+                return item
         return client
-
-
-def _active_turn(agent_id: str) -> tuple[_Client, "_ActiveTurn"] | None:
-    """The process holding ``agent_id``'s live turn and that turn. A turn only
-    ever runs in its own agent's pool, so this needs no profile lookup (the
-    snapshot asks it per agent)."""
-    with _LOCK:
-        clients = list({id(client): client for client in _CLIENTS.values()}.values())
-    for client in clients:
-        active = getattr(client, "_actives", {}).get(agent_id) or (
-            client.active if getattr(getattr(client, "active", None), "agent_id", None)
-            == agent_id else None)
-        if active is not None:
-            return client, active
-    return None
 
 
 def steer(agent_id: str, text: str, *, client_msg_id: str = "",
           synthesize_audio: bool = False) -> bool:
-    found = _active_turn(agent_id)
-    return bool(found and found[0].steer(
+    client = _shared_client()
+    return bool(client and client.steer(
         text, client_msg_id, synthesize_audio, agent_id=agent_id))
 
 
 def active_handles(agent_id: str) -> list[AppTurnHandle]:
-    found = _active_turn(agent_id)
-    if found is None:
+    client = _shared_client()
+    if client is None:
         return []
-    active = found[1]
-    return [active.handle] if active.handle.is_alive() else []
+    active = getattr(client, "_actives", {}).get(agent_id) or (
+        client.active if getattr(client.active, "agent_id", None) == agent_id
+        else None)
+    return [active.handle] if active and active.handle.is_alive() else []
 
 
 def busy_agents() -> set[str]:
@@ -962,7 +885,7 @@ def interrupt(agent_id: str) -> int:
         for handle in handles:
             handle.terminate()
         return len(handles)
-    client = _client_for_agent(agent_id)
+    client = _shared_client()
     if client is None:
         return 0
     client.interrupt_active(agent_id)
@@ -975,8 +898,6 @@ def recycle_clients() -> int:
         clients = list({id(client): client for client in _CLIENTS.values()}.values())
         closed = 0
         for client in clients:
-            if getattr(client, "profile", ""):
-                continue  # not an OpenAI account: a credential change is not about it
             client.refresh_requested = True
             if _busy(client):
                 continue

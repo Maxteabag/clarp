@@ -856,11 +856,6 @@ def clear_cache() -> None:
 def endpoint_response(*, force_refresh: bool = False) -> dict[str, Any]:
     """The versioned catalog plus response-level freshness notes."""
     catalog = capability_catalog(force_refresh=force_refresh)
-    codex = (catalog.get("providers") or {}).get("codex")
-    if isinstance(codex, dict):
-        # Additive (contract 63): Codex agents that run on another provider.
-        from . import codex_profiles
-        codex["provider_profiles"] = codex_profiles.catalog()
     return {
         **catalog,
         "freshness_scope": "response_observation",

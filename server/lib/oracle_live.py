@@ -856,8 +856,7 @@ def serve(handler):
                 query.get("source_artifact", [episode.get("source_artifact_id", "")])[0])
             podcast_context = podcast_live.context_for(
                 episode, float(query.get("position", ["0"])[0]),
-                float(artifact.get("duration_ms", 0))/1000, source=podcast_source,
-                artifact=artifact)
+                float(artifact.get("duration_ms", 0))/1000, source=podcast_source)
             if query.get("revision", [""])[0] != episode["revision"]:
                 raise ValueError("Podcast audio revision changed; reopen the episode")
         except (ValueError, TypeError, KeyError, AttributeError):

@@ -55,8 +55,7 @@ def test_conversion_keeps_identity_runtime_history_and_model():
     assert agents.get_by_session("sam")["is_janitor"] == 1
     assert janitors.create("sam", scope={"agent_ids": ["unknown"]}) == created
     assert agents.session_dict()["sam"]["interaction_capabilities"] == {
-        "can_chat": False, "can_voice_target": False, "can_restart": False, "can_inspect": True,
-        "can_speak": True, "can_cloud_dictation": True}
+        "can_chat": False, "can_voice_target": False, "can_restart": False, "can_inspect": True}
 
 
 def test_active_interval_config_and_reset_preserve_scope_and_pause():

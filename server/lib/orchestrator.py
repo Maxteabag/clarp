@@ -24,7 +24,7 @@ from typing import Any, Callable
 
 from . import agents as agents_db
 from . import events, identity
-from . import backends, codex_profiles, config, eventlog, janitor_builtins, janitors, settings_store
+from . import backends, config, eventlog, janitor_builtins, janitors, settings_store
 from .db import conn, now_ms
 from .log import log_exception
 from .prompt_admissions import PromptAdmission
@@ -474,10 +474,6 @@ class OrchestratorService:
                     error="Request identity already refers to different work",
                 )
             return self._replayed_run(prior["run_id"], requested_session, trace_id)
-        from .routing import addresses_profiled
-        if (codex_profiles.is_profiled(target_agent_id or "")
-                or addresses_profiled(text)):
-            return None  # the prompt of a provider-profile agent: no routing model
         owner = janitor_builtins.resolve(JANITOR_ROLE, target_agent_id=target_agent_id)
         if owner is None:
             return None
@@ -1014,12 +1010,8 @@ class OrchestratorService:
                 ORDER BY ts DESC, state_id DESC LIMIT 1""",
             (agent["agent_id"],),
         ).fetchone()
-        persona = agent["persona"]
-        if codex_profiles.is_profiled(agent):
-            # Spoken through the TTS provider: the kind only, never its text.
-            kind = state["kind"] if state else "active"
-            return f"{persona} is currently {kind}."
         messages = _recent_messages(agent["agent_id"], role="assistant", limit=2)
+        persona = agent["persona"]
         if messages:
             snippet = messages[-1]["text"][:180]
             return f"{persona} was last working on: {snippet}"
@@ -1217,13 +1209,9 @@ def build_context_packet(
             if agent["session"] in detailed_sessions
             or _agent_context_activity(agent) >= cutoff
         ]
-    # A provider-profile agent stays routable by name, but its messages and
-    # state never go to the routing model.
-    profiled = codex_profiles.assigned()
     for agent in all_agents:
         agent_id = agent["agent_id"]
-        include_detail = ((include_all_context or agent["session"] in detailed_sessions)
-                          and agent_id not in profiled)
+        include_detail = include_all_context or agent["session"] in detailed_sessions
         user_messages = (
             _recent_messages(agent_id, role="user", limit=RECENT_MESSAGES_PER_ROLE)
             if include_detail else []
