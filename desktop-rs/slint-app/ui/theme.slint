@@ -276,6 +276,26 @@ export global Frame {
     out property <length> bottom: 6px;
 }
 
+// The EU marker on an agent that runs on a Codex provider profile
+// ("Codex (EU, Azure)"): its data stays in the EU data zone, text only.
+export component EuBadge inherits Rectangle {
+    width: eu-label.preferred-width + 8px;
+    height: 16px;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Palette.accent;
+    background: Palette.accent.with-alpha(0.15);
+    accessible-role: text;
+    accessible-label: "EU data zone";
+    eu-label := Text {
+        text: "EU";
+        color: Palette.accent;
+        font-size: 10 * Look.unit;
+        font-weight: 700;
+        accessible-role: none;
+    }
+}
+
 export component PaneFrame inherits Rectangle {
     in property <string> key;
     in property <string> label;
@@ -286,6 +306,8 @@ export component PaneFrame inherits Rectangle {
     // muted details, as the chat frame shows its agent.
     in property <string> info-name;
     in property <string> info;
+    // The agent runs in the EU data zone: the EU marker after its name.
+    in property <bool> info-eu;
     callback info-clicked();
     property <color> tone: root.active ? Palette.focus : Palette.border;
     // Thicker when focused, so which pane has the keyboard shows by width
@@ -320,7 +342,8 @@ export component PaneFrame inherits Rectangle {
     // mid-border with the line missing after it).
     property <length> info-gap: root.info-name != "" && root.info != "" ? 6px : 0px;
     property <length> info-room: Math.max(0px, root.width - 40px - 2 * 10px - 60px);
-    property <length> info-want: (root.info-name != "" ? name-text.preferred-width : 0px) + root.info-gap + (root.info != "" ? info-text.preferred-width : 0px);
+    property <length> eu-room: root.info-eu ? eu-mark.width + 6px : 0px;
+    property <length> info-want: (root.info-name != "" ? name-text.preferred-width : 0px) + root.eu-room + root.info-gap + (root.info != "" ? info-text.preferred-width : 0px);
     if root.info-name != "" || root.info != "": Rectangle {
         width: Math.min(root.info-want, root.info-room) + 8px;
         height: 14px;
@@ -333,7 +356,7 @@ export component PaneFrame inherits Rectangle {
         x: root.width - 10px - 4px - Math.min(root.info-want, root.info-room);
         y: 0;
         height: 14px;
-        width: Math.min(self.preferred-width, root.info-room);
+        width: Math.min(self.preferred-width, Math.max(0px, root.info-room - root.eu-room));
         text: root.info-name;
         color: name-touch.has-hover ? Palette.accent : Palette.chrome-text;
         font-size: 11 * Look.unit;
@@ -344,9 +367,14 @@ export component PaneFrame inherits Rectangle {
         accessible-label: "Agent profile";
         name-touch := TouchArea { mouse-cursor: pointer; clicked => { root.info-clicked(); } }
     }
+    eu-mark := EuBadge {
+        visible: root.info-eu;
+        x: name-text.x + (root.info-name != "" ? name-text.width : 0px) + 6px;
+        y: -1px;
+    }
     info-text := Text {
         visible: root.info != "";
-        x: name-text.x + (root.info-name != "" ? name-text.width : 0px) + root.info-gap;
+        x: name-text.x + (root.info-name != "" ? name-text.width : 0px) + root.eu-room + root.info-gap;
         y: 0;
         height: 14px;
         width: Math.max(0px, root.width - 10px - 4px - self.x);
@@ -357,3 +385,4 @@ export component PaneFrame inherits Rectangle {
         overflow: elide;
     }
 }
+

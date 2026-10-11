@@ -111,6 +111,8 @@ pub struct AgentRow {
     pub background_job_count: i32,
     pub sub_agent_count: i32,
     pub process_count: i32,
+    /// The agent's Codex provider profile ("" = none): the EU marker.
+    pub provider_profile: String,
 }
 
 pub type Op = ListOp<AgentRow, Role, Signal>;
@@ -199,6 +201,7 @@ impl Roster {
             background_job_count: if live { counts.total } else { 0 },
             sub_agent_count: if live { counts.sub_agents } else { 0 },
             process_count: if live { self.running_work(agent) } else { 0 },
+            provider_profile: agent.provider_profile.clone(),
         }
     }
 

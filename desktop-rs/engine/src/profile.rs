@@ -140,11 +140,15 @@ impl Engine {
         let shared = self.shared_filesystem();
         let workspace = self.profile.workspace.describe(&agent.working_directory, shared);
         let state = self.roster.display_state(session).unwrap_or_default();
+        // A provider-profile agent's models are its profile's.
+        let choice = self.launch_choice_for(&agent);
         Some(json!({
+            "provider_profile": agent.provider_profile, "eu_data_zone": agent.eu_data_zone(), "launch_choice": choice,
+            "can_speak": agent.can_speak,
             "agent_id": agent.agent_id, "session": agent.session, "name": display_name(&agent),
             "backend": agent.backend, "working_directory": agent.working_directory, "workspace": workspace,
             "model": agent.model, "effort": agent.effort,
-            "default_effort": self.default_effort_for_model(&agent.backend, &agent.model),
+            "default_effort": self.default_effort_for_model(&choice, &agent.model),
             "state": state, "status_text": agent.status_text, "context_tokens": agent.context_tokens,
             "context_window": agent.context_window, "queue_count": agent.queued_turn_count, "muted": agent.muted,
             "heartbeat_enabled": agent.heartbeat_enabled, "dreaming_enabled": agent.dreaming_enabled,

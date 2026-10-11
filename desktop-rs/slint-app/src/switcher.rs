@@ -81,6 +81,8 @@ fn command(action: &str, key: &str) -> Item {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Toggles {
     pub preview_versions: bool,
+    /// The Host offers a Codex provider profile ("Codex (EU, Azure)").
+    pub eu_codex: bool,
 }
 
 /// The commands; the settings come from the settings page (`settings`).
@@ -96,6 +98,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("quick-new-agent", "Ctrl+Shift+N"),
         ("rename-agent", "F2"),
         ("new", "Ctrl+N"),
+        ("new-eu-codex", ""),
         ("preview-versions", ""),
         ("new-contact", "Ctrl+Alt+N"),
         ("agent-terminal", "Ctrl+Alt+T"),
@@ -143,6 +146,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
     .map(|(action, key)| command(action, key))
     .collect();
     rows.retain(|c| c.target != "preview-versions" || toggles.preview_versions);
+    rows.retain(|c| c.target != "new-eu-codex" || toggles.eu_codex);
     rows
 }
 
@@ -344,7 +348,10 @@ mod tests {
         assert_eq!(split.len(), 1);
         assert_eq!(split[0].target, "split-right");
         assert!(rows.iter().all(|c| c.target != "preview-versions"), "only where previews can install");
-        assert!(commands(Toggles { preview_versions: true }).iter().any(|c| c.target == "preview-versions"));
+        assert!(commands(Toggles { preview_versions: true, ..Toggles::default() }).iter().any(|c| c.target == "preview-versions"));
+        assert!(rows.iter().all(|c| c.target != "new-eu-codex"), "only on a Host with a Codex provider profile");
+        let eu = commands(Toggles { eu_codex: true, ..Toggles::default() });
+        assert_eq!(eu.iter().find(|c| c.target == "new-eu-codex").map(|c| c.label.as_str()), Some("New EU Codex agent"));
     }
 
     #[test]
@@ -368,7 +375,7 @@ mod tests {
 
     #[test]
     fn every_command_is_described_with_aliases() {
-        for item in commands(Toggles { preview_versions: true }) {
+        for item in commands(Toggles { preview_versions: true, eu_codex: true }) {
             let entry = crate::catalogue::find(&item.target);
             assert!(entry.is_some_and(|e| !e.description.is_empty() && e.aliases.len() >= 2), "{} ({}) needs a catalogue entry", item.label, item.target);
             assert_eq!(item.description, entry.map(|e| e.description).unwrap_or_default());

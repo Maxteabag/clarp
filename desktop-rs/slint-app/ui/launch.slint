@@ -10,6 +10,10 @@ export struct ProviderChip {
     id: string,
     label: string,
     initial: string,
+    // False for a provider profile the Host has no key for: shown, but it
+    // cannot start an agent; `detail` says why.
+    available: bool,
+    detail: string,
 }
 
 // A contact card: an idle contact to start, or (with Show all) a chat.
@@ -115,6 +119,10 @@ export global LaunchHub {
     in property <[ProviderChip]> providers;
     in property <int> provider-index;
     in property <string> model-summary;
+    // Under the provider marks: a provider profile's operating rule, or
+    // why it is unavailable (`provider-note-warning`).
+    in property <string> provider-note;
+    in property <bool> provider-note-warning;
     in property <bool> editing-model;
     in property <[string]> model-labels;
     in-out property <int> model-index;
@@ -173,8 +181,10 @@ component ProviderMark inherits Rectangle {
     border-color: root.selected ? Palette.accent : Palette.border;
     background: root.selected ? Palette.raised : touch.has-hover ? Palette.hover : transparent;
     accessible-role: button;
-    accessible-label: root.chip.label;
+    accessible-label: root.chip.available ? root.chip.label : root.chip.label + " (unavailable)";
+    accessible-description: root.chip.detail;
     accessible-checked: root.selected;
+    opacity: root.chip.available ? 1 : 0.55;
     touch := TouchArea { clicked => { root.clicked(); } }
     mark-row := HorizontalLayout {
         padding-left: 11px;
@@ -408,6 +418,13 @@ export component NewSessionHub inherits Modal {
                         clicked => { LaunchHub.choose-provider(index); }
                     }
                 }
+                if LaunchHub.provider-note != "": Text {
+                    text: LaunchHub.provider-note;
+                    color: LaunchHub.provider-note-warning ? Palette.warning : Palette.muted;
+                    wrap: word-wrap;
+                    font-size: 12 * Look.unit;
+                    accessible-role: text;
+                }
             }
             if LaunchHub.connected: VerticalLayout {
                 spacing: 6px;
@@ -563,7 +580,13 @@ export global StartAgent {
     in property <bool> past-loading;
     // A fresh start, or a past session chosen to resume or fork.
     in property <bool> past-ready: true;
-    out property <bool> can-start: name != "" && workspace != "" && past-ready;
+    // False while the backend is a provider profile without its key.
+    in property <bool> backend-ready: true;
+    // Under the backend: a provider profile's operating rule, or why it is
+    // unavailable (`backend-note-warning`).
+    in property <string> backend-note;
+    in property <bool> backend-note-warning;
+    out property <bool> can-start: name != "" && workspace != "" && past-ready && backend-ready;
     in property <string> error;
     in property <int> focus-request;
     callback workspace-edited(string);
@@ -670,6 +693,13 @@ export component StartAgentDialog inherits Modal {
                         selected => { StartAgent.effort-chosen(self.current-index); }
                     }
                 }
+            }
+            if StartAgent.backend-note != "": Text {
+                text: StartAgent.backend-note;
+                color: StartAgent.backend-note-warning ? Palette.warning : Palette.muted;
+                wrap: word-wrap;
+                font-size: 12 * Look.unit;
+                accessible-role: text;
             }
             Label { text: "Model"; }
             ComboBox {

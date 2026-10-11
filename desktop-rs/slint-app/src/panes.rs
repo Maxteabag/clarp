@@ -474,6 +474,7 @@ impl App {
         view.status = agent.map(|a| a.status_text.clone()).unwrap_or_default().into();
         view.default_effort = agent.map(|a| engine.default_effort_for_model(&a.backend, &a.model)).unwrap_or_default().into();
         view.busy = agent.is_some_and(|a| a.busy);
+        view.eu = agent.is_some_and(clarp_core::protocol::Agent::eu_data_zone);
         view.working = crate::cells_view::working(engine, session);
         let (status, busy, key) = crate::live_view::status(engine, session);
         if engine.live_active(session) {

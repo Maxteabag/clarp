@@ -486,6 +486,7 @@ pub const ENTRIES: &[Entry] = &[
     e("quick-new-agent", "New contact & chat", "agent", "Creates a new contact and opens a chat with it.", &["new session", "hub", "create", "add contact", "new persona"]),
     e("rename-agent", "Rename contact", "agent", "Changes the open contact's name.", &["rename", "name", "title", "relabel", "persona"]),
     e("new", "New session", "agent", "Opens the hub to start a new agent.", &["new agent", "start", "chat", "provider", "contact", "hub", "create"]),
+    e("new-eu-codex", "New EU Codex agent", "agent", "Opens the hub on Codex (EU, Azure): an agent whose data stays in the EU data zone, text only.", &["codex eu", "azure", "eu data zone", "provider profile", "gdpr"]),
     e("preview-versions", "Preview versions · update or roll back", "settings", "Installs another build of this app, newer or older.", &["previous installs", "rollback", "downgrade", "upgrade", "update", "version"]),
     e("new-contact", "Start an idle contact", "agent", "Starts one of your idle contacts in a new session.", &["new session", "hub", "contact", "wake", "resume"]),
     e("agent-terminal", "Open agent in terminal", "agent", "Opens the agent's native CLI in a terminal.", &["terminal", "cli", "shell", "console", "native"]),

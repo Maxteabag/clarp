@@ -104,6 +104,18 @@ outage_until = 0.0
 # Path -> [status, count]: the next `count` requests to `path` fail with
 # `status` (a Host behind a proxy that timed out).
 failures = {}
+# Path -> what a scripted failure answers instead of the default: a JSON
+# object, or plain text (the real /send answers its refusals that way).
+failure_bodies = {}
+# GET /server-info `contract.host`; None (unset) as an older Host that never
+# said. The `codex_provider_profiles` feature is advertised only when
+# /__control/contract says so, whatever the number.
+host_contract = None
+provider_profiles_feature = False
+# What a contract-63 Host puts in a provider-profile agent's
+# `interaction_capabilities`: text only, local dictation, no voice target.
+TEXT_ONLY_CAPABILITIES = {"can_chat": True, "can_voice_target": False, "can_restart": True, "can_inspect": True,
+                          "can_speak": False, "can_cloud_dictation": False}
 # HTML form event journals (server/lib/html_form_events.py): artifact id ->
 # rows in Host order, the draft-key policy per artifact, and how many more
 # accepted batches lose their receipt (stored, then answered 503).
@@ -705,6 +717,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def reply_failure(self, path, default):
+        """Answers a failure scripted with /__control/fail; False when none is due."""
+        failure = failures.get(path)
+        if not failure or failure[1] <= 0:
+            return False
+        failure[1] -= 1
+        body = failure_bodies.get(path)
+        if isinstance(body, str):
+            self.reply_bytes(failure[0], body.encode(), "text/plain")
+        else:
+            self.reply(failure[0], body if body is not None else {"error": default})
+        return True
+
     def in_outage(self):
         # An outage looks like a dead Host: the connection closes unanswered.
         if time.time() < outage_until:
@@ -722,10 +747,8 @@ class Handler(BaseHTTPRequestHandler):
                 "last_event_id": self.headers.get("Last-Event-ID", ""), "at": time.time()})
         if not self.authorized():
             return self.reply(401, {"error": "unauthorized"})
-        failure = failures.get(url.path)
-        if failure and failure[1] > 0:
-            failure[1] -= 1
-            return self.reply(failure[0], {"error": "Gateway Timeout"})
+        if self.reply_failure(url.path, "Gateway Timeout"):
+            return
         if url.path == "/server-info":
             # As the real Host and contract/schemas/server-info.json have it:
             # feature flags under capabilities.features.
@@ -733,8 +756,13 @@ class Handler(BaseHTTPRequestHandler):
             features.append("html_form_events")
             if turn_summaries:
                 features.append("log_turn_summary")
+            if provider_profiles_feature:
+                features.append("codex_provider_profiles")
             info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": "fake-host-1",
                     "capabilities": {"version": 1, "features": features}}
+            if host_contract is not None:
+                info["contract"] = {"host": host_contract, "min_ios": 1,
+                                    "features": {"codex_provider_profiles": host_contract} if provider_profiles_feature else {}}
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
             if snapshot_delay[1] > 0:
@@ -986,6 +1014,8 @@ class Handler(BaseHTTPRequestHandler):
                 "size": len(raw), "content_type": self.headers.get("Content-Type", ""),
                 "transcription_id": self.headers.get("X-Transcription-ID", ""),
                 "hands_free": self.headers.get("X-Hands-Free", ""), "riff": raw[:4].decode("latin1")}})
+            if self.reply_failure(url.path, "Internal Server Error"):
+                return
             return self.reply(200, {"text": "  dictated words  ", "trace_id": "trace-dictation",
                                     "transcription_id": self.headers.get("X-Transcription-ID", ""), "hands_free": False})
         if url.path == "/upload":
@@ -1003,8 +1033,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"path": f"/srv/uploads/{name}", "name": name})
         body = json.loads(raw or b"{}")
         if url.path == "/__control/fail":
-            # Test control: the next `count` GETs to `path` answer `status`.
+            # Test control: the next `count` GETs to `path` answer `status`,
+            # with `body` (JSON) or `text` (plain) when given.
             failures[body["path"]] = [int(body.get("status", 504)), int(body.get("count", 1))]
+            failure_bodies[body["path"]] = body.get("text", body.get("body"))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/contract":
+            # Test control: the Host contract /server-info advertises (null
+            # for an older Host) and whether it offers Codex provider profiles.
+            global host_contract, provider_profiles_feature
+            host_contract = body.get("host")
+            provider_profiles_feature = bool(body.get("codex_provider_profiles", False))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/form-events":
             # Test control: the next `lose_receipts` accepted event batches
@@ -1045,8 +1084,13 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: one more idle agent in the roster, announced.
             session = body["session"]
             row = {"agent_id": session + "-id", "session": session, "persona": body.get("persona", session),
-                   "backend": "claude", "latest_state": "idle", "alive": True, "last_activity": 500,
+                   "backend": body.get("backend", "claude"), "latest_state": "idle", "alive": True, "last_activity": 500,
                    "conversation_id": "c-" + session, "head_revision": 0}
+            if body.get("provider_profile"):
+                row["provider_profile"] = body["provider_profile"]
+                row["model"] = body.get("model", "")
+            if "interaction_capabilities" in body:
+                row["interaction_capabilities"] = body["interaction_capabilities"]
             with state_lock:
                 turns.setdefault(session, [])
                 agents.append(row)
@@ -1588,6 +1632,15 @@ class Handler(BaseHTTPRequestHandler):
             row = {"agent_id": session + "-id", "session": session, "persona": name, "backend": body.get("backend", ""),
                    "cwd": body.get("cwd", ""), "latest_state": "idle", "alive": True, "last_activity": 9000,
                    "conversation_id": "c-" + session, "head_revision": 0}
+            profile = body.get("provider_profile")
+            if profile:
+                # Contract 63: the model defaults to the profile's.
+                offered = (model_options.get("providers", {}).get("codex", {}).get("provider_profiles") or [])
+                chosen = next((p for p in offered if p.get("id") == profile), {})
+                row["provider_profile"] = profile
+                row["interaction_capabilities"] = dict(TEXT_ONLY_CAPABILITIES)
+                row["model"] = body.get("model") or chosen.get("default_model", "")
+                row["effort"] = body.get("effort", "")
             with state_lock:
                 turns[session] = []
                 if create_mode == "modern":
@@ -1604,10 +1657,8 @@ class Handler(BaseHTTPRequestHandler):
             session = body["session"]
             if send_delay:
                 time.sleep(send_delay)
-            failure = failures.get(url.path)
-            if failure and failure[1] > 0:
-                failure[1] -= 1
-                return self.reply(failure[0], {"error": "Internal Server Error"})
+            if self.reply_failure(url.path, "Internal Server Error"):
+                return
             if body.get("text") == "never-file":
                 # Accepted but never filed: the client must time the send out.
                 return self.reply(200, {"ok": True})

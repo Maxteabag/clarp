@@ -267,12 +267,14 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     let count = |key: &str| details.get(key).and_then(Value::as_i64).unwrap_or(0);
     let backend = value("backend");
     let name = first(&[value("name")], "Agent");
+    let eu = flag("eu_data_zone");
 
-    // Model and effort, as the catalog lists them.
-    let models = engine.models_for_backend(&backend);
+    // Model and effort, as the catalog lists them (a provider profile's own).
+    let choice = first(&[value("launch_choice")], &backend);
+    let models = engine.models_for_backend(&choice);
     let model_ids: Vec<String> = models.iter().map(|m| text(m, "id")).collect();
     let model_index = model_ids.iter().position(|id| *id == value("model")).unwrap_or(0);
-    let efforts = engine.efforts_for_model(&backend, &value("model"));
+    let efforts = engine.efforts_for_model(&choice, &value("model"));
     let effort_ids: Vec<String> = efforts.iter().map(|e| text(e, "id")).collect();
     let effort_index = effort_ids.iter().position(|id| *id == value("effort")).unwrap_or(0);
     bridge.set_models(ModelRc::new(VecModel::from(models.iter().map(|m| SharedString::from(first(&[text(m, "label"), text(m, "id")], "")))
@@ -390,6 +392,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         symbol: SharedString::new(),
         portrait,
         backend: backend.into(),
+        eu,
+        can_speak: details.get("can_speak").and_then(Value::as_bool).unwrap_or(true),
         folder: first(&[value("working_directory")], "Unavailable").into(),
         state: first(&[state.clone()], "offline").into(),
         model_index: model_index as i32,
@@ -481,7 +485,7 @@ pub fn wire(window: &AppWindow) {
     bridge.on_load_older(|| with_session(|app, _, session| app.engine.borrow_mut().load_prompt_history(session, true)));
     bridge.on_set_model(|index| {
         with_session(|app, _, session| {
-            let backend = detail(app, session, "backend").as_str().unwrap_or_default().to_owned();
+            let backend = detail(app, session, "launch_choice").as_str().unwrap_or_default().to_owned();
             let chosen = STATE.with(|s| s.borrow().model_ids.get(index as usize).cloned()).unwrap_or_default();
             let options: Vec<String> = app.engine.borrow().efforts_for_model(&backend, &chosen).iter().map(|e| text(e, "id")).collect();
             // An effort the new model lacks (or its first) becomes the default.

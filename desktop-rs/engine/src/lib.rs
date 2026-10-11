@@ -457,6 +457,29 @@ impl Engine {
     pub fn connection_state(&self) -> &str {
         &self.connection_state
     }
+    /// The agent runs on a provider profile ("Codex (EU, Azure)"): it shows
+    /// the EU marker. Its voice follows its capabilities, never this.
+    pub fn agent_in_eu_data_zone(&self, session: &str) -> bool {
+        !session.is_empty() && self.roster.find(session).is_some_and(clarp_core::protocol::Agent::eu_data_zone)
+    }
+
+    /// Its replies may be spoken (`interaction_capabilities`); true for an
+    /// unknown agent or an older Host.
+    pub fn agent_can_speak(&self, session: &str) -> bool {
+        self.roster.find(session).is_none_or(|a| a.can_speak)
+    }
+
+    /// A dictated send to it may be a hands-free voice turn.
+    pub fn agent_can_voice_target(&self, session: &str) -> bool {
+        self.roster.find(session).is_none_or(|a| a.can_voice_target)
+    }
+
+    /// Dictation to it may use a cloud engine; false: only the Host's local
+    /// Whisper, and a cloud engine's 409 ("type instead") is expected.
+    pub fn agent_can_cloud_dictation(&self, session: &str) -> bool {
+        self.roster.find(session).is_none_or(|a| a.can_cloud_dictation)
+    }
+
     pub fn error(&self) -> &str {
         &self.error
     }
@@ -1209,11 +1232,14 @@ impl Engine {
         let client_id = uuid::Uuid::new_v4().to_string();
         self.with_conversation(session, |c| c.add_optimistic(&client_id, trimmed));
         self.set_sending(true);
+        // An agent that cannot speak gets no spoken reply; one that is no
+        // voice target never gets a hands-free voice turn.
+        let (speaks, voice_target) = (self.agent_can_speak(session), self.agent_can_voice_target(session));
         let mut body = json!({
             // "client" tells the Host the desktop sent it, so the reply is
             // not pushed to the phone.
             "session": session, "text": trimmed, "client_msg_id": client_id, "client": "desktop",
-            "synthesize_audio": !self.muted, "hands_free": hands_free, "queue_if_busy": queue_if_busy,
+            "synthesize_audio": !self.muted && speaks, "hands_free": hands_free && voice_target, "queue_if_busy": queue_if_busy,
         });
         if !trace.is_empty() {
             body["trace_id"] = json!(trace);
@@ -1346,6 +1372,8 @@ impl Engine {
     }
 
     fn handle_failure(&mut self, tag: &str, message: &str, status: u16) {
+        // A provider-profile refusal that came as a bare code reads as words.
+        let message = clarp_core::catalog::profile_refusal_text(message).unwrap_or(message);
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
@@ -1465,6 +1493,10 @@ impl Engine {
         let session = json::string(event, "session");
         self.lifecycle_event(&kind, &session);
         match kind.as_str() {
+            "audio" if !self.agent_can_speak(&session) => {
+                // An agent that cannot speak is never played, whatever arrives.
+                eprintln!("Engine: ignored a voice clip for {session}, which cannot speak");
+            }
             "audio" => {
                 // A clip for the chat means its voice works again.
                 if !session.is_empty() {

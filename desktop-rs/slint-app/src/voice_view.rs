@@ -20,6 +20,12 @@ pub fn open(app: &Rc<App>, window: &AppWindow, session: &str, name: &str) {
     if session.is_empty() {
         return;
     }
+    if !app.engine.borrow().agent_can_speak(session) {
+        // The Host says it never speaks: there is no voice to choose.
+        app.engine.borrow_mut().report_error(&format!("{name} replies in text only; it has no voice settings"));
+        pump_now(app);
+        return;
+    }
     FOR.with(|f| *f.borrow_mut() = (session.to_owned(), name.to_owned()));
     window.global::<VoiceBridge>().set_agent_name(name.into());
     app.engine.borrow_mut().load_voices(session);

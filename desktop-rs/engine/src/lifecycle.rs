@@ -56,6 +56,9 @@ pub fn default_terminal_launcher() -> TerminalLauncher {
 pub(crate) struct Launch {
     catalog: Object,
     catalog_loaded: bool,
+    /// The Host advertises the `codex_provider_profiles` feature; without
+    /// it the dialogs and Ctrl+K show nothing of provider profiles.
+    profiles_supported: bool,
     contacts: Vec<Contact>,
     available_mcp_servers: Vec<Value>,
     starting_contact: String,
@@ -86,6 +89,7 @@ impl Launch {
         Self {
             catalog: Object::new(),
             catalog_loaded: false,
+            profiles_supported: false,
             contacts: Vec::new(),
             available_mcp_servers: Vec::new(),
             starting_contact: String::new(),
@@ -124,6 +128,38 @@ fn path_strings(values: &[Value]) -> Vec<String> {
         .collect()
 }
 
+/// The feature a Host advertises for Codex provider profiles.
+pub const PROVIDER_PROFILES_FEATURE: &str = "codex_provider_profiles";
+
+/// `/server-info` advertises the `codex_provider_profiles` feature, in
+/// `capabilities.features` or `contract.features`. Only the feature counts,
+/// never the contract number: that may change when the work lands, and a
+/// number reused for something else must not switch the EU UI on.
+pub fn host_has_provider_profiles(info: &Object) -> bool {
+    let contract = json::object(info, "contract");
+    let feature = |list: Option<&Value>| list.is_some_and(|f| match f {
+        Value::Array(names) => names.iter().any(|n| n.as_str() == Some(PROVIDER_PROFILES_FEATURE)),
+        Value::Object(names) => names.contains_key(PROVIDER_PROFILES_FEATURE),
+        _ => false,
+    });
+    feature(contract.get("features"))
+        || feature(info.get("capabilities").and_then(|c| c.get("features")))
+}
+
+/// Puts a launch choice in a create body: `codex@<profile>` becomes
+/// `backend: codex` and `provider_profile`. Voice is the Host's to decide
+/// (the created row's `interaction_capabilities`), not inferred here.
+fn with_backend(mut body: Value, choice: &str) -> Value {
+    match clarp_core::catalog::split_choice(choice) {
+        (backend, Some(profile)) => {
+            body["backend"] = json!(backend);
+            body["provider_profile"] = json!(profile);
+        }
+        (backend, None) => body["backend"] = json!(backend),
+    }
+    body
+}
+
 fn with_llm(mut body: Value, model: &str, effort: &str) -> Value {
     if !model.trim().is_empty() {
         body["model"] = json!(model.trim());
@@ -145,9 +181,59 @@ impl Engine {
         self.api.get("model-catalog", "/agent-model-options", &[]);
     }
 
-    /// Installed providers as `{id, label}`; the built-in three without a catalog.
+    /// Installed providers as `{id, label}`; the built-in three without a
+    /// catalog. On a Host with provider profiles each follows Codex as
+    /// `codex@<profile>` with `available`, `detail` and `operating_rule`.
     pub fn backend_options(&self) -> Vec<Value> {
-        clarp_core::catalog::backend_options(&self.launch.catalog)
+        clarp_core::catalog::launch_options(&self.launch.catalog, self.launch.profiles_supported)
+    }
+
+    /// The Host's provider profiles; none from an older Host.
+    pub fn provider_profiles(&self) -> Vec<clarp_core::catalog::ProviderProfile> {
+        if !self.launch.profiles_supported {
+            return Vec::new();
+        }
+        clarp_core::catalog::provider_profiles(&self.launch.catalog)
+    }
+
+    /// A launch choice's profile, when it names one this Host offers.
+    pub fn provider_profile(&self, choice: &str) -> Option<clarp_core::catalog::ProviderProfile> {
+        let id = clarp_core::catalog::split_choice(choice).1?;
+        self.provider_profiles().into_iter().find(|p| p.id == id)
+    }
+
+    /// The choice an existing agent relaunches with: its profile's
+    /// (`codex@<profile>`, which it keeps for life), else its backend.
+    pub fn launch_choice_for(&self, agent: &clarp_core::protocol::Agent) -> String {
+        if agent.eu_data_zone() && self.launch.profiles_supported {
+            clarp_core::catalog::profile_choice(&agent.provider_profile)
+        } else {
+            agent.backend.clone()
+        }
+    }
+
+    /// Why a choice cannot start an agent: a profile the Host does not
+    /// offer, or one it offers without its key (its `detail`).
+    fn profile_refusal(&self, choice: &str) -> Option<String> {
+        let id = clarp_core::catalog::split_choice(choice).1?;
+        match self.provider_profile(choice) {
+            None => Some(format!("This Host does not offer the provider profile {id}")),
+            Some(profile) if !profile.available => {
+                Some(if profile.detail.is_empty() { format!("{} is not available on this Host", profile.label) } else { profile.detail })
+            }
+            Some(_) => None,
+        }
+    }
+
+    /// Refuses (with the error shown) a choice that cannot start an agent.
+    fn refuse_unavailable(&mut self, choice: &str) -> bool {
+        match self.profile_refusal(choice) {
+            Some(message) => {
+                self.set_error(&message);
+                true
+            }
+            None => false,
+        }
     }
     pub fn models_for_backend(&self, backend: &str) -> Vec<Value> {
         clarp_core::catalog::models_for_backend(&self.launch.catalog, backend)
@@ -202,7 +288,7 @@ impl Engine {
 
     /// The last launch's backend, else the selected agent's, else Claude.
     pub fn quick_start_backend(&self) -> String {
-        if !self.launch.last_backend.is_empty() {
+        if !self.launch.last_backend.is_empty() && self.profile_refusal(&self.launch.last_backend).is_none() {
             return self.launch.last_backend.clone();
         }
         let selected = self.roster.find(&self.selected).map(|a| a.backend.clone()).unwrap_or_default();
@@ -355,7 +441,10 @@ impl Engine {
         if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() {
             return false;
         }
-        let body = with_llm(json!({"anonymous": true, "backend": backend}), model, effort);
+        if self.refuse_unavailable(backend) {
+            return false;
+        }
+        let body = with_backend(with_llm(json!({"anonymous": true}), model, effort), backend);
         self.post_contact_create("anonymous", backend, body);
         true
     }
@@ -369,7 +458,10 @@ impl Engine {
         if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() {
             return false;
         }
-        let body = with_llm(json!({"auto_contact": true, "backend": backend}), model, effort);
+        if self.refuse_unavailable(backend) {
+            return false;
+        }
+        let body = with_backend(with_llm(json!({"auto_contact": true}), model, effort), backend);
         self.post_contact_create("pool", backend, body);
         true
     }
@@ -391,7 +483,10 @@ impl Engine {
         };
         let backend = backend.trim();
         let backend = if backend.is_empty() { self.quick_start_backend() } else { backend.to_owned() };
-        let body = with_llm(json!({"name": contact, "backend": backend}), model, effort);
+        if self.refuse_unavailable(&backend) {
+            return false;
+        }
+        let body = with_backend(with_llm(json!({"name": contact}), model, effort), &backend);
         self.post_contact_create(&contact, &backend, body);
         true
     }
@@ -412,10 +507,12 @@ impl Engine {
             self.set_error("Name, workspace, and backend are required");
             return;
         }
-        let mut body = with_llm(
-            json!({"name": name, "session": name.to_lowercase(), "cwd": directory, "backend": backend, "synthesize_audio": !self.muted}),
-            model,
-            effort,
+        if self.refuse_unavailable(backend) {
+            return;
+        }
+        let mut body = with_backend(
+            with_llm(json!({"name": name, "session": name.to_lowercase(), "cwd": directory, "synthesize_audio": !self.muted}), model, effort),
+            backend,
         );
         let servers: Vec<Value> =
             mcp_servers.iter().filter_map(Value::as_str).filter(|name| !name.is_empty()).map(Value::from).collect();
@@ -688,6 +785,11 @@ impl Engine {
     pub(crate) fn lifecycle_json(&mut self, tag: &str, object: &Object) -> bool {
         let array = |key: &str| json::array(object, key);
         if tag == "server-info" {
+            let profiles = host_has_provider_profiles(object);
+            if profiles != self.launch.profiles_supported {
+                self.launch.profiles_supported = profiles;
+                self.changes.push(Change::Launch);
+            }
             self.apply_host_launch_directory_default(&json::string(object, "default_cwd"));
             self.load_model_catalog();
             return false;

@@ -299,3 +299,25 @@ fn only_web_and_mail_links_are_openable() {
         assert!(!is_openable_link(bad), "{bad}");
     }
 }
+
+#[test]
+fn an_agent_row_carries_its_provider_profile() {
+    let eu = Agent::from_json(&obj(json!({"session": "eu", "backend": "codex", "provider_profile": " azure-eu "})));
+    assert_eq!(eu.provider_profile, "azure-eu");
+    assert!(eu.eu_data_zone());
+    let plain = Agent::from_json(&obj(json!({"session": "c", "backend": "codex", "provider_profile": ""})));
+    assert!(!plain.eu_data_zone());
+    assert!(!Agent::from_json(&obj(json!({"session": "old"}))).eu_data_zone(), "an older Host sends none");
+}
+
+#[test]
+fn voice_capabilities_come_from_the_row_and_default_to_allowed() {
+    use clarp_core::protocol::capability;
+    let old = Agent::from_json(&obj(json!({"session": "old", "provider_profile": "azure-eu"})));
+    assert!(old.can_speak && old.can_cloud_dictation && old.can_voice_target, "absent keys: an older Host's behaviour, even with a profile");
+    let row = obj(json!({"session": "t", "interaction_capabilities": {"can_chat": true, "can_speak": false, "can_cloud_dictation": false, "can_voice_target": false}}));
+    let text_only = Agent::from_json(&row);
+    assert!(!text_only.can_speak && !text_only.can_cloud_dictation && !text_only.can_voice_target);
+    assert!(!text_only.eu_data_zone(), "capabilities alone are no EU marker");
+    assert!(capability::allowed(&obj(json!({"interaction_capabilities": {"can_speak": "no"}})), capability::CAN_SPEAK), "a non-boolean is ignored");
+}
