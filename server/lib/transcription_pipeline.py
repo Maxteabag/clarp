@@ -110,7 +110,9 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
     except Exception as e:  # noqa: BLE001 - escalation never blocks STT
         log_exception("sttLongFormRouteFail", e)
     from . import agents as agents_db, codex_profiles
-    eu_only = codex_profiles.is_profiled(agents_db.get_by_session(focus or ""))
+    focused = agents_db.get_by_session(focus or "")
+    eu_only = bool(focused) and not agents_db.interaction_capabilities(
+        focused)["can_cloud_dictation"]
     if eu_only:
         # Dictation to a provider-profile agent is its prompt: only the Host's
         # own Whisper may hear it, never a cloud or adapter engine.

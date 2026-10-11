@@ -1287,7 +1287,7 @@ class TurnDispatchService:
             # A provider-profile agent's words never reach an agent whose
             # provider is another one (docs/codex-eu-profile.md).
             raise DispatchError(403, codex_profiles.BOUNDARY)
-        if codex_profiles.is_profiled(agent_id):
+        if not agents_db.interaction_capabilities(agent)["can_speak"]:
             synthesize_audio = False  # text-only: no TTS vendor hears it
         if not skip_admission and origin in _RECOVERY_RESUMING_ORIGINS:
             self.clear_recovery_backoff(agent_id, reason=f"send:{origin}")
