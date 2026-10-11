@@ -415,6 +415,12 @@ class Backend:
         """
         return ""
 
+    def recorded_model_for(self, agent: dict, session_id: str) -> str:
+        """``recorded_model`` for an agent whose row is at hand; a backend
+        whose transcripts depend on the agent (a provider profile's home)
+        reads that from the row instead of querying for it."""
+        return self.recorded_model(session_id)
+
     def model_transcript(self, session_id: str) -> pathlib.Path | None:
         """The transcript ``recorded_model`` reads the model from: the
         session's transcript unless the CLI keeps a better index of it.

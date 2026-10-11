@@ -119,3 +119,31 @@ def test_an_unknown_profile_fails_closed_and_never_runs_on_openai(tmp_path, monk
                                     provider_profile="gone-eu")
     assert spawned == [] and popen == []
     assert codex_profiles.is_profiled(agents_db.get_by_agent_id("a-ghost"))
+
+
+def test_the_snapshot_reads_each_profile_from_the_rows_it_loaded(tmp_path, monkeypatch):
+    """(5) No per-agent query, by agent id or by its bound session: every
+    agent's profile (and its transcript home) comes from the row the snapshot
+    already loaded."""
+    from lib.snapshot import build_agent_snapshot
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ids, sids = [], []
+    for i in range(6):
+        agent_id = agents_db.create_agent(
+            persona=f"P{i}", voice_id="", cwd="/tmp", session=f"p{i}", backend="codex",
+            **({"provider_profile": "example-eu"} if i % 2 else {}))
+        agents_db.start_runtime(agent_id, f"p{i}")
+        agents_db.bind_backend_session(agent_id, f"thread-{i}-0b5e0a8c")
+        ids.append(agent_id)
+        sids.append(f"thread-{i}-0b5e0a8c")
+    build_agent_snapshot(None)
+    statements = []
+    db.conn().set_trace_callback(statements.append)
+    try:
+        rows = build_agent_snapshot(None)["agents"]
+    finally:
+        db.conn().set_trace_callback(None)
+
+    assert {row["provider_profile"] for row in rows} == {"", "example-eu"}
+    per_agent = [s for s in statements if any(key in s for key in ids + sids)]
+    assert per_agent == []
