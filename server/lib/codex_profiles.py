@@ -379,6 +379,38 @@ def mentions(value, ids: frozenset[str], sessions: frozenset[str]) -> bool:
     return False
 
 
+def _owners(value) -> list[str]:
+    """The agent ids and sessions an owner field names (a string, or the
+    agent_id/session of a dict, or of each element of a list)."""
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, dict):
+        return [str(value[key]) for key in ("agent_id", "session") if value.get(key)]
+    if isinstance(value, (list, tuple)):
+        return [owner for item in value for owner in _owners(item)]
+    return []
+
+
+def event_visible(event: dict, ids: frozenset[str], sessions: frozenset[str]) -> bool:
+    """Whether a stream event may reach a caller who may not read the agents
+    ``ids``/``sessions``. With nothing hidden (the user, or no profile agent
+    on another profile) everything flows. Otherwise it fails closed: an event
+    of an unknown type, or one that names no owner and is not declared
+    content-free, is withheld, as is any event naming a hidden agent."""
+    if not ids and not sessions:
+        return True
+    from . import events
+    event_type = event.get("type")
+    if event_type not in events.FIELDS:
+        return False
+    if event_type not in events.CONTENT_FREE:
+        owners = [owner for field in events.OWNER_FIELDS.get(event_type, ())
+                  for owner in _owners(event.get(field))]
+        if not owners or any(owner in ids or owner in sessions for owner in owners):
+            return False
+    return not mentions(event, ids, sessions)
+
+
 def prune(value, ids: frozenset[str], sessions: frozenset[str]):
     """``value`` without any list element (at any depth) that names one of
     those agents, and without keys that are their ids."""

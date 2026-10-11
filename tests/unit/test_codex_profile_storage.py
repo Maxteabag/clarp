@@ -119,3 +119,17 @@ def test_an_unknown_profile_fails_closed_and_never_runs_on_openai(tmp_path, monk
                                     provider_profile="gone-eu")
     assert spawned == [] and popen == []
     assert codex_profiles.is_profiled(agents_db.get_by_agent_id("a-ghost"))
+
+
+def test_no_server_code_can_bypass_the_profile_trigger():
+    """R2: the immutability trigger guards UPDATE; only REPLACE or DELETE+INSERT
+    of an agent row could bypass it, and no Host code may issue either."""
+    import re
+    root = Path(__file__).resolve().parents[2] / "server"
+    pattern = re.compile(r"(?i)\b(?:INSERT\s+OR\s+REPLACE|REPLACE)\s+INTO\s+agents\b"
+                         r"|\bDELETE\s+FROM\s+agents\b")
+    offenders = [f"{path.relative_to(root)}:{number}"
+                 for path in sorted(root.rglob("*.py"))
+                 for number, line in enumerate(path.read_text().splitlines(), 1)
+                 if pattern.search(line)]
+    assert offenders == []
