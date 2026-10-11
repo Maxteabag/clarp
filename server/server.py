@@ -1742,32 +1742,21 @@ class Handler(BaseHTTPRequestHandler):
         busy = bool(agent and agents_db.is_busy(agent["agent_id"]))
         runtime_payload = {
             "available": True,
+            "reason": "",
             "release_id": "embedded",
+            "fenced": False,
+            "sealed": False,
             "draining": False,
             "drain": {"phase": "idle"},
             "active_turns": int(busy),
+            "observed_at": int(time.time() * 1000),
         }
         runtime_client = getattr(self.ctx, "runtime_client", None)
         if runtime_client is not None:
-            try:
-                runtime_status = runtime_client.status()
-                runtime_payload = {
-                    "available": True,
-                    "release_id": str(runtime_status.get("release_id") or ""),
-                    "draining": bool(runtime_status.get("draining")),
-                    # The graceful release drain; runtimes from before it
-                    # report none (docs/runtime-restarts.md).
-                    "drain": runtime_status.get("drain"),
-                    "active_turns": len(runtime_status.get("active") or {}),
-                }
-            except Exception:
-                runtime_payload = {
-                    "available": False,
-                    "release_id": "",
-                    "draining": False,
-                    "drain": None,
-                    "active_turns": 0,
-                }
+            # Stable and complete, or explicitly unavailable: a failed status
+            # call never reads as idle (docs/protocol.md "Runtime status").
+            from lib.runtime_release import status_view_for
+            runtime_payload = status_view_for(runtime_client).block()
         body = json.dumps({
             "session": session, "busy": busy,
             "runtime": runtime_payload,

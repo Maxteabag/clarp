@@ -82,9 +82,13 @@ to a newly installed release without interrupting anything:
 
 Runtime status shows `drain` (phase, target and running release, attempt,
 `fenced_since`, `deadline`, `next_attempt_at`, `blockers` by kind,
-`last_outcome`) and `held` (agents whose next turn waits on the fence), and
-`GET /status` carries the same block as `runtime.drain` (docs/protocol.md;
-additive and diagnostic, no contract bump). An agent whose next turn is held
+`last_outcome`, `last_event`, `last_blockers`) and `held` (agents whose next
+turn waits on the fence), and `GET /status` carries the same block as
+`runtime.drain`, with `runtime.fenced`, `runtime.sealed` and
+`runtime.draining` (true from the fence on, not only once sealed). A status
+call that fails reports `available: false` with its reason and the last known
+drain, never an idle block (docs/protocol.md; additive and diagnostic, no
+contract bump). An agent whose next turn is held
 shows, once its own turn has settled, the live status `limited` with the
 headline "Waiting for the Clarp update" and no turn (`turn_id` and
 `turn_started_ms` null; docs/live-items.md §1.3), cleared when the fence lifts
