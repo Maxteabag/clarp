@@ -331,8 +331,11 @@ class RuntimeReleaseMonitor:
         if not result:
             return self._hand_over(desired)
         # Something appeared during the seal check: the fence is down again.
+        # Every park this check saw counts as refused, including one it handed
+        # over (it relaunches on the lowered fence and parks again): only a
+        # genuinely new park, or no blockers, is worth another seal.
         self._set(blockers=result)
-        self._refused_parks = self._parks(result)
+        self._refused_parks = self._parks(blockers) | self._parks(result)
         self._event("seal_missed", target=desired,
                     reason=",".join(sorted(result)))
         log("runtimeDrainSealMissed",

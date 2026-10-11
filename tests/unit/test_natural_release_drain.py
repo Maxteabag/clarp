@@ -329,3 +329,52 @@ def test_natural_does_not_refence_for_the_same_refused_parks(tmp_path, monkeypat
         assert monitor.status()["phase"] == "waiting_idle"
     finally:
         runtime.server_close()
+
+
+def test_a_missed_seal_with_a_handed_over_park_does_not_refence_every_check(
+        tmp_path, monkeypatch, selector_configured):
+    """Re-review M1: one park handed over, one refused (its process ran). The
+    handed-over turn relaunches on the lowered fence and parks again; the
+    drain must not fence, transfer and lower every 30 s for the whole
+    recovery. A re-attempt needs a genuinely new park or zero blockers."""
+    from lib import agents as agents_db
+    from lib.db import conn
+    from test_drain_recovery_transfer import Pool, _bound_agent
+    from test_drain_recovery_transfer import _runtime as carry_runtime
+    pool = Pool(monkeypatch)
+    mike = _bound_agent(tmp_path, "mike")
+    nadia = _agent(tmp_path, "nadia")
+    agents_db.bind_backend_session(nadia, "99999999-2222-3333-4444-555555555555")
+    service, provider = _service(tmp_path)
+    pool.coordinator.recovering = True
+    pool.coordinator.parked_since = 40.0
+    pool.coordinator.command = ("selector",)
+    for session in ("mike", "nadia"):
+        service.dispatch(text=f"w-{session}", requested_session=session,
+                         trace_id=f"t-{session}", client_msg_id=f"w-{session}",
+                         synthesize_audio=False)
+    assert provider.spawned == []
+    pool.coordinator.attempts[nadia].state["spawn_started"] = True   # the trigger
+    runtime = carry_runtime(tmp_path, service)
+    fences = []
+    original = service.begin_admission_fence
+    monkeypatch.setattr(service, "begin_admission_fence",
+                        lambda: (fences.append(1), original())[1])
+    clock = Clock()
+    monitor = _monitor(runtime, clock)
+    try:
+        for _ in range(6):
+            monitor.check_once()
+            clock.now += NATURAL_CHECK_SEC
+    finally:
+        runtime.server_close()
+    handoffs = conn().execute(
+        "SELECT COUNT(*) n FROM state_log WHERE agent_id = ? AND detail LIKE '%update_handoff%'",
+        (mike,)).fetchone()["n"]
+    turns = conn().execute("SELECT COUNT(*) n FROM turns WHERE agent_id = ?",
+                           (mike,)).fetchone()["n"]
+    assert len(fences) <= 1
+    assert handoffs <= 1                      # handed over once...
+    assert turns <= 2                         # ...relaunched once, not every check
+    assert td._SLOTS.fenced is False
+    assert monitor.status()["phase"] == "waiting_idle"
