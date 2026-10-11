@@ -571,6 +571,9 @@ def test_two_importers_racing_keep_the_checkpoint_that_covers_more(tmp_path, clo
 
 def test_older_code_reads_a_v117_database_and_117_migrates_from_116(tmp_path, monkeypatch):
     from lib import db_schema, db_migrations
+    # Pinned to the 117 release explicitly: this is about 117 against 116,
+    # whatever the current schema version is.
+    monkeypatch.setattr(db_schema, "_SCHEMA_VERSION", 117)
     path = tmp_path / "state.sqlite"
     db.reset_for_tests(path)
     c = db.conn()
@@ -585,8 +588,8 @@ def test_older_code_reads_a_v117_database_and_117_migrates_from_116(tmp_path, mo
     message_store.store_transcript_turns(agent_id="a", backend_session_id="b", source_file="f",
                                          turns=[{"role": "user", "text": "hi", "timestamp": _ts(1)}])
     assert db.conn().execute("PRAGMA user_version").fetchone()[0] == 117
-    monkeypatch.undo()
-    # A v116 database gains the table.
+    monkeypatch.setattr(db_schema, "_SCHEMA_VERSION", 117)
+    # A v116 database gains the table when the 117 release opens it.
     old = tmp_path / "old.sqlite"
     db.reset_for_tests(old)
     c = db.conn()
@@ -598,6 +601,7 @@ def test_older_code_reads_a_v117_database_and_117_migrates_from_116(tmp_path, mo
     assert c.execute("PRAGMA user_version").fetchone()[0] == 117
     assert c.execute("SELECT count(*) FROM transcript_import_checkpoints").fetchone()[0] == 0
     assert db_migrations._migrate_to_v117(c) is None     # idempotent
+    monkeypatch.undo()
 
 
 # ---- the store's carried state at every split ---------------------------------

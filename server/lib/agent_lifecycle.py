@@ -120,6 +120,7 @@ class AgentLifecycleService:
             resolve_agent=lambda raw: getattr(identity.resolve(raw), "agent_id", ""),
             ancestors=agents_db.ancestors,
             agent_profile=codex_profiles.for_agent,
+            provider_profile=codex_profiles.get,
             resume_profile_ok=_resume_profile_ok,
         )
 

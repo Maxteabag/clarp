@@ -106,6 +106,19 @@ def owner_of_backend_session(backend_session_id: str) -> str:
     return str(row["agent_id"]) if row else ""
 
 
+def profile_of_backend_session(backend_session_id: str) -> str:
+    """The provider profile of the agent that bound this backend session in
+    any runtime (the newest), "" for none or the CLI's own account. One
+    query keyed by the session id."""
+    if not backend_session_id:
+        return ""
+    row = conn().execute(
+        """SELECT a.provider_profile FROM runtimes r JOIN agents a USING (agent_id)
+            WHERE r.backend_session_id = ? ORDER BY r.started_at DESC LIMIT 1""",
+        (backend_session_id,)).fetchone()
+    return str(row["provider_profile"]) if row else ""
+
+
 def resolve_for_hook(*, backend_session_id: str | None,
                      session: str | None) -> dict[str, Any] | None:
     """Find the agent that fired a hook.

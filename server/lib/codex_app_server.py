@@ -911,21 +911,34 @@ def _client_for_agent(agent_id: str) -> _Client | None:
         return client
 
 
+def _active_turn(agent_id: str) -> tuple[_Client, "_ActiveTurn"] | None:
+    """The process holding ``agent_id``'s live turn and that turn. A turn only
+    ever runs in its own agent's pool, so this needs no profile lookup (the
+    snapshot asks it per agent)."""
+    with _LOCK:
+        clients = list({id(client): client for client in _CLIENTS.values()}.values())
+    for client in clients:
+        active = getattr(client, "_actives", {}).get(agent_id) or (
+            client.active if getattr(getattr(client, "active", None), "agent_id", None)
+            == agent_id else None)
+        if active is not None:
+            return client, active
+    return None
+
+
 def steer(agent_id: str, text: str, *, client_msg_id: str = "",
           synthesize_audio: bool = False) -> bool:
-    client = _client_for_agent(agent_id)
-    return bool(client and client.steer(
+    found = _active_turn(agent_id)
+    return bool(found and found[0].steer(
         text, client_msg_id, synthesize_audio, agent_id=agent_id))
 
 
 def active_handles(agent_id: str) -> list[AppTurnHandle]:
-    client = _client_for_agent(agent_id)
-    if client is None:
+    found = _active_turn(agent_id)
+    if found is None:
         return []
-    active = getattr(client, "_actives", {}).get(agent_id) or (
-        client.active if getattr(client.active, "agent_id", None) == agent_id
-        else None)
-    return [active.handle] if active and active.handle.is_alive() else []
+    active = found[1]
+    return [active.handle] if active.handle.is_alive() else []
 
 
 def busy_agents() -> set[str]:

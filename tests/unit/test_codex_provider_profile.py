@@ -597,7 +597,7 @@ def test_a_default_parent_cannot_fork_into_the_profile(profile_env):
 # --- the configuration -----------------------------------------------------------
 
 def _valid(**changes):
-    from conftest import FAKE_CODEX_PROFILE
+    from tests.unit.codex_profile_fakes import FAKE_CODEX_PROFILE
     table = dict(FAKE_CODEX_PROFILE)
     table.update(changes)
     return {key: value for key, value in table.items() if value is not None}

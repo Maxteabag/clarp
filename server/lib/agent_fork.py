@@ -333,7 +333,8 @@ def _fork_child(ctx, parent: _Parent, spec: ChildSpec, send: Callable) -> dict:
     # A child runs on its parent's provider profile: neither the native
     # fork nor a seed may carry a conversation to another provider.
     profile = parent.provider_profile
-    if (spec.provider_profile or profile) != profile or (profile and backend != "codex"):
+    if ((spec.provider_profile or profile) != profile
+            or (profile and not backends.by_id(backend).supports_provider_profiles)):
         raise ForkError(409, "provider_profile_mismatch",
                         f"{parent.session} runs on provider profile "
                         f"'{profile or 'default'}'; its forks stay there")

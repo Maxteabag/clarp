@@ -1353,7 +1353,7 @@ class TurnDispatchService:
             backend_session_id=backend_session_id or None,
         )
         provider_profile = codex_profiles.for_agent(agent_id)
-        if provider_profile and backend != "codex":
+        if provider_profile and not backends.by_id(backend).supports_provider_profiles:
             raise DispatchError(409, "provider profile requires the codex backend")
         model, effort = _resolve_llm(agent, backend, provider_profile)
         team_digest, team_inbox_ids = team_store.pending_digest(agent_id)
