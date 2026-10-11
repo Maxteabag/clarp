@@ -10,38 +10,67 @@ The client contract (Host contract 63) is in `docs/compatibility.md` and
 ## Configuration
 
 Profiles are configured by the owner, not built into Clarp. Each one is a
-table in Clarp's `config.toml`:
+table in `~/.config/clarp/config.toml`. Clarp reads it whenever it starts a
+profile's process or builds the catalogue, so no reload is needed. Shape:
+
+```toml
+[codex_profiles.<id>]
+label = "Codex (EU, Azure)"
+detail = "Azure OpenAI, EU Data Zone"
+base_url = "https://<resource>.openai.azure.com/openai/v1"
+models = [{ id = "<deployment>", label = "<name>", efforts = ["low", "medium", "high", "xhigh"] }]
+default_model = "<deployment>"
+wire_api = "responses"
+key_header = "api-key"
+keyring_service = "<secret-tool service>"
+keyring_key = "<secret-tool key>"
+```
+
+The ECIT install adds exactly this table. It is configuration, not code:
 
 ```toml
 [codex_profiles.azure-eu]
 label = "Codex (EU, Azure)"
-detail = "Azure OpenAI, EU Data Zone"
-base_url = "https://<resource>.openai.azure.com/openai/v1"
-model = "<deployment>"
-efforts = ["low", "medium", "high", "xhigh"]
+detail = "Azure OpenAI, EU Data Zone (Sweden Central)"
+base_url = "https://irisbot-ticketmaster-ai-sc.openai.azure.com/openai/v1"
+models = [{ id = "sol61-eu", label = "GPT-6.1 Sol (EU)", efforts = ["low", "medium", "high", "xhigh"] }]
+default_model = "sol61-eu"
 wire_api = "responses"
-env_key_header = "api-key"
-keyring_service = "<secret-tool service>"
-keyring_key = "<secret-tool key>"
+key_header = "api-key"
+keyring_service = "psa-reverify"
+keyring_key = "azure-openai"
 ```
 
 - **Keyring fields.** `keyring_service` and `keyring_key` are a reference:
   Clarp runs `secret-tool lookup service <service> key <key>`. The key is never
   in the file.
-- **Strict validation.** Clarp rejects any other field (`key`, `api_key`,
-  `token` and so on), a base URL that isn't plain `https`, a base URL that
-  carries credentials or a query, any value that looks like a secret, a
-  `wire_api` other than `responses`, and an `Authorization` header. A rejected
-  table is logged with its id and the reason, never its values, and is never
-  offered or run.
-- **Fixed settings.** Clarp always sets analytics, feedback, update checks and
-  web search off, and `requires_openai_auth = false`. The config can't change
-  these.
+- **Strict validation.** Clarp rejects a table that:
+  - holds a literal secret: any `key`, `token`, `secret`, `password` or similar
+    field, or a value that looks like a credential;
+  - has any other unknown field, at the top level or in a model;
+  - has a base URL that isn't plain `https`, or that carries credentials or a
+    query;
+  - sets a `wire_api` other than `responses`, or an `Authorization` header;
+  - has a `default_model` that isn't one of its `models`.
+- **Rejected tables** are logged with the id and the reason, never the values,
+  and are never offered or run.
+- **Fixed settings.** For every profile Clarp sets analytics, feedback, update
+  checks and web search off and `requires_openai_auth = false`. It strips
+  `OPENAI_API_KEY`, `CODEX_API_KEY` and every other `OPENAI_*`/`CODEX_*`
+  variable. The config can't change these.
 - **Availability.** A profile is offered (`available`) only while its table
-  is valid and the keyring lookup succeeds. The check uses the lookup's exit
-  status and never reads the value.
+  is valid and `secret-tool lookup` exits 0. The value is discarded; it is only
+  read when the profile's process starts.
 - **Profile home.** Each profile runs in `<Clarp data dir>/codex-profiles/<id>`
   (mode 0700).
+
+## Operating rule: text, not voice
+
+Dictation and hands-free routing carry the user's own words. Clarp keeps both
+as local as it can for an EU agent: only the Host's own Whisper transcribes
+dictation, and routing judgments stay local. Still, **use text input, not
+voice, for real cases with this agent.** The catalogue shows this rule in
+every profile's `detail` and as `operating_rule`.
 
 ## How a turn runs
 
@@ -138,11 +167,13 @@ tests are in `tests/unit/test_codex_profile_leak_paths.py`,
 | Podcast detours (`podcast_live.context_for`, three engines) | an episode's transcript and source artifact | OpenAI / Gemini Live, image generation | Refused when the episode or its source belongs to an EU agent |
 | Fleet map world and rule design (`viz_normalize.build_fleet_map`) | tool commands, paths, plans, artifacts, prompt excerpts | `codex exec`, `claude -p` | EU agents never enter the map's events or work |
 | Team posts (`team_store.capture_assistant_message`) | `<team>` posts, read by teammates' turns and the heartbeat decider | teammates' providers | An EU agent's posts reach only teammates on its profile |
+| Agent-to-agent messages: `clarp-admin prompt`/`request`, `/send` with the EU agent as sender, message replies (`turn_dispatch`) | the EU agent's words | the recipient's provider | Refused (403 `provider_profile_boundary`) unless the recipient is on the same profile. Messages into an EU agent stay allowed. |
+| Request replies recorded into the requester's goal (`peer_requests.plan_reply`) | the EU agent's answer | the requester's provider | Refused (`provider_profile_boundary`) unless the requester is on the same profile |
 | Another agent's turn reading over the Host API (`do_GET`, `/agents/snapshot`) | `/log`, artifacts, jobs, conversation and message previews | that agent's provider | Refused (403) when the caller's turn identity (`X-Clarp-Turn`) is on another profile. The snapshot shows such a caller an EU agent's identity and state only. The user's devices see everything. |
 | Backend and account fallback (`turn_dispatch`, `codex_app_server`) | the failed turn | the CLI's own OpenAI account, another backend | None exists for an EU turn. No account-pool registration, no usage-limit reconnect, no failover request, no OpenAI usage record. An unconfigured profile refuses the turn. Dispatch refuses an EU agent on any backend but `codex`. Retries go to the same profile process. |
 | Janitor model fallbacks (`model_fallbacks`) | janitor packets | any CLI | Only janitor work uses them, and janitors never take an EU agent in scope |
 | Clarp-side summarizers, titlers, search, embeddings | — | — | None exist. Every Host module that calls a model is listed in this table: judgments, orchestrator, janitors, explainer, fleet map, Oracle, podcasts, TTS, STT. |
-| Speech output (`tts_queue.enqueue`) | `<speak>` replies | Cartesia, ElevenLabs, Deepgram, Gemini TTS, adapters | EU agents are text-only: nothing is enqueued |
+| Speech output (`turn_dispatch`, `tts_queue.enqueue`) | `<speak>` replies | Cartesia, ElevenLabs, Deepgram, Gemini TTS, adapters | EU agents are text-only. Their turns run with `synthesize_audio` off (no voice instructions), and nothing of theirs is ever queued for TTS. |
 | Dictation (`transcription_pipeline`) | the prompt audio and transcript, plus the junk filter | cloud STT, adapters, TypeSafe | With an EU agent focused, only the Host's local Whisper transcribes it; otherwise the request is refused (409, type instead). Judgments are local-only |
 | Fork / adopt / resume (`agent_fork`, `agent_spec`) | the transcript or a seed | the child's provider | Cross-profile forks and resumes are refused |
 | Compaction, interactive terminal | the thread | the CLI's own OpenAI account | Refused |
@@ -186,10 +217,19 @@ Microsoft Learn, "Understanding deployment types in Microsoft Foundry Models"
 The Data Zone does not cover:
 
 - data in Clarp or on this laptop;
-- anything listed in "What the Host cannot enforce";
-- whether the deployment really is a Data Zone SKU. Clarp cannot see that:
-  confirm in the portal that the deployment is `DataZoneStandard` (or
-  `DataZoneProvisionedManaged`).
+- anything listed in "What the Host cannot enforce".
+
+The ECIT `azure-eu` deployment was verified through Azure Resource Manager by
+Nadia on 2026-10-11:
+
+| Item | Value |
+|---|---|
+| Subscription | `21a4fbcd-1d08-4ce7-9aa4-61553cbc8750` |
+| Resource group | `rg-irisbot-ticketmaster` |
+| Region | swedencentral |
+| Deployment | `sol61-eu` |
+| SKU | `DataZoneStandard` |
+| Model | `gpt-6.1-sol`, version 2026-09-29 |
 
 **Do not use customer data until the CISO confirms that Azure OpenAI is on the
 customer DPA sub-processor list.** Until then, use synthetic data only.

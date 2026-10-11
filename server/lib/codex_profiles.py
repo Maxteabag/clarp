@@ -9,22 +9,24 @@ user's keyring at spawn time, only in that process's environment.
 Profiles are configured, not built in: one ``[codex_profiles.<id>]`` table per
 profile in Clarp's ``config.toml``::
 
-    [codex_profiles.azure-eu]
-    label = "Codex (EU, Azure)"
+    [codex_profiles.example-eu]
+    label = "Codex (EU)"
     detail = "Azure OpenAI, EU Data Zone"
     base_url = "https://<resource>.openai.azure.com/openai/v1"
-    model = "<deployment>"
-    efforts = ["low", "medium", "high", "xhigh"]
+    models = [{ id = "<deployment>", label = "<name>", efforts = ["low", "medium", "high"] }]
+    default_model = "<deployment>"
     wire_api = "responses"
-    env_key_header = "api-key"
+    key_header = "api-key"
     keyring_service = "<secret-tool service>"
     keyring_key = "<secret-tool key>"
 
 The keyring fields are a reference (``secret-tool lookup service <service>
-key <key>``), never the key. A table with any other field, an http URL or a
-value that looks like a secret is rejected and never offered or run. Clarp
-always enforces analytics, feedback, update checks and web search off and
-``requires_openai_auth = false`` for every profile.
+key <key>``), never the key. A table that holds a literal secret (a key,
+token, secret or password field, or a value that looks like one), any other
+field or a non-https URL is rejected and never offered or run. Clarp always
+enforces analytics, feedback, update checks and web search off,
+``requires_openai_auth = false`` and no OpenAI/Codex credential variables in
+the profile's process. Profiles are read at spawn and catalog time.
 
 The key is never written to disk, argv, the database, logs or error text;
 ``redact`` strips it from anything the profile's process prints back. See
@@ -65,28 +67,41 @@ class ProfileUnavailable(RuntimeError):
     """The profile cannot run: not configured, or its key is not in the keyring."""
 
 
+# Shown with every profile in the catalogue: dictation and hands-free routing
+# are the user's own input and reach Clarp's speech and routing providers.
+OPERATING_RULE = "Use text input, not voice, for real cases with this agent."
+
+
+@dataclass(frozen=True)
+class ProfileModel:
+    id: str
+    label: str
+    efforts: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class CodexProfile:
     id: str
     label: str
     detail: str
     base_url: str
-    model: str
-    efforts: tuple[str, ...]
-    env_key_header: str
+    models: tuple[ProfileModel, ...]
+    default_model: str
+    key_header: str
     keyring_service: str
     keyring_key: str
 
-    @property
-    def default_model(self) -> str:
-        return self.model
-
-    @property
-    def models(self) -> tuple[tuple[str, str], ...]:
-        return ((self.model, self.model),)
-
     def has_model(self, model: str) -> bool:
-        return model == self.model
+        return any(m.id == model for m in self.models)
+
+    def efforts_for(self, model: str = "") -> tuple[str, ...]:
+        """The efforts ``model`` (default: the default model) accepts."""
+        wanted = model or self.default_model
+        return next((m.efforts for m in self.models if m.id == wanted), ())
+
+    @property
+    def efforts(self) -> tuple[str, ...]:
+        return self.efforts_for()
 
     @property
     def keyring(self) -> tuple[str, ...]:
@@ -96,13 +111,16 @@ class CodexProfile:
 # --- the configuration --------------------------------------------------------
 
 _ID = re.compile(r"[a-z][a-z0-9-]{0,39}")
-_FIELDS = {"label", "detail", "base_url", "model", "efforts", "wire_api",
-           "env_key_header", "keyring_service", "keyring_key"}
-_REQUIRED = {"label", "base_url", "model", "keyring_service", "keyring_key"}
+_FIELDS = {"label", "detail", "base_url", "models", "default_model", "wire_api",
+           "key_header", "keyring_service", "keyring_key"}
+_REQUIRED = {"label", "base_url", "models", "default_model", "keyring_service", "keyring_key"}
+_MODEL_FIELDS = {"id", "label", "efforts"}
 _EFFORTS = {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 _MODEL = re.compile(r"[A-Za-z0-9._-]{1,64}")
 _HEADER = re.compile(r"[A-Za-z0-9-]{1,64}")
 _KEYRING_ATTR = re.compile(r"[A-Za-z0-9._:/@-]{1,128}")
+# A field whose name says it holds a credential.
+_SECRET_FIELD = re.compile(r"(?i)key|token|secret|passw|credential|auth")
 # A literal that looks like a credential: a known key prefix, a bearer token,
 # or a long unbroken alphanumeric run (Azure keys are 32 hex or 84 letters
 # and digits).
@@ -112,6 +130,26 @@ _REJECTED: dict[str, str] = {}
 _REJECTED_LOCK = threading.Lock()
 
 
+def _check_fields(where: str, table: dict, allowed: set[str]) -> None:
+    secret = sorted(name for name in set(table) - allowed if _SECRET_FIELD.search(str(name)))
+    if secret:
+        raise ValueError(f"{where} holds a literal secret ({', '.join(secret)}); "
+                         "name the key in the keyring instead")
+    unknown = sorted(set(table) - allowed)
+    if unknown:
+        raise ValueError(f"{where} has unknown field(s) {', '.join(unknown)}")
+
+
+def _strings(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for v in value for item in _strings(v)]
+    if isinstance(value, dict):
+        return [item for v in value.values() for item in _strings(v)]
+    return []
+
+
 def _validate(profile_id: str, table) -> CodexProfile:
     """One ``[codex_profiles.<id>]`` table, or ValueError naming what is
     wrong (never a value from the table)."""
@@ -119,18 +157,14 @@ def _validate(profile_id: str, table) -> CodexProfile:
         raise ValueError("the profile id must be lowercase letters, digits and dashes")
     if not isinstance(table, dict):
         raise ValueError("a profile must be a table")
-    unknown = sorted(set(table) - _FIELDS)
-    if unknown:
-        raise ValueError("unknown field(s) " + ", ".join(unknown)
-                         + "; a profile names its key in the keyring, never the key")
+    _check_fields("the profile", table, _FIELDS)
     missing = sorted(_REQUIRED - set(table))
     if missing:
         raise ValueError("missing field(s) " + ", ".join(missing))
     for name, value in table.items():
-        values = value if name == "efforts" else [value]
-        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
-            raise ValueError(f"{name} must be {'a list of strings' if name == 'efforts' else 'a string'}")
-        if any(_SECRETISH.search(v) for v in values):
+        if name != "models" and not isinstance(value, str):
+            raise ValueError(f"{name} must be a string")
+        if any(_SECRETISH.search(v) for v in _strings(value)):
             raise ValueError(f"{name} looks like a secret; put the key in the keyring")
     url = urlsplit(table["base_url"])
     if (url.scheme != "https" or not url.hostname or url.username or url.password
@@ -138,23 +172,40 @@ def _validate(profile_id: str, table) -> CodexProfile:
         raise ValueError("base_url must be a plain https URL")
     if table.get("wire_api", "responses") != "responses":
         raise ValueError("wire_api must be 'responses'")
-    if not _MODEL.fullmatch(table["model"]):
-        raise ValueError("model must be a deployment name")
-    header = table.get("env_key_header", "api-key")
+    header = table.get("key_header", "api-key")
     if not _HEADER.fullmatch(header) or header.lower() == "authorization":
-        raise ValueError("env_key_header must be a header name such as 'api-key'")
+        raise ValueError("key_header must be a header name such as 'api-key'")
     for name in ("keyring_service", "keyring_key"):
         if not _KEYRING_ATTR.fullmatch(table[name]):
             raise ValueError(f"{name} must be a keyring attribute value")
-    efforts = tuple(table.get("efforts") or ())
-    if set(efforts) - _EFFORTS:
-        raise ValueError("efforts must be reasoning effort names")
+    raw_models = table["models"]
+    if not isinstance(raw_models, list) or not raw_models:
+        raise ValueError("models must be a non-empty list of {id, label, efforts}")
+    models = []
+    for item in raw_models:
+        if not isinstance(item, dict):
+            raise ValueError("each model must be a table {id, label, efforts}")
+        _check_fields("a model", item, _MODEL_FIELDS)
+        model_id, model_label = item.get("id"), item.get("label", item.get("id"))
+        efforts = item.get("efforts", [])
+        if not isinstance(model_id, str) or not _MODEL.fullmatch(model_id):
+            raise ValueError("a model id must be a deployment name")
+        if not isinstance(model_label, str) or not 0 < len(model_label) <= 80:
+            raise ValueError("a model label must be 1-80 characters")
+        if (not isinstance(efforts, list) or not all(isinstance(e, str) for e in efforts)
+                or set(efforts) - _EFFORTS):
+            raise ValueError("model efforts must be reasoning effort names")
+        models.append(ProfileModel(model_id, model_label, tuple(efforts)))
+    if len({m.id for m in models}) != len(models):
+        raise ValueError("model ids must be unique")
+    if table["default_model"] not in {m.id for m in models}:
+        raise ValueError("default_model must be one of models")
     label, detail = table["label"].strip(), str(table.get("detail") or "").strip()
     if not label or len(label) > 80 or len(detail) > 300:
         raise ValueError("label (1-80) or detail (0-300) has the wrong length")
     return CodexProfile(
         id=profile_id, label=label, detail=detail, base_url=table["base_url"],
-        model=table["model"], efforts=efforts, env_key_header=header,
+        models=tuple(models), default_model=table["default_model"], key_header=header,
         keyring_service=table["keyring_service"], keyring_key=table["keyring_key"])
 
 
@@ -233,6 +284,16 @@ def profiled_sessions() -> dict[str, str]:
     return {row["session"]: row["agent_id"] for row in rows if row}
 
 
+def may_post(sender_agent_id: str, target_agent_id: str) -> bool:
+    """Whether an agent may send to another: a profile agent's posts go only
+    to agents on its own profile; anyone may post to a profile agent."""
+    sender = for_agent(sender_agent_id or "")
+    return not sender or for_agent(target_agent_id or "") == sender
+
+
+BOUNDARY = "provider_profile_boundary"
+
+
 def readable_by(target: dict | str | None, caller_agent_id: str) -> bool:
     """Whether the agent ``caller_agent_id`` (its own turn) may read
     ``target``'s content: only a caller on the same profile may read a
@@ -289,14 +350,22 @@ def home(profile_id: str) -> pathlib.Path:
     return root() / profile_id
 
 
-def home_for_thread(thread_id: str) -> pathlib.Path | None:
-    """The Codex home of the agent that bound ``thread_id``: its profile's
-    home, or None for the default home. No other home is ever searched."""
-    if not thread_id:
-        return None
-    from . import agents as agents_db
-    profile = for_agent(agents_db.owner_of_backend_session(thread_id) or "")
+def home_for(*, agent_id: str | None = None, thread_id: str = "") -> pathlib.Path | None:
+    """The one Codex home to read for an agent's thread: its profile's home,
+    or None for the CLI's own home. With ``agent_id`` the agent's stored
+    profile decides; without it, the agent that bound ``thread_id`` does.
+    No other home is ever searched."""
+    if agent_id is None:
+        if not thread_id:
+            return None
+        from . import agents as agents_db
+        agent_id = agents_db.owner_of_backend_session(thread_id)
+    profile = for_agent(agent_id or "")
     return home(profile) if profile else None
+
+
+def home_for_thread(thread_id: str) -> pathlib.Path | None:
+    return home_for(thread_id=thread_id)
 
 
 def thread_in_home(profile_id: str, thread_id: str) -> bool:
@@ -317,7 +386,7 @@ def config_toml(profile: CodexProfile) -> str:
     return "\n".join((
         "# Generated by Clarp for the Codex provider profile "
         f"{_toml_string(pid)}. Rewritten at every app-server start.",
-        f"model = {_toml_string(profile.model)}",
+        f"model = {_toml_string(profile.default_model)}",
         f"model_provider = {_toml_string(pid)}",
         "check_for_update_on_startup = false",
         'web_search = "disabled"',
@@ -332,7 +401,7 @@ def config_toml(profile: CodexProfile) -> str:
         f"name = {_toml_string(profile.label)}",
         f"base_url = {_toml_string(profile.base_url)}",
         'wire_api = "responses"',
-        f"env_http_headers = {{ {_toml_string(profile.env_key_header)} = "
+        f"env_http_headers = {{ {_toml_string(profile.key_header)} = "
         f"{_toml_string(KEY_ENV)} }}",
         "requires_openai_auth = false",
         "supports_websockets = false",
@@ -451,9 +520,10 @@ def catalog() -> list[dict]:
     return [{
         "id": profile.id,
         "label": profile.label,
-        "detail": profile.detail,
+        "detail": " ".join(part for part in (profile.detail, OPERATING_RULE) if part),
+        "operating_rule": OPERATING_RULE,
         "available": available(profile.id),
-        "default_model": profile.model,
-        "models": [{"id": profile.model, "label": profile.model,
-                    "supported_efforts": list(profile.efforts)}],
+        "default_model": profile.default_model,
+        "models": [{"id": m.id, "label": m.label, "supported_efforts": list(m.efforts)}
+                   for m in profile.models],
     } for profile in profiles().values()]

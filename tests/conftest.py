@@ -320,41 +320,44 @@ def seed_agents():
 
 # A synthetic Codex provider profile and keyring (lib.codex_profiles). The
 # values are fakes; no real resource, deployment or keyring entry appears.
+FAKE_CODEX_PROFILE_ID = "example-eu"
 FAKE_CODEX_PROFILE_KEY = "sk-SENTINEL-azure-0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 FAKE_CODEX_PROFILE = {
-    "label": "Codex (EU, Azure)",
+    "label": "Codex (EU, example)",
     "detail": "Synthetic EU test provider",
-    "base_url": "https://eu-provider.invalid/openai/v1",
-    "model": "eu-model",
-    "efforts": ["low", "medium", "high", "xhigh"],
+    "base_url": "https://example.invalid/openai/v1",
+    "models": [{"id": "eu-model", "label": "EU Model",
+                "efforts": ["low", "medium", "high", "xhigh"]}],
+    "default_model": "eu-model",
     "wire_api": "responses",
-    "env_key_header": "api-key",
-    "keyring_service": "clarp-test",
-    "keyring_key": "codex-eu",
+    "key_header": "api-key",
+    "keyring_service": "clarp-test-keyring",
+    "keyring_key": "example-eu",
 }
 
 
 @pytest.fixture
 def fake_codex_profile(tmp_path, monkeypatch):
-    """Configure profile ``azure-eu`` with fake values, a fake ``secret-tool``
+    """Configure profile ``example-eu`` with fake values, a fake ``secret-tool``
     holding a sentinel key, and a private profile root."""
     from dataclasses import replace
     from lib import codex_profiles, config
 
     real_load = config.load
     monkeypatch.setattr(config, "load", lambda *a, **k: replace(
-        real_load(*a, **k), codex_profiles={"azure-eu": dict(FAKE_CODEX_PROFILE)}))
+        real_load(*a, **k),
+        codex_profiles={FAKE_CODEX_PROFILE_ID: dict(FAKE_CODEX_PROFILE)}))
     bindir = tmp_path / "fake-keyring-bin"
     bindir.mkdir()
     tool = bindir / "secret-tool"
     tool.write_text(
         "#!/bin/sh\n"
-        "[ \"$*\" = \"lookup service clarp-test key codex-eu\" ] || exit 1\n"
+        "[ \"$*\" = \"lookup service clarp-test-keyring key example-eu\" ] || exit 1\n"
         f"printf '%s\\n' '{FAKE_CODEX_PROFILE_KEY}'\n")
     tool.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("CLARP_CODEX_PROFILES_DIR", str(tmp_path / "profiles"))
     codex_profiles.clear_cache()
-    yield SimpleNamespace(key=FAKE_CODEX_PROFILE_KEY, secret_tool=tool,
-                          root=tmp_path / "profiles")
+    yield SimpleNamespace(id=FAKE_CODEX_PROFILE_ID, key=FAKE_CODEX_PROFILE_KEY,
+                          secret_tool=tool, root=tmp_path / "profiles")
     codex_profiles.clear_cache()

@@ -335,8 +335,8 @@ def _resolve_llm(agent: dict, backend: str, provider_profile: str = "") -> tuple
             raise DispatchError(409, f"provider profile '{provider_profile}' is not configured")
         model = (agent.get("model") or "").strip()
         effort = (agent.get("effort") or "").strip()
-        return (model if profile.has_model(model) else profile.default_model,
-                effort if effort in profile.efforts else "")
+        model = model if profile.has_model(model) else profile.default_model
+        return model, (effort if effort in profile.efforts_for(model) else "")
     cfg = config.load()
     if agent.get("is_janitor"):
         from .janitor_design_policy import effective_chain
@@ -1283,6 +1283,12 @@ class TurnDispatchService:
             raise DispatchError(409, "Durable goal owns continuation")
         _validate_goal_dispatch(agent, client_msg_id)
         agent_id = agent["agent_id"]
+        if sender_agent_id and not codex_profiles.may_post(sender_agent_id, agent_id):
+            # A provider-profile agent's words never reach an agent whose
+            # provider is another one (docs/codex-eu-profile.md).
+            raise DispatchError(403, codex_profiles.BOUNDARY)
+        if codex_profiles.is_profiled(agent_id):
+            synthesize_audio = False  # text-only: no TTS vendor hears it
         if not skip_admission and origin in _RECOVERY_RESUMING_ORIGINS:
             self.clear_recovery_backoff(agent_id, reason=f"send:{origin}")
         request = admission_policy.LiveWork(
