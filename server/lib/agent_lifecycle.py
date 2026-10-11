@@ -14,7 +14,7 @@ import threading
 from dataclasses import dataclass, replace
 
 from . import agents as agents_db
-from . import backends, events, identity
+from . import backends, codex_profiles, events, identity
 from .agent_store import AGENT_ROSTER, load_agents, save_agents
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
@@ -119,6 +119,9 @@ class AgentLifecycleService:
             default_roster_voice=next(iter(AGENT_ROSTER.values())),
             resolve_agent=lambda raw: getattr(identity.resolve(raw), "agent_id", ""),
             ancestors=agents_db.ancestors,
+            agent_profile=codex_profiles.for_agent,
+            provider_profile=codex_profiles.get,
+            resume_profile_ok=_resume_profile_ok,
         )
 
     @staticmethod
@@ -151,6 +154,8 @@ class AgentLifecycleService:
         agents[session] = {
             "name": spec.persona, "voice_id": spec.voice_id, "cwd": spec.cwd,
             "backend": spec.backend,
+            # Written with the agent row in one transaction (create_agent).
+            **({"provider_profile": spec.provider_profile} if spec.provider_profile else {}),
         }
         if spec.janitor:
             agents_db.create_agent(
@@ -163,6 +168,10 @@ class AgentLifecycleService:
         agent = agents_db.get_by_session(session)
         if not agent:
             raise AgentLifecycleError(500, "agent persistence failed")
+        if codex_profiles.for_agent(agent["agent_id"]) != spec.provider_profile:
+            # A profile is only ever written with the agent row; a mismatch
+            # here is an existing agent on another profile (or none).
+            raise AgentLifecycleError(409, "provider_profile_locked")
         if spec.llm_update:
             agents_db.update_agent(agent["agent_id"], **spec.llm_update)
         if spec.mcp_servers is not None:
@@ -296,3 +305,12 @@ def _existing_cwd(raw) -> str:
     else:
         fallback = pathlib.Path.home()
     return str(candidate) if candidate.is_dir() else str(fallback)
+
+
+def _resume_profile_ok(profile_id: str, thread_id: str) -> bool:
+    """A conversation is resumed only inside its own profile: a profile
+    agent's thread must be in that profile's home, and a default agent may
+    not take a thread a profile agent has bound. No other home is searched."""
+    if profile_id:
+        return codex_profiles.thread_in_home(profile_id, thread_id)
+    return not codex_profiles.for_agent(agents_db.owner_of_backend_session(thread_id))

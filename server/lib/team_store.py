@@ -484,6 +484,10 @@ def capture_assistant_message(*, agent_id: str, source_message_id: str,
         inserted = 0
         ts = now_ms()
         c = conn()
+        # A provider-profile agent's posts reach only teammates on its profile;
+        # anyone else would carry them to their own provider.
+        from . import codex_profiles
+        source_profile = codex_profiles.for_agent(agent_id)
         for team in teams:
             if not team["communication_enabled"]:
                 continue
@@ -514,6 +518,8 @@ def capture_assistant_message(*, agent_id: str, source_message_id: str,
                 inserted += 1
                 for member_id in members:
                     if member_id == agent_id:
+                        continue
+                    if source_profile and codex_profiles.for_agent(member_id) != source_profile:
                         continue
                     c.execute(
                         """INSERT INTO team_inbox (

@@ -714,7 +714,10 @@ def save_progress(attachment_id: str, generation: int, state: dict, next_run_at=
 
 
 def _in_scope(scope, target):
+    # A provider-profile agent's content never goes to a janitor's model.
+    from . import codex_profiles
     return (not target.get("is_janitor") and target.get("deleted_at") is None and target.get("archived_at") is None
+            and not codex_profiles.is_profiled(target)
             and target["agent_id"] not in scope.get("exclude_agent_ids", [])
             and (not scope.get("agent_ids") or target["agent_id"] in scope["agent_ids"]))
 

@@ -141,6 +141,9 @@ class LiveExplainer:
         return self._setting
 
     def _admit(self, agent_id: str, ops: list[dict[str, Any]]) -> None:
+        from . import codex_profiles
+        if codex_profiles.is_profiled(agent_id):
+            return  # its tool calls never go to the explainer's model
         setting = self._current_setting()
         level = int(setting["detail_level"])
         if not setting["enabled"] or level == 0:
