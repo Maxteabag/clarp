@@ -285,6 +285,36 @@ def profiled_sessions() -> dict[str, str]:
         "AND deleted_at IS NULL")}
 
 
+# --- pushes to Apple ---------------------------------------------------------
+#
+# APNs (and the relay in front of it) is outside the EU. A push about a profile
+# agent carries this marker first, so the app's notification extension skips
+# enrichment and intent donation, and generic text instead of its words.
+
+PUSH_REPLY = "New reply"
+PUSH_NEEDS_ANSWER = "Needs your answer"
+
+
+def push_marker(agent: dict | str | None) -> dict:
+    """``{provider_profile, privacy_restricted: true}`` for a profile agent,
+    else {}."""
+    profile = profile_of(agent)
+    return {"provider_profile": profile, "privacy_restricted": True} if profile else {}
+
+
+def restrict_push(payload: dict, agent: dict | str | None, *, alert_body: str = "") -> dict:
+    """``payload`` for an ordinary agent; for a profile agent the marker
+    first, the alert's body generic and no subtitle."""
+    marker = push_marker(agent)
+    if not marker:
+        return payload
+    alert = (payload.get("aps") or {}).get("alert")
+    if isinstance(alert, dict):
+        alert["body"] = alert_body or PUSH_REPLY
+        alert.pop("subtitle", None)
+    return {**marker, **{key: value for key, value in payload.items() if key not in marker}}
+
+
 def may_post(sender_agent_id: str, target_agent_id: str) -> bool:
     """Whether an agent may send to another: a profile agent's posts go only
     to agents on its own profile; anyone may post to a profile agent."""
