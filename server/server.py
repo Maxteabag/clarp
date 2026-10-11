@@ -324,6 +324,15 @@ def _spawn_voice_metrics(audio_bytes: bytes, ctype: str, *, session, trace_id,
     threading.Thread(target=work, name="voice-metrics", daemon=True).start()
 
 
+# Snapshot fields another agent may see of an EU-only agent: who and what
+# state, never its messages, status text or activity.
+_EU_ONLY_SNAPSHOT_KEYS = (
+    "agent_id", "persona", "session", "backend", "provider_profile", "cwd",
+    "alive", "busy", "focused", "latest_state", "is_janitor", "role",
+    "parent_agent_id", "archived_at", "muted", "avatar_url",
+)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ClaudePWA/1.0"
     # HTTP/1.1 so the tailscale-serve reverse proxy (and any direct client)
@@ -1057,6 +1066,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "GET"):
             return self._json_error(403, "full device access required")
+        refusal = self._eu_only_read_refusal(path)
+        if refusal:
+            return self._json_error(403, refusal)
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "GET")
@@ -1627,8 +1639,44 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
-        from lib import snapshot
-        self._send(200, snapshot.SHARED.body(self.ctx), "application/json")
+        from lib import codex_profiles, snapshot
+        body = snapshot.SHARED.body(self.ctx)
+        caller = self._turn_caller() if codex_profiles.assigned() else ""
+        if caller:
+            # Another agent's turn sees an EU-only agent's identity and
+            # state, never its words.
+            data = json.loads(body)
+            data["agents"] = [
+                row if codex_profiles.readable_by(row, caller)
+                else {key: row.get(key) for key in _EU_ONLY_SNAPSHOT_KEYS if key in row}
+                for row in data.get("agents") or []]
+            body = json.dumps(data).encode()
+        self._send(200, body, "application/json")
+
+    def _eu_only_read_refusal(self, path: str) -> str:
+        """Refuse another agent's turn a read of an EU-only agent's content:
+        its provider would receive it (docs/codex-eu-profile.md)."""
+        from lib import codex_profiles
+        if not codex_profiles.assigned():
+            return ""
+        caller = self._turn_caller()
+        if not caller:
+            return ""
+        query = self._query()
+        owners = [identity.lookup(unquote(value)) for key in ("session", "agent", "session_id")
+                  for value in query.get(key, []) if value]
+        parts = path.strip("/").split("/")
+        if len(parts) >= 2 and parts[0] == "agents" and parts[1] not in ("snapshot",):
+            owners.append(identity.lookup(unquote(parts[1])))
+        if len(parts) >= 2 and parts[0] == "artifacts":
+            from lib import artifacts
+            owners.append(artifacts.get(unquote(parts[1])))
+        if len(parts) >= 2 and parts[0] == "background-jobs":
+            from lib import background_jobs
+            owners.append(background_jobs.get(unquote(parts[1]), reconcile=False))
+        if any(owner and not codex_profiles.readable_by(owner, caller) for owner in owners):
+            return "This agent is EU-only; another agent cannot read it"
+        return ""
 
     def _handle_prompt_history(self):
         """Authenticated history of prospectively evidenced user prompts."""

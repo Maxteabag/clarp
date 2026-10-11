@@ -69,39 +69,66 @@ the eventlog, transcripts, `/status` or error text. Clarp replaces it with
 sentinel key. A live probe on 2026-10-11 found the real key in none of the
 probe's files.
 
-## Clarp features that skip profile agents
+## Leak-path audit: every other path that reads an agent's content
 
-These features send an agent's content to a model provider other than the
-agent's own. They skip profile agents:
+Rule: no Clarp feature sends an EU agent's prompts, replies, tool calls,
+tool output or transcript text to a model outside its EU deployment. "EU
+agent" means an agent on the `azure-eu` profile. Every Host path that reads
+one agent's content and then calls a model is listed below with its
+decision. Each decision is pinned by a test that stubs the non-EU model
+client and checks that a sentinel from an EU agent never reaches it. The
+tests are in `tests/unit/test_codex_profile_leak_paths.py`,
+`tests/unit/test_codex_profile_side_channels.py` and
+`tests/unit/test_codex_provider_profile.py`.
 
-- the tool-call explainer: the live path and janitor scope;
-- janitors: task labels, the heartbeat keeper and other scoped janitors;
-- the label checker;
-- dreaming;
-- the orchestrator's routing context. The agent's name stays routable, but
-  its messages and state are not sent;
-- Oracle: its roster, delegation, pending decisions and completion
-  notifications;
-- fleet-map rule design for unknown commands;
-- remote error classification;
-- compaction through `codex resume` and the interactive terminal. Both would
-  run on the CLI's own account.
+| Path | What it would send | Where | Decision |
+|---|---|---|---|
+| Tool explainer: live (`live_explain`) and phone (`tool_explanations.request`) | tool commands, inputs, script contents | `codex exec`, CLI fallbacks, TypeSafe | Skipped. Live admission refuses EU agents. Janitor scope resolves no explainer, so no model call is made. |
+| Error classification (`turn_dispatch`) | the turn's error text | TypeSafe | Local regex only |
+| OpenAI account recovery, usage records, account switch | quota state, model | OpenAI account | Skipped for EU turns |
+| Janitors: task labels, heartbeat keeper, scoped janitors (`janitors._in_scope`, `janitor_runner.in_scope`) | recent messages, plans, jobs | janitor model (any CLI or OpenAI) | EU agents are never in scope |
+| Label checker (`label_audit`) | status, jobs, recent messages, helper status | TypeSafe | EU agents and EU helpers under ordinary parents are skipped |
+| Quota / hotseat janitors | account usage only | — | No agent content; unchanged |
+| Dreaming (`dreaming`) | chat snapshot plus a full turn, possibly on another backend | any CLI | EU agents never dream |
+| Orchestrator routing context (`build_context_packet`) | recent messages and state of every agent | OpenAI, TypeSafe, CLI | EU agents' messages and state are withheld; only their names stay routable |
+| Orchestrator routing of a message to an EU agent (`handle_send`) | the utterance, which is the EU agent's prompt | routing model | No routing model when the target is an EU agent or the message opens with its name |
+| Spoken-name matching (`routing`, `send_service`) | the utterance | TypeSafe | Local match for EU names; local-only when the default target is an EU agent |
+| Orchestrator spoken status ("what is X doing") | the last reply, 180 characters | TTS provider | EU agent: its state kind only |
+| Oracle tools and roster (`oracle_calls`, `oracle_calls_stable`, `oracle_contact`, Gemini Live) | messages, transcript, status | OpenAI Realtime / Live, Gemini Live | EU agents are not in Oracle's roster |
+| Oracle attention (`oracle_attention`) | pending decisions, completion replies | same | EU agents' rows are filtered out |
+| Oracle delegations (`oracle_delegations.begin`) | the delegated result | same | Refused for EU agents (all engines) |
+| Legacy `/oracle/realtime` proxy (the phone runs the tools) | whatever the phone reads back | OpenAI Realtime | Read-tool calls naming an EU agent have their output replaced; EU delegation results are not injected |
+| Oracle router (`oracle_router`) | tool and delegation results | `codex exec` / OpenAI | Covered by the roster and delegation guards |
+| Podcast detours (`podcast_live.context_for`, three engines) | an episode's transcript and source artifact | OpenAI / Gemini Live, image generation | Refused when the episode or its source belongs to an EU agent |
+| Fleet map world and rule design (`viz_normalize.build_fleet_map`) | tool commands, paths, plans, artifacts, prompt excerpts | `codex exec`, `claude -p` | EU agents never enter the map's events or work |
+| Team posts (`team_store.capture_assistant_message`) | `<team>` posts, read by teammates' turns and the heartbeat decider | teammates' providers | An EU agent's posts reach only teammates on its profile |
+| Another agent's turn reading over the Host API (`do_GET`, `/agents/snapshot`) | `/log`, artifacts, jobs, conversation and message previews | that agent's provider | Refused (403) when the caller's turn identity (`X-Clarp-Turn`) is on another profile. The snapshot shows such a caller an EU agent's identity and state only. The user's devices see everything. |
+| Speech output (`tts_queue.enqueue`) | `<speak>` replies | Cartesia, ElevenLabs, Deepgram, Gemini TTS, adapters | EU agents are text-only: nothing is enqueued |
+| Dictation (`transcription_pipeline`) | the prompt audio and transcript, plus the junk filter | cloud STT, adapters, TypeSafe | With an EU agent focused, only the Host's local Whisper transcribes it; otherwise the request is refused (409, type instead). Judgments are local-only |
+| Fork / adopt / resume (`agent_fork`, `agent_spec`) | the transcript or a seed | the child's provider | Cross-profile forks and resumes are refused |
+| Compaction, interactive terminal | the thread | the CLI's own OpenAI account | Refused |
+| Voice preamble, heartbeat, goals, compaction inside the turn | — | the agent's own EU turn | Unchanged (EU) |
+| herald, live activity, notifications, leader memory, background jobs, goal ledger, artifacts | — | — | No model call (local) |
 
-`tests/unit/test_codex_profile_side_channels.py` pins these.
+## What the Host cannot enforce
 
-## Still outside the EU deployment
-
-- **Speech.** When the agent speaks, `<speak>` text goes to the configured TTS
-  vendor (Cartesia, ElevenLabs and others). Dictation goes to the configured
-  speech-to-text vendor. For EU-only work, use the agent in text, or set
-  `[tts.agents.<name>]` to an EU-hosted or local voice.
-- **Hands-free routing.** With the orchestrator on, a spoken or typed
-  utterance that is not addressed to a session goes to the routing model
-  (OpenAI by default) to decide which agent receives it. Send to the agent's
-  chat directly.
-- **Agent-to-agent traffic.** Team posts, `clarp-admin prompt` and replies to a
-  parent go to whichever agents receive them. Keep EU work among profile
-  agents.
+- **Same Unix user.** Every agent runs with full access as the same OS user.
+  An ordinary agent can read the Clarp database or the EU profile's rollouts
+  straight from disk and pass them to its own provider. The Host only guards
+  its own API. To exclude this, keep EU work off any machine where
+  non-EU agents work on files that hold EU content, or run them in an OS
+  sandbox.
+- **Live event stream.** The SSE event stream is not filtered per caller. An
+  agent subscribing to it would receive live text. No agent or skill does
+  this today.
+- **Bypassing turn identity.** A request without `X-Clarp-Turn`, made with a
+  device token from an agent's shell, is treated as the user.
+- **Clients.** On-device features of the apps (iOS speech recognition,
+  client-side TTS or summaries, if any) are outside the Host. Push
+  notifications carry a reply preview to Apple's push service; this is not a
+  model.
+- **What the user chooses to send.** The user typing EU content into an
+  ordinary agent, or pasting it into a team, a decision or Oracle.
 
 ## What the EU Data Zone does and does not guarantee
 

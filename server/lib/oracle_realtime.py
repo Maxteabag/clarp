@@ -213,6 +213,9 @@ def _validated_agent_result(
     if delegation_id in injected:
         return None
     row = oracle_delegations.get(delegation_id)
+    from . import codex_profiles
+    if row is not None and codex_profiles.is_profiled(str(row.get("agent_id") or "")):
+        return None
     if (row is None or row.get("owner_principal") != principal
             or row.get("delivered_at") is not None
             or row.get("status") not in oracle_delegations.TERMINAL):
@@ -230,10 +233,47 @@ def _validated_agent_result(
     return delegation_id
 
 
+# Tools the phone runs that read an agent's content back to the model.
+_READ_TOOLS = frozenset({"read_agent_messages", "get_agent_status", "read_agent_transcript"})
+EU_ONLY_OUTPUT = json.dumps({"error": "This agent is EU-only; Oracle cannot read it."})
+
+
+def note_eu_only_call(raw, blocked: set[str]) -> None:
+    """Remember a model tool call that would read an EU-only agent, so the
+    phone's answer to it is replaced (the phone runs these tools itself)."""
+    try:
+        event = json.loads(raw)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(event, dict):
+        return
+    item = event.get("item") if event.get("type") == "response.output_item.done" else event
+    if (not isinstance(item, dict)
+            or event.get("type") not in ("response.output_item.done",
+                                         "response.function_call_arguments.done")
+            or item.get("name") not in _READ_TOOLS):
+        return
+    try:
+        arguments = json.loads(item.get("arguments") or "{}")
+    except (TypeError, ValueError):
+        arguments = {}
+    name = str((arguments or {}).get("agent") or "").strip().casefold()
+    call_id = item.get("call_id")
+    if not name or not isinstance(call_id, str):
+        return
+    from . import agents as agents_db, codex_profiles
+    for session in codex_profiles.profiled_sessions():
+        row = agents_db.get_by_session(session) or {}
+        if name in (session.casefold(), str(row.get("persona") or "").casefold()):
+            blocked.add(call_id)
+            return
+
+
 def _safe_client_event(
     raw: str, *, model: str, voice: str, principal: str = "",
     injected: dict[str, str] | None = None,
     transcription_model: str = "",
+    eu_only_calls: set[str] | None = None,
 ) -> str | None:
     """Allow only Oracle events and replace configurable billable contracts."""
     try:
@@ -318,6 +358,8 @@ def _safe_client_event(
             if (not isinstance(call_id, str) or not call_id
                     or not isinstance(output, str) or len(output) > 100_000):
                 return None
+            if eu_only_calls is not None and call_id in eu_only_calls:
+                output = EU_ONLY_OUTPUT
             safe = {"type": kind, "item": {
                 "type": "function_call_output",
                 "call_id": call_id[:160], "output": output,
@@ -410,6 +452,8 @@ def serve(handler) -> None:
                 stop.set()
                 return False
 
+    eu_only_calls: set[str] = set()
+
     def pump_upstream() -> None:
         try:
             while not stop.is_set():
@@ -423,6 +467,7 @@ def serve(handler) -> None:
                         continue
                 if journal:
                     journal.event("server", str(incoming))
+                note_eu_only_call(incoming, eu_only_calls)
                 detail = incomplete_response_detail(incoming)
                 if detail:
                     log("oracleResponseIncomplete", detail)
@@ -467,7 +512,8 @@ def serve(handler) -> None:
                 continue
             safe = _safe_client_event(
                 raw, model=model, voice=voice, principal=principal,
-                injected=injected_delegations, transcription_model=transcription_model)
+                injected=injected_delegations, transcription_model=transcription_model,
+                eu_only_calls=eu_only_calls)
             if safe is None:
                 try:
                     rejected = json.loads(raw)

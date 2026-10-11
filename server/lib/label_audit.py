@@ -70,6 +70,7 @@ def candidates(now: int) -> list[dict[str, Any]]:
     jobs = background_jobs.active_by_agent()
     activity = stale_work.activities(rows)
     profiled = codex_profiles.assigned()
+    profiled_sessions = codex_profiles.profiled_sessions()
     found: list[dict[str, Any]] = []
     for a in rows:
         agent_id = a["agent_id"]
@@ -82,7 +83,8 @@ def candidates(now: int) -> list[dict[str, Any]]:
         state = states.get(agent_id, {})
         processes = background_jobs.background_processes(
             jobs.get(agent_id, []), tree.helper_sessions.get(agent_id, set()))
-        helpers = tree.helper_activity.get(agent_id, [])
+        helpers = [h for h in tree.helper_activity.get(agent_id, [])
+                   if h.get("session") not in profiled_sessions]
         label = snapshot.shown_status(a, state, visible, helpers, processes)
         if not (label or processes or helpers or state.get("kind") == "background"):
             continue

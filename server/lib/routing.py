@@ -67,6 +67,22 @@ def _strip_address_prefix(text: str, end: int) -> str:
     return re.sub(r"^[\s,;:!?.-]+", "", rest).strip()
 
 
+def addresses_profiled(text: str) -> bool:
+    """Whether ``text`` opens by naming an agent on a provider profile."""
+    from . import agents as agents_db
+    from . import codex_profiles
+    profiled = codex_profiles.profiled_sessions()
+    if not profiled or not text:
+        return False
+    tokens = _word_tokens(text)
+    first = 0
+    while first < len(tokens) and tokens[first][0] in LEADING_ADDRESS_FILLERS:
+        first += 1
+    names = {_clean_word(str((agents_db.get_by_session(session) or {}).get("persona") or "")).lower()
+             for session in profiled} - {""}
+    return any(token in names for token, _s, _e in tokens[first:first + MAX_ADDRESS_TOKENS])
+
+
 def resolve_agent_by_spoken_name(
     text: str, agents: dict
 ) -> tuple[str | None, str]:
@@ -104,6 +120,16 @@ def resolve_agent_by_spoken_name(
     address_tokens = tokens[first:first + MAX_ADDRESS_TOKENS]
     if not address_tokens:
         return None, text
+
+    # A provider-profile agent addressed by its exact name is matched here,
+    # so the utterance meant for it never goes to the remote judgment.
+    from . import codex_profiles
+    profiled = codex_profiles.profiled_sessions()
+    if profiled:
+        for token, _start, end in address_tokens:
+            for persona, session_id in candidates:
+                if session_id in profiled and token == _clean_word(persona).lower():
+                    return session_id, _strip_address_prefix(text, end)
 
     # 0) Optional judgment. It runs before the spelling matchers because both
     # of them treat any name in the opening words as an address, which is how
