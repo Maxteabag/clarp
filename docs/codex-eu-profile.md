@@ -161,7 +161,7 @@ tests are in `tests/unit/test_codex_profile_leak_paths.py`,
 | Label checker (`label_audit`) | status, jobs, recent messages, helper status | TypeSafe | EU agents and EU helpers under ordinary parents are skipped |
 | Quota / hotseat janitors | account usage only | — | No agent content; unchanged |
 | Dreaming (`dreaming`) | chat snapshot plus a full turn, possibly on another backend | any CLI | EU agents never dream |
-| Orchestrator routing context (`build_context_packet`) | recent messages and state of every agent | OpenAI, TypeSafe, CLI | EU agents' messages and state are withheld; only their names stay routable |
+| Orchestrator routing context (`build_context_packet`) | recent messages and state of every agent | OpenAI, TypeSafe, CLI | EU agents are not voice targets (`can_voice_target` false), so they are not in the routing packet at all; send to them directly |
 | Orchestrator routing of a message to an EU agent (`handle_send`) | the utterance, which is the EU agent's prompt | routing model | No routing model when the target is an EU agent or the message opens with its name |
 | Spoken-name matching (`routing`, `send_service`) | the utterance | TypeSafe | Local match for EU names; local-only when the default target is an EU agent |
 | Orchestrator spoken status ("what is X doing") | the last reply, 180 characters | TTS provider | EU agent: its state kind only |
