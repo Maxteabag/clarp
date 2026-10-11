@@ -114,7 +114,11 @@ class RuntimeReleaseMonitor:
         self._deadline = 0.0
         self._next_attempt = 0.0
         self._blockers: dict[str, list[str]] = {}
+        self._last_blockers: dict[str, list[str]] = {}
         self._last_outcome = ""
+        # What the drain last did (fenced, retargeted, reverted, withdrawn,
+        # sealed), so a reader never has to infer it from the phase alone.
+        self._last_event: dict[str, Any] = {}
 
     # --- status --------------------------------------------------------------
 
@@ -134,9 +138,21 @@ class RuntimeReleaseMonitor:
                 "fenced_since": at(self._fenced_at) if self._phase == "draining" else None,
                 "deadline": at(self._deadline) if self._phase == "draining" else None,
                 "next_attempt_at": at(self._next_attempt) if self._phase == "backoff" else None,
-                "blockers": {key: list(value) for key, value in self._blockers.items()},
+                # Only a drain in progress has blockers; afterwards the last
+                # attempt's are history (``last_blockers``).
+                "blockers": ({key: list(value) for key, value in self._blockers.items()}
+                             if self._phase == "draining" else {}),
+                "last_blockers": {key: list(value)
+                                  for key, value in self._last_blockers.items()},
                 "last_outcome": self._last_outcome,
+                "last_event": dict(self._last_event),
             }
+
+    def _event(self, kind: str, *, target: str, reason: str = "") -> None:
+        """Record the drain's latest transition at the wall-clock moment."""
+        with self._lock:
+            self._last_event = {"kind": kind, "at": int(self.wall() * 1000),
+                                "target_release": target, "reason": reason}
 
     def _set(self, **fields: Any) -> None:
         with self._lock:
@@ -163,6 +179,7 @@ class RuntimeReleaseMonitor:
             # A newer release superseded the target: keep the one fence and
             # its deadline, aim at the newest. One handoff, never two.
             log("runtimeDrainRetarget", f"from={self._target} to={desired}")
+            self._event("retargeted", target=desired, reason=f"from {self._target}")
             self._set(target=desired)
         blockers = self.runtime.seal_if_drained()
         self._set(blockers=blockers)
@@ -177,6 +194,7 @@ class RuntimeReleaseMonitor:
         attempt = self._attempt + 1
         self._set(phase="draining", target=target, attempt=attempt,
                   fenced_at=now, deadline=now + self.budget_sec, blockers={})
+        self._event("fenced", target=target)
         log("runtimeDrainStarted",
             f"running={self.running_release_id} target={target} "
             f"attempt={attempt} budget={self.budget_sec:g}s")
@@ -185,6 +203,9 @@ class RuntimeReleaseMonitor:
         """Lift the fence; held work starts. With ``backoff`` the next attempt
         waits base * 2**(attempt-1), capped."""
         self.runtime.release_admission_fence()
+        self._set(last_blockers=dict(self._blockers))
+        self._event("reverted" if backoff else "withdrawn", target=self._target,
+                    reason=reason)
         if backoff:
             delay = min(self.backoff_cap_sec,
                         self.backoff_base_sec * 2 ** max(0, self._attempt - 1))
@@ -205,6 +226,7 @@ class RuntimeReleaseMonitor:
         if self._phase == "draining":
             self._revert("target withdrawn", now=self.clock(), backoff=False)
         elif self._phase == "backoff":
+            self._event("withdrawn", target=self._target, reason="target withdrawn")
             self._set(phase="idle", attempt=0, target="", next_attempt=0.0,
                       blockers={})
 
@@ -218,6 +240,7 @@ class RuntimeReleaseMonitor:
             return False
         self._set(phase="handed_over", target=desired, blockers={},
                   last_outcome="handed over")
+        self._event("sealed", target=desired)
         log("runtimeDrainHandover",
             f"running={self.running_release_id} target={desired} "
             f"attempt={self._attempt}")
@@ -247,3 +270,95 @@ class RuntimeReleaseMonitor:
                     return
             except Exception as exc:  # noqa: BLE001 - retry on next poll
                 log_exception("runtimeReleaseMonitorFail", exc)
+
+
+class RuntimeStatusView:
+    """The ``runtime`` block of GET /status, built from the runtime's status
+    RPC (``fetch``). Always the same keys. ``fenced`` is the soft admission
+    fence, ``sealed`` the hard one just before the handoff, ``draining``
+    either. When the call fails the block says ``unavailable`` with the
+    reason and carries the last real drain block and when it was seen; it
+    never reads as idle because the runtime did not answer."""
+
+    def __init__(self, fetch: Callable[[], dict], *,
+                 wall: Callable[[], float] = time.time):
+        self.fetch = fetch
+        self.wall = wall
+        self._lock = threading.Lock()
+        self._last: dict[str, Any] | None = None
+
+    @staticmethod
+    def _reason(exc: BaseException) -> str:
+        from .runtime_bridge import RuntimeProtocolError, RuntimeUnavailable
+        if isinstance(exc, RuntimeUnavailable):
+            cause = exc.__cause__
+            if isinstance(cause, TimeoutError) or "timed out" in str(exc):
+                return "timeout"
+            return "unreachable"
+        if isinstance(exc, RuntimeProtocolError):
+            return "protocol_error"
+        return "error"
+
+    def block(self) -> dict[str, Any]:
+        observed = int(self.wall() * 1000)
+        try:
+            status = self.fetch()
+            if not isinstance(status, dict) or not status:
+                return self._unavailable("empty_status")
+        except Exception as exc:  # noqa: BLE001 - reported, never read as idle
+            reason = self._reason(exc)
+            log("runtimeStatusUnavailable", f"reason={reason} error={str(exc)[:160]}")
+            return self._unavailable(reason)
+        drain = status.get("drain")
+        if not isinstance(drain, dict):
+            drain = {"phase": "unsupported"}
+        sealed = bool(status.get("draining"))
+        fenced = (bool(status["fenced"]) if "fenced" in status
+                  else drain.get("phase") == "draining") or sealed
+        block = {
+            "available": True,
+            "reason": "",
+            "release_id": str(status.get("release_id") or ""),
+            "fenced": fenced,
+            "sealed": sealed,
+            "draining": fenced or sealed,
+            "drain": drain,
+            "active_turns": len(status.get("active") or {}),
+            "observed_at": observed,
+        }
+        with self._lock:
+            self._last = block
+        return block
+
+    def _unavailable(self, reason: str) -> dict[str, Any]:
+        with self._lock:
+            last = self._last
+        return {
+            "available": False,
+            "reason": reason,
+            "release_id": last["release_id"] if last else "",
+            "fenced": None,
+            "sealed": None,
+            "draining": None,
+            "drain": {"phase": "unavailable",
+                      "last_known": last["drain"] if last else None,
+                      "last_known_at": last["observed_at"] if last else None},
+            "active_turns": None,
+            "observed_at": int(self.wall() * 1000),
+        }
+
+
+_VIEWS: dict[int, tuple[Any, RuntimeStatusView]] = {}
+_VIEWS_LOCK = threading.Lock()
+
+
+def status_view_for(client: Any) -> RuntimeStatusView:
+    """The one view per runtime client, so its last known drain survives
+    between requests (a replaced client starts a fresh view)."""
+    with _VIEWS_LOCK:
+        entry = _VIEWS.get(id(client))
+        if entry is None or entry[0] is not client:
+            _VIEWS.clear()
+            entry = (client, RuntimeStatusView(client.status))
+            _VIEWS[id(client)] = entry
+        return entry[1]

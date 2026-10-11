@@ -649,15 +649,28 @@ Returns 404 for an unknown job, otherwise:
 
 ### Runtime status in `GET /status`
 
-`runtime` carries `available`, `release_id`, `draining` (the runtime is sealed
-and about to hand over to a new release), `active_turns` and `drain`, the
-graceful release drain of [runtime-restarts.md](runtime-restarts.md):
+`runtime` always carries the same keys: `available`, `reason`, `release_id`,
+`fenced`, `sealed`, `draining`, `drain`, `active_turns` and `observed_at`
+(epoch ms). `fenced` is the graceful drain's soft admission fence (no turn
+starts, arrivals are held durably), `sealed` the hard fence of the moment
+before the handoff, and `draining` is either. `drain` is the graceful release
+drain of [runtime-restarts.md](runtime-restarts.md):
 `{"phase": "idle | draining | backoff | handed_over", "running_release",
 "target_release", "attempt", "fenced_since", "deadline", "next_attempt_at",
-"blockers": {kind: [agent ids]}, "last_outcome"}` with times in epoch ms.
-`drain` is `null` when the runtime is unavailable or predates the drain, and
-`{"phase": "idle"}` on an embedded Host. It is diagnostic: no client contract
-depends on it, and clients must tolerate it missing.
+"blockers": {kind: [agent ids]}, "last_blockers", "last_outcome",
+"last_event": {"kind": "fenced | retargeted | reverted | withdrawn | sealed",
+"at", "target_release", "reason"}}` with times in epoch ms. `blockers` is
+non-empty only while the phase is `draining`; the previous attempt's are
+`last_blockers`. A runtime from before the drain reports
+`{"phase": "unsupported"}`, and an embedded Host `{"phase": "idle"}`.
+
+When the runtime does not answer its status call, the block is explicitly
+unavailable, never idle: `available` false, `reason` one of `timeout`,
+`unreachable`, `protocol_error`, `empty_status`, `error`; `fenced`, `sealed`,
+`draining` and `active_turns` are `null` (unknown); and `drain` is
+`{"phase": "unavailable", "last_known", "last_known_at"}`, the last real drain
+block this Host saw and when. It is diagnostic: no client contract depends on
+it, and clients must tolerate it missing.
 
 ### Read-only HTML reports: `html_form` with `read_only`
 

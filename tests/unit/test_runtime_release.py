@@ -203,3 +203,85 @@ def test_clean_handoff_marker_is_private_and_consumed_once(tmp_path):
     assert marker.stat().st_mode & 0o777 == 0o600
     assert consume_clean_handoff(marker) is True
     assert consume_clean_handoff(marker) is False
+
+
+# --- truthful drain status (Solu re7d614160304, item 2) ---------------------
+
+def _wall_clock(clock):
+    return dict(clock=clock, wall=lambda: 1_700_000_000.0 + clock.now)
+
+
+def test_status_names_the_last_drain_event_with_its_time_and_reason():
+    clock = Clock()
+    desired = ["r1"]
+    runtime = FakeRuntime(blockers=[{"active": ["a"]}])
+    monitor = RuntimeReleaseMonitor(
+        runtime, running_release_id="old", desired_release_id=lambda: desired[0],
+        budget_sec=900, backoff_base_sec=300, backoff_cap_sec=3600,
+        **_wall_clock(clock))
+
+    monitor.check_once()
+    event = monitor.status()["last_event"]
+    assert event == {"kind": "fenced", "at": 1_700_000_000_000,
+                     "target_release": "r1", "reason": ""}
+
+    clock.now += 10
+    desired[0] = "r2"
+    monitor.check_once()
+    event = monitor.status()["last_event"]
+    assert event["kind"] == "retargeted"
+    assert event["target_release"] == "r2"
+    assert event["reason"] == "from r1"
+    # Retargeting keeps the one deadline.
+    assert monitor.status()["deadline"] == 1_700_000_000_000 + 900_000
+
+    clock.now += 890
+    monitor.check_once()
+    status = monitor.status()
+    assert status["phase"] == "backoff"
+    assert status["last_event"]["kind"] == "reverted"
+    assert status["last_event"]["reason"] == "budget expired"
+    assert status["last_event"]["at"] == 1_700_000_000_000 + 900_000
+
+
+def test_blockers_are_live_only_while_draining_and_kept_as_last_blockers_after():
+    clock = Clock()
+    runtime = FakeRuntime(blockers=[{"active": ["a"]}])
+    monitor = _monitor(runtime, clock=clock)
+    monitor.check_once()
+    assert monitor.status()["blockers"] == {"active": ["a"]}
+    clock.now += 900
+    monitor.check_once()
+    status = monitor.status()
+    assert status["phase"] == "backoff"
+    # In backoff nothing is blocking: the last attempt's blockers are history.
+    assert status["blockers"] == {}
+    assert status["last_blockers"] == {"active": ["a"]}
+
+
+def test_a_withdrawn_target_is_reported_as_withdrawn():
+    desired = ["new"]
+    runtime = FakeRuntime(blockers=[{"active": ["a"]}])
+    monitor = _monitor(runtime, desired)
+    monitor.check_once()
+    desired[0] = "old"
+    monitor.check_once()
+    status = monitor.status()
+    assert status["phase"] == "idle"
+    assert status["last_event"]["kind"] == "withdrawn"
+    assert status["last_event"]["reason"] == "target withdrawn"
+
+
+def test_a_seal_is_reported_before_shutdown():
+    seen = []
+
+    class Watching(FakeRuntime):
+        def shutdown(self):
+            seen.append(monitor.status())
+
+    runtime = Watching(blockers=[{"active": ["a"]}, {}])
+    monitor = _monitor(runtime)
+    monitor.check_once()
+    monitor.check_once()
+    assert seen[0]["phase"] == "handed_over"
+    assert seen[0]["last_event"]["kind"] == "sealed"

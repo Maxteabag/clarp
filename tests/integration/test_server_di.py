@@ -197,10 +197,15 @@ def test_status_reports_external_runtime_health(fake_ctx):
         status, body = _get(f"http://127.0.0.1:{port}/status")
         assert status == 200
         runtime = json.loads(body)["runtime"]
+        assert isinstance(runtime.pop("observed_at"), int)
+        # Fenced but not yet sealed: draining, truthfully (Nadia 2026-10-11).
         assert runtime == {
             "available": True,
+            "reason": "",
             "release_id": "runtime-42",
-            "draining": False,
+            "fenced": True,
+            "sealed": False,
+            "draining": True,
             "drain": {"phase": "draining", "target_release": "runtime-43",
                       "blockers": {"active": ["agent-1"]}},
             "active_turns": 1,
