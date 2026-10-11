@@ -74,6 +74,28 @@ to a newly installed release without interrupting anything:
    goal continuation) and no held work that is not yet durable. Then
    `mark_clean_handoff`, shutdown, and the new runtime recovers the durable
    queue exactly as at every boot.
+
+   An account recovery park is handed over rather than waited out when it is
+   the last thing owned and it is certain (Solu re7d614160304): the
+   coordinator registered the turn while recovering, so no process ever ran
+   for it (not a retry, not a continuation, no maintenance run, no unheard
+   audio, not a new session); its conversation binding is unchanged; its
+   queue is not paused; it still owns its slot with no launch running; and
+   no recovery pass (the selector) is in flight. It then becomes a
+   `recovery-park-<trace>` row at the head of the agent's queue, in one write
+   transaction with the end of its turn row and an `idle` state that names
+   the handoff (so a crash leaves no interrupted turn), and the same spec
+   heads the in-memory queue with that park id, the slot given back. From
+   there it is held work like any other: the next runtime recovers it in
+   order, and a revert or a rollback between seal and exit starts it first.
+   The seal writes `runtime-account-recovery.json` beside the clean-handoff
+   marker with each recovering pool's original park start (timing only;
+   credentials and the account choice stay with the selector), and the next
+   runtime continues that recovery from it, so a handoff never restarts the
+   30-minute park bound; a carry older than an hour is ignored. Anything
+   else keeps blocking, and the seal's blockers say why
+   (`account_recovery_refused: ["agent:reason"]`). A runtime built without
+   the carry path (tests, older releases) blocks on every park as before.
 4. The wait is monotonic and bounded: 15 minutes from raising the fence (a
    newer release retargets the same drain without extending it). When it
    expires the fence is lifted, held work starts in order with nothing lost or
