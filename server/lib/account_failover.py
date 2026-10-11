@@ -132,9 +132,10 @@ class AccountFailover:
         self.next_check = 0.0
         self.parked_since = 0.0
         self.checked_models: tuple[str, ...] = ()
-        # A recovery pass is running (deciding, stopping processes, or asking
-        # the selector). Parked work is never handed over meanwhile.
-        self.checking = False
+        # Recovery passes running (deciding, stopping processes, or asking
+        # the selector); a timer and a new request can overlap. Parked work
+        # is never handed over while any runs.
+        self.checking = 0
 
     @staticmethod
     def _schedule(delay, callback):
@@ -230,12 +231,12 @@ class AccountFailover:
 
     def recover(self):
         with self.lock:
-            self.checking = True
+            self.checking += 1
         try:
             self._recover()
         finally:
             with self.lock:
-                self.checking = False
+                self.checking -= 1
 
     def _recover(self):
         settings = FailoverSettings(recheck_seconds=RECHECK_SECONDS,
@@ -297,7 +298,7 @@ class AccountFailover:
 
     def status(self):
         with self.lock:
-            return {"recovering": self.recovering, "checking": self.checking,
+            return {"recovering": self.recovering, "checking": bool(self.checking),
                     "waiting": sorted(item.agent_id for item in self.attempts.values()
                                       if item.state.get("account_recovery") and item.owned())}
 

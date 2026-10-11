@@ -439,7 +439,6 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         # account-recovery work keeps blocking the handoff, as it always did.
         self.account_recovery_carry = (pathlib.Path(account_recovery_carry)
                                        if account_recovery_carry else None)
-        self._last_transfer: dict[str, Any] = {}
         self.dispatch_service = dispatch_service
         self.status_provider = status_provider or self._default_status
         self.release_id = str(release_id or "")
@@ -822,13 +821,13 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             self.dispatch_service.refresh_hold_headlines()
             blockers = self.handover_blockers()
             transfer = getattr(self.dispatch_service, "transfer_recovery_parks", None)
+            refused: dict[str, str] = {}
             if (blockers and transfer is not None
                     and self.account_recovery_carry is not None
                     and self._only_account_recovery(blockers)):
-                self._last_transfer = transfer()
+                refused = dict(transfer().get("refused") or {})
                 blockers = self.handover_blockers()
             if blockers:
-                refused = self._last_transfer.get("refused") or {}
                 if refused:
                     blockers = {**blockers, "account_recovery_refused": sorted(
                         f"{agent}:{reason}" for agent, reason in refused.items())}

@@ -813,6 +813,12 @@ class TurnDispatchService:
                         refused.setdefault(agent_id, "selector_running")
                 taken += [(coordinator, attempt)
                           for attempt in coordinator.take_parked(eligible)]
+        moved = {attempt.agent_id for _coordinator, attempt in taken}
+        for agent_id in facts:
+            if agent_id not in moved:
+                # A process ran for it (or it is mid-launch): its own
+                # recovery continues it; the handoff waits.
+                refused.setdefault(agent_id, "process_ran")
         if not taken:
             return {"transferred": [], "refused": refused}
         con = db.conn()
