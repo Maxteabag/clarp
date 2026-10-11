@@ -553,6 +553,12 @@ class Config:
     # switch and resource budget; read by lib.transcript_incremental). Off
     # unless `enabled = true`; see docs/transcript-incremental-import.md.
     transcript_shadow: dict[str, Any] = field(default_factory=dict)
+    # [runtime] release_drain: how a new runtime release takes over.
+    # "natural" (default) waits for a moment with nothing to cut short and
+    # fences only for the seal check; "fenced" holds new turns for up to 15
+    # minutes per attempt. CLARP_RELEASE_DRAIN=natural outranks it
+    # (lib.runtime_release.release_drain_mode, docs/runtime-restarts.md).
+    runtime_release_drain: str = "natural"
 
     def eleven_key(self) -> str:
         """Resolved ElevenLabs key: config first, env fallback."""
@@ -1010,6 +1016,9 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         audio_central_credential = str(audio_central.get("credential", "")).strip(),
         transcript_shadow = dict(data.get("transcript_shadow") or {})
             if isinstance(data.get("transcript_shadow"), dict) else {},
+        runtime_release_drain = str(
+            (data.get("runtime") if isinstance(data.get("runtime"), dict) else {})
+            .get("release_drain", "natural")).strip().lower(),
     )
     _CACHED_PATH = path
     _CACHED_STAT = signature
