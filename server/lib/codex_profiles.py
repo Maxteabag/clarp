@@ -546,15 +546,34 @@ def _read_key(profile: CodexProfile) -> str:
     return key
 
 
+# What the profile process (and every tool its turns run) may not inherit from
+# the Host: another provider's credentials, any credential-shaped variable that
+# is not its own key, and proxies (which would see its traffic).
+_VENDOR_PREFIXES = ("OPENAI_", "CODEX_", "AZURE_OPENAI_", "ANTHROPIC_", "CLAUDE_CODE_",
+                    "GEMINI_", "GOOGLE_", "ELEVEN", "CARTESIA", "DEEPGRAM", "FIREWORKS",
+                    "GROQ", "XAI_", "GROK", "OPENROUTER", "MISTRAL", "COHERE",
+                    "TOGETHER", "PERPLEXITY", "DEEPSEEK", "TYPESAFE", "HF_", "HUGGINGFACE")
+_SECRET_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_SECRET_KEY", "_ACCESS_KEY",
+                    "_PASSWORD", "_CREDENTIALS")
+_PROXIES = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FTP_PROXY"}
+
+
+def _inherits(name: str) -> bool:
+    """Whether a Host variable may pass into a profile's process."""
+    upper = name.upper()
+    return not (upper.startswith(_VENDOR_PREFIXES) or upper.endswith(_SECRET_SUFFIXES)
+                or upper in _PROXIES or upper == "API_KEY")
+
+
 def spawn_env(profile_id: str, base: dict[str, str]) -> tuple[dict[str, str], str]:
     """The app-server environment for ``profile_id`` and the key it carries
-    (kept by the caller only to redact it). Nothing from the default Codex
-    account (its home or any OpenAI variable) reaches it."""
+    (kept by the caller only to redact it). No other provider's credential,
+    no credential-shaped variable other than its own key, and no proxy
+    reaches it (``_inherits``)."""
     profile = require(profile_id)
     path = prepare_home(profile.id)
     key = _read_key(profile)
-    env = {name: value for name, value in base.items()
-           if not name.startswith(("OPENAI_", "CODEX_", "AZURE_OPENAI_"))}
+    env = {name: value for name, value in base.items() if _inherits(name)}
     env["CODEX_HOME"] = str(path)
     env[KEY_ENV] = key
     return env, key
