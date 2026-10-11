@@ -71,6 +71,8 @@ def save_agents(data: dict[str, dict[str, Any]],
                 cwd=str(info.get("cwd") or str(pathlib.Path.home())),
                 session=session,
                 backend=str(info.get("backend") or AgentBackend.CLAUDE),
+                **({"provider_profile": str(info["provider_profile"])}
+                   if info.get("provider_profile") else {}),
             )
         except Exception as e:  # noqa: BLE001 — write path, log + continue
             log("agentCreateSyncFail", f"{session} :: {e}")

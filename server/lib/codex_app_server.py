@@ -938,6 +938,8 @@ def recycle_clients() -> int:
         clients = list({id(client): client for client in _CLIENTS.values()}.values())
         closed = 0
         for client in clients:
+            if getattr(client, "profile", ""):
+                continue  # not an OpenAI account: a credential change is not about it
             client.refresh_requested = True
             if _busy(client):
                 continue

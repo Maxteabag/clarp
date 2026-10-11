@@ -11,14 +11,15 @@ import pytest
 from lib import agents as agents_db
 from lib import codex_profiles
 
+pytestmark = pytest.mark.usefixtures("fake_codex_profile")
+
 
 @pytest.fixture
 def agents():
     plain = agents_db.create_agent(persona="Plain", voice_id="V", cwd="/tmp",
                                    session="plain", backend="codex")
     eu = agents_db.create_agent(persona="Eu", voice_id="V", cwd="/tmp",
-                                session="eu", backend="codex")
-    codex_profiles.assign(eu, "azure-eu")
+                                session="eu", backend="codex", provider_profile="azure-eu")
     return SimpleNamespace(plain=plain, eu=eu)
 
 

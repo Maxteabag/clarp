@@ -17,6 +17,8 @@ import pytest
 from lib import agents as agents_db
 from lib import codex_profiles
 
+pytestmark = pytest.mark.usefixtures("fake_codex_profile")
+
 SENTINEL = "SENTINEL-EU-7f3a9c"
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -26,8 +28,7 @@ def fleet():
     plain = agents_db.create_agent(persona="Plain", voice_id="V", cwd="/tmp",
                                    session="plain", backend="codex")
     eu = agents_db.create_agent(persona="Eunice", voice_id="V", cwd="/tmp",
-                                session="eunice", backend="codex")
-    codex_profiles.assign(eu, "azure-eu")
+                                session="eunice", backend="codex", provider_profile="azure-eu")
     return SimpleNamespace(plain=plain, eu=eu)
 
 
@@ -206,8 +207,7 @@ def test_an_eu_agent_never_speaks_through_a_tts_provider(fleet):
 def test_an_eu_agents_team_posts_reach_only_teammates_on_its_profile(fleet):
     from lib import team_store
     eu_peer = agents_db.create_agent(persona="Euan", voice_id="V", cwd="/tmp",
-                                     session="euan", backend="codex")
-    codex_profiles.assign(eu_peer, "azure-eu")
+                                     session="euan", backend="codex", provider_profile="azure-eu")
     team = team_store.create_team("Mixed", communication_enabled=True)
     for member in (fleet.plain, fleet.eu, eu_peer):
         team_store.add_member(team["team_id"], member)
@@ -228,8 +228,7 @@ def test_an_eu_agents_team_posts_reach_only_teammates_on_its_profile(fleet):
 def test_the_label_checker_never_sends_an_eu_helpers_status(fleet, monkeypatch):
     from lib import label_audit
     helper = agents_db.create_agent(persona="Eva", voice_id="V", cwd="/tmp",
-                                    session="eva", backend="codex")
-    codex_profiles.assign(helper, "azure-eu")
+                                    session="eva", backend="codex", provider_profile="azure-eu")
     agents_db.set_lineage(helper, parent_agent_id=fleet.plain, role="helper")
     agents_db.conn().execute("UPDATE agents SET custom_status=? WHERE agent_id=?", (SENTINEL, helper))
     idle = SimpleNamespace(busy=False, idle_since_ms=0)

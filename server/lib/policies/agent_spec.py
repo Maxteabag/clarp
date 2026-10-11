@@ -60,7 +60,8 @@ class RosterView:
     resolve_agent: Callable[[str], str] = lambda _raw: ""  # session or id -> agent_id or ""
     ancestors: Callable[[str], Sequence[str]] = lambda _agent_id: ()
     agent_profile: Callable[[str], str] = lambda _agent_id: ""  # agent_id -> provider profile
-    thread_profile: Callable[[str], str] = lambda _sid: ""  # Codex thread -> owning profile
+    # (profile, Codex thread) -> whether that profile may resume the thread
+    resume_profile_ok: Callable[[str, str], bool] = lambda _profile, _sid: True
 
 
 @dataclass(frozen=True)
@@ -400,7 +401,7 @@ def _provider_profile(data: dict, *, backend: str, roster: RosterView,
                 "Fork a provider-profile agent with POST /agents/<session>/fork."))
     resume_id = str(data.get("resume_session_id") or "").strip()
     if (resume_id and backend == "codex"
-            and roster.thread_profile(resume_id) != (profile.id if profile else "")):
+            and not roster.resume_profile_ok(profile.id if profile else "", resume_id)):
         return SpecError(409, "provider_profile_mismatch", detail=(
             "That Codex conversation belongs to another provider profile."))
     return profile
