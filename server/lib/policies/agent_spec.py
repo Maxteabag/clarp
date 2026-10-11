@@ -269,10 +269,10 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         if effective_model and not profile.has_model(effective_model):
             return SpecError(400, "invalid model for provider profile",
                              detail=f"{profile.label} runs only "
-                                    + ", ".join(m for m, _ in profile.models))
-        if effective_effort and effective_effort not in profile.efforts:
-            return SpecError(400, "invalid effort for provider profile")
+                                    + ", ".join(m.id for m in profile.models))
         effective_model = effective_model or profile.default_model
+        if effective_effort and effective_effort not in profile.efforts_for(effective_model):
+            return SpecError(400, "invalid effort for provider profile")
     if not effective_model and not janitor:
         resume_id = str(data.get("resume_session_id") or data.get("fork_session_id") or "")
         effective_model = (roster.recorded_model(backend, resume_id) if resume_id

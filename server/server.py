@@ -3426,7 +3426,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(409, {"error": "provider profile is not configured",
                                     "provider_profile": stored_profile})
         if profile is not None:
-            valid = list(profile.efforts)
+            next_profile_model = (str(data.get("model") or "").strip()
+                                  if "model" in data else str(agent.get("model") or ""))
+            valid = list(profile.efforts_for(next_profile_model))
         update: dict[str, str] = {}
         if "model" in data:
             if data.get("model") is not None and not isinstance(data.get("model"), str):

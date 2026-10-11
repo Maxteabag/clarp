@@ -530,8 +530,9 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   `id`, `label`, `default_effort`, `supported_efforts`, and provenance.
   `providers.codex.provider_profiles[]` (contract 63) lists Codex provider
   profiles a client may offer as their own card ("Codex (EU, Azure)"): `id`,
-  `label`, `detail`, `available` (false when the Host has no key for it),
-  `default_model` and `models[]` (`id`, `label`, `supported_efforts`).
+  `label`, `detail` (ends with the profile's operating rule), `operating_rule`,
+  `available` (false when the Host has no key for it), `default_model` and
+  `models[]` (`id`, `label`, `supported_efforts`).
   Create one with `POST /agents` `{"backend": "codex", "provider_profile": id}`.
   Clients render this list rather than a bundled enum: cards are the
   installed, unhidden rows (plus the backend an existing agent runs on),

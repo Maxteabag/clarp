@@ -19,7 +19,7 @@ def agents():
     plain = agents_db.create_agent(persona="Plain", voice_id="V", cwd="/tmp",
                                    session="plain", backend="codex")
     eu = agents_db.create_agent(persona="Eu", voice_id="V", cwd="/tmp",
-                                session="eu", backend="codex", provider_profile="azure-eu")
+                                session="eu", backend="codex", provider_profile="example-eu")
     return SimpleNamespace(plain=plain, eu=eu)
 
 

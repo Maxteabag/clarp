@@ -740,7 +740,7 @@ def test_a_provider_profile_rides_the_handoff_with_held_work(tmp_path, fake_code
     (memory, durable and drain-time arrivals) is relaunched on that profile."""
     agent = agents_db.create_agent(persona="Mike", voice_id="V", cwd=str(tmp_path),
                                    session="mike", backend="codex",
-                                   provider_profile="azure-eu")
+                                   provider_profile="example-eu")
     agents_db.start_runtime(agent, "mike")
     service, provider = _service(tmp_path)
     _send(service, "running")
@@ -754,8 +754,8 @@ def test_a_provider_profile_rides_the_handoff_with_held_work(tmp_path, fake_code
     new_service, new_provider = _restart(tmp_path)
     _finish_recovered(new_service, new_provider, ("pre-drain normal",))
 
-    assert provider.spawned[0]["provider_profile"] == "azure-eu"
+    assert provider.spawned[0]["provider_profile"] == "example-eu"
     assert new_provider.texts() == ["pre-drain normal", "user during drain"]
     assert [call.get("provider_profile") for call in new_provider.spawned] == [
-        "azure-eu", "azure-eu"]
+        "example-eu", "example-eu"]
     assert all(call["model"] == "eu-model" for call in new_provider.spawned)
