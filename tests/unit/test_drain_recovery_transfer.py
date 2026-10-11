@@ -734,3 +734,67 @@ def test_a_carry_written_in_the_future_is_ignored(tmp_path):
     path.write_text(json.dumps({"written_ms": int((now + 120) * 1000),
                                 "pools": {"claude": {"parked_since_ms": int(now * 1000)}}}))
     assert consume_account_recovery_carry(path, wall=now) == {}
+
+
+# --- re-review N1: a cancelled taken-over row stays cancelled ---------------------
+
+def test_a_cancelled_taken_over_row_stays_cancelled(tmp_path, monkeypatch, selector_configured):
+    """Oracle cancels a delegation (oracle_delegations.cancel): Stop with a
+    held barrier, remove the durable row, release with the trace cancelled.
+    The taken-over row must not come back on a revert or the next boot."""
+    agent, service, provider, pool, runtime = _queued_parked_scene(tmp_path, monkeypatch)
+    try:
+        assert service.transfer_recovery_parks()["transferred"] == [agent]
+        lease = runtime.dispatch_request("begin_stop", {
+            "agent_id": agent, "backend": "claude", "strict": False, "hold": True})
+        assert lease["ok"], lease
+        turn_queue.remove("work")
+        done = runtime.dispatch_request("finish_stop", {
+            "lease_id": lease["result"]["lease_id"], "cancelled_trace_ids": ["t-work"]})
+        assert done["ok"], done
+        assert ("work", "parked") not in _rows(agent)
+        runtime.release_admission_fence()
+    finally:
+        runtime.server_close()
+    assert ("work", "queued") not in _rows(agent)
+    turn_queue.set_paused(agent, False)          # Resume
+    pool.coordinator.recover()
+    for _ in range(3):
+        if "next" in provider.texts() and provider.texts().count("next") == 1:
+            try:
+                provider.finish("next")
+            except Exception:
+                pass
+        service.recover_queued()
+        pool.coordinator.recover()
+    assert "work" not in provider.texts()[1:]
+    # Nor after a restart.
+    new_service, new_provider, new_pool = _restart(tmp_path, monkeypatch)
+    new_pool.run_timers()
+    new_service.recover_queued()
+    assert "work" not in new_provider.texts()
+
+
+def test_a_stop_without_cancel_keeps_the_taken_over_row_held(tmp_path, monkeypatch,
+                                                              selector_configured):
+    """Keep stopped work held: a Stop that cancels nothing leaves the row;
+    after the handoff it waits for Resume, then runs once."""
+    agent, service, provider, pool, runtime = _queued_parked_scene(tmp_path, monkeypatch)
+    try:
+        assert runtime.seal_if_drained() == {}
+        assert runtime.dispatch_request("begin_stop", {
+            "agent_id": agent, "backend": "claude", "strict": False,
+            "hold": False})["ok"]
+        assert ("work", "parked") in _rows(agent)
+    finally:
+        runtime.server_close()
+    new_service, new_provider, new_pool = _restart(tmp_path, monkeypatch)
+    new_pool.run_timers()
+    new_service.recover_queued()
+    assert new_provider.spawned == []           # held by the Stop's pause
+    assert ("work", "queued") in _rows(agent)
+    turn_queue.set_paused(agent, False)          # Resume
+    new_service.recover_queued()
+    new_pool.run_timers()
+    new_pool.coordinator.recover()
+    assert new_provider.texts().count("work") == 1

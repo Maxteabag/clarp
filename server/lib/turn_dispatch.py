@@ -372,6 +372,10 @@ class _TurnSpec:
     bypass_pause: bool = False
     # The release drain already made this held spec durable.
     drain_persisted: bool = False
+    # The release drain's hand-over parked this spec's own queue row
+    # (``queue_id``) in place: a cancel ends that exact row, and lifting
+    # the fence queues it again.
+    taken_over: bool = False
 
 
 def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:
@@ -681,10 +685,6 @@ class TurnDispatchService:
         # Injectable so tests can run retries synchronously instead of on a
         # real timer thread.
         self.retry_scheduler = retry_scheduler or _default_retry_scheduler
-        # Queue rows the release drain's hand-over parked in place (their
-        # work is held in memory with that queue id); lowering the fence
-        # queues them again.
-        self._transferred_rows: set[str] = set()
         # Per account pool, agents whose parked work the hand-over moved
         # (the seal's carry names them for the next runtime).
         self.handed_over: dict[str, set[str]] = {}
@@ -721,12 +721,13 @@ class TurnDispatchService:
 
     def lower_admission_fence(self) -> bool:
         """Let turns start again; ``start_held_work`` starts the held ones."""
-        rows = getattr(self, "_transferred_rows", None)
+        # Queue rows the hand-over parked in place run from memory again,
+        # which reads them only while queued. Only work still held: a
+        # cancelled spec's row was ended with it (prepare_queued_for_finish).
+        rows = sorted(spec.queue_id for specs in _SLOTS.queued_specs().values()
+                      for spec in specs if spec.taken_over and spec.queue_id)
         if rows:
-            # Queue rows the hand-over parked in place run from memory
-            # again, which reads them only while queued.
-            turn_queue.requeue_rows(sorted(rows))
-            rows.clear()
+            turn_queue.requeue_rows(rows)
         self.handed_over.clear()
         changed = _SLOTS.set_fenced(False)
         if changed:
@@ -920,9 +921,8 @@ class TurnDispatchService:
                 if spec.queue_id:
                     # Its own row, parked for the handoff; a lifted fence
                     # makes it queued again before held work starts.
-                    self._transferred_rows.add(spec.queue_id)
                     held = replace(spec, park_id="", bypass_pause=False,
-                                   drain_persisted=True)
+                                   drain_persisted=True, taken_over=True)
                 else:
                     held = replace(spec, queue_id="", park_id=row_id,
                                    bypass_pause=False, drain_persisted=True)
@@ -3165,6 +3165,10 @@ def prepare_queued_for_finish(
     for spec in cancelled:
         if getattr(spec, "park_id", ""):
             turn_queue.unpark(spec.park_id)
+        if getattr(spec, "taken_over", False) and spec.queue_id:
+            # Exactly the row the hand-over parked for this work (by id);
+            # other parked rows (held arrivals) stay held across the Stop.
+            turn_queue.remove_taken_over(spec.queue_id)
 
 
 def complete_stop(

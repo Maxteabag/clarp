@@ -141,6 +141,23 @@ def take_over_at_head(queue_id: str, *, agent_id: str, trace_id: str,
     _move_behind(agent_id, queue_id)
 
 
+def remove_taken_over(queue_id: str) -> bool:
+    """Its work was cancelled: delete the row the drain's hand-over parked
+    in place, matched by id (it may already be queued again after a revert)."""
+    if not queue_id:
+        return False
+    row = db.conn().execute(
+        "SELECT agent_id FROM queued_turns WHERE queue_id = ? AND status IN ('parked', 'queued')",
+        (queue_id,)).fetchone()
+    if row is None:
+        return False
+    db.conn().execute(
+        "DELETE FROM queued_turns WHERE queue_id = ? AND status IN ('parked', 'queued')",
+        (queue_id,))
+    _bump_revision(str(row["agent_id"]))
+    return True
+
+
 def requeue_rows(queue_ids) -> int:
     """Turn the given parked rows back into queued work (a lifted fence)."""
     count = 0
