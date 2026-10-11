@@ -197,3 +197,27 @@ def test_a_database_error_while_holding_loses_no_queued_work(tmp_path, monkeypat
     assert _waiting(world) == ["p_pre", "p_pre2"]
     _resume(world)
     assert world.started == ["t0", "u_mid", "p_pre", "p_pre2"]
+
+
+def test_a_new_park_row_keeps_older_park_rows_behind_it(tmp_path):
+    """A send with no row ahead of drain-parked ones (a failed handoff put it
+    back at the head): Resume still runs them in memory order."""
+    from dataclasses import replace
+    world = World(tmp_path)
+    world.send("t0")
+    world.service.begin_admission_fence()
+    world.send("h1", origin="automation")
+    world.send("h2", origin="automation")
+    world.service.persist_held()              # h1, h2 get drain-park rows
+    world.stop()
+    h1 = td._SLOTS.queued_specs()[world.agent][0]
+    td._SLOTS.requeue_front(world.agent, replace(
+        h1, text="x", trace_id="t-x", client_msg_id="x", park_id="",
+        queue_id="", drain_persisted=False))
+    world.service.lower_admission_fence()
+    world.service.start_held_work()
+    world.settle()
+    assert world.started == ["t0"]
+    assert _waiting(world) == ["x", "h1", "h2"]
+    _resume(world)
+    assert world.started == ["t0", "x", "h1", "h2"]
