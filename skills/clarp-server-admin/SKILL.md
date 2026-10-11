@@ -120,7 +120,10 @@ and deployed source.
 HTTP endpoints and schema migrations activate with the Host restart. Runner
 code becomes active after the natural idle handoff; installer success alone
 is not proof of that transition. Read the runtime status `release_id`,
-`draining` and `drain` fields and compare with the installed release.
+`draining` and `drain` fields and compare with the installed release. In
+`GET /status` (contract 62 on), `runtime.draining` is true from the admission
+fence on and `runtime.sealed` is the moment before the handoff; `available:
+false` with a `reason` means the runtime did not answer (unknown, not idle).
 
 The standard Claude runner launches one CLI process per turn. Its plugin path
 resolves through `share/plugin -> current/plugin` on each launch, so the next
