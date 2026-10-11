@@ -651,3 +651,84 @@ def test_recovery_behind_the_fence_holds_rows_without_counting_a_backoff(tmp_pat
     provider.finish("first")
     provider.finish("second")
     assert provider.texts() == ["first", "second", "fresh user send"]
+
+
+# --- held-queue evidence (Solu re7d614160304, item 3) -------------------------
+
+def _evidence(monkeypatch):
+    """Capture the drain's order evidence lines (ids only)."""
+    lines = []
+
+    def capture(event, detail=""):
+        if event in ("drainHeldOrder", "queuedRecoveredOrder"):
+            lines.append((event, detail))
+    monkeypatch.setattr(td, "log", capture)
+    return lines
+
+
+def _traces(order, agent):
+    return [entry["trace"] for entry in order[agent]]
+
+
+def test_status_lists_held_work_in_fifo_order_by_stable_ids(tmp_path):
+    agent, service, provider = _held_mixture(tmp_path)
+    runtime, _ = _runtime(tmp_path, service)
+    try:
+        order = runtime.dispatch_request("status", {})["result"]["held_order"]
+        assert _traces(order, agent) == [
+            "t-pre-drain normal", "t-peer", "t-user during drain",
+            "t-queued during drain"]
+        # The memory-only send has no row until the seal attempt persists it;
+        # after that every entry has a durable row id that never changes.
+        runtime.seal_if_drained()
+        persisted = runtime.dispatch_request("status", {})["result"]["held_order"]
+        assert _traces(persisted, agent) == _traces(order, agent)
+        assert all(entry["row"] for entry in persisted[agent])
+        assert persisted[agent][0]["row"] == "drain-park-t-pre-drain normal"
+        # Ids only, never message text.
+        assert set(persisted[agent][0]) == {"row", "trace", "origin"}
+    finally:
+        runtime.server_close()
+
+
+def test_a_revert_logs_the_held_order_and_starts_exactly_that_order(tmp_path, monkeypatch):
+    lines = _evidence(monkeypatch)
+    agent, service, provider = _held_mixture(tmp_path)
+    runtime, _ = _runtime(tmp_path, service)
+    try:
+        held = runtime.dispatch_request("status", {})["result"]["held_order"]
+        runtime.seal_if_drained()           # blocked by the running turn
+        provider.finish("running")
+        runtime.release_admission_fence()   # the budget expired: revert
+        for text in ("pre-drain normal", "peer note", "user during drain"):
+            provider.finish(text)
+    finally:
+        runtime.server_close()
+    revert = [detail for event, detail in lines
+              if event == "drainHeldOrder" and "event=revert" in detail]
+    assert len(revert) == 1
+    assert f"agent={agent}" in revert[0]
+    started = [c["trace_id"] for c in provider.spawned][1:]
+    assert started == _traces(held, agent)
+
+
+def test_recovery_after_the_handoff_logs_the_rows_it_readmits_in_order(tmp_path, monkeypatch):
+    agent, service, provider = _held_mixture(tmp_path)
+    runtime, _ = _runtime(tmp_path, service)
+    try:
+        provider.finish("running")
+        lines = _evidence(monkeypatch)
+        assert runtime.seal_if_drained() == {}
+    finally:
+        runtime.server_close()
+    seal = [d for e, d in lines if e == "drainHeldOrder" and "event=seal" in d]
+    assert len(seal) == 1
+    rows = seal[0].split("rows=")[1].split(",")
+    assert len(rows) == 4
+
+    new_service, new_provider = _restart(tmp_path)
+    _finish_recovered(new_service, new_provider,
+                      ("pre-drain normal", "peer note", "user during drain"))
+    recovered = [d.split("rows=")[1] for e, d in lines
+                 if e == "queuedRecoveredOrder" and f"agent={agent}" in d]
+    assert ",".join(recovered).split(",") == rows

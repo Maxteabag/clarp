@@ -742,6 +742,8 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         with self._admission_lock:
             if self._draining:
                 raise RuntimeProtocolError("runtime is sealed for its handoff")
+            from . import turn_dispatch
+            turn_dispatch.log_held_order("revert")
             self.dispatch_service.lower_admission_fence()
         # Launches run outside the admission lock, like any queued handoff.
         self.dispatch_service.start_held_work()
@@ -791,6 +793,8 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             if blockers:
                 return blockers
             self._draining = True
+            from . import turn_dispatch
+            turn_dispatch.log_held_order("seal")
             # The held work now waits for the next runtime, which recovers it.
             self.dispatch_service.clear_hold_headlines()
             return {}
