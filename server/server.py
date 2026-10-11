@@ -747,6 +747,19 @@ class Handler(BaseHTTPRequestHandler):
         self._json(code, {"error": message})
 
     def _send(self, code, body=b"", content_type="text/plain", extra_headers=None):
+        hidden = getattr(self, "_eu_hidden", None)
+        if hidden and body and str(content_type).startswith("application/json"):
+            # An identified agent turn on another provider never receives a
+            # provider-profile agent's content in any JSON read, including
+            # endpoints added later (docs/codex-eu-profile.md).
+            from lib import codex_profiles
+            try:
+                data = json.loads(body)
+            except (TypeError, ValueError):
+                data = None
+            if data is not None:
+                body = json.dumps(codex_profiles.prune(data, *hidden),
+                                  ensure_ascii=False).encode()
         response_started = time.perf_counter()
         request_started = getattr(self, "_request_started_monotonic", response_started)
         headers = dict(extra_headers or {})
@@ -1070,6 +1083,25 @@ class Handler(BaseHTTPRequestHandler):
     # --- GET dispatch ----------------------------------------------------
 
     def do_GET(self):
+        # Per request: which agents this GET's caller may not read (see
+        # _eu_begin_request); never carried to the next request on the
+        # connection.
+        self._eu_hidden = None
+        try:
+            return self._do_GET()
+        finally:
+            self._eu_hidden = None
+
+    def _eu_begin_request(self) -> None:
+        """Remember, for this GET, the provider-profile agents its caller (an
+        identified agent turn) may not read; ``_send`` prunes every JSON body
+        by it. None for the user's devices and when nothing is hidden."""
+        from lib import codex_profiles
+        caller = self._turn_caller()
+        hidden = codex_profiles.hidden_from(caller) if caller else None
+        self._eu_hidden = hidden if hidden and (hidden[0] or hidden[1]) else None
+
+    def _do_GET(self):
         if not self._authorized():
             return self._reject_unauthorized()
         path = self.path.split("?", 1)[0]
@@ -1077,6 +1109,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "GET"):
             return self._json_error(403, "full device access required")
+        self._eu_begin_request()
         refusal = self._eu_only_read_refusal(path)
         if refusal:
             return self._json_error(403, refusal)
@@ -1651,6 +1684,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
         from lib import codex_profiles, snapshot
+        self._eu_hidden = None   # the snapshot builds its own status-only view
         body = snapshot.SHARED.body(self.ctx)
         caller = self._turn_caller() if codex_profiles.assigned() else ""
         if caller:
@@ -1693,6 +1727,18 @@ class Handler(BaseHTTPRequestHandler):
         owners = [identity.lookup(unquote(value))
                   for key in ("session", "agent", "session_id", "agent_id")
                   for value in query.get(key, []) if value]
+        # Prompt history names its agent "<computer_id>:<slug>".
+        owners += [identity.lookup(unquote(value).rpartition(":")[2])
+                   for value in query.get("session_id", []) if ":" in value]
+        if query.get("plan_id"):
+            from lib import db as _db
+            row = _db.conn().execute("SELECT agent_id FROM task_plans WHERE plan_id = ?",
+                                     (query["plan_id"][0],)).fetchone()
+            owners.append(dict(row) if row else None)
+        if path == "/transcription-audio" and query.get("trace_id"):
+            from lib import heard_audio
+            kept = heard_audio.lookup(_runtime_paths().cache_dir, query["trace_id"][0])
+            owners.append(identity.lookup(str(kept[1].get("session") or "")) if kept else None)
         if path == "/log" and not query.get("session"):
             # /log without a session reads the focused agent.
             owners.append(identity.lookup(self.ctx.default_session))
@@ -2950,7 +2996,8 @@ class Handler(BaseHTTPRequestHandler):
                 hidden["sets"], hidden["at"] = (codex_profiles.hidden_from(caller),
                                                 time.monotonic())
             ids, sessions = hidden["sets"]
-            return bool(ids or sessions) and codex_profiles.mentions(ev, ids, sessions)
+            # Fail closed: an event that names no owner is withheld too.
+            return not codex_profiles.event_visible(ev, ids, sessions)
         try:
             self.wfile.write(b": connected\n\n")
             self.wfile.flush()

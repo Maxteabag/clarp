@@ -113,6 +113,44 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# Who each event is about, for the per-caller stream filter
+# (codex_profiles.event_visible): an identified turn never receives an event
+# about an agent on another provider profile, and an event that names nobody
+# is withheld from it unless its type is CONTENT_FREE. Every type in FIELDS is
+# in exactly one of the two (tests/unit/test_codex_profile_r1.py).
+OWNER_FIELDS: dict[str, tuple[str, ...]] = {
+    SSEType.AUDIO: ("agent_id", "session"),
+    SSEType.AGENT_STATE: ("agent_id", "session"),
+    SSEType.AGENT_ACTIVITY: ("agent_id", "session"),
+    SSEType.AGENT_ROSTER: ("session",),
+    SSEType.AGENT_FOCUS: ("agent_id", "session"),
+    SSEType.TRANSCRIPT_UPDATED: ("agent_id", "session"),
+    SSEType.QUEUE_UPDATED: ("agent_id", "session"),
+    SSEType.ARTIFACT_UPDATED: ("agent_id", "session"),
+    SSEType.BACKGROUND_JOB_UPDATED: ("agent_id", "session"),
+    SSEType.USER_NOTIFICATION: ("agent_id", "session"),
+    SSEType.TTS_ERROR: ("agent_id", "session"),
+    SSEType.LOCATION_REQUEST: ("session",),
+    SSEType.CALENDAR_REQUEST: ("session",),
+    SSEType.GOAL_UPDATED: ("agent_id", "session"),
+    SSEType.ORCHESTRATOR_DECISION: ("target_session",),
+    SSEType.ORACLE_HANDOFF: ("agent",),
+    SSEType.GROUP_CALL: ("participants",),
+    SSEType.LIVE: ("agent_id", "session"),
+}
+# Types that carry no agent's words: Host and device facts only.
+CONTENT_FREE: frozenset[str] = frozenset({
+    SSEType.SERVER_VERSION, SSEType.REMOTE_ACTION, SSEType.ATTENTION_UPDATED,
+    SSEType.PROVIDER_LIMIT, SSEType.HEARTBEAT,
+})
+# Field names that can carry what an agent or its user wrote; a CONTENT_FREE
+# type may have none of them.
+TEXT_FIELDS: frozenset[str] = frozenset({
+    "preview", "detail", "status_text", "summary", "file_path", "tool", "title",
+    "notes", "message", "error", "reason", "goal", "ops", "job", "text",
+    "stop_reason", "repair_reason", "location", "url", "name", "persona",
+})
+
 # Keys the stream hub adds after construction (the durable row id and its
 # timestamp); tolerated on re-validation of a relayed or replayed row.
 _HUB_KEYS = frozenset({"event_id", "ts"})
