@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 import time
 
-from . import background_jobs, events, stale_work
+from . import background_jobs, events, reconcile, stale_work
 from .log import log_exception
 from .timing import SERVER_TIMING
 
@@ -48,6 +48,12 @@ class BackgroundJobWatcher:
                     stale_work.sweep(self.stream)
                 except Exception as exc:  # noqa: BLE001
                     log_exception("staleWorkSweepFail", exc)
+                try:
+                    # A receipt the ledger never settled must not wait for a
+                    # runtime restart to end (turn_queue, idle_agent).
+                    reconcile.end_idle_agent_receipts_now()
+                except Exception as exc:  # noqa: BLE001
+                    log_exception("idleReceiptSweepFail", exc)
 
     def _tick(self) -> None:
         # Publish managed-job progress before any provider backlog work.
