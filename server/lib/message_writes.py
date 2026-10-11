@@ -637,16 +637,25 @@ class _ImportWriter:
 
 
 def store_transcript_turns(*, agent_id: str, backend_session_id: str,
-                           source_file: str, turns: list[dict[str, Any]]
+                           source_file: str, turns: list[dict[str, Any]],
+                           capture_at: int | None = None,
+                           captured: dict[str, Any] | None = None,
+                           on_stored=None,
+                           out_seqs: list[int] | None = None,
                            ) -> list[dict[str, Any]]:
+    """Import a whole parsed transcript (the authoritative full import).
+
+    ``capture_at``/``captured``/``on_stored`` serve the incremental-import
+    shadow (lib.transcript_incremental): the import's carried state as it
+    reaches turn ``capture_at`` is copied into ``captured``, and
+    ``on_stored(database, captured)`` writes the checkpoint inside the
+    import's last transaction, after every row, and ``out_seqs`` receives
+    the transcript turn of each returned row. A checkpoint that fails to
+    write is logged and dropped; it never fails the import.
+    """
     # Pure text normalization can dominate a large transcript import; do it
     # before taking SQLite's single writer lock, once per assistant message.
-    final_assistant_texts = []
-    for turn in turns:
-        if turn.get("role") == "assistant":
-            text = _strip_voice_markup(turn.get("text"))
-            if text:
-                final_assistant_texts.append(text)
+    final_assistant_texts = _final_assistant_texts(turns)
     database = _facade().conn()
     for locked in (False, True):
         writer = _ImportWriter(database, locked=locked)
@@ -655,7 +664,10 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                 writer, agent_id=agent_id,
                 backend_session_id=backend_session_id,
                 source_file=source_file, turns=turns,
-                final_assistant_texts=final_assistant_texts)
+                final_assistant_texts=final_assistant_texts,
+                capture_at=capture_at, captured=captured, out_seqs=out_seqs)
+            if on_stored is not None:
+                _write_checkpoint(writer, database, on_stored, captured)
             writer.commit()
             if not locked and database.in_transaction:
                 database.execute("COMMIT")  # the probe's read snapshot
@@ -669,6 +681,158 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                 database.execute("ROLLBACK")
             raise
     raise AssertionError("the locked import pass cannot need a write")
+
+
+def _final_assistant_texts(turns: list[dict[str, Any]]) -> list[str]:
+    texts = []
+    for turn in turns:
+        if turn.get("role") == "assistant":
+            text = _strip_voice_markup(turn.get("text"))
+            if text:
+                texts.append(text)
+    return texts
+
+
+def _write_checkpoint(writer, database, on_stored, captured) -> None:
+    """Run ``on_stored`` in the import's final transaction, behind a savepoint.
+
+    The locked pass writes it into its last open batch (or a batch of its
+    own when the rows are already committed). The probe pass found nothing
+    to write and holds one read snapshot; the checkpoint upgrades that
+    snapshot to a write, so it describes exactly the rows the probe read.
+    Another writer having committed since makes SQLite refuse the upgrade;
+    the checkpoint is then skipped, never retried against newer rows.
+    """
+    if writer.locked:
+        writer.execute("SAVEPOINT transcript_checkpoint")
+    elif database.in_transaction:
+        database.execute("SAVEPOINT transcript_checkpoint")
+    else:
+        return  # a probe that read nothing has no snapshot to describe
+    try:
+        on_stored(database, captured if captured is not None else {})
+    except Exception as exc:  # noqa: BLE001 - logged; the import itself stands
+        database.execute("ROLLBACK TO transcript_checkpoint")
+        database.execute("RELEASE transcript_checkpoint")
+        from .log import log_exception
+        log_exception("transcriptCheckpointWriteSkip", exc)
+        return
+    database.execute("RELEASE transcript_checkpoint")
+
+
+def store_transcript_tail(*, agent_id: str, backend_session_id: str,
+                          source_file: str, turns: list[dict[str, Any]],
+                          start_seq: int, carry: dict[str, Any],
+                          capture_at: int | None = None,
+                          captured: dict[str, Any] | None = None,
+                          ) -> list[dict[str, Any]]:
+    """Store only the turns from ``start_seq`` on, resuming from ``carry``.
+
+    The incremental import's store. Production never calls it: the shadow
+    (lib.transcript_incremental) only plans it with ``plan_transcript_tail``;
+    the equivalence tests apply it to prove it matches the full import."""
+    database = _facade().conn()
+    writer = _ImportWriter(database, locked=True)
+    try:
+        out = _store_transcript_turns_txn(
+            writer, agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns,
+            final_assistant_texts=_final_assistant_texts(turns),
+            start_seq=start_seq, carry=carry,
+            capture_at=capture_at, captured=captured)
+        writer.commit()
+        return out
+    except Exception:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
+        raise
+
+
+class _PlanCursor:
+    def __init__(self, rows=(), rowcount=0):
+        self._rows = list(rows)
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return list(self._rows)
+
+
+class _PlanWriter:
+    """Runs the import against one read snapshot and writes nothing.
+
+    Every write is recorded instead: revisions come from a private counter
+    above the current clock, deletes report the rows they would remove. Like
+    the probe it is unlocked, so the recording helpers (team messages,
+    Dreaming, heartbeats) stay untouched."""
+
+    locked = False
+
+    def __init__(self, database):
+        self._database = database
+        self.seq = 0
+        self.began_at = None
+        self.deleted: set[str] = set()
+        self.updated: set[str] = set()
+        if not database.in_transaction:
+            database.execute("BEGIN")
+        row = database.execute(
+            "SELECT revision FROM message_clock WHERE singleton = 0").fetchone()
+        self.revision_floor = int(row["revision"]) if row else 0
+        self._revision = self.revision_floor
+
+    def execute(self, sql, parameters=()):
+        text = str(sql).lstrip()
+        verb = text.split(None, 1)[0].upper()
+        if verb not in _WRITE_VERBS:
+            return self._database.execute(sql, parameters)
+        if "message_clock" in text:
+            self._revision += 1
+            return _PlanCursor([{"revision": self._revision}], 1)
+        if verb == "DELETE" and text.upper().startswith("DELETE FROM MESSAGES"):
+            ids = [row[0] for row in self._database.execute(
+                "SELECT message_id " + text[len("DELETE "):], parameters).fetchall()]
+            self.deleted.update(ids)
+            return _PlanCursor([], len(ids))
+        if verb == "UPDATE" and text.upper().startswith("UPDATE MESSAGES"):
+            self.updated.add(str(parameters[-1]))
+        return _PlanCursor([], 1)
+
+    def due(self) -> bool:
+        return False
+
+    def commit(self) -> None:
+        pass
+
+    def __getattr__(self, name):
+        return getattr(self._database, name)
+
+
+def plan_transcript_tail(*, agent_id: str, backend_session_id: str,
+                         source_file: str, turns: list[dict[str, Any]],
+                         start_seq: int, carry: dict[str, Any],
+                         ) -> dict[str, Any]:
+    """What ``store_transcript_tail`` would write, computed without writing.
+
+    Returns the rows it would hold (``out``), the ids it would delete or
+    update, the clock it started from and the carried state at its end."""
+    database = _facade().conn()
+    writer = _PlanWriter(database)
+    end_state: dict[str, Any] = {}
+    try:
+        out = _store_transcript_turns_txn(
+            writer, agent_id=agent_id, backend_session_id=backend_session_id,
+            source_file=source_file, turns=turns,
+            final_assistant_texts=_final_assistant_texts(turns),
+            start_seq=start_seq, carry=carry,
+            capture_at=start_seq + len(turns), captured=end_state)
+        return {"out": out, "deleted": writer.deleted, "updated": writer.updated,
+                "revision_floor": writer.revision_floor, "end_state": end_state}
+    finally:
+        if database.in_transaction:
+            database.execute("ROLLBACK")
 
 
 _FINAL_TWIN_WINDOW_S = 600
@@ -796,9 +960,24 @@ def _delete_slot(database, agent_id: str, backend_session_id: str,
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
-                                final_assistant_texts: list[str]
+                                final_assistant_texts: list[str],
+                                start_seq: int = 0,
+                                carry: dict[str, Any] | None = None,
+                                capture_at: int | None = None,
+                                captured: dict[str, Any] | None = None,
+                                out_seqs: list[int] | None = None,
                                 ) -> list[dict[str, Any]]:
+    """Import ``turns`` as transcript rows ``start_seq`` onward.
+
+    A full import passes every turn (``start_seq`` 0, no ``carry``). The
+    incremental import passes the turns from a checkpointed turn on and the
+    state this loop carried when it reached that turn (``carry``, as
+    ``captured`` recorded it at ``capture_at``); the transcript then holds
+    ``start_seq + len(turns)`` turns in all.
+    """
     out: list[dict[str, Any]] = []
+    if out_seqs is not None:
+        out_seqs.clear()
     latest_revision = 0
     from . import message_turns
     # Which turn wrote each row, how that turn ended, and each text row's
@@ -825,14 +1004,29 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             r["sender_agent_id"] or "",
             r["timestamp"],
         ))
-    latest_user_key, current_origin, current_sender_agent_id = _latest_user_provenance(
-        database, agent_id, backend_session_id)
-    # Incremental transcript reads may begin with assistant-only deltas. Carry
-    # the durable heartbeat user key across those reads so every partial update
-    # is still accounted once per heartbeat turn, never once per delta.
-    current_heartbeat_key = (
-        latest_user_key if current_origin == "heartbeat" else ""
-    )
+    # Client rows this import linked to transcript turns, in match order.
+    consumed_client_ids: list[str] = []
+    if carry is None:
+        latest_user_key, current_origin, current_sender_agent_id = _latest_user_provenance(
+            database, agent_id, backend_session_id)
+        # Incremental transcript reads may begin with assistant-only deltas. Carry
+        # the durable heartbeat user key across those reads so every partial update
+        # is still accounted once per heartbeat turn, never once per delta.
+        current_heartbeat_key = (
+            latest_user_key if current_origin == "heartbeat" else ""
+        )
+    else:
+        consumed_client_ids = list(carry["consumed_client_ids"])
+        consumed = set(consumed_client_ids)
+        for key in list(client_user_provenance):
+            remaining = [r for r in client_user_provenance[key] if r[0] not in consumed]
+            if remaining:
+                client_user_provenance[key] = remaining
+            else:
+                del client_user_provenance[key]
+        current_origin = carry["current_origin"]
+        current_sender_agent_id = carry["current_sender_agent_id"]
+        current_heartbeat_key = carry["current_heartbeat_key"]
     assistant_ordinal = 0
     # Tools of agy turns whose final row the stream owns: trace -> (row, tools, cells).
     authority_tools: dict[str, tuple[str, list, list]] = {}
@@ -848,6 +1042,32 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     adopted_final_ids: set[str] = set()
     skipped_slot_removed = False
     final_rows = _FinalRows(database, agent_id, backend_session_id)
+    if carry is not None:
+        assistant_ordinal = int(carry["assistant_ordinal"])
+        authority_tools = {trace: (entry[0], list(entry[1]), list(entry[2]))
+                           for trace, entry in carry["authority_tools"].items()}
+        closed_authority = set(carry["closed_authority"])
+        unanswered_key = carry["unanswered_key"]
+        current_request_trace = carry["current_request_trace"]
+        adopted_final_ids = set(carry["adopted_final_ids"])
+        newest_trace = carry["newest_trace"]
+
+    def capture() -> None:
+        """The carried state as the loop stands now (lib.transcript_incremental)."""
+        captured.clear()
+        captured.update(json.loads(json.dumps({
+            "consumed_client_ids": consumed_client_ids,
+            "current_origin": current_origin,
+            "current_sender_agent_id": current_sender_agent_id,
+            "current_heartbeat_key": current_heartbeat_key,
+            "assistant_ordinal": assistant_ordinal,
+            "authority_tools": authority_tools,
+            "closed_authority": sorted(closed_authority),
+            "unanswered_key": unanswered_key,
+            "current_request_trace": current_request_trace,
+            "adopted_final_ids": sorted(adopted_final_ids),
+            "newest_trace": newest_trace,
+        })))
 
     def commit_batch() -> None:
         nonlocal latest_revision
@@ -871,7 +1091,10 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         time.sleep(_facade().IMPORT_WRITER_YIELD_SECONDS)
         final_rows.invalidate()
 
-    for seq, turn in enumerate(turns):
+    for index, turn in enumerate(turns):
+        seq = start_seq + index
+        if captured is not None and seq == capture_at:
+            capture()
         database.seq = seq
         if database.due():
             commit_batch()
@@ -967,6 +1190,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 continue
             if rows:
                 client_msg_id, current_origin, current_sender_agent_id, _ = rows.pop(0)
+                consumed_client_ids.append(client_msg_id)
                 unanswered_key = key
                 authored = database.execute("SELECT trace_id FROM messages WHERE message_id=?", (client_msg_id,)).fetchone()
                 current_request_trace = (authored["trace_id"] or "") if authored else ""
@@ -1056,7 +1280,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         outcome = turn_index.outcomes.get(row_trace)
         tools = message_turns.settle_statuses(tools, outcome)
         display_cells = message_turns.settle_statuses(display_cells, outcome)
-        phase = phases[seq] if role == "assistant" else None
+        phase = phases[index] if role == "assistant" else None
         newest_trace = row_trace or newest_trace
         tools_json = json.dumps(tools, separators=(",", ":"))
         display_cells_json = json.dumps(display_cells, separators=(",", ":"))
@@ -1140,6 +1364,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
             "sender_agent_id": sender_agent_id,
             "revision": revision,
         })
+        if out_seqs is not None:
+            out_seqs.append(seq)
+    total_turns = start_seq + len(turns)
+    if captured is not None and capture_at == total_turns:
+        capture()
     # The turns this import touched: their last row carries the summary.
     for trace in sorted(touched_traces | ({newest_trace} if newest_trace else set())):
         if database.due():
@@ -1174,7 +1403,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
               AND source_file NOT LIKE 'live:%'
               AND source_file NOT LIKE 'final:%'
             LIMIT 1""",
-        (agent_id, backend_session_id, len(turns)),
+        (agent_id, backend_session_id, total_turns),
     ).fetchone()
     if stale is not None:
         database.execute(
@@ -1183,7 +1412,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                   AND source_file NOT LIKE 'client:%'
                   AND source_file NOT LIKE 'live:%'
                   AND source_file NOT LIKE 'final:%'""",
-            (agent_id, backend_session_id, len(turns)),
+            (agent_id, backend_session_id, total_turns),
         )
     stale_replace_revision = (
         _next_revision(database)

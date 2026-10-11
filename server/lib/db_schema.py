@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 116
+_SCHEMA_VERSION = 117
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -251,6 +251,36 @@ CREATE TABLE conversation_heads (
     revision INTEGER NOT NULL DEFAULT 0,
     replace_revision INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (agent_id, backend_session_id)
+);
+
+-- Where an incremental transcript import may resume (lib.transcript_incremental,
+-- shadow mode only). One row per imported transcript file: the file identity
+-- and parser version it is valid for, the turn the next import re-parses from
+-- and the full import's carried state there. Written in the import's last
+-- transaction; any mismatch means a full import.
+CREATE TABLE transcript_import_checkpoints (
+    agent_id TEXT NOT NULL,
+    backend_session_id TEXT NOT NULL,
+    source_file TEXT NOT NULL,
+    backend TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    device INTEGER NOT NULL,
+    inode INTEGER NOT NULL,
+    size INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    complete_size INTEGER NOT NULL,
+    boundary_offset INTEGER NOT NULL,
+    boundary_seq INTEGER NOT NULL,
+    turn_count INTEGER NOT NULL,
+    prefix_hash TEXT NOT NULL,
+    tail_hash TEXT NOT NULL,
+    prefix_turns_hash TEXT NOT NULL,
+    parser_carry_json TEXT NOT NULL,
+    store_carry_json TEXT NOT NULL,
+    imports_since_audit INTEGER NOT NULL DEFAULT 0,
+    audited_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, backend_session_id, source_file)
 );
 
 CREATE TABLE orchestrator_decisions (

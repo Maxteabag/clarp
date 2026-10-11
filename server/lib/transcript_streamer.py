@@ -22,7 +22,7 @@ from typing import Callable
 from . import agents as agents_db
 from . import backends, events
 from . import health
-from . import transcript_import_cache
+from . import transcript_import_cache, transcript_incremental
 from . import tts_queue
 from .log import log_exception
 from .protocol import TurnSource
@@ -185,13 +185,11 @@ class TranscriptStreamer:
             if latest is None:
                 return
             def import_latest() -> None:
-                turns = backend.parse_transcript(latest)
-                agents_db.store_transcript_turns(
+                transcript_incremental.import_transcript(
+                    backend=backend.id, path=latest,
                     agent_id=agent["agent_id"],
                     backend_session_id=backend_session_id,
-                    source_file=str(latest),
-                    turns=turns,
-                )
+                    parse=backend.parse_transcript)
 
             transcript_import_cache.import_if_changed(
                 latest, import_latest, owner=agent["agent_id"])

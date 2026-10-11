@@ -549,6 +549,10 @@ class Config:
     # (and managed voice), reached with this Computer's cav1.… credential.
     audio_central_url: str = DEFAULT_AUDIO_CENTRAL_URL
     audio_central_credential: str = field(default="", repr=False)
+    # [transcript_shadow]: the incremental-import shadow comparison (kill
+    # switch and resource budget; read by lib.transcript_incremental). Off
+    # unless `enabled = true`; see docs/transcript-incremental-import.md.
+    transcript_shadow: dict[str, Any] = field(default_factory=dict)
 
     def eleven_key(self) -> str:
         """Resolved ElevenLabs key: config first, env fallback."""
@@ -1004,6 +1008,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         audio_central_url = (str(audio_central.get("url", "")).strip().rstrip("/")
                              or DEFAULT_AUDIO_CENTRAL_URL),
         audio_central_credential = str(audio_central.get("credential", "")).strip(),
+        transcript_shadow = dict(data.get("transcript_shadow") or {})
+            if isinstance(data.get("transcript_shadow"), dict) else {},
     )
     _CACHED_PATH = path
     _CACHED_STAT = signature
