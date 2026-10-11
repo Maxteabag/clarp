@@ -328,9 +328,20 @@ def _spawn_voice_metrics(audio_bytes: bytes, ctype: str, *, session, trace_id,
 # state, never its messages, status text or activity.
 _EU_ONLY_SNAPSHOT_KEYS = (
     "agent_id", "persona", "session", "backend", "provider_profile", "cwd",
-    "alive", "busy", "focused", "latest_state", "is_janitor", "role",
-    "parent_agent_id", "archived_at", "muted", "avatar_url",
+    "alive", "busy", "focused", "latest_state", "latest_state_ts", "is_janitor",
+    "role", "parent_agent_id", "helper_state", "archived_at", "muted", "avatar_url",
+    "background_jobs", "queued_turn_count", "queue_paused", "compacting",
 )
+
+
+def _eu_only_status(row: dict) -> dict:
+    """What another agent's turn sees of an EU-only agent: its Clarp state
+    (busy, helper, jobs, queue, goal status), which is how a parent follows
+    it, and none of its words."""
+    shown = {key: row.get(key) for key in _EU_ONLY_SNAPSHOT_KEYS if key in row}
+    if isinstance(row.get("goal"), dict):
+        shown["goal"] = {"status": row["goal"].get("status")}
+    return shown
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1647,8 +1658,7 @@ class Handler(BaseHTTPRequestHandler):
             # state, never its words.
             data = json.loads(body)
             data["agents"] = [
-                row if codex_profiles.readable_by(row, caller)
-                else {key: row.get(key) for key in _EU_ONLY_SNAPSHOT_KEYS if key in row}
+                row if codex_profiles.readable_by(row, caller) else _eu_only_status(row)
                 for row in data.get("agents") or []]
             body = json.dumps(data).encode()
         self._send(200, body, "application/json")
@@ -5655,6 +5665,10 @@ class Handler(BaseHTTPRequestHandler):
         req, call_sessions = self._apply_group_call(req)
         if req is None:
             return
+        from lib.send_request import boundary_refusal
+        refusal = boundary_refusal(req, caller_agent_id=self._turn_caller())
+        if refusal is not None:  # the group call routed it outside the profile
+            return self._send_request_error(refusal)
         if not req.force_session:
             handled = self._send_via_orchestrator(req, prompt_admission, only_sessions=call_sessions)
             if handled:

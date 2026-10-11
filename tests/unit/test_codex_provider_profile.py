@@ -804,3 +804,78 @@ def test_a_profile_agent_cannot_reply_to_a_request_from_outside_its_profile(monk
     with pytest.raises(peer_requests.RequestError, match="provider_profile_boundary"):
         peer_requests.plan_reply(agents_db.get_by_agent_id(eu), "r0123456789ab",
                                  "result", "the EU answer")
+
+
+# --- C. direct posts: the turn's own identity or the claimed sender ------------------
+
+def _send_request(session, *, caller="", sender=""):
+    from lib.send_request import SendRequest
+    return SendRequest.from_payload(
+        {"text": "status: done", "session": session,
+         **({"sender": sender} if sender else {})},
+        default_session="plain", trace_id_factory=lambda: "t", authenticated=True,
+        resolve_sender=lambda raw: (agents_db.get_by_session(raw) or {}).get("agent_id", ""),
+        caller_agent_id=caller)
+
+
+def test_an_eu_agents_turn_cannot_send_to_an_agent_outside_its_profile():
+    from lib.send_request import SendRequestError
+    eu, eu_peer, plain = _peer("eu", "example-eu"), _peer("euan", "example-eu"), _peer("plain")
+    plain_peer = _peer("pia")
+
+    for caller, sender in ((eu, ""), (eu, "eu"), ("", "eu")):  # turn identity or claim
+        with pytest.raises(SendRequestError) as refused:
+            _send_request("plain", caller=caller, sender=sender)
+        assert refused.value.status == 403
+        assert str(refused.value) == "provider_profile_boundary"
+
+    allowed = _send_request("euan", caller=eu)                 # same profile
+    assert allowed.session == "euan" and allowed.force_session  # never re-routed
+    assert _send_request("eu", caller=plain).session == "eu"   # inbound stays allowed
+    assert _send_request("pia", caller=plain, sender="plain").session == "pia"  # control
+    del eu_peer, plain_peer
+
+
+def test_a_group_call_cannot_carry_an_eu_agents_message_outside_its_profile():
+    from dataclasses import replace
+    from lib.send_request import SendRequestError, boundary_refusal
+    eu, plain = _peer("eu", "example-eu"), _peer("plain")
+    _peer("euan", "example-eu")
+    request = _send_request("euan", caller=eu)
+
+    assert boundary_refusal(request, caller_agent_id=eu) is None
+    refused = boundary_refusal(replace(request, session="plain"), caller_agent_id=eu)
+    assert isinstance(refused, SendRequestError) and refused.status == 403
+    assert boundary_refusal(replace(request, session="plain"), caller_agent_id=plain) is None
+
+
+def test_the_parent_still_sees_an_eu_agents_status_in_the_snapshot(profile_env, monkeypatch):
+    import importlib.util
+    from lib import snapshot
+    eu, plain = _peer("eu", "example-eu"), _peer("plain")
+    from lib import provider_background_jobs as jobs
+    token, _ = jobs.identity_env(plain)
+    jobs.record_identity(token, agent_id=plain, provider="codex", pid=1)
+    monkeypatch.setattr(snapshot.SHARED, "body", lambda _ctx: json.dumps({"agents": [
+        {"agent_id": eu, "session": "eu", "busy": True, "latest_state": "tool",
+         "helper_state": "running", "queued_turn_count": 2,
+         "background_jobs": {"count": 1, "sub_agents": 0},
+         "goal": {"status": "active", "objective": SENTINEL},
+         "last_message": SENTINEL}]}).encode())
+    spec = importlib.util.spec_from_file_location(
+        "clarp_server_status", Path(__file__).resolve().parents[2] / "server/server.py")
+    server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server)
+    handler = object.__new__(server.Handler)
+    handler.path, handler.headers = "/agents/snapshot", {"X-Clarp-Turn": token}
+    handler.server = SimpleNamespace(ctx=SimpleNamespace())
+    sent = []
+    handler._send = lambda status, body, *_a, **_k: sent.append(json.loads(body))
+
+    handler._handle_snapshot()
+
+    [row] = sent[0]["agents"]
+    assert SENTINEL not in json.dumps(row)
+    assert (row["busy"], row["latest_state"], row["helper_state"], row["queued_turn_count"],
+            row["background_jobs"], row["goal"]) == (
+        True, "tool", "running", 2, {"count": 1, "sub_agents": 0}, {"status": "active"})
