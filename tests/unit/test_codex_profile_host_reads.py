@@ -142,10 +142,12 @@ def test_attention_jobs_team_log_and_schedules_hide_an_eu_agent(server, fleet, m
 
 
 def test_the_event_stream_never_carries_an_eu_agents_events_to_another_agent(server, fleet):
-    events = [{"event_id": 1, "type": "message", "agent_id": fleet.eu, "text": SENTINEL},
-              {"event_id": 2, "type": "artifact-updated",
-               "artifact": {"agent_id": fleet.eu, "title": SENTINEL}},
-              {"event_id": 3, "type": "message", "session": "plain", "text": "plainword"}]
+    events = [{"event_id": 1, "type": "agent-state", "agent_id": fleet.eu,
+               "session": "eunice", "status_text": SENTINEL},
+              {"event_id": 2, "type": "user-notification", "session": "eunice",
+               "preview": SENTINEL},
+              {"event_id": 3, "type": "agent-state", "session": "plain",
+               "status_text": "plainword"}]
 
     def stream_output(turn):
         q = queue.Queue()
