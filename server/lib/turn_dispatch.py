@@ -196,12 +196,15 @@ def _transfer_refusal(spec: "_TurnSpec", number: int, facts: dict) -> str:
     return ""
 
 
-def account_recovery_carry(wall: float | None = None) -> dict[str, dict]:
-    """Per account pool in recovery, when its work was first parked."""
+def account_recovery_carry(wall: float | None = None,
+                           handed_over: dict[str, set[str]] | None = None
+                           ) -> dict[str, dict]:
+    """Per account pool in recovery, when its work was first parked and
+    whose parked work the drain handed over."""
     wall = time.time() if wall is None else wall
     carry = {}
     for pool, coordinator in _FAILOVERS.items():
-        value = coordinator.carry_over(wall)
+        value = coordinator.carry_over(wall, (handed_over or {}).get(pool, ()))
         if value is not None:
             carry[pool] = value
     return carry
@@ -223,7 +226,10 @@ def resume_account_recovery(carry: dict, wall: float | None = None) -> list[str]
             since = int(value.get("parked_since_ms") or 0)
         except (TypeError, ValueError):
             continue
-        if since and coordinator.resume_recovery(command, since, wall):
+        agents = value.get("agents") or ()
+        if not isinstance(agents, (list, tuple)):
+            agents = ()
+        if since and coordinator.resume_recovery(command, since, wall, agents):
             resumed.append(pool)
             log("accountRecoveryCarried",
                 f"pool={pool} parked_for={max(0.0, wall - since / 1000):.0f}s")
@@ -679,6 +685,9 @@ class TurnDispatchService:
         # work is held in memory with that queue id); lowering the fence
         # queues them again.
         self._transferred_rows: set[str] = set()
+        # Per account pool, agents whose parked work the hand-over moved
+        # (the seal's carry names them for the next runtime).
+        self.handed_over: dict[str, set[str]] = {}
 
     # --- release drain ------------------------------------------------------
 
@@ -718,6 +727,7 @@ class TurnDispatchService:
             # again, which reads them only while queued.
             turn_queue.requeue_rows(sorted(rows))
             rows.clear()
+        self.handed_over.clear()
         changed = _SLOTS.set_fenced(False)
         if changed:
             log("admissionFenceLowered", f"held={len(_SLOTS.queued_specs())}")
@@ -901,6 +911,10 @@ class TurnDispatchService:
                 if not _SLOTS.release(spec.agent_id, spec.trace_id):
                     orphaned.append((spec, row_id))
                     continue
+                pool = next((name for name, value in _FAILOVERS.items()
+                             if value is _coordinator), "")
+                if pool:
+                    self.handed_over.setdefault(pool, set()).add(spec.agent_id)
                 if spec.queue_id:
                     # Its own row, parked for the handoff; a lifted fence
                     # makes it queued again before held work starts.

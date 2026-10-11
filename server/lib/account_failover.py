@@ -29,6 +29,10 @@ RECHECK_SECONDS = 60.0
 # on. Verified 2026-09-17: a selector that could not reach its usage API held
 # every Claude agent on this Host for three and a half hours.
 MAX_PARK_SECONDS = 1800.0
+# A recovery carried over a runtime handoff waits this long at most for the
+# work it carried to be re-admitted before an empty pass may end it.
+CARRIED_WORK_WAIT_SECONDS = 120.0
+CARRIED_WORK_POLL_SECONDS = 1.0
 
 
 def finish_owned_group(handle) -> None:
@@ -136,6 +140,10 @@ class AccountFailover:
         # the selector); a timer and a new request can overlap. Parked work
         # is never handed over while any runs.
         self.checking = 0
+        # Agents whose parked work the previous runtime handed over and that
+        # have not registered here yet, and until when to wait for them.
+        self.awaiting: set[str] = set()
+        self.awaiting_until = 0.0
 
     @staticmethod
     def _schedule(delay, callback):
@@ -147,6 +155,7 @@ class AccountFailover:
         """Return true if the new attempt must wait for account recovery."""
         with self.lock:
             self.attempts[attempt.agent_id] = attempt
+            self.awaiting.discard(attempt.agent_id)
             if self.recovering:
                 attempt.state["account_recovery"] = True
                 attempt.pause()
@@ -249,6 +258,14 @@ class AccountFailover:
                     self._stop_owned(attempt)
             with self.lock:
                 pending = self._pending()
+                if (not pending and self.awaiting
+                        and self.now() < self.awaiting_until):
+                    # A carried recovery whose work is not re-admitted yet
+                    # (boot recovery runs after this timer, or before it):
+                    # ending it now would run that work unchecked.
+                    self.schedule(CARRIED_WORK_POLL_SECONDS, self.recover)
+                    return
+                self.awaiting.clear()
                 decision = self._decide(pending, NOT_CHECKED, settings)
                 if isinstance(decision, Release):
                     self.recovering = False
@@ -335,16 +352,19 @@ class AccountFailover:
             for attempt in resume:
                 attempt.resume()
 
-    def carry_over(self, wall: float) -> dict | None:
+    def carry_over(self, wall: float, agents=()) -> dict | None:
         """What the next runtime needs to keep this recovery's bound: when
-        the work was first parked (wall-clock ms). None when not recovering."""
+        the work was first parked (wall-clock ms) and whose parked work was
+        handed over. None when not recovering."""
         with self.lock:
             if not self.recovering:
                 return None
             return {"parked_since_ms": int(
-                (wall - max(0.0, self.now() - self.parked_since)) * 1000)}
+                (wall - max(0.0, self.now() - self.parked_since)) * 1000),
+                "agents": sorted(set(agents))}
 
-    def resume_recovery(self, command, parked_since_ms: int, wall: float) -> bool:
+    def resume_recovery(self, command, parked_since_ms: int, wall: float,
+                        agents=()) -> bool:
         """At boot after a handoff: continue the previous runtime's recovery
         with its original start, so a handoff never extends the park bound.
         Credentials stay with the selector; only the timing carries over."""
@@ -358,5 +378,9 @@ class AccountFailover:
             self.parked_since = self.now() - elapsed
             self.command = tuple(command)
             self.next_check = 0.0
+            # Hold the recovery for the carried work, whichever runs first:
+            # this pass or the boot's queue recovery that re-admits it.
+            self.awaiting = {str(agent) for agent in agents} - set(self.attempts)
+            self.awaiting_until = self.now() + CARRIED_WORK_WAIT_SECONDS
         self.schedule(0.0, self.recover)
         return True
