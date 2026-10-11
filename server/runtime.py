@@ -16,6 +16,7 @@ from lib.runtime_bridge import RuntimeRPCServer  # noqa: E402
 from lib.runtime_events import RuntimeEventStream  # noqa: E402
 from lib.runtime_release import (  # noqa: E402
     RuntimeReleaseMonitor,
+    consume_account_recovery_carry,
     consume_clean_handoff,
     mark_clean_handoff,
     read_installed_release_id,
@@ -32,10 +33,14 @@ def main() -> int:
     dispatch = TurnDispatchService(ctx)
     handoff_marker = paths.cache_dir / "runtime-clean-handoff"
     clean_handoff = consume_clean_handoff(handoff_marker)
+    # The previous runtime's account recovery, so its park bound carries on.
+    recovery_carry_path = paths.cache_dir / "runtime-account-recovery.json"
+    recovery_carry = consume_account_recovery_carry(recovery_carry_path)
     running_release_id = read_runtime_release_id(ctx.root)
     runtime = RuntimeRPCServer(
         paths.runtime_socket, dispatch_service=dispatch,
-        release_id=running_release_id)
+        release_id=running_release_id,
+        account_recovery_carry=recovery_carry_path)
     # Live items (docs/live-items.md): this process runs the agents, so it
     # owns the hub; the HTTP server follows it over the runtime socket.
     from lib import live_hub
@@ -61,6 +66,9 @@ def main() -> int:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     try:
+        if recovery_carry:
+            from lib import turn_dispatch
+            turn_dispatch.resume_account_recovery(recovery_carry)
         recovered = recover_runtime(ctx, dispatch, clean_handoff=clean_handoff)
         log("runtimeReady", f"socket={paths.runtime_socket} recovery={recovered}")
         if running_release_id:

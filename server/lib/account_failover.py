@@ -114,6 +114,9 @@ class Attempt:
     handle: object = None
     spawned: threading.Event = field(default_factory=threading.Event)
     stopped: bool = False
+    # The dispatcher's own record of the parked work (its spec and attempt
+    # number), read only by the release drain's transfer (turn_dispatch).
+    work: object = None
 
 
 class AccountFailover:
@@ -129,6 +132,9 @@ class AccountFailover:
         self.next_check = 0.0
         self.parked_since = 0.0
         self.checked_models: tuple[str, ...] = ()
+        # A recovery pass is running (deciding, stopping processes, or asking
+        # the selector). Parked work is never handed over meanwhile.
+        self.checking = False
 
     @staticmethod
     def _schedule(delay, callback):
@@ -223,6 +229,15 @@ class AccountFailover:
         attempt.stopped = True
 
     def recover(self):
+        with self.lock:
+            self.checking = True
+        try:
+            self._recover()
+        finally:
+            with self.lock:
+                self.checking = False
+
+    def _recover(self):
         settings = FailoverSettings(recheck_seconds=RECHECK_SECONDS,
                                     max_park_seconds=MAX_PARK_SECONDS)
         try:
@@ -282,6 +297,65 @@ class AccountFailover:
 
     def status(self):
         with self.lock:
-            return {"recovering": self.recovering,
+            return {"recovering": self.recovering, "checking": self.checking,
                     "waiting": sorted(item.agent_id for item in self.attempts.values()
                                       if item.state.get("account_recovery") and item.owned())}
+
+    # --- the release drain's hand-over (turn_dispatch.transfer_recovery_parks)
+
+    def take_parked(self, eligible: Callable[[Attempt], bool]) -> list[Attempt]:
+        """Remove and return parked work no process ever ran for, which
+        ``eligible`` accepts, so no recovery pass can resume it. Nothing while
+        a recovery pass is running. Called with the dispatch lock held."""
+        with self.lock:
+            if self.checking:
+                return []
+            taken = [attempt for attempt in self.attempts.values()
+                     if attempt.state.get("account_recovery")
+                     and attempt.spawned.is_set() and attempt.handle is None
+                     and not attempt.state.get("spawn_started")
+                     and attempt.owned() and eligible(attempt)]
+            for attempt in taken:
+                self.attempts.pop(attempt.agent_id, None)
+            return taken
+
+    def restore(self, attempts: list[Attempt]) -> None:
+        """Give back work ``take_parked`` removed whose hand-over failed. If
+        the recovery ended meanwhile it resumes now, like the rest did."""
+        resume = []
+        with self.lock:
+            for attempt in attempts:
+                if not attempt.owned():
+                    continue
+                if self.recovering:
+                    self.attempts.setdefault(attempt.agent_id, attempt)
+                else:
+                    resume.append(attempt)
+            for attempt in resume:
+                attempt.resume()
+
+    def carry_over(self, wall: float) -> dict | None:
+        """What the next runtime needs to keep this recovery's bound: when
+        the work was first parked (wall-clock ms). None when not recovering."""
+        with self.lock:
+            if not self.recovering:
+                return None
+            return {"parked_since_ms": int(
+                (wall - max(0.0, self.now() - self.parked_since)) * 1000)}
+
+    def resume_recovery(self, command, parked_since_ms: int, wall: float) -> bool:
+        """At boot after a handoff: continue the previous runtime's recovery
+        with its original start, so a handoff never extends the park bound.
+        Credentials stay with the selector; only the timing carries over."""
+        if not command:
+            return False
+        with self.lock:
+            if self.recovering:
+                return False
+            elapsed = max(0.0, wall - parked_since_ms / 1000.0)
+            self.recovering = True
+            self.parked_since = self.now() - elapsed
+            self.command = tuple(command)
+            self.next_check = 0.0
+        self.schedule(0.0, self.recover)
+        return True

@@ -164,6 +164,70 @@ def log_held_order(event: str) -> None:
                               f"n={len(entries)} rows={rows}")
 
 
+RECOVERY_PARK_PREFIX = "recovery-park"
+
+
+def _transfer_refusal(spec: "_TurnSpec", number: int, facts: dict) -> str:
+    """Why parked account-recovery work cannot become durable held work, or
+    "" when it can. Anything uncertain refuses; the work then keeps blocking
+    the handoff exactly as before (Solu re7d614160304)."""
+    if number != 1:
+        return "retried"
+    if spec.recovery_text or spec.recovery_attempted:
+        return "continuation"
+    if spec.janitor_run_id:
+        return "maintenance"
+    if spec.unheard_audio:
+        return "unheard_audio"
+    if spec.is_new_session or not spec.backend_session_id:
+        return "new_session"
+    if facts.get("binding") != spec.backend_session_id:
+        return "binding_changed"
+    if facts.get("paused"):
+        return "queue_paused"
+    if facts.get("excluded"):
+        return str(facts["excluded"])
+    if _SLOTS.get(spec.agent_id) != spec.trace_id:
+        return "not_slot_owner"
+    if _launch_running(spec.agent_id):
+        return "launching"
+    return ""
+
+
+def account_recovery_carry(wall: float | None = None) -> dict[str, dict]:
+    """Per account pool in recovery, when its work was first parked."""
+    wall = time.time() if wall is None else wall
+    carry = {}
+    for pool, coordinator in _FAILOVERS.items():
+        value = coordinator.carry_over(wall)
+        if value is not None:
+            carry[pool] = value
+    return carry
+
+
+def resume_account_recovery(carry: dict, wall: float | None = None) -> list[str]:
+    """At boot after a handoff, continue the pools that were recovering with
+    their original start (the park bound does not restart). Returns pools."""
+    wall = time.time() if wall is None else wall
+    resumed = []
+    for pool, value in (carry or {}).items():
+        coordinator = _FAILOVERS.get(pool)
+        if coordinator is None or not isinstance(value, dict):
+            continue
+        backend = next((b for b in backends.ids()
+                        if backends.by_id(b).account_pool() == pool), "")
+        command = account_selector(backend) if backend else None
+        try:
+            since = int(value.get("parked_since_ms") or 0)
+        except (TypeError, ValueError):
+            continue
+        if since and coordinator.resume_recovery(command, since, wall):
+            resumed.append(pool)
+            log("accountRecoveryCarried",
+                f"pool={pool} parked_for={max(0.0, wall - since / 1000):.0f}s")
+    return resumed
+
+
 def unpersisted_held() -> list[str]:
     """Agents with queued work that would not survive a runtime handoff:
     no durable queue row and no park row."""
@@ -693,6 +757,123 @@ class TurnDispatchService:
         if parked:
             log("drainHeldPersisted", f"parked={parked}")
         return parked
+
+    def transfer_recovery_parks(self, excluded: dict[str, str] | None = None
+                                ) -> dict[str, Any]:
+        """The release drain's hand-over of account-recovery parks.
+
+        Work parked for an account before any process ran for it (the
+        coordinator registered it while recovering) becomes durable held work:
+        a ``recovery-park`` row at the head of the agent's queue, in one write
+        transaction with the end of its turn row and an ``idle`` state that
+        names the handoff, then the same spec at the head of the in-memory
+        queue with that park id, and the slot is given back. From there it is
+        held work like any other: the next runtime recovers it in order (after
+        ``resume_account_recovery`` restores the park's start, so the bound
+        does not restart), a revert starts it first. Only work whose exact
+        prompt, binding, order and pause state are known qualifies
+        (``_transfer_refusal``); a running recovery pass, a process that ran,
+        or anything uncertain keeps its blocker. Credentials and account
+        choice never move. Returns ``{"transferred": [agents], "refused":
+        {agent: reason}}``."""
+        excluded = dict(excluded or {})
+        # Reads before any lock (the turn-lock rule): the binding and the
+        # pause state the transfer must preserve.
+        facts: dict[str, dict] = {}
+        for coordinator in _FAILOVERS.values():
+            for agent_id in coordinator.status().get("waiting") or ():
+                facts[agent_id] = {
+                    "binding": agents_db.live_backend_session(agent_id),
+                    "paused": turn_queue.is_paused(agent_id),
+                    "excluded": excluded.get(agent_id, ""),
+                }
+        refused: dict[str, str] = {}
+
+        def eligible(attempt) -> bool:
+            work = attempt.work
+            if not (isinstance(work, tuple) and len(work) == 2
+                    and isinstance(work[0], _TurnSpec)):
+                refused[attempt.agent_id] = "unknown_work"
+                return False
+            spec, number = work
+            if spec.trace_id != attempt.trace_id:
+                refused[attempt.agent_id] = "trace_mismatch"
+                return False
+            reason = _transfer_refusal(spec, number,
+                                       facts.get(attempt.agent_id, {}))
+            if reason:
+                refused[attempt.agent_id] = reason
+            return not reason
+
+        taken: list[tuple[Any, Any]] = []
+        with _TURN_LOCK:
+            for coordinator in _FAILOVERS.values():
+                if coordinator.checking and coordinator.status().get("waiting"):
+                    for agent_id in coordinator.status()["waiting"]:
+                        refused.setdefault(agent_id, "selector_running")
+                taken += [(coordinator, attempt)
+                          for attempt in coordinator.take_parked(eligible)]
+        if not taken:
+            return {"transferred": [], "refused": refused}
+        con = db.conn()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                for _coordinator, attempt in taken:
+                    spec = attempt.work[0]
+                    turn_queue.park_at_head(
+                        queue_id=f"{RECOVERY_PARK_PREFIX}-{spec.trace_id}",
+                        agent_id=spec.agent_id, session=spec.session,
+                        text=spec.text, trace_id=spec.trace_id,
+                        client_msg_id=spec.client_msg_id,
+                        synthesize_audio=spec.synthesize_audio,
+                        origin=spec.origin, sender_agent_id=spec.sender_agent_id,
+                        prompt_admission_id=spec.prompt_admission_id)
+                    turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id)
+                    # Not busy (a crash leaves no "interrupted" turn behind)
+                    # and not an outcome: the turn has not run yet.
+                    turn_lifecycle.record(spec.agent_id, AgentState.IDLE, {
+                        "reason": "update_handoff", "trace_id": spec.trace_id,
+                        "message": UPDATE_HOLD_HEADLINE})
+                con.execute("COMMIT")
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+        except Exception as exc:  # noqa: BLE001 - the work stays parked and blocking
+            log_exception("drainRecoveryTransferFail", exc)
+            by_pool: dict[int, tuple[Any, list]] = {}
+            for coordinator, attempt in taken:
+                by_pool.setdefault(id(coordinator), (coordinator, []))[1].append(attempt)
+                refused[attempt.agent_id] = "persist_failed"
+            for coordinator, attempts in by_pool.values():
+                coordinator.restore(attempts)
+            for _coordinator, attempt in taken:
+                self._pause_for_account(attempt.work[0])
+            return {"transferred": [], "refused": refused}
+        transferred = []
+        orphaned = []
+        with _TURN_LOCK:
+            for _coordinator, attempt in taken:
+                spec = attempt.work[0]
+                row_id = f"{RECOVERY_PARK_PREFIX}-{spec.trace_id}"
+                if not _SLOTS.release(spec.agent_id, spec.trace_id):
+                    orphaned.append((spec, row_id))
+                    continue
+                _SLOTS.requeue_front(spec.agent_id, replace(
+                    spec, queue_id="", park_id=row_id, bypass_pause=False,
+                    drain_persisted=True))
+                transferred.append(spec.agent_id)
+        for spec, row_id in orphaned:
+            # Unreachable while the seal holds the admission lock; never
+            # leave a row that would run work a new owner replaced.
+            turn_queue.unpark(row_id)
+            log("drainRecoveryTransferLost",
+                f"agent={spec.agent_id} trace={spec.trace_id}")
+        if transferred:
+            log("drainRecoveryTransferred",
+                f"agents={','.join(sorted(transferred))}")
+            refresh_hold_headlines()
+        return {"transferred": sorted(transferred), "refused": refused}
 
     def recover_queued(self) -> int:
         """Re-admit durable explicit queues after a server restart."""
@@ -2081,7 +2262,8 @@ class TurnDispatchService:
                     and not self._superseded(spec, locked=False)), pause=pause,
                 resume=lambda: defer_on(
                     coordinator.lock,
-                    lambda: self._resume_after_account_switch(spec, attempt, state)))
+                    lambda: self._resume_after_account_switch(spec, attempt, state)),
+                work=(spec, attempt))
             if coordinator.register(account_attempt):
                 return
         on_init, on_result, on_error = self._attempt_callbacks(spec, attempt, state)
