@@ -110,11 +110,16 @@ runtime availability, and `clarp-admin doctor` afterwards.
 The supported installer restarts the HTTP Host and enables the runtime service;
 it does not force-restart an already-running runtime. Current `runtime.py` starts
 `RuntimeReleaseMonitor`, which watches the installed `RUNTIME_RELEASE_ID` once
-`RUNTIME_READY` and `INSTALL_OK` exist. A busy runtime fences admissions (new
-work queues durably, in-flight turns finish), hands over when nothing is owned,
-and lifts the fence after 15 minutes with a growing backoff; see
-`docs/runtime-restarts.md` "Graceful release drain". Runtimes from before that
-change hand over only when fully idle. Verify the mechanism in the candidate
+`RUNTIME_READY` and `INSTALL_OK` exist. In the default natural mode
+(`[runtime] release_drain = "natural"`, or `CLARP_RELEASE_DRAIN=natural`) a busy
+runtime holds nothing: it waits (`drain.phase` `waiting_idle`, live `blockers`)
+for a moment with nothing to cut short and fences only for the seconds of the
+seal check. With `release_drain = "fenced"` it fences admissions (new work
+queues durably, in-flight turns finish), hands over when nothing is owned, and
+lifts the fence after 15 minutes with a growing backoff; see
+`docs/runtime-restarts.md` "Graceful release drain". Runtimes from before the
+drain hand over only when fully idle; runtimes from before natural mode always
+fence. Verify the mechanism in the candidate
 and deployed source.
 
 HTTP endpoints and schema migrations activate with the Host restart. Runner
