@@ -670,7 +670,8 @@ unavailable, never idle: `available` false, `reason` one of `timeout`,
 `draining` and `active_turns` are `null` (unknown); and `drain` is
 `{"phase": "unavailable", "last_known", "last_known_at"}`, the last real drain
 block this Host saw and when. It is diagnostic: no client contract depends on
-it, and clients must tolerate it missing.
+it, and clients must tolerate it missing. Contract 62 (`runtime_drain_status`)
+introduced this shape; before it `draining` meant sealed.
 
 ### Read-only HTML reports: `html_form` with `read_only`
 
