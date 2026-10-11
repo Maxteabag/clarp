@@ -1663,6 +1663,23 @@ class Handler(BaseHTTPRequestHandler):
             body = json.dumps(data).encode()
         self._send(200, body, "application/json")
 
+    def _eu_boundary(self, target) -> str:
+        """The refusal when this request's turn is a provider-profile agent
+        writing toward an agent outside its profile (H2), else ""."""
+        from lib import codex_profiles
+        caller = self._turn_caller()
+        target_id = str((target or {}).get("agent_id") or "")
+        if caller and target_id and not codex_profiles.may_post(caller, target_id):
+            return codex_profiles.BOUNDARY
+        return ""
+
+    def _eu_prune(self, body):
+        """``body`` as another agent's turn may receive it: nothing of an agent
+        on another provider profile. The user's devices get it unchanged."""
+        from lib import codex_profiles
+        ids, sessions = codex_profiles.hidden_from(self._turn_caller())
+        return codex_profiles.prune(body, ids, sessions)
+
     def _eu_only_read_refusal(self, path: str) -> str:
         """Refuse another agent's turn a read of an EU-only agent's content:
         its provider would receive it (docs/codex-eu-profile.md)."""
@@ -1673,8 +1690,12 @@ class Handler(BaseHTTPRequestHandler):
         if not caller:
             return ""
         query = self._query()
-        owners = [identity.lookup(unquote(value)) for key in ("session", "agent", "session_id")
+        owners = [identity.lookup(unquote(value))
+                  for key in ("session", "agent", "session_id", "agent_id")
                   for value in query.get(key, []) if value]
+        if path == "/log" and not query.get("session"):
+            # /log without a session reads the focused agent.
+            owners.append(identity.lookup(self.ctx.default_session))
         parts = path.strip("/").split("/")
         if len(parts) >= 2 and parts[0] == "agents" and parts[1] not in ("snapshot",):
             owners.append(identity.lookup(unquote(parts[1])))
@@ -2916,6 +2937,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         q = self.ctx.stream.subscribe(live=self._live_subscription())
+        # Another agent's turn never receives an event of an agent on another
+        # provider profile; the set is refreshed as agents come and go.
+        from lib import codex_profiles
+        caller = self._turn_caller()
+        hidden = {"at": 0.0, "sets": (frozenset(), frozenset())}
+
+        def withheld(ev) -> bool:
+            if not caller:
+                return False
+            if time.monotonic() - hidden["at"] > 5.0:
+                hidden["sets"], hidden["at"] = (codex_profiles.hidden_from(caller),
+                                                time.monotonic())
+            ids, sessions = hidden["sets"]
+            return bool(ids or sessions) and codex_profiles.mentions(ev, ids, sessions)
         try:
             self.wfile.write(b": connected\n\n")
             self.wfile.flush()
@@ -2923,6 +2958,8 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 page = self.ctx.stream.recent(cursor)
                 for ev in page:
+                    if withheld(ev):
+                        continue
                     event_id = ev.get("event_id")
                     if event_id:
                         self.wfile.write(f"id: {event_id}\n".encode())
@@ -2953,6 +2990,8 @@ class Handler(BaseHTTPRequestHandler):
                         ev = json.loads(payload)
                     except json.JSONDecodeError:
                         ev = {}
+                    if withheld(ev):
+                        continue
                     event_id = ev.get("event_id")
                     if event_id:
                         self.wfile.write(f"id: {event_id}\n".encode())
@@ -3289,7 +3328,7 @@ class Handler(BaseHTTPRequestHandler):
             "team_id": team_id,
             "messages": team_store.list_team_messages(team_id, limit=limit),
         }
-        return self._json_ok(body)
+        return self._json_ok(self._eu_prune(body))
 
     def _handle_request_location(self):
         """An agent asks the app for the user's location: broadcast a request the
@@ -3557,7 +3596,7 @@ class Handler(BaseHTTPRequestHandler):
             session=session if session else None,
             agent_id=agent_id if agent_id else None,
         )
-        return self._json_ok({"schedules": schedules})
+        return self._json_ok(self._eu_prune({"schedules": schedules}))
 
     def _handle_agent_schedules_post(self):
         from lib import scheduler
@@ -3573,6 +3612,9 @@ class Handler(BaseHTTPRequestHandler):
         enabled = bool(data.get("enabled", True))
         if not session or not name or not cron or not prompt:
             return self._json_error(400, "session, name, cron_expression, and prompt are required")
+        refusal = self._eu_boundary(identity.lookup(session))
+        if refusal:
+            return self._json_error(403, refusal)
         try:
             item = scheduler.create_schedule(session, name, cron, prompt, enabled=enabled)
         except ValueError as exc:
@@ -3613,6 +3655,10 @@ class Handler(BaseHTTPRequestHandler):
         name = data.get("name")
         cron = data.get("cron_expression") or data.get("cron")
         prompt = data.get("prompt")
+        current = scheduler.get_schedule(schedule_id)
+        refusal = self._eu_boundary(current) if current and prompt else ""
+        if refusal:
+            return self._json_error(403, refusal)
         try:
             item = scheduler.update_schedule(
                 schedule_id,
@@ -4852,7 +4898,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_background_jobs(self):
         from lib import background_jobs
-        return self._json_ok(background_jobs.snapshot())
+        return self._json_ok(self._eu_prune(background_jobs.snapshot()))
 
     def _handle_background_job_detail(self, job_id: str):
         from lib import background_jobs
@@ -4906,7 +4952,8 @@ class Handler(BaseHTTPRequestHandler):
             limit=limit, offset=offset,
             order=(qs.get("order", ["updated"])[0] or "updated").strip(),
         )
-        return self._json_ok({"artifacts": [artifacts.response_representation(row, representation) for row in rows]})
+        return self._json_ok(self._eu_prune(
+            {"artifacts": [artifacts.response_representation(row, representation) for row in rows]}))
 
     def _handle_artifact_events_config(self, artifact_id: str, *, write: bool = True):
         if getattr(self, "_request_device_scope", "") == "limited":
@@ -5186,11 +5233,12 @@ class Handler(BaseHTTPRequestHandler):
         self._deliver_pending_decisions()
         # An explicit format advertisement lets helpers reject older Hosts
         # which otherwise silently interpret question creation as approval.
-        return self._json_ok({
+        items = self._eu_prune(items)
+        return self._json_ok(self._eu_prune({
             "items": items, "count": len(items), "decision_format": 2,
             "janitor_items": janitor_attention.pending(
    include_archived=query.get("include_archived", [""])[0] == "1"),
-        })
+        }))
 
     def _handle_turn_queue(self):
         from lib import turn_queue

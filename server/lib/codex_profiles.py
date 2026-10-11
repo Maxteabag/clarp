@@ -336,6 +336,60 @@ def readable_by(target: dict | str | None, caller_agent_id: str) -> bool:
     return for_agent(caller_agent_id) == target_profile
 
 
+# --- what another agent's turn may receive ------------------------------------
+#
+# A request or event stream that carries an agent's turn identity is that
+# agent's provider reading. Lists and events it receives drop everything that
+# names an agent on another provider profile; the user's devices (no turn
+# identity) are not filtered. Only identifying requests can be filtered: every
+# agent runs as the same Unix user (docs/codex-eu-profile.md).
+
+_OWNER_KEYS = frozenset({"agent_id", "session", "source_agent_id", "sender_agent_id",
+                         "principal_agent_id", "delegate_agent_id", "target_agent_id",
+                         "from_agent_id", "to_agent_id", "parent_agent_id"})
+
+
+def hidden_from(caller_agent_id: str) -> tuple[frozenset[str], frozenset[str]]:
+    """(agent ids, sessions) of the profile agents ``caller_agent_id`` may not
+    read; empty for the user (no caller)."""
+    if not caller_agent_id:
+        return frozenset(), frozenset()
+    from .db import conn
+    rows = conn().execute(
+        "SELECT agent_id, session FROM agents WHERE provider_profile != '' "
+        "AND provider_profile != ?", (profile_of(caller_agent_id),)).fetchall()
+    return (frozenset(row["agent_id"] for row in rows),
+            frozenset(row["session"] for row in rows))
+
+
+def mentions(value, ids: frozenset[str], sessions: frozenset[str]) -> bool:
+    """Whether ``value`` (any JSON-like structure) names one of those agents."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in _OWNER_KEYS and isinstance(item, str) and (item in ids or item in sessions):
+                return True
+            if key in ids or mentions(item, ids, sessions):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(mentions(item, ids, sessions) for item in value)
+    return False
+
+
+def prune(value, ids: frozenset[str], sessions: frozenset[str]):
+    """``value`` without any list element (at any depth) that names one of
+    those agents, and without keys that are their ids."""
+    if not ids and not sessions:
+        return value
+    if isinstance(value, dict):
+        return {key: prune(item, ids, sessions) for key, item in value.items()
+                if key not in ids}
+    if isinstance(value, list):
+        return [prune(item, ids, sessions) for item in value
+                if not mentions(item, ids, sessions)]
+    return value
+
+
 # --- local-only work --------------------------------------------------------
 #
 # Work done for a profile agent outside its own turn (transcribing its
