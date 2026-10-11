@@ -16,6 +16,21 @@ from . import db, identity, origins
 from .prompt_admissions import PromptAdmission
 
 
+def _boundary(session: str, speaker_agent_id: str, trace_id: str = ""):
+    from . import codex_profiles, identity
+    target = identity.lookup(session) or {}
+    if codex_profiles.may_post(speaker_agent_id, target.get("agent_id", "")):
+        return None
+    return SendRequestError(403, codex_profiles.BOUNDARY, trace_id=trace_id)
+
+
+def boundary_refusal(req: "SendRequest", *, caller_agent_id: str = ""):
+    """The 403 for a request whose speaker (the claimed sender, else the
+    turn's own agent) is on a provider profile and whose target, as finally
+    routed, is not. None when it may go."""
+    return _boundary(req.session, req.sender_agent_id or caller_agent_id, req.trace_id)
+
+
 class SendRequestError(ValueError):
     """A /send body the handler must refuse.
 
@@ -163,6 +178,14 @@ class SendRequest:
                 raise SendRequestError(
                     403, "a bookkeeping delegate does not message its principal",
                     trace_id=trace_id)
+        from . import codex_profiles
+        if codex_profiles.is_profiled(sender_agent_id or caller_agent_id):
+            # A provider-profile agent's words never reach an agent on another
+            # provider, and are never re-routed away from the target it named.
+            refusal = _boundary(session, sender_agent_id or caller_agent_id, trace_id)
+            if refusal is not None:
+                raise refusal
+            force_session = True
         origin = (data.get("origin") or "").strip().lower()
         if origin not in origins.CLIENT_SETTABLE_ORIGINS:
             origin = "agent" if sender_agent_id else "user"
