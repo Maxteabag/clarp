@@ -48,8 +48,9 @@ def enqueue(*,
         from .log import log
         log("ttsSuppressedSilentTurn", f"agent={agent_id} session={session}")
         return 0
-    from . import codex_profiles
-    if codex_profiles.is_profiled(agent_id):
+    from . import agents as agents_db
+    agent = agents_db.get_by_agent_id(agent_id) or {"agent_id": agent_id}
+    if not agents_db.interaction_capabilities(agent)["can_speak"]:
         # Its words would go to the TTS provider: a provider-profile agent is
         # text-only (docs/codex-eu-profile.md).
         from .log import log

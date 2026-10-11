@@ -142,10 +142,16 @@ def get_by_agent_id(agent_id: str) -> dict[str, Any] | None:
 
 
 def interaction_capabilities(agent: dict[str, Any]) -> dict[str, bool]:
-    """One product capability policy shared by admission and clients."""
+    """One product capability policy shared by admission, enforcement and
+    clients. A Codex provider-profile agent never speaks through a TTS
+    provider, never has its dictation sent to a cloud engine and is never a
+    voice-routing target; speech, dictation and turn audio read these keys."""
+    from . import codex_profiles
     ordinary = not bool(agent.get("is_janitor"))
-    return {"can_chat": ordinary, "can_voice_target": ordinary,
-            "can_restart": ordinary, "can_inspect": True}
+    open_ = not codex_profiles.is_profiled(agent)
+    return {"can_chat": ordinary, "can_voice_target": ordinary and open_,
+            "can_restart": ordinary, "can_inspect": True,
+            "can_speak": open_, "can_cloud_dictation": open_}
 
 
 def favorite_paths(limit: int = 5) -> list[dict[str, Any]]:
