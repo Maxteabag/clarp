@@ -94,8 +94,14 @@ def recover_runtime(
 
 def _terminalize_ended_receipts() -> dict[str, int]:
     """End queue receipts whose turn is over; a slot this runtime holds after
-    rehydration keeps its receipt ``started``."""
-    from . import turn_dispatch, turn_queue
-    live = set(turn_dispatch.runtime_status()["active"].values())
+    rehydration keeps its receipt ``started``. What the ledger cannot prove
+    ended, an agent with no slot and no process can (``idle_ended``)."""
+    from . import reconcile, turn_dispatch, turn_queue
+    status = turn_dispatch.runtime_status()
+    live = set(status["active"].values())
     with db.busy_timeout(SQLITE_RECOVERY_BUSY_TIMEOUT_MS):
-        return turn_queue.terminalize_ended_receipts(live)
+        counts = dict(turn_queue.terminalize_ended_receipts(live))
+        idle = reconcile.end_idle_agent_receipts(status).get("ended", 0)
+    if idle:
+        counts["idle_ended"] = idle
+    return counts

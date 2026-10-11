@@ -187,6 +187,41 @@ def reconcile_agent(agent_id: str, backend: str | None = None, *,
     return repaired
 
 
+def end_idle_agent_receipts(status: dict[str, Any]) -> dict[str, int]:
+    """End the ``started`` queue receipts of agents that run no turn.
+
+    ``status`` is the runtime's ownership snapshot (turn_dispatch.runtime_status
+    in the runtime, backends.runtime_status here): an agent with a slot, spawn,
+    terminal, in-memory queue or provider turn in it keeps its receipts, and so
+    does one has_live_work still sees a process for. When the provider turns
+    are unknown nothing is ended."""
+    from . import turn_queue
+    provider_turns = set(status.get("provider_turns") or ())
+    if "<unknown>" in provider_turns:
+        return {}
+    held = (set(status.get("active") or {}) | set(status.get("spawning") or ())
+            | set(status.get("terminals") or ()) | set(status.get("queued") or {})
+            | provider_turns)
+
+    def is_live(agent_id: str) -> bool:
+        if agent_id in held:
+            return True
+        agent = agents_db.get_by_agent_id(agent_id) or {}
+        return has_live_work(agent_id, backends.normalize(agent.get("backend")))
+
+    return turn_queue.terminalize_idle_agent_receipts(is_live)
+
+
+def end_idle_agent_receipts_now() -> dict[str, int]:
+    """The periodic pass: read the ownership snapshot fresh, then end."""
+    if getattr(backends, "_RUNTIME_CLIENT", None) is None:
+        from . import turn_dispatch
+        status = turn_dispatch.runtime_status()
+    else:
+        status = backends.runtime_status(max_age=0)
+    return end_idle_agent_receipts(status)
+
+
 def reconcile_all(*, home: pathlib.Path | None = None) -> int:
     """Boot-time pass over every agent. Returns the number repaired."""
     count = 0

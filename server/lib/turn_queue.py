@@ -1,6 +1,8 @@
 """Durable ledger for explicit queue-after-current-turn requests."""
 from __future__ import annotations
 
+from typing import Callable
+
 from . import db, prompt_admissions
 from .log import log
 
@@ -249,6 +251,81 @@ def terminalize_ended_receipts(live_traces: frozenset[str] | set[str] = frozense
         log("queueReceiptsTerminalized",
             " ".join(f"{status}={n}" for status, n in sorted(counts.items())))
     return counts
+
+
+# A finishing turn records its terminal state just before it gives its slot
+# back (turn_dispatch.LEAKED_SLOT_GRACE_MS); settle_receipt ends its receipt.
+IDLE_RECEIPT_SETTLE_GRACE_MS = 60_000
+# A receipt this old on an agent with no busy state ends even when no newer
+# state proves it: the agent has been idle far longer than any turn runs.
+IDLE_RECEIPT_MAX_AGE_MS = 24 * 3_600_000
+
+
+def terminalize_idle_agent_receipts(
+        is_live: Callable[[str], bool], *, now_ms: int | None = None,
+        settle_grace_ms: int = IDLE_RECEIPT_SETTLE_GRACE_MS,
+        max_age_ms: int = IDLE_RECEIPT_MAX_AGE_MS) -> dict[str, int]:
+    """End every ``started`` receipt of an agent that is not running a turn.
+
+    terminalize_ended_receipts needs the ledger to prove a turn ended, and a
+    trace whose ``turns`` row never settled, on an agent with no later turn,
+    stayed ``started`` for weeks (46 rows after the 2026-10-11 restart). Here
+    the agent proves it: ``is_live(agent_id)`` is false (no slot, spawn,
+    terminal or process; an error counts as live) and either its newest state
+    is terminal, at least ``settle_grace_ms`` old and newer than the receipt's
+    start, or the receipt is older than ``max_age_ms`` and the agent has no
+    busy state. Such a receipt becomes ``ended``. Idempotent; queued, claimed,
+    parked and terminal rows are never touched, and the row keeps
+    deduplicating client retries. Returns {"ended": n} or {}."""
+    from .turn_lifecycle import TERMINAL
+    now = db.now_ms() if now_ms is None else now_ms
+    con = db.conn()
+    rows = con.execute(
+        """SELECT q.queue_id, q.agent_id,
+                  COALESCE(q.started_at, q.enqueued_at) AS started_at,
+                  l.kind, l.ts
+             FROM queued_turns q
+             LEFT JOIN state_log l ON l.state_id = (
+                  SELECT s.state_id FROM state_log s
+                   WHERE s.agent_id = q.agent_id
+                   ORDER BY s.ts DESC, s.state_id DESC LIMIT 1)
+            WHERE q.status = 'started'""").fetchall()
+    candidates: dict[str, list[str]] = {}
+    for row in rows:
+        kind = str(row["kind"] or "")
+        if kind and kind not in TERMINAL:
+            continue
+        settled_after = (kind and int(row["ts"]) > int(row["started_at"])
+                         and now - int(row["ts"]) >= settle_grace_ms)
+        if settled_after or now - int(row["started_at"]) >= max_age_ms:
+            candidates.setdefault(str(row["agent_id"]), []).append(
+                str(row["queue_id"]))
+    queue_ids = []
+    for agent_id, ids in candidates.items():
+        try:
+            if is_live(agent_id):
+                continue
+        except Exception as exc:  # noqa: BLE001 - can't tell -> leave it
+            log("queueReceiptIdleCheckFail", f"agent={agent_id} {exc!r}")
+            continue
+        queue_ids.extend(ids)
+    if not queue_ids:
+        return {}
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        ended = sum(
+            con.execute(
+                """UPDATE queued_turns SET status = 'ended'
+                    WHERE queue_id = ? AND status = 'started'""",
+                (queue_id,)).rowcount for queue_id in queue_ids)
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    if not ended:
+        return {}
+    log("queueReceiptsTerminalized", f"reason=idle_agent ended={ended}")
+    return {"ended": ended}
 
 
 def mark_started(queue_id: str) -> None:
