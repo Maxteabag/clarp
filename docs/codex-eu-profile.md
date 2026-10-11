@@ -122,7 +122,13 @@ Everything Codex sends to its model during the agent's turns:
   the agent that bound the thread: an EU agent never sees `~/.codex`, and a
   default agent never sees a profile home.
 - Clarp's database: the messages, turns and states shown in the apps.
-- The `agent.provider_profile.<agent_id>` setting.
+- The agent's profile: the `agents.provider_profile` column (schema 118).
+  The creating INSERT writes it and a trigger aborts any update that would
+  change it, so a restore, repair or resurrection can never move an EU agent
+  to the CLI's own account. An unknown or unconfigured profile fails closed:
+  its turns are refused, nothing runs on OpenAI, and side channels still treat
+  the agent as EU. Schema 118 backfilled the column from the old
+  `agent.provider_profile.<id>` settings rows, which are no longer read.
 
 ## What never leaves memory
 
@@ -167,9 +173,16 @@ tests are in `tests/unit/test_codex_profile_leak_paths.py`,
 | Podcast detours (`podcast_live.context_for`, three engines) | an episode's transcript and source artifact | OpenAI / Gemini Live, image generation | Refused when the episode or its source belongs to an EU agent |
 | Fleet map world and rule design (`viz_normalize.build_fleet_map`) | tool commands, paths, plans, artifacts, prompt excerpts | `codex exec`, `claude -p` | EU agents never enter the map's events or work |
 | Team posts (`team_store.capture_assistant_message`) | `<team>` posts, read by teammates' turns and the heartbeat decider | teammates' providers | An EU agent's posts reach only teammates on its profile |
-| Agent-to-agent messages: `clarp-admin prompt`/`request`, message replies, any `/send` whose claimed sender or turn identity (`X-Clarp-Turn`) is the EU agent (`send_request`, group-call routing, `turn_dispatch`) | the EU agent's words | the recipient's provider | Refused (403 `provider_profile_boundary`) unless the final target is on the same profile. Such a message is never re-routed by name or by the orchestrator. Messages into an EU agent stay allowed. The parent follows it through its Clarp status only (next row). |
+| Agent-to-agent messages: `clarp-admin prompt`/`request`, message replies, any `/send` whose claimed sender or turn identity (`X-Clarp-Turn`) is the EU agent (`send_request`, group-call routing, `turn_dispatch`) | the EU agent's words | the recipient's provider | Refused (403 `provider_profile_boundary`) unless the final target is on the same profile, **when the request identifies itself** (claimed sender or turn header); see "What the Host cannot enforce". Such a message is never re-routed by name or by the orchestrator. Messages into an EU agent stay allowed. The parent follows it through its Clarp status only. |
+| Schedules (`POST /agent-schedules`, `PATCH /schedules/<id>`) | a cron prompt in the EU agent's words | the target agent's provider | An EU agent's turn may not create a schedule, or change a schedule's prompt, on an agent outside its profile (403 `provider_profile_boundary`) |
+| Bookkeeping delegates (`goal_ledger.enable`, `observe`) | the principal's last messages and goal events | the delegate's provider | `enable` refuses a delegate on another profile; `observe` refuses any existing cross-profile delegation (`provider_profile_boundary`) |
 | Request replies recorded into the requester's goal (`peer_requests.plan_reply`) | the EU agent's answer | the requester's provider | Refused (`provider_profile_boundary`) unless the requester is on the same profile |
-| Another agent's turn reading over the Host API (`do_GET`, `/agents/snapshot`) | `/log`, artifacts, jobs, conversation and message previews | that agent's provider | Refused (403) when the caller's turn identity (`X-Clarp-Turn`) is on another profile. The snapshot shows such a caller (e.g. the EU agent's parent) its Clarp status only: identity, busy/state, helper state, background job and queue counts, goal status. It never shows messages, status text, activity or goal text. The user's devices see everything. |
+| Another agent's turn reading over the Host API | `/log` (with or without `session`), `/agents/<x>`, `/artifacts/<id>`, `/artifacts?agent_id=`, `/background-jobs/<id>` | that agent's provider | Refused (403) **when the request carries the caller's turn identity** (`X-Clarp-Turn`) and the owner is a profile agent on another profile |
+| Same, lists and events | the artifact list and search, `/attention`, the `/background-jobs` list, `/teams/<id>/messages`, `/agent-schedules`, the `/events` stream | that agent's provider | For an identified caller, every entry or event that names such an agent is dropped, at any depth |
+| Same, snapshot | `/agents/snapshot` | that agent's provider | For an identified caller (e.g. the EU agent's parent), the EU agent's row is status only: identity, busy/state, helper state, background job and queue counts, goal status. Never messages, status text, activity or goal text. |
+| Same, the user's devices | everything | — | Unfiltered: a request without a turn identity is the user |
+| Push notifications to Apple (`apns`, `user_notifications`, relay) | reply preview (≤180 characters), decision question and title | Apple Push Notification service, outside the EU | Every payload about an EU agent starts with `provider_profile` and `privacy_restricted: true`, and its alert text is generic ("New reply", "Needs your answer"). No preview, question, title or subtitle. Background syncs carry the marker too. |
+| Live Activity (`live_activity`, pushed through APNs) | the tool label (a file or command), headline | Apple, outside the EU | An EU agent's row carries the same marker and its phase only (a state word); `tool` is null |
 | Backend and account fallback (`turn_dispatch`, `codex_app_server`) | the failed turn | the CLI's own OpenAI account, another backend | None exists for an EU turn. No account-pool registration, no usage-limit reconnect, no failover request, no OpenAI usage record. An unconfigured profile refuses the turn. Dispatch refuses an EU agent on any backend but `codex`. Retries go to the same profile process. |
 | Janitor model fallbacks (`model_fallbacks`) | janitor packets | any CLI | Only janitor work uses them, and janitors never take an EU agent in scope |
 | Clarp-side summarizers, titlers, search, embeddings | — | — | None exist. Every Host module that calls a model is listed in this table: judgments, orchestrator, janitors, explainer, fleet map, Oracle, podcasts, TTS, STT. |
@@ -182,23 +195,37 @@ tests are in `tests/unit/test_codex_profile_leak_paths.py`,
 
 ## What the Host cannot enforce
 
-- **Same Unix user.** Every agent runs with full access as the same OS user.
-  An ordinary agent can read the Clarp database or the EU profile's rollouts
-  straight from disk and pass them to its own provider. The Host only guards
-  its own API. To exclude this, keep EU work off any machine where
-  non-EU agents work on files that hold EU content, or run them in an OS
-  sandbox.
-- **Live event stream.** The SSE event stream is not filtered per caller. An
-  agent subscribing to it would receive live text. No agent or skill does
-  this today.
-- **Bypassing turn identity.** A request without `X-Clarp-Turn`, made with a
-  device token from an agent's shell, is treated as the user.
-- **Clients.** On-device features of the apps (iOS speech recognition,
-  client-side TTS or summaries, if any) are outside the Host. Push
-  notifications carry a reply preview to Apple's push service; this is not a
-  model.
+**Every agent runs as the same Unix user.** This was confirmed in review:
+- The turn header (`X-Clarp-Turn`) is optional.
+- The config's admin token is accepted from any local request.
+- `peter` has passwordless `sudo` and `docker`.
+
+So any agent can:
+- read the Clarp database, `config.toml` and the EU profile's rollouts straight
+  from disk;
+- leave out its turn header (`env -u CLARP_PROVIDER_TURN clarp-admin …`) and
+  be treated as the user.
+
+The 403s and filters above therefore hold **only for requests that identify
+their turn**. They stop accidents and well-behaved tools, not an agent that
+tries. The real control is machine or Unix-user isolation: run EU work on a
+machine, or under a user, where no non-EU agent runs. This is a CISO-level
+limit; Clarp claims no isolation beyond it.
+
+Also outside the Host:
+- **Clients.** On-device features of the apps, such as iOS speech recognition
+  or any client-side summaries, are outside the Host. The `privacy_restricted`
+  marker lets the iOS notification extension skip enrichment and intent
+  donation; that behaviour is the app's.
 - **What the user chooses to send.** The user typing EU content into an
   ordinary agent, or pasting it into a team, a decision or Oracle.
+
+## Capability keys
+
+`interaction_capabilities` (in snapshot agent rows) reports `can_speak`,
+`can_cloud_dictation` and `can_voice_target` as false for a profile agent.
+Speech, cloud dictation and turn audio read the same function, so what
+clients are told is what the Host enforces.
 
 ## What the EU Data Zone does and does not guarantee
 
