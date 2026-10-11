@@ -431,8 +431,15 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         status_provider=None,
         release_id: str = "",
         stop_lease_timeout: float = 30.0,
+        account_recovery_carry: pathlib.Path | str | None = None,
     ):
         self.socket_path = pathlib.Path(socket_path)
+        # Where the seal leaves account recovery's start for the next runtime
+        # (runtime_release.write_account_recovery_carry). Without it, parked
+        # account-recovery work keeps blocking the handoff, as it always did.
+        self.account_recovery_carry = (pathlib.Path(account_recovery_carry)
+                                       if account_recovery_carry else None)
+        self._last_transfer: dict[str, Any] = {}
         self.dispatch_service = dispatch_service
         self.status_provider = status_provider or self._default_status
         self.release_id = str(release_id or "")
@@ -774,10 +781,34 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         for key, value in status.items():
             if key.endswith("_account_recovery") and isinstance(value, dict):
                 waiting = sorted(value.get("waiting") or ())
-                if value.get("recovering") and not waiting:
-                    waiting = ["<recovering>"]
+                if self.account_recovery_carry is None:
+                    if value.get("recovering") and not waiting:
+                        waiting = ["<recovering>"]
+                elif value.get("checking"):
+                    # A recovery pass (and maybe the selector) is running;
+                    # never cut it short. A recovery with nothing parked
+                    # otherwise carries over (resume_account_recovery).
+                    waiting = waiting or ["<checking>"]
                 blockers[key] = waiting
         return {key: value for key, value in blockers.items() if value}
+
+    def _only_account_recovery(self, blockers: dict[str, list[str]]) -> bool:
+        """Whether every blocker is account-recovery parked work (whose slot
+        shows it active and spawning too), so a hand-over may clear them."""
+        parked: set[str] = set()
+        for key, value in blockers.items():
+            if key.endswith("_account_recovery"):
+                if any(item.startswith("<") for item in value):
+                    return False
+                parked.update(value)
+        if not parked:
+            return False
+        for key, value in blockers.items():
+            if key.endswith("_account_recovery"):
+                continue
+            if key not in ("active", "spawning") or not set(value) <= parked:
+                return False
+        return True
 
     def seal_if_drained(self) -> dict[str, list[str]]:
         """Behind the soft fence, raise the hard fence when nothing is owned.
@@ -790,8 +821,29 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             self.dispatch_service.persist_held()
             self.dispatch_service.refresh_hold_headlines()
             blockers = self.handover_blockers()
+            transfer = getattr(self.dispatch_service, "transfer_recovery_parks", None)
+            if (blockers and transfer is not None
+                    and self.account_recovery_carry is not None
+                    and self._only_account_recovery(blockers)):
+                self._last_transfer = transfer()
+                blockers = self.handover_blockers()
             if blockers:
+                refused = self._last_transfer.get("refused") or {}
+                if refused:
+                    blockers = {**blockers, "account_recovery_refused": sorted(
+                        f"{agent}:{reason}" for agent, reason in refused.items())}
                 return blockers
+            if self.account_recovery_carry is not None:
+                from . import turn_dispatch
+                from .runtime_release import write_account_recovery_carry
+                try:
+                    write_account_recovery_carry(
+                        self.account_recovery_carry,
+                        turn_dispatch.account_recovery_carry())
+                except OSError as exc:
+                    from .log import log_exception
+                    log_exception("accountRecoveryCarryFail", exc)
+                    return {"account_recovery_carry": ["<write failed>"]}
             self._draining = True
             from . import turn_dispatch
             turn_dispatch.log_held_order("seal")
@@ -800,9 +852,16 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             return {}
 
     def cancel_handover(self) -> None:
-        """Undo a seal whose target vanished before shutdown (a rollback)."""
+        """Undo a seal whose target vanished before shutdown (a rollback).
+        Work handed over from account recovery is held work again; lifting
+        the fence starts it first."""
         with self._admission_lock:
             self._draining = False
+            if self.account_recovery_carry is not None:
+                try:
+                    self.account_recovery_carry.unlink()
+                except FileNotFoundError:
+                    pass
 
     def _drain_status(self) -> dict[str, Any]:
         monitor = self.release_monitor

@@ -74,6 +74,63 @@ def consume_clean_handoff(path: pathlib.Path | str) -> bool:
         return False
 
 
+# A carry older than this is from an earlier handoff (a rollback, an old
+# runtime that ignored it); the park bound it describes is long over.
+ACCOUNT_RECOVERY_CARRY_MAX_AGE_SEC = 3600.0
+
+
+def write_account_recovery_carry(path: pathlib.Path | str, carry: dict) -> None:
+    """Leave account recovery's start for the next runtime (only timing:
+    credentials and the account choice stay with the selector). Removes the
+    file when no pool is recovering."""
+    import json
+    target = pathlib.Path(path)
+    if not carry:
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.next")
+    payload = json.dumps({"written_ms": int(time.time() * 1000),
+                          "pools": carry}).encode()
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    temporary.replace(target)
+
+
+def consume_account_recovery_carry(path: pathlib.Path | str, *,
+                                   wall: float | None = None) -> dict:
+    """Read and remove the carry; {} when absent, unreadable or stale."""
+    import json
+    target = pathlib.Path(path)
+    try:
+        raw = target.read_bytes()
+    except FileNotFoundError:
+        return {}
+    finally:
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            pass
+    try:
+        data = json.loads(raw)
+        written = int(data.get("written_ms") or 0)
+        pools = data.get("pools")
+    except (ValueError, TypeError, AttributeError):
+        log("accountRecoveryCarryUnreadable", str(target))
+        return {}
+    now = time.time() if wall is None else wall
+    if not isinstance(pools, dict) or now - written / 1000 > ACCOUNT_RECOVERY_CARRY_MAX_AGE_SEC:
+        return {}
+    return pools
+
+
 class RuntimeReleaseMonitor:
     """Drive one runtime's graceful handoff. ``runtime`` is the
     RuntimeRPCServer (begin_drain_if_idle, begin_admission_fence,
