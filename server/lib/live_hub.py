@@ -776,6 +776,13 @@ def _observe_state(hub: LiveHub, agent_id: str, event: str, to_state: str,
     from .turn_lifecycle import BUSY, TERMINAL, TurnEvent
     trace = str(detail.get("trace_id") or "")
     current = hub.current_turn_id(agent_id)
+    if event == TurnEvent.UPDATE_HANDOFF:
+        # The turn never ran and waits for the update as held work: keep its
+        # place (a revert relaunches the same trace into it) and say why.
+        if current is not None and (not trace or trace == current):
+            hub.account_recovery(agent_id, str(detail.get("message") or
+                                               "Waiting for the Clarp update")[:140])
+        return
     if to_state in TERMINAL:
         interrupted = to_state in (AgentState.INTERRUPTED, AgentState.STOPPED)
         if trace and current and trace != current:

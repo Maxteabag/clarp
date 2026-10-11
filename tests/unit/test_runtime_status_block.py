@@ -96,3 +96,22 @@ def test_an_empty_answer_is_unavailable_not_an_empty_block():
     block = _view([{}]).block()
     assert block["available"] is False
     assert block["reason"] == "empty_status"
+
+
+def test_the_view_and_its_last_known_drain_live_on_the_runtime_client():
+    from types import SimpleNamespace
+    from lib.runtime_release import status_view_for
+    answers = [_status(fenced=True, drain={"phase": "draining"}),
+               RuntimeUnavailable("agent runtime unavailable: no socket")]
+
+    def status():
+        answer = answers.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+    client = SimpleNamespace(status=status)
+    status_view_for(client).block()
+    block = status_view_for(client).block()
+    assert block["drain"]["last_known"] == {"phase": "draining"}
+    # A replaced client starts fresh.
+    assert status_view_for(SimpleNamespace(status=lambda: {})) is not status_view_for(client)
