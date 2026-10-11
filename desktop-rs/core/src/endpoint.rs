@@ -111,10 +111,14 @@ impl SseCursor {
 }
 
 /// The user-facing message for a failed request: the Host's `message`,
-/// `detail` or `error` field when the body is a JSON object, else fallback.
+/// `detail` or `error` field when the body is a JSON object, a bare error
+/// code sent as plain text (`/send` answers `provider_profile_boundary`
+/// that way), else fallback.
 pub fn error_message(body: &[u8], fallback: &str) -> String {
     let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(body) else {
-        return fallback.to_owned();
+        let text = std::str::from_utf8(body).unwrap_or_default().trim();
+        let code = !text.is_empty() && text.len() <= 64 && text.bytes().all(|b| b.is_ascii_lowercase() || b == b'_');
+        return if code { text.to_owned() } else { fallback.to_owned() };
     };
     ["message", "detail", "error"]
         .iter()

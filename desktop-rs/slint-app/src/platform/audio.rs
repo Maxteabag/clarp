@@ -526,7 +526,10 @@ impl Audio {
             }
             ApiReply::Json { tag, object } if tag.starts_with("transcribe:") => self.transcribed(&tag, Ok(object)),
             ApiReply::Failed { tag, message, status } if tag.starts_with("transcribe:") => {
-                let error = if status > 0 { format!("{message} (HTTP {status})") } else { message };
+                // 409: the focused agent takes only dictation transcribed on
+                // the Host ("type the message instead"); its words as they are,
+                // and never retried.
+                let error = if status == 409 || status == 0 { message } else { format!("{message} (HTTP {status})") };
                 self.transcribed(&tag, Err(error));
             }
             ApiReply::Failed { tag, message, .. } if tag.starts_with("clip-ack:") => {

@@ -1,6 +1,6 @@
 import { ListView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing, Look, ChromeText } from "theme.slint";
+import { Palette, Focus, FocusRing, Look, ChromeText, EuBadge } from "theme.slint";
 
 export struct SwitcherRow {
     kind: string,
@@ -14,6 +14,8 @@ export struct SwitcherRow {
     snippet: styled-text,
     // A setting that steps: + and - change it in place.
     adjustable: bool,
+    // An agent in the EU data zone (a Codex provider profile).
+    eu: bool,
 }
 
 // The quick switcher (QuickSwitcher.qml): type to find an agent, command or
@@ -128,6 +130,7 @@ export component Switcher inherits Rectangle {
                                 }
                                 if row.detail != "" && row.kind != "message": Text { text: row.detail; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
                             }
+                            if row.eu: EuBadge { y: (parent.height - self.height) / 2; }
                             if row.value != "": Rectangle {
                                 y: (parent.height - self.height) / 2;
                                 height: 20px;

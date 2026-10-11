@@ -758,8 +758,12 @@ fn focus_sidebar(app: &App, window: &AppWindow) {
 
 // ---- the quick switcher ------------------------------------------------------
 
-fn toggles() -> switcher::Toggles {
-    switcher::Toggles { preview_versions: crate::preview_view::enabled() }
+fn toggles(app: &App) -> switcher::Toggles {
+    switcher::Toggles {
+        preview_versions: crate::preview_view::enabled(),
+        // Only a Host whose catalogue has a Codex provider profile.
+        eu_codex: !app.engine.borrow().provider_profiles().is_empty(),
+    }
 }
 
 /// Ctrl+Shift+X, its command and its setting: the Host's tool explanations
@@ -843,7 +847,7 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     if !app.switcher.borrow().open {
         return;
     }
-    let toggles = toggles();
+    let toggles = toggles(app);
     let (query, contacts_only, picker) = {
         let state = app.switcher.borrow();
         (state.query.clone(), state.contacts_only, state.picker.clone())
@@ -898,9 +902,11 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     let mut state = app.switcher.borrow_mut();
     let current = switcher::keep_selection(&items, &state.selected);
     state.selected = usize::try_from(current).ok().and_then(|i| items.get(i)).map(switcher::Item::key_of).unwrap_or_default();
+    let engine = app.engine.borrow();
     let rows: Vec<SwitcherRow> = items
         .iter()
         .map(|item| SwitcherRow {
+            eu: item.kind == switcher::Kind::Agent && engine.agent_in_eu_data_zone(&item.target),
             kind: match item.kind {
                 switcher::Kind::Agent => "agent".into(),
                 switcher::Kind::Contact => "contact".into(),
@@ -918,6 +924,7 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
             adjustable: item.target.starts_with("settingpicker:"),
         })
         .collect();
+    drop(engine);
     state.items = items;
     drop(state);
     window.set_switcher_rows(ModelRc::new(VecModel::from(rows)));

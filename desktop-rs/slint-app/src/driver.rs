@@ -13,6 +13,9 @@ use crate::headless;
 // ---- launch dialogs
 #[path = "launch_checks.rs"]
 mod launch_checks;
+// ---- Codex provider profiles (the codex_provider_profiles feature)
+#[path = "eu_codex_checks.rs"]
+mod eu_codex_checks;
 // ---- profile and overview
 #[path = "profile_checks.rs"]
 mod profile_checks;
@@ -500,6 +503,7 @@ pub fn start_check(name: &str, out: String) {
         // ---- launch dialogs
         "launch" => launch_checks::launch_check(out),
         "agent-dialogs" => launch_checks::agent_dialogs_check(out),
+        "eu-codex" => eu_codex_checks::eu_codex_check(out),
         // ---- profile and overview
         "profile" => profile_checks::profile_check(out),
         "overview" => profile_checks::overview_check(out),

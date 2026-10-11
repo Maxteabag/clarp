@@ -1,4 +1,4 @@
-import { Palette, Look } from "theme.slint";
+import { Palette, Look, EuBadge } from "theme.slint";
 import { ComboBox, ScrollView, Switch } from "std-widgets.slint";
 import { Modal } from "dialogs.slint";
 import { AgentAvatar, StatusPill, AvatarArt } from "avatar.slint";
@@ -12,6 +12,10 @@ export struct ProfileInfo {
     symbol: string,
     portrait: image,
     backend: string,
+    // Runs on a Codex provider profile: the EU data zone marker.
+    eu: bool,
+    // Its replies may be spoken (interaction_capabilities): else no Voice.
+    can-speak: bool,
     folder: string,
     state: string,
     model-index: int,
@@ -169,7 +173,12 @@ export component AgentProfile inherits Modal {
                 alignment: center;
                 spacing: 1px;
                 horizontal-stretch: 1;
-                Text { text: root.info.name; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: root.info.name; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; }
+                    if root.info.eu: EuBadge { y: (parent.height - self.height) / 2; }
+                }
                 Text {
                     text: root.info.backend + "  ·  " + root.info.session;
                     color: Palette.muted;
@@ -213,7 +222,7 @@ export component AgentProfile inherits Modal {
                         alignment: start;
                         IconButton { icon: @image-url("icons/folder.svg"); tip: "Open files"; clicked => { ProfileBridge.open-files(); } }
                         IconButton { icon: @image-url("icons/terminal.svg"); tip: "Open terminal"; clicked => { ProfileBridge.open-terminal(); } }
-                        IconButton { icon: @image-url("icons/voice.svg"); tip: "Voice"; clicked => { ProfileBridge.voice(); } }
+                        if root.info.can-speak: IconButton { icon: @image-url("icons/voice.svg"); tip: "Voice"; clicked => { ProfileBridge.voice(); } }
                     }
                 }
                 if root.info.plan-shown: Card {

@@ -71,6 +71,8 @@ fn fill(app: &App, window: &AppWindow) {
                 dreaming: row.dreaming_enabled,
                 selected: row.session == selected,
                 schedules: ModelRc::new(VecModel::from(schedules)),
+                eu: !row.provider_profile.is_empty(),
+                can_speak: app.engine.borrow().agent_can_speak(&row.session),
             }
         })
         .collect();

@@ -1,4 +1,4 @@
-import { Palette, Look, ChromeText, RevealText } from "theme.slint";
+import { Palette, Look, ChromeText, RevealText, EuBadge } from "theme.slint";
 import { ListView, ScrollView } from "std-widgets.slint";
 import { Modal } from "dialogs.slint";
 import { AvatarActivity, ActivitySweep, StatusPill, AvatarArt } from "avatar.slint";
@@ -32,6 +32,10 @@ export struct OverviewCard {
     dreaming: bool,
     selected: bool,
     schedules: [OverviewSchedule],
+    // Runs on a Codex provider profile: the EU data zone marker.
+    eu: bool,
+    // Its replies may be spoken (interaction_capabilities): else no Voice.
+    can-speak: bool,
 }
 
 export struct OverviewArchived {
@@ -110,7 +114,12 @@ component Card inherits Rectangle {
                 spacing: 2px;
                 horizontal-stretch: 1;
                 alignment: center;
-                Text { text: root.card.name; color: Palette.text; font-family: "JetBrains Mono"; font-size: 13 * Look.unit; font-weight: 600; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    Text { text: root.card.name; color: Palette.text; font-family: "JetBrains Mono"; font-size: 13 * Look.unit; font-weight: 600; }
+                    if root.card.eu: EuBadge { y: (parent.height - self.height) / 2; }
+                }
                 Rectangle {
                     height: preview.preferred-height;
                     ActivitySweep {
@@ -194,7 +203,7 @@ component Card inherits Rectangle {
             VerticalLayout {
                 padding: 3px;
                 MenuItem { text: "Relaunch"; clicked => { OverviewBridge.relaunch(root.card.session); } }
-                MenuItem { text: "Voice"; clicked => { OverviewBridge.voice(root.card.session); } }
+                if root.card.can-speak: MenuItem { text: "Voice"; clicked => { OverviewBridge.voice(root.card.session); } }
                 Rectangle { height: 1px; background: Palette.rule; }
                 MenuItem { text: root.card.heartbeat ? "Disable heartbeat" : "Enable heartbeat"; clicked => { OverviewBridge.heartbeat(root.card.session); } }
                 MenuItem { text: root.card.dreaming ? "Disable dreaming" : "Enable dreaming"; clicked => { OverviewBridge.dreaming(root.card.session); } }

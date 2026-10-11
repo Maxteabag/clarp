@@ -37,8 +37,14 @@ impl Engine {
         if !tag.starts_with("recoverable:") {
             return false;
         }
-        let clips: Vec<Object> =
-            object.get("events").and_then(Value::as_array).into_iter().flatten().filter_map(|e| e.as_object().cloned()).collect();
+        let clips: Vec<Object> = object
+            .get("events")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.as_object().cloned())
+            .filter(|e| self.agent_can_speak(&clarp_core::json::string(e, "session")))
+            .collect();
         if !clips.is_empty() {
             self.changes.push(Change::Clips(clips));
         }

@@ -1,6 +1,6 @@
 import { ListView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
-import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook, ChromeText, RevealText, Motion } from "theme.slint";
+import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook, ChromeText, RevealText, Motion, EuBadge } from "theme.slint";
 import { CompactWork, ProcessIndicator } from "processes.slint";
 import { ProfileBridge } from "profile.slint";
 import { AgentAvatar, AvatarArt } from "avatar.slint";
@@ -42,6 +42,8 @@ export struct ChatRow {
     folded: bool,
     // An archived agent: Restore instead of opening.
     archived: bool,
+    // Runs on a Codex provider profile: the EU data zone marker.
+    eu: bool,
 }
 
 // A small labelled toggle, like the QML scope chips.
@@ -273,6 +275,14 @@ component Row inherits Rectangle {
             Image { source: @image-url("icons/restore.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
             restore-touch := TouchArea { clicked => { root.restore(); } }
         }
+    }
+    // The EU data zone marker on the avatar's corner, outside the row's
+    // layouts: a fleet's rows must stay cheap to make (the explorer check
+    // jumps through 180 of them).
+    if root.chat.eu: EuBadge {
+        property <length> avatar: root.compact ? AvatarArt.compact : AvatarArt.row;
+        x: 10px + root.chat.depth * 18px + self.avatar - self.width + 4px;
+        y: (root.top-height - self.avatar) / 2 + Look.density-pad + self.avatar - self.height + 2px;
     }
 }
 

@@ -72,6 +72,8 @@ fn error_bodies_name_the_host_message() {
     assert_eq!(error_message(br#"{"error":"unauthorized"}"#, "x"), "unauthorized");
     assert_eq!(error_message(b"<html>", "HTTP 502"), "HTTP 502");
     assert_eq!(error_message(br#"["list"]"#, "HTTP 500"), "HTTP 500");
+    assert_eq!(error_message(b"provider_profile_boundary\n", "Forbidden"), "provider_profile_boundary", "a bare error code");
+    assert_eq!(error_message(b"Not found", "HTTP 404"), "HTTP 404", "prose is not a code");
 }
 
 #[test]

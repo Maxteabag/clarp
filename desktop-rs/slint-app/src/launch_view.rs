@@ -66,6 +66,9 @@ struct Start {
     mode: String,
     past_session_id: String,
     mcp_servers: Vec<String>,
+    /// A relaunch of a provider-profile agent keeps its `codex@<profile>`;
+    /// empty otherwise.
+    locked: String,
     focus_request: i32,
 }
 
@@ -114,6 +117,33 @@ fn choices(values: &[Value]) -> Vec<(String, String)> {
 
 fn providers(engine: &Engine) -> Vec<(String, String)> {
     choices(&engine.backend_options())
+}
+
+/// What a launch choice says beyond its label: a provider profile offered
+/// without its key is unavailable, and every profile carries a note (its
+/// operating rule, or the detail of why it is unavailable).
+#[derive(Debug, Clone, Default, PartialEq)]
+struct ProviderNote {
+    available: bool,
+    detail: String,
+    note: String,
+}
+
+fn provider_note(engine: &Engine, choice: &str) -> ProviderNote {
+    match engine.provider_profile(choice) {
+        Some(profile) if !profile.available => ProviderNote {
+            available: false,
+            note: if profile.detail.is_empty() { format!("{} is not available on this Host", profile.label) } else { profile.detail.clone() },
+            detail: profile.detail,
+        },
+        Some(profile) => ProviderNote { available: true, note: profile.operating_rule, detail: profile.detail },
+        None => ProviderNote { available: true, ..ProviderNote::default() },
+    }
+}
+
+/// A provider profile starts on its own default model, shown as chosen.
+fn default_model_for(engine: &Engine, choice: &str) -> String {
+    engine.provider_profile(choice).map(|p| p.default_model).unwrap_or_default()
 }
 
 // ---- the hub's rows -----------------------------------------------------------
@@ -165,9 +195,12 @@ fn starting(engine: &Engine, state: &Hub) -> bool {
 }
 
 fn can_confirm(engine: &Engine, state: &Hub) -> bool {
+    // Opening an existing chat starts nothing, whatever the provider.
+    let opens_chat = !state.new_contact && selected_row(engine, state).is_some_and(|r| r.in_chat);
     engine.connected()
         && !starting(engine, state)
         && !state.choosing_directory
+        && (opens_chat || provider_note(engine, &state.backend).available)
         && if state.new_contact { !state.name.trim().is_empty() } else { selected_row(engine, state).is_some() }
 }
 
@@ -340,8 +373,9 @@ pub fn open_hub(app: &Rc<App>, window: &AppWindow) {
         (engine.last_working_directory(), engine.last_backend(), providers(&engine))
     };
     let backend = if offered.iter().any(|(id, _)| *id == saved) { saved } else { offered.first().map(|p| p.0.clone()).unwrap_or_default() };
+    let model = default_model_for(&app.engine.borrow(), &backend);
     hub(|s| {
-        *s = Hub { focus_request: s.focus_request, directory: if directory.is_empty() { "~".into() } else { directory }, backend, ..Hub::default() };
+        *s = Hub { focus_request: s.focus_request, directory: if directory.is_empty() { "~".into() } else { directory }, backend, model, ..Hub::default() };
     });
     sync_host_default_directory(app);
     app.engine.borrow_mut().clear_error();
@@ -357,6 +391,19 @@ pub fn open_hub(app: &Rc<App>, window: &AppWindow) {
     show(app, window);
 }
 
+/// Ctrl+K "New EU Codex agent": the hub on the Host's first Codex
+/// provider profile, its default model chosen.
+fn open_hub_on_profile(app: &Rc<App>, window: &AppWindow) {
+    open_hub(app, window);
+    let Some(profile) = app.engine.borrow().provider_profiles().into_iter().next() else { return };
+    hub(|s| {
+        s.backend = profile.choice();
+        s.model = profile.default_model.clone();
+        s.effort.clear();
+    });
+    show(app, window);
+}
+
 /// NewSessionHub.qml `openLaunch`: a command-line launch opens the hub and
 /// starts at once, anonymously or with whichever contact the pool has
 /// free (an empty pool falls back to New contact). Waits for the Host.
@@ -367,11 +414,12 @@ pub fn open_launch(app: &Rc<App>, window: &AppWindow, backend: &str, model: &str
         app.engine.borrow_mut().set_launch_directory(directory);
     }
     let known = providers(&app.engine.borrow()).iter().any(|(id, _)| id == backend);
+    let profile_model = default_model_for(&app.engine.borrow(), backend);
     hub(|s| {
         if known {
             s.backend = backend.to_owned();
         }
-        s.model = model.to_owned();
+        s.model = if model.is_empty() { profile_model } else { model.to_owned() };
         s.effort = effort.to_owned();
     });
     if backend.is_empty() {
@@ -468,10 +516,11 @@ fn step_provider(app: &Rc<App>, window: &AppWindow, index: i64) {
         return;
     }
     let next = offered[index.rem_euclid(offered.len() as i64) as usize].0.clone();
+    let model = default_model_for(&app.engine.borrow(), &next);
     hub(|s| {
         if s.backend != next {
             s.backend = next;
-            s.model.clear();
+            s.model = model;
             s.effort.clear();
         }
     });
@@ -509,9 +558,18 @@ fn show(app: &App, window: &AppWindow) {
         let offered = providers(&engine);
         globals.set_connected(engine.connected());
         globals.set_providers(model(
-            offered.iter().map(|(id, label)| ProviderChip { id: id.into(), label: label.into(), initial: initial(label) }).collect(),
+            offered
+                .iter()
+                .map(|(id, label)| {
+                    let note = provider_note(&engine, id);
+                    ProviderChip { id: id.into(), label: label.into(), initial: initial(label), available: note.available, detail: note.detail.into() }
+                })
+                .collect(),
         ));
         globals.set_provider_index(provider_index(&engine, s) as i32);
+        let note = provider_note(&engine, &s.backend);
+        globals.set_provider_note(note.note.into());
+        globals.set_provider_note_warning(!note.available);
         let models = choices(&engine.models_for_backend(&s.backend));
         let efforts = choices(&engine.efforts_for_model(&s.backend, &s.model));
         let label = |list: &[(String, String)], id: &str| list.iter().find(|(i, _)| i == id).map(|(_, l)| l.clone()).unwrap_or_else(|| id.to_owned());
@@ -597,7 +655,7 @@ pub fn open_start_agent(app: &Rc<App>, window: &AppWindow, replace_session: &str
         match engine.roster().find(replace_session).filter(|_| !replace_session.is_empty()) {
             Some(agent) => (
                 agent.working_directory.clone(),
-                agent.backend.clone(),
+                engine.launch_choice_for(agent),
                 agent.model.clone(),
                 agent.effort.clone(),
                 agent.mcp_servers.iter().map(server_name).filter(|n| !n.is_empty()).collect(),
@@ -606,9 +664,12 @@ pub fn open_start_agent(app: &Rc<App>, window: &AppWindow, replace_session: &str
         }
     };
     let workspace = if workspace.is_empty() { "~".to_owned() } else { workspace };
+    let locked = if !replace_session.is_empty() && clarp_core::catalog::split_choice(&backend).1.is_some() { backend.clone() } else { String::new() };
+    let model = if model.is_empty() && replace_session.is_empty() { default_model_for(&app.engine.borrow(), &backend) } else { model };
     start_state(|s| {
         *s = Start {
             replace_session: replace_session.to_owned(),
+            locked,
             backend,
             model,
             effort,
@@ -630,8 +691,22 @@ pub fn open_start_agent(app: &Rc<App>, window: &AppWindow, replace_session: &str
     globals.set_focus_request(start_state(|s| s.focus_request));
 }
 
-fn start_backends(engine: &Engine) -> Vec<(String, String)> {
-    providers(engine)
+/// A new agent may start on any choice. A relaunch keeps a provider
+/// profile (only that choice) and cannot move onto one (the Host answers
+/// `provider_profile_locked` either way).
+fn start_backends(engine: &Engine, state: &Start) -> Vec<(String, String)> {
+    let offered = providers(engine);
+    if state.replace_session.is_empty() {
+        return offered;
+    }
+    let profiled = |id: &str| clarp_core::catalog::split_choice(id).1.is_some();
+    if state.locked.is_empty() {
+        return offered.into_iter().filter(|(id, _)| !profiled(id)).collect();
+    }
+    let kept: Vec<(String, String)> = offered.into_iter().filter(|(id, _)| *id == state.locked).collect();
+    // A profile the Host no longer lists still names the agent's own; the
+    // Host says why it cannot run.
+    if kept.is_empty() { vec![(state.locked.clone(), state.locked.clone())] } else { kept }
 }
 
 fn start_models(engine: &Engine, backend: &str) -> Vec<(String, String)> {
@@ -665,7 +740,7 @@ fn show_start(app: &App, window: &AppWindow) {
     let engine = app.engine.borrow();
     let globals = window.global::<StartAgent>();
     start_state(|s| {
-        let backends = start_backends(&engine);
+        let backends = start_backends(&engine, s);
         if !backends.iter().any(|(id, _)| *id == s.backend) {
             s.backend = backends.first().map(|b| b.0.clone()).unwrap_or_default();
         }
@@ -693,6 +768,10 @@ fn show_start(app: &App, window: &AppWindow) {
             Vec::new()
         };
         globals.set_mcp_servers(model(servers));
+        let note = provider_note(&engine, &s.backend);
+        globals.set_backend_ready(note.available);
+        globals.set_backend_note(note.note.into());
+        globals.set_backend_note_warning(!note.available);
         globals.set_can_resume(engine.backend_supports_resume(&s.backend));
         globals.set_can_fork(engine.backend_supports_fork(&s.backend));
         globals.set_mode(s.mode.clone().into());
@@ -779,6 +858,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> Option<bool> {
     let switcher_open = app.switcher.borrow().open;
     match action {
         "new" | "quick-new-agent" => open_hub(app, window),
+        "new-eu-codex" => open_hub_on_profile(app, window),
         "new-contact" => open_contacts(app, window, None),
         "change-directory" => {
             if !overlay_is(app, HUB) {
@@ -974,14 +1054,17 @@ pub fn wire(window: &AppWindow) {
         }
     }));
     start.on_backend_chosen(|index| with_window(|app, window| {
-        let backend = start_backends(&app.engine.borrow()).get(index as usize).map(|b| b.0.clone());
-        if let Some(backend) = backend {
-            start_state(|s| {
+        let engine = app.engine.borrow();
+        start_state(|s| {
+            if let Some(backend) = start_backends(&engine, s).get(index as usize).map(|b| b.0.clone()) {
+                if backend != s.backend {
+                    s.model = default_model_for(&engine, &backend);
+                    s.effort.clear();
+                }
                 s.backend = backend;
-                s.model.clear();
-                s.effort.clear();
-            });
-        }
+            }
+        });
+        drop(engine);
         set_mode(app, window, "fresh");
     }));
     start.on_model_chosen(|index| with_window(|app, window| {

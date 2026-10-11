@@ -66,6 +66,36 @@ pub struct Agent {
     /// (docs/notification-policy.md, "Quiet agents"). The Host's `quiet`;
     /// a Host older than contract 56 lacks it, so a janitor is quiet there.
     pub quiet: bool,
+    /// The Codex provider profile the agent runs on (codex_provider_profiles),
+    /// e.g. "azure-eu"; empty for the CLI's own account and on older Hosts.
+    /// Only the EU marker follows it; voice follows the capabilities below.
+    pub provider_profile: String,
+    /// `interaction_capabilities` ([`capability`]): its replies may be
+    /// spoken; false means never play or expect speech for it.
+    pub can_speak: bool,
+    /// Dictation to it may use a cloud engine; false means only the Host's
+    /// local Whisper (a cloud engine answers 409 "type instead").
+    pub can_cloud_dictation: bool,
+    /// It may be a voice target: a dictated send is a hands-free voice turn.
+    pub can_voice_target: bool,
+}
+
+/// The agent row's `interaction_capabilities` keys the desktop reads, in one
+/// place so a rename on the Host is a one-line change here. A contract-63
+/// Host sends them on every agent; a key it does not send (an older Host)
+/// keeps the old behaviour: allowed. They are advisory, for the UI only: the
+/// Host enforces them anyway (TTS refused, a `tts-error`; cloud dictation
+/// answered 409), and those answers are still handled as errors.
+pub mod capability {
+    pub const FIELD: &str = "interaction_capabilities";
+    pub const CAN_SPEAK: &str = "can_speak";
+    pub const CAN_CLOUD_DICTATION: &str = "can_cloud_dictation";
+    pub const CAN_VOICE_TARGET: &str = "can_voice_target";
+
+    /// `key` in the row's capabilities; true when absent or not a boolean.
+    pub fn allowed(row: &crate::json::Object, key: &str) -> bool {
+        row.get(FIELD).and_then(|c| c.get(key)).and_then(serde_json::Value::as_bool).unwrap_or(true)
+    }
 }
 
 impl Default for Agent {
@@ -115,6 +145,10 @@ impl Default for Agent {
             unread: false,
             janitor: false,
             quiet: false,
+            provider_profile: String::new(),
+            can_speak: true,
+            can_cloud_dictation: true,
+            can_voice_target: true,
         }
     }
 }
@@ -179,9 +213,19 @@ impl Agent {
             heartbeat_enabled: b("heartbeat_enabled"),
             dreaming_enabled: b("dreaming_enabled"),
             archived: !matches!(object.get("archived_at"), None | Some(Value::Null)),
+            provider_profile: s("provider_profile").trim().to_owned(),
+            can_speak: capability::allowed(object, capability::CAN_SPEAK),
+            can_cloud_dictation: capability::allowed(object, capability::CAN_CLOUD_DICTATION),
+            can_voice_target: capability::allowed(object, capability::CAN_VOICE_TARGET),
             latest_state,
             unread: false,
         }
+    }
+
+    /// Runs on a provider profile: today only "Codex (EU, Azure)", so the
+    /// marker reads "EU" ("EU data zone"). Voice is not inferred from it.
+    pub fn eu_data_zone(&self) -> bool {
+        !self.provider_profile.is_empty()
     }
 
     pub fn is_helper(&self) -> bool {

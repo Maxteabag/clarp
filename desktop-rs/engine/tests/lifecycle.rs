@@ -280,3 +280,101 @@ fn a_failed_send_is_retried() {
     assert!(!rows.iter().any(|r| r.delivery_failed), "the failed copy is gone");
     assert_eq!(rows.iter().filter(|r| r.text == "Try again").count(), 1);
 }
+
+fn profiled_catalog(available: bool) -> serde_json::Value {
+    json!({"providers": {
+        "codex": {"label": "Codex", "sort_index": 2, "models": [{"id": "gpt-5", "label": "GPT-5"}],
+                  "provider_profiles": [{"id": "azure-eu", "label": "Codex (EU, Azure)", "detail": "No key. Use text input.",
+                                         "operating_rule": "Use text input.", "available": available, "default_model": "sol61-eu",
+                                         "models": [{"id": "sol61-eu", "label": "sol61-eu", "supported_efforts": ["low", "high"]}]}]},
+        "claude": {"label": "Claude", "sort_index": 1},
+    }})
+}
+
+#[test]
+fn a_host_without_the_feature_offers_no_provider_profile_even_with_contract_63() {
+    let host = Host::start("profiles-old");
+    // The contract number alone switches nothing on: only the feature does.
+    host.control("/__control/contract", json!({"host": 63}));
+    host.control("/__control/catalog", profiled_catalog(true));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("catalog", |e| e.model_catalog_loaded());
+    let ids: Vec<String> = d.engine.backend_options().iter().map(|o| o["id"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(ids, ["claude", "codex"]);
+    assert!(d.engine.provider_profiles().is_empty());
+    assert!(!d.engine.start_anonymous_agent("codex@azure-eu", "", ""), "a profile it does not offer cannot start");
+    assert_eq!(d.engine.error(), "This Host does not offer the provider profile azure-eu");
+    assert!(host.requests("POST", "/agents").is_empty());
+}
+
+#[test]
+fn a_profile_agent_is_created_as_codex_with_its_profile_and_no_voice() {
+    let host = Host::start("profiles");
+    host.control("/__control/contract", json!({"host": 63, "codex_provider_profiles": true}));
+    host.control("/__control/catalog", profiled_catalog(true));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("profiles", |e| e.model_catalog_loaded() && !e.provider_profiles().is_empty());
+    let ids: Vec<String> = d.engine.backend_options().iter().map(|o| o["id"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(ids, ["claude", "codex", "codex@azure-eu"]);
+    assert_eq!(d.engine.models_for_backend("codex@azure-eu").len(), 2);
+
+    d.engine.create_agent("Euna", "/work", "codex@azure-eu", "sol61-eu", "high", "", "fresh", "", vec![]);
+    d.until_change(&Change::AgentMutated("euna-new".into()));
+    let body = host.requests("POST", "/agents")[0]["body"].clone();
+    assert_eq!(
+        (&body["backend"], &body["provider_profile"], &body["model"], &body["effort"], &body["synthesize_audio"]),
+        (&json!("codex"), &json!("azure-eu"), &json!("sol61-eu"), &json!("high"), &json!(true))
+    );
+    assert!(d.engine.agent_in_eu_data_zone("euna-new"), "the created row carries its profile");
+    assert!(!d.engine.agent_in_eu_data_zone("rachel"));
+    let agent = d.engine.roster().find("euna-new").cloned().unwrap();
+    assert_eq!(d.engine.launch_choice_for(&agent), "codex@azure-eu", "a relaunch keeps the profile");
+
+    d.engine.send_to("euna-new", "hello", false);
+    d.until("sent", |_| !host.requests("POST", "/send").is_empty());
+    let send = host.requests("POST", "/send")[0]["body"].clone();
+    assert_eq!((&send["synthesize_audio"], &send["hands_free"]), (&json!(false), &json!(false)), "the created row says it cannot speak");
+    assert!(!d.engine.agent_can_speak("euna-new") && !d.engine.agent_can_voice_target("euna-new") && !d.engine.agent_can_cloud_dictation("euna-new"));
+
+    // Without its key the profile is offered but cannot start an agent.
+    host.control("/__control/catalog", profiled_catalog(false));
+    d.engine.reconnect();
+    d.until("unavailable, connected again", |e| e.connected() && e.provider_profiles().first().is_some_and(|p| !p.available));
+    assert!(!d.engine.start_anonymous_agent("codex@azure-eu", "", ""));
+    assert_eq!(d.engine.error(), "No key. Use text input.");
+    assert_eq!(host.requests("POST", "/agents").len(), 1);
+}
+
+#[test]
+fn voice_follows_the_capabilities_not_the_profile() {
+    let host = Host::start("profile-capabilities");
+    host.control("/__control/contract", json!({"host": 63, "codex_provider_profiles": true}));
+    // A profile agent from a Host that sends no new capability (older
+    // behaviour), and an ordinary agent the Host says cannot speak.
+    host.control("/__control/add-agent", json!({"session": "pia", "persona": "Pia", "backend": "codex", "provider_profile": "azure-eu"}));
+    host.control("/__control/add-agent", json!({"session": "tess", "persona": "Tess",
+        "interaction_capabilities": {"can_chat": true, "can_speak": false, "can_voice_target": false, "can_cloud_dictation": false}}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("both agents", |e| e.roster().find("pia").is_some() && e.roster().find("tess").is_some());
+    assert!(d.engine.agent_in_eu_data_zone("pia") && d.engine.agent_can_speak("pia") && d.engine.agent_can_voice_target("pia"));
+    assert!(!d.engine.agent_in_eu_data_zone("tess") && !d.engine.agent_can_speak("tess") && !d.engine.agent_can_cloud_dictation("tess"));
+    d.engine.send_to("pia", "hi", false);
+    d.engine.send_to("tess", "hi", false);
+    d.until("two sends", |_| host.requests("POST", "/send").len() == 2);
+    let sends = host.requests("POST", "/send");
+    let body = |session: &str| sends.iter().find(|s| s["body"]["session"] == session).map(|s| s["body"]["synthesize_audio"].clone()).unwrap();
+    assert_eq!((body("pia"), body("tess")), (json!(true), json!(false)));
+}
+
+#[test]
+fn only_the_advertised_feature_switches_provider_profiles_on() {
+    use clarp_engine::lifecycle::host_has_provider_profiles;
+    let info = |v: serde_json::Value| v.as_object().cloned().unwrap();
+    assert!(!host_has_provider_profiles(&info(json!({"contract": {"host": 63}}))), "a number is no feature");
+    assert!(!host_has_provider_profiles(&info(json!({"contract": {"host": 99, "features": {}}, "capabilities": {"features": ["live_items"]}}))));
+    assert!(host_has_provider_profiles(&info(json!({"capabilities": {"features": ["codex_provider_profiles"]}}))));
+    assert!(host_has_provider_profiles(&info(json!({"contract": {"host": 64, "features": {"codex_provider_profiles": 64}}}))));
+}

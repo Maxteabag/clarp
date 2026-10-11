@@ -32,6 +32,8 @@ export struct PaneView {
     status: string,
     default-effort: string,
     busy: bool,
+    // Runs on a Codex provider profile: the EU data zone marker.
+    eu: bool,
     // "Working…" under the transcript (Show when ready, agent working).
     working: bool,
     // Live items' status line ("" when idle), whether the agent works (the
@@ -426,6 +428,7 @@ export component Pane inherits Rectangle {
           // frame's border (there is no separate header).
           PaneFrame {
             info-name: root.pane.session == "" ? "No agent selected" : root.pane.name;
+            info-eu: root.pane.eu && root.pane.session != "" && !root.pane.pair;
             info: root.pane.session == "" || root.pane.pair ? root.pane.workspace-label
                 : (root.pane.workspace-label != "" ? root.pane.workspace-label + "  ·  " : "")
                 + (root.pane.status != "" ? root.pane.status + "  ·  " : "")
