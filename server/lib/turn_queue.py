@@ -71,30 +71,14 @@ def allow_paused(queue_id: str) -> bool:
     return bool(cursor.rowcount)
 
 
-def park_at_head(*, queue_id: str, agent_id: str, session: str, text: str,
-                 trace_id: str, client_msg_id: str, synthesize_audio: bool,
-                 origin: str, sender_agent_id: str,
-                 prompt_admission_id: str = "") -> None:
-    """Park work that was already in flight ahead of everything the agent
-    has open, keeping their order behind it. The caller holds the write
-    transaction (the release drain's hand-over writes this, the turn's end
-    and its state together)."""
+def _move_behind(agent_id: str, head: str) -> None:
+    """Re-insert every other open row of the agent after ``head``, in their
+    order (the caller holds the write transaction)."""
     con = db.conn()
     behind = [row["queue_id"] for row in con.execute(
         """SELECT queue_id FROM queued_turns
-            WHERE agent_id = ? AND status IN ('queued', 'parked')
-            ORDER BY queue_seq""", (agent_id,))]
-    cursor = con.execute(
-        """INSERT INTO queued_turns (
-               queue_id, agent_id, session, text, trace_id, client_msg_id,
-               synthesize_audio, origin, sender_agent_id, status, enqueued_at,
-               prompt_admission_id, allow_paused
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, 0)""",
-        (queue_id, agent_id, session, text, trace_id, client_msg_id,
-         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
-         prompt_admission_id))
-    if cursor.rowcount != 1:
-        raise RuntimeError(f"could not park {queue_id}")
+            WHERE agent_id = ? AND queue_id <> ? AND status IN ('queued', 'parked')
+            ORDER BY queue_seq""", (agent_id, head))]
     for row_id in behind:
         row = con.execute("SELECT * FROM queued_turns WHERE queue_id = ?",
                           (row_id,)).fetchone()
@@ -105,6 +89,66 @@ def park_at_head(*, queue_id: str, agent_id: str, session: str, text: str,
             f"VALUES ({', '.join('?' * len(columns))})",
             [row[key] for key in columns])
     _bump_revision(agent_id)
+
+
+def park_at_head(*, queue_id: str, agent_id: str, session: str, text: str,
+                 trace_id: str, client_msg_id: str, synthesize_audio: bool,
+                 origin: str, sender_agent_id: str,
+                 prompt_admission_id: str = "") -> None:
+    """Park work that was already in flight ahead of everything the agent
+    has open, keeping their order behind it. The caller holds the write
+    transaction (the release drain's hand-over writes this, the turn's end
+    and its state together)."""
+    cursor = db.conn().execute(
+        """INSERT INTO queued_turns (
+               queue_id, agent_id, session, text, trace_id, client_msg_id,
+               synthesize_audio, origin, sender_agent_id, status, enqueued_at,
+               prompt_admission_id, allow_paused
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'parked', ?, ?, 0)""",
+        (queue_id, agent_id, session, text, trace_id, client_msg_id,
+         int(synthesize_audio), origin, sender_agent_id, db.now_ms(),
+         prompt_admission_id))
+    if cursor.rowcount != 1:
+        raise RuntimeError(f"could not park {queue_id}")
+    _move_behind(agent_id, queue_id)
+
+
+def queued_row_matches(queue_id: str, *, agent_id: str, trace_id: str,
+                       prompt_admission_id: str) -> bool:
+    """Whether ``queue_id`` is unambiguously this work's own still-queued
+    row: status queued, same agent, trace and admission."""
+    if not queue_id:
+        return False
+    row = db.conn().execute(
+        "SELECT agent_id, trace_id, prompt_admission_id, status FROM queued_turns "
+        "WHERE queue_id = ?", (queue_id,)).fetchone()
+    return bool(row and row["status"] == "queued" and row["agent_id"] == agent_id
+                and str(row["trace_id"] or "") == trace_id
+                and str(row["prompt_admission_id"] or "") == (prompt_admission_id or ""))
+
+
+def take_over_at_head(queue_id: str, *, agent_id: str, trace_id: str,
+                      prompt_admission_id: str) -> None:
+    """Park the work's own queued row (same id, never a second row) ahead of
+    everything else the agent has open. The caller holds the write
+    transaction; raises when the row is not unambiguously this work's."""
+    if not queued_row_matches(queue_id, agent_id=agent_id, trace_id=trace_id,
+                              prompt_admission_id=prompt_admission_id):
+        raise RuntimeError(f"queued row {queue_id} is not this work's")
+    db.conn().execute(
+        "UPDATE queued_turns SET status = 'parked' WHERE queue_id = ? AND status = 'queued'",
+        (queue_id,))
+    _move_behind(agent_id, queue_id)
+
+
+def requeue_rows(queue_ids) -> int:
+    """Turn the given parked rows back into queued work (a lifted fence)."""
+    count = 0
+    for queue_id in queue_ids:
+        count += db.conn().execute(
+            "UPDATE queued_turns SET status = 'queued' WHERE queue_id = ? AND status = 'parked'",
+            (queue_id,)).rowcount or 0
+    return count
 
 
 def move_to_back(queue_id: str) -> bool:
