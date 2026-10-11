@@ -392,6 +392,27 @@ def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:
                 or command.allow_paused_queue or effective.paused_bypass)
 
 
+def _stop_holds(spec: _TurnSpec) -> bool:
+    """Whether the agent's Stop pause holds this queued spec from starting.
+
+    The in-memory handover (a turn's end, the end of a Stop, a retried or
+    ownerless head, a lifted drain fence, a closed terminal) applies the same
+    rule as admission and durable recovery: work the pause could not hold on
+    arrival (``bypass_pause``), a row the release drain kept that right on
+    (``allow_paused``) and an allowed goal wake run; everything else waits for
+    Resume. A Stop takes the arrival right back from work already queued
+    (``prepare_queued_for_finish``), as ``turn_queue.set_paused`` does for rows.
+    """
+    if spec.bypass_pause or not turn_queue.is_paused(spec.agent_id):
+        return False
+    from . import task_goal_recovery
+    if (spec.client_msg_id.startswith(task_goal_recovery.PREFIX)
+            and task_goal_recovery.allows_paused_queue(spec.client_msg_id)):
+        return False
+    row = turn_queue.get(spec.queue_id) if spec.queue_id else None
+    return not (row and row.get("allow_paused"))
+
+
 def _park(spec: _TurnSpec, *, prefix: str = "stop-park") -> str:
     """Persist a send that is about to wait behind the Stop barrier (or, with
     ``prefix="drain-park"``, behind the release drain's admission fence)."""
@@ -2007,6 +2028,50 @@ class TurnDispatchService:
         if head is not None:
             self._resume_and_spawn(agent_id, head)
 
+    def _hold_stopped_queue(self, agent_id: str, spec: _TurnSpec) -> None:
+        """A Stop's pause holds ``spec``, which just took the slot over.
+
+        Every spec the pause holds stays queued for Resume, in its order, in
+        the durable queue that Resume recovers: a spec without a queue row
+        gets one first, and older rows behind it move back after it, as the
+        release drain orders them. Nothing is withdrawn. The first spec the
+        pause does not hold starts; with none the slot is freed."""
+        with _TURN_LOCK:
+            later = (_SLOTS.take_queued(agent_id)
+                     if _SLOTS.owns(agent_id, spec.trace_id) else [])
+        kept: list[_TurnSpec] = []
+        held: list[str] = []
+        stuck: set[str] = set()
+        reorder = False
+        for item in [spec, *later]:
+            if item is not spec and not _stop_holds(item):
+                kept.append(item)
+                continue
+            row_id = item.queue_id
+            if not row_id:
+                row_id = item.park_id or _park(item)
+                if not row_id:
+                    # It cannot be made durable: memory keeps it, unstarted.
+                    kept.append(item)
+                    stuck.add(item.trace_id)
+                    continue
+                turn_queue.requeue_rows([row_id])
+                reorder = True
+            elif reorder:
+                turn_queue.move_to_back(row_id)
+            held.append(row_id)
+        log("queuedHeldByStop",
+            f"agent={agent_id} rows={','.join(held) or '∅'} kept={len(kept)} "
+            f"— queued before a Stop; waits for Resume")
+        with _TURN_LOCK:
+            _SLOTS.put_front(agent_id, kept)
+            next_spec = _SLOTS.pop_next(agent_id, expected=spec.trace_id)
+            if next_spec is not None and next_spec.trace_id in stuck:
+                _SLOTS.release(agent_id, next_spec.trace_id)
+                _SLOTS.requeue_front(agent_id, next_spec)
+            elif next_spec is not None:
+                defer_on(_TURN_LOCK, lambda: self._spawn_next(agent_id, next_spec))
+
     def _resume_and_spawn_claimed(self, agent_id: str, next_spec: _TurnSpec,
                                   phase: dict) -> None:
         """The prior owner (a finished turn, or a closed terminal) may have
@@ -2027,6 +2092,9 @@ class TurnDispatchService:
                 sender_agent_id=str(durable["sender_agent_id"]),
                 prompt_admission_id=str(durable["prompt_admission_id"]),
             )
+        if _stop_holds(next_spec):
+            self._hold_stopped_queue(agent_id, next_spec)
+            return
         try:
             agent = agents_db.get_by_agent_id(agent_id) or {}
             _validate_janitor_target(agent, next_spec.janitor_run_id, next_spec.trace_id)
@@ -3156,6 +3224,11 @@ def prepare_queued_for_finish(
     agent_id: str, snapshot: dict, cancelled_trace_ids: set[str]
 ) -> None:
     """Restore preserved/new specs except cancelled ones under the barrier."""
+    # Work queued before this Stop loses the right to run past its pause
+    # that it had on arrival; work admitted during the Stop keeps it.
+    snapshot = {**snapshot, "queued": [
+        replace(spec, bypass_pause=False)
+        for spec in snapshot.get("queued") or ()]}
     with _TURN_LOCK:
         cancelled = [
             spec for spec in list(snapshot.get("queued") or [])

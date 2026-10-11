@@ -5,8 +5,8 @@ before the drain (no fence), observed in process and after a crash. The drain
 modes hold the same arrivals behind the fence and then either lift it
 (``revert``) or hand over (``handoff``: memory gone, the next runtime recovers
 the durable queue; a crash mid-drain recovers the same way). The asserted
-tables were measured on origin/main before b540547a with this file's
-``baseline`` mode (see ``test_baseline_table``).
+tables were measured with this file's ``baseline`` mode (see
+``test_baseline_table``), last after the Stop hold fix of 2026-10-11.
 """
 from __future__ import annotations
 
@@ -239,22 +239,25 @@ def test_drain_table(tmp_path, name, mode, capsys):
         print(f"\nTABLE {name} {mode}: {result}")
 
 
-# --- measured baseline (origin/main before b540547a, `test_baseline_table`) --------
+# --- measured baseline (`test_baseline_table`) -------------------------------------
 #
-# In process, the runtime's Stop restores the work queued behind the stopped
-# turn and starts its head (finish_stop): grandfathered work runs. After a
-# crash, recovery leaves every row of a paused agent waiting.
+# Until 2026-10-11 the runtime's Stop restored the work queued behind the
+# stopped turn and started its head (finish_stop), and every later turn end
+# started the next: work queued before a Stop ran past it (eu-codex-profile,
+# see test_stop_holds_queue.py). Now nothing queued before the last Stop
+# starts in process either; a send that preempted before the Stop (h1) ran
+# then. Post-Stop arrivals keep the right they had on arrival.
 BASELINE = {
-    "a": {"started": {"t0", "a_pre", "u_post", "h_post", "p_pre", "uq_pre",
-                      "p_post", "uq_post"}, "waiting": {"a_post"}},
-    "c": {"started": {"t0", "h1", "a1", "p1", "u1q"}, "waiting": set()},
-    "c2": {"started": {"t0", "u0", "h1", "u1", "p1", "u1q"}, "waiting": {"a1"}},
+    "a": {"started": {"t0", "u_post", "h_post", "p_post", "uq_post"},
+          "waiting": {"a_post", "a_pre", "p_pre", "uq_pre"}},
+    "c": {"started": {"t0", "h1"}, "waiting": {"a1", "p1", "u1q"}},
+    "c2": {"started": {"t0", "u0", "h1", "u1"}, "waiting": {"a1", "p1", "u1q"}},
 }
 BASELINE_CRASH = {
-    "a": {"started": {"t0", "a_pre", "u_post", "h_post"},
-          "waiting": {"a_post", "p_post", "p_pre", "uq_post", "uq_pre"}},
-    "c": {"started": {"t0", "h1", "a1"}, "waiting": {"p1", "u1q"}},
-    "c2": {"started": {"t0", "u0", "h1", "u1", "p1"}, "waiting": {"a1", "u1q"}},
+    "a": {"started": {"t0", "u_post", "h_post"},
+          "waiting": {"a_post", "a_pre", "p_post", "p_pre", "uq_post", "uq_pre"}},
+    "c": {"started": {"t0", "h1"}, "waiting": {"a1", "p1", "u1q"}},
+    "c2": {"started": {"t0", "u0", "h1", "u1"}, "waiting": {"a1", "p1", "u1q"}},
 }
 # Work that arrived before the scenario's last Stop: a Stop fences it.
 BEFORE_LAST_STOP = {
@@ -278,11 +281,14 @@ def _ids(outcome):
 
 @pytest.mark.skipif(not HAS_FENCE, reason="no drain before b540547a")
 @pytest.mark.parametrize("name", sorted(SCENARIOS))
-def test_lifting_the_fence_matches_the_baseline_exactly(tmp_path, name):
+def test_lifting_the_fence_matches_the_handoff_exactly(tmp_path, name):
+    """In process or through a handoff, a Stop holds the same work."""
     outcome = SCENARIOS[name](World(tmp_path), "revert")
-    assert set(outcome["started"]) == BASELINE[name]["started"]
+    assert set(outcome["started"]) == HANDOFF[name]
     assert len(outcome["started"]) == len(set(outcome["started"]))  # each once
-    assert _ids(outcome) == BASELINE[name]["waiting"]
+    assert _ids(outcome) | HANDOFF[name] == (
+        BASELINE[name]["started"] | BASELINE[name]["waiting"])
+    assert outcome["paused"] is True
 
 
 @pytest.mark.skipif(not HAS_FENCE, reason="no drain before b540547a")

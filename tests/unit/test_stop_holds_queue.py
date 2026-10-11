@@ -95,7 +95,6 @@ def test_held_work_is_not_started_by_handoff_retries_or_ownerless_starts(tmp_pat
     world = World(tmp_path)
     world.send("t0")
     world.send("p1", origin="agent", queue=True)
-    world.send("h1", origin="automation")   # memory-only, no queue row yet
     world.send("p2", origin="agent", queue=True)
     world.stop()
     world.service.start_held_work()
@@ -103,10 +102,9 @@ def test_held_work_is_not_started_by_handoff_retries_or_ownerless_starts(tmp_pat
     td.drain_after_terminal(world.service.ctx, world.agent)
     world.settle()
     assert world.started == ["t0"]
-    # Held, never withdrawn: the memory-only send got a durable row, in order.
-    assert _waiting(world) == ["p1", "h1", "p2"]
+    assert _waiting(world) == ["p1", "p2"]
     _resume(world)
-    assert world.started == ["t0", "p1", "h1", "p2"]
+    assert world.started == ["t0", "p1", "p2"]
 
 
 def test_arrivals_during_the_stop_keep_their_documented_rights(tmp_path):
@@ -149,12 +147,16 @@ def test_lifting_the_release_fence_after_a_stop_holds_pre_stop_work(tmp_path):
     world.send("t0")
     world.service.begin_admission_fence()
     world.send("p1", origin="agent", queue=True)
+    world.send("h1", origin="automation")   # waits instead of preempting
     world.send("a1", origin="automation", queue=True)
+    world.service.persist_held()              # h1 gets a drain-park row
     world.stop()
     world.service.lower_admission_fence()
     world.service.start_held_work()
     world.settle()
     assert world.started == ["t0"]
-    assert _waiting(world) == ["p1", "a1"]
+    # Held, never withdrawn: the parked send is visible queued work, in order.
+    assert [_id.removeprefix("drain-park-t-") for _id in _waiting(world)] == [
+        "p1", "h1", "a1"]
     _resume(world)
-    assert world.started == ["t0", "p1", "a1"]
+    assert world.started == ["t0", "p1", "h1", "a1"]
