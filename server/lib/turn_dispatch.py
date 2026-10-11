@@ -2073,14 +2073,23 @@ class TurnDispatchService:
             # later, held or started then.
             log_exception("queuedHoldFail", exc, detail=spec.session)
             with _TURN_LOCK:
+                if not _SLOTS.release(agent_id, spec.trace_id):
+                    # A Stop took the slot meanwhile (see below).
+                    taken = [replace(item, bypass_pause=False) for item in taken]
                 _SLOTS.put_front(agent_id, taken)
-                _SLOTS.release(agent_id, spec.trace_id)
             self.retry_scheduler(1.0, lambda: self._retry_handoff(agent_id))
             return
         log("queuedHeldByStop",
             f"agent={agent_id} rows={','.join(held) or '∅'} kept={len(kept)} "
             f"— queued before a Stop; waits for Resume")
         with _TURN_LOCK:
+            if not _SLOTS.owns(agent_id, spec.trace_id):
+                # A Stop took the slot while the queue was out of memory, so
+                # its snapshot missed these: it holds them as it holds all
+                # work queued before it. A free slot hands them on now.
+                kept = [replace(item, bypass_pause=False) for item in kept]
+                if kept and not _SLOTS.get(agent_id):
+                    defer_on(_TURN_LOCK, lambda: self._retry_handoff(agent_id))
             _SLOTS.put_front(agent_id, kept)
             next_spec = _SLOTS.pop_next(agent_id, expected=spec.trace_id)
             if next_spec is not None and next_spec.trace_id in stuck:

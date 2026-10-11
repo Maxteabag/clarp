@@ -221,3 +221,29 @@ def test_a_new_park_row_keeps_older_park_rows_behind_it(tmp_path):
     assert _waiting(world) == ["x", "h1", "h2"]
     _resume(world)
     assert world.started == ["t0", "x", "h1", "h2"]
+
+
+def test_a_second_stop_while_holding_also_holds_the_kept_sends(tmp_path, monkeypatch):
+    """A send that could run past Stop 1 was queued before Stop 2. Stop 2
+    lands while the hold has the memory queue out; Stop 2 holds it too."""
+    world = World(tmp_path)
+    world.send("t0")
+    world.send("p_pre", origin="agent", queue=True)
+    real_holds, fired = td._stop_holds, []
+
+    def holds_then_stop_again(spec):
+        result = real_holds(spec)
+        if spec.client_msg_id == "u_mid" and not fired:
+            fired.append(spec.client_msg_id)
+            world.stop()                      # Stop 2, inside the window
+        return result
+
+    monkeypatch.setattr(td, "_stop_holds", holds_then_stop_again)
+    _stop_with_arrivals(world, [("u_mid", "user", False)])
+    assert fired == ["u_mid"]
+    world.service.start_held_work()
+    world.settle()
+    assert world.started == ["t0"]
+    assert _waiting(world) == ["p_pre", "u_mid"]
+    _resume(world)
+    assert world.started == ["t0", "p_pre", "u_mid"]
