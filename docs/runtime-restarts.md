@@ -96,7 +96,8 @@ to a newly installed release without interrupting anything:
    marker with each recovering pool's original park start (timing only;
    credentials and the account choice stay with the selector), and the next
    runtime continues that recovery from it, so a handoff never restarts the
-   30-minute park bound; a carry older than an hour is ignored. The carry also
+   30-minute park bound; a carry written, or a park start, outside
+   [now - 1 hour, now + 60 s] is ignored and logged. The carry also
    names the agents whose parks were handed over, and the continued recovery
    does not end on an empty pass until they have been re-admitted and parked
    again (at most 2 minutes), whichever runs first at boot: its own timer or

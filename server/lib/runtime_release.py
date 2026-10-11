@@ -77,6 +77,8 @@ def consume_clean_handoff(path: pathlib.Path | str) -> bool:
 # A carry older than this is from an earlier handoff (a rollback, an old
 # runtime that ignored it); the park bound it describes is long over.
 ACCOUNT_RECOVERY_CARRY_MAX_AGE_SEC = 3600.0
+# Clock slack for a carry's times that lie ahead of this runtime's clock.
+ACCOUNT_RECOVERY_CARRY_FUTURE_SLACK_SEC = 60.0
 
 
 def write_account_recovery_carry(path: pathlib.Path | str, carry: dict) -> None:
@@ -126,9 +128,25 @@ def consume_account_recovery_carry(path: pathlib.Path | str, *,
         log("accountRecoveryCarryUnreadable", str(target))
         return {}
     now = time.time() if wall is None else wall
-    if not isinstance(pools, dict) or now - written / 1000 > ACCOUNT_RECOVERY_CARRY_MAX_AGE_SEC:
+    oldest = now - ACCOUNT_RECOVERY_CARRY_MAX_AGE_SEC
+    newest = now + ACCOUNT_RECOVERY_CARRY_FUTURE_SLACK_SEC
+    if not isinstance(pools, dict) or not oldest <= written / 1000 <= newest:
+        log("accountRecoveryCarryIgnored", f"written_ms={written} outside the window")
         return {}
-    return pools
+    kept = {}
+    for pool, value in pools.items():
+        try:
+            since = int((value or {}).get("parked_since_ms") or 0)
+        except (TypeError, ValueError, AttributeError):
+            since = 0
+        # A park start outside [now-1h, now+60s] would end the park at once
+        # or restart its bound; neither is the carried recovery.
+        if not oldest <= since / 1000 <= newest:
+            log("accountRecoveryCarryIgnored",
+                f"pool={pool} parked_since_ms={since} outside the window")
+            continue
+        kept[pool] = value
+    return kept
 
 
 class RuntimeReleaseMonitor:
