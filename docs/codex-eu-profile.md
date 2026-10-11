@@ -226,9 +226,9 @@ Nadia on 2026-10-11:
 |---|---|
 | Subscription | `21a4fbcd-1d08-4ce7-9aa4-61553cbc8750` |
 | Resource group | `rg-irisbot-ticketmaster` |
-| Region | swedencentral |
+| Account region | swedencentral |
 | Deployment | `sol61-eu` |
-| SKU | `DataZoneStandard` |
+| SKU | `DataZoneStandard`, capacity 300 |
 | Model | `gpt-6.1-sol`, version 2026-09-29 |
 
 **Do not use customer data until the CISO confirms that Azure OpenAI is on the
