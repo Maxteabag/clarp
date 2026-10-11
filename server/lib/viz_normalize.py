@@ -399,7 +399,11 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
     native_rows,covered=viz_native.tool_rows(con,since_ms,until)
     import itertools
     legacy=(row for row in viz_corpus.tool_rows(con,since_ms,until) if row['runtime_id'] not in covered)
-    rows=itertools.chain(legacy,native_rows)
+    # A provider-profile agent never enters the map: the world and unknown
+    # tools built from it are designed by a model on another provider.
+    from . import codex_profiles
+    profiled = codex_profiles.assigned()
+    rows=(row for row in itertools.chain(legacy,native_rows) if row['agent_id'] not in profiled)
     import heapq
     limit = max(1, min(limit, 10000))
     events = sorted(heapq.nlargest(limit, iter_normalize(rows, names, library),
@@ -432,14 +436,10 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
         n["redesignable"] = n["id"] in library["entities"]
         n["agents"] = sorted(n["agents"])         # JSON-serializable
 
-    # Unknown tools are designed by a model; a provider-profile agent's
-    # commands never go there.
-    from . import codex_profiles
-    profiled = codex_profiles.assigned()
     clusters = {}
     for ev in events:
         sample = ev.pop("sample", "")
-        if not ev["provisional"] or ev.get("agent_id") in profiled:
+        if not ev["provisional"]:
             continue
         hint = ev["target"].split(":", 1)[1]
         c = clusters.setdefault(hint, {"hint": hint, "count": 0, "clamped": 0, "example": sample})
@@ -450,7 +450,11 @@ def build_fleet_map(since_ms: int, until_ms: int | None = None,
     specific = sum(1 for e in events if e["specific"])
     from . import viz_world, viz_work
     world = viz_world.build(events)
-    world["work"] = viz_work.build(con, since_ms, until, names)
+    world["work"] = {key: ([item for item in value if isinstance(item, dict) and not (
+                             {item.get("agent_id"), item.get("from_agent_id"),
+                              item.get("to_agent_id")} & profiled.keys())]
+                           if isinstance(value, list) else value)
+                     for key, value in viz_work.build(con, since_ms, until, names).items()}
     return {
         "world": world,
         "program": library.get("program"),

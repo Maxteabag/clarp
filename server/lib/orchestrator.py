@@ -474,6 +474,10 @@ class OrchestratorService:
                     error="Request identity already refers to different work",
                 )
             return self._replayed_run(prior["run_id"], requested_session, trace_id)
+        from .routing import addresses_profiled
+        if (codex_profiles.is_profiled(target_agent_id or "")
+                or addresses_profiled(text)):
+            return None  # the prompt of a provider-profile agent: no routing model
         owner = janitor_builtins.resolve(JANITOR_ROLE, target_agent_id=target_agent_id)
         if owner is None:
             return None
@@ -1010,8 +1014,12 @@ class OrchestratorService:
                 ORDER BY ts DESC, state_id DESC LIMIT 1""",
             (agent["agent_id"],),
         ).fetchone()
-        messages = _recent_messages(agent["agent_id"], role="assistant", limit=2)
         persona = agent["persona"]
+        if codex_profiles.is_profiled(agent):
+            # Spoken through the TTS provider: the kind only, never its text.
+            kind = state["kind"] if state else "active"
+            return f"{persona} is currently {kind}."
+        messages = _recent_messages(agent["agent_id"], role="assistant", limit=2)
         if messages:
             snippet = messages[-1]["text"][:180]
             return f"{persona} was last working on: {snippet}"

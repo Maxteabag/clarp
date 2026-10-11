@@ -33,9 +33,15 @@ def resolve_send_target(*, text: str, requested_session: str,
     falling back to what the client asked for, then the global default. This is
     what lets a hands-free user keep talking to one agent without re-naming it
     every turn."""
-    routed_session, stripped = resolve_agent_by_spoken_name(
-        text, load_agents(agents_path)
-    )
+    # A message whose default target is a provider-profile agent is that
+    # agent's prompt: resolving an address in it stays local.
+    from . import codex_profiles
+    default_target = agents_db.get_by_session(
+        (sticky_session or requested_session or default_session).strip())
+    with codex_profiles.local_only(codex_profiles.is_profiled(default_target)):
+        routed_session, stripped = resolve_agent_by_spoken_name(
+            text, load_agents(agents_path)
+        )
     if routed_session:
         session = routed_session
         text = stripped or text

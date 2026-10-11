@@ -18,6 +18,8 @@ Codex account). A turn, a fork or a resume across profiles is refused.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import os
 import pathlib
 import subprocess
@@ -131,6 +133,52 @@ def is_profiled(agent: dict | str | None) -> bool:
     that would send its content to another provider skip it."""
     agent_id = agent if isinstance(agent, str) else (agent or {}).get("agent_id", "")
     return bool(for_agent(str(agent_id or "")))
+
+
+def profiled_sessions() -> dict[str, str]:
+    """session -> agent_id for every live agent on a provider profile."""
+    profiled = assigned()
+    if not profiled:
+        return {}
+    from . import agents as agents_db
+    rows = (agents_db.get_by_agent_id(agent_id) for agent_id in profiled)
+    return {row["session"]: row["agent_id"] for row in rows if row}
+
+
+def readable_by(target: dict | str | None, caller_agent_id: str) -> bool:
+    """Whether the agent ``caller_agent_id`` (its own turn) may read
+    ``target``'s content: only a caller on the same profile may read a
+    profile agent. "" (the user, a device, the Host itself) always may."""
+    target_profile = for_agent(
+        target if isinstance(target, str) else str((target or {}).get("agent_id") or ""))
+    if not target_profile or not caller_agent_id:
+        return True
+    return for_agent(caller_agent_id) == target_profile
+
+
+# --- local-only work --------------------------------------------------------
+#
+# Work done for a profile agent outside its own turn (transcribing its
+# dictation, routing a message addressed to it) runs inside ``local_only``:
+# remote judgment models are not asked and the caller falls back to its local
+# rule.
+
+_LOCAL_ONLY: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "codex_profile_local_only", default=False)
+
+
+@contextlib.contextmanager
+def local_only(active: bool = True):
+    token = _LOCAL_ONLY.set(bool(active) or _LOCAL_ONLY.get())
+    try:
+        yield
+    finally:
+        _LOCAL_ONLY.reset(token)
+
+
+def remote_allowed() -> bool:
+    """False inside ``local_only``: no remote model may see this work."""
+    return not _LOCAL_ONLY.get()
 
 
 # --- the profile's CODEX_HOME ----------------------------------------------
