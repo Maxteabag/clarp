@@ -203,7 +203,9 @@ pub fn stop_held_check(out: String) {
         })),
         ("subscribed", Box::new(|app, _, _| {
             let engine = app.engine.borrow();
-            engine.live_items() && engine.live_active("rachel") && engine.live_view("rachel").is_some_and(|v| v.lseq().is_some() && !v.awaiting_snapshot())
+            // An idle, empty snapshot: the chat owns live items from the
+            // first event the Host sends.
+            engine.live_items() && engine.live_view("rachel").is_some_and(|v| v.lseq() == Some(0) && !v.awaiting_snapshot())
         })),
         // The release drain holds Rachel's next turn: limited, no turn.
         ("held", Box::new(|_, _, _| {
