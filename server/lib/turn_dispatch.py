@@ -2049,21 +2049,23 @@ class TurnDispatchService:
                 if item is not spec and not _stop_holds(item):
                     kept.append(item)
                     continue
-                row_id = item.queue_id
+                row_id = item.queue_id or item.park_id
                 if not row_id:
-                    row_id = item.park_id or _park(item)
+                    row_id = _park(item)
                     if not row_id:
                         # It cannot be made durable: memory keeps it, unstarted.
                         kept.append(item)
                         stuck.add(item.trace_id)
                         continue
+                    # The newest row: older rows behind it move back after it.
+                    reorder = True
+                elif reorder:
+                    turn_queue.move_to_back(row_id)
+                if not item.queue_id:
                     turn_queue.requeue_rows([row_id])
                     # From here its queue row is the work; a copy put back
                     # below must not run it a second time beside that row.
                     taken[index] = replace(item, queue_id=row_id, park_id="")
-                    reorder = True
-                elif reorder:
-                    turn_queue.move_to_back(row_id)
                 held.append(row_id)
         except Exception as exc:  # noqa: BLE001 - nothing taken may be lost
             # A failed write ("database is locked") leaves the split unknown:
