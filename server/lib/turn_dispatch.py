@@ -129,6 +129,7 @@ def runtime_status() -> dict[str, Any]:
         # The release drain (runtime_release): agents whose next turn waits on
         # the admission fence, and held work not yet durable.
         "held": _SLOTS.held(),
+        "held_order": held_order(),
         "unpersisted": unpersisted_held(),
         "provider_turns": provider_turns(),
         "compactions": compaction.active_sessions(),
@@ -139,6 +140,28 @@ def runtime_status() -> dict[str, Any]:
            for pool, coordinator in _FAILOVERS.items()},
     })
     return status
+
+
+def held_order() -> dict[str, list[dict[str, str]]]:
+    """While fenced, every agent's held work in FIFO order by stable ids:
+    the durable row (queue or park id; "" until the drain persists it), the
+    trace and the origin. Never message text."""
+    if not _SLOTS.fenced:
+        return {}
+    return {agent_id: [{"row": spec.queue_id or spec.park_id,
+                        "trace": spec.trace_id, "origin": spec.origin}
+                       for spec in specs]
+            for agent_id, specs in _SLOTS.queued_specs().items()}
+
+
+def log_held_order(event: str) -> None:
+    """Journal the held order at a seal or revert: the evidence that the work
+    recovered or started afterwards kept it (``queuedRecoveredOrder``)."""
+    for agent_id, entries in sorted(held_order().items()):
+        rows = ",".join(entry["row"] or f"memory:{entry['trace']}"
+                        for entry in entries)
+        log("drainHeldOrder", f"event={event} agent={agent_id} "
+                              f"n={len(entries)} rows={rows}")
 
 
 def unpersisted_held() -> list[str]:
@@ -722,6 +745,9 @@ class TurnDispatchService:
         # launch per step, not one per queued row.
         held: set[str] = set()
         next_try = None
+        # Rows re-admitted by this pass, per agent in queue order: the other
+        # half of the drain's order evidence (``drainHeldOrder``).
+        readmitted: dict[str, list[str]] = {}
         for row in turn_queue.pending():
             if row["agent_id"] in held:
                 continue
@@ -779,6 +805,7 @@ class TurnDispatchService:
                     janitor_run_id=_recovered_janitor_run(row),
                 ))
                 recovered += 1
+                readmitted.setdefault(row["agent_id"], []).append(str(row["queue_id"]))
                 _RECOVERY_BACKOFF.clear(row["agent_id"])
             except JanitorDispatchError as exc:
                 _remove_queued_run(str(row["queue_id"]))
@@ -791,6 +818,9 @@ class TurnDispatchService:
                 backoff = self._recovery_failed(row, exc)
                 if not backoff.parked:
                     next_try = min(next_try or backoff.retry_at, backoff.retry_at)
+        for agent_id, rows in sorted(readmitted.items()):
+            log("queuedRecoveredOrder", f"agent={agent_id} n={len(rows)} "
+                                        f"rows={','.join(rows)}")
         if deferred or turn_queue.claimed_count() > 0:
             self.retry_scheduler(1.0, self.recover_queued)
         if next_try is not None and _RECOVERY_BACKOFF.claim_wake(next_try):

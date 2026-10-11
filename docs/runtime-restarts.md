@@ -95,6 +95,13 @@ headline "Waiting for the Clarp update" and no turn (`turn_id` and
 or the runtime seals for its handoff. The iOS lock-screen Live Activity and
 desktop show it; the iOS in-app status line does not yet (it hides `limited`
 without a running turn). Held messages show as queued in every client.
+Order evidence, ids only and never message text: runtime status carries
+`held_order` (per agent, in FIFO order, `{row, trace, origin}` where `row` is
+the durable queue or park id, empty until the drain persists it). The journal
+gets `drainHeldOrder event=seal|revert agent=… rows=…` at the seal and at a
+revert, and the runtime that recovers the queue logs `queuedRecoveredOrder
+agent=… rows=…` for the rows it re-admits, so the order before the handoff and
+after it can be compared row by row.
 The fence lives in process memory: a runtime that crashes mid-drain restarts
 unfenced, recovers the durable queue, and its monitor decides again.
 
