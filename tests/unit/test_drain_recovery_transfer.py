@@ -676,3 +676,36 @@ def test_the_carried_recovery_survives_the_real_boot_order(
     finally:
         coordinator.schedule = lambda *_a: None
         timers.cancel()
+
+
+# --- review finding 3 ----------------------------------------------------------
+
+def test_a_failed_transfer_does_not_mark_a_resumed_turn_waiting_again(
+        tmp_path, monkeypatch, selector_configured):
+    agent, service, provider, pool, runtime = _parked_scene(tmp_path, monkeypatch)
+
+    def end_recovery_then_fail(**_kwargs):
+        pool.coordinator.recovering = False      # an account was verified
+        raise OSError("disk full")
+    monkeypatch.setattr(turn_queue, "park_at_head", end_recovery_then_fail)
+    try:
+        runtime.seal_if_drained()
+    finally:
+        runtime.server_close()
+    assert provider.texts() == ["work"]          # it runs...
+    assert agent not in td._CLAIMED_AT           # ...not spawning again
+    latest = agents_db.latest_state(agent)
+    assert (latest.get("detail") or {}).get("account_recovery") != "waiting"
+
+
+def test_a_failed_transfer_while_still_recovering_shows_the_wait_again(
+        tmp_path, monkeypatch, selector_configured):
+    agent, service, provider, pool, runtime = _parked_scene(tmp_path, monkeypatch)
+    monkeypatch.setattr(turn_queue, "park_at_head",
+                        lambda **_k: (_ for _ in ()).throw(OSError("disk full")))
+    try:
+        runtime.seal_if_drained()
+    finally:
+        runtime.server_close()
+    latest = agents_db.latest_state(agent)
+    assert latest["detail"]["account_recovery"] == "waiting"

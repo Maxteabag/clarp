@@ -897,9 +897,11 @@ class TurnDispatchService:
             for coordinator, attempt in taken:
                 by_pool.setdefault(id(coordinator), (coordinator, []))[1].append(attempt)
                 refused[attempt.agent_id] = "persist_failed"
+            parked_again = []
             for coordinator, attempts in by_pool.values():
-                coordinator.restore(attempts)
-            for _coordinator, attempt in taken:
+                parked_again += coordinator.restore(attempts)
+            # Only work still parked waits; a resumed turn is running.
+            for attempt in parked_again:
                 self._pause_for_account(attempt.work[0])
             return {"transferred": [], "refused": refused}
         transferred = []
