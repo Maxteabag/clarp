@@ -733,3 +733,28 @@ def test_recovery_after_the_handoff_logs_the_rows_it_readmits_in_order(tmp_path,
     recovered = [d.split("rows=")[1] for e, d in lines
                  if e == "queuedRecoveredOrder" and f"agent={agent}" in d]
     assert ",".join(recovered).split(",") == rows
+
+
+def test_a_provider_profile_rides_the_handoff_with_held_work(tmp_path):
+    """A Codex agent on a provider profile: work held across the handoff
+    (memory, durable and drain-time arrivals) is relaunched on that profile."""
+    from lib import codex_profiles
+    agent = _agent(tmp_path, "mike", backend="codex")
+    codex_profiles.assign(agent, "azure-eu")
+    service, provider = _service(tmp_path)
+    _send(service, "running")
+    td._CLAIMED_AT[agent] = 1.0
+    _send(service, "pre-drain normal")
+    td._CLAIMED_AT.pop(agent, None)
+    service.begin_admission_fence()
+    _send(service, "user during drain")
+    provider.finish("running")
+
+    new_service, new_provider = _restart(tmp_path)
+    _finish_recovered(new_service, new_provider, ("pre-drain normal",))
+
+    assert provider.spawned[0]["provider_profile"] == "azure-eu"
+    assert new_provider.texts() == ["pre-drain normal", "user during drain"]
+    assert [call.get("provider_profile") for call in new_provider.spawned] == [
+        "azure-eu", "azure-eu"]
+    assert all(call["model"] == "sol61-eu" for call in new_provider.spawned)

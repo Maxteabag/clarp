@@ -497,6 +497,14 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   fork without `parent` records its source agent. Self-parenting and cycles
   answer 409 (`self_parent`, `parent_cycle`); an unknown parent 404.
   Answers `{"session", "persona", …}` and broadcasts `agent-roster`.
+  `provider_profile` (contract 63, codex only) runs the agent on a Codex
+  provider profile from `providers.codex.provider_profiles` in
+  `/agent-model-options`, e.g. `azure-eu` (docs/codex-eu-profile.md). The
+  model defaults to the profile's and must be one of its models. It is set
+  once: a relaunch keeps it and cannot change it or the backend (409
+  `provider_profile_locked`), and resuming or forking a conversation across
+  profiles answers 409 `provider_profile_mismatch`. Agent rows (snapshot and
+  the create response) carry `provider_profile`, `""` for the CLI's account.
 - `POST /agent-helper-state` — `{"session", "state": "done"|"failed"|"running",
   "by"?}` marks a helper. `by` is the marking agent and must be the helper's
   parent; without it the mark is the user's. An agent-origin `/send` from a
@@ -520,6 +528,11 @@ apply the broadcast, not re-post `/select`, or two clients loop.
   (`none` | `device_code` | `cli` | `api_key`), `effort_ui` (`picker` |
   `hidden` | `folded_into_model`) with `effort_help`, and `models[]` with
   `id`, `label`, `default_effort`, `supported_efforts`, and provenance.
+  `providers.codex.provider_profiles[]` (contract 63) lists Codex provider
+  profiles a client may offer as their own card ("Codex (EU, Azure)"): `id`,
+  `label`, `detail`, `available` (false when the Host has no key for it),
+  `default_model` and `models[]` (`id`, `label`, `supported_efforts`).
+  Create one with `POST /agents` `{"backend": "codex", "provider_profile": id}`.
   Clients render this list rather than a bundled enum: cards are the
   installed, unhidden rows (plus the backend an existing agent runs on),
   and every Fork / Resume / Compact / MCP control follows its flag. A flag

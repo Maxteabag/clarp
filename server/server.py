@@ -3371,11 +3371,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(404, "no such agent")
         backend = backends.normalize(agent.get("backend"))
         valid = list(backends.valid_efforts(backend))
+        from lib import codex_profiles
+        profile = codex_profiles.get(codex_profiles.for_agent(agent["agent_id"]))
+        if profile is not None:
+            valid = list(profile.efforts)
         update: dict[str, str] = {}
         if "model" in data:
             if data.get("model") is not None and not isinstance(data.get("model"), str):
                 return self._json_error(400, "model must be string or null")
             model = (data.get("model") or "").strip()
+            if profile is not None and model and not profile.has_model(model):
+                return self._json(400, {
+                    "error": "invalid model for provider profile", "backend": backend,
+                    "provider_profile": profile.id,
+                })
             if not backends.is_valid_model(backend, model):
                 return self._json(400, {
          "error": "invalid model for backend", "backend": backend,
@@ -5343,8 +5352,10 @@ class Handler(BaseHTTPRequestHandler):
         from lib.session_models import agent_model
         agent["model"] = agent_model(row, identity.backend_session(row))
         state = agents_db.latest_state(row["agent_id"]) or {}
+        from lib import codex_profiles
         agent.update(alive=True, latest_state=state.get("kind") or "idle", last_activity=row.get("created_at", 0),
                      mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
+                     provider_profile=codex_profiles.for_agent(row["agent_id"]),
                      avatar_url=versioned_avatar_url("/avatars", row.get("agent_id", ""), row.get("avatar_path") or ""))
         return self._json_ok({
             "ok": True, "session": result.session, "name": result.persona, "agent": agent,

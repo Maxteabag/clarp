@@ -57,6 +57,14 @@ def get_many(keys: list[str]) -> dict[str, str]:
     return {str(row["key"]): str(row["value"]) for row in rows}
 
 
+def get_prefix(prefix: str) -> dict[str, str]:
+    """Every stored key that starts with ``prefix`` and its value."""
+    rows = conn().execute(
+        "SELECT key, value FROM settings WHERE substr(key, 1, ?) = ?",
+        (len(prefix), prefix)).fetchall()
+    return {str(row["key"]): str(row["value"]) for row in rows}
+
+
 def get_text(key: str, *, default: str = "") -> str:
     value = get(key)
     return default if value is None else value

@@ -14,7 +14,7 @@ import threading
 from dataclasses import dataclass, replace
 
 from . import agents as agents_db
-from . import backends, events, identity
+from . import backends, codex_profiles, events, identity
 from .agent_store import AGENT_ROSTER, load_agents, save_agents
 from .log import log, log_exception
 from .mcp_selection import encode as encode_mcp_selection
@@ -119,6 +119,8 @@ class AgentLifecycleService:
             default_roster_voice=next(iter(AGENT_ROSTER.values())),
             resolve_agent=lambda raw: getattr(identity.resolve(raw), "agent_id", ""),
             ancestors=agents_db.ancestors,
+            agent_profile=codex_profiles.for_agent,
+            thread_profile=codex_profiles.owner_of_thread,
         )
 
     @staticmethod
@@ -163,6 +165,13 @@ class AgentLifecycleService:
         agent = agents_db.get_by_session(session)
         if not agent:
             raise AgentLifecycleError(500, "agent persistence failed")
+        if spec.provider_profile:
+            # Before anything can dispatch a turn to the agent.
+            try:
+                codex_profiles.assign(agent["agent_id"], spec.provider_profile)
+            except codex_profiles.ProfileMismatch as exc:
+                raise AgentLifecycleError(409, "provider_profile_locked",
+                                          message=str(exc)) from exc
         if spec.llm_update:
             agents_db.update_agent(agent["agent_id"], **spec.llm_update)
         if spec.mcp_servers is not None:

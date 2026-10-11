@@ -735,11 +735,14 @@ class CodexBackend(StreamJsonBackend):
 
     # --- model policy -----------------------------------------------------
 
-    def fork_conversation(self, session_id: str, *, source_cwd: str, cwd: str) -> str:
+    def fork_conversation(self, session_id: str, *, source_cwd: str, cwd: str,
+                          provider_profile: str = "") -> str:
         """The app-server's ``thread/fork``; the rollout index is global, so
-        the child's directory only becomes the new thread's cwd."""
+        the child's directory only becomes the new thread's cwd. A provider
+        profile's thread forks inside that profile's home."""
         from .. import codex_app_server
-        return codex_app_server.fork_thread(session_id, cwd=cwd)
+        return codex_app_server.fork_thread(
+            session_id, cwd=cwd, provider_profile=provider_profile)
 
     def _home(self) -> pathlib.Path:
         return pathlib.Path(os.environ.get("CODEX_HOME") or pathlib.Path.home() / ".codex")
