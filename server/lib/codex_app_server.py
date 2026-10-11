@@ -102,21 +102,28 @@ class AppTurnHandle:
         self.client.interrupt_active(self.agent_id)
 
 
+def _base_env(session: str) -> dict[str, str]:
+    env = {**os.environ, "CLAUDE_PWA_SESSION": session}
+    env.pop("CLARP_PROVIDER_TURN", None)   # one shared server has no turn identity
+    return env
+
+
 class _Client:
-    def __init__(self, agent_id: str, session: str, stream=None, profile: str = ""):
+    def __init__(self, agent_id: str, session: str, stream=None, profile: str = "",
+                 prepared: tuple[dict[str, str], str] | None = None):
         argv = _codex_argv()
         self.agent_id = agent_id
         self.profile = profile
         self.auth_fingerprint = b"" if profile else _auth_fingerprint()
         self.refresh_requested = False
         self.rate_limits = {}
-        env = {**os.environ, "CLAUDE_PWA_SESSION": session}
-        env.pop("CLARP_PROVIDER_TURN", None)   # one shared server has no turn identity
+        env = _base_env(session)
         # The provider key lives in this process's environment and, for
-        # redaction, in memory; never on argv, disk or in a message.
+        # redaction, in memory; never on argv, disk or in a message. It is
+        # normally read (``_prepare``) before the pool lock is taken.
         self._key = ""
         if profile:
-            env, self._key = codex_profiles.spawn_env(profile, env)
+            env, self._key = prepared or codex_profiles.spawn_env(profile, env)
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -770,7 +777,20 @@ def recover_usage_failure(message: str) -> bool:
         return not message.quota_confirmed
 
 
-def _client(agent_id: str, session: str, stream=None, profile: str = "") -> _Client:
+def _prepare(profile: str, session: str) -> tuple[dict[str, str], str] | None:
+    """Read a profile's key (``secret-tool``, up to 15 s) without the pool
+    lock, when its process will have to start; None when one is running."""
+    if not profile:
+        return None
+    client = _CLIENTS.get(_pool_key(profile))
+    if client is not None and client.proc.poll() is None \
+            and not getattr(client, "refresh_requested", False):
+        return None
+    return codex_profiles.spawn_env(profile, _base_env(session))
+
+
+def _client(agent_id: str, session: str, stream=None, profile: str = "",
+            prepared: tuple[dict[str, str], str] | None = None) -> _Client:
     """One app-server process for the Host, and one per provider profile.
 
     Codex serialises thread writes with an exclusive flock. One process per
@@ -790,7 +810,7 @@ def _client(agent_id: str, session: str, stream=None, profile: str = "") -> _Cli
                     client = None
         if client is None or client.proc.poll() is not None:
             client = _Client(agent_id, session, stream=stream,
-                             **({"profile": profile} if profile else {}))
+                             **({"profile": profile, "prepared": prepared} if profile else {}))
             _CLIENTS[key] = client
         elif stream is not None:
             client.stream = stream
@@ -821,8 +841,10 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
             voice_preamble=voice_preamble, model=model, effort=effort,
             isolated=True,
         )
+    prepared = _prepare(provider_profile, session)   # never under _LOCK
     with _LOCK:
-        client = _client(agent_id, session, stream=stream, profile=provider_profile)
+        client = _client(agent_id, session, stream=stream, profile=provider_profile,
+                         prepared=prepared)
         handle = AppTurnHandle(client, agent_id=agent_id)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""
@@ -867,9 +889,11 @@ def goal(agent_id: str, action: str, *, objective: str = "", stream=None) -> dic
     agent = agents_db.get_by_agent_id(agent_id)
     if not agent:
         raise ValueError("no such agent")
-    profile = codex_profiles.for_agent(agent_id)
+    profile = codex_profiles.profile_of(agent)
+    prepared = _prepare(profile, agent["session"])   # never under _LOCK
     with _LOCK:
-        client = _client(agent_id, agent["session"], stream=stream, profile=profile)
+        client = _client(agent_id, agent["session"], stream=stream, profile=profile,
+                         prepared=prepared)
     return client.goal(agent, action, objective)
 
 

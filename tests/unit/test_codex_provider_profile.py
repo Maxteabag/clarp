@@ -875,3 +875,27 @@ def test_the_parent_still_sees_an_eu_agents_status_in_the_snapshot(profile_env, 
     assert (row["busy"], row["latest_state"], row["helper_state"], row["queued_turn_count"],
             row["background_jobs"], row["goal"]) == (
         True, "tool", "running", 2, {"count": 1, "sub_agents": 0}, {"status": "active"})
+
+
+# --- M1. a slow keyring never stalls the other Codex agents ------------------------
+
+def test_a_slow_keyring_read_never_holds_the_app_server_lock(profile_env):
+    """The keyring read (up to 15 s) happens before the pool's global lock:
+    while a profile's process waits for it, default agents still steer and
+    interrupt at once."""
+    tool = profile_env.secret_tool
+    tool.write_text("#!/bin/sh\nsleep 2\n" + "\n".join(tool.read_text().splitlines()[1:]) + "\n")
+    eu, plain = _agent("eu", profile="example-eu"), _agent("plain")
+    started = threading.Thread(target=lambda: _run_turn(eu, "eu", profile="example-eu"),
+                               daemon=True)
+    started.start()
+    time.sleep(0.4)  # the profile spawn is now inside the keyring read
+
+    began = time.monotonic()
+    codex_app_server.interrupt(plain)
+    codex_app_server.active_handles(plain)
+    waited = time.monotonic() - began
+    started.join(15)
+
+    assert waited < 0.5, f"a default agent waited {waited:.1f}s for the keyring"
+    assert profile_env.spawned and profile_env.spawned[0]["env"]["CODEX_HOME"].endswith("example-eu")
