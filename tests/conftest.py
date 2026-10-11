@@ -7,6 +7,7 @@ don't see one another's agents.
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 import pathlib
 import subprocess
 import sys
@@ -315,3 +316,35 @@ def _seed_agents_via_db(rows: dict[str, dict]) -> None:
 @pytest.fixture
 def seed_agents():
     return _seed_agents_via_db
+
+
+# A synthetic Codex provider profile and keyring (lib.codex_profiles).
+from tests.unit.codex_profile_fakes import (  # noqa: E402
+    FAKE_CODEX_PROFILE, FAKE_CODEX_PROFILE_ID, FAKE_CODEX_PROFILE_KEY)
+
+
+@pytest.fixture
+def fake_codex_profile(tmp_path, monkeypatch):
+    """Configure profile ``example-eu`` with fake values, a fake ``secret-tool``
+    holding a sentinel key, and a private profile root."""
+    from dataclasses import replace
+    from lib import codex_profiles, config
+
+    real_load = config.load
+    monkeypatch.setattr(config, "load", lambda *a, **k: replace(
+        real_load(*a, **k),
+        codex_profiles={FAKE_CODEX_PROFILE_ID: dict(FAKE_CODEX_PROFILE)}))
+    bindir = tmp_path / "fake-keyring-bin"
+    bindir.mkdir()
+    tool = bindir / "secret-tool"
+    tool.write_text(
+        "#!/bin/sh\n"
+        "[ \"$*\" = \"lookup service clarp-test-keyring key example-eu\" ] || exit 1\n"
+        f"printf '%s\\n' '{FAKE_CODEX_PROFILE_KEY}'\n")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("CLARP_CODEX_PROFILES_DIR", str(tmp_path / "profiles"))
+    codex_profiles.clear_cache()
+    yield SimpleNamespace(id=FAKE_CODEX_PROFILE_ID, key=FAKE_CODEX_PROFILE_KEY,
+                          secret_tool=tool, root=tmp_path / "profiles")
+    codex_profiles.clear_cache()

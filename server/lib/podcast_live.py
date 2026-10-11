@@ -96,7 +96,12 @@ def validate_episode(value):
     return value
 
 
-def context_for(episode, position, duration, source=None):
+def context_for(episode, position, duration, source=None, *, artifact=None):
+    from . import codex_profiles
+    if any(codex_profiles.is_profiled(str((item or {}).get("agent_id") or ""))
+           for item in (artifact, source)):
+        # A live model would hear an EU-only agent's episode or its source.
+        raise ValueError("This podcast belongs to an EU-only agent")
     validate_episode(episode)
     if not _number(position) or not _number(duration) or not 0 < duration <= 86400 or position > duration:
         raise ValueError("Invalid podcast playhead")

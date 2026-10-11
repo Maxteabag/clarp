@@ -156,6 +156,7 @@ class CodexBackend(StreamJsonBackend):
     symbol = 'terminal'
     brand = BackendBrand('#2b2f3c', '#14161d', '#c0caf5', '#3c4257')
     supports_fork = True
+    supports_provider_profiles = True
     supports_steer = True
     supports_usage = True
     login_kind = 'device_code'
@@ -735,36 +736,62 @@ class CodexBackend(StreamJsonBackend):
 
     # --- model policy -----------------------------------------------------
 
-    def fork_conversation(self, session_id: str, *, source_cwd: str, cwd: str) -> str:
+    def fork_conversation(self, session_id: str, *, source_cwd: str, cwd: str,
+                          provider_profile: str = "") -> str:
         """The app-server's ``thread/fork``; the rollout index is global, so
-        the child's directory only becomes the new thread's cwd."""
+        the child's directory only becomes the new thread's cwd. A provider
+        profile's thread forks inside that profile's home."""
         from .. import codex_app_server
-        return codex_app_server.fork_thread(session_id, cwd=cwd)
+        return codex_app_server.fork_thread(
+            session_id, cwd=cwd, provider_profile=provider_profile)
 
-    def _home(self) -> pathlib.Path:
+    def _home(self, session_id: str = "", agent_id: str | None = None) -> pathlib.Path:
+        """The Codex home for an agent's thread: its provider profile's home,
+        else the CLI's own (``codex_profiles.home_for``)."""
+        from .. import codex_profiles
+        profile_home = codex_profiles.home_for(agent_id=agent_id, thread_id=session_id)
+        if profile_home is not None:
+            return profile_home
         return pathlib.Path(os.environ.get("CODEX_HOME") or pathlib.Path.home() / ".codex")
 
-    def model_transcript(self, session_id: str) -> pathlib.Path | None:
-        """The rollout file: the thread index first, else the newest match."""
+    def model_transcript(self, session_id: str, *,
+                         agent_id: str | None = None) -> pathlib.Path | None:
+        """The rollout file in the agent's own home: the thread index first,
+        else the newest match there."""
+        home = self._home(session_id, agent_id)
         try:
-            with sqlite3.connect(f"file:{self._home() / 'state_5.sqlite'}?mode=ro",
+            with sqlite3.connect(f"file:{home / 'state_5.sqlite'}?mode=ro",
                                  uri=True, timeout=0.1) as db:
                 row = db.execute("SELECT rollout_path FROM threads WHERE id = ?",
                                  (session_id,)).fetchone()
-            if row and row[0] and pathlib.Path(row[0]).is_file():
+            if (row and row[0] and pathlib.Path(row[0]).is_file()
+                    and home.resolve() in pathlib.Path(row[0]).resolve().parents):
                 return pathlib.Path(row[0])
         except sqlite3.Error:
             pass
-        return self.find_transcript(session_id)
+        if agent_id is None:
+            return self.find_transcript(session_id)   # the binding decides the home
+        return self.transcript.find_latest_jsonl(session_id, agent_id=agent_id)
 
-    def recorded_model(self, session_id: str) -> str:
-        """The thread index's model, else the rollout's last turn_context."""
+    def recorded_model(self, session_id: str, *, agent_id: str | None = None) -> str:
+        """The thread index's model, else the rollout's last turn_context,
+        both from the agent's own home."""
         if not session_id:
             return ""
-        indexed = resolve("session_models", "indexed_model")(self._home(), session_id)
+        indexed = resolve("session_models", "indexed_model")(
+            self._home(session_id, agent_id), session_id)
         if indexed:
             return indexed
-        return resolve("session_models", "transcript_model")(self.id, session_id)
+        if agent_id is None:
+            return resolve("session_models", "transcript_model")(self.id, session_id)
+        path = self.model_transcript(session_id, agent_id=agent_id)
+        if path is None:
+            return ""
+        try:
+            stat = path.stat()
+        except OSError:
+            return ""
+        return resolve("session_models", "_read_model")(str(path), stat.st_mtime_ns, stat.st_size)
 
     def cli_default_model(self) -> str:
         """The active profile's ``model`` in config.toml, else the top-level one."""

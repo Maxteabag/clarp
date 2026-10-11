@@ -87,6 +87,11 @@ def serve_terminal(handler, session: str) -> None:
         return _send_http_error(handler, 404, "no such agent")
     backend = backends.by_id(agent.get("backend"))
     agent_id = agent["agent_id"]
+    from . import codex_profiles
+    if codex_profiles.is_profiled(agent_id):
+        # An interactive `codex` would run on the CLI's own account and home.
+        return _send_http_error(
+            handler, 501, "no interactive terminal for a provider-profile agent")
     bsid = agents_db.live_backend_session(agent_id)
     # Interactive launch argv when resuming a known session and when starting
     # fresh (agent has never bound a session id yet). A backend without an

@@ -216,6 +216,10 @@ def plan_reply(replier: dict, request_id: str, kind: str, text: str) -> dict[str
     if not text.strip():
         raise RequestError("a reply needs text")
     requester = find_request(replier, request_id)
+    from . import codex_profiles
+    if not codex_profiles.may_post(replier["agent_id"], requester["agent_id"]):
+        raise RequestError(f"{codex_profiles.BOUNDARY}: {replier['session']} runs on a "
+                           "provider profile and cannot answer an agent outside it")
     plan = waiting_goal(requester, request_id)
     cont = (plan or {}).get("goal", {}).get("continuation") or {}
     recorded = cont.get("dependency_result") or {}

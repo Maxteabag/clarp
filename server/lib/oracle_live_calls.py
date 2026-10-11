@@ -43,7 +43,8 @@ def _podcast(data):
         if value["revision"] != episode["revision"]: raise ValueError("changed episode")
         source = podcast_history.source_artifact(value.get("source_artifact_id") or episode.get("source_artifact_id", ""))
         position = value["position"]
-        context = podcast_live.context_for(episode, position, float(artifact.get("duration_ms", 0))/1000, source=source)
+        context = podcast_live.context_for(episode, position, float(artifact.get("duration_ms", 0))/1000, source=source,
+                                           artifact=artifact)
         return {"artifact": artifact, "source": source, "position": position, "context": context,
                 "images": value.get("images") is True}
     except (ValueError, TypeError, KeyError):

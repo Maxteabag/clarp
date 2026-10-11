@@ -532,6 +532,12 @@ def enable(principal: dict, delegate: dict, reason: str, *, baseline_messages: i
         raise LedgerError("the delegate must be a helper whose parent is the principal")
     if delegate.get("archived_at") or delegate.get("deleted_at"):
         raise LedgerError("the delegate is archived")
+    from . import codex_profiles
+    if codex_profiles.profile_of(principal) != codex_profiles.profile_of(delegate):
+        # The delegate reads the principal's messages; on another provider
+        # that would carry a provider-profile agent's words there.
+        raise LedgerError(f"{codex_profiles.BOUNDARY}: the delegate must run on the "
+                          "principal's provider profile")
     from .turn_identity import IDENTITY_BACKENDS
     for role, agent in (("principal", principal), ("delegate", delegate)):
         if agent.get("backend") not in IDENTITY_BACKENDS:
@@ -665,6 +671,11 @@ def _authorize(con, delegation_id: str, token: str, caller: str):
         raise DelegationDenied("this delegation is stopped")
     if not agents_live(con, row):
         raise DelegationDenied("the principal or delegate is deleted or archived")
+    from . import codex_profiles
+    if (codex_profiles.profile_of(row["principal_agent_id"])
+            != codex_profiles.profile_of(row["delegate_agent_id"])):
+        raise DelegationDenied(f"{codex_profiles.BOUNDARY}: the delegate runs on another "
+                               "provider than the principal")
     return row
 
 

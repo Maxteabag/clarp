@@ -307,7 +307,9 @@ class ResolvedTimeZone:
 
 
 def dreaming_enabled(agent: dict) -> bool:
-    return bool(agent.get("dreaming_enabled"))
+    # A dream may run on another backend; a provider-profile agent never dreams.
+    from . import codex_profiles
+    return bool(agent.get("dreaming_enabled")) and not codex_profiles.is_profiled(agent)
 
 
 def reset_for_tests() -> None:
@@ -1146,7 +1148,8 @@ def dispatch_isolated_dream(agent: dict, prompt: str) -> bool:
     """
     agent_id = str(agent.get("agent_id") or "")
     session = str(agent.get("session") or "")
-    if not agent_id or not session:
+    from . import codex_profiles
+    if not agent_id or not session or codex_profiles.is_profiled(agent_id):
         return False
     backend = backends.normalize(
         get_settings().backend or agent.get("backend"))

@@ -106,7 +106,11 @@ class AgentTools:
         self.supersede = lambda agent: None
 
     def roster(self):
-        return [a for a in agents.list_agents() if not a.get('archived_at') and not a.get('is_janitor')]
+        # Oracle's voice provider never reads a provider-profile agent.
+        from . import codex_profiles
+        profiled = codex_profiles.assigned()
+        return [a for a in agents.list_agents() if not a.get('archived_at') and not a.get('is_janitor')
+                and a['agent_id'] not in profiled]
 
     def resolve(self, name):
         name = str(name or '').strip().casefold()

@@ -124,9 +124,20 @@ def _row(agent_id: str, info: dict[str, Any]) -> dict[str, Any]:
     tool = activity.get("tool") if isinstance(activity.get("tool"), dict) else None
     started = (tool or {}).get("started_at_ms") or activity.get("since_ms") \
         or activity.get("turn_started_ms")
+    state = activity.get("state") or "idle"
+    from . import codex_profiles
+    marker = codex_profiles.push_marker(agent_id)
+    if marker:
+        # Pushed through Apple: a provider-profile agent shows its phase only,
+        # never a headline, tool name or file.
+        return {**marker, "agent_id": agent_id, "session": info.get("session") or "",
+                "persona": display_name(info.get("persona") or info.get("session") or ""),
+                "state": state, "headline": _STATE_WORDS.get(state, "Working"),
+                "tool": None, "started_at_ms": int(started) if started else None,
+                "turn_started_ms": activity.get("turn_started_ms")}
     return {"agent_id": agent_id, "session": info.get("session") or "",
             "persona": display_name(info.get("persona") or info.get("session") or ""),
-            "state": activity.get("state") or "idle", "headline": row_headline(activity),
+            "state": state, "headline": row_headline(activity),
             "tool": (tool or {}).get("name"),
             "started_at_ms": int(started) if started else None,
             "turn_started_ms": activity.get("turn_started_ms")}
