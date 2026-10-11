@@ -709,3 +709,28 @@ def test_a_failed_transfer_while_still_recovering_shows_the_wait_again(
         runtime.server_close()
     latest = agents_db.latest_state(agent)
     assert latest["detail"]["account_recovery"] == "waiting"
+
+
+# --- review finding 5 ----------------------------------------------------------
+
+@pytest.mark.parametrize("offset_s,kept", [
+    (-60, True), (-3599, True), (59, True),      # inside [now-1h, now+60s]
+    (-3601, False), (61, False), (None, False)])
+def test_a_carried_park_start_outside_the_window_is_ignored(tmp_path, offset_s, kept):
+    import time
+    now = time.time()
+    path = tmp_path / "carry.json"
+    since = 0 if offset_s is None else int((now + offset_s) * 1000)
+    path.write_text(json.dumps({"written_ms": int(now * 1000),
+                                "pools": {"claude": {"parked_since_ms": since}}}))
+    pools = consume_account_recovery_carry(path, wall=now)
+    assert ("claude" in pools) is kept
+
+
+def test_a_carry_written_in_the_future_is_ignored(tmp_path):
+    import time
+    now = time.time()
+    path = tmp_path / "carry.json"
+    path.write_text(json.dumps({"written_ms": int((now + 120) * 1000),
+                                "pools": {"claude": {"parked_since_ms": int(now * 1000)}}}))
+    assert consume_account_recovery_carry(path, wall=now) == {}
