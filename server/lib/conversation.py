@@ -7,12 +7,12 @@ returns the `/log` response shape the clients already consume.
 from __future__ import annotations
 
 import pathlib
-import time
 from typing import Any
 
 from . import agents as agents_db
 from . import backends
 from . import transcript_import_cache
+from . import transcript_incremental
 from . import eventlog
 
 
@@ -94,27 +94,19 @@ def load_conversation(*, session: str, after_revision: int = 0,
 
     if latest is not None:
         def import_latest() -> None:
-            import_started = time.perf_counter()
-            parse_started = import_started
-            imported = backends.parse_turns(backend, latest)
-            parsed_at = time.perf_counter()
-            agents_db.store_transcript_turns(
-                agent_id=agent_id,
-                backend_session_id=backend_session_id,
-                source_file=str(latest),
-                turns=imported,
-            )
-            stored_at = time.perf_counter()
+            imported = transcript_incremental.import_transcript(
+                backend=backend, path=latest, agent_id=agent_id,
+                backend_session_id=backend_session_id)
             eventlog.emit(
                 "transcript", "import",
                 session=session, agent_id=agent_id,
                 backend_session_id=backend_session_id,
                 detail={
                     "interaction_id": interaction_id,
-                    "rows": len(imported),
-                    "parse_ms": round((parsed_at - parse_started) * 1000, 3),
-                    "store_ms": round((stored_at - parsed_at) * 1000, 3),
-                    "total_ms": round((stored_at - import_started) * 1000, 3),
+                    "rows": imported["rows"],
+                    "parse_ms": round(imported["parse_s"] * 1000, 3),
+                    "store_ms": round(imported["store_s"] * 1000, 3),
+                    "total_ms": round((imported["parse_s"] + imported["store_s"]) * 1000, 3),
                     "source_bytes": transcript_import_cache.source_size(latest),
                 },
             )

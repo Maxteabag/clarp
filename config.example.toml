@@ -201,3 +201,15 @@ deepseek_effort        = ""   # same values as opencode_effort
 # revoking the Computer in the app stops its voice and its pushes.
 # url        = "https://clarp-audio-central.peter-w-adams96.workers.dev"  # default
 # credential = "cav1.<account>.<key-id>.<secret>"
+
+# [transcript_shadow]
+# Shadow run of the incremental transcript import: computed beside the full
+# import on a sample of ticks, compared, logged, never served. Off by default;
+# CLARP_TRANSCRIPT_SHADOW=0 turns it off whatever this says. See
+# docs/transcript-incremental-import.md.
+# enabled = false
+# sample_every = 20                 # at most one shadow run per N imports
+# max_cpu_seconds_per_hour = 30.0
+# max_load_per_cpu = 0.75           # skip when load1 / CPUs is above this
+# max_io_pressure = 10.0            # skip when /proc/pressure/io some avg10 is above this
+# max_memory_pressure = 10.0

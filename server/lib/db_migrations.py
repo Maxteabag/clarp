@@ -177,6 +177,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 116:
             _migrate_to_v116(con)
 
+        if version < 117:
+            _migrate_to_v117(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -892,3 +895,12 @@ def _migrate_to_v116(con: sqlite3.Connection) -> None:
     if "allow_paused" not in columns:
         con.execute("ALTER TABLE queued_turns"
                     " ADD COLUMN allow_paused INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_to_v117(con: sqlite3.Connection) -> None:
+    """Checkpoints of the incremental transcript import's shadow. A new table
+    only: older code ignores it, so rolling back needs no down-migration."""
+    start = db_schema._SCHEMA_SQL.index("CREATE TABLE transcript_import_checkpoints")
+    end = db_schema._SCHEMA_SQL.index(");", start) + 2
+    con.execute(db_schema._SCHEMA_SQL[start:end].replace(
+        "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
