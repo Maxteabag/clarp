@@ -838,9 +838,10 @@ class TurnDispatchService:
                     turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id)
                     # Not busy (a crash leaves no "interrupted" turn behind)
                     # and not an outcome: the turn has not run yet.
-                    turn_lifecycle.record(spec.agent_id, AgentState.IDLE, {
-                        "reason": "update_handoff", "trace_id": spec.trace_id,
-                        "message": UPDATE_HOLD_HEADLINE})
+                    turn_lifecycle.transition(
+                        spec.agent_id, TurnEvent.UPDATE_HANDOFF, {
+                            "reason": "update_handoff", "trace_id": spec.trace_id,
+                            "message": UPDATE_HOLD_HEADLINE})
                 con.execute("COMMIT")
             except BaseException:
                 con.execute("ROLLBACK")

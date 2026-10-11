@@ -405,17 +405,15 @@ class RuntimeStatusView:
         }
 
 
-_VIEWS: dict[int, tuple[Any, RuntimeStatusView]] = {}
-_VIEWS_LOCK = threading.Lock()
-
-
 def status_view_for(client: Any) -> RuntimeStatusView:
-    """The one view per runtime client, so its last known drain survives
-    between requests (a replaced client starts a fresh view)."""
-    with _VIEWS_LOCK:
-        entry = _VIEWS.get(id(client))
-        if entry is None or entry[0] is not client:
-            _VIEWS.clear()
-            entry = (client, RuntimeStatusView(client.status))
-            _VIEWS[id(client)] = entry
-        return entry[1]
+    """The one view per runtime client, kept on the client itself, so its
+    last known drain survives between requests (a replaced client starts a
+    fresh view)."""
+    view = getattr(client, "_clarp_status_view", None)
+    if not isinstance(view, RuntimeStatusView):
+        view = RuntimeStatusView(client.status)
+        try:
+            setattr(client, "_clarp_status_view", view)
+        except (AttributeError, TypeError):
+            pass                         # a frozen stand-in: no memory, still truthful
+    return view

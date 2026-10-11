@@ -295,3 +295,22 @@ def test_an_update_hold_reads_limited_on_a_settled_turn_and_clears():
     assert (hub.activities()["a"]["state"], hub.activities()["a"]["headline"]) == (
         "idle", None)
 
+
+
+def test_an_update_handoff_keeps_the_turn_and_says_it_waits_for_the_update(monkeypatch):
+    """The release drain handed a never-run turn back to the queue: no end
+    (it is neither completed nor interrupted), the wait is named instead."""
+    from lib import live_hub
+    from lib.protocol import AgentState
+    hub, clock, events = _hub()
+    monkeypatch.setattr(live_hub, "_HUB", hub)
+    hub.begin_turn(agent_id="a1", session="rachel", conv="conv-1", turn_id="tr-1")
+    hub.account_recovery("a1", "Waiting for a claude account with available usage")
+    clock.advance(1)
+    live_hub.observe_transition("a1", "update_handoff", AgentState.IDLE, {
+        "trace_id": "tr-1", "reason": "update_handoff",
+        "message": "Waiting for the Clarp update"})
+    snapshot = hub.snapshot(session="rachel")
+    assert snapshot["turn"]["status"] == "running"
+    assert snapshot["activity"]["headline"] == "Waiting for the Clarp update"
+    _same_state(_client(hub, events), snapshot)
