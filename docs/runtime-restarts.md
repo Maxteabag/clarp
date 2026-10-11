@@ -82,7 +82,11 @@ to a newly installed release without interrupting anything:
    audio, not a new session); its conversation binding is unchanged; its
    queue is not paused; it still owns its slot with no launch running; and
    no recovery pass (the selector) is in flight. It then becomes a
-   `recovery-park-<trace>` row at the head of the agent's queue, in one write
+   `recovery-park-<trace>` row at the head of the agent's queue (work that
+   came from the durable queue keeps its own row instead: same id, parked,
+   moved to the head, never a second row; a row that is not unambiguously its
+   own refuses with `queued_row_uncertain`; lifting the fence queues it
+   again), in one write
    transaction with the end of its turn row and an `idle` state that names
    the handoff (so a crash leaves no interrupted turn), and the same spec
    heads the in-memory queue with that park id, the slot given back. From

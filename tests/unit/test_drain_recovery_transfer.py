@@ -519,3 +519,80 @@ def test_refusal_reasons_belong_to_the_attempt_that_tried(tmp_path, monkeypatch,
         assert "account_recovery_refused" not in runtime.seal_if_drained()
     finally:
         runtime.server_close()
+
+
+# --- review drain-review-a3fc, finding 1: work that already has a queue row ------
+
+def _queued_parked_scene(tmp_path, monkeypatch):
+    """"work" was a queued send; it popped when "first" finished and parked
+    for an account with no process, its queue row still 'queued'."""
+    pool = Pool(monkeypatch)
+    agent = _bound_agent(tmp_path)
+    service, provider = _service(tmp_path)
+    _send(service, "first")
+    _send(service, "work", queue=True)
+    pool.coordinator.recovering = True
+    pool.coordinator.parked_since = 40.0
+    pool.coordinator.command = ("selector",)
+    provider.finish("first")
+    assert provider.texts() == ["first"]
+    assert pool.coordinator.status()["waiting"] == [agent]
+    service.begin_admission_fence()
+    _send(service, "next")
+    return agent, service, provider, pool, _runtime(tmp_path, service)
+
+
+def _rows(agent):
+    from lib.db import conn
+    return [(r["queue_id"], r["status"]) for r in conn().execute(
+        "SELECT queue_id, status FROM queued_turns WHERE agent_id = ? "
+        "AND status IN ('queued', 'parked', 'claimed') ORDER BY queue_seq", (agent,))]
+
+
+def test_a_queued_turn_parked_for_an_account_runs_once_after_the_handoff(
+        tmp_path, monkeypatch, selector_configured):
+    agent, service, provider, pool, runtime = _queued_parked_scene(tmp_path, monkeypatch)
+    try:
+        assert runtime.seal_if_drained() == {}
+    finally:
+        runtime.server_close()
+    # The existing row is taken over (same id), not duplicated, and heads the queue.
+    assert _rows(agent) == [("work", "parked"), ("drain-park-t-next", "parked")]
+    new_service, new_provider, new_pool = _restart(tmp_path, monkeypatch)
+    new_pool.run_timers()
+    for _ in range(3):
+        if "work" in new_provider.texts():
+            new_provider.finish("work")
+        new_service.recover_queued()
+        new_pool.run_timers()
+    assert new_provider.texts() == ["work", "next"]
+    assert _user_rows("work") == 1
+
+
+def test_a_queued_turn_transferred_then_reverted_runs_once(
+        tmp_path, monkeypatch, selector_configured):
+    agent, service, provider, pool, runtime = _queued_parked_scene(tmp_path, monkeypatch)
+    try:
+        assert service.transfer_recovery_parks()["transferred"] == [agent]
+        runtime.release_admission_fence()
+    finally:
+        runtime.server_close()
+    pool.coordinator.recover()                  # parked again here; verified now
+    provider.finish("work")
+    for _ in range(3):
+        service.recover_queued()
+    assert provider.texts() == ["first", "work", "next"]
+    assert _rows(agent) == []
+
+
+def test_an_ambiguous_queue_row_keeps_the_blocker(tmp_path, monkeypatch, selector_configured):
+    agent, service, provider, pool, runtime = _queued_parked_scene(tmp_path, monkeypatch)
+    from lib.db import conn
+    conn().execute("UPDATE queued_turns SET trace_id = 'someone-else' WHERE queue_id = 'work'")
+    try:
+        blockers = runtime.seal_if_drained()
+    finally:
+        runtime.server_close()
+    assert f"{agent}:queued_row_uncertain" in blockers["account_recovery_refused"]
+    assert pool.coordinator.attempts[agent].trace_id == "t-work"
+    assert ("work", "queued") in _rows(agent)

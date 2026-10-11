@@ -185,6 +185,8 @@ def _transfer_refusal(spec: "_TurnSpec", number: int, facts: dict) -> str:
         return "binding_changed"
     if facts.get("paused"):
         return "queue_paused"
+    if spec.queue_id and not facts.get("queued_row"):
+        return "queued_row_uncertain"
     if facts.get("excluded"):
         return str(facts["excluded"])
     if _SLOTS.get(spec.agent_id) != spec.trace_id:
@@ -673,6 +675,10 @@ class TurnDispatchService:
         # Injectable so tests can run retries synchronously instead of on a
         # real timer thread.
         self.retry_scheduler = retry_scheduler or _default_retry_scheduler
+        # Queue rows the release drain's hand-over parked in place (their
+        # work is held in memory with that queue id); lowering the fence
+        # queues them again.
+        self._transferred_rows: set[str] = set()
 
     # --- release drain ------------------------------------------------------
 
@@ -706,6 +712,12 @@ class TurnDispatchService:
 
     def lower_admission_fence(self) -> bool:
         """Let turns start again; ``start_held_work`` starts the held ones."""
+        rows = getattr(self, "_transferred_rows", None)
+        if rows:
+            # Queue rows the hand-over parked in place run from memory
+            # again, which reads them only while queued.
+            turn_queue.requeue_rows(sorted(rows))
+            rows.clear()
         changed = _SLOTS.set_fenced(False)
         if changed:
             log("admissionFenceLowered", f"held={len(_SLOTS.queued_specs())}")
@@ -782,10 +794,21 @@ class TurnDispatchService:
         facts: dict[str, dict] = {}
         for coordinator in _FAILOVERS.values():
             for agent_id in coordinator.status().get("waiting") or ():
+                attempt = coordinator.attempts.get(agent_id)
+                work = getattr(attempt, "work", None)
+                spec = work[0] if isinstance(work, tuple) and work else None
                 facts[agent_id] = {
                     "binding": agents_db.live_backend_session(agent_id),
                     "paused": turn_queue.is_paused(agent_id),
                     "excluded": excluded.get(agent_id, ""),
+                    # Work that already has a durable row is taken over, so
+                    # that row must be unambiguously its own.
+                    "queued_row": bool(
+                        isinstance(spec, _TurnSpec) and spec.queue_id
+                        and turn_queue.queued_row_matches(
+                            spec.queue_id, agent_id=agent_id,
+                            trace_id=spec.trace_id,
+                            prompt_admission_id=spec.prompt_admission_id)),
                 }
         refused: dict[str, str] = {}
 
@@ -827,6 +850,18 @@ class TurnDispatchService:
             try:
                 for _coordinator, attempt in taken:
                     spec = attempt.work[0]
+                    if spec.queue_id:
+                        # Its own queued row: take it over, never a second row.
+                        turn_queue.take_over_at_head(
+                            spec.queue_id, agent_id=spec.agent_id,
+                            trace_id=spec.trace_id,
+                            prompt_admission_id=spec.prompt_admission_id)
+                        turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id)
+                        turn_lifecycle.transition(
+                            spec.agent_id, TurnEvent.UPDATE_HANDOFF, {
+                                "reason": "update_handoff", "trace_id": spec.trace_id,
+                                "message": UPDATE_HOLD_HEADLINE})
+                        continue
                     turn_queue.park_at_head(
                         queue_id=f"{RECOVERY_PARK_PREFIX}-{spec.trace_id}",
                         agent_id=spec.agent_id, session=spec.session,
@@ -862,18 +897,28 @@ class TurnDispatchService:
         with _TURN_LOCK:
             for _coordinator, attempt in taken:
                 spec = attempt.work[0]
-                row_id = f"{RECOVERY_PARK_PREFIX}-{spec.trace_id}"
+                row_id = spec.queue_id or f"{RECOVERY_PARK_PREFIX}-{spec.trace_id}"
                 if not _SLOTS.release(spec.agent_id, spec.trace_id):
                     orphaned.append((spec, row_id))
                     continue
-                _SLOTS.requeue_front(spec.agent_id, replace(
-                    spec, queue_id="", park_id=row_id, bypass_pause=False,
-                    drain_persisted=True))
+                if spec.queue_id:
+                    # Its own row, parked for the handoff; a lifted fence
+                    # makes it queued again before held work starts.
+                    self._transferred_rows.add(spec.queue_id)
+                    held = replace(spec, park_id="", bypass_pause=False,
+                                   drain_persisted=True)
+                else:
+                    held = replace(spec, queue_id="", park_id=row_id,
+                                   bypass_pause=False, drain_persisted=True)
+                _SLOTS.requeue_front(spec.agent_id, held)
                 transferred.append(spec.agent_id)
         for spec, row_id in orphaned:
             # Unreachable while the seal holds the admission lock; never
             # leave a row that would run work a new owner replaced.
-            turn_queue.unpark(row_id)
+            if spec.queue_id:
+                turn_queue.requeue_rows([row_id])
+            else:
+                turn_queue.unpark(row_id)
             log("drainRecoveryTransferLost",
                 f"agent={spec.agent_id} trace={spec.trace_id}")
         if transferred:
