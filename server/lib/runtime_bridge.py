@@ -791,6 +791,28 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 blockers[key] = waiting
         return {key: value for key, value in blockers.items() if value}
 
+    def only_account_recovery(self, blockers: dict[str, list[str]]) -> bool:
+        return self._only_account_recovery(blockers)
+
+    def seal_now(self) -> dict[str, list[str]]:
+        """The natural drain's one step at a zero-blocker moment: fence, check
+        and seal atomically (no RPC runs meanwhile), or lower the fence at
+        once and start whatever arrived. Returns the blockers; empty means
+        sealed. The fence never outlasts this call."""
+        with self._admission_lock:
+            if self._draining:
+                return {}
+            self.dispatch_service.begin_admission_fence()
+            blockers = self.seal_if_drained()
+            if blockers:
+                from . import turn_dispatch
+                turn_dispatch.log_held_order("seal_missed")
+                self.dispatch_service.lower_admission_fence()
+        if blockers:
+            # Launches run outside the admission lock, like any handoff.
+            self.dispatch_service.start_held_work()
+        return blockers
+
     def _only_account_recovery(self, blockers: dict[str, list[str]]) -> bool:
         """Whether every blocker is account-recovery parked work (whose slot
         shows it active and spawning too), so a hand-over may clear them."""

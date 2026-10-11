@@ -58,7 +58,7 @@ def _monitor(runtime, desired="new", clock=None, **kwargs):
     return RuntimeReleaseMonitor(
         runtime, running_release_id="old", desired_release_id=lambda: value[0],
         clock=clock or Clock(), budget_sec=900, backoff_base_sec=300,
-        backoff_cap_sec=3600, **kwargs)
+        backoff_cap_sec=3600, **{"mode": lambda: "fenced", **kwargs})
 
 
 def test_release_monitor_leaves_current_runtime_untouched():
@@ -218,7 +218,7 @@ def test_status_names_the_last_drain_event_with_its_time_and_reason():
     monitor = RuntimeReleaseMonitor(
         runtime, running_release_id="old", desired_release_id=lambda: desired[0],
         budget_sec=900, backoff_base_sec=300, backoff_cap_sec=3600,
-        **_wall_clock(clock))
+        mode=lambda: "fenced", **_wall_clock(clock))
 
     monitor.check_once()
     event = monitor.status()["last_event"]

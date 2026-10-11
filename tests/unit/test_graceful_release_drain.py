@@ -118,7 +118,8 @@ def _monitor(runtime, desired, clock, order=None, **kwargs):
         before_shutdown=lambda: (order if order is not None else []).append("handoff"),
         clock=clock, wall=lambda: 1_700_000_000.0 + clock.now - 1000.0,
         budget_sec=900,
-        backoff_base_sec=300, backoff_cap_sec=3600, **kwargs)
+        backoff_base_sec=300, backoff_cap_sec=3600,
+        **{"mode": lambda: "fenced", **kwargs})
 
 
 def _send(service, text, *, session="mike", cid=None, queue=False, origin="user"):
@@ -536,7 +537,7 @@ def test_a_rollback_between_seal_and_shutdown_unseals(tmp_path):
     reads = iter(["new", "new", "old"])
     monitor = RuntimeReleaseMonitor(
         runtime, running_release_id="old", desired_release_id=lambda: next(reads),
-        clock=Clock())
+        clock=Clock(), mode=lambda: "fenced")
     try:
         _send(service, "running")
         monitor.check_once()                  # fence

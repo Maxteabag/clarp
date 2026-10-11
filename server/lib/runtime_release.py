@@ -31,6 +31,25 @@ from .log import log, log_exception
 DRAIN_BUDGET_SEC = 900.0
 DRAIN_BACKOFF_BASE_SEC = 300.0
 DRAIN_BACKOFF_CAP_SEC = 3600.0
+# The natural drain looks for a moment with nothing to cut short this often.
+NATURAL_CHECK_SEC = 30.0
+RELEASE_DRAIN_MODES = ("natural", "fenced")
+
+
+def release_drain_mode() -> str:
+    """How a new release takes over, read live: CLARP_RELEASE_DRAIN=natural
+    (the kill switch) outranks ``[runtime] release_drain``; anything but
+    "fenced" is natural."""
+    if os.environ.get("CLARP_RELEASE_DRAIN", "").strip().lower() == "natural":
+        return "natural"
+    try:
+        from . import config
+        mode = str(getattr(config.load(), "runtime_release_drain", "natural")
+                   or "natural").strip().lower()
+    except Exception as exc:  # noqa: BLE001 - an unreadable config must not fence
+        log_exception("releaseDrainModeFail", exc)
+        return "natural"
+    return mode if mode in RELEASE_DRAIN_MODES else "natural"
 
 
 def read_runtime_release_id(root: pathlib.Path | str) -> str:
@@ -167,8 +186,17 @@ class RuntimeReleaseMonitor:
         backoff_cap_sec: float = DRAIN_BACKOFF_CAP_SEC,
         clock: Callable[[], float] = time.monotonic,
         wall: Callable[[], float] = time.time,
+        mode: Callable[[], str] = release_drain_mode,
+        natural_check_sec: float = NATURAL_CHECK_SEC,
     ):
         self.runtime = runtime
+        self.mode = mode
+        self.natural_check_sec = float(natural_check_sec)
+        self._mode = "natural"
+        self._next_natural_check = 0.0
+        # Parked account-recovery work the last natural seal check refused
+        # to hand over; the next check waits for that set to change.
+        self._refused_parks: frozenset[str] = frozenset()
         self.running_release_id = str(running_release_id or "")
         self.desired_release_id = desired_release_id
         self.before_shutdown = before_shutdown or (lambda: None)
@@ -206,6 +234,7 @@ class RuntimeReleaseMonitor:
                 return int((wall + moment - now) * 1000) if moment else None
 
             return {
+                "mode": self._mode,
                 "phase": self._phase,
                 "running_release": self.running_release_id,
                 "target_release": self._target,
@@ -216,7 +245,7 @@ class RuntimeReleaseMonitor:
                 # Only a drain in progress has blockers; afterwards the last
                 # attempt's are history (``last_blockers``).
                 "blockers": ({key: list(value) for key, value in self._blockers.items()}
-                             if self._phase == "draining" else {}),
+                             if self._phase in ("draining", "waiting_idle") else {}),
                 "last_blockers": {key: list(value)
                                   for key, value in self._last_blockers.items()},
                 "last_outcome": self._last_outcome,
@@ -242,6 +271,15 @@ class RuntimeReleaseMonitor:
         if not desired or desired == self.running_release_id:
             self._withdraw()
             return False
+        mode = self.mode()
+        mode = mode if mode in RELEASE_DRAIN_MODES else "natural"
+        if mode != self._mode:
+            log("runtimeDrainMode", f"from={self._mode} to={mode}")
+            self._set(mode=mode)
+        if mode == "natural":
+            return self._natural(desired)
+        if self._phase == "waiting_idle":
+            self._set(phase="idle", blockers={})
         now = self.clock()
         if self._phase != "draining":
             if self.runtime.begin_drain_if_idle():
@@ -263,6 +301,56 @@ class RuntimeReleaseMonitor:
         if self.clock() >= self._deadline:
             self._revert("budget expired", now=self.clock())
         return False
+
+    # --- natural mode ----------------------------------------------------------
+
+    def _natural(self, desired: str) -> bool:
+        """Never hold admissions while anything blocks: look every
+        ``natural_check_sec`` for a moment with no blockers, then fence, check
+        and seal in one step, or lower the fence at once (no attempt, budget
+        or backoff)."""
+        if self._phase == "draining":
+            # Switched from fenced mid-attempt: lift its fence now.
+            self._revert("mode natural", now=self.clock(), backoff=False)
+        if self.runtime.begin_drain_if_idle():
+            return self._hand_over(desired)
+        now = self.clock()
+        if self._phase != "waiting_idle":
+            self._set(phase="waiting_idle", attempt=0, next_attempt=0.0,
+                      fenced_at=0.0, deadline=0.0)
+            self._next_natural_check = 0.0
+        self._set(target=desired)
+        if now < self._next_natural_check:
+            return False
+        self._next_natural_check = now + self.natural_check_sec
+        blockers = self.runtime.handover_blockers()
+        self._set(blockers=blockers)
+        if blockers and not self._parks_worth_a_seal(blockers):
+            return False
+        result = self.runtime.seal_now()
+        if not result:
+            return self._hand_over(desired)
+        # Something appeared during the seal check: the fence is down again.
+        self._set(blockers=result)
+        self._refused_parks = self._parks(result)
+        self._event("seal_missed", target=desired,
+                    reason=",".join(sorted(result)))
+        log("runtimeDrainSealMissed",
+            f"target={desired} blockers={ {k: len(v) for k, v in result.items()} }")
+        return False
+
+    @staticmethod
+    def _parks(blockers: dict[str, list[str]]) -> frozenset[str]:
+        return frozenset(agent for key, value in blockers.items()
+                         if key.endswith("_account_recovery") for agent in value)
+
+    def _parks_worth_a_seal(self, blockers: dict[str, list[str]]) -> bool:
+        """Only account-recovery parks remain, which the seal may hand over
+        (item 1), and not the same set the last check refused."""
+        only = getattr(self.runtime, "only_account_recovery", None)
+        if only is None or not only(blockers):
+            return False
+        return self._parks(blockers) != self._refused_parks
 
     def _fence(self, target: str, now: float) -> None:
         self.runtime.begin_admission_fence()
@@ -300,6 +388,12 @@ class RuntimeReleaseMonitor:
         not ready: abort a drain cleanly and forget the backoff."""
         if self._phase == "draining":
             self._revert("target withdrawn", now=self.clock(), backoff=False)
+        elif self._phase == "waiting_idle":
+            # A natural seal whose target vanished leaves its brief fence up:
+            # lower it (a no-op when the natural drain never fenced).
+            self.runtime.release_admission_fence()
+            self._event("withdrawn", target=self._target, reason="target withdrawn")
+            self._set(phase="idle", target="", blockers={})
         elif self._phase == "backoff":
             self._event("withdrawn", target=self._target, reason="target withdrawn")
             self._set(phase="idle", attempt=0, target="", next_attempt=0.0,

@@ -655,13 +655,17 @@ Returns 404 for an unknown job, otherwise:
 starts, arrivals are held durably), `sealed` the hard fence of the moment
 before the handoff, and `draining` is either. `drain` is the graceful release
 drain of [runtime-restarts.md](runtime-restarts.md):
-`{"phase": "idle | draining | backoff | handed_over", "running_release",
+`{"mode": "natural | fenced", "phase": "idle | waiting_idle | draining |
+backoff | handed_over", "running_release",
 "target_release", "attempt", "fenced_since", "deadline", "next_attempt_at",
 "blockers": {kind: [agent ids]}, "last_blockers", "last_outcome",
-"last_event": {"kind": "fenced | retargeted | reverted | withdrawn | sealed",
-"at", "target_release", "reason"}}` with times in epoch ms. `blockers` is
-non-empty only while the phase is `draining`; the previous attempt's are
-`last_blockers`. A runtime from before the drain reports
+"last_event": {"kind": "fenced | retargeted | reverted | withdrawn | sealed |
+seal_missed", "at", "target_release", "reason"}}` with times in epoch ms.
+`waiting_idle` is the natural drain (the default) waiting, with nothing
+fenced, for a moment with no blockers; `seal_missed` means its brief seal
+check found something and lowered the fence at once. `blockers` is non-empty
+only while the phase is `draining` or `waiting_idle`; the previous attempt's
+are `last_blockers`. A runtime from before the drain reports
 `{"phase": "unsupported"}`, and an embedded Host `{"phase": "idle"}`.
 
 When the runtime does not answer its status call, the block is explicitly

@@ -48,7 +48,29 @@ provider quota to ask idle conversations whether they have anything to do.
 ## Graceful release drain
 
 `RuntimeReleaseMonitor` (`server/lib/runtime_release.py`) hands a runtime over
-to a newly installed release without interrupting anything:
+to a newly installed release without interrupting anything. It has two modes,
+read live: `[runtime] release_drain = "natural"` (the default) or `"fenced"`;
+`CLARP_RELEASE_DRAIN=natural` in the runtime's environment outranks the config
+(the kill switch), and any other value is natural.
+
+**Natural (default).** Nothing is ever held while something blocks the
+handoff. The runtime looks every 30 seconds (`NATURAL_CHECK_SEC`) for a moment
+with no blockers, the same set the seal uses (account-recovery parks the seal
+may hand over count as clear, unless the last check refused that very set).
+Only then does it fence, re-check and seal in one step under the admission
+lock (`RuntimeRPCServer.seal_now`), so no request runs in between; if anything
+appeared, the fence comes down at once and whatever arrived starts, nothing
+lost. The fence lasts only for that check, never minutes; there are no
+attempts, budget or backoff. Status shows `mode: "natural"` and phase
+`waiting_idle` with the live blockers, and `last_event` `seal_missed` when a
+check found something. Users see "Waiting for the Clarp update" only during
+that brief check. A fully idle runtime still hands over at once. Peter asked
+for this (via Solu, rda0af9c6fdc2) after the fenced retries held messages for
+up to 15 minutes again and again.
+
+**Fenced (opt-in).** The behaviour below, unchanged. Switching from fenced to
+natural mid-attempt lifts the fence at once; natural to fenced starts a
+fenced attempt.
 
 1. It targets the release in `share/current` only when that release has both
    `RUNTIME_READY` and `INSTALL_OK` (the installer writes the latter after the

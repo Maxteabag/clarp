@@ -202,6 +202,15 @@ deepseek_effort        = ""   # same values as opencode_effort
 # url        = "https://clarp-audio-central.peter-w-adams96.workers.dev"  # default
 # credential = "cav1.<account>.<key-id>.<secret>"
 
+# [runtime]
+# How a newly installed runtime release takes over. "natural" (default) never
+# holds messages while anything is running: it waits for a moment with nothing
+# to cut short and fences only for the seconds of the seal check. "fenced"
+# holds new turns for up to 15 minutes per attempt, with backoff, until the
+# runtime is idle. CLARP_RELEASE_DRAIN=natural outranks this. Read live; see
+# docs/runtime-restarts.md "Graceful release drain".
+# release_drain = "natural"
+
 # [transcript_shadow]
 # Shadow run of the incremental transcript import: computed beside the full
 # import on a sample of ticks, compared, logged, never served. Off by default;
