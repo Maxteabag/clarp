@@ -30,7 +30,6 @@ import weakref
 import time
 from urllib.parse import quote, urlencode, urlsplit, urlunsplit
 
-from . import codex_profiles
 from .log import log, log_exception
 
 # APNs hosts. TestFlight + App Store builds use the production host; a debug
@@ -839,7 +838,7 @@ def send_user_notification(notification: dict) -> dict:
                     str(notification.get("agent_id") or ""),
                     str(row.get("base_url") or ""),
                 )
-                payload = codex_profiles.restrict_push(turn_done_payload(
+                payload = turn_done_payload(
                     persona,
                     session,
                     body,
@@ -848,10 +847,7 @@ def send_user_notification(notification: dict) -> dict:
                     notification_id,
                     _server_instance_id(),
                     bool(notification.get("needs_response")),
-                ), str(notification.get("agent_id") or ""),
-                    alert_body=(codex_profiles.PUSH_NEEDS_ANSWER
-                                if notification.get("needs_response")
-                                else codex_profiles.PUSH_REPLY))
+                )
                 try:
                     status, reason, apns_id = transport.send(
                         tok, env, payload, grant=row.get("push_grant") or "")
@@ -919,9 +915,8 @@ def _reset_background_budget() -> None:
 
 
 def background_sync_payload(session: str, agent_id: str) -> dict:
-    return codex_profiles.restrict_push(
-        {"aps": {"content-available": 1}, "kind": "sync",
-         "session": session, "agent_id": agent_id}, agent_id)
+    return {"aps": {"content-available": 1}, "kind": "sync",
+            "session": session, "agent_id": agent_id}
 
 
 def send_background_sync(session: str, agent_id: str = "") -> dict:
@@ -1130,7 +1125,7 @@ def send_decision_created(artifact: dict) -> dict:
                 env = row.get("environment") or cfg.apns_environment
                 avatar_url, avatar_custom = _avatar_details(
                     cfg, persona, agent_id, str(row.get("base_url") or ""))
-                payload = codex_profiles.restrict_push(decision_payload(
+                payload = decision_payload(
                     persona, session, title, question,
                     decision_id=decision_id, artifact_id=artifact_id,
                     time_sensitive=time_sensitive,
@@ -1138,8 +1133,7 @@ def send_decision_created(artifact: dict) -> dict:
                     revision=int(decision.get("revision") or 1),
                     expires_at=decision.get("expires_at"),
                     avatar_url=avatar_url, avatar_custom=avatar_custom,
-                    server_instance_id=_server_instance_id()),
-                    agent or agent_id, alert_body=codex_profiles.PUSH_NEEDS_ANSWER)
+                    server_instance_id=_server_instance_id())
                 try:
                     status, reason, apns_id = transport.send(
                         tok, env, payload, grant=row.get("push_grant") or "")

@@ -324,26 +324,6 @@ def _spawn_voice_metrics(audio_bytes: bytes, ctype: str, *, session, trace_id,
     threading.Thread(target=work, name="voice-metrics", daemon=True).start()
 
 
-# Snapshot fields another agent may see of an EU-only agent: who and what
-# state, never its messages, status text or activity.
-_EU_ONLY_SNAPSHOT_KEYS = (
-    "agent_id", "persona", "session", "backend", "provider_profile",
-    "alive", "busy", "focused", "latest_state", "latest_state_ts", "is_janitor",
-    "role", "parent_agent_id", "helper_state", "archived_at", "muted", "avatar_url",
-    "background_jobs", "queued_turn_count", "queue_paused", "compacting",
-)
-
-
-def _eu_only_status(row: dict) -> dict:
-    """What another agent's turn sees of an EU-only agent: its Clarp state
-    (busy, helper, jobs, queue, goal status), which is how a parent follows
-    it, and none of its words."""
-    shown = {key: row.get(key) for key in _EU_ONLY_SNAPSHOT_KEYS if key in row}
-    if isinstance(row.get("goal"), dict):
-        shown["goal"] = {"status": row["goal"].get("status")}
-    return shown
-
-
 class Handler(BaseHTTPRequestHandler):
     server_version = "ClaudePWA/1.0"
     # HTTP/1.1 so the tailscale-serve reverse proxy (and any direct client)
@@ -1077,9 +1057,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(401, "Oracle requires authenticated full-device access")
         if self._device_forbidden(path, "GET"):
             return self._json_error(403, "full device access required")
-        refusal = self._eu_only_read_refusal(path)
-        if refusal:
-            return self._json_error(403, refusal)
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "GET")
@@ -1650,64 +1627,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_snapshot(self):
         """Unified per-agent read model for the dashboard."""
-        from lib import codex_profiles, snapshot
-        body = snapshot.SHARED.body(self.ctx)
-        caller = self._turn_caller() if codex_profiles.assigned() else ""
-        if caller:
-            # Another agent's turn sees an EU-only agent's identity and
-            # state, never its words.
-            data = json.loads(body)
-            data["agents"] = [
-                row if codex_profiles.readable_by(row, caller) else _eu_only_status(row)
-                for row in data.get("agents") or []]
-            body = json.dumps(data).encode()
-        self._send(200, body, "application/json")
-
-    def _eu_boundary(self, target) -> str:
-        """The refusal when this request's turn is a provider-profile agent
-        writing toward an agent outside its profile (H2), else ""."""
-        from lib import codex_profiles
-        caller = self._turn_caller()
-        target_id = str((target or {}).get("agent_id") or "")
-        if caller and target_id and not codex_profiles.may_post(caller, target_id):
-            return codex_profiles.BOUNDARY
-        return ""
-
-    def _eu_prune(self, body):
-        """``body`` as another agent's turn may receive it: nothing of an agent
-        on another provider profile. The user's devices get it unchanged."""
-        from lib import codex_profiles
-        ids, sessions = codex_profiles.hidden_from(self._turn_caller())
-        return codex_profiles.prune(body, ids, sessions)
-
-    def _eu_only_read_refusal(self, path: str) -> str:
-        """Refuse another agent's turn a read of an EU-only agent's content:
-        its provider would receive it (docs/codex-eu-profile.md)."""
-        from lib import codex_profiles
-        if not codex_profiles.assigned():
-            return ""
-        caller = self._turn_caller()
-        if not caller:
-            return ""
-        query = self._query()
-        owners = [identity.lookup(unquote(value))
-                  for key in ("session", "agent", "session_id", "agent_id")
-                  for value in query.get(key, []) if value]
-        if path == "/log" and not query.get("session"):
-            # /log without a session reads the focused agent.
-            owners.append(identity.lookup(self.ctx.default_session))
-        parts = path.strip("/").split("/")
-        if len(parts) >= 2 and parts[0] == "agents" and parts[1] not in ("snapshot",):
-            owners.append(identity.lookup(unquote(parts[1])))
-        if len(parts) >= 2 and parts[0] == "artifacts":
-            from lib import artifacts
-            owners.append(artifacts.get(unquote(parts[1])))
-        if len(parts) >= 2 and parts[0] == "background-jobs":
-            from lib import background_jobs
-            owners.append(background_jobs.get(unquote(parts[1]), reconcile=False))
-        if any(owner and not codex_profiles.readable_by(owner, caller) for owner in owners):
-            return "This agent is EU-only; another agent cannot read it"
-        return ""
+        from lib import snapshot
+        self._send(200, snapshot.SHARED.body(self.ctx), "application/json")
 
     def _handle_prompt_history(self):
         """Authenticated history of prospectively evidenced user prompts."""
@@ -2937,20 +2858,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         q = self.ctx.stream.subscribe(live=self._live_subscription())
-        # Another agent's turn never receives an event of an agent on another
-        # provider profile; the set is refreshed as agents come and go.
-        from lib import codex_profiles
-        caller = self._turn_caller()
-        hidden = {"at": 0.0, "sets": (frozenset(), frozenset())}
-
-        def withheld(ev) -> bool:
-            if not caller:
-                return False
-            if time.monotonic() - hidden["at"] > 5.0:
-                hidden["sets"], hidden["at"] = (codex_profiles.hidden_from(caller),
-                                                time.monotonic())
-            ids, sessions = hidden["sets"]
-            return bool(ids or sessions) and codex_profiles.mentions(ev, ids, sessions)
         try:
             self.wfile.write(b": connected\n\n")
             self.wfile.flush()
@@ -2958,8 +2865,6 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 page = self.ctx.stream.recent(cursor)
                 for ev in page:
-                    if withheld(ev):
-                        continue
                     event_id = ev.get("event_id")
                     if event_id:
                         self.wfile.write(f"id: {event_id}\n".encode())
@@ -2990,8 +2895,6 @@ class Handler(BaseHTTPRequestHandler):
                         ev = json.loads(payload)
                     except json.JSONDecodeError:
                         ev = {}
-                    if withheld(ev):
-                        continue
                     event_id = ev.get("event_id")
                     if event_id:
                         self.wfile.write(f"id: {event_id}\n".encode())
@@ -3328,7 +3231,7 @@ class Handler(BaseHTTPRequestHandler):
             "team_id": team_id,
             "messages": team_store.list_team_messages(team_id, limit=limit),
         }
-        return self._json_ok(self._eu_prune(body))
+        return self._json_ok(body)
 
     def _handle_request_location(self):
         """An agent asks the app for the user's location: broadcast a request the
@@ -3468,26 +3371,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(404, "no such agent")
         backend = backends.normalize(agent.get("backend"))
         valid = list(backends.valid_efforts(backend))
-        from lib import codex_profiles
-        stored_profile = codex_profiles.for_agent(agent["agent_id"])
-        profile = codex_profiles.get(stored_profile)
-        if stored_profile and profile is None:
-            return self._json(409, {"error": "provider profile is not configured",
-                                    "provider_profile": stored_profile})
-        if profile is not None:
-            next_profile_model = (str(data.get("model") or "").strip()
-                                  if "model" in data else str(agent.get("model") or ""))
-            valid = list(profile.efforts_for(next_profile_model))
         update: dict[str, str] = {}
         if "model" in data:
             if data.get("model") is not None and not isinstance(data.get("model"), str):
                 return self._json_error(400, "model must be string or null")
             model = (data.get("model") or "").strip()
-            if profile is not None and model and not profile.has_model(model):
-                return self._json(400, {
-                    "error": "invalid model for provider profile", "backend": backend,
-                    "provider_profile": profile.id,
-                })
             if not backends.is_valid_model(backend, model):
                 return self._json(400, {
          "error": "invalid model for backend", "backend": backend,
@@ -3596,7 +3484,7 @@ class Handler(BaseHTTPRequestHandler):
             session=session if session else None,
             agent_id=agent_id if agent_id else None,
         )
-        return self._json_ok(self._eu_prune({"schedules": schedules}))
+        return self._json_ok({"schedules": schedules})
 
     def _handle_agent_schedules_post(self):
         from lib import scheduler
@@ -3612,9 +3500,6 @@ class Handler(BaseHTTPRequestHandler):
         enabled = bool(data.get("enabled", True))
         if not session or not name or not cron or not prompt:
             return self._json_error(400, "session, name, cron_expression, and prompt are required")
-        refusal = self._eu_boundary(identity.lookup(session))
-        if refusal:
-            return self._json_error(403, refusal)
         try:
             item = scheduler.create_schedule(session, name, cron, prompt, enabled=enabled)
         except ValueError as exc:
@@ -3655,10 +3540,6 @@ class Handler(BaseHTTPRequestHandler):
         name = data.get("name")
         cron = data.get("cron_expression") or data.get("cron")
         prompt = data.get("prompt")
-        current = scheduler.get_schedule(schedule_id)
-        refusal = self._eu_boundary(current) if current and prompt else ""
-        if refusal:
-            return self._json_error(403, refusal)
         try:
             item = scheduler.update_schedule(
                 schedule_id,
@@ -4898,7 +4779,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_background_jobs(self):
         from lib import background_jobs
-        return self._json_ok(self._eu_prune(background_jobs.snapshot()))
+        return self._json_ok(background_jobs.snapshot())
 
     def _handle_background_job_detail(self, job_id: str):
         from lib import background_jobs
@@ -4952,8 +4833,7 @@ class Handler(BaseHTTPRequestHandler):
             limit=limit, offset=offset,
             order=(qs.get("order", ["updated"])[0] or "updated").strip(),
         )
-        return self._json_ok(self._eu_prune(
-            {"artifacts": [artifacts.response_representation(row, representation) for row in rows]}))
+        return self._json_ok({"artifacts": [artifacts.response_representation(row, representation) for row in rows]})
 
     def _handle_artifact_events_config(self, artifact_id: str, *, write: bool = True):
         if getattr(self, "_request_device_scope", "") == "limited":
@@ -5233,12 +5113,11 @@ class Handler(BaseHTTPRequestHandler):
         self._deliver_pending_decisions()
         # An explicit format advertisement lets helpers reject older Hosts
         # which otherwise silently interpret question creation as approval.
-        items = self._eu_prune(items)
-        return self._json_ok(self._eu_prune({
+        return self._json_ok({
             "items": items, "count": len(items), "decision_format": 2,
             "janitor_items": janitor_attention.pending(
    include_archived=query.get("include_archived", [""])[0] == "1"),
-        }))
+        })
 
     def _handle_turn_queue(self):
         from lib import turn_queue
@@ -5464,10 +5343,8 @@ class Handler(BaseHTTPRequestHandler):
         from lib.session_models import agent_model
         agent["model"] = agent_model(row, identity.backend_session(row))
         state = agents_db.latest_state(row["agent_id"]) or {}
-        from lib import codex_profiles
         agent.update(alive=True, latest_state=state.get("kind") or "idle", last_activity=row.get("created_at", 0),
                      mcp_servers=decode_mcp(row.get("mcp_servers"))[1],
-                     provider_profile=codex_profiles.for_agent(row["agent_id"]),
                      avatar_url=versioned_avatar_url("/avatars", row.get("agent_id", ""), row.get("avatar_path") or ""))
         return self._json_ok({
             "ok": True, "session": result.session, "name": result.persona, "agent": agent,
@@ -5713,10 +5590,6 @@ class Handler(BaseHTTPRequestHandler):
         req, call_sessions = self._apply_group_call(req)
         if req is None:
             return
-        from lib.send_request import boundary_refusal
-        refusal = boundary_refusal(req, caller_agent_id=self._turn_caller())
-        if refusal is not None:  # the group call routed it outside the profile
-            return self._send_request_error(refusal)
         if not req.force_session:
             handled = self._send_via_orchestrator(req, prompt_admission, only_sessions=call_sessions)
             if handled:

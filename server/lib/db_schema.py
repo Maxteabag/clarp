@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 118
+_SCHEMA_VERSION = 117
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -55,17 +55,9 @@ CREATE TABLE agents (
     role TEXT NOT NULL DEFAULT 'agent',
     helper_state TEXT,
     helper_completed_at INTEGER,
-    custom_status_at INTEGER,
-    -- Codex provider profile ('' = the CLI's own account). Written by the
-    -- creating INSERT; the trigger below makes it immutable.
-    provider_profile TEXT NOT NULL DEFAULT ''
+    custom_status_at INTEGER
 );
 CREATE INDEX idx_agents_parent ON agents(parent_agent_id) WHERE parent_agent_id IS NOT NULL;
-CREATE INDEX idx_agents_provider_profile ON agents(provider_profile) WHERE provider_profile != '';
-CREATE TRIGGER agents_provider_profile_immutable
-BEFORE UPDATE OF provider_profile ON agents
-WHEN OLD.provider_profile IS NOT NEW.provider_profile
-BEGIN SELECT RAISE(ABORT, 'agents.provider_profile is immutable'); END;
 
 CREATE TABLE runtimes (
     runtime_id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -110,9 +110,6 @@ class Backend:
     label: str = ""
     required_binary: str = ""
     supports_fork: bool = False
-    # Whether an agent on this backend may run on a provider profile
-    # (lib.codex_profiles): its own process, home and provider key.
-    supports_provider_profiles: bool = False
     supports_steer: bool = False
     supports_transcript_streaming: bool = False
     supports_routing: bool = True

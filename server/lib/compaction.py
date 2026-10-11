@@ -60,11 +60,6 @@ def compact_session(session: str) -> dict[str, Any]:
     agent = agents_db.get_by_session(session)
     if agent and not agents_db.interaction_capabilities(agent)["can_restart"]:
         return {"ok": False, "error": "Janitors are managed from their configuration"}
-    from . import codex_profiles
-    if agent and codex_profiles.is_profiled(agent):
-        # `codex resume` would start on the CLI's own account and home.
-        return {"ok": False, "error": "compaction unsupported for a provider-profile "
-                                      "agent; Codex compacts it automatically"}
     if _runtime_client is not None:
         return _runtime_client.compact(session)
     if not agent:

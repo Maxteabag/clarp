@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from . import artifacts, codex_profiles, db
+from . import artifacts, db
 
 
 MAX_DECISIONS = 20
@@ -27,17 +27,6 @@ def _text(value: Any, limit: int) -> str:
     return str(value or "").strip()[:limit]
 
 
-def _profiled_sessions() -> set[str]:
-    """Sessions of provider-profile agents: Oracle's voice provider never
-    sees their decisions or replies."""
-    profiled = codex_profiles.assigned()
-    if not profiled:
-        return set()
-    marks = ",".join("?" * len(profiled))
-    return {row["session"] for row in db.conn().execute(
-        f"SELECT session FROM agents WHERE agent_id IN ({marks})", tuple(profiled))}
-
-
 def pending_decisions(*, limit: int = MAX_DECISIONS) -> list[dict[str, Any]]:
     """Return current pending decisions/questions in attention order.
 
@@ -51,10 +40,9 @@ def pending_decisions(*, limit: int = MAX_DECISIONS) -> list[dict[str, Any]]:
     if limit == 0:
         return []
     rows = artifacts.attention(include_questions=True)
-    hidden = _profiled_sessions()
     output: list[dict[str, Any]] = []
     for row in rows:
-        if row.get("status") != "pending" or row.get("session") in hidden:
+        if row.get("status") != "pending":
             continue
         output.append({
             "decision_id": _text(row.get("decision_id"), 180),
@@ -213,11 +201,8 @@ def pending_completion_notifications(*, now_ms_value: int | None = None,
             LIMIT ?""",
             (max(1, min(limit * 4, MAX_DECISIONS * 4)),),
     ).fetchall()
-    profiled = codex_profiles.assigned()
     output: list[dict[str, Any]] = []
     for row in rows:
-        if row["agent_id"] in profiled:
-            continue
         notification_origin = str(row["origin"] or "").strip()
         cause_origin = str(row["cause_origin"] or notification_origin).strip()
         if (notification_origin not in {"user", "oracle"}

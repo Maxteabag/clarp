@@ -62,6 +62,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
     handler's helpers; they are passed in so this module never imports
     `server`. The caller must hold `transcription_results.serialize(id)`.
     """
+    from . import transcription_results
 
     # One request sees one engine: `_activate_transcription_if_default` may
     # swap ctx.stt on another thread while this request runs.
@@ -109,35 +110,6 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
             requested_model = long_model
     except Exception as e:  # noqa: BLE001 - escalation never blocks STT
         log_exception("sttLongFormRouteFail", e)
-    from . import agents as agents_db, codex_profiles
-    focused = agents_db.get_by_session(focus or "")
-    eu_only = bool(focused) and not agents_db.interaction_capabilities(
-        focused)["can_cloud_dictation"]
-    if eu_only:
-        # Dictation to a provider-profile agent is its prompt: only the Host's
-        # own Whisper may hear it, never a cloud or adapter engine.
-        from .stt import OpenAIWhisperSTT, WhisperSTT
-        if not isinstance(stt, WhisperSTT) or isinstance(stt, OpenAIWhisperSTT):
-            return TranscriptionOutcome.error(
-                409, "This agent only accepts dictation transcribed on this computer; "
-                     "type the message instead")
-        requested_model, agent_fallbacks = "", []
-    with codex_profiles.local_only(eu_only):
-        return _transcribe(ctx, stt=stt, focus=focus, audio_bytes=audio_bytes,
-                           ctype=ctype, hands_free=hands_free,
-                           requested_model=requested_model,
-                           agent_fallbacks=agent_fallbacks,
-                           transcription_id=transcription_id,
-                           fingerprint=fingerprint, utterance_id=utterance_id,
-                           client_ts=client_ts, record_voice=record_voice,
-                           spawn_voice_metrics=spawn_voice_metrics)
-
-
-def _transcribe(ctx, *, stt, focus, audio_bytes, ctype, hands_free,
-                requested_model, agent_fallbacks, transcription_id, fingerprint,
-                utterance_id, client_ts, record_voice,
-                spawn_voice_metrics) -> TranscriptionOutcome:
-    from . import transcription_results
     if not requested_model and not stt.ready.is_set():
         return TranscriptionOutcome.error(503, "whisper model loading")
     # The trace is minted before compiling so the vocab run, the

@@ -56,10 +56,6 @@ def begin(*, delegation_id: str, trace_id: str, client_msg_id: str,
     if not all((delegation_id, trace_id, client_msg_id, agent_id, session,
                 request_text, owner_principal)):
         raise ValueError("complete Oracle delegation identity is required")
-    from . import codex_profiles
-    if codex_profiles.is_profiled(agent_id):
-        # Its result would be read back to Oracle's voice provider.
-        raise ValueError("Oracle cannot delegate to an EU-only agent")
     database = db.conn()
     database.execute("BEGIN IMMEDIATE")
     try:

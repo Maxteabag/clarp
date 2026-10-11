@@ -522,9 +522,6 @@ class Config:
     # is stored on its row and written into a scoped config per turn. Direct
     # `claude` CLI use is unaffected.
     mcp_strict: bool = True
-    # [codex_profiles.<id>] tables, raw. lib.codex_profiles validates them
-    # strictly; an invalid table is never offered or run.
-    codex_profiles: dict[str, Any] = field(default_factory=dict)
     roster: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_ROSTER))
     catalog: list[dict[str, str]] = field(default_factory=lambda: list(DEFAULT_CATALOG))
     # APNs push notifications. When an agent finishes its turn (state 'done'),
@@ -998,8 +995,6 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         deepseek_model  = str(agents.get("deepseek_model", "")),
         deepseek_effort = str(agents.get("deepseek_effort", "")),
         mcp_strict      = bool(mcp.get("strict", True)),
-        codex_profiles  = (dict(data.get("codex_profiles"))
-                           if isinstance(data.get("codex_profiles"), dict) else {}),
         # Merge over the built-in roster (never wholesale-replace): a [roster]
         # in config.toml adds or overrides personas, but the built-ins always
         # remain — so personas added to DEFAULT_ROSTER in code can never be

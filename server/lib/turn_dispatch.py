@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from . import agents as agents_db
-from . import backend_usage, backends, codex_profiles, config, db, error_classify, eventlog
+from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
 from . import recovery_backoff, turn_lifecycle, turn_slots
 from . import events
@@ -73,20 +73,6 @@ def account_failover(backend):
 
 def account_selector(backend):
     return getattr(config.load(), _pool_backend(backend).config_account_switch_field)
-
-def _account_pool(spec) -> str:
-    """The account pool a turn's failures may switch or recover. A provider
-    profile is not an account of its CLI: its turns have none."""
-    if spec.provider_profile:
-        return ""
-    return backends.by_id(spec.backend).account_pool()
-
-def _classify_failure(spec, text, local: str) -> str:
-    """The failure category. A provider-profile turn's error text stays on
-    this machine: no remote classifier sees it."""
-    if spec.provider_profile:
-        return local
-    return judgment_sites.classify_error_or_unknown(text, local)
 
 _INFLIGHT: dict[str, str] = _SLOTS.inflight
 _QUEUED: dict[str, list] = _SLOTS.queued
@@ -323,20 +309,10 @@ class DispatchResult:
     queue_revision: int = 0
 
 
-def _resolve_llm(agent: dict, backend: str, provider_profile: str = "") -> tuple[str, str]:
+def _resolve_llm(agent: dict, backend: str) -> tuple[str, str]:
     """Effective (model, effort) for a turn: the per-agent override wins, else
     the global [agents] config default, else the CLI's own default ("").
-    Effort is validated against what the backend's CLI accepts. A provider
-    profile only runs its own models and efforts."""
-    if provider_profile:
-        profile = codex_profiles.get(provider_profile)
-        if profile is None:
-            # Never fall back to the CLI's own account or another backend.
-            raise DispatchError(409, f"provider profile '{provider_profile}' is not configured")
-        model = (agent.get("model") or "").strip()
-        effort = (agent.get("effort") or "").strip()
-        model = model if profile.has_model(model) else profile.default_model
-        return model, (effort if effort in profile.efforts_for(model) else "")
+    Effort is validated against what the backend's CLI accepts."""
     cfg = config.load()
     if agent.get("is_janitor"):
         from .janitor_design_policy import effective_chain
@@ -400,9 +376,6 @@ class _TurnSpec:
     # (``queue_id``) in place: a cancel ends that exact row, and lifting
     # the fence queues it again.
     taken_over: bool = False
-    # The agent's Codex provider profile ("" = the CLI's own account), read
-    # from the agent at admission, so recovered and re-admitted work keeps it.
-    provider_profile: str = ""
 
 
 def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:
@@ -1283,12 +1256,6 @@ class TurnDispatchService:
             raise DispatchError(409, "Durable goal owns continuation")
         _validate_goal_dispatch(agent, client_msg_id)
         agent_id = agent["agent_id"]
-        if sender_agent_id and not codex_profiles.may_post(sender_agent_id, agent_id):
-            # A provider-profile agent's words never reach an agent whose
-            # provider is another one (docs/codex-eu-profile.md).
-            raise DispatchError(403, codex_profiles.BOUNDARY)
-        if not agents_db.interaction_capabilities(agent)["can_speak"]:
-            synthesize_audio = False  # text-only: no TTS vendor hears it
         if not skip_admission and origin in _RECOVERY_RESUMING_ORIGINS:
             self.clear_recovery_backoff(agent_id, reason=f"send:{origin}")
         request = admission_policy.LiveWork(
@@ -1352,10 +1319,7 @@ class TurnDispatchService:
             session=session,
             backend_session_id=backend_session_id or None,
         )
-        provider_profile = codex_profiles.for_agent(agent_id)
-        if provider_profile and not backends.by_id(backend).supports_provider_profiles:
-            raise DispatchError(409, "provider profile requires the codex backend")
-        model, effort = _resolve_llm(agent, backend, provider_profile)
+        model, effort = _resolve_llm(agent, backend)
         team_digest, team_inbox_ids = team_store.pending_digest(agent_id)
         team_protocol = team_store.team_protocol_instruction(
             agent_id,
@@ -1385,7 +1349,6 @@ class TurnDispatchService:
                       or ((client_msg_id or trace_id) if queue_if_busy else "")),
             unheard_audio=unheard_audio,
             janitor_run_id=janitor_run_id,
-            provider_profile=provider_profile,
         )
         # Queue receipts and ordinary user admissions share one SQLite write
         # transaction, preserving client_msg_id idempotency even if concurrent
@@ -2348,7 +2311,7 @@ class TurnDispatchService:
         # A retry of a never-initialised new session must keep --session-id.
         state = {"saw_init": False, "backend_session_id": spec.backend_session_id, "spawn_ready": threading.Event()}
         account_attempt = None
-        if (_account_pool(spec)
+        if (backend.account_pool()
                 and (account_selector(spec.backend) or account_failover(spec.backend).recovering)):
             coordinator = account_failover(spec.backend)
 
@@ -2424,8 +2387,6 @@ class TurnDispatchService:
                 model=spec.model,
                 effort=spec.effort,
                 run_if_owned=run_if_owned,
-                **({"provider_profile": spec.provider_profile}
-                   if spec.provider_profile else {}),
             )
             state["handle"] = handle
             team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
@@ -2504,8 +2465,8 @@ class TurnDispatchService:
                         spec, attempt, state, error_classify.RUNNER_EXIT,
                         f"backend session bind failed: {state['bind_error']}")
                     return
-                category = _classify_failure(
-                    spec, _result_error_text(event), error_classify.classify_result(event))
+                category = judgment_sites.classify_error_or_unknown(
+                    _result_error_text(event), error_classify.classify_result(event))
                 if category != error_classify.CLEAN:
                     self._handle_failure(spec, attempt, state, category,
                                          _result_error_text(event))
@@ -2567,8 +2528,8 @@ class TurnDispatchService:
                 return
             try:
                 category = (error_classify.RUNNER_EXIT if state.get("bind_error")
-                            else _classify_failure(
-                                spec, message, error_classify.classify_error(message)))
+                            else judgment_sites.classify_error_or_unknown(
+                                message, error_classify.classify_error(message)))
                 if state.get("bind_error"):
                     message = f"backend session bind failed: {state['bind_error']}"
                 self._handle_failure(spec, attempt, state, category, message)
@@ -2603,8 +2564,7 @@ class TurnDispatchService:
             return
         msg = (message or "")[:300]
         backend = backends.by_id(spec.backend)
-        if (category == error_classify.USAGE_LIMIT and not spec.recovery_attempted
-                and not spec.provider_profile):
+        if category == error_classify.USAGE_LIMIT and not spec.recovery_attempted:
             try:
                 recovered = backend.recover_usage_limit(message)
             except Exception as exc:
@@ -2619,7 +2579,7 @@ class TurnDispatchService:
                     return
         if (category in (error_classify.USAGE_LIMIT, error_classify.AUTH,
                          error_classify.ACCOUNT_PLAN)
-                and _account_pool(spec)
+                and backend.account_pool()
                 and account_failover(spec.backend).request(
                     spec.agent_id, spec.trace_id, account_selector(spec.backend))):
             eventlog.emit("server", "claudeAccountRecovery", context=spec.context,
@@ -2728,7 +2688,7 @@ class TurnDispatchService:
         limit_event = None
         if category == error_classify.USAGE_LIMIT and quota_confirmed is False:
             human = "Codex could not complete this request. Try again"
-        if category == error_classify.USAGE_LIMIT and not spec.provider_profile:
+        if category == error_classify.USAGE_LIMIT:
             try:
                 limit_event = backends.by_id(spec.backend).classify_usage_limit(
                     message or "", quota_confirmed=quota_confirmed)
