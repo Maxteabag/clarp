@@ -32,9 +32,9 @@ The key is never written to disk, argv, the database, logs or error text;
 ``redact`` strips it from anything the profile's process prints back. See
 docs/codex-eu-profile.md for what leaves the machine and what stays.
 
-An agent's profile is stored at creation, in the same transaction as the
-agent row, in the settings table under ``agent.provider_profile.<agent_id>``,
-and never changes ("" is the default Codex account). A turn, a fork or a
+An agent's profile is the ``agents.provider_profile`` column (schema 118),
+written by the creating INSERT and made immutable by a trigger ("" is the
+default Codex account). A turn, a fork or a
 resume across profiles is refused.
 """
 from __future__ import annotations
@@ -51,9 +51,8 @@ import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from . import managed_skills, settings_store
+from . import managed_skills
 
-SETTING_PREFIX = "agent.provider_profile."
 REDACTED = "[redacted]"
 # The one variable that carries a profile's key into its own app-server.
 KEY_ENV = "CLARP_CODEX_PROFILE_API_KEY"
@@ -239,49 +238,51 @@ def require(profile_id: str) -> CodexProfile:
 
 
 # --- the agent's profile ---------------------------------------------------
+#
+# The profile is a column on the agent's row (schema 118): written by the
+# creating INSERT, immutable by trigger. Readers take it from a row they
+# already hold (``profile_of``); a bare id costs one primary-key read.
+
+def profile_of(agent: dict | str | None) -> str:
+    """The agent's profile id ("" = the CLI's own account), from its row when
+    given one, else read by id (deleted agents included: they still own their
+    threads)."""
+    if isinstance(agent, dict) and "provider_profile" in agent:
+        return str(agent.get("provider_profile") or "")
+    agent_id = agent if isinstance(agent, str) else str((agent or {}).get("agent_id") or "")
+    if not agent_id:
+        return ""
+    from .db import conn
+    row = conn().execute("SELECT provider_profile FROM agents WHERE agent_id = ?",
+                         (agent_id,)).fetchone()
+    return str(row["provider_profile"]) if row else ""
+
 
 def for_agent(agent_id: str) -> str:
     """The agent's profile id, "" for the default Codex account."""
-    if not agent_id:
-        return ""
-    return settings_store.get_text(SETTING_PREFIX + agent_id)
-
-
-def write_for_new_agent(c, agent_id: str, profile_id: str) -> None:
-    """Store ``profile_id`` inside the caller's transaction that writes the
-    agent row (``agents.create_agent``). Immutable: an agent that already has
-    another profile, or none while one is asked for, is refused."""
-    current = settings_store.get_text_in(c, SETTING_PREFIX + agent_id)
-    if current == profile_id:
-        return
-    if current:
-        raise ProfileMismatch(f"agent {agent_id} runs on provider profile '{current}'")
-    require(profile_id)
-    settings_store.set_text_in(c, SETTING_PREFIX + agent_id, profile_id)
+    return profile_of(agent_id or "")
 
 
 def assigned() -> dict[str, str]:
-    """agent_id -> profile for every agent with a profile."""
-    return {key[len(SETTING_PREFIX):]: value
-            for key, value in settings_store.get_prefix(SETTING_PREFIX).items()
-            if value}
+    """agent_id -> profile for every agent with a profile (one indexed read)."""
+    from .db import conn
+    return {row["agent_id"]: row["provider_profile"] for row in conn().execute(
+        "SELECT agent_id, provider_profile FROM agents WHERE provider_profile != ''")}
 
 
 def is_profiled(agent: dict | str | None) -> bool:
-    """Whether an agent (row or id) runs on a provider profile. Side channels
-    that would send its content to another provider skip it."""
-    agent_id = agent if isinstance(agent, str) else (agent or {}).get("agent_id", "")
-    return bool(for_agent(str(agent_id or "")))
+    """Whether an agent (row or id) runs on a provider profile, configured or
+    not. Side channels that would send its content to another provider skip
+    it; a profile Clarp no longer knows still counts (fail closed)."""
+    return bool(profile_of(agent))
 
 
 def profiled_sessions() -> dict[str, str]:
     """session -> agent_id for every live agent on a provider profile."""
-    profiled = assigned()
-    if not profiled:
-        return {}
-    from . import agents as agents_db
-    rows = (agents_db.get_by_agent_id(agent_id) for agent_id in profiled)
-    return {row["session"]: row["agent_id"] for row in rows if row}
+    from .db import conn
+    return {row["session"]: row["agent_id"] for row in conn().execute(
+        "SELECT session, agent_id FROM agents WHERE provider_profile != '' "
+        "AND deleted_at IS NULL")}
 
 
 def may_post(sender_agent_id: str, target_agent_id: str) -> bool:

@@ -180,6 +180,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 117:
             _migrate_to_v117(con)
 
+        if version < 118:
+            _migrate_to_v118(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -895,6 +898,30 @@ def _migrate_to_v116(con: sqlite3.Connection) -> None:
     if "allow_paused" not in columns:
         con.execute("ALTER TABLE queued_turns"
                     " ADD COLUMN allow_paused INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_to_v118(con: sqlite3.Connection) -> None:
+    """An agent's Codex provider profile moves from the settings table
+    (``agent.provider_profile.<agent_id>``) onto its row. Strictly additive:
+    the column is backfilled before the immutability trigger exists; the old
+    settings rows stay untouched and are no longer read. Older releases ignore
+    the column."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(agents)")}
+    if "provider_profile" not in columns:
+        con.execute("ALTER TABLE agents ADD COLUMN provider_profile TEXT NOT NULL DEFAULT ''")
+    prefix = "agent.provider_profile."
+    con.execute(
+        """UPDATE agents SET provider_profile = (
+               SELECT value FROM settings WHERE key = ? || agents.agent_id)
+            WHERE provider_profile = '' AND EXISTS (
+               SELECT 1 FROM settings WHERE key = ? || agents.agent_id AND value != '')""",
+        (prefix, prefix))
+    con.execute("CREATE INDEX IF NOT EXISTS idx_agents_provider_profile"
+                " ON agents(provider_profile) WHERE provider_profile != ''")
+    con.execute("""CREATE TRIGGER IF NOT EXISTS agents_provider_profile_immutable
+                   BEFORE UPDATE OF provider_profile ON agents
+                   WHEN OLD.provider_profile IS NOT NEW.provider_profile
+                   BEGIN SELECT RAISE(ABORT, 'agents.provider_profile is immutable'); END""")
 
 
 def _migrate_to_v117(con: sqlite3.Connection) -> None:
