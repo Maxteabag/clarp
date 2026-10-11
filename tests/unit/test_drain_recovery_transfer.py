@@ -10,6 +10,7 @@ clock and selector."""
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from dataclasses import replace
 
 import pytest
@@ -166,7 +167,8 @@ def test_a_park_no_process_ran_for_moves_to_the_head_and_the_runtime_seals(
     # The park's start carries over (only timing, no credentials).
     carry = json.loads((tmp_path / "carry.json").read_text())
     assert set(carry["pools"]) == {"claude"}
-    assert set(carry["pools"]["claude"]) == {"parked_since_ms"}
+    assert set(carry["pools"]["claude"]) == {"parked_since_ms", "agents"}
+    assert carry["pools"]["claude"]["agents"] == [agent]
 
 
 def test_after_the_handoff_the_work_runs_once_in_order_and_the_bound_carries_on(
@@ -596,3 +598,81 @@ def test_an_ambiguous_queue_row_keeps_the_blocker(tmp_path, monkeypatch, selecto
     assert f"{agent}:queued_row_uncertain" in blockers["account_recovery_refused"]
     assert pool.coordinator.attempts[agent].trace_id == "t-work"
     assert ("work", "queued") in _rows(agent)
+
+
+# --- review finding 2: the carried recovery across the real boot ---------------
+
+class RealTimers:
+    """Production scheduling (threading.Timer), recorded so the test can
+    cancel what is still pending when it ends."""
+
+    def __init__(self):
+        import threading
+        self.threading = threading
+        self.timers = []
+
+    def __call__(self, delay, callback):
+        timer = self.threading.Timer(delay, callback)
+        timer.daemon = True
+        self.timers.append(timer)
+        timer.start()
+
+    def cancel(self):
+        for timer in self.timers:
+            timer.cancel()
+
+
+def _wait(predicate, seconds=5.0):
+    import time
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return predicate()
+
+
+@pytest.mark.parametrize("timer_first", [True, False])
+def test_the_carried_recovery_survives_the_real_boot_order(
+        tmp_path, monkeypatch, selector_configured, timer_first):
+    import time
+    from lib import runtime_startup
+    agent, service, provider, pool, runtime = _parked_scene(tmp_path, monkeypatch)
+    try:
+        assert runtime.seal_if_drained() == {}
+    finally:
+        runtime.server_close()
+    carried_ms = json.loads((tmp_path / "carry.json").read_text())[
+        "pools"]["claude"]["parked_since_ms"]
+
+    # The new runtime process, booting as server/runtime.py does, with the
+    # production timer and clock. The account is still exhausted.
+    td.reset_for_tests()
+    timers, selector = RealTimers(), Selector(False, False, False)
+    passes = []
+    coordinator = AccountFailover(td.OwnershipLock(), switch=selector,
+                                  schedule=timers)
+    original = coordinator._recover
+    monkeypatch.setattr(coordinator, "_recover",
+                        lambda: (original(), passes.append(1)))
+    monkeypatch.setitem(td._FAILOVERS, "claude", coordinator)
+    try:
+        carry = consume_account_recovery_carry(tmp_path / "carry.json")
+        assert td.resume_account_recovery(carry) == ["claude"]
+        if timer_first:
+            assert _wait(lambda: passes)        # Timer(0) ran before recovery
+        new_service, new_provider = _service(tmp_path)
+        runtime_startup.recover_runtime(
+            SimpleNamespace(stream=None), new_service, clean_handoff=True,
+            restore_agents=lambda _ctx: None)
+        assert _wait(lambda: selector.asked >= 1)
+        # Never on the current account without a check; still parked.
+        assert new_provider.spawned == []
+        assert coordinator.recovering is True
+        assert coordinator.status()["waiting"] == [agent]
+        # The bound counts from the original park, not from this boot.
+        parked_for = time.monotonic() - coordinator.parked_since
+        assert abs(parked_for - (time.time() - carried_ms / 1000)) < 2.0
+    finally:
+        coordinator.schedule = lambda *_a: None
+        timers.cancel()

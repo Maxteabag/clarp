@@ -838,7 +838,9 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 try:
                     write_account_recovery_carry(
                         self.account_recovery_carry,
-                        turn_dispatch.account_recovery_carry())
+                        turn_dispatch.account_recovery_carry(
+                            handed_over=getattr(
+                                self.dispatch_service, "handed_over", None)))
                 except OSError as exc:
                     from .log import log_exception
                     log_exception("accountRecoveryCarryFail", exc)

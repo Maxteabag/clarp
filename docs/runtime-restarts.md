@@ -96,7 +96,12 @@ to a newly installed release without interrupting anything:
    marker with each recovering pool's original park start (timing only;
    credentials and the account choice stay with the selector), and the next
    runtime continues that recovery from it, so a handoff never restarts the
-   30-minute park bound; a carry older than an hour is ignored. Anything
+   30-minute park bound; a carry older than an hour is ignored. The carry also
+   names the agents whose parks were handed over, and the continued recovery
+   does not end on an empty pass until they have been re-admitted and parked
+   again (at most 2 minutes), whichever runs first at boot: its own timer or
+   the queue recovery. So handed-over work never starts on the current
+   account without a selector check. Anything
    else keeps blocking, and the seal's blockers say why
    (`account_recovery_refused: ["agent:reason"]`). A runtime built without
    the carry path (tests, older releases) blocks on every park as before.
