@@ -1865,15 +1865,12 @@ def find_latest_jsonl(
     if not session_id:
         return None
     if sessions_root is None:
-        # Provider-profile agents keep their rollouts in their own home;
-        # thread ids are UUIDs, so the first home that has one owns it.
+        # The home of the agent that bound this thread, and only that home:
+        # a provider-profile agent's rollouts live in its profile's home and a
+        # default agent never sees one.
         from . import codex_profiles
-        for root in (_codex_home() / "sessions",
-                     *(home / "sessions" for home in codex_profiles.homes())):
-            found = find_latest_jsonl(session_id, root)
-            if found is not None:
-                return found
-        return None
+        home = codex_profiles.home_for_thread(session_id)
+        sessions_root = (home if home is not None else _codex_home()) / "sessions"
     root = sessions_root
     if not root.is_dir():
         return None

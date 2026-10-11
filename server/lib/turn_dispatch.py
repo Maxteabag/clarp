@@ -329,7 +329,10 @@ def _resolve_llm(agent: dict, backend: str, provider_profile: str = "") -> tuple
     Effort is validated against what the backend's CLI accepts. A provider
     profile only runs its own models and efforts."""
     if provider_profile:
-        profile = codex_profiles.require(provider_profile)
+        profile = codex_profiles.get(provider_profile)
+        if profile is None:
+            # Never fall back to the CLI's own account or another backend.
+            raise DispatchError(409, f"provider profile '{provider_profile}' is not configured")
         model = (agent.get("model") or "").strip()
         effort = (agent.get("effort") or "").strip()
         return (model if profile.has_model(model) else profile.default_model,

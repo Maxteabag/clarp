@@ -24,11 +24,13 @@ from lib import turn_dispatch as _td
 from lib.protocol import AgentState
 from lib.turn_dispatch import TurnDispatchService
 
+pytestmark = pytest.mark.usefixtures("fake_codex_profile")
+
 SENTINEL = "sk-SENTINEL-azure-0f1e2d3c4b5a69788796a5b4c3d2e1f0"
 
 _FAKE_APP_SERVER = r'''
 import json, os, sys, uuid
-key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+key = os.environ.get("CLARP_CODEX_PROFILE_API_KEY", "")
 mode = os.environ.get("FAKE_MODE", "ok")
 def send(message):
     print(json.dumps(message), flush=True)
@@ -48,7 +50,13 @@ for line in sys.stdin:
         thread = params["threadId"]
         send({"id": rid, "result": {"turn": {"id": "turn-1"}}})
         send({"method": "turn/started", "params": {"threadId": thread, "turn": {"id": "turn-1"}}})
-        if mode == "leak":
+        if mode == "usage":
+            send({"method": "turn/completed", "params": {"threadId": thread, "turn": {
+                "id": "turn-1", "status": "failed",
+                "error": {"message": "You've hit your usage limit. Try again later."}}}})
+        elif mode == "drop":
+            sys.exit(1)
+        elif mode == "leak":
             sys.stderr.write("upstream said: bad api-key " + key + "\n")
             sys.stderr.flush()
             send({"method": "turn/completed", "params": {"threadId": thread, "turn": {
@@ -65,19 +73,10 @@ for line in sys.stdin:
 
 
 @pytest.fixture
-def profile_env(tmp_path, monkeypatch):
-    """A fake keyring with the sentinel key, a private profile root, the fake
-    app-server and an empty pool."""
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    secret_tool = bindir / "secret-tool"
-    secret_tool.write_text(
-        "#!/bin/sh\n"
-        "[ \"$*\" = \"lookup service psa-reverify key azure-openai\" ] || exit 1\n"
-        f"printf '%s\\n' '{SENTINEL}'\n")
-    secret_tool.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("CLARP_CODEX_PROFILES_DIR", str(tmp_path / "profiles"))
+def profile_env(tmp_path, monkeypatch, fake_codex_profile):
+    """The fake profile and keyring (tests/conftest.py) holding the sentinel
+    key, the fake app-server and an empty pool."""
+    assert fake_codex_profile.key == SENTINEL
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "default-codex-home"))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-reach-azure")
     server = tmp_path / "fake_app_server.py"
@@ -97,7 +96,8 @@ def profile_env(tmp_path, monkeypatch):
     codex_app_server.recycle_clients()
     codex_app_server._CLIENTS.clear()
     codex_profiles.clear_cache()
-    yield SimpleNamespace(tmp=tmp_path, spawned=spawned)
+    yield SimpleNamespace(tmp=tmp_path, spawned=spawned,
+                          secret_tool=fake_codex_profile.secret_tool)
     for client in list(codex_app_server._CLIENTS.values()):
         client.shutdown()
     codex_app_server._CLIENTS.clear()
@@ -107,10 +107,8 @@ def profile_env(tmp_path, monkeypatch):
 def _agent(session, *, profile="", cwd="/tmp"):
     agent_id = agents_db.create_agent(
         persona=session.title(), voice_id="V", cwd=cwd, session=session,
-        backend="codex")
+        backend="codex", **({"provider_profile": profile} if profile else {}))
     agents_db.start_runtime(agent_id, session)
-    if profile:
-        codex_profiles.assign(agent_id, profile)
     return agent_id
 
 
@@ -160,12 +158,12 @@ def test_the_profile_app_server_gets_its_own_home_and_the_key_only_in_env(profil
     [spawn] = profile_env.spawned
     home = profile_env.tmp / "profiles" / "azure-eu"
     assert spawn["env"]["CODEX_HOME"] == str(home)
-    assert spawn["env"]["AZURE_OPENAI_API_KEY"] == SENTINEL
+    assert spawn["env"]["CLARP_CODEX_PROFILE_API_KEY"] == SENTINEL
     assert "OPENAI_API_KEY" not in spawn["env"]
     assert SENTINEL not in " ".join(spawn["argv"])
     assert stat.S_IMODE(home.stat().st_mode) == 0o700
     config = tomllib.loads((home / "config.toml").read_text())
-    assert config["model"] == "sol61-eu"
+    assert config["model"] == "eu-model"
     assert config["model_provider"] == "azure-eu"
     assert config["web_search"] == "disabled"
     assert config["check_for_update_on_startup"] is False
@@ -173,9 +171,9 @@ def test_the_profile_app_server_gets_its_own_home_and_the_key_only_in_env(profil
     assert config["feedback"] == {"enabled": False}
     provider = config["model_providers"]["azure-eu"]
     assert provider["base_url"] == (
-        "https://irisbot-ticketmaster-ai-sc.openai.azure.com/openai/v1")
+        "https://eu-provider.invalid/openai/v1")
     assert provider["wire_api"] == "responses"
-    assert provider["env_http_headers"] == {"api-key": "AZURE_OPENAI_API_KEY"}
+    assert provider["env_http_headers"] == {"api-key": "CLARP_CODEX_PROFILE_API_KEY"}
     assert provider["requires_openai_auth"] is False
     assert provider["supports_websockets"] is False
 
@@ -223,7 +221,7 @@ def test_the_key_never_reaches_logs_eventlog_db_status_or_error_text(
 
 def test_a_missing_key_fails_the_turn_visibly_without_any_openai_fallback(
         profile_env, monkeypatch):
-    (profile_env.tmp / "bin" / "secret-tool").write_text("#!/bin/sh\nexit 1\n")
+    profile_env.secret_tool.write_text("#!/bin/sh\nexit 1\n")
     codex_profiles.clear_cache()
     agent = _agent("eu", profile="azure-eu")
 
@@ -350,7 +348,7 @@ def test_a_profile_turn_skips_account_switching_recovery_and_openai_usage(
 
     [call] = registry.spawned
     assert call["provider_profile"] == "azure-eu"
-    assert call["model"] == "sol61-eu"
+    assert call["model"] == "eu-model"
     call["on_error"]("You've hit your usage limit. Try again at 3:29 PM.")
 
     assert recovered == []
@@ -377,33 +375,64 @@ def test_a_default_codex_turn_still_carries_no_profile_and_still_switches_accoun
 
 # --- 4. the profile persists on the agent ------------------------------------
 
-def test_the_profile_survives_a_runtime_restart_and_is_immutable(profile_env):
+def test_the_profile_is_written_with_the_agent_row_and_is_immutable(profile_env):
     agent = _agent("eu", profile="azure-eu")
     codex_profiles.clear_cache()
-
     assert codex_profiles.for_agent(agent) == "azure-eu"
-    with pytest.raises(codex_profiles.ProfileMismatch):
-        codex_profiles.assign(agent, "")
     assert codex_profiles.for_agent(_agent("plain")) == ""
+
+    agents_db.soft_delete(agent)
+    with pytest.raises(codex_profiles.ProfileMismatch):  # same session, other profile
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(codex_profiles, "get", lambda pid: codex_profiles.CodexProfile(
+                id=pid, label="x", detail="", base_url="https://x.invalid", model="m",
+                efforts=(), env_key_header="api-key", keyring_service="s", keyring_key="k"))
+            agents_db.create_agent(persona="Eu", voice_id="V", cwd="/tmp", session="eu",
+                                   backend="codex", provider_profile="other-eu")
+    assert codex_profiles.for_agent(agent) == "azure-eu"
+
+
+def test_an_unconfigured_profile_never_creates_an_agent(profile_env):
+    with pytest.raises(codex_profiles.ProfileUnavailable):
+        agents_db.create_agent(persona="Nope", voice_id="V", cwd="/tmp", session="nope",
+                               backend="codex", provider_profile="not-configured")
+    assert agents_db.get_by_session("nope") is None  # the row rolled back with it
 
 
 # --- transcripts, sessions and skills against the profile home -----------------
 
-def test_profile_rollouts_are_found_but_never_offered_for_adoption(profile_env):
-    from lib import codex_transcript
-    home = codex_profiles.prepare_home("azure-eu")
-    rollout = home / "sessions" / "2026" / "10" / "11" / (
-        "rollout-2026-10-11T10-00-00-0b5e0a8c-1111-4222-8333-944445555666.jsonl")
-    rollout.parent.mkdir(parents=True)
-    rollout.write_text(json.dumps({"type": "session_meta", "payload": {
-        "id": "0b5e0a8c-1111-4222-8333-944445555666", "cwd": "/tmp"}}) + "\n"
-        + json.dumps({"type": "event_msg", "payload": {
+def _rollout(home, thread):
+    path = home / "sessions" / "2026" / "10" / "11" / (
+        f"rollout-2026-10-11T10-00-00-{thread}.jsonl")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"type": "session_meta", "payload": {
+        "id": thread, "cwd": "/tmp"}}) + "\n" + json.dumps({"type": "event_msg", "payload": {
             "type": "user_message", "message": "hello"}}) + "\n")
+    return path
 
-    assert codex_transcript.find_latest_jsonl(
-        "0b5e0a8c-1111-4222-8333-944445555666") == rollout
-    assert codex_transcript.list_sessions("/tmp", all_projects=True) == []
-    assert codex_profiles.owner_of_thread("0b5e0a8c-1111-4222-8333-944445555666") == "azure-eu"
+
+def test_each_agent_finds_its_rollouts_only_in_its_own_home(profile_env):
+    from lib import codex_transcript
+    from lib.backend.registry import by_id
+    eu_thread = "0b5e0a8c-1111-4222-8333-944445555666"
+    plain_thread = "1c6f1b9d-1111-4222-8333-944445555666"
+    eu, plain = _agent("eu", profile="azure-eu"), _agent("plain")
+    eu_rollout = _rollout(codex_profiles.prepare_home("azure-eu"), eu_thread)
+    plain_rollout = _rollout(profile_env.tmp / "default-codex-home", plain_thread)
+    # Each home also holds a copy of the other's thread: neither may see it.
+    _rollout(profile_env.tmp / "default-codex-home", eu_thread)
+    _rollout(codex_profiles.home("azure-eu"), plain_thread)
+    agents_db.bind_backend_session(eu, eu_thread)
+    agents_db.bind_backend_session(plain, plain_thread)
+
+    assert codex_transcript.find_latest_jsonl(eu_thread) == eu_rollout
+    assert codex_transcript.find_latest_jsonl(plain_thread) == plain_rollout
+    assert by_id("codex").model_transcript(eu_thread) == eu_rollout
+    assert by_id("codex").model_transcript(plain_thread) == plain_rollout
+    # An unbound thread is the default account's: a profile home is never searched.
+    loose = "2d7a2cae-1111-4222-8333-944445555666"
+    _rollout(codex_profiles.home("azure-eu"), loose)
+    assert codex_transcript.find_latest_jsonl(loose) is None
 
 
 def test_the_profile_home_links_clarps_managed_codex_skills(profile_env, monkeypatch):
@@ -430,7 +459,7 @@ def test_model_options_offer_the_profile_with_its_own_models(profile_env, monkey
     assert profile["id"] == "azure-eu"
     assert profile["label"] == "Codex (EU, Azure)"
     assert profile["available"] is True
-    assert [m["id"] for m in profile["models"]] == ["sol61-eu"]
+    assert [m["id"] for m in profile["models"]] == ["eu-model"]
     assert "provider_profiles" not in response["providers"]["claude"]
 
 
@@ -453,7 +482,7 @@ def test_creating_a_profile_agent_stores_the_profile_and_its_model(profile_env):
 
     row = agents_db.get_by_session(result.session)
     assert codex_profiles.for_agent(row["agent_id"]) == "azure-eu"
-    assert row["model"] == "sol61-eu"
+    assert row["model"] == "eu-model"
     [shown] = [a for a in snapshot.build_agent_snapshot(None)["agents"]
                if a["session"] == "eu"]
     assert shown["provider_profile"] == "azure-eu"
@@ -503,21 +532,19 @@ def test_a_relaunch_keeps_the_profile_and_cannot_change_it_or_the_backend(profil
 
 def test_a_conversation_is_only_resumed_inside_the_profile_that_owns_it(profile_env):
     from lib.agent_lifecycle import AgentLifecycleError
-    home = codex_profiles.prepare_home("azure-eu")
     owned = "0b5e0a8c-1111-4222-8333-944445555666"
-    (home / "sessions").mkdir()
-    (home / "sessions" / f"rollout-2026-10-11T10-00-00-{owned}.jsonl").write_text("{}\n")
+    _rollout(codex_profiles.prepare_home("azure-eu"), owned)
+    _create(profile_env.tmp, session="eu", provider_profile="azure-eu",
+            resume_session_id=owned)          # its own home holds it
 
     with pytest.raises(AgentLifecycleError) as into_default:
-        _create(profile_env.tmp, session="plain", resume_session_id=owned)
+        _create(profile_env.tmp, session="plain", name="Plain", resume_session_id=owned)
     with pytest.raises(AgentLifecycleError) as into_profile:
-        _create(profile_env.tmp, session="eu", provider_profile="azure-eu",
+        _create(profile_env.tmp, session="eu2", name="Eu2", provider_profile="azure-eu",
                 resume_session_id="aaaaaaaa-1111-4222-8333-944445555666")
 
-    assert into_default.value.code == "provider_profile_mismatch"
-    assert into_profile.value.code == "provider_profile_mismatch"
-    _create(profile_env.tmp, session="eu", provider_profile="azure-eu",
-            resume_session_id=owned)
+    assert into_default.value.code == "provider_profile_mismatch"  # a profile agent bound it
+    assert into_profile.value.code == "provider_profile_mismatch"  # not in its own home
 
 
 def test_a_fork_stays_on_its_parents_profile(profile_env, monkeypatch):
@@ -566,3 +593,129 @@ def test_a_default_parent_cannot_fork_into_the_profile(profile_env):
                       "provider_profile": "azure-eu"}]}, dispatch=lambda _c: None)
 
     assert result["children"][0]["error"] == "provider_profile_mismatch"
+
+
+# --- the configuration -----------------------------------------------------------
+
+def _valid(**changes):
+    from conftest import FAKE_CODEX_PROFILE
+    table = dict(FAKE_CODEX_PROFILE)
+    table.update(changes)
+    return {key: value for key, value in table.items() if value is not None}
+
+
+@pytest.mark.parametrize("table", [
+    _valid(api_key="0123456789abcdef0123456789abcdef"),          # a key in the table
+    _valid(key="anything"),
+    _valid(base_url="http://eu-provider.invalid/openai/v1"),       # not https
+    _valid(base_url="https://eu-provider.invalid/v1?api-key=x"),   # credentials in the URL
+    _valid(base_url="https://user:pw@eu-provider.invalid/v1"),
+    _valid(label="sk-proj-abcdefghijklmnop"),                      # secret-looking literal
+    _valid(keyring_key="0123456789abcdef0123456789abcdef"),
+    _valid(wire_api="chat"),
+    _valid(env_key_header="Authorization"),
+    _valid(efforts=["turbo"]),
+    _valid(model=None),                                            # missing
+])
+def test_a_profile_table_is_validated_strictly(table, monkeypatch, capsys):
+    from dataclasses import replace
+    from lib import config
+    real = config.load
+    monkeypatch.setattr(config, "load", lambda *a, **k: replace(
+        real(*a, **k), codex_profiles={"bad-eu": table}))
+    codex_profiles.clear_cache()
+
+    assert codex_profiles.profiles() == {}
+    assert codex_profiles.catalog() == []
+    for value in table.values():
+        if isinstance(value, str) and len(value) > 12:
+            assert value not in capsys.readouterr().err  # never logs a value
+
+
+def test_a_valid_profile_is_offered_only_while_its_key_is_in_the_keyring(profile_env):
+    assert codex_profiles.available("azure-eu") is True
+    profile_env.secret_tool.write_text("#!/bin/sh\nexit 1\n")
+    codex_profiles.clear_cache()
+    assert codex_profiles.available("azure-eu") is False
+    assert codex_profiles.available("not-configured") is False
+
+
+# --- no OpenAI credential ever in the profile home ---------------------------------
+
+def test_the_profile_home_never_holds_or_inherits_an_openai_credential(profile_env, monkeypatch):
+    default_home = profile_env.tmp / "default-codex-home"
+    default_home.mkdir()
+    (default_home / "auth.json").write_text('{"tokens": "openai"}')
+    monkeypatch.setenv("CODEX_API_KEY", "sk-codex-must-not-pass")
+    agent = _agent("eu", profile="azure-eu")
+
+    _run_turn(agent, "eu", profile="azure-eu")
+
+    home = codex_profiles.home("azure-eu")
+    assert not (home / "auth.json").exists()
+    assert not any(p.resolve() == (default_home / "auth.json").resolve()
+                   for p in home.rglob("*") if p.is_symlink())
+    [spawn] = profile_env.spawned
+    assert not [name for name in spawn["env"]
+                if name.startswith(("OPENAI_", "CODEX_")) and name != "CODEX_HOME"]
+
+    (home / "auth.json").write_text("{}")   # someone copied one in
+    codex_app_server.recycle_clients()
+    for client in list(codex_app_server._CLIENTS.values()):
+        client.shutdown()
+    codex_app_server._CLIENTS.clear()
+    with pytest.raises(codex_profiles.ProfileUnavailable):
+        codex_app_server.spawn_turn(text="hi", cwd=Path("/tmp"), session="eu",
+                                    agent_id=agent, is_new_session=True,
+                                    provider_profile="azure-eu")
+
+
+# --- no fallback of any kind ------------------------------------------------------
+
+@pytest.mark.parametrize("mode", ["usage", "leak", "drop"])
+def test_a_failing_profile_turn_never_falls_back_to_another_account_or_backend(
+        profile_env, monkeypatch, mode):
+    """Usage limit, auth failure and a dropped connection: every attempt runs
+    on the profile's own app-server; nothing reaches the default Codex
+    account, another backend or the account switcher."""
+    from lib import backends
+    monkeypatch.setattr(_td, "_RUNTIME_CLIENT", None)
+    monkeypatch.setenv("FAKE_MODE", mode)
+    for other in backends.ids():
+        if other != "codex":
+            monkeypatch.setattr(backends.by_id(other), "spawn_turn",
+                                lambda **_k: pytest.fail("another backend got the turn"))
+    from dataclasses import replace
+    from unittest.mock import Mock
+    from lib.account_failover import AccountFailover
+    cfg = replace(_td.config.load(), codex_account_switch_command=("codex-selector",))
+    monkeypatch.setattr(_td.config, "load", lambda *a, **k: cfg)
+    coordinator = AccountFailover(_td._TURN_LOCK, switch=Mock(return_value=True),
+                                  schedule=lambda _d, fn: fn(), now=lambda: 100)
+    coordinator.register = Mock(side_effect=AssertionError("registered a profile turn"))
+    coordinator.request = Mock(side_effect=AssertionError("asked to switch accounts"))
+    monkeypatch.setitem(_td._FAILOVERS, "codex", coordinator)
+    switched = []
+    monkeypatch.setattr(_td.backend_usage, "record_classified_usage_limit",
+                        lambda provider: switched.append(provider))
+    agent = _agent("eu", profile="azure-eu")
+    service = TurnDispatchService(
+        SimpleNamespace(default_session="eu", agents_path=profile_env.tmp / "x.json",
+                        stream=SimpleNamespace(broadcast=lambda _e: None)),
+        home=profile_env.tmp, retry_scheduler=lambda _d, fn: fn())
+
+    service.dispatch(text=f"sentinel turn {SENTINEL[:12]}", requested_session="eu",
+                     trace_id="t-eu", synthesize_audio=False)
+    deadline = time.monotonic() + 20
+    while agents_db.latest_state(agent)["kind"] != AgentState.INTERRUPTED:
+        assert time.monotonic() < deadline, "the failed turn never ended"
+        time.sleep(0.05)
+
+    assert profile_env.spawned
+    assert all(spawn["env"].get("CODEX_HOME", "").endswith("azure-eu")
+               for spawn in profile_env.spawned)
+    assert codex_app_server._SHARED_KEY not in codex_app_server._CLIENTS
+    assert switched == []
+    coordinator.register.assert_not_called()
+    coordinator.request.assert_not_called()
+    coordinator.switch.assert_not_called()

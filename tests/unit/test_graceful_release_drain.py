@@ -735,12 +735,13 @@ def test_recovery_after_the_handoff_logs_the_rows_it_readmits_in_order(tmp_path,
     assert ",".join(recovered).split(",") == rows
 
 
-def test_a_provider_profile_rides_the_handoff_with_held_work(tmp_path):
+def test_a_provider_profile_rides_the_handoff_with_held_work(tmp_path, fake_codex_profile):
     """A Codex agent on a provider profile: work held across the handoff
     (memory, durable and drain-time arrivals) is relaunched on that profile."""
-    from lib import codex_profiles
-    agent = _agent(tmp_path, "mike", backend="codex")
-    codex_profiles.assign(agent, "azure-eu")
+    agent = agents_db.create_agent(persona="Mike", voice_id="V", cwd=str(tmp_path),
+                                   session="mike", backend="codex",
+                                   provider_profile="azure-eu")
+    agents_db.start_runtime(agent, "mike")
     service, provider = _service(tmp_path)
     _send(service, "running")
     td._CLAIMED_AT[agent] = 1.0
@@ -757,4 +758,4 @@ def test_a_provider_profile_rides_the_handoff_with_held_work(tmp_path):
     assert new_provider.texts() == ["pre-drain normal", "user during drain"]
     assert [call.get("provider_profile") for call in new_provider.spawned] == [
         "azure-eu", "azure-eu"]
-    assert all(call["model"] == "sol61-eu" for call in new_provider.spawned)
+    assert all(call["model"] == "eu-model" for call in new_provider.spawned)

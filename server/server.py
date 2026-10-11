@@ -3420,7 +3420,11 @@ class Handler(BaseHTTPRequestHandler):
         backend = backends.normalize(agent.get("backend"))
         valid = list(backends.valid_efforts(backend))
         from lib import codex_profiles
-        profile = codex_profiles.get(codex_profiles.for_agent(agent["agent_id"]))
+        stored_profile = codex_profiles.for_agent(agent["agent_id"])
+        profile = codex_profiles.get(stored_profile)
+        if stored_profile and profile is None:
+            return self._json(409, {"error": "provider profile is not configured",
+                                    "provider_profile": stored_profile})
         if profile is not None:
             valid = list(profile.efforts)
         update: dict[str, str] = {}

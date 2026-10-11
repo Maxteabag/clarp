@@ -1,18 +1,47 @@
-# Codex on Azure OpenAI EU: the `azure-eu` provider profile
+# Codex on another provider: Codex provider profiles (e.g. Azure OpenAI EU)
 
-A Codex agent can be created on the provider profile `azure-eu`. Its turns go
-to Azure OpenAI instead of the OpenAI/ChatGPT account the Codex CLI normally
-uses. Every other Codex agent runs as before. The code is in
-`server/lib/codex_profiles.py`. The client contract (Host contract 63) is in
-`docs/compatibility.md` and `docs/protocol.md`.
+A Codex agent can be created on a provider profile. Its turns then go to the
+profile's provider (for example an Azure OpenAI EU Data Zone deployment)
+instead of the OpenAI/ChatGPT account the Codex CLI normally uses. Every other
+Codex agent runs as before. The code is in `server/lib/codex_profiles.py`.
+The client contract (Host contract 63) is in `docs/compatibility.md` and
+`docs/protocol.md`. Below, "EU agent" means an agent on such a profile.
 
-| | |
-|---|---|
-| Resource | `irisbot-ticketmaster-ai-sc` (Sweden Central) |
-| Endpoint | `https://irisbot-ticketmaster-ai-sc.openai.azure.com/openai/v1`, Responses API |
-| Deployment | `sol61-eu` (gpt-6.1-sol) |
-| Key | user keyring: `secret-tool lookup service psa-reverify key azure-openai` |
-| Codex home | `<Clarp data dir>/codex-profiles/azure-eu` (mode 0700) |
+## Configuration
+
+Profiles are configured by the owner, not built into Clarp. Each one is a
+table in Clarp's `config.toml`:
+
+```toml
+[codex_profiles.azure-eu]
+label = "Codex (EU, Azure)"
+detail = "Azure OpenAI, EU Data Zone"
+base_url = "https://<resource>.openai.azure.com/openai/v1"
+model = "<deployment>"
+efforts = ["low", "medium", "high", "xhigh"]
+wire_api = "responses"
+env_key_header = "api-key"
+keyring_service = "<secret-tool service>"
+keyring_key = "<secret-tool key>"
+```
+
+- **Keyring fields.** `keyring_service` and `keyring_key` are a reference:
+  Clarp runs `secret-tool lookup service <service> key <key>`. The key is never
+  in the file.
+- **Strict validation.** Clarp rejects any other field (`key`, `api_key`,
+  `token` and so on), a base URL that isn't plain `https`, a base URL that
+  carries credentials or a query, any value that looks like a secret, a
+  `wire_api` other than `responses`, and an `Authorization` header. A rejected
+  table is logged with its id and the reason, never its values, and is never
+  offered or run.
+- **Fixed settings.** Clarp always sets analytics, feedback, update checks and
+  web search off, and `requires_openai_auth = false`. The config can't change
+  these.
+- **Availability.** A profile is offered (`available`) only while its table
+  is valid and the keyring lookup succeeds. The check uses the lookup's exit
+  status and never reads the value.
+- **Profile home.** Each profile runs in `<Clarp data dir>/codex-profiles/<id>`
+  (mode 0700).
 
 ## How a turn runs
 
@@ -26,14 +55,19 @@ does four things:
    key's environment variable, never the key.
 2. It reads the key from the keyring.
 3. It puts the key only into that process's environment, as
-   `AZURE_OPENAI_API_KEY`. It removes `OPENAI_API_KEY`, `CODEX_API_KEY` and the
-   other OpenAI variables from that environment.
+   `CLARP_CODEX_PROFILE_API_KEY`. It removes every `OPENAI_*`, `CODEX_*` and
+   `AZURE_OPENAI_*` variable inherited from the Host. The profile home never
+   holds an OpenAI credential: Clarp refuses to start a profile whose home
+   contains `auth.json`, and it never copies or links one in.
 4. It sets `CODEX_HOME` to the profile home.
 
 The process has no OpenAI login and no route back to OpenAI. If Azure refuses
 a turn, the turn fails visibly. Clarp skips its OpenAI account handling for
 these turns: there is no account switch, no usage-limit reconnect, no usage
-recorded against the OpenAI account and no retry on another provider.
+recorded against the OpenAI account and no retry on another provider. If the
+profile is removed from the config, its agents' turns are refused. There is no
+fallback of any kind: to the CLI's account, to another backend, or to the
+janitors' model fallbacks, which never take an EU agent in scope.
 
 Clarp stores the profile with the agent when the agent is created, and the
 profile never changes. A turn, fork or resume that would cross profiles is
@@ -55,7 +89,9 @@ Everything Codex sends to its model during the agent's turns:
 
 - Rollouts and transcripts: `<profile home>/sessions/…`. The Codex thread
   index, goals and Codex's own log database stay in the profile home too.
-  `~/.codex` is not used.
+  `~/.codex` is not used. Clarp finds a thread's rollout only in the home of
+  the agent that bound the thread: an EU agent never sees `~/.codex`, and a
+  default agent never sees a profile home.
 - Clarp's database: the messages, turns and states shown in the apps.
 - The `agent.provider_profile.<agent_id>` setting.
 
@@ -103,6 +139,9 @@ tests are in `tests/unit/test_codex_profile_leak_paths.py`,
 | Fleet map world and rule design (`viz_normalize.build_fleet_map`) | tool commands, paths, plans, artifacts, prompt excerpts | `codex exec`, `claude -p` | EU agents never enter the map's events or work |
 | Team posts (`team_store.capture_assistant_message`) | `<team>` posts, read by teammates' turns and the heartbeat decider | teammates' providers | An EU agent's posts reach only teammates on its profile |
 | Another agent's turn reading over the Host API (`do_GET`, `/agents/snapshot`) | `/log`, artifacts, jobs, conversation and message previews | that agent's provider | Refused (403) when the caller's turn identity (`X-Clarp-Turn`) is on another profile. The snapshot shows such a caller an EU agent's identity and state only. The user's devices see everything. |
+| Backend and account fallback (`turn_dispatch`, `codex_app_server`) | the failed turn | the CLI's own OpenAI account, another backend | None exists for an EU turn. No account-pool registration, no usage-limit reconnect, no failover request, no OpenAI usage record. An unconfigured profile refuses the turn. Dispatch refuses an EU agent on any backend but `codex`. Retries go to the same profile process. |
+| Janitor model fallbacks (`model_fallbacks`) | janitor packets | any CLI | Only janitor work uses them, and janitors never take an EU agent in scope |
+| Clarp-side summarizers, titlers, search, embeddings | — | — | None exist. Every Host module that calls a model is listed in this table: judgments, orchestrator, janitors, explainer, fleet map, Oracle, podcasts, TTS, STT. |
 | Speech output (`tts_queue.enqueue`) | `<speak>` replies | Cartesia, ElevenLabs, Deepgram, Gemini TTS, adapters | EU agents are text-only: nothing is enqueued |
 | Dictation (`transcription_pipeline`) | the prompt audio and transcript, plus the junk filter | cloud STT, adapters, TypeSafe | With an EU agent focused, only the Host's local Whisper transcribes it; otherwise the request is refused (409, type instead). Judgments are local-only |
 | Fork / adopt / resume (`agent_fork`, `agent_spec`) | the transcript or a seed | the child's provider | Cross-profile forks and resumes are refused |
@@ -141,17 +180,16 @@ Microsoft Learn, "Understanding deployment types in Microsoft Foundry Models"
 - The EU Data Boundary can include EFTA countries such as Norway and
   Switzerland, as well as EU member states. Microsoft can add regions to a
   data zone without prior notice.
-- Data stored at rest stays in the designated Azure geography: Sweden, for
-  this resource.
+- Data stored at rest stays in the designated Azure geography, which is the
+  resource's region.
 
 The Data Zone does not cover:
 
 - data in Clarp or on this laptop;
-- the vendors in "Still outside the EU deployment";
-- whether the deployment really is a Data Zone SKU. This was not checked from
-  Clarp: the resource is not visible from the tenant used here. Confirm that
-  `sol61-eu` is `DataZoneStandard` (or `DataZoneProvisionedManaged`) in the
-  portal.
+- anything listed in "What the Host cannot enforce";
+- whether the deployment really is a Data Zone SKU. Clarp cannot see that:
+  confirm in the portal that the deployment is `DataZoneStandard` (or
+  `DataZoneProvisionedManaged`).
 
 **Do not use customer data until the CISO confirms that Azure OpenAI is on the
 customer DPA sub-processor list.** Until then, use synthetic data only.
@@ -162,7 +200,8 @@ customer DPA sub-processor list.** Until then, use synthetic data only.
   The `clarp-runtime` user service reaches the keyring over the session bus
   (`DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`). If the keyring is
   locked or the key is missing, the turn fails with "no key in the keyring".
-- A rotated key takes effect when the profile's app-server restarts, for
-  example after a credential change or a runtime restart.
+- A rotated key takes effect when the profile's app-server restarts, which
+  happens at a runtime restart. Switching OpenAI accounts (`codex login`,
+  Hotseat) does not recycle profile processes: they are not OpenAI accounts.
 - Managed skills are linked from the profile home (`skills` → Clarp's
   managed Codex skills directory).

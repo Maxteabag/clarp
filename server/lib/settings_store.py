@@ -65,6 +65,21 @@ def get_prefix(prefix: str) -> dict[str, str]:
     return {str(row["key"]): str(row["value"]) for row in rows}
 
 
+def get_text_in(c, key: str) -> str:
+    """``get_text`` on the connection holding the caller's transaction."""
+    row = c.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return str(row["value"]) if row is not None else ""
+
+
+def set_text_in(c, key: str, value: str) -> None:
+    """Write ``key`` inside the caller's open transaction on ``c``."""
+    c.execute(
+        """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+                                          updated_at = excluded.updated_at""",
+        (key, value, now_ms()))
+
+
 def get_text(key: str, *, default: str = "") -> str:
     value = get(key)
     return default if value is None else value

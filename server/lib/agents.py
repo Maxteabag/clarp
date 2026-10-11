@@ -94,6 +94,17 @@ def get_by_backend_session(backend_session_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def owner_of_backend_session(backend_session_id: str) -> str:
+    """The agent that bound this backend session in any runtime, live or
+    ended (the newest one), or "". Deleted agents still own their threads."""
+    if not backend_session_id:
+        return ""
+    row = conn().execute(
+        """SELECT agent_id FROM runtimes WHERE backend_session_id = ?
+            ORDER BY started_at DESC LIMIT 1""", (backend_session_id,)).fetchone()
+    return str(row["agent_id"]) if row else ""
+
+
 def resolve_for_hook(*, backend_session_id: str | None,
                      session: str | None) -> dict[str, Any] | None:
     """Find the agent that fired a hook.
@@ -152,7 +163,8 @@ def favorite_paths(limit: int = 5) -> list[dict[str, Any]]:
 def create_agent(*, persona: str, voice_id: str, cwd: str,
                  session: str, backend: str = AgentBackend.CLAUDE,
                  model: str = "", effort: str = "",
-                 creation_request_id: str = "") -> str:
+                 creation_request_id: str = "",
+                 provider_profile: str = "") -> str:
     """Insert or resurrect an agent row. Returns the agent_id.
 
     If a soft-deleted row exists with the same `session`, it's
@@ -165,7 +177,29 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
 
     Raises sqlite3.IntegrityError only if a LIVE agent already owns the
     name — caller should relaunch or pick a different session.
+
+    ``provider_profile`` (a Codex provider profile) is written in the same
+    transaction as the row: the agent never exists without it.
     """
+    if provider_profile:
+        if creation_request_id:
+            raise ValueError("a reserved janitor agent has no provider profile")
+        from . import codex_profiles
+        c = conn()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            agent_id, resurrected = _write_agent_row(
+                c, persona=persona, voice_id=voice_id, cwd=cwd, session=session,
+                backend=backend, model=model, effort=effort)
+            codex_profiles.write_for_new_agent(c, agent_id, provider_profile)
+            c.execute("COMMIT")
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+        turn_lifecycle.transition(
+            agent_id, turn_lifecycle.TurnEvent.AGENT_CREATED,
+            {"session": session, **({"resurrected": True} if resurrected else {})})
+        return agent_id
     if creation_request_id:
         from .janitors import create_reserved_agent
         return create_reserved_agent(
@@ -203,6 +237,33 @@ def create_agent(*, persona: str, voice_id: str, cwd: str,
     turn_lifecycle.transition(agent_id, turn_lifecycle.TurnEvent.AGENT_CREATED,
                               {"session": session})
     return agent_id
+
+
+def _write_agent_row(c, *, persona: str, voice_id: str, cwd: str, session: str,
+                     backend: str, model: str, effort: str) -> tuple[str, bool]:
+    """Insert or resurrect the row inside the caller's transaction on ``c``;
+    returns (agent_id, resurrected). The same writes as ``create_agent``."""
+    ghost = c.execute(
+        "SELECT agent_id FROM agents WHERE session = ? AND deleted_at IS NOT NULL",
+        (session,)).fetchone()
+    if ghost is not None:
+        c.execute("""
+            UPDATE agents SET deleted_at = NULL, persona = ?, voice_id = ?,
+                   cwd = ?, backend = ?, created_at = ?, model = ?, effort = ?,
+                   custom_status = '', custom_status_at = NULL,
+                   parent_agent_id = NULL,
+                   role = CASE WHEN is_janitor = 1 THEN 'janitor' ELSE 'agent' END,
+                   helper_state = NULL, helper_completed_at = NULL
+             WHERE agent_id = ?
+        """, (persona, voice_id, cwd, backend, now_ms(), model, effort, ghost["agent_id"]))
+        return ghost["agent_id"], True
+    agent_id = _new_agent_id()
+    c.execute("""
+        INSERT INTO agents (agent_id, persona, voice_id, cwd, session, backend,
+                            created_at, model, effort)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (agent_id, persona, voice_id, cwd, session, backend, now_ms(), model, effort))
+    return agent_id, False
 
 
 def update_voice(agent_id: str, voice_id: str) -> None:

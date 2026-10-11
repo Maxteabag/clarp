@@ -744,13 +744,19 @@ class CodexBackend(StreamJsonBackend):
         return codex_app_server.fork_thread(
             session_id, cwd=cwd, provider_profile=provider_profile)
 
-    def _home(self) -> pathlib.Path:
+    def _home(self, session_id: str = "") -> pathlib.Path:
+        """The Codex home of the agent that bound ``session_id``: its
+        provider profile's home, else the CLI's own."""
+        from .. import codex_profiles
+        profile_home = codex_profiles.home_for_thread(session_id)
+        if profile_home is not None:
+            return profile_home
         return pathlib.Path(os.environ.get("CODEX_HOME") or pathlib.Path.home() / ".codex")
 
     def model_transcript(self, session_id: str) -> pathlib.Path | None:
         """The rollout file: the thread index first, else the newest match."""
         try:
-            with sqlite3.connect(f"file:{self._home() / 'state_5.sqlite'}?mode=ro",
+            with sqlite3.connect(f"file:{self._home(session_id) / 'state_5.sqlite'}?mode=ro",
                                  uri=True, timeout=0.1) as db:
                 row = db.execute("SELECT rollout_path FROM threads WHERE id = ?",
                                  (session_id,)).fetchone()
@@ -764,7 +770,7 @@ class CodexBackend(StreamJsonBackend):
         """The thread index's model, else the rollout's last turn_context."""
         if not session_id:
             return ""
-        indexed = resolve("session_models", "indexed_model")(self._home(), session_id)
+        indexed = resolve("session_models", "indexed_model")(self._home(session_id), session_id)
         if indexed:
             return indexed
         return resolve("session_models", "transcript_model")(self.id, session_id)
