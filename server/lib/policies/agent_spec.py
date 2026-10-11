@@ -22,6 +22,7 @@ import secrets
 from dataclasses import dataclass, field
 from typing import Callable, Collection, Mapping, Sequence
 
+from .. import codex_profiles
 from .. import roster as contact_roster
 from ..voice import CARTESIA, resolve_voice
 from . import helper_state as helper_policy
@@ -58,6 +59,8 @@ class RosterView:
     random_suffix: Callable[[], str] = lambda: secrets.token_hex(2)
     resolve_agent: Callable[[str], str] = lambda _raw: ""  # session or id -> agent_id or ""
     ancestors: Callable[[str], Sequence[str]] = lambda _agent_id: ()
+    agent_profile: Callable[[str], str] = lambda _agent_id: ""  # agent_id -> provider profile
+    thread_profile: Callable[[str], str] = lambda _sid: ""  # Codex thread -> owning profile
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,7 @@ class AgentSpec:
     parent_agent_id: str = ""         # the creator: an explicit parent or the fork source
     role: str = helper_policy.Role.AGENT
     write_lineage: bool = False       # persist parent_agent_id and role
+    provider_profile: str = ""        # Codex provider profile ("" = the CLI's account)
 
     @staticmethod
     def parse(data: Mapping, *, backends, roster: RosterView, personas,
@@ -255,6 +259,19 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
     effective_effort = (
         requested_effort if "effort" in data
         else ("" if clear_retained_effort else retained_effort))
+    profile = _provider_profile(data, backend=backend, roster=roster,
+                                replace_sid=replace_sid, fork_id=fork_id,
+                                janitor=janitor)
+    if isinstance(profile, SpecError):
+        return profile
+    if profile is not None:
+        if effective_model and not profile.has_model(effective_model):
+            return SpecError(400, "invalid model for provider profile",
+                             detail=f"{profile.label} runs only "
+                                    + ", ".join(m for m, _ in profile.models))
+        if effective_effort and effective_effort not in profile.efforts:
+            return SpecError(400, "invalid effort for provider profile")
+        effective_model = effective_model or profile.default_model
     if not effective_model and not janitor:
         resume_id = str(data.get("resume_session_id") or data.get("fork_session_id") or "")
         effective_model = (roster.recorded_model(backend, resume_id) if resume_id
@@ -345,7 +362,48 @@ def _parse(data: dict, *, backends, roster: RosterView, personas,
         presentation_update=presentation_update, recommendation=recommendation,
         creation_request_id=str(data.get("creation_request_id") or ""),
         parent_agent_id=parent_agent_id, role=role, write_lineage=write_lineage,
+        provider_profile=profile.id if profile is not None else "",
     )
+
+
+def _provider_profile(data: dict, *, backend: str, roster: RosterView,
+                      replace_sid: str, fork_id: str, janitor: bool):
+    """The Codex provider profile the agent runs on, None for the CLI's own
+    account, or a refusal. A profile is chosen once, at creation: a relaunch
+    keeps it and can change neither it nor the backend, and a Codex
+    conversation is only resumed by an agent of the profile that owns it."""
+    raw = data.get("provider_profile")
+    if raw is not None and not isinstance(raw, str):
+        return SpecError(400, "provider_profile must be a string or null")
+    requested = (raw or "").strip()
+    existing = ""
+    if replace_sid:
+        row = roster.existing_agent(replace_sid) or {}
+        existing = roster.agent_profile(str(row.get("agent_id") or ""))
+    if replace_sid and (existing or requested):
+        if (requested or existing) != existing or backend != "codex":
+            return SpecError(409, "provider_profile_locked", detail=(
+                "An agent's provider profile and backend are fixed when it is "
+                "created; start a new agent instead."))
+        requested = existing
+    profile = None
+    if requested:
+        profile = codex_profiles.get(requested)
+        if profile is None:
+            return SpecError(400, "unknown provider_profile")
+        if backend != "codex":
+            return SpecError(400, "provider_profile requires the codex backend")
+        if janitor:
+            return SpecError(400, "janitors run on the CLI's own account")
+        if fork_id:
+            return SpecError(400, "fork_unsupported", detail=(
+                "Fork a provider-profile agent with POST /agents/<session>/fork."))
+    resume_id = str(data.get("resume_session_id") or "").strip()
+    if (resume_id and backend == "codex"
+            and roster.thread_profile(resume_id) != (profile.id if profile else "")):
+        return SpecError(409, "provider_profile_mismatch", detail=(
+            "That Codex conversation belongs to another provider profile."))
+    return profile
 
 
 def _lineage(data: dict, *, roster: RosterView, replace_sid: str, fork_id: str,

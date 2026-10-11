@@ -8,7 +8,7 @@ from typing import Any
 
 
 from . import (background_jobs, agent_goals, agents as agents_db, avatar_settings, backend_usage, backends,
-               compaction, db,
+               codex_profiles, compaction, db,
                config, message_store, model_avatars, team_store,
                turn_queue, scheduler, janitors, quiet_agents)
 from . import reconcile
@@ -132,6 +132,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     janitor_templates = {row["agent_id"]: row["template_id"] for row in
                          db.conn().execute("SELECT agent_id,template_id FROM janitor_configs")}
     exhausted = _exhausted_backends()
+    provider_profiles = codex_profiles.assigned()
     agent_rows = agents_db.list_agents()
     tree = helper_tree(agent_rows, states, visible_labels)
     child_count = tree.child_count
@@ -234,6 +235,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
             "model":          agent_model(a, bsid),
             "effort":         a.get("effort") or "",
             "mcp_servers":    mcp_servers,
+            # Codex provider profile ("" = the CLI's own account); contract 63.
+            "provider_profile": provider_profiles.get(agent_id, ""),
             "schedules":      schedules.get(agent_id, []),
             "is_janitor": bool(a.get("is_janitor")),
             # Never unread, in Updates, Ctrl+J or "agents working" by itself.
