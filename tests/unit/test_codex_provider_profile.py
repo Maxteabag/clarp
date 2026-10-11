@@ -899,3 +899,71 @@ def test_a_slow_keyring_read_never_holds_the_app_server_lock(profile_env):
 
     assert waited < 0.5, f"a default agent waited {waited:.1f}s for the keyring"
     assert profile_env.spawned and profile_env.spawned[0]["env"]["CODEX_HOME"].endswith("example-eu")
+
+
+# --- L2. the profile process inherits no other vendor's credentials or proxy ----------
+
+_VENDOR_ENV = {
+    "ANTHROPIC_API_KEY": "s1", "CLAUDE_CODE_OAUTH_TOKEN": "s2", "GEMINI_API_KEY": "s3",
+    "GOOGLE_API_KEY": "s4", "GOOGLE_APPLICATION_CREDENTIALS": "/s5.json",
+    "ELEVENLABS_API_KEY": "s6", "ELEVEN_API_KEY": "s7", "CARTESIA_API_KEY": "s8",
+    "DEEPGRAM_API_KEY": "s9", "FIREWORKS_API_KEY": "s10", "GROQ_API_KEY": "s11",
+    "XAI_API_KEY": "s12", "GROK_API_KEY": "s13", "OPENROUTER_API_KEY": "s14",
+    "GITHUB_TOKEN": "s15", "SOME_VENDOR_API_KEY": "s16", "TYPESAFE_TOKEN": "s17",
+    "OPENAI_API_KEY": "s18", "CODEX_API_KEY": "s19", "AZURE_OPENAI_API_KEY": "s20",
+    "HTTP_PROXY": "http://p", "https_proxy": "http://p", "ALL_PROXY": "socks://p",
+    "NO_PROXY": "localhost",
+}
+
+
+def test_the_profile_app_server_inherits_no_other_vendor_credentials_or_proxies(
+        profile_env, monkeypatch):
+    for name, value in _VENDOR_ENV.items():
+        monkeypatch.setenv(name, f"SENTINEL-VENDOR-{value}")
+    monkeypatch.setenv("CLARP_HARMLESS_SETTING", "kept")
+    plain, eu = _agent("plain"), _agent("eu", profile="example-eu")
+
+    _run_turn(plain, "plain")
+    _run_turn(eu, "eu", profile="example-eu")
+
+    default_env, profile_spawn_env = (spawn["env"] for spawn in profile_env.spawned)
+    assert not [name for name in profile_spawn_env if "SENTINEL-VENDOR" in profile_spawn_env[name]]
+    assert profile_spawn_env["CLARP_CODEX_PROFILE_API_KEY"] == SENTINEL      # its own key
+    assert profile_spawn_env["CODEX_HOME"].endswith("example-eu")
+    assert profile_spawn_env["CLARP_HARMLESS_SETTING"] == "kept"
+    assert profile_spawn_env["PATH"]
+    # Control: the default account's process keeps today's environment.
+    assert all(default_env[name] == f"SENTINEL-VENDOR-{value}"
+               for name, value in _VENDOR_ENV.items())
+
+
+# --- L3. the status-only snapshot view carries no path ----------------------------
+
+def test_the_status_only_snapshot_view_carries_no_path(profile_env, monkeypatch):
+    import importlib.util
+    from lib import snapshot
+    from lib import provider_background_jobs as jobs
+    eu, plain = _peer("eu", "example-eu"), _peer("plain")
+    token, _ = jobs.identity_env(plain)
+    jobs.record_identity(token, agent_id=plain, provider="codex", pid=1)
+    path = f"/home/x/cases/{SENTINEL[:16]}-customer"
+    monkeypatch.setattr(snapshot.SHARED, "body", lambda _ctx: json.dumps({"agents": [
+        {"agent_id": eu, "session": "eu", "busy": True, "latest_state": "tool", "cwd": path},
+        {"agent_id": plain, "session": "plain", "cwd": "/home/x/plainword"}]}).encode())
+    spec = importlib.util.spec_from_file_location(
+        "clarp_server_l3", Path(__file__).resolve().parents[2] / "server/server.py")
+    server = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server)
+    sent = []
+    for turn in (token, ""):
+        handler = object.__new__(server.Handler)
+        handler.path = "/agents/snapshot"
+        handler.headers = {"X-Clarp-Turn": turn} if turn else {}
+        handler.server = SimpleNamespace(ctx=SimpleNamespace())
+        handler._send = lambda status, body, *_a, **_k: sent.append(body.decode())
+        handler._handle_snapshot()
+
+    as_agent, as_user = sent
+    assert SENTINEL[:16] not in as_agent and "cwd" not in json.loads(as_agent)["agents"][0]
+    assert "/home/x/plainword" in as_agent          # control: an ordinary row is whole
+    assert SENTINEL[:16] in as_user                  # the user's device

@@ -56,8 +56,8 @@ keyring_key = "azure-openai"
   and are never offered or run.
 - **Fixed settings.** For every profile Clarp sets analytics, feedback, update
   checks and web search off and `requires_openai_auth = false`. It strips
-  `OPENAI_API_KEY`, `CODEX_API_KEY` and every other `OPENAI_*`/`CODEX_*`
-  variable. The config can't change these.
+  every other provider's credentials and the proxy variables (see "How a turn
+  runs"). The config can't change these.
 - **Availability.** A profile is offered (`available`) only while its table
   is valid and `secret-tool lookup` exits 0. The value is discarded; it is only
   read when the profile's process starts.
@@ -84,8 +84,16 @@ does four things:
    key's environment variable, never the key.
 2. It reads the key from the keyring.
 3. It puts the key only into that process's environment, as
-   `CLARP_CODEX_PROFILE_API_KEY`. It removes every `OPENAI_*`, `CODEX_*` and
-   `AZURE_OPENAI_*` variable inherited from the Host. The profile home never
+   `CLARP_CODEX_PROFILE_API_KEY`. It does not pass on any other provider's
+   credentials (`OPENAI_*`, `CODEX_*`, `AZURE_OPENAI_*`, `ANTHROPIC_*`,
+   `CLAUDE_CODE_*`, `GEMINI_*`/`GOOGLE_*`, `ELEVEN*`, `CARTESIA*`, `DEEPGRAM*`,
+   `FIREWORKS*`, `GROQ*`, `XAI_*`/`GROK*`, `OPENROUTER*` and other model
+   vendors). It also drops any variable ending in `_API_KEY`, `_TOKEN`,
+   `_SECRET`, `_PASSWORD` or `_CREDENTIALS` other than its own key, and the
+   proxy variables (`HTTP(S)_PROXY`, `ALL_PROXY`, `NO_PROXY`). The tools the
+   agent's turns run inherit this environment, so they can't call another
+   provider with the Host's keys either. `clarp-admin` reads its token from
+   Clarp's config, not the environment. The profile home never
    holds an OpenAI credential: Clarp refuses to start a profile whose home
    contains `auth.json`, and it never copies or links one in.
 4. It sets `CODEX_HOME` to the profile home.
@@ -179,7 +187,7 @@ tests are in `tests/unit/test_codex_profile_leak_paths.py`,
 | Request replies recorded into the requester's goal (`peer_requests.plan_reply`) | the EU agent's answer | the requester's provider | Refused (`provider_profile_boundary`) unless the requester is on the same profile |
 | Another agent's turn reading over the Host API | `/log` (with or without `session`), `/agents/<x>`, `/artifacts/<id>`, `/artifacts?agent_id=`, `/background-jobs/<id>` | that agent's provider | Refused (403) **when the request carries the caller's turn identity** (`X-Clarp-Turn`) and the owner is a profile agent on another profile |
 | Same, lists and events | the artifact list and search, `/attention`, the `/background-jobs` list, `/teams/<id>/messages`, `/agent-schedules`, the `/events` stream | that agent's provider | For an identified caller, every entry or event that names such an agent is dropped, at any depth |
-| Same, snapshot | `/agents/snapshot` | that agent's provider | For an identified caller (e.g. the EU agent's parent), the EU agent's row is status only: identity, busy/state, helper state, background job and queue counts, goal status. Never messages, status text, activity or goal text. |
+| Same, snapshot | `/agents/snapshot` | that agent's provider | For an identified caller (e.g. the EU agent's parent), the EU agent's row is status only: identity, busy/state, helper state, background job and queue counts, goal status. Never messages, status text, activity, goal text, or its working directory or any other path. |
 | Same, the user's devices | everything | — | Unfiltered: a request without a turn identity is the user |
 | Push notifications to Apple (`apns`, `user_notifications`, relay) | reply preview (≤180 characters), decision question and title | Apple Push Notification service, outside the EU | Every payload about an EU agent starts with `provider_profile` and `privacy_restricted: true`, and its alert text is generic ("New reply", "Needs your answer"). No preview, question, title or subtitle. Background syncs carry the marker too. |
 | Live Activity (`live_activity`, pushed through APNs) | the tool label (a file or command), headline | Apple, outside the EU | An EU agent's row carries the same marker and its phase only (a state word); `tool` is null |

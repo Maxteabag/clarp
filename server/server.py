@@ -327,7 +327,7 @@ def _spawn_voice_metrics(audio_bytes: bytes, ctype: str, *, session, trace_id,
 # Snapshot fields another agent may see of an EU-only agent: who and what
 # state, never its messages, status text or activity.
 _EU_ONLY_SNAPSHOT_KEYS = (
-    "agent_id", "persona", "session", "backend", "provider_profile", "cwd",
+    "agent_id", "persona", "session", "backend", "provider_profile",
     "alive", "busy", "focused", "latest_state", "latest_state_ts", "is_janitor",
     "role", "parent_agent_id", "helper_state", "archived_at", "muted", "avatar_url",
     "background_jobs", "queued_turn_count", "queue_paused", "compacting",
