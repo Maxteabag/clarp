@@ -341,6 +341,18 @@ class TurnSlots:
         with self.lock:
             self.queued.setdefault(agent_id, []).insert(0, spec)
 
+    def take_queued(self, agent_id: str) -> list:
+        """Remove and return the agent's whole memory queue, in order."""
+        with self.lock:
+            return list(self.queued.pop(agent_id, []) or [])
+
+    def put_front(self, agent_id: str, specs: list) -> None:
+        """Put taken specs back ahead of anything queued since."""
+        if not specs:
+            return
+        with self.lock:
+            self.queued[agent_id] = list(specs) + list(self.queued.get(agent_id) or [])
+
     def claim_age(self, agent_id: str) -> float | None:
         """Seconds since the slot was claimed, or None when not spawning."""
         with self.lock:
