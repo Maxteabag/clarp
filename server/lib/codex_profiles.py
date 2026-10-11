@@ -438,18 +438,18 @@ def home(profile_id: str) -> pathlib.Path:
     return root() / profile_id
 
 
-def home_for(*, agent_id: str | None = None, thread_id: str = "") -> pathlib.Path | None:
+def home_for(*, agent: dict | str | None = None, thread_id: str = "") -> pathlib.Path | None:
     """The one Codex home to read for an agent's thread: its profile's home,
-    or None for the CLI's own home. With ``agent_id`` the agent's stored
-    profile decides; without it, the agent that bound ``thread_id`` does.
-    No other home is ever searched."""
-    if agent_id is None:
+    or None for the CLI's own home. With ``agent`` (its row, read without a
+    query, or its id) the agent's own profile decides; without it, the agent
+    that bound ``thread_id`` does. No other home is ever searched."""
+    if agent is None:
         if not thread_id:
             return None
         from . import agents as agents_db
         profile = agents_db.profile_of_backend_session(thread_id)
     else:
-        profile = for_agent(agent_id or "")
+        profile = profile_of(agent)
     return home(profile) if profile else None
 
 

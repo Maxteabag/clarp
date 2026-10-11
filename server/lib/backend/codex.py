@@ -745,20 +745,20 @@ class CodexBackend(StreamJsonBackend):
         return codex_app_server.fork_thread(
             session_id, cwd=cwd, provider_profile=provider_profile)
 
-    def _home(self, session_id: str = "", agent_id: str | None = None) -> pathlib.Path:
+    def _home(self, session_id: str = "", agent: dict | str | None = None) -> pathlib.Path:
         """The Codex home for an agent's thread: its provider profile's home,
         else the CLI's own (``codex_profiles.home_for``)."""
         from .. import codex_profiles
-        profile_home = codex_profiles.home_for(agent_id=agent_id, thread_id=session_id)
+        profile_home = codex_profiles.home_for(agent=agent, thread_id=session_id)
         if profile_home is not None:
             return profile_home
         return pathlib.Path(os.environ.get("CODEX_HOME") or pathlib.Path.home() / ".codex")
 
     def model_transcript(self, session_id: str, *,
-                         agent_id: str | None = None) -> pathlib.Path | None:
+                         agent: dict | str | None = None) -> pathlib.Path | None:
         """The rollout file in the agent's own home: the thread index first,
         else the newest match there."""
-        home = self._home(session_id, agent_id)
+        home = self._home(session_id, agent)
         try:
             with sqlite3.connect(f"file:{home / 'state_5.sqlite'}?mode=ro",
                                  uri=True, timeout=0.1) as db:
@@ -769,29 +769,28 @@ class CodexBackend(StreamJsonBackend):
                 return pathlib.Path(row[0])
         except sqlite3.Error:
             pass
-        if agent_id is None:
+        if agent is None:
             return self.find_transcript(session_id)   # the binding decides the home
-        return self.transcript.find_latest_jsonl(session_id, agent_id=agent_id)
+        return self.transcript.find_latest_jsonl(session_id, agent=agent)
 
-    def recorded_model(self, session_id: str, *, agent_id: str | None = None) -> str:
+    def recorded_model_for(self, agent: dict, session_id: str) -> str:
+        """``recorded_model`` for an agent whose row is at hand: its provider
+        profile (and so its home) is read from the row, without a query."""
+        return self.recorded_model(session_id, agent=agent)
+
+    def recorded_model(self, session_id: str, *, agent: dict | str | None = None) -> str:
         """The thread index's model, else the rollout's last turn_context,
         both from the agent's own home."""
         if not session_id:
             return ""
         indexed = resolve("session_models", "indexed_model")(
-            self._home(session_id, agent_id), session_id)
+            self._home(session_id, agent), session_id)
         if indexed:
             return indexed
-        if agent_id is None:
-            return resolve("session_models", "transcript_model")(self.id, session_id)
-        path = self.model_transcript(session_id, agent_id=agent_id)
-        if path is None:
-            return ""
-        try:
-            stat = path.stat()
-        except OSError:
-            return ""
-        return resolve("session_models", "_read_model")(str(path), stat.st_mtime_ns, stat.st_size)
+        from .. import codex_profiles
+        return resolve("session_models", "transcript_model")(
+            self.id, session_id,
+            **({} if agent is None else {"profile": codex_profiles.profile_of(agent)}))
 
     def cli_default_model(self) -> str:
         """The active profile's ``model`` in config.toml, else the top-level one."""

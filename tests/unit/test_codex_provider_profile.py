@@ -734,11 +734,11 @@ def test_a_default_agent_never_finds_a_thread_that_only_a_profile_home_holds(pro
     plain_only = "4f9c3ec0-1111-4222-8333-944445555666"
     _rollout(profile_env.tmp / "default-codex-home", plain_only)
 
-    assert codex_transcript.find_latest_jsonl(only_there, agent_id=plain) is None
-    assert codex_transcript.find_latest_jsonl(only_there, agent_id=eu) is not None
-    assert codex_transcript.find_latest_jsonl(plain_only, agent_id=eu) is None
-    assert by_id("codex").model_transcript(only_there, agent_id=plain) is None
-    assert by_id("codex").recorded_model(only_there, agent_id=plain) == ""
+    assert codex_transcript.find_latest_jsonl(only_there, agent=plain) is None
+    assert codex_transcript.find_latest_jsonl(only_there, agent=eu) is not None
+    assert codex_transcript.find_latest_jsonl(plain_only, agent=eu) is None
+    assert by_id("codex").model_transcript(only_there, agent=plain) is None
+    assert by_id("codex").recorded_model(only_there, agent=plain) == ""
 
 
 # --- C. text-only and the provider-profile boundary ------------------------------

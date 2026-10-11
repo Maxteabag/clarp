@@ -1856,7 +1856,7 @@ def find_latest_jsonl(
     session_id: str,
     sessions_root: pathlib.Path | None = None,
     *,
-    agent_id: str | None = None,
+    agent: dict | str | None = None,
 ) -> pathlib.Path | None:
     """Find the rollout JSONL for a Codex session UUID.
 
@@ -1871,7 +1871,7 @@ def find_latest_jsonl(
         # a provider-profile agent's rollouts live in its profile's home and a
         # default agent never sees one.
         from . import codex_profiles
-        home = codex_profiles.home_for(agent_id=agent_id, thread_id=session_id)
+        home = codex_profiles.home_for(agent=agent, thread_id=session_id)
         sessions_root = (home if home is not None else _codex_home()) / "sessions"
     root = sessions_root
     if not root.is_dir():

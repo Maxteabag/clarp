@@ -14,11 +14,15 @@ from pathlib import Path
 
 
 @lru_cache(maxsize=512)
-def _transcript(backend: str, session: str, epoch: int):
-    """The transcript the backend reads the model from, cached a minute."""
+def _transcript(backend: str, session: str, epoch: int, profile: str | None = None):
+    """The transcript the backend reads the model from, cached a minute.
+    ``profile`` is the agent's provider profile when its row is at hand, so
+    the transcript's home needs no lookup."""
     del epoch
     from .backends import by_id
-    return by_id(backend).model_transcript(session)
+    if profile is None:
+        return by_id(backend).model_transcript(session)
+    return by_id(backend).model_transcript(session, agent={"provider_profile": profile})
 
 
 @lru_cache(maxsize=512)
@@ -62,10 +66,11 @@ def _indexed_model(home: str, session: str, epoch: int) -> str:
         return ""
 
 
-def transcript_model(backend: str, session: str) -> str:
+def transcript_model(backend: str, session: str, *, profile: str | None = None) -> str:
     """The model the newest turn of the session's transcript names, or ""."""
     try:
-        path = _transcript(backend, session, int(time.monotonic() // 60))
+        path = _transcript(backend, session, int(time.monotonic() // 60),
+                           *(() if profile is None else (profile,)))
         if path is None:
             return ""
         stat = path.stat()
@@ -95,4 +100,7 @@ def launch_default(backend: str, cfg) -> str:
 
 
 def agent_model(agent: dict, session: str = "") -> str:
-    return str(agent.get("model") or recorded_model(str(agent.get("backend") or "claude"), session))
+    if agent.get("model") or not session:
+        return str(agent.get("model") or "")
+    from .backends import by_id
+    return str(by_id(str(agent.get("backend") or "claude")).recorded_model_for(agent, session))
