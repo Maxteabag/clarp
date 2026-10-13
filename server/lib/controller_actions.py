@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -30,6 +31,9 @@ AUDIT_PREFIX = "controller_actions.audit:"
 REQUEST_PREFIX = "controller_actions.request:"
 AUDIT_KEEP = 500
 REQUEST_TTL_MS = 10 * 60_000
+# A second press of the same action this soon after the first (a bouncing
+# button, a double-tap) reports the first run instead of running again.
+DEBOUNCE_MS = 1_500
 
 ACTION_TYPES = ("http_post", "agent_prompt")
 # A button's raw edges drive recording; only finished gestures can be mapped.
@@ -249,16 +253,6 @@ def set_mapping(*, device: str, button: str, gesture: str, action_id: str | None
     return mapping
 
 
-def resolve(device: str, button: str, gesture: str) -> str | None:
-    """The action a gesture runs: the device's own mapping, else the wildcard."""
-    mappings = _load()["mappings"]
-    for wanted in (device, WILDCARD_DEVICE):
-        for m in mappings:
-            if (m["device"], m["button"], m["gesture"]) == (wanted, button, gesture):
-                return m["action_id"]
-    return None
-
-
 def audit_log(*, limit: int = 50) -> list[dict]:
     """Newest first."""
     keys = settings_store.keys_with_prefix(AUDIT_PREFIX)[::-1][:max(0, int(limit))]
@@ -308,33 +302,76 @@ def _execute(action: dict, *, allowed_urls, http_post: HttpPost | None,
     return result
 
 
-def run(action_id: str, *, actor: str, source: dict | None = None,
-        request_id: str = "", allowed_urls=(), http_post: HttpPost | None = None,
+_RUN_LOCK = threading.Lock()
+_IN_FLIGHT: dict[str, threading.Event] = {}
+_LAST_RUN: dict[str, tuple[float, dict | None]] = {}
+
+
+def _reset_runtime_state() -> None:
+    """Forget in-process debounce state (tests)."""
+    with _RUN_LOCK:
+        _IN_FLIGHT.clear()
+        _LAST_RUN.clear()
+
+
+def run(action_id: str, *, actor: str, request_id: str, source: dict | None = None,
+        allowed_urls=(), http_post: HttpPost | None = None,
         send_prompt: SendPrompt | None = None) -> dict:
-    """Execute one action and audit it. A failing action is a result, not an
-    exception; only an unknown or disabled id raises."""
+    """Execute one action and audit it. `request_id` makes the call
+    idempotent: a repeat, even one arriving while the first still runs,
+    returns the first result with `duplicate: true`. A different request for
+    the same action inside DEBOUNCE_MS returns `debounced: true` without
+    running. A failing action is a result, not an exception; only a missing
+    request id or an unknown or disabled action raises."""
+    request_id = str(request_id or "").strip()[:128]
+    if not request_id:
+        raise ActionError("request_id required")
     action = get_action(action_id)
     if action is None:
         raise ActionError(f"no such action {action_id}", 404)
     if not action.get("enabled", True):
         raise ActionError(f"action {action_id} is disabled", 409)
-    request_id = str(request_id or "").strip()[:128]
-    if request_id:
-        settings_store.prune_prefix(REQUEST_PREFIX, updated_before=now_ms() - REQUEST_TTL_MS)
-        previous = settings_store.get(REQUEST_PREFIX + request_id)
-        if previous:
-            return {**json.loads(previous), "duplicate": True}
+    key = REQUEST_PREFIX + request_id
+    while True:
+        with _RUN_LOCK:
+            settings_store.prune_prefix(REQUEST_PREFIX, updated_before=now_ms() - REQUEST_TTL_MS)
+            previous = settings_store.get(key)
+            if previous:
+                return {**json.loads(previous), "duplicate": True}
+            waiting = _IN_FLIGHT.get(request_id)
+            if waiting is None:
+                last = _LAST_RUN.get(action["id"])
+                # Only a run in flight or a success holds the window; a
+                # failure can be retried at once.
+                if (last and (last[1] is None or last[1].get("ok"))
+                        and (time.monotonic() - last[0]) * 1000 < DEBOUNCE_MS):
+                    result = {**(last[1] or {"action_id": action["id"], "title": action["title"],
+                                             "type": action["type"], "ok": True}),
+                              "debounced": True, "duration_ms": 0}
+                    _audit("debounced", actor=actor, action_id=action["id"], source=source or {})
+                    return result
+                done = threading.Event()
+                _IN_FLIGHT[request_id] = done
+                _LAST_RUN[action["id"]] = (time.monotonic(), None)
+                break
+        waiting.wait(HTTP_TIMEOUT_S * 4)
     started = time.monotonic()
     try:
-        result = _execute(action, allowed_urls=allowed_urls, http_post=http_post,
-                          send_prompt=send_prompt)
-    except Exception as exc:  # noqa: BLE001 - every failure is reported to the caller
-        result = {"ok": False, "error": str(exc)[:300] or type(exc).__name__}
-    result = {"action_id": action["id"], "title": action["title"], "type": action["type"],
-              **result, "duration_ms": int((time.monotonic() - started) * 1000)}
-    if request_id:
-        settings_store.set_text(REQUEST_PREFIX + request_id, json.dumps(result))
-    _audit("run", actor=actor, action_id=action["id"], ok=result["ok"],
-           error=result.get("error", ""), status=result.get("status"),
-           duration_ms=result["duration_ms"], source=source or {})
-    return result
+        try:
+            result = _execute(action, allowed_urls=allowed_urls, http_post=http_post,
+                              send_prompt=send_prompt)
+        except Exception as exc:  # noqa: BLE001 - every failure is reported to the caller
+            result = {"ok": False, "error": str(exc)[:300] or type(exc).__name__}
+        result = {"action_id": action["id"], "title": action["title"], "type": action["type"],
+                  **result, "duration_ms": int((time.monotonic() - started) * 1000)}
+        settings_store.set_text(key, json.dumps(result))
+        with _RUN_LOCK:
+            _LAST_RUN[action["id"]] = (_LAST_RUN.get(action["id"], (started, None))[0], result)
+        _audit("run", actor=actor, action_id=action["id"], ok=result["ok"],
+               error=result.get("error", ""), status=result.get("status"),
+               duration_ms=result["duration_ms"], source=source or {})
+        return result
+    finally:
+        with _RUN_LOCK:
+            _IN_FLIGHT.pop(request_id, None)
+        done.set()

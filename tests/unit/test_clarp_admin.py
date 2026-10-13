@@ -1563,7 +1563,8 @@ def test_controller_action_map_unmap_remove_run(monkeypatch):
     assert sent == [("POST", "/controller-actions/delete", {"id": "rk-demo-leak"})]
     code, sent = _controller_action(monkeypatch, ["run", "rk-demo-leak"],
                                     reply={"ok": False, "error": "HTTP 500"})
-    assert code == 1 and sent[0][1] == "/controller-actions/run"
+    assert code == 1 and sent[0][1] == "/controller-actions/rk-demo-leak/invoke"
+    assert sent[0][2]["request_id"].startswith("clarp-admin-")
 
 
 def test_controller_action_list_prints_actions_and_their_gestures(monkeypatch, capsys):

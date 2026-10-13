@@ -619,7 +619,6 @@ class Handler(BaseHTTPRequestHandler):
         "/controller-actions/update": "_handle_controller_action_update",
         "/controller-actions/delete": "_handle_controller_action_delete",
         "/controller-actions/mappings": "_handle_controller_action_mapping",
-        "/controller-actions/run": "_handle_controller_action_run",
     }
     _PUT_ROUTES = {
         "/dreaming/settings": "_handle_dreaming_settings_put",
@@ -1022,7 +1021,6 @@ class Handler(BaseHTTPRequestHandler):
         "/clips/ack", "/clog", "/location", "/calendar/response",
         "/remote-action",
         "/voice-events",
-        "/controller-actions/run",
     })
 
     def _device_forbidden(self, path: str, method: str) -> bool:
@@ -1036,7 +1034,8 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET":
             return False
         if method == "POST":
-            return path not in self._LIMITED_DEVICE_POST_EXACT
+            return (path not in self._LIMITED_DEVICE_POST_EXACT
+                    and self._controller_invoke_id(path) is None)
         return True
 
     def _oracle_auth_missing(self, path: str) -> bool:
@@ -2966,6 +2965,9 @@ class Handler(BaseHTTPRequestHandler):
             return janitor_http.handle(self, "POST")
         if self._dispatch_exact(self._POST_ROUTES, path):
             return
+        invoke_id = self._controller_invoke_id(path)
+        if invoke_id is not None:
+            return self._handle_controller_action_invoke(invoke_id)
         if path.startswith("/turn-queue/") and path.endswith("/send"):
             queue_id = path[len("/turn-queue/"):-len("/send")].strip("/")
             return self._handle_turn_queue_send(queue_id)
@@ -3417,23 +3419,28 @@ class Handler(BaseHTTPRequestHandler):
                 gesture=str(data.get("gesture") or ""), action_id=data.get("action_id"),
                 actor=self._controller_actor())})
 
-    def _handle_controller_action_run(self):
-        """Run one custom action. The caller names an action id, or the
-        gesture (device, button, gesture) whose mapping picks it; nothing in
-        the request can change what the action does."""
+    @staticmethod
+    def _controller_invoke_id(path: str) -> str | None:
+        """The action id in POST /controller-actions/<id>/invoke, else None."""
+        prefix, suffix = "/controller-actions/", "/invoke"
+        if not (path.startswith(prefix) and path.endswith(suffix)):
+            return None
+        action_id = unquote(path[len(prefix):-len(suffix)])
+        return action_id if action_id and "/" not in action_id else None
+
+    def _handle_controller_action_invoke(self, action_id: str):
+        """Run one custom action for a paired device. The caller names the
+        action and its own request id; nothing in the body can change what
+        the action does, which only the Host's definition decides."""
         from lib import config as app_config, controller_actions
+        if not (getattr(self, "_request_auth_validated", False)
+                or self._controller_admin()):
+            return self._json_error(401, "paired device required")
         data = self._read_json()
         if not isinstance(data, dict):
             return self._json_error(400, "bad json")
         source = {key: str(data.get(key) or "")[:128]
                   for key in ("device", "button", "gesture", "source_kind") if data.get(key)}
-        action_id = str(data.get("action_id") or "").strip()
-        if not action_id:
-            action_id = controller_actions.resolve(
-                source.get("device", "*"), source.get("button", ""),
-                source.get("gesture", "")) or ""
-            if not action_id:
-                return self._json_error(404, "no action is mapped to that gesture")
         try:
             result = controller_actions.run(
                 action_id, actor=self._controller_actor(), source=source,
@@ -3442,7 +3449,7 @@ class Handler(BaseHTTPRequestHandler):
                 send_prompt=self._controller_send_prompt)
         except controller_actions.ActionError as exc:
             return self._json_error(exc.status, str(exc))
-        log("controllerActionRun", f"{action_id} ok={result['ok']}")
+        log("controllerActionInvoke", f"{action_id} ok={result['ok']}")
         return self._json_ok(result)
 
     def _controller_send_prompt(self, session: str, text: str) -> dict:
