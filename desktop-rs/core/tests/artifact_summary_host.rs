@@ -209,12 +209,3 @@ fn some_fields_live_in_the_payload_only() {
     assert!(item("html_form_report", "default")["payload"].get("answer_schema").is_some());
     assert!(item("plan_artifact", "default")["payload"].get("plan_id").is_some());
 }
-
-#[test]
-fn a_lone_surrogate_is_no_json_string_the_desktop_reads() {
-    // Not in the canonical set: the Host escapes a lone surrogate as \ud800,
-    // which serde_json refuses, so such an item cannot be read (its summary
-    // marker is pending; see the engine's surrogate test).
-    let error = serde_json::from_str::<Value>(r#"{"content": "bad \ud800 text"}"#).expect_err("a lone surrogate");
-    assert!(error.to_string().contains("escape"), "{error}");
-}

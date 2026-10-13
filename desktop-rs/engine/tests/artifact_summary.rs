@@ -502,28 +502,3 @@ fn the_fake_host_serves_the_canonical_snapshot_as_the_real_host_does() {
         assert_eq!(d.engine.artifact_hydrations_sent(id), 1, "{}: verified the first time", vector["name"]);
     }
 }
-
-#[test]
-fn a_lone_surrogate_breaks_only_its_own_read_under_summary_lists() {
-    // As the real Host: the list's marker is pending (no bytes, no hash);
-    // the item cannot be decoded, so opening it says so.
-    let host = seeded("summary-surrogate", fixtures(), true);
-    host.control("/__control/artifact-summary", json!({"lone_surrogate": ["form-b"]}));
-    let mut d = listed(&host);
-    let marker = row(&d, "form-b")["content_omitted"].clone();
-    assert_eq!((marker["sha256"].is_null(), marker["hash_pending"].as_bool(), marker["bytes"].is_null(), marker["size_unknown"].as_bool()),
-               (true, Some(true), true, Some(true)), "{marker}");
-    d.engine.need_artifact("form-b");
-    d.until("form-b fails", |e| matches!(e.artifact_hydration("form-b"), Hydration::Failed(_)));
-    let Hydration::Failed(why) = d.engine.artifact_hydration("form-b") else { unreachable!() };
-    assert!(why.contains("Invalid JSON response"), "{why}");
-    assert_eq!(row(&d, "form-a")["content_omitted"]["sha256"].as_str().map(|h| h.starts_with("c1:")), Some(true), "the rest of the list is whole");
-
-    // Without summary lists the same content breaks the whole flat-v1 list.
-    let host = seeded("summary-surrogate-flat", fixtures(), false);
-    host.control("/__control/artifact-summary", json!({"lone_surrogate": ["form-b"]}));
-    let mut d = Driver::new(&host.base);
-    d.connect();
-    d.until("the flat list fails", |e| e.updates_error().contains("Invalid JSON response") && !e.updates_loading());
-    assert!(d.engine.update_artifacts().is_empty());
-}

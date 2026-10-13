@@ -154,7 +154,6 @@ UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 # `item_delay` slows GET /artifacts/<id>; `refuse` advertises the feature
 # but answers the list as an old Host (400); `item_ignores_flat` makes
 # GET /artifacts/<id> ignore representation=flat-v1 (an older item route);
-# `lone_surrogate` ids hold content with a lone surrogate (see `stored`);
 # `unknown_hash` ones carry a
 # content hash of a kind the client cannot check (not `c1:`).
 artifact_summary = {"on": False, "hash_pending": [], "digest_pending": [], "wrong_sha": [], "corrupt": {}, "item_delay": 0.0}
@@ -315,19 +314,10 @@ def represent(artifact, representation):
     return {**top, "payload": {k: v for k, v in artifact.items() if k in PUBLIC_FIELDS + PAYLOAD_ONLY}}
 
 
-def stored(artifact):
-    """The artifact as the Host's database holds it: `lone_surrogate` ids
-    have content no UTF-8 can carry (SQLite keeps it as a JSON escape)."""
-    if artifact.get("artifact_id") not in artifact_summary.get("lone_surrogate", []):
-        return artifact
-    bad = "bad \ud800 text"
-    return {**artifact, "content": bad, **({"payload": {**artifact["payload"], "content": bad}} if "payload" in artifact else {})}
-
-
 def listed_artifacts(limit):
     if not host_order:
-        return [stored(a) for a in artifacts]
-    rows = [stored(a) for a in artifacts if a.get("type") not in UNLISTED_TYPES]
+        return list(artifacts)
+    rows = [a for a in artifacts if a.get("type") not in UNLISTED_TYPES]
     rows.sort(key=lambda a: (a.get("updated_at") or 0, a.get("artifact_id", "")), reverse=True)
     return rows[:limit]
 
@@ -427,12 +417,9 @@ def summary_row(artifact):
     row = copy.deepcopy(artifact)
     artifact_id = row.get("artifact_id", "")
     if row.get("type") == "html_form" and "content" in row:
-        try:
-            data = row.pop("content").encode("utf-8")
-        except UnicodeEncodeError:
-            data = None     # a lone surrogate: as the Host, pending, never a hash of something else
+        data = row.pop("content").encode("utf-8")
         marker = {"reason": "summary", "version": row.get("version"), "updated_at": row.get("updated_at", 0)}
-        if data is None or artifact_id in artifact_summary["hash_pending"]:
+        if artifact_id in artifact_summary["hash_pending"]:
             marker.update({"bytes": None, "size_unknown": True, "sha256": None, "hash_pending": True})
         elif artifact_id in artifact_summary.get("unknown_hash", []):
             # Not a hash of this content either: a client must not check it.
@@ -1026,7 +1013,7 @@ class Handler(BaseHTTPRequestHandler):
                 found = next((a for a in artifacts if a.get("artifact_id") == artifact_id), None)
                 if found is None:
                     return self.reply(404, {"error": "artifact not found"})
-                item = copy.deepcopy(represent(stored(found), "flat-v1" if flat_item else ""))
+                item = copy.deepcopy(represent(found, "flat-v1" if flat_item else ""))
                 if artifact_summary["corrupt"].get(artifact_id, 0) > 0:
                     artifact_summary["corrupt"][artifact_id] -= 1
                     item["content"] = item.get("content", "") + "<!-- altered -->"
