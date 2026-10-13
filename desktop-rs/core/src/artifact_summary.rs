@@ -47,10 +47,13 @@ pub fn is_unsupported_representation(status: u16, message: &str) -> bool {
     status == 400 && message.trim() == UNSUPPORTED
 }
 
-/// `path` with `representation=<representation>` added to its query.
+/// `path` asking for `representation` instead of any it named.
 pub fn with_representation(path: &str, representation: &str) -> String {
-    let joiner = if path.contains('?') { '&' } else { '?' };
-    format!("{path}{joiner}representation={representation}")
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    let mut pairs: Vec<&str> = query.split('&').filter(|p| !p.is_empty() && !p.starts_with("representation=")).collect();
+    let asked = format!("representation={representation}");
+    pairs.push(&asked);
+    format!("{route}?{}", pairs.join("&"))
 }
 
 /// An html_form row's `content_omitted`.
