@@ -24,16 +24,22 @@ fn only_the_exact_refusal_falls_back() {
     assert!(!summary::is_unsupported_representation(500, "unsupported artifact representation"));
     assert!(!summary::is_unsupported_representation(400, "Bad Request"));
     assert_eq!(summary::with_representation("/artifacts?limit=50", "summary-v1"), "/artifacts?limit=50&representation=summary-v1");
-    assert_eq!(summary::with_representation("/artifacts/pinned", "summary-v1"), "/artifacts/pinned?representation=summary-v1");
+    assert_eq!(summary::with_representation("/pinned-artifacts", "summary-v1"), "/pinned-artifacts?representation=summary-v1");
     assert_eq!(summary::with_representation("/artifacts?limit=50&representation=flat-v1&order=updated", "summary-v1"), "/artifacts?limit=50&order=updated&representation=summary-v1", "instead of flat-v1, not beside it");
 }
 
 #[test]
 fn markers_are_read_and_an_omitted_body_is_not_complete() {
+    const HI: &str = "9c655e84ab91015eed7670dfbb369ffdc31f6efe04ef8bad2615cab6b9e63ca6";
     let row = json!({"artifact_id": "f", "type": "html_form", "updated_at": 5,
-                     "content_omitted": {"reason": "summary", "bytes": 12, "sha256": "ABC", "version": 2, "updated_at": 5}});
+                     "content_omitted": {"reason": "summary", "bytes": 9, "sha256": format!("c1:{}", HI.to_uppercase()), "version": 2, "updated_at": 5}});
     let marker = summary::content_marker(&row).unwrap();
-    assert_eq!((marker.bytes, marker.sha256.as_deref(), marker.version, marker.updated_at), (Some(12), Some("abc"), json!(2), 5));
+    assert_eq!((marker.bytes, marker.sha256.as_deref(), marker.version, marker.updated_at), (Some(9), Some(HI), json!(2), 5));
+    // A hash of another kind (or none) cannot be checked: as pending.
+    for other in [json!(format!("c2:{HI}")), json!(HI), json!("c1:not-hex"), json!(null)] {
+        let row = json!({"content_omitted": {"reason": "summary", "sha256": other, "updated_at": 5}});
+        assert_eq!(summary::content_marker(&row).unwrap().sha256, None, "{other}");
+    }
     assert!(!summary::complete(&row));
     let pending = json!({"content_omitted": {"reason": "summary", "bytes": null, "size_unknown": true, "sha256": null, "hash_pending": true, "version": null, "updated_at": 9}});
     let marker = summary::content_marker(&pending).unwrap();
@@ -44,6 +50,8 @@ fn markers_are_read_and_an_omitted_body_is_not_complete() {
     assert!(summary::complete(&json!({"type": "html_form", "content": ""})), "a full row");
     assert!(summary::content_marker(&json!({"content_omitted": {"reason": "other"}})).is_none());
 
+    let digested = json!({"plan": {"goal": {"history_omitted": {"reason": "summary", "count": 3, "last_at": 7, "digest": "h1:ABCdef"}}}});
+    assert_eq!(summary::history_marker(&digested).unwrap().digest.as_deref(), Some("h1:ABCdef"), "opaque: kept as sent");
     let plan = json!({"plan": {"goal": {"history_omitted": {"reason": "summary", "count": 3, "last_at": 7, "digest": null, "digest_pending": true}}}});
     let marker = summary::history_marker(&plan).unwrap();
     assert_eq!((marker.count, marker.last_at, marker.digest), (3, Some(7), None));
@@ -53,6 +61,28 @@ fn markers_are_read_and_an_omitted_body_is_not_complete() {
     assert!(summary::complete(&plan));
     summary::set_goal_history(&mut plan, None);
     assert!(summary::goal_history(&plan).is_none());
+}
+
+/// Revision 5's vectors: the decoded string, its UTF-8 bytes, its hash.
+#[test]
+fn the_contract_hash_vectors_hold() {
+    let vectors = [
+        (r#""""#, 0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"),
+        (r#""<p>Hi</p>""#, 9, "9c655e84ab91015eed7670dfbb369ffdc31f6efe04ef8bad2615cab6b9e63ca6"),
+        (r#""\u00e9\u6f22\ud83d\ude00""#, 9, "3ea0588400cb4af7b15d0edd7dc2fe1e359a94ab6822abe8c535f4281f330a20"),
+        (r#""line1\nline2\t\"q\" \\ /""#, 19, "689426335045576c85a1ac7696a1146993c503c57b489f7b2fb2e581bac1ca1b"),
+        (r#""<img src=\"data:image/png;base64,iVBORw0KGgo=\">""#, 46, "9af61be3754e69b51d792026d0f7364a2bef6f29389257192c59f443e6a643d8"),
+    ];
+    for (wire, bytes, hex) in vectors {
+        let content: String = serde_json::from_str(wire).unwrap();
+        assert_eq!(content.len(), bytes, "{wire}");
+        assert_eq!(summary::content_hash_of(&content), format!("c1:{hex}"), "{wire}");
+        let row = json!({"content_omitted": {"reason": "summary", "sha256": format!("c1:{hex}"), "updated_at": 1}});
+        let marker = summary::content_marker(&row).unwrap();
+        assert_eq!(summary::check_content(marker.sha256.as_deref(), &content), Check::Match, "{wire}");
+    }
+    let emoji: String = serde_json::from_str(r#""é漢😀""#).unwrap();
+    assert_eq!(summary::sha256_hex(&emoji), "3ea0588400cb4af7b15d0edd7dc2fe1e359a94ab6822abe8c535f4281f330a20", "raw or escaped, the same codepoints");
 }
 
 #[test]
