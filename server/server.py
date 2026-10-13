@@ -498,6 +498,8 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/v2/calls/status": "_handle_oracle_live_call_status",
         "/oracle/v2/context/image": "_handle_oracle_context_image",
         "/agent-schedules": "_handle_agent_schedules_get",
+        "/controller-actions": "_handle_controller_actions_get",
+        "/controller-actions/audit": "_handle_controller_actions_audit",
     }
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
@@ -613,6 +615,11 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-schedules": "_handle_agent_schedules_post",
         "/agent-schedules/toggle": "_handle_agent_schedules_toggle",
         "/agent-schedules/delete": "_handle_agent_schedules_delete",
+        "/controller-actions": "_handle_controller_action_create",
+        "/controller-actions/update": "_handle_controller_action_update",
+        "/controller-actions/delete": "_handle_controller_action_delete",
+        "/controller-actions/mappings": "_handle_controller_action_mapping",
+        "/controller-actions/run": "_handle_controller_action_run",
     }
     _PUT_ROUTES = {
         "/dreaming/settings": "_handle_dreaming_settings_put",
@@ -1015,6 +1022,7 @@ class Handler(BaseHTTPRequestHandler):
         "/clips/ack", "/clog", "/location", "/calendar/response",
         "/remote-action",
         "/voice-events",
+        "/controller-actions/run",
     })
 
     def _device_forbidden(self, path: str, method: str) -> bool:
@@ -3320,6 +3328,144 @@ class Handler(BaseHTTPRequestHandler):
         if action == ClientAction.CONTROLLER_EVENT:
             body["controller_event_id"] = event["controller_event_id"]
         return self._json_ok(body)
+
+    # --- controller custom actions (lib.controller_actions) ------------
+
+    def _controller_actor(self) -> str:
+        caller = self._turn_caller()
+        if caller:
+            return f"agent:{caller}"
+        principal = str(getattr(self, "_request_principal", "") or "")
+        if principal and principal != "administrator":
+            return f"device:{principal}"
+        return "administrator"
+
+    def _controller_admin(self) -> bool:
+        """Defining actions is for local administrators (agents through
+        clarp-admin); a paired device can only map and run them."""
+        if getattr(self, "_request_principal", "") == "administrator":
+            return True
+        return (not (getattr(self.ctx, "auth_token", "") or "")
+                and bool(getattr(self, "_request_is_local", False)))
+
+    def _controller_action_change(self, apply, *, status: int = 200,
+                                  admin: bool = False):
+        """Apply one registry change and tell connected clients to resync."""
+        from lib import controller_actions
+        if admin and not self._controller_admin():
+            return self._json_error(403, "only a local administrator can define controller actions")
+        try:
+            result = apply()
+        except controller_actions.ActionError as exc:
+            return self._json_error(exc.status, str(exc))
+        events.broadcast_ephemeral(self.ctx.stream, events.controller_actions_updated(
+            revision=controller_actions.registry()["revision"]))
+        return self._json(status, {"ok": True, **result})
+
+    def _handle_controller_actions_get(self):
+        from lib import controller_actions
+        return self._json_ok(controller_actions.registry())
+
+    def _handle_controller_actions_audit(self):
+        from lib import controller_actions
+        try:
+            limit = int((self._query().get("limit", ["50"])[0]) or 50)
+        except ValueError:
+            return self._json_error(400, "limit must be an integer")
+        return self._json_ok({"entries": controller_actions.audit_log(limit=min(limit, 500))})
+
+    def _handle_controller_action_create(self):
+        from lib import config as app_config, controller_actions
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        return self._controller_action_change(
+            lambda: {"action": controller_actions.create_action(
+                data, actor=self._controller_actor(),
+                allowed_urls=app_config.load().controller_action_urls)},
+            status=201, admin=True)
+
+    def _handle_controller_action_update(self):
+        from lib import config as app_config, controller_actions
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        return self._controller_action_change(
+            lambda: {"action": controller_actions.update_action(
+                str(data.get("id") or "").strip(), data, actor=self._controller_actor(),
+                allowed_urls=app_config.load().controller_action_urls)},
+            admin=True)
+
+    def _handle_controller_action_delete(self):
+        from lib import controller_actions
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        return self._controller_action_change(
+            lambda: controller_actions.delete_action(
+                str(data.get("id") or "").strip(), actor=self._controller_actor()),
+            admin=True)
+
+    def _handle_controller_action_mapping(self):
+        from lib import controller_actions
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        return self._controller_action_change(
+            lambda: {"mapping": controller_actions.set_mapping(
+                device=str(data.get("device") or "*"), button=str(data.get("button") or ""),
+                gesture=str(data.get("gesture") or ""), action_id=data.get("action_id"),
+                actor=self._controller_actor())})
+
+    def _handle_controller_action_run(self):
+        """Run one custom action. The caller names an action id, or the
+        gesture (device, button, gesture) whose mapping picks it; nothing in
+        the request can change what the action does."""
+        from lib import config as app_config, controller_actions
+        data = self._read_json()
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        source = {key: str(data.get(key) or "")[:128]
+                  for key in ("device", "button", "gesture", "source_kind") if data.get(key)}
+        action_id = str(data.get("action_id") or "").strip()
+        if not action_id:
+            action_id = controller_actions.resolve(
+                source.get("device", "*"), source.get("button", ""),
+                source.get("gesture", "")) or ""
+            if not action_id:
+                return self._json_error(404, "no action is mapped to that gesture")
+        try:
+            result = controller_actions.run(
+                action_id, actor=self._controller_actor(), source=source,
+                request_id=str(data.get("request_id") or ""),
+                allowed_urls=app_config.load().controller_action_urls,
+                send_prompt=self._controller_send_prompt)
+        except controller_actions.ActionError as exc:
+            return self._json_error(exc.status, str(exc))
+        log("controllerActionRun", f"{action_id} ok={result['ok']}")
+        return self._json_ok(result)
+
+    def _controller_send_prompt(self, session: str, text: str) -> dict:
+        """Deliver an agent_prompt action through this Host's own /send, the
+        same path `clarp-admin prompt` takes."""
+        import urllib.error
+        import urllib.request
+        port = int(self.server.server_address[1])
+        payload = {"session": session, "text": text, "force_session": True,
+                   "synthesize_audio": False, "hands_free": False, "origin": "automation",
+                   "client_msg_id": f"controller-action-{secrets.token_hex(8)}"}
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/send", data=json.dumps(payload).encode(),
+            method="POST", headers={"Content-Type": "application/json"})
+        token = getattr(self.ctx, "auth_token", "") or ""
+        if token:
+            request.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                response.read()
+            return {"ok": True}
+        except urllib.error.HTTPError as exc:
+            return {"ok": False, "error": f"HTTP {exc.code}: {exc.read(300).decode('utf-8', 'replace')}"}
 
     # --- POST handlers ---------------------------------------------------
 
