@@ -181,7 +181,7 @@ async fn api_requests_carry_auth_and_report_host_errors() {
 
 /// What Python's json.dumps writes for a lone high, a lone low, a high before
 /// plain text and a valid pair.
-const SURROGATES: &str = r#""\ud800","\udc00","\ud800x","😀""#;
+const SURROGATES: &str = r#""\ud800","\udc00","\ud800x","\ud83d\ude00""#;
 const REPAIRED: [&str; 4] = ["\u{FFFD}", "\u{FFFD}", "\u{FFFD}x", "😀"];
 
 #[tokio::test]
