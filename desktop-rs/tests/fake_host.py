@@ -1204,15 +1204,6 @@ class Handler(BaseHTTPRequestHandler):
             with state_lock:
                 artifact_summary.update(body)
             return self.reply(200, {"ok": True})
-        if url.path == "/__control/artifact-quiet-update":
-            # Test control: change one artifact's fields in place (a later
-            # updated_at) without announcing it: only a list shows it.
-            with state_lock:
-                for artifact in artifacts:
-                    if artifact.get("artifact_id") == body.get("id"):
-                        artifact.update(body.get("set", {}))
-                        artifact["updated_at"] = artifact.get("updated_at", 0) + 1
-            return self.reply(200, {"ok": True})
         if url.path == "/__control/server-id":
             # Test control: this Host answers as another instance.
             global server_id
@@ -1620,6 +1611,15 @@ class Handler(BaseHTTPRequestHandler):
                         artifact["updated_at"] = now_ms
                 settled = [a.get("artifact_id", "") for a in artifacts if a.get("session") == body.get("session")]
             announce(settled, body.get("session", ""))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/artifact-quiet-update":
+            # Test control: change one artifact's fields in place (a later
+            # updated_at) without announcing it: only a list shows it.
+            with state_lock:
+                for artifact in artifacts:
+                    if artifact.get("artifact_id") == body.get("id"):
+                        artifact.update(body.get("set", {}))
+                        artifact["updated_at"] = artifact.get("updated_at", 0) + 1
             return self.reply(200, {"ok": True})
         if url.path == "/__control/artifact-update":
             # Test control: change one artifact's fields in place (a later
