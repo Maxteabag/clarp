@@ -2291,6 +2291,34 @@ mod tests {
         assert_eq!(network_grant(&flat[0]), serde_json::json!(["https://api.example"]));
     }
 
+    /// The Host's rule (server/lib/html_forms.py): an html_form is a report
+    /// exactly when `read_only` is true; the flag is flattened, so every
+    /// representation carries it. The canonical snapshot's forms (empty
+    /// `answer_schema` in the payload, no `read_only`) are forms on the Host,
+    /// and the desktop reads them so in every shape.
+    #[test]
+    fn html_forms_are_reports_exactly_when_the_host_says_read_only() {
+        let fixture = |name: &str| -> Value {
+            let path = format!("{}/../tests/fixtures/summary-v1/{name}", env!("CARGO_MANIFEST_DIR"));
+            serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).unwrap()
+        };
+        let mut seen = 0;
+        for list in ["01-artifacts-flat-v1.body", "01-artifacts-default.body", "01-artifacts-summary-v1.body"] {
+            for row in fixture(list)["artifacts"].as_array().unwrap().iter().filter(|r| r["type"] == "html_form") {
+                let host = row.get("read_only").or_else(|| row["payload"].get("read_only")) == Some(&Value::Bool(true));
+                assert_eq!(is_report(row), host, "{list}: {}", row["title"]);
+                assert_eq!(artifact_item(row).label, if host { "REPORT" } else { "FORM" }, "{list}: {}", row["title"]);
+                seen += 1;
+            }
+        }
+        for shape in ["default", "flat-v1", "bogus"] {
+            assert!(!is_report(&fixture(&format!("04-item-html_form_report-{shape}.body"))["artifact"]), "{shape}");
+        }
+        assert_eq!(seen, 18, "six forms in each of three lists");
+        // A read-only report keeps its flag at the top level in flat-v1.
+        assert!(is_report(&serde_json::json!({"type": "html_form", "read_only": true})));
+    }
+
     #[test]
     fn only_unfinished_states_get_a_badge() {
         assert_eq!(badge("cancelled"), "Cancelled");
