@@ -259,16 +259,17 @@ def test_a_non_ascii_body_under_the_budget_in_chars_but_over_in_bytes_is_pending
 
 def test_a_mostly_ascii_body_with_a_few_wide_chars_is_measured_exactly(theo):
     """No 4x-per-character guess: 2,000 ASCII chars and one emoji is 2,004
-    bytes, under a 2,100-byte budget, so the marker completes exactly."""
+    bytes. Counting and hashing them costs 2 x 2,004, which a 4,100-byte budget
+    covers (a 4x guess would claim 8,004), so the marker completes exactly."""
     content = "a" * 2000 + "😀"
     _form(content)
-    budget = artifacts.summary_budget(max_bytes=2100)
+    budget = artifacts.summary_budget(max_bytes=4100)
     [item] = [artifacts.response_representation(r, "summary-v1", budget=budget)
               for r in artifacts.list_artifacts(limit=200, type="html_form")]
     assert item["content_omitted"]["bytes"] == 2004
     assert item["content_omitted"]["sha256"] == "c1:" + hashlib.sha256(
         content.encode()).hexdigest()
-    assert budget.remaining == 2100 - 2004
+    assert budget.remaining == 4100 - 2 * 2004
 
 
 def test_a_wide_history_under_the_budget_in_chars_but_over_in_bytes_is_pending(theo):
@@ -319,3 +320,49 @@ def test_a_plan_without_its_goal_text_is_pending_and_never_reuses_a_digest(theo,
     assert marker["digest"] is None and marker["digest_pending"] is True
     assert marker["count"] == len(row["plan"]["goal"]["history"])
     assert hashes == [] and len(artifacts._HISTORY_DIGEST) == cached
+
+
+def test_over_budget_counting_work_is_charged_and_bounded(theo, monkeypatch):
+    """Five wide rows, each over a 2,500-byte budget: the counting of the
+    first spends the budget, the rest do no encoding at all, so the request's
+    total UTF-8 encoding stays within the budget plus one chunk."""
+    monkeypatch.setattr(artifacts, "_UTF8_COUNT_CHUNK", 100)      # 100 chars <= 400 bytes
+    encoded = []
+    real = getattr(artifacts, "_encode_utf8", None)
+
+    def counting(text):
+        data = real(text)
+        encoded.append(len(data))
+        return data
+
+    monkeypatch.setattr(artifacts, "_encode_utf8", counting, raising=False)
+    for _ in range(5):
+        _form("😀" * 500)                                       # 500 chars, 2,000 bytes each
+    budget = artifacts.summary_budget(max_bytes=2500)
+    items = [artifacts.response_representation(r, "summary-v1", budget=budget)
+             for r in artifacts.list_artifacts(limit=200, type="html_form")]
+    # 2,000 bytes are counted for the first row, then hashing it needs
+    # 2,000 more: over. Nothing after it may encode.
+    assert budget.remaining == 0
+    assert all(i["content_omitted"]["hash_pending"] for i in items)
+    assert sum(encoded) <= 2500 + 400
+
+
+def test_a_too_heavy_entry_is_not_stored_and_the_others_stay():
+    from lib.revisioned_cache import RevisionedCache
+    cache = RevisionedCache("test_heavy_entry", max_entries=10, max_weight=1000,
+                            weight=lambda key, revision, value: len(value))
+    try:
+        cache.put("a", 1, "x" * 300)
+        cache.put("b", 1, "y" * 300)
+        cache.put("c", 1, "z" * 5000)                 # heavier than the whole bound
+        assert cache.get("a", 1) == (True, "x" * 300)
+        assert cache.get("b", 1) == (True, "y" * 300)
+        assert cache.get("c", 1) == (False, None)
+        assert cache.weight == 600
+        cache.put("a", 2, "w" * 5000)                 # a stale entry is not kept either
+        assert cache.get("a", 1) == (False, None) and cache.get("a", 2) == (False, None)
+        assert cache.get("b", 1) == (True, "y" * 300) and cache.weight == 300
+    finally:
+        from lib import revisioned_cache
+        revisioned_cache._REGISTRY.pop("test_heavy_entry", None)
