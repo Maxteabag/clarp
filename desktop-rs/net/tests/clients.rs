@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clarp_core::endpoint::SseTiming;
+use clarp_core::host_json::REPAIRED_FIELD;
 use clarp_net::{ApiClient, ApiReply, SseClient, SseSignal};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -215,18 +216,24 @@ async fn lists_items_chats_and_the_snapshot_survive_a_lone_surrogate() {
             "list" => {
                 assert_eq!(texts(&object["artifacts"][0]["title"]), REPAIRED);
                 assert_eq!((object["artifacts"][1]["title"].as_str(), object["next"].as_str()), (Some("fine"), Some("c2")));
+                assert_eq!(object[REPAIRED_FIELD], 3);
+                assert_eq!(object["artifacts"][0][REPAIRED_FIELD], 3);
+                assert!(object["artifacts"][1].get(REPAIRED_FIELD).is_none());
             }
             "item" => {
                 assert_eq!(texts(&object["content"]), REPAIRED);
                 assert_eq!(object["content_hash"], "hash_pending");
+                assert_eq!(object[REPAIRED_FIELD], 3);
             }
             "chat" => {
                 assert_eq!(texts(&object["messages"][0]["text"]), REPAIRED);
                 assert_eq!(object["messages"][1]["text"], "after");
+                assert!(object["messages"][1].get(REPAIRED_FIELD).is_none());
             }
             _ => {
                 assert_eq!(texts(&object["agents"][0]["label"]), REPAIRED);
                 assert_eq!(object["agents"][1]["session"], "mike");
+                assert_eq!(object["agents"][0][REPAIRED_FIELD], 3);
             }
         }
     }
@@ -261,6 +268,8 @@ async fn an_sse_event_with_a_lone_surrogate_is_delivered_with_its_neighbours() {
     assert_eq!(types, ["agent-state", "artifact", "agent-roster"]);
     let titles: Vec<&str> = events[1]["title"].as_array().unwrap().iter().map(|t| t.as_str().unwrap()).collect();
     assert_eq!(titles, REPAIRED);
+    assert_eq!(events[1][REPAIRED_FIELD], 3);
+    assert!(events[0].get(REPAIRED_FIELD).is_none());
     client.stop();
 }
 
