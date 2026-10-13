@@ -438,3 +438,59 @@ fn a_hydration_asks_for_flat_v1_and_reads_either_shape() {
     assert!((1_100_000..1_300_000).contains(&flat), "flat-v1 hydration: {flat} bytes");
     assert!((2_200_000..2_500_000).contains(&legacy), "legacy hydration: {legacy} bytes");
 }
+
+/// The real Host's responses (`tests/fixtures/artifact_summary_v1_host.json`).
+fn real_host() -> Value {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/artifact_summary_v1_host.json");
+    serde_json::from_str(&std::fs::read_to_string(path).expect("the fixture")).expect("valid JSON")
+}
+
+#[test]
+fn the_fake_host_lists_real_rows_as_the_real_host_does() {
+    // The real flat-v1 rows (bodies intact: not the big or surrogate forms)
+    // seeded into the fake must come back as the real summary-v1 rows.
+    let real = real_host();
+    let skip = ["big", "big116", "surrogate"].map(|n| real["ids"][n].clone());
+    let flat: Vec<Value> = real["flat"]["body"]["artifacts"].as_array().unwrap().iter().filter(|r| !skip.contains(&r["artifact_id"])).cloned().collect();
+    let expected: Vec<Value> = real["summary"]["body"]["artifacts"].as_array().unwrap().iter().filter(|r| !skip.contains(&r["artifact_id"])).cloned().collect();
+    let host = seeded("summary-real-rows", Value::Array(flat), true);
+    let mut d = listed(&host);
+    assert_eq!(d.engine.update_artifacts(), expected.as_slice(), "the fake's summary rows are the real Host's");
+
+    // A real form hydrates and verifies; a real plan's history is read for its view.
+    let small = real["ids"]["small"].as_str().unwrap();
+    d.engine.need_artifact(small);
+    ready(&mut d, small);
+    assert_eq!(row(&d, small)["content"], real["items"]["small"]["flat"]["body"]["artifact"]["content"]);
+    assert_eq!(hydrations(&host, small), 1);
+    let plan = real["ids"]["plan_artifact"].as_str().unwrap();
+    d.engine.set_artifact_in_view(Some(plan));
+    ready(&mut d, plan);
+    let count = row(&d, plan)["plan"]["goal"]["history_omitted"]["count"].as_u64();
+    assert_eq!(row(&d, plan)["plan"]["goal"]["history"].as_array().map(|h| h.len() as u64), count);
+}
+
+#[test]
+fn a_lone_surrogate_breaks_only_its_own_read_under_summary_lists() {
+    // As the real Host: the list's marker is pending (no bytes, no hash);
+    // the item cannot be decoded, so opening it says so.
+    let host = seeded("summary-surrogate", fixtures(), true);
+    host.control("/__control/artifact-summary", json!({"lone_surrogate": ["form-b"]}));
+    let mut d = listed(&host);
+    let marker = row(&d, "form-b")["content_omitted"].clone();
+    assert_eq!((marker["sha256"].is_null(), marker["hash_pending"].as_bool(), marker["bytes"].is_null(), marker["size_unknown"].as_bool()),
+               (true, Some(true), true, Some(true)), "{marker}");
+    d.engine.need_artifact("form-b");
+    d.until("form-b fails", |e| matches!(e.artifact_hydration("form-b"), Hydration::Failed(_)));
+    let Hydration::Failed(why) = d.engine.artifact_hydration("form-b") else { unreachable!() };
+    assert!(why.contains("lone leading surrogate"), "{why}");
+    assert_eq!(row(&d, "form-a")["content_omitted"]["sha256"].as_str().map(|h| h.starts_with("c1:")), Some(true), "the rest of the list is whole");
+
+    // Without summary lists the same content breaks the whole flat-v1 list.
+    let host = seeded("summary-surrogate-flat", fixtures(), false);
+    host.control("/__control/artifact-summary", json!({"lone_surrogate": ["form-b"]}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.until("the flat list fails", |e| e.updates_error().contains("lone leading surrogate") && !e.updates_loading());
+    assert!(d.engine.update_artifacts().is_empty());
+}
