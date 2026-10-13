@@ -1,0 +1,40 @@
+{
+ "note": "Rev 5 vectors. sha256 is over the UTF-8 bytes of the decoded content string. Each vector is an html_form in this snapshot; its summary-v1 marker must equal 'c1:' + sha256.",
+ "vectors": [
+  {
+   "name": "empty",
+   "content": "",
+   "utf8_bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "artifact_id": "artifact-7917ea11d25be13320537473"
+  },
+  {
+   "name": "p-hi",
+   "content": "<p>Hi</p>",
+   "utf8_bytes": 9,
+   "sha256": "9c655e84ab91015eed7670dfbb369ffdc31f6efe04ef8bad2615cab6b9e63ca6",
+   "artifact_id": "artifact-e780769127642772455791f6"
+  },
+  {
+   "name": "non-ascii",
+   "content": "é漢😀",
+   "utf8_bytes": 9,
+   "sha256": "3ea0588400cb4af7b15d0edd7dc2fe1e359a94ab6822abe8c535f4281f330a20",
+   "artifact_id": "artifact-b53ab95a852eeaf579e0a1cd"
+  },
+  {
+   "name": "escapes",
+   "content": "line1\nline2\t\"q\" \\ /",
+   "utf8_bytes": 19,
+   "sha256": "689426335045576c85a1ac7696a1146993c503c57b489f7b2fb2e581bac1ca1b",
+   "artifact_id": "artifact-64b3de5d56cd1c1cd72ef02f"
+  },
+  {
+   "name": "data-uri",
+   "content": "<img src=\"data:image/png;base64,iVBORw0KGgo=\">",
+   "utf8_bytes": 46,
+   "sha256": "9af61be3754e69b51d792026d0f7364a2bef6f29389257192c59f443e6a643d8",
+   "artifact_id": "artifact-75c1f8508ac41884ffd6bd9a"
+  }
+ ]
+}

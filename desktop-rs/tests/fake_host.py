@@ -143,7 +143,7 @@ PUBLIC_FIELDS = ("target_at", "url", "thumbnail_url", "mime_type", "file_name", 
                  "read_only", "connect_origins")
 # Fields the Host keeps in `payload` only (`_public` never copies them up): a
 # fixture may name them at the top level, but no representation shows them
-# there (real Host @ dfc489bb, tests/fixtures/artifact_summary_v1_host.json).
+# there (Host dfc489bb, tests/fixtures/summary-v1/).
 PAYLOAD_ONLY = ("answer_schema", "plan_id")
 UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 # The summary-v1 artifact list (feature artifact_summary_v1), off until
