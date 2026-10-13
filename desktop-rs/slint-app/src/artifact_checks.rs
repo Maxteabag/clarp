@@ -2674,9 +2674,10 @@ fn listed_row(app: &crate::App, id: &str) -> Value {
 }
 
 /// `--check artifact-summary`: on a Host offering summary lists, the
-/// cards show without their forms' bodies, a report opened twice quickly is
-/// read once and shows, a form opens in the browser with its body, and one
-/// deleted meanwhile leaves the chat and says so.
+/// 1.16 MB reports' cards show without their bodies; the report viewer,
+/// asked twice quickly, reads one once and shows it; its card then opens
+/// in the browser from what was read; and one deleted meanwhile leaves the
+/// chat and says so.
 pub(super) fn artifact_summary_check(out: String) {
     let before = Rc::new(Cell::new(0usize));
     let before2 = before.clone();
@@ -2698,31 +2699,28 @@ pub(super) fn artifact_summary_check(out: String) {
             true
         })),
     ];
-    stages.extend(load_chat("art-summary", &["html_form"]));
+    stages.extend(load_chat("art-summary", &["html_big"]));
     stages.extend::<Vec<Stage>>(vec![
         ("summary cards", Box::new(|app, window, elapsed| {
-            let trip = listed_row(app, "form-trip");
-            if (!placed(window, &["form-trip", "form-report", "form-stale"], elapsed) || trip.get("content").is_some()) && elapsed < Duration::from_secs(10) {
+            let big = listed_row(app, "big-report");
+            if (!placed(window, &["big-report", "big-net"], elapsed) || big.get("content_omitted").is_none()) && elapsed < Duration::from_secs(10) {
                 return false;
             }
-            check(trip.get("content").is_none() && trip["content_omitted"]["bytes"].as_u64().is_some_and(|b| b > 0), &format!("the list left the form's body out: {trip}"));
-            let (form, report) = (card(window, "form-trip"), card(window, "form-report"));
-            check(form.as_ref().is_some_and(|c| c.label == "FORM" && c.action == "Open form"), "the form's card is whole without it");
-            check(report.as_ref().is_some_and(|c| c.label == "REPORT" && c.action == "Open report"), "so is the report's");
-            check(host_gets("/artifacts/form-trip") + host_gets("/artifacts/form-report") == 0, "nothing is read before it is opened");
-            // Two quick clicks.
-            let bridge = window.global::<ArtifactBridge>();
-            bridge.invoke_open("form-report".into());
-            bridge.invoke_open("form-report".into());
+            check(big.get("content").is_none() && big["content_omitted"]["bytes"].as_u64().is_some_and(|b| b > 1_000_000), &format!("the list left the report's body out: {}", big["content_omitted"]));
+            check(card(window, "big-report").is_some_and(|c| c.label == "REPORT" && c.action == "Open report"), "its card is whole without it");
+            check(host_gets("/artifacts/big-report") + host_gets("/artifacts/big-net") == 0, "nothing is read before it is opened");
+            // Updates' Open, twice quickly.
+            window.invoke_open_report("big-report".into());
+            window.invoke_open_report("big-report".into());
             true
         })),
-        ("report opens", Box::new(|_, window, elapsed| {
+        ("report shows", Box::new(|_, window, elapsed| {
             if (window.get_overlay() != "report" || window.get_report_blocks().row_count() == 0) && elapsed < Duration::from_secs(10) {
                 return false;
             }
-            check(window.get_overlay() == "report" && window.get_report_title() == "Quarterly cost report" && window.get_report_blocks().row_count() > 0,
+            check(window.get_overlay() == "report" && window.get_report_title() == "Agentretten, offentlig stil" && window.get_report_blocks().row_count() > 0,
                 &format!("the report is read, then shows: overlay {:?} title {:?}", window.get_overlay(), window.get_report_title()));
-            check(host_gets("/artifacts/form-report") == 1, &format!("two quick clicks read it once: {}", host_gets("/artifacts/form-report")));
+            check(host_gets("/artifacts/big-report") == 1, &format!("two quick opens read it once: {}", host_gets("/artifacts/big-report")));
             headless::press(slint::platform::Key::Escape);
             true
         })),
@@ -2731,35 +2729,36 @@ pub(super) fn artifact_summary_check(out: String) {
                 return false;
             }
             before.set(opened().len());
-            window.global::<ArtifactBridge>().invoke_open("form-trip".into());
+            window.global::<ArtifactBridge>().invoke_open("big-report".into());
             true
         })),
-        ("form opens", Box::new(move |_, _, elapsed| {
+        ("browser page", Box::new(move |_, _, elapsed| {
             let urls = opened();
             if urls.len() <= before2.get() {
                 if elapsed > Duration::from_secs(10) {
-                    check(false, &format!("the form opens once read: {urls:?}"));
+                    check(false, &format!("the card opens the report in the browser: {urls:?}"));
                     return true;
                 }
                 return false;
             }
             let page = urls.last().map(|url| fetch("GET", url, "", None)).unwrap_or_else(|| Err("no page".into()));
-            check(page.as_ref().is_ok_and(|(status, body)| *status == 200 && body.contains("name=\"destination\"")), &format!("its page holds the body read: {:?}", page.map(|(s, b)| (s, b.len()))));
-            check(host_gets("/artifacts/form-trip") == 1, "read once");
+            check(page.as_ref().is_ok_and(|(status, body)| *status == 200 && body.contains("Agentretten") && body.len() > 1_000_000),
+                &format!("its page holds the body read: {:?}", page.map(|(s, b)| (s, b.len()))));
+            check(host_gets("/artifacts/big-report") == 1, "from the cache, not read again");
             true
         })),
         ("deleted meanwhile", Box::new(|_, window, _| {
-            check(control("/__control/fail", &json!({"path": "/artifacts/form-stale", "status": 404})).is_ok(), "the Host deletes the lunch order");
-            window.global::<ArtifactBridge>().invoke_open("form-stale".into());
+            check(control("/__control/fail", &json!({"path": "/artifacts/big-net", "status": 404})).is_ok(), "the Host deletes the other report");
+            window.global::<ArtifactBridge>().invoke_open("big-net".into());
             true
         })),
         ("deleted", Box::new(move |_, window, elapsed| {
-            let gone = card(window, "form-stale").is_none();
+            let gone = card(window, "big-net").is_none();
             if !gone && elapsed < Duration::from_secs(10) {
                 return false;
             }
-            check(gone, "a form deleted on the Host leaves the chat when it is opened");
-            check(window.get_error().contains("“Lunch order” was deleted on the Host"), &format!("and says so: {:?}", window.get_error()));
+            check(gone, "a report deleted on the Host leaves the chat when it is opened");
+            check(window.get_error().contains("“The same report, with a connection” was deleted on the Host"), &format!("and says so: {:?}", window.get_error()));
             shot(&out, "artifact-summary");
             true
         })),
