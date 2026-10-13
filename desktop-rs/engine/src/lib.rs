@@ -27,6 +27,8 @@ pub mod profile;
 pub mod roster_freshness;
 mod teams;
 mod updates;
+mod artifact_summary;
+pub use artifact_summary::Hydration;
 pub mod workspace;
 
 use std::collections::{HashMap, HashSet};
@@ -271,6 +273,7 @@ pub struct Engine {
 
     // panels
     updates: updates::Updates,
+    artifact_summary: artifact_summary::ArtifactSummary,
     teams: teams::Teams,
     profile: profile::Profile,
     avatars: avatars::Avatars,
@@ -386,6 +389,7 @@ impl Engine {
             queue: queue::TurnQueue::default(),
             // panels
             updates: Default::default(),
+            artifact_summary: Default::default(),
             teams: Default::default(),
             profile: Default::default(),
             avatars: Default::default(),
@@ -702,6 +706,7 @@ impl Engine {
         // The features are read again from /server-info.
         self.reset_live();
         self.reset_form_events();
+        self.reset_artifact_summary();
         self.api.set_endpoint(endpoint, &self.token);
         self.changes.push(Change::Endpoint);
         self.set_error("");
@@ -1322,6 +1327,7 @@ impl Engine {
             self.force_snapshot();
             self.live_server_info(object);
             self.form_events_server_info(object);
+            self.artifact_summary_server_info(object);
             let open: Vec<String> = self.conversations.keys().cloned().collect();
             for session in open {
                 self.live_chat_opened(&session);
