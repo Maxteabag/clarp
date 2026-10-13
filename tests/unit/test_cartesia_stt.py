@@ -62,3 +62,17 @@ def test_anything_but_one_language_code_is_refused_before_sending(sent, language
     with pytest.raises(cartesia_stt.CartesiaSTTError, match="one language"):
         _call(language=language)
     assert sent == []
+
+
+@pytest.mark.parametrize("stored", [None, "", "   ", "auto", "no,en", "English"])
+def test_an_unusable_language_setting_still_resolves_to_a_code_cartesia_accepts(
+        monkeypatch, sent, stored):
+    # The explicit English fallback lives in language resolution, not in the
+    # adapter: a missing or bad setting must never turn into a refused clip.
+    from lib import stt_language
+    monkeypatch.setattr(stt_language.settings_store, "get_text",
+                        lambda key: stored if key == stt_language.LANGUAGE_KEY else None)
+    language = stt_language.language_for(None)
+    assert language == stt_language.DEFAULT_LANGUAGE == "en"
+    assert _call(language=language) == ("ok", 1.5)
+    assert _field(sent[0], "language") == "en"
