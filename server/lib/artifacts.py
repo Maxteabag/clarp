@@ -1,6 +1,7 @@
 """Durable typed deliverables and approval decisions."""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import pathlib
@@ -10,6 +11,7 @@ from urllib.parse import urlsplit
 from typing import Any
 
 from . import agents, db, media_store
+from .revisioned_cache import RevisionedCache
 from .voice_markup import strip_hidden_blocks
 
 TYPES = {"countdown", "html_form", "decision", "question", "plan", "document", "research", "code_change", "data",
@@ -326,21 +328,167 @@ def _public(row) -> dict:
             item["decision"]["input_hint"] = _input_hint(item["payload"])
     elif item["type"] == "plan" and item.get("reference_id"):
         from . import task_plans
-        item["plan"] = task_plans.get(item["reference_id"])
+        plan, goal_text = task_plans.get_with_goal_text(item["reference_id"])
+        item["plan"] = _PlanWithGoalText(plan, goal_text) if plan is not None else None
     return item
 
 
-def response_representation(item: dict, representation: str = "") -> dict:
+class _PlanWithGoalText(dict):
+    """A plan dict that also remembers the exact goal_json text it came from.
+
+    It serializes exactly like the plain dict; only summary-v1 reads
+    ``goal_text`` to key the history digest (see _history_marker)."""
+    __slots__ = ("goal_text",)
+
+    def __init__(self, plan: dict, goal_text: str | None) -> None:
+        super().__init__(plan)
+        self.goal_text = goal_text
+
+
+REPRESENTATIONS = ("", "flat-v1", "summary-v1")
+
+
+def response_representation(item: dict, representation: str = "", *,
+                            budget: "SummaryBudget | None" = None) -> dict:
     """Opt-in wire projection; canonical storage and default clients keep payload.
 
     Flattening has already copied validated public fields, including large content,
     rows and diff. Native clients consume those top-level fields, never payload.
+    ``summary-v1`` is flat-v1 with exactly two bodies left out, each replaced by
+    an explicit marker: html_form ``content`` (``content_omitted``) and
+    ``plan.goal.history`` (``plan.goal.history_omitted``). Pass one ``budget``
+    per request; without one each call gets its own.
     """
     if representation == "":
         return item
-    if representation != "flat-v1":
+    if representation not in ("flat-v1", "summary-v1"):
         raise ValueError("unsupported artifact representation")
-    return {key: value for key, value in item.items() if key != "payload"}
+    flat = {key: value for key, value in item.items() if key != "payload"}
+    if representation == "flat-v1":
+        return flat
+    budget = budget or summary_budget()
+    if flat.get("type") == "html_form" and "content" in flat:
+        content = flat.pop("content")
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        flat["content_omitted"] = _content_marker(
+            item, content, payload.get("version"), budget)
+    plan = flat.get("plan")
+    if isinstance(plan, dict) and isinstance(plan.get("goal"), dict) \
+            and "history" in plan["goal"]:
+        goal = dict(plan["goal"])
+        history = goal.pop("history")
+        goal["history_omitted"] = _history_marker(
+            plan, history, getattr(plan, "goal_text", None), budget)
+        flat["plan"] = {**plan, "goal": goal}
+    return flat
+
+
+# --- summary-v1 identity markers -------------------------------------------------
+#
+# Hashing is bounded three ways: unchanged items are cache hits (an unchanged
+# list rebuild hashes nothing), each request may hash at most a budget of
+# bytes (past it a marker says the value is pending, never a wrong one), and
+# both caches are LRU-bounded by entries and by weight.
+
+SUMMARY_HASH_BUDGET_BYTES = 64 * 1024 * 1024
+
+
+class SummaryBudget:
+    """Bytes one request may still hash for summary-v1 markers."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.remaining = max_bytes
+
+    def take(self, size: int) -> bool:
+        if size > self.remaining:
+            return False
+        self.remaining -= size
+        return True
+
+
+def summary_budget(max_bytes: int | None = None) -> SummaryBudget:
+    return SummaryBudget(SUMMARY_HASH_BUDGET_BYTES if max_bytes is None else max_bytes)
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+# (artifact_id) at (updated_at, version) -> (UTF-8 bytes, "c1:" sha) or
+# (None, None) for content that has no UTF-8 encoding. Content is immutable
+# per (artifact_id, updated_at): its only writer bumps updated_at. Weighted by
+# the bytes each entry hashed.
+_CONTENT_IDENTITY: RevisionedCache[str, tuple[int | None, str | None]] = RevisionedCache(
+    "artifact_content_identity", max_entries=4096,
+    max_weight=1024 * 1024 * 1024, weight=lambda _revision, value: value[0] or 0)
+
+# plan_id at the exact goal_json text last seen -> "h1:" digest. A hit needs
+# exact string equality: _goal_save rewrites goal_json without a revision or
+# updated_at bump. Weighted by the text it holds.
+_HISTORY_DIGEST: RevisionedCache[str, str] = RevisionedCache(
+    "plan_history_digest", max_entries=4096,
+    max_weight=64 * 1024 * 1024, weight=lambda revision, _value: len(revision))
+
+
+def content_identity(content: str) -> tuple[int | None, str | None]:
+    """(UTF-8 byte length, "c1:" sha256 of those bytes), or (None, None) when
+    the content cannot be encoded as UTF-8 (a lone surrogate)."""
+    try:
+        data = content.encode("utf-8")
+    except UnicodeEncodeError:
+        return None, None
+    return len(data), "c1:" + _sha256(data)
+
+
+def _content_marker(item: dict, content: str, version: Any, budget: SummaryBudget) -> dict:
+    revision = (item.get("updated_at"), version)
+    found, identity = _CONTENT_IDENTITY.get(item["artifact_id"], revision)
+    if not found:
+        # Characters bound the UTF-8 size from below; the budget is checked
+        # before any encoding work.
+        if budget.take(len(content)):
+            identity = content_identity(content)
+            _CONTENT_IDENTITY.put(item["artifact_id"], revision, identity)
+        else:
+            identity = (None, None)
+    size, digest = identity
+    marker: dict[str, Any] = {"reason": "summary", "bytes": size}
+    if size is None:
+        marker["size_unknown"] = True
+    marker["sha256"] = digest
+    if digest is None:
+        marker["hash_pending"] = True
+    marker["version"] = version if version is not None else None
+    marker["updated_at"] = item.get("updated_at")
+    return marker
+
+
+def _history_digest(history: list) -> str:
+    return "h1:" + _sha256(json.dumps(
+        history, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8", "surrogatepass"))
+
+
+def _history_marker(plan: dict, history: Any, goal_text: str | None,
+                    budget: SummaryBudget) -> dict:
+    entries = history if isinstance(history, list) else []
+    last = entries[-1] if entries and isinstance(entries[-1], dict) else {}
+    marker: dict[str, Any] = {"reason": "summary", "count": len(entries),
+                              "last_at": last.get("at")}
+    plan_id = str(plan.get("plan_id") or "")
+    digest = None
+    if goal_text is not None and plan_id:
+        found, digest = _HISTORY_DIGEST.get(plan_id, goal_text)
+        if not found:
+            digest = None
+    if digest is None and budget.take(len(goal_text) if goal_text is not None else 0):
+        digest = _history_digest(history)
+        if goal_text is not None and plan_id:
+            _HISTORY_DIGEST.put(plan_id, goal_text, digest)
+    marker["digest"] = digest
+    if digest is None:
+        marker["digest_pending"] = True
+    return marker
 
 
 def _public_field_valid(key: str, value: Any) -> bool:

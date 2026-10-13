@@ -45,6 +45,7 @@ HOST_CONTRACT = 72  # PROVISIONAL (agent_ring_device_optout over agent_ring_live
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
+    "artifact_summary_v1",
     "agent_ring_device_optout",
     "agent_ring_live",
     "tts_google_id_guard",
@@ -365,6 +366,7 @@ FEATURE_CONTRACTS["controller_actions"] = 63
 FEATURE_CONTRACTS["agent_rings"] = 64
 # 65-68 are reserved by unmerged lanes (artifact_summary_v1, steer_receipts, listen-first calls,
 # opening_receipts); clients gate on the feature, never on the number.
+FEATURE_CONTRACTS["artifact_summary_v1"] = 65  # PROVISIONAL: its reserved number; Nadia books it at the ready landing (never 1)
 FEATURE_CONTRACTS["tts_provider_google"] = 69
 FEATURE_CONTRACTS["tts_google_id_guard"] = 70
 FEATURE_CONTRACTS["agent_ring_live"] = 71  # PROVISIONAL: booked at the ready landing, else the next free number

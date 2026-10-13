@@ -44,7 +44,8 @@ _OBJECT="CASE WHEN json_valid(a.payload_json) THEN json_type(a.payload_json)='ob
 _LITE=', '.join(f"CASE WHEN {_OBJECT} THEN json_extract(a.payload_json,'$.{k}') END AS pj_{k}" for k in _FIELDS)
 
 def page(*,limit=100,cursor='',representation=''):
-    if representation not in ('', 'flat-v1'): raise ValueError('unsupported artifact representation')
+    if representation not in artifacts.REPRESENTATIONS: raise ValueError('unsupported artifact representation')
+    budget=artifacts.summary_budget()
     limit=max(1,min(int(limit),200))
     if len(cursor)>2048: raise ValueError("invalid attention cursor")
     # One SQLite read snapshot includes serialization, not only the ID query.
@@ -94,7 +95,7 @@ def page(*,limit=100,cursor='',representation=''):
         full=_full_rows(c,[r['artifact_id'] for r,_ in window])
         result=[]
         for r,b in window:
-            public=artifacts.response_representation(artifacts._public(full[r['artifact_id']]),representation);public['attention_bucket']=b;result.append(public)
+            public=artifacts.response_representation(artifacts._public(full[r['artifact_id']]),representation,budget=budget);public['attention_bucket']=b;result.append(public)
         end=offset+len(result)
         next_cursor=base64.urlsafe_b64encode(json.dumps({'revision':revision,'offset':end}).encode()).decode() if end<len(selected) else None
         return {'artifacts':result,'next_cursor':next_cursor,'snapshot_revision':revision,'total':len(selected),'index_version':1}

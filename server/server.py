@@ -5075,7 +5075,7 @@ class Handler(BaseHTTPRequestHandler):
         from lib import artifacts
         qs = self._query()
         representation = qs.get("representation", [""])[0]
-        if representation not in ("", "flat-v1"):
+        if representation not in artifacts.REPRESENTATIONS:
             return self._json_error(400, "unsupported artifact representation")
         try:
             limit = int(qs.get("limit", ["100"])[0] or 100)
@@ -5093,7 +5093,10 @@ class Handler(BaseHTTPRequestHandler):
             limit=limit, offset=offset,
             order=(qs.get("order", ["updated"])[0] or "updated").strip(),
         )
-        return self._json_ok({"artifacts": [artifacts.response_representation(row, representation) for row in rows]})
+        budget = artifacts.summary_budget()
+        return self._json_ok({"artifacts": [
+            artifacts.response_representation(row, representation, budget=budget)
+            for row in rows]})
 
     def _handle_artifact_events_config(self, artifact_id: str, *, write: bool = True):
         if getattr(self, "_request_device_scope", "") == "limited":
@@ -5160,6 +5163,10 @@ class Handler(BaseHTTPRequestHandler):
         row = artifacts.get(artifact_id)
         if not row:
             return self._json_error(404, "artifact not found")
+        # Exactly flat-v1 drops the duplicate `payload`; any other value is
+        # ignored, as it always was (no new 400 on this route).
+        if self._query().get("representation", [""])[0] == "flat-v1":
+            row = artifacts.response_representation(row, "flat-v1")
         return self._json_ok({"artifact": row})
 
     def _handle_artifact_create(self):
@@ -5345,10 +5352,11 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_pinned_artifacts(self):
         from lib import artifacts
         representation = self._query().get("representation", [""])[0]
-        if representation not in ("", "flat-v1"):
+        if representation not in artifacts.REPRESENTATIONS:
             return self._json_error(400, "unsupported artifact representation")
+        budget = artifacts.summary_budget()
         return self._json_ok({"artifacts": [
-            artifacts.response_representation(row, representation)
+            artifacts.response_representation(row, representation, budget=budget)
             for row in artifacts.list_pinned()]})
 
     def _handle_attention_inbox(self):

@@ -702,6 +702,37 @@ report. Create it with `POST /artifacts`:
   it is never served on the Host origin. Clients before contract 19 show it as
   a form with an empty answer set. Feature `html_reports`.
 
+### Artifact list summaries: `representation=summary-v1`
+
+`GET /artifacts`, `GET /pinned-artifacts` and `GET /attention/inbox` accept
+`representation=summary-v1` when the Host advertises the feature
+`artifact_summary_v1` (contract 65). It is `flat-v1` (no `payload`) with
+exactly two bodies left out, each replaced by an explicit marker. The rows,
+their order, count, filters, paging, archived and pinned rows, `decision` and
+every action field are exactly `flat-v1`'s.
+
+- An `html_form` has **no** `content` key; it carries
+  `"content_omitted": {"reason": "summary", "bytes": <UTF-8 length>,
+  "sha256": "c1:<hex>", "version": <payload version or null>,
+  "updated_at": <ms>}`. `sha256` is over the UTF-8 bytes of the decoded
+  `content` string, so a client can verify hydrated content. `bytes` may be
+  `null` with `"size_unknown": true`, and `sha256` `null` with
+  `"hash_pending": true` (content with no UTF-8 encoding, or the request's
+  hash budget spent); the client then hydrates before treating it as ready.
+- A plan's `plan.goal` has **no** `history` key; it carries
+  `"history_omitted": {"reason": "summary", "count": N, "last_at": <ms or
+  null>, "digest": "h1:<hex>"}`. The digest is opaque: compare it for
+  equality, never recompute it. It changes whenever the history does, even
+  when the plan's revision does not; `null` with `"digest_pending": true`
+  means hydrate before use.
+- Hydrate an item with `GET /artifacts/<id>?representation=flat-v1`: the full
+  item without the duplicate `payload`. Without that exact value (none, or any
+  other) the route returns the full legacy item, as an older Host always does,
+  so decode both shapes. 404 `{"error": "artifact not found"}` means deleted.
+- An older Host answers `summary-v1` with 400 `unsupported artifact
+  representation` (the inbox: `invalid attention query`). Gate on the
+  feature; fall back to `flat-v1` only when it is absent or on that exact 400.
+
 ### Tool explanation hit rate: `GET /tool-explanations/stats`
 
 How tool calls were explained over a window, for watching the learning cache
