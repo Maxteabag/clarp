@@ -319,3 +319,21 @@ pub(crate) fn auth_headers(token: &str, accept: &'static str) -> HeaderMap {
         }
     headers
 }
+
+#[cfg(test)]
+mod tests {
+    use super::traffic_route;
+    use url::Url;
+
+    #[test]
+    fn the_updates_routes_are_counted_and_nothing_else() {
+        let route = |path: &str| traffic_route(&Url::parse(&format!("http://h{path}")).unwrap());
+        assert_eq!(route("/artifacts?limit=50&order=updated&representation=flat-v1"), Some("artifacts"));
+        assert_eq!(route("/artifacts/a%2Fb?representation=flat-v1"), Some("artifact"));
+        assert_eq!(route("/artifacts/a/events"), None);
+        assert_eq!(route("/attention"), Some("attention"));
+        assert_eq!(route("/background-jobs"), Some("jobs"));
+        assert_eq!(route("/background-jobs/j1"), None);
+        assert_eq!(route("/log"), None);
+    }
+}

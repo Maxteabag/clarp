@@ -45,6 +45,11 @@ fn an_artifact_event_reads_that_artifact_alone_and_places_it() {
     assert_eq!(read[0]["query"]["representation"], "flat-v1");
     assert!(d.engine.update_artifacts()[0].get("payload").is_none(), "patched in as flat-v1 has it");
     assert_eq!(ids(&d.engine), ["a1", "a4", "a3", "a2"]);
+    // The memory line's counters saw both reads.
+    let traffic = d.engine.take_list_traffic();
+    assert!(traffic["artifacts"].requests >= 1 && traffic["artifacts"].bytes > 0, "{traffic:?}");
+    assert_eq!(traffic["artifact"].requests, 1, "{traffic:?}");
+    assert!(d.engine.take_list_traffic().is_empty(), "taken once");
 
     // A pin leaves updated_at alone: changed in place.
     host.control("/__control/event", json!({"type": "artifact-updated", "artifact_id": "a3"}));

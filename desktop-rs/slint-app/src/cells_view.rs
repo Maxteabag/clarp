@@ -77,7 +77,9 @@ pub fn shows_tool(row: &PresentedRow, tool: &Value) -> bool {
 /// For each presented row, the session's artifacts made while it was being
 /// written: an artifact belongs to the earliest reply stamped at or after
 /// its creation, or the latest reply when it came after them all. Artifacts
-/// without a creation time stay out of the transcript.
+/// without a creation time stay out of the transcript. A row's cards are in
+/// the order they were made, not the list's (newest updated first, so a
+/// card that changed would otherwise jump ahead of its neighbours).
 pub fn artifacts_by_row(rows: &[PresentedRow], artifacts: &[Value]) -> Vec<Vec<Value>> {
     let mut placed = vec![Vec::new(); rows.len()];
     let stamps: Vec<Option<i64>> = rows
@@ -99,6 +101,9 @@ pub fn artifacts_by_row(rows: &[PresentedRow], artifacts: &[Value]) -> Vec<Vec<V
         if let Some(index) = at {
             placed[index].push(artifact.clone());
         }
+    }
+    for row in &mut placed {
+        row.sort_by_key(|artifact| number(artifact, "created_at"));
     }
     placed
 }
@@ -150,5 +155,18 @@ mod tests {
         let placed: Vec<Vec<String>> =
             artifacts_by_row(&rows, &artifacts).iter().map(|a| a.iter().map(|v| text(v, "artifact_id")).collect()).collect();
         assert_eq!(placed, [vec!["after".to_owned()], vec![], vec!["during".to_owned()]]);
+    }
+
+    #[test]
+    fn a_rows_cards_keep_the_order_they_were_made_whatever_the_list_order() {
+        let rows = [row("reply", "assistant", "2026-09-29T10:01:00Z")];
+        // As the Host lists them: the one updated last first.
+        let artifacts = [
+            json!({"artifact_id": "second", "created_at": 2, "updated_at": 9}),
+            json!({"artifact_id": "first", "created_at": 1, "updated_at": 5}),
+            json!({"artifact_id": "third", "created_at": 3, "updated_at": 3}),
+        ];
+        let placed: Vec<String> = artifacts_by_row(&rows, &artifacts)[0].iter().map(|v| text(v, "artifact_id")).collect();
+        assert_eq!(placed, ["first", "second", "third"]);
     }
 }
