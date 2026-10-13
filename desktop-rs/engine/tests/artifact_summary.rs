@@ -318,6 +318,8 @@ fn another_host_or_credential_empties_the_cache() {
     let mut d = listed(&host);
     d.engine.need_artifact("form-a");
     ready(&mut d, "form-a");
+    // Closed: nothing asks for it again after the cache is dropped.
+    d.engine.release_artifact("form-a");
     assert_eq!(d.engine.artifact_cache_size().0, 1);
 
     // The same Host and token again: kept.
@@ -332,6 +334,7 @@ fn another_host_or_credential_empties_the_cache() {
     d.until("listed", |e| !e.update_artifacts().is_empty() && !e.updates_loading());
     d.engine.need_artifact("form-a");
     ready(&mut d, "form-a");
+    d.engine.release_artifact("form-a");
     assert_eq!(d.engine.artifact_cache_size().0, 1);
 
     // Another Host instance behind the same address.
