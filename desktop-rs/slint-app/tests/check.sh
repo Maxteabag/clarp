@@ -67,6 +67,16 @@ PY
     for _ in $(seq 50); do [ -s "$scratch/tp-port" ] && break; sleep 0.1; done
     export CLARP_TEST_THIRD_PARTY_PORT=$(cat "$scratch/tp-port")
     export CLARP_TEST_CHROME=$(command -v google-chrome-stable || command -v google-chrome || command -v chromium || true)
+    # A cold headless Chrome can take most of a stage's 40 s on a loaded runner
+    # (8.4 s against 0.6 s warm, measured): start one on a blank page first,
+    # bounded, so the stages meet a warm one. Its outcome is only logged.
+    if [ -n "$CLARP_TEST_CHROME" ]; then
+        warm_start=$(date +%s.%N)
+        timeout -k 5 60 "$CLARP_TEST_CHROME" --headless=new --no-sandbox --disable-gpu --no-first-run \
+            --user-data-dir="$scratch/chrome-warm" --dump-dom about:blank > /dev/null 2> "$scratch/chrome-warm.log"
+        warm_exit=$?
+        echo "$warm_start $(date +%s.%N) warm-up (exit $warm_exit)" >> "$scratch/browser.log.trace"
+    fi
     cat > "$scratch/bin/google-chrome-stable" <<'SH'
 #!/bin/sh
 for url; do :; done
@@ -81,7 +91,8 @@ trace "fetched (exit $?)"
 # A page that reaches the third-party web is also rendered by a real,
 # headless Chrome (its own profile), *.example.com pointing at the fake web.
 if grep -q 'chart.js?from=' "$page" && [ -n "$CLARP_TEST_CHROME" ]; then
-    timeout 30 "$CLARP_TEST_CHROME" --headless=new --no-sandbox --disable-gpu --no-first-run \
+    # -k: a Chrome that ignores TERM is killed, so the launch is still logged.
+    timeout -k 5 30 "$CLARP_TEST_CHROME" --headless=new --no-sandbox --disable-gpu --no-first-run \
         --user-data-dir="$page.profile" --ignore-certificate-errors \
         --host-resolver-rules="MAP *.example.com 127.0.0.1:$CLARP_TEST_THIRD_PARTY_PORT" \
         --virtual-time-budget=4000 --dump-dom "$url" > "$page.dom" 2> "$page.chrome-log"
