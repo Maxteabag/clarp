@@ -1,6 +1,6 @@
 """Sanitize a raw capture (artifact_summary_v1_capture.py) into artifact_summary_v1_host.json.
 
-usage: python3 make_artifact_summary_v1_host.py RAW.json HOST_SHA
+usage: python3 make_artifact_summary_v1_host.py RAW.json   (the Host sha comes from the capture)
 The two big forms' and the lone-surrogate form's contents become a size note
 (their markers keep the real bytes and hashes); the surrogate item stays as its
 raw wire text. /server-info keeps only what the desktop reads.
@@ -10,7 +10,9 @@ import json
 import pathlib
 import sys
 
-raw, sha = json.load(open(sys.argv[1])), sys.argv[2]
+raw = json.load(open(sys.argv[1]))
+sha = raw["host_sha"]
+assert len(sha) == 40, sha
 ids = raw["ids"]
 HIDDEN = {ids["big"], ids["big116"], ids["surrogate"]}
 
@@ -46,6 +48,7 @@ fixture = {
               "Regenerate with artifact_summary_v1_capture.py + make_artifact_summary_v1_host.py; do not hand-edit.",
     "host_sha": sha,
     "ids": ids,
+    "vectors": raw["vectors"],
     "server_info": {"status": raw["server_info"]["status"], "body": {
         "server_id": info.get("server_id"),
         "capabilities": {"features": info["capabilities"]["features"]},

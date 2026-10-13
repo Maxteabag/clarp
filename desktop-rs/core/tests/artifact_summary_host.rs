@@ -146,3 +146,41 @@ fn over_budget_and_lone_surrogates_take_the_pending_paths() {
     let error = serde_json::from_str::<Value>(raw).expect_err("a lone surrogate");
     assert!(error.to_string().contains("escape"), "{error}");
 }
+
+#[test]
+fn the_fixture_names_its_host_commit() {
+    assert_eq!(fixture()["host_sha"], "dfc489bba1d8ae6a47a3037eb352aa8a043ae228");
+}
+
+#[test]
+fn the_hosts_markers_carry_the_contract_vectors() {
+    // Revision 5's vectors as real form contents: the Host's marker, the
+    // desktop's hash of the hydrated body and the doc's value all agree.
+    let f = fixture();
+    let vectors = f["vectors"].as_array().unwrap();
+    assert_eq!(vectors.len(), 5);
+    for (n, vector) in vectors.iter().enumerate() {
+        let content = vector.as_str().unwrap();
+        let name = format!("vector{n}");
+        let row = row(&f, "summary", &name);
+        assert_eq!(row["content_omitted"]["sha256"].as_str(), Some(summary::content_hash_of(content).as_str()), "{name}");
+        assert_eq!(row["content_omitted"]["bytes"].as_u64(), Some(content.len() as u64), "{name}");
+        let marker = summary::content_marker(row).unwrap();
+        for shape in ["flat", "legacy", "other"] {
+            let hydrated = item(&f, &name, shape)["content"].as_str().unwrap();
+            assert_eq!(summary::check_content(marker.sha256.as_deref(), hydrated), Check::Match, "{name} {shape}");
+        }
+    }
+}
+
+#[test]
+fn some_fields_live_in_the_payload_only() {
+    // answer_schema and plan_id never reach the top level, in any shape.
+    let f = fixture();
+    for capture in ["summary", "flat", "pinned_summary", "pinned_flat"] {
+        assert!(rows(&f, capture).iter().all(|r| r.get("answer_schema").is_none() && r.get("plan_id").is_none()), "{capture}");
+    }
+    assert!(item(&f, "small", "legacy")["payload"].get("answer_schema").is_some());
+    assert!(item(&f, "small", "flat").get("answer_schema").is_none());
+    assert!(item(&f, "plan_artifact", "legacy")["payload"].get("plan_id").is_some());
+}
