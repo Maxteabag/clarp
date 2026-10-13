@@ -1,6 +1,6 @@
 # Agent rings: an agent calls its owner
 
-Status: **implemented on the Host, contract 63, feature `agent_rings`.**
+Status: **implemented on the Host, contract 64, feature `agent_rings`.**
 
 An agent that needs the user now, by voice, can ring the owner's phone. The
 phone shows an incoming call from that agent with the reason. When the user
