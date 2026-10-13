@@ -71,9 +71,13 @@ PY
 #!/bin/sh
 for url; do :; done
 page="$CLARP_TEST_BROWSER_LOG.page$$"
+# Each step's time, to tell a slow fetch from a slow Chrome when a stage times out.
+trace() { echo "$(date +%s.%N) $$ $*" >> "$CLARP_TEST_BROWSER_LOG.trace"; }
+trace start
 /usr/bin/python3 -c 'import sys, urllib.request as u
 r = u.build_opener(u.ProxyHandler({})).open(sys.argv[1], timeout=5)
 open(sys.argv[2], "w").write("HTTP/1.1 %d\r\n%s\r\n%s" % (r.status, r.headers, r.read().decode()))' "$url" "$page"
+trace "fetched (exit $?)"
 # A page that reaches the third-party web is also rendered by a real,
 # headless Chrome (its own profile), *.example.com pointing at the fake web.
 if grep -q 'chart.js?from=' "$page" && [ -n "$CLARP_TEST_CHROME" ]; then
@@ -81,6 +85,7 @@ if grep -q 'chart.js?from=' "$page" && [ -n "$CLARP_TEST_CHROME" ]; then
         --user-data-dir="$page.profile" --ignore-certificate-errors \
         --host-resolver-rules="MAP *.example.com 127.0.0.1:$CLARP_TEST_THIRD_PARTY_PORT" \
         --virtual-time-budget=4000 --dump-dom "$url" > "$page.dom" 2> "$page.chrome-log"
+    trace "chrome done (exit $?)"
 fi
 echo "$$ $*" >> "$CLARP_TEST_BROWSER_LOG"
 SH
@@ -127,4 +132,6 @@ done
 cp "$scratch/run.log" "$out/app.log"
 # artifact-open: what the third-party web saw, and what Chrome rendered.
 [ -f "$scratch/third-party.log" ] && cp "$scratch/third-party.log" "$scratch"/browser.log.page*.dom "$out/" 2>/dev/null
+# ...and how far the fake browser got, even when the page never arrived.
+[ "$name" = artifact-open ] && cp "$scratch"/browser.log.trace "$scratch"/browser.log.page*.chrome-log "$out/" 2>/dev/null
 grep -q "^E2E_PASS" "$scratch/run.log" && ! grep -q "^E2E_FAIL" "$scratch/run.log"
