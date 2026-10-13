@@ -109,6 +109,14 @@ pub(crate) struct Updates {
 }
 
 impl Updates {
+    pub(crate) fn artifacts(&self) -> &[Value] {
+        &self.artifacts
+    }
+
+    pub(crate) fn artifacts_mut(&mut self) -> &mut Vec<Value> {
+        &mut self.artifacts
+    }
+
     fn feed(&mut self, feed: Feed) -> &mut FeedState {
         &mut self.feeds[feed as usize]
     }
@@ -313,6 +321,11 @@ impl Engine {
         if artifact_id.is_empty() {
             return;
         }
+        // A summary list's big form: its next list says what changed.
+        if self.artifact_summary_defers(artifact_id) {
+            self.request_list(Feed::Artifacts, false);
+            return;
+        }
         if self.updates.items_pending.contains(artifact_id) {
             self.updates.items_owed.insert(artifact_id.to_owned());
             return;
@@ -357,7 +370,8 @@ impl Engine {
             Feed::Jobs => "/background-jobs".to_owned(),
             Feed::Artifacts => {
                 self.updates.item_overrides.clear();
-                update_feeds::artifact_list_path(!self.updates.plain_artifacts)
+                let plain = update_feeds::artifact_list_path(!self.updates.plain_artifacts);
+                self.artifact_list_path(&tag, &plain)
             }
         };
         self.changes.push(Change::Updates);
@@ -473,6 +487,7 @@ impl Engine {
         }
         self.updates.artifacts = list;
         self.updates.artifact_cap = cap;
+        self.artifact_list_applied();
         stale
     }
 
@@ -485,6 +500,7 @@ impl Engine {
         let patch = update_feeds::patch_artifact(&mut self.updates.artifacts, artifact_id, item, cap);
         if patch != Patch::Unchanged {
             self.changes.push(Change::Updates);
+            self.artifact_list_applied();
         }
         // The Host's list dropped its oldest item or moved the next one
         // up; only a reload says which.
@@ -537,6 +553,7 @@ impl Engine {
                 update_feeds::flatten(&mut item);
             }
             if item.is_object() {
+                let item = self.summarize_item(item);
                 self.patch_artifact(artifact_id, Some(item));
             } else {
                 eprintln!("Updates: artifact {artifact_id} came without an artifact; reloading the list");
