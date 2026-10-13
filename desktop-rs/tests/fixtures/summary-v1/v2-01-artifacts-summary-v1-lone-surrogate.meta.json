@@ -1,0 +1,28 @@
+{
+ "method": "GET",
+ "path": "/artifacts?type=html_form&limit=200&representation=summary-v1",
+ "status": 200,
+ "reason": "OK",
+ "headers": [
+  [
+   "Server",
+   "ClaudePWA/1.0 Python/3.12.14"
+  ],
+  [
+   "Date",
+   "Tue, 13 Oct 2026 14:21:50 GMT"
+  ],
+  [
+   "Content-Type",
+   "application/json"
+  ],
+  [
+   "Content-Length",
+   "1325"
+  ],
+  [
+   "Cache-Control",
+   "no-store"
+  ]
+ ]
+}

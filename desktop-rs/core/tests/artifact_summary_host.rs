@@ -13,14 +13,20 @@ fn dir() -> std::path::PathBuf {
     std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/summary-v1")).to_owned()
 }
 
+/// The v1 manifest (its seed's ids).
 fn manifest() -> Value {
     serde_json::from_slice(&std::fs::read(dir().join("manifest.json")).expect("the manifest")).expect("valid JSON")
+}
+
+/// The v2 manifest: every file's sha256, v1's (and its manifest) included.
+fn manifest_v2() -> Value {
+    serde_json::from_slice(&std::fs::read(dir().join("manifest-v2.json")).expect("the v2 manifest")).expect("valid JSON")
 }
 
 /// One fixture file's JSON, after checking its bytes against the manifest.
 fn file(name: &str) -> Value {
     let bytes = std::fs::read(dir().join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
-    let manifest = manifest();
+    let manifest = manifest_v2();
     let entry = manifest["files"].as_array().unwrap().iter().find(|f| f["file"] == name).unwrap_or_else(|| panic!("{name} is not in the manifest"));
     let sha: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
     assert_eq!(entry["sha256"].as_str(), Some(sha.as_str()), "{name} does not match the manifest");
@@ -64,10 +70,11 @@ fn without(row: &Value, key: &str) -> Value {
 
 #[test]
 fn every_file_matches_the_manifest_of_the_final_host() {
-    let manifest = manifest();
+    assert_eq!(manifest()["source_sha"], HOST_SHA);
+    let manifest = manifest_v2();
     assert_eq!(manifest["source_sha"], HOST_SHA);
     let listed: Vec<&str> = manifest["files"].as_array().unwrap().iter().map(|f| f["file"].as_str().unwrap()).collect();
-    let mut on_disk: Vec<String> = std::fs::read_dir(dir()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n != "manifest.json").collect();
+    let mut on_disk: Vec<String> = std::fs::read_dir(dir()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).filter(|n| n != "manifest-v2.json").collect();
     on_disk.sort();
     let mut expected: Vec<String> = listed.iter().map(|s| (*s).to_owned()).collect();
     expected.sort();
@@ -208,4 +215,42 @@ fn some_fields_live_in_the_payload_only() {
     }
     assert!(item("html_form_report", "default")["payload"].get("answer_schema").is_some());
     assert!(item("plan_artifact", "default")["payload"].get("plan_id").is_some());
+}
+
+fn v2_id(name: &str) -> String {
+    manifest_v2()["v2_db_seed"]["rows"][name].as_str().unwrap_or_else(|| panic!("no v2 id {name}")).to_owned()
+}
+
+#[test]
+fn the_1_16_mb_form_verifies_and_flat_v1_halves_its_read() {
+    let id = v2_id("html_form_1mb");
+    let row = find(&rows("v2-01-artifacts-summary-v1-lone-surrogate.body"), &id);
+    let marker = summary::content_marker(&row).expect("a marker");
+    assert!(row.get("content").is_none() && marker.bytes.is_some_and(|b| b > 1_000_000), "{}", row["content_omitted"]);
+    let (default, flat) = (file("v2-02-item-html-form-1mb-default.body")["artifact"].clone(), file("v2-02-item-html-form-1mb-flat-v1.body")["artifact"].clone());
+    for (shape, item) in [("default", &default), ("flat-v1", &flat)] {
+        let content = item["content"].as_str().unwrap();
+        assert_eq!(summary::check_content(marker.sha256.as_deref(), content), Check::Match, "{shape}");
+        assert_eq!(marker.bytes, Some(content.len() as u64), "{shape}");
+    }
+    assert_eq!(without(&default, "payload"), flat);
+    let size = |name: &str| std::fs::metadata(dir().join(name)).unwrap().len();
+    let (legacy, flat_bytes) = (size("v2-02-item-html-form-1mb-default.body"), size("v2-02-item-html-form-1mb-flat-v1.body"));
+    assert!(flat_bytes * 19 < legacy * 10, "flat-v1 about halves the hydration: {flat_bytes} vs {legacy}");
+    // Pinned in flat-v1, the same form is its flat-v1 item.
+    assert_eq!(find(&rows("v2-04-pinned-artifacts-flat-v1.body"), &id), flat);
+}
+
+#[test]
+fn a_question_reads_the_same_in_summary_and_flat_rows() {
+    let id = v2_id("question");
+    let (s, f) = (find(&rows("v2-03-artifacts-question-summary-v1.body"), &id), find(&rows("v2-03-artifacts-question-flat-v1.body"), &id));
+    assert_eq!(s, f, "nothing is left out of a question");
+    assert_eq!(s["type"], "question");
+    assert!(s["decision"]["decision_id"].is_string() && summary::complete(&s));
+}
+
+#[test]
+fn the_host_advertises_summary_lists_as_the_desktop_reads_them() {
+    assert!(summary::advertised(file("v2-05-server-info.body").as_object().unwrap()));
 }
