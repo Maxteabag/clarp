@@ -483,7 +483,7 @@ fn a_lone_surrogate_breaks_only_its_own_read_under_summary_lists() {
     d.engine.need_artifact("form-b");
     d.until("form-b fails", |e| matches!(e.artifact_hydration("form-b"), Hydration::Failed(_)));
     let Hydration::Failed(why) = d.engine.artifact_hydration("form-b") else { unreachable!() };
-    assert!(why.contains("lone leading surrogate"), "{why}");
+    assert!(why.contains("Invalid JSON response"), "{why}");
     assert_eq!(row(&d, "form-a")["content_omitted"]["sha256"].as_str().map(|h| h.starts_with("c1:")), Some(true), "the rest of the list is whole");
 
     // Without summary lists the same content breaks the whole flat-v1 list.
@@ -491,6 +491,6 @@ fn a_lone_surrogate_breaks_only_its_own_read_under_summary_lists() {
     host.control("/__control/artifact-summary", json!({"lone_surrogate": ["form-b"]}));
     let mut d = Driver::new(&host.base);
     d.connect();
-    d.until("the flat list fails", |e| e.updates_error().contains("lone leading surrogate") && !e.updates_loading());
+    d.until("the flat list fails", |e| e.updates_error().contains("Invalid JSON response") && !e.updates_loading());
     assert!(d.engine.update_artifacts().is_empty());
 }
