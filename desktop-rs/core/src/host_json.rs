@@ -2,7 +2,7 @@
 //! lone UTF-16 surrogate goes out of `json.dumps` as an unpaired `\ud800`
 //! escape, and serde_json rejects that, so one bad artifact used to fail the
 //! whole list, chat or snapshot it rode in. Every Host body is read through
-//! here: unpaired `\uD800`-`\uDFFF` escapes become `�` (U+FFFD) and every
+//! here: unpaired `\uD800`-`\uDFFF` escapes become `\ufffd` (U+FFFD) and every
 //! other byte, valid pairs included, stays as it was.
 //!
 //! Content hashes: a summary-v1 `c1:` hash is taken over the Host's decoded
