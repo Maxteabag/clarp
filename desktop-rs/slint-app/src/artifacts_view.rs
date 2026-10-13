@@ -2136,6 +2136,20 @@ mod tests {
         full
     }
 
+    /// A card's fields and its lists' rows (models compare by pointer).
+    fn card(artifact: &Value) -> String {
+        use slint::Model;
+        let item = artifact_item(artifact);
+        let rows = |model: Vec<String>| model.join("|");
+        format!(
+            "{item:?} first_row={} head={} hints={} options={}",
+            rows(item.first_row.iter().map(|r| format!("{r:?}")).collect()),
+            rows(item.head.iter().map(|r| format!("{r:?}")).collect()),
+            rows(item.hints.iter().map(|r| format!("{r:?}")).collect()),
+            rows(item.options.iter().map(|r| format!("{r:?}")).collect()),
+        )
+    }
+
     #[test]
     fn every_card_reads_the_same_from_flat_v1_as_from_the_full_representation() {
         use serde_json::json;
@@ -2158,7 +2172,7 @@ mod tests {
         ];
         for flat in &flat {
             let full = with_payload(flat);
-            assert_eq!(artifact_item(flat), artifact_item(&full), "{}", flat["artifact_id"]);
+            assert_eq!(card(flat), card(&full), "{}", flat["artifact_id"]);
             assert_eq!(is_report(flat), is_report(&full), "{}", flat["artifact_id"]);
             assert_eq!(network_grant(flat), network_grant(&full), "{}", flat["artifact_id"]);
             let id = flat["artifact_id"].as_str().unwrap();

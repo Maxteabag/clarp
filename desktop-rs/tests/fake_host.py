@@ -393,6 +393,7 @@ def run_stream(spec):
 
 
 def record(entry):
+    entry.setdefault("at", time.time())
     with open(log_path, "a") as handle:
         handle.write(json.dumps(entry) + "\n")
 
