@@ -32,6 +32,7 @@ from .log import log, log_exception
 KEY = "agent_ring.records"
 AUDIT_KEY = "agent_ring.audit"
 ENABLED_KEY = "agent_ring.enabled"
+VOIP_KEY = "agent_ring.voip_tokens"
 RING_TIMEOUT_MS = 45 * 1000
 AGENT_INTERVAL_MS = 60 * 1000
 HOUR_MS = 60 * 60 * 1000
@@ -83,8 +84,13 @@ def audit() -> list[dict]:
     return list(reversed(json.loads(raw))) if raw else []
 
 
+SHOW_REASON_KEY = "agent_ring.show_reason"
+
+
 def settings() -> dict:
-    return {"enabled": settings_store.get_bool(ENABLED_KEY, default=True)}
+    return {"enabled": settings_store.get_bool(ENABLED_KEY, default=True),
+            # The lock screen shows who is calling; why only when opted in.
+            "show_reason": settings_store.get_bool(SHOW_REASON_KEY, default=False)}
 
 
 def update_settings(data: dict) -> dict:
@@ -93,6 +99,11 @@ def update_settings(data: dict) -> dict:
             raise CallError(400, "enabled must be true or false")
         settings_store.set_bool(ENABLED_KEY, data["enabled"])
         _audit({"outcome": "settings", "enabled": data["enabled"]})
+    if "show_reason" in data:
+        if not isinstance(data["show_reason"], bool):
+            raise CallError(400, "show_reason must be true or false")
+        settings_store.set_bool(SHOW_REASON_KEY, data["show_reason"])
+        _audit({"outcome": "settings", "show_reason": data["show_reason"]})
     return settings()
 
 
@@ -330,10 +341,19 @@ def _announce(ring: dict, kind: str) -> dict:
         except Exception as exc:  # noqa: BLE001
             log_exception("agentRingEmitFail", exc, f"ring={ring['ring_id']}")
     delivery: dict = {}
-    try:
-        delivery = _push(ring, kind) or {}
-    except Exception as exc:  # noqa: BLE001
-        log_exception("agentRingPushFail", exc, f"ring={ring['ring_id']}")
+    if kind == "ring":
+        # A live ring rings through CallKit when a phone registered a VoIP
+        # token; the alert is then a duplicate. Only the live ring is ever
+        # VoIP: iOS requires every VoIP push to start a CallKit call.
+        try:
+            delivery["voip"] = _push_voip(ring) or {}
+        except Exception as exc:  # noqa: BLE001
+            log_exception("agentRingVoipFail", exc, f"ring={ring['ring_id']}")
+    if not (delivery.get("voip") or {}).get("sent"):
+        try:
+            delivery.update(_push(ring, kind) or {})
+        except Exception as exc:  # noqa: BLE001
+            log_exception("agentRingPushFail", exc, f"ring={ring['ring_id']}")
     if kind in _NOTICES:
         _notice(ring, _NOTICES[kind].format(reason=ring["reason"]))
     return delivery
@@ -355,6 +375,41 @@ def _notice(ring: dict, text: str) -> None:
                 agent_id=ring["agent_id"], session=ring["session"], backend_session_id=backend_session_id))
     except Exception as exc:  # noqa: BLE001
         log_exception("agentRingNoticeFail", exc, f"ring={ring['ring_id']}")
+
+
+# ---- VoIP (CallKit) -----------------------------------------------------------------
+
+def _hex_token(token: str) -> bool:
+    return 32 <= len(token) <= 200 and all(c in "0123456789abcdef" for c in token)
+
+
+def register_voip_token(principal: str, token: str, *, environment: str = "production") -> dict:
+    """The phone's PushKit VoIP token, one per principal. "" forgets it."""
+    token = str(token or "").strip().lower()
+    environment = "sandbox" if str(environment or "").lower() == "sandbox" else "production"
+    if token and not _hex_token(token):
+        raise CallError(400, "token must be hex")
+    with _lock:
+        raw = settings_store.get(VOIP_KEY)
+        rows = {r["principal"]: r for r in (json.loads(raw) if raw else [])}
+        if token:
+            rows[principal] = {"principal": principal, "token": token, "environment": environment,
+                               "updated_at": now_ms()}
+        else:
+            rows.pop(principal, None)
+        settings_store.set_text(VOIP_KEY, json.dumps(list(rows.values()), separators=(",", ":")))
+    log("agentRingVoipToken", f"principal={principal} registered={int(bool(token))} env={environment}")
+    return {"ok": True, "registered": bool(token)}
+
+
+def voip_tokens() -> list[dict]:
+    raw = settings_store.get(VOIP_KEY)
+    return json.loads(raw) if raw else []
+
+
+def _push_voip(ring: dict) -> dict:
+    from . import apns
+    return apns.send_agent_ring_voip(ring, voip_tokens())
 
 
 def _push(ring: dict, kind: str) -> dict:

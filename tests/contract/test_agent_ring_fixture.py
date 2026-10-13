@@ -48,6 +48,7 @@ def _scenario(monkeypatch) -> dict:
     monkeypatch.setattr(group_calls.uuid, "uuid4", fixed)
     monkeypatch.setattr(group_calls, "_host_id", lambda: "host_fixture")
     monkeypatch.setattr(agent_rings, "_schedule_expiry", lambda ring: None)
+    monkeypatch.setattr(agent_rings, "_push_voip", lambda ring: {"sent": 0})
     pushes = []
     monkeypatch.setattr(agent_rings, "_push", lambda ring, kind: pushes.append(
         apns.agent_ring_payload(ring, kind, server_instance_id="host_fixture")) or {"sent": 1})
@@ -67,7 +68,8 @@ def _scenario(monkeypatch) -> dict:
     agent_rings.ring(caller_agent_id="a-theo", reason="The leak is getting worse", opening_line="It's me again.")
     clock["now"] += agent_rings.RING_TIMEOUT_MS
     agent_rings.expire_due()
-    return {"principal": PHONE, "events": stream.events, "pushes": pushes, "answer": answer}
+    voip = apns.agent_ring_voip_payload(first, server_instance_id="host_fixture")
+    return {"principal": PHONE, "events": stream.events, "pushes": pushes, "voip_push": voip, "answer": answer}
 
 
 def test_the_fixture_is_what_the_host_emits(monkeypatch):

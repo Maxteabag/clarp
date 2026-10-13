@@ -79,6 +79,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(rings, "now_ms", clock)
     monkeypatch.setattr(rings, "_push", lambda ring, kind: pushes.append((kind, dict(ring))) or {"sent": 1})
     monkeypatch.setattr(rings, "_schedule_expiry", lambda ring: None)
+    monkeypatch.setattr(rings, "_push_voip", lambda ring: {"sent": 0})
     ctx = type("Ctx", (), {"stream": stream, "tts": tts})()
     rings.bind(ctx)
     calls.bind(ctx)
@@ -292,13 +293,17 @@ def test_the_ring_push_is_time_sensitive_with_answer_actions():
     ring = {"ring_id": "rng_1", "session": "theo-97e5", "agent_id": "a-theo", "persona": "Theo",
             "reason": "Possible water leak at pump 01", "opening_line": "Camera 2 …", "state": "ringing",
             "opening_audio_url": "/audio/x.mp3", "expires_at": 5}
-    payload = apns.agent_ring_payload(ring, "ring")
+    payload = apns.agent_ring_payload(ring, "ring", show_reason=True)
     aps = payload["aps"]
     assert aps["interruption-level"] == "time-sensitive" and aps["category"] == "agent-call"
     assert aps["sound"] and aps["alert"]["title"] == "Theo is calling"
     assert aps["alert"]["body"] == "Possible water leak at pump 01"
     assert payload["kind"] == "agent-ring" and payload["ring_id"] == "rng_1"
     assert payload["session"] == "theo-97e5" and payload["ring_state"] == "ringing"
+    # By default the lock screen shows who is calling, not why.
+    private = apns.agent_ring_payload(ring, "ring")
+    assert private["aps"]["alert"] == {"title": "Theo is calling", "body": "Incoming call"}
+    assert private["reason"] == "Possible water leak at pump 01"
     missed = apns.agent_ring_payload({**ring, "state": "missed"}, "missed")
     assert missed["aps"]["alert"]["title"] == "Missed call from Theo"
     assert missed["aps"]["interruption-level"] == "active" and "category" not in missed["aps"]
@@ -445,3 +450,81 @@ def test_the_cli_rings_waits_for_the_answer_and_cancels(monkeypatch, capsys):
     assert run(["call", "rings", "status"]) == 0
     assert sent == [("POST", "/calls/ring/cancel", {"ring_id": "rng_1"}), ("GET", "/calls/ring", None),
                     ("POST", "/calls/ring/settings", {"enabled": False}), ("GET", "/calls/ring/settings", None)]
+
+
+# ---- VoIP (CallKit) ------------------------------------------------------------
+
+def test_a_phone_registers_one_voip_token_per_principal(env):
+    rings.register_voip_token(PHONE, "ab" * 32, environment="sandbox")
+    rings.register_voip_token(PHONE, "cd" * 32, environment="production")
+    rings.register_voip_token("device_other", "ef" * 32)
+    assert {(t["principal"], t["token"], t["environment"]) for t in rings.voip_tokens()} == {
+        (PHONE, "cd" * 32, "production"), ("device_other", "ef" * 32, "production")}
+    rings.register_voip_token(PHONE, "")
+    assert [t["principal"] for t in rings.voip_tokens()] == ["device_other"]
+    for bad in ("zz", "ab" * 200):
+        with pytest.raises(calls.CallError) as err:
+            rings.register_voip_token(PHONE, bad)
+        assert err.value.status == 400
+
+
+def test_a_live_ring_goes_out_as_voip_and_skips_the_duplicate_alert(env, monkeypatch):
+    voips, alerts = [], []
+    monkeypatch.setattr(rings, "_push", lambda ring, kind: alerts.append(kind) or {"sent": 1})
+    monkeypatch.setattr(rings, "_push_voip", lambda ring: voips.append(ring["ring_id"]) or {"sent": 1})
+    ring = _ring()["ring"]
+    assert voips == [ring["ring_id"]] and alerts == []
+    rings.decline(PHONE, ring["ring_id"])
+    # Later states are never VoIP: each VoIP push must start a CallKit call.
+    assert voips == [ring["ring_id"]] and alerts == ["declined"]
+
+
+def test_the_alert_rings_when_voip_cannot(env, monkeypatch):
+    alerts = []
+    monkeypatch.setattr(rings, "_push", lambda ring, kind: alerts.append(kind) or {"sent": 1})
+    monkeypatch.setattr(rings, "_push_voip", lambda ring: {"sent": 0})
+    _ring()
+    assert alerts == ["ring"]
+
+
+def test_the_voip_push_is_a_bare_call_invite():
+    from lib import apns
+    ring = {"ring_id": "rng_1", "session": "theo-97e5", "agent_id": "a-theo", "persona": "Theo",
+            "reason": "Leak", "opening_line": "Camera 2 …", "state": "ringing", "expires_at": 1_800_000_045_000}
+    payload = apns.agent_ring_voip_payload(ring, server_instance_id="host_x")
+    assert "aps" not in payload or not payload["aps"].get("alert")
+    assert payload["kind"] == "agent-ring" and payload["ring_state"] == "ringing"
+    assert payload["ring_id"] == "rng_1" and payload["session"] == "theo-97e5" and payload["persona"] == "Theo"
+    assert payload["expires_at"] == 1_800_000_045_000 and payload["server_instance_id"] == "host_x"
+
+
+def test_send_one_targets_the_voip_topic_with_an_expiry():
+    from lib import apns
+    seen = {}
+
+    class Client:
+        def post(self, url, headers, content):
+            seen.update(url=url, headers=headers)
+            return type("R", (), {"status_code": 200, "headers": {"apns-id": "x"}})()
+    apns._send_one(Client(), "https://api.push.apple.com", "jwt", "com.maxteabag.clarp", "ab" * 32,
+                   {"kind": "agent-ring"}, push_type="voip", collapse_id="ring-1", expiration=1_800_000_045)
+    assert seen["headers"]["apns-topic"] == "com.maxteabag.clarp.voip"
+    assert seen["headers"]["apns-push-type"] == "voip" and seen["headers"]["apns-priority"] == "10"
+    assert seen["headers"]["apns-expiration"] == "1800000045"
+
+
+def test_the_voip_token_route(env):
+    server = _server()
+    h = _Handler({"token": "ab" * 32, "environment": "sandbox"}, env)
+    server.Handler._handle_calls_ring_voip_token(h)
+    assert h.sent[0][0] == 200 and rings.voip_tokens()[0]["principal"] == PHONE
+    limited = _Handler({"token": "ab" * 32}, env, scope="limited")
+    server.Handler._handle_calls_ring_voip_token(limited)
+    assert limited.sent[0][0] == 401
+
+
+def test_the_owner_opts_in_to_the_reason_on_the_lock_screen(env):
+    assert rings.settings() == {"enabled": True, "show_reason": False}
+    assert rings.update_settings({"show_reason": True})["show_reason"] is True
+    with pytest.raises(calls.CallError):
+        rings.update_settings({"show_reason": "yes"})
