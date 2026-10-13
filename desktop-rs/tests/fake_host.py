@@ -1548,6 +1548,16 @@ class Handler(BaseHTTPRequestHandler):
                 ids = gone + [a.get("artifact_id", "") for a in artifacts]
             announce(ids, body.get("session", ""))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/canonical-summary":
+            # Test control: the artifacts become the canonical summary-v1
+            # snapshot's rows (tests/fixtures/summary-v1, Host dfc489bb), as
+            # its default list serves them (payload included), and summary
+            # lists come on; every representation is derived from them.
+            source = REPO / "desktop-rs" / "tests" / "fixtures" / "summary-v1" / "01-artifacts-default.body"
+            with state_lock:
+                artifacts = json.loads(source.read_bytes())["artifacts"]
+                artifact_summary["on"] = True
+            return self.reply(200, {"ok": True, "count": len(artifacts)})
         if url.path == "/__control/representation":
             # Test control: false makes /artifacts refuse flat-v1 (400), as
             # a Host that knows no such representation.
