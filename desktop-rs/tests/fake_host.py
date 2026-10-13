@@ -150,6 +150,7 @@ UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 # `item_delay` slows GET /artifacts/<id>; `refuse` advertises the feature
 # but answers the list as an old Host (400); `item_ignores_flat` makes
 # GET /artifacts/<id> ignore representation=flat-v1 (an older item route);
+# `lone_surrogate` ids hold content with a lone surrogate (see `stored`);
 # `unknown_hash` ones carry a
 # content hash of a kind the client cannot check (not `c1:`).
 artifact_summary = {"on": False, "hash_pending": [], "digest_pending": [], "wrong_sha": [], "corrupt": {}, "item_delay": 0.0}
@@ -309,10 +310,19 @@ def represent(artifact, representation):
     return {**artifact, "payload": {k: v for k, v in artifact.items() if k in PUBLIC_FIELDS}}
 
 
+def stored(artifact):
+    """The artifact as the Host's database holds it: `lone_surrogate` ids
+    have content no UTF-8 can carry (SQLite keeps it as a JSON escape)."""
+    if artifact.get("artifact_id") not in artifact_summary.get("lone_surrogate", []):
+        return artifact
+    bad = "bad \ud800 text"
+    return {**artifact, "content": bad, **({"payload": {**artifact["payload"], "content": bad}} if "payload" in artifact else {})}
+
+
 def listed_artifacts(limit):
     if not host_order:
-        return list(artifacts)
-    rows = [a for a in artifacts if a.get("type") not in UNLISTED_TYPES]
+        return [stored(a) for a in artifacts]
+    rows = [stored(a) for a in artifacts if a.get("type") not in UNLISTED_TYPES]
     rows.sort(key=lambda a: (a.get("updated_at") or 0, a.get("artifact_id", "")), reverse=True)
     return rows[:limit]
 
@@ -412,13 +422,16 @@ def summary_row(artifact):
     row = copy.deepcopy(artifact)
     artifact_id = row.get("artifact_id", "")
     if row.get("type") == "html_form" and "content" in row:
-        data = row.pop("content").encode("utf-8")
+        try:
+            data = row.pop("content").encode("utf-8")
+        except UnicodeEncodeError:
+            data = None     # a lone surrogate: as the Host, pending, never a hash of something else
         marker = {"reason": "summary", "version": row.get("version"), "updated_at": row.get("updated_at", 0)}
-        if artifact_id in artifact_summary.get("unknown_hash", []):
+        if data is None or artifact_id in artifact_summary["hash_pending"]:
+            marker.update({"bytes": None, "size_unknown": True, "sha256": None, "hash_pending": True})
+        elif artifact_id in artifact_summary.get("unknown_hash", []):
             # Not a hash of this content either: a client must not check it.
             marker.update({"bytes": len(data), "sha256": "c9:" + hashlib.sha256(data + b"x").hexdigest()})
-        elif artifact_id in artifact_summary["hash_pending"]:
-            marker.update({"bytes": None, "size_unknown": True, "sha256": None, "hash_pending": True})
         else:
             sha = hashlib.sha256(data + (b"x" if artifact_id in artifact_summary["wrong_sha"] else b"")).hexdigest()
             marker.update({"bytes": len(data), "sha256": "c1:" + sha})
@@ -913,7 +926,7 @@ class Handler(BaseHTTPRequestHandler):
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
                 features.append("artifact_summary_v1")
-                info["contract"] = {"host": 63, "features": {"artifact_summary_v1": 1}}
+                info["contract"] = {"host": 63, "min_ios": 1, "features": {"artifact_summary_v1": 1}}
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
             if snapshot_delay[1] > 0:
@@ -1008,7 +1021,7 @@ class Handler(BaseHTTPRequestHandler):
                 found = next((a for a in artifacts if a.get("artifact_id") == artifact_id), None)
                 if found is None:
                     return self.reply(404, {"error": "artifact not found"})
-                item = copy.deepcopy(represent(found, "flat-v1" if flat_item else ""))
+                item = copy.deepcopy(represent(stored(found), "flat-v1" if flat_item else ""))
                 if artifact_summary["corrupt"].get(artifact_id, 0) > 0:
                     artifact_summary["corrupt"][artifact_id] -= 1
                     item["content"] = item.get("content", "") + "<!-- altered -->"
