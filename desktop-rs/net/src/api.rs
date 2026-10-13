@@ -236,6 +236,7 @@ impl ApiClient {
         let generation = self.generation.load(Ordering::SeqCst);
         let (_, token) = self.snapshot();
         let route = (method == Method::GET).then(|| traffic_route(&url)).flatten();
+        let path = url.path().to_owned();
         let mut request = self.api.request(method, url).headers(auth_headers(&token, "application/json"));
         request = match body {
             Body::None => request,
@@ -274,7 +275,7 @@ impl ApiClient {
                             message: error_message(&body, &http_status_text(status)),
                             status: status.as_u16(),
                         },
-                        Ok(body) => match serde_json::from_slice::<Value>(&body) {
+                        Ok(body) => match clarp_core::host_json::parse(&body, &path) {
                             Ok(Value::Object(object)) => ApiReply::Json { tag, object },
                             Ok(_) => ApiReply::Failed {
                                 tag,
