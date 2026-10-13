@@ -1501,3 +1501,79 @@ def test_a_refused_prompt_says_why_instead_of_a_traceback(tmp_path, monkeypatch,
                               delay=None, server=None)
     assert admin.cmd_prompt(args) == 4
     assert "send as --from koko" in capsys.readouterr().err
+
+
+def _controller_action(monkeypatch, argv, reply=None):
+    sent = []
+
+    def fake(method, path, body=None, **kwargs):
+        sent.append((method, path, body))
+        return reply if reply is not None else {"ok": True}
+    monkeypatch.setattr(admin, "api_request", fake)
+    args = admin.parser().parse_args(["controller-action", *argv])
+    return args.func(args), sent
+
+
+def test_controller_action_add_sends_an_http_post_definition(monkeypatch):
+    code, sent = _controller_action(monkeypatch, [
+        "add", "rk-demo-leak", "--title", "Demo leak",
+        "--http-post", "http://127.0.0.1:8765/api/scenario",
+        "--body", '{"feed":"demo-cam-02","clip":"leak"}'],
+        reply={"ok": True, "action": {"id": "rk-demo-leak"}})
+    assert code == 0
+    assert sent == [("POST", "/controller-actions", {
+        "id": "rk-demo-leak", "title": "Demo leak", "type": "http_post", "enabled": True,
+        "url": "http://127.0.0.1:8765/api/scenario",
+        "body": {"feed": "demo-cam-02", "clip": "leak"}})]
+
+
+def test_controller_action_add_agent_prompt_and_refuses_bad_json(monkeypatch):
+    code, sent = _controller_action(monkeypatch, [
+        "add", "ask", "--title", "Ask Koko", "--agent", "koko-5850", "--text", "status?"])
+    assert code == 0 and sent[0][2]["type"] == "agent_prompt"
+    assert sent[0][2]["session"] == "koko-5850" and sent[0][2]["text"] == "status?"
+    with pytest.raises(SystemExit):
+        _controller_action(monkeypatch, [
+            "add", "x", "--title", "X", "--http-post", "http://127.0.0.1:1/", "--body", "{nope"])
+
+
+def test_controller_action_update_sends_only_given_fields(monkeypatch):
+    code, sent = _controller_action(monkeypatch, [
+        "update", "rk-demo-leak", "--title", "Leak!", "--disable"],
+        reply={"ok": True, "action": {"id": "rk-demo-leak"}})
+    assert code == 0
+    assert sent == [("POST", "/controller-actions/update",
+                     {"id": "rk-demo-leak", "title": "Leak!", "enabled": False})]
+
+
+def test_controller_action_map_unmap_remove_run(monkeypatch):
+    _, sent = _controller_action(monkeypatch, [
+        "map", "--button", "secondary", "--gesture", "swipe-up", "--action", "rk-demo-leak"],
+        reply={"ok": True, "mapping": {}})
+    assert sent == [("POST", "/controller-actions/mappings", {
+        "device": "*", "button": "secondary", "gesture": "swipe-up",
+        "action_id": "rk-demo-leak"})]
+    _, sent = _controller_action(monkeypatch, [
+        "unmap", "--device", "flic-1", "--button", "primary", "--gesture", "hold"],
+        reply={"ok": True, "mapping": None})
+    assert sent[0][2] == {"device": "flic-1", "button": "primary", "gesture": "hold",
+                          "action_id": None}
+    _, sent = _controller_action(monkeypatch, ["remove", "rk-demo-leak"],
+                                 reply={"ok": True, "deleted": True, "mappings_removed": 1})
+    assert sent == [("POST", "/controller-actions/delete", {"id": "rk-demo-leak"})]
+    code, sent = _controller_action(monkeypatch, ["run", "rk-demo-leak"],
+                                    reply={"ok": False, "error": "HTTP 500"})
+    assert code == 1 and sent[0][1] == "/controller-actions/rk-demo-leak/invoke"
+    assert sent[0][2]["request_id"].startswith("clarp-admin-")
+
+
+def test_controller_action_list_prints_actions_and_their_gestures(monkeypatch, capsys):
+    code, _ = _controller_action(monkeypatch, ["list"], reply={
+        "revision": 3,
+        "actions": [{"id": "rk-demo-leak", "title": "Demo leak", "type": "http_post",
+                     "enabled": True, "url": "http://127.0.0.1:8765/api/scenario",
+                     "body": {"clip": "leak"}}],
+        "mappings": [{"device": "*", "button": "secondary", "gesture": "swipe-up",
+                      "action_id": "rk-demo-leak"}]})
+    out = capsys.readouterr().out
+    assert code == 0 and "rk-demo-leak" in out and "secondary swipe-up" in out
