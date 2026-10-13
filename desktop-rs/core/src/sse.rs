@@ -74,7 +74,10 @@ fn parse_block(block: &[u8]) -> SseMessage {
             _ => {}
         }
     }
-    if let Ok(serde_json::Value::Object(object)) = serde_json::from_slice(&data) {
+    // A whole block is repaired at once, so an escape split across chunks is
+    // seen only after its block is complete.
+    let event = if message.event.is_empty() { "message" } else { message.event.as_str() };
+    if let Ok(serde_json::Value::Object(object)) = crate::host_json::parse(&data, format_args!("a {event} event")) {
         message.data = object;
     }
     message
