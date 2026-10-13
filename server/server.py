@@ -498,8 +498,6 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/v2/calls/status": "_handle_oracle_live_call_status",
         "/oracle/v2/context/image": "_handle_oracle_context_image",
         "/agent-schedules": "_handle_agent_schedules_get",
-        "/controller-actions": "_handle_controller_actions_get",
-        "/controller-actions/audit": "_handle_controller_actions_audit",
     }
     _ROOT_STATIC = {"/manifest.json", "/styles.css", "/icon.png"}
     _POST_ROUTES = {
@@ -615,10 +613,6 @@ class Handler(BaseHTTPRequestHandler):
         "/agent-schedules": "_handle_agent_schedules_post",
         "/agent-schedules/toggle": "_handle_agent_schedules_toggle",
         "/agent-schedules/delete": "_handle_agent_schedules_delete",
-        "/controller-actions": "_handle_controller_action_create",
-        "/controller-actions/update": "_handle_controller_action_update",
-        "/controller-actions/delete": "_handle_controller_action_delete",
-        "/controller-actions/mappings": "_handle_controller_action_mapping",
     }
     _PUT_ROUTES = {
         "/dreaming/settings": "_handle_dreaming_settings_put",
@@ -1033,9 +1027,11 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if method == "GET":
             return False
+        from lib import controller_actions_http
+        if controller_actions_http.handles(path):
+            return not controller_actions_http.limited_device_allowed(path, method)
         if method == "POST":
-            return (path not in self._LIMITED_DEVICE_POST_EXACT
-                    and self._controller_invoke_id(path) is None)
+            return path not in self._LIMITED_DEVICE_POST_EXACT
         return True
 
     def _oracle_auth_missing(self, path: str) -> bool:
@@ -1067,6 +1063,9 @@ class Handler(BaseHTTPRequestHandler):
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "GET")
+        from lib import controller_actions_http
+        if controller_actions_http.handles(path):
+            return controller_actions_http.handle(self, "GET")
         if path in self._ROOT_STATIC:
             return self._send_root_static(path)
         if path == "/podcast-history" or path.startswith("/podcast-history/"):
@@ -2963,11 +2962,11 @@ class Handler(BaseHTTPRequestHandler):
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "POST")
+        from lib import controller_actions_http
+        if controller_actions_http.handles(path):
+            return controller_actions_http.handle(self, "POST")
         if self._dispatch_exact(self._POST_ROUTES, path):
             return
-        invoke_id = self._controller_invoke_id(path)
-        if invoke_id is not None:
-            return self._handle_controller_action_invoke(invoke_id)
         if path.startswith("/turn-queue/") and path.endswith("/send"):
             queue_id = path[len("/turn-queue/"):-len("/send")].strip("/")
             return self._handle_turn_queue_send(queue_id)
@@ -3330,149 +3329,6 @@ class Handler(BaseHTTPRequestHandler):
         if action == ClientAction.CONTROLLER_EVENT:
             body["controller_event_id"] = event["controller_event_id"]
         return self._json_ok(body)
-
-    # --- controller custom actions (lib.controller_actions) ------------
-
-    def _controller_actor(self) -> str:
-        caller = self._turn_caller()
-        if caller:
-            return f"agent:{caller}"
-        principal = str(getattr(self, "_request_principal", "") or "")
-        if principal and principal != "administrator":
-            return f"device:{principal}"
-        return "administrator"
-
-    def _controller_admin(self) -> bool:
-        """Defining actions is for local administrators (agents through
-        clarp-admin); a paired device can only map and run them."""
-        if getattr(self, "_request_principal", "") == "administrator":
-            return True
-        return (not (getattr(self.ctx, "auth_token", "") or "")
-                and bool(getattr(self, "_request_is_local", False)))
-
-    def _controller_action_change(self, apply, *, status: int = 200,
-                                  admin: bool = False):
-        """Apply one registry change and tell connected clients to resync."""
-        from lib import controller_actions
-        if admin and not self._controller_admin():
-            return self._json_error(403, "only a local administrator can define controller actions")
-        try:
-            result = apply()
-        except controller_actions.ActionError as exc:
-            return self._json_error(exc.status, str(exc))
-        events.broadcast_ephemeral(self.ctx.stream, events.controller_actions_updated(
-            revision=controller_actions.registry()["revision"]))
-        return self._json(status, {"ok": True, **result})
-
-    def _handle_controller_actions_get(self):
-        from lib import controller_actions
-        return self._json_ok(controller_actions.registry())
-
-    def _handle_controller_actions_audit(self):
-        from lib import controller_actions
-        try:
-            limit = int((self._query().get("limit", ["50"])[0]) or 50)
-        except ValueError:
-            return self._json_error(400, "limit must be an integer")
-        return self._json_ok({"entries": controller_actions.audit_log(limit=min(limit, 500))})
-
-    def _handle_controller_action_create(self):
-        from lib import config as app_config, controller_actions
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        return self._controller_action_change(
-            lambda: {"action": controller_actions.create_action(
-                data, actor=self._controller_actor(),
-                allowed_urls=app_config.load().controller_action_urls)},
-            status=201, admin=True)
-
-    def _handle_controller_action_update(self):
-        from lib import config as app_config, controller_actions
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        return self._controller_action_change(
-            lambda: {"action": controller_actions.update_action(
-                str(data.get("id") or "").strip(), data, actor=self._controller_actor(),
-                allowed_urls=app_config.load().controller_action_urls)},
-            admin=True)
-
-    def _handle_controller_action_delete(self):
-        from lib import controller_actions
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        return self._controller_action_change(
-            lambda: controller_actions.delete_action(
-                str(data.get("id") or "").strip(), actor=self._controller_actor()),
-            admin=True)
-
-    def _handle_controller_action_mapping(self):
-        from lib import controller_actions
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        return self._controller_action_change(
-            lambda: {"mapping": controller_actions.set_mapping(
-                device=str(data.get("device") or "*"), button=str(data.get("button") or ""),
-                gesture=str(data.get("gesture") or ""), action_id=data.get("action_id"),
-                actor=self._controller_actor())})
-
-    @staticmethod
-    def _controller_invoke_id(path: str) -> str | None:
-        """The action id in POST /controller-actions/<id>/invoke, else None."""
-        prefix, suffix = "/controller-actions/", "/invoke"
-        if not (path.startswith(prefix) and path.endswith(suffix)):
-            return None
-        action_id = unquote(path[len(prefix):-len(suffix)])
-        return action_id if action_id and "/" not in action_id else None
-
-    def _handle_controller_action_invoke(self, action_id: str):
-        """Run one custom action for a paired device. The caller names the
-        action and its own request id; nothing in the body can change what
-        the action does, which only the Host's definition decides."""
-        from lib import config as app_config, controller_actions
-        if not (getattr(self, "_request_auth_validated", False)
-                or self._controller_admin()):
-            return self._json_error(401, "paired device required")
-        data = self._read_json()
-        if not isinstance(data, dict):
-            return self._json_error(400, "bad json")
-        source = {key: str(data.get(key) or "")[:128]
-                  for key in ("device", "button", "gesture", "source_kind") if data.get(key)}
-        try:
-            result = controller_actions.run(
-                action_id, actor=self._controller_actor(), source=source,
-                request_id=str(data.get("request_id") or ""),
-                allowed_urls=app_config.load().controller_action_urls,
-                send_prompt=self._controller_send_prompt)
-        except controller_actions.ActionError as exc:
-            return self._json_error(exc.status, str(exc))
-        log("controllerActionInvoke", f"{action_id} ok={result['ok']}")
-        return self._json_ok(result)
-
-    def _controller_send_prompt(self, session: str, text: str) -> dict:
-        """Deliver an agent_prompt action through this Host's own /send, the
-        same path `clarp-admin prompt` takes."""
-        import urllib.error
-        import urllib.request
-        port = int(self.server.server_address[1])
-        payload = {"session": session, "text": text, "force_session": True,
-                   "synthesize_audio": False, "hands_free": False, "origin": "automation",
-                   "client_msg_id": f"controller-action-{secrets.token_hex(8)}"}
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{port}/send", data=json.dumps(payload).encode(),
-            method="POST", headers={"Content-Type": "application/json"})
-        token = getattr(self.ctx, "auth_token", "") or ""
-        if token:
-            request.add_header("Authorization", f"Bearer {token}")
-        try:
-            with urllib.request.urlopen(request, timeout=15) as response:
-                response.read()
-            return {"ok": True}
-        except urllib.error.HTTPError as exc:
-            return {"ok": False, "error": f"HTTP {exc.code}: {exc.read(300).decode('utf-8', 'replace')}"}
 
     # --- POST handlers ---------------------------------------------------
 

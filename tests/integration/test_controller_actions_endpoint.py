@@ -220,3 +220,35 @@ def test_clarp_admin_seeds_maps_and_runs_the_demo_actions(running_server, scenar
     assert received == [("/api/scenario", {"feed": "demo-cam-02", "clip": "leak"}),
                         ("/api/scenario", {"feed": "demo-cam-02", "clip": "normal"})]
     assert "rk-demo-reset" in cli("audit")
+
+
+def test_the_demo_seed_script_is_idempotent_and_maps_only_on_request(
+        running_server, scenario_server, tmp_path):
+    import os
+    import pathlib
+    import subprocess
+    import sys
+    url, received = scenario_server
+    port = int(running_server.rsplit(":", 1)[1])
+    config_dir = tmp_path / "admin-config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        f'[server]\nport = {port}\nauth_token = "avatar-test-token"\n')
+    root = pathlib.Path(__file__).resolve().parents[2]
+    env = {**os.environ, "CLARP_CONFIG_DIR": str(config_dir),
+           "CLARP_ADMIN": f"{sys.executable} {root / 'bin/clarp-admin.py'}",
+           "RK_SCENARIO_URL": url + "/api/scenario"}
+    env.pop("CLARP_PROVIDER_TURN", None)
+    script = root / "scripts/demo/rk-demo-controller-actions.sh"
+    for args in ([], ["--map"]):  # the second run updates in place
+        done = subprocess.run(["bash", str(script), *args], env=env, text=True,
+                              capture_output=True, timeout=120)
+        assert done.returncode == 0, done.stderr
+    state = _call(running_server, "GET", "/controller-actions")[1]
+    assert {a["id"] for a in state["actions"]} == {"rk-demo-leak", "rk-demo-reset"}
+    assert {(m["gesture"], m["action_id"]) for m in state["mappings"]} == {
+        ("swipe-up", "rk-demo-leak"), ("swipe-down", "rk-demo-reset")}
+    status, result = _call(running_server, "POST", "/controller-actions/rk-demo-reset/invoke",
+                           {"request_id": "seed-1"}, token=_device())
+    assert status == 200 and result["ok"] is True
+    assert received == [("/api/scenario", {"feed": "demo-cam-02", "clip": "normal"})]
