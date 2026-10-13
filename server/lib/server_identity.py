@@ -46,6 +46,7 @@ MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
     "agent_rings",
+    "controller_actions",
     "runtime_drain_status",
     "turn_slot_repair",
     "group_calls",
@@ -356,4 +357,5 @@ FEATURE_CONTRACTS["html_form_network"] = 59
 FEATURE_CONTRACTS["group_calls"] = 60
 FEATURE_CONTRACTS["turn_slot_repair"] = 61
 FEATURE_CONTRACTS["runtime_drain_status"] = 62
+FEATURE_CONTRACTS["controller_actions"] = 63
 FEATURE_CONTRACTS["agent_rings"] = 64

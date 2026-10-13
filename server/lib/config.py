@@ -387,6 +387,9 @@ class Config:
     local_tls_port: int = 7683
     relay_enabled: bool = False
     relay_config_path: str = ""
+    # URL prefixes a controller `http_post` action may call besides loopback
+    # ([controller_actions] allowed_urls; see lib.controller_actions).
+    controller_action_urls: tuple[str, ...] = ()
     eleven_api_key: str = ""             # if set, used for direct HTTP; else env var ELEVEN_API_KEY
     eleven_model: str = "eleven_flash_v2_5"
     eleven_speed: float = 1.2
@@ -864,6 +867,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     network = data.get("network", {}) or {}
     apns    = data.get("apns", {}) or {}
     audio_central = data.get("audio_central", {}) or {}
+    controller_actions = data.get("controller_actions", {}) or {}
     if (str(network.get("mode", "off")).strip().lower() != "off"
             or network.get("relay_enabled", False) or network.get("local_enabled", False)) and not str(server.get("auth_token", "")).strip():
         raise ConfigError("remote networking requires configured authentication")
@@ -903,6 +907,9 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         local_tls_port  = int(network.get("local_tls_port", 7683)),
         relay_enabled   = bool(network.get("relay_enabled", False)),
         relay_config_path = str(path.parent / "relay.json"),
+        controller_action_urls = tuple(
+            str(url).strip() for url in controller_actions.get("allowed_urls", []) or []
+            if str(url).strip()),
         default_session = str(server.get("default_session", "claude")),
         eleven_api_key  = str(eleven.get("api_key", "")),
         eleven_model    = str(eleven.get("model", "eleven_flash_v2_5")),

@@ -1035,6 +1035,9 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if method == "GET":
             return False
+        from lib import controller_actions_http
+        if controller_actions_http.handles(path):
+            return not controller_actions_http.limited_device_allowed(path, method)
         if method == "POST":
             return path not in self._LIMITED_DEVICE_POST_EXACT
         return True
@@ -1068,6 +1071,9 @@ class Handler(BaseHTTPRequestHandler):
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "GET")
+        from lib import controller_actions_http
+        if controller_actions_http.handles(path):
+            return controller_actions_http.handle(self, "GET")
         if path in self._ROOT_STATIC:
             return self._send_root_static(path)
         if path == "/podcast-history" or path.startswith("/podcast-history/"):
@@ -2964,6 +2970,9 @@ class Handler(BaseHTTPRequestHandler):
         from lib import janitor_http
         if janitor_http.handles(path):
             return janitor_http.handle(self, "POST")
+        from lib import controller_actions_http
+        if controller_actions_http.handles(path):
+            return controller_actions_http.handle(self, "POST")
         if self._dispatch_exact(self._POST_ROUTES, path):
             return
         if path.startswith("/turn-queue/") and path.endswith("/send"):
