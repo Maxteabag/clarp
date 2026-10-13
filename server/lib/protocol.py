@@ -48,6 +48,9 @@ class SSEType:
     # An agent is calling the user, or its call was answered, declined,
     # missed or cancelled (docs/agent-rings.md).
     AGENT_RING = "agent-ring"
+    # The controller custom actions or their gesture mappings changed; clients
+    # refetch GET /controller-actions when `revision` is newer than theirs.
+    CONTROLLER_ACTIONS_UPDATED = "controller-actions-updated"
     # Item ops for a conversation's open turn, only to connections that asked
     # with GET /events?live=… (docs/live-items.md). Ephemeral, never replayed.
     LIVE = "live"

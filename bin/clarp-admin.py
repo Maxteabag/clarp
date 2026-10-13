@@ -2557,6 +2557,11 @@ def _cmd_agent(args) -> int:
     return 0
 
 
+def cmd_controller_action(args) -> int:
+    from lib.controller_actions_cli import execute
+    return execute(args, api_request)
+
+
 def cmd_janitor(args) -> int:
     from lib.janitor_cli import execute
     return execute(args, api_request)
@@ -2567,6 +2572,8 @@ def parser() -> argparse.ArgumentParser:
     sub = result.add_subparsers(dest="command", required=True)
     from lib.janitor_cli import add_parsers as add_janitor_parsers
     add_janitor_parsers(sub, cmd_janitor)
+    from lib.controller_actions_cli import add_parsers as add_controller_action_parsers
+    add_controller_action_parsers(sub, cmd_controller_action)
     setup = sub.add_parser(
         "setup",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -3014,6 +3021,7 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     sched_rm = schedule.add_parser("remove")
     sched_rm.add_argument("schedule_id", help="schedule ID to remove")
     sched_rm.set_defaults(func=cmd_schedule)
+
 
     return result
 
