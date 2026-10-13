@@ -4,16 +4,22 @@ The batch endpoint accepts no vocabulary biasing today; the compiler gives
 Cartesia a zero budget so nothing is spent building a payload it cannot use.
 Ink-2's turn detection lives on the streaming socket, which the phone drives
 when the turn-taking strategy is `provider`.
+
+The endpoint (API 2026-08-14) treats an omitted language as English and does not
+detect the spoken one, so every request names exactly one ISO 639-1 code that
+Clarp chose; nothing here falls back to English.
 """
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 
 from .eleven_stt import _filename_for, _multipart
 
 CARTESIA_VERSION = "2026-08-14"
+_LANGUAGE_CODE = re.compile(r"[a-z]{2,3}")
 
 
 class CartesiaSTTError(RuntimeError):
@@ -21,14 +27,19 @@ class CartesiaSTTError(RuntimeError):
 
 
 def transcribe(*, audio_bytes: bytes, content_type: str, api_key: str,
-               model: str = "ink-whisper", keyterms: list[str] | None = None,
-               language: str = "en", timeout: float = 60.0
+               language: str, model: str = "ink-whisper",
+               keyterms: list[str] | None = None, timeout: float = 60.0
                ) -> tuple[str, float]:
     if not api_key:
         raise CartesiaSTTError("Cartesia API key is not configured")
+    code = (language or "").strip().lower()
+    if not _LANGUAGE_CODE.fullmatch(code):
+        raise CartesiaSTTError(
+            "Cartesia needs one language code such as 'no' or 'en'; "
+            "it cannot detect the spoken language")
     del keyterms  # no biasing on the batch endpoint
     body, ctype = _multipart(
-        [("model", model), ("language", language)], "file",
+        [("model", model), ("language", code)], "file",
         _filename_for(content_type), content_type or "audio/webm", audio_bytes)
     request = urllib.request.Request(
         "https://api.cartesia.ai/stt", data=body, method="POST",

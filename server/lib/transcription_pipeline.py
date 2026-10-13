@@ -49,6 +49,15 @@ def _cache_dir() -> pathlib.Path:
     return RuntimePaths.from_home(pathlib.Path.home()).cache_dir
 
 
+
+def _language_for(session: str) -> str:
+    """The language a cloud engine was asked for on this clip, for the sidecar."""
+    try:
+        from . import stt_language
+        return stt_language.language_for(session or None)
+    except Exception:  # noqa: BLE001 - diagnostics never block a turn
+        return ""
+
 def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                requested_model: str, transcription_id: str, fingerprint: str,
                utterance_id: str = "", client_ts: int | None = None,
@@ -177,7 +186,8 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
             heard_audio.retain(
                 _cache_dir(), trace_id=trace_id, audio_bytes=audio_bytes,
                 content_type=ctype, session=focus, run_id=vocab_run_id,
-                model=f"{requested_model or ''} (failed)")
+                model=f"{requested_model or ''} (failed)",
+                language=_language_for(focus))
         except Exception as retain_error:  # noqa: BLE001
             log_exception("heardAudioRetainFail", retain_error)
         record_voice("error", utterance_id=utterance_id or None,
@@ -190,7 +200,8 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         heard_audio.retain(
             _cache_dir(),
             trace_id=trace_id, audio_bytes=audio_bytes, content_type=ctype,
-            session=focus, run_id=vocab_run_id, model=requested_model or "")
+            session=focus, run_id=vocab_run_id, model=requested_model or "",
+            language=_language_for(focus))
     except Exception as e:  # noqa: BLE001 - diagnostics never block a turn
         log_exception("heardAudioFail", e)
     if vocab_run_id:

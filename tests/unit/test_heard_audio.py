@@ -55,3 +55,12 @@ def test_sweep_keeps_the_newest_and_drops_the_old(tmp_path, monkeypatch):
     remaining = sorted(p.stem for p in root.glob("*.json"))
     assert remaining == [f"{2:016x}", f"{3:016x}"]
     assert removed == 4
+
+
+def test_the_sidecar_records_the_language_the_clip_was_sent_with(tmp_path):
+    heard_audio.set_enabled(True)
+    heard_audio.retain(tmp_path, trace_id="0123456789abcdef", audio_bytes=b"RIFF",
+                       content_type="audio/wav", session="pebble", model="cartesia:ink-whisper",
+                       language="no")
+    _, meta = heard_audio.lookup(tmp_path, "0123456789abcdef")
+    assert meta["language"] == "no"
