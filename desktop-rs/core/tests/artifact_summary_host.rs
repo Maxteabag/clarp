@@ -1,5 +1,5 @@
 //! The real Host's summary-v1 responses (`tests/fixtures/artifact_summary_v1_host.json`,
-//! captured from feat/artifact-summary-v1 @ ee0fb54b) read the way the desktop
+//! captured from feat/artifact-summary-v1 @ dfc489bb) read the way the desktop
 //! reads them. A Host change that moves a field, a name or a type fails here.
 
 use clarp_core::artifact_summary::{self as summary, Check};
@@ -115,11 +115,20 @@ fn a_history_marker_is_opaque_and_counts_the_hydrated_history() {
 #[test]
 fn over_budget_and_lone_surrogates_take_the_pending_paths() {
     let f = fixture();
+    // A 10-byte budget: what fits is hashed exactly, the rest is pending in
+    // full (never a hash without its size, or a size without its hash).
+    let mut pending = 0;
     for row in rows(&f, "summary_pending") {
         if row["type"] == "html_form" {
             let m = &row["content_omitted"];
-            assert_eq!((m["sha256"].is_null(), m["hash_pending"].as_bool(), m["bytes"].is_null(), m["size_unknown"].as_bool()), (true, Some(true), true, Some(true)), "{row}");
-            assert_eq!(summary::content_marker(row).unwrap().sha256, None);
+            let marker = summary::content_marker(row).unwrap();
+            if m["sha256"].is_null() {
+                pending += 1;
+                assert_eq!((m["hash_pending"].as_bool(), m["bytes"].is_null(), m["size_unknown"].as_bool()), (Some(true), true, Some(true)), "{row}");
+                assert_eq!(marker.sha256, None);
+            } else {
+                assert!(m["sha256"].as_str().unwrap().starts_with("c1:") && marker.bytes.is_some_and(|b| b <= 10) && m.get("hash_pending").is_none(), "{row}");
+            }
         }
         if row["type"] == "plan" {
             let m = &row["plan"]["goal"]["history_omitted"];
@@ -127,6 +136,7 @@ fn over_budget_and_lone_surrogates_take_the_pending_paths() {
             assert_eq!(summary::history_marker(row).unwrap().digest, None);
         }
     }
+    assert!(pending >= 3, "the budget ran out: {pending} pending forms");
     let m = &row(&f, "summary", "surrogate")["content_omitted"];
     assert_eq!((m["sha256"].is_null(), m["hash_pending"].as_bool(), m["bytes"].is_null(), m["size_unknown"].as_bool()), (true, Some(true), true, Some(true)));
     // The item itself cannot be read: a lone surrogate is no JSON string
