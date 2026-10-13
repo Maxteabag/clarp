@@ -73,3 +73,8 @@ clarp-admin controller-action unmap --button secondary --gesture swipe-up
 clarp-admin controller-action update rk-demo-leak --disable
 clarp-admin controller-action list | run <id> | remove <id> | audit
 ```
+
+The Ringerikskraft demo's two actions (`rk-demo-leak`, `rk-demo-reset`, both
+POSTing to the leak-watch scenario endpoint) are seeded by
+`scripts/demo/rk-demo-controller-actions.sh`; add `--map` to bind the small
+button's swipe up and down to them.
