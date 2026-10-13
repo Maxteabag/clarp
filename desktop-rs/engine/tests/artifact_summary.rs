@@ -40,7 +40,7 @@ fn fixtures() -> Value {
 }
 
 /// A fake Host with these artifacts, and summary-v1 on or off.
-fn host(name: &str, artifacts: Value, summary: bool) -> Host {
+fn seeded(name: &str, artifacts: Value, summary: bool) -> Host {
     let host = Host::start(name);
     host.control("/__control/artifacts", json!({"artifacts": artifacts}));
     host.control("/__control/artifact-summary", json!({"on": summary}));
@@ -95,7 +95,7 @@ fn ready(d: &mut Driver, id: &str) {
 
 #[test]
 fn without_the_feature_the_list_is_asked_for_as_before() {
-    let host = host("summary-off", fixtures(), false);
+    let host = seeded("summary-off", fixtures(), false);
     let d = listed(&host);
     assert!(!d.engine.artifact_summary_enabled());
     assert!(list_representations(&host).iter().all(|r| r == "flat-v1"), "never summary-v1 unadvertised: {:?}", list_representations(&host));
@@ -105,9 +105,9 @@ fn without_the_feature_the_list_is_asked_for_as_before() {
 
 #[test]
 fn summary_rows_match_the_full_list_and_approvals_work_from_them() {
-    let full_host = host("summary-parity-full", fixtures(), false);
+    let full_host = seeded("summary-parity-full", fixtures(), false);
     let full = listed(&full_host);
-    let host = host("summary-parity", fixtures(), true);
+    let host = seeded("summary-parity", fixtures(), true);
     let mut d = listed(&host);
     assert!(d.engine.artifact_summary_enabled());
     assert_eq!(list_representations(&host).last().map(String::as_str), Some("summary-v1"));
@@ -138,7 +138,7 @@ fn summary_rows_match_the_full_list_and_approvals_work_from_them() {
 
 #[test]
 fn opening_a_form_reads_it_once() {
-    let host = host("summary-once", fixtures(), true);
+    let host = seeded("summary-once", fixtures(), true);
     host.control("/__control/artifact-summary", json!({"item_delay": 0.4}));
     let mut d = listed(&host);
     assert_eq!(d.engine.need_artifact("form-a"), Hydration::Loading);
@@ -156,7 +156,7 @@ fn opening_a_form_reads_it_once() {
 
 #[test]
 fn a_hash_mismatch_is_dropped_and_read_again() {
-    let host = host("summary-sha", fixtures(), true);
+    let host = seeded("summary-sha", fixtures(), true);
     host.control("/__control/artifact-summary", json!({"corrupt": {"form-a": 1}}));
     let mut d = listed(&host);
     d.engine.need_artifact("form-a");
@@ -176,7 +176,7 @@ fn a_hash_mismatch_is_dropped_and_read_again() {
 
 #[test]
 fn a_pending_hash_is_checked_once_the_host_has_it() {
-    let host = host("summary-pending", fixtures(), true);
+    let host = seeded("summary-pending", fixtures(), true);
     host.control("/__control/artifact-summary", json!({"hash_pending": ["form-a"]}));
     let mut d = listed(&host);
     assert_eq!(row(&d, "form-a")["content_omitted"]["hash_pending"], json!(true));
@@ -201,7 +201,7 @@ fn a_pending_hash_is_checked_once_the_host_has_it() {
 
 #[test]
 fn a_plan_history_is_read_again_when_its_digest_changes() {
-    let host = host("summary-history", fixtures(), true);
+    let host = seeded("summary-history", fixtures(), true);
     let mut d = listed(&host);
     d.engine.set_artifact_in_view(Some("plan-1"));
     d.until("history read", |e| e.update_artifacts().iter().any(|a| a["artifact_id"] == "plan-1" && a["plan"]["goal"]["history"].as_array().is_some_and(|h| h.len() == 3)));
@@ -229,7 +229,7 @@ fn a_plan_history_is_read_again_when_its_digest_changes() {
 
 #[test]
 fn a_history_without_its_digest_is_read_for_the_view() {
-    let host = host("summary-digest-pending", fixtures(), true);
+    let host = seeded("summary-digest-pending", fixtures(), true);
     host.control("/__control/artifact-summary", json!({"digest_pending": ["plan-1"]}));
     let mut d = listed(&host);
     assert_eq!(row(&d, "plan-1")["plan"]["goal"]["history_omitted"]["digest_pending"], json!(true));
@@ -244,7 +244,7 @@ fn a_history_without_its_digest_is_read_for_the_view() {
 
 #[test]
 fn a_deleted_artifact_is_removed_and_said() {
-    let host = host("summary-deleted", fixtures(), true);
+    let host = seeded("summary-deleted", fixtures(), true);
     let mut d = listed(&host);
     host.control("/__control/fail", json!({"path": "/artifacts/form-a", "status": 404}));
     d.engine.set_artifact_in_view(Some("form-a"));
@@ -255,7 +255,7 @@ fn a_deleted_artifact_is_removed_and_said() {
 
 #[test]
 fn only_the_old_hosts_exact_refusal_falls_back() {
-    let host = host("summary-refused", fixtures(), true);
+    let host = seeded("summary-refused", fixtures(), true);
     host.control("/__control/artifact-summary", json!({"refuse": true}));
     let d = listed(&host);
     assert_eq!(list_representations(&host), ["summary-v1", "flat-v1"], "refused once, then asked for as before");
@@ -263,7 +263,7 @@ fn only_the_old_hosts_exact_refusal_falls_back() {
     assert!(d.engine.updates_error().is_empty(), "the fallback is not an error: {:?}", d.engine.updates_error());
     assert!(!d.engine.artifact_summary_enabled());
 
-    let host = host("summary-errors", fixtures(), true);
+    let host = seeded("summary-errors", fixtures(), true);
     host.control("/__control/fail", json!({"path": "/artifacts", "status": 400}));
     let mut d = Driver::new(&host.base);
     d.connect();
@@ -282,7 +282,7 @@ fn only_the_old_hosts_exact_refusal_falls_back() {
 #[test]
 fn the_cache_keeps_to_its_caps() {
     let artifacts = json!([form("f1", "<p>one</p>", 1003), form("f2", "<p>two</p>", 1002), form("f3", "<p>three</p>", 1001)]);
-    let host = host("summary-cap", artifacts, true);
+    let host = seeded("summary-cap", artifacts, true);
     let mut d = listed(&host);
     d.engine.set_artifact_cache_limits(2, 1 << 20);
     for id in ["f1", "f2", "f3"] {
@@ -314,7 +314,7 @@ fn the_big_report_is_read_only_when_opened() {
 
 #[test]
 fn another_host_or_credential_empties_the_cache() {
-    let host = host("summary-scope", fixtures(), true);
+    let host = seeded("summary-scope", fixtures(), true);
     let mut d = listed(&host);
     d.engine.need_artifact("form-a");
     ready(&mut d, "form-a");
@@ -342,7 +342,7 @@ fn another_host_or_credential_empties_the_cache() {
 
 #[test]
 fn a_read_for_a_row_that_moved_on_is_dropped() {
-    let host = host("summary-late", fixtures(), true);
+    let host = seeded("summary-late", fixtures(), true);
     host.control("/__control/artifact-summary", json!({"item_delay": 0.8}));
     let mut d = listed(&host);
     d.engine.set_artifact_in_view(Some("form-a"));
