@@ -446,28 +446,61 @@ fn canonical(name: &str) -> Value {
     serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).expect("valid JSON")
 }
 
-#[test]
-fn the_fake_host_lists_real_rows_as_the_real_host_does() {
-    // The Host's flat-v1 rows seeded into the fake come back as the Host's
-    // summary-v1 rows, exactly.
-    let flat = canonical("01-artifacts-flat-v1.body")["artifacts"].clone();
-    let expected = canonical("01-artifacts-summary-v1.body")["artifacts"].as_array().unwrap().clone();
-    let host = seeded("summary-real-rows", flat, true);
-    let mut d = listed(&host);
-    assert_eq!(d.engine.update_artifacts(), expected.as_slice(), "the fake's summary rows are the real Host's");
+/// A raw `GET` to the fake Host: its status and parsed body (plan bodies are
+/// compared parsed, never as bytes: the Host's `counts` key order varies).
+fn get(host: &Host, path: &str) -> (u16, Value) {
+    use std::io::{Read, Write};
+    let address = host.base.trim_start_matches("http://");
+    let mut stream = std::net::TcpStream::connect(address).expect("fake host reachable");
+    write!(stream, "GET {path} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer probe-token\r\nConnection: close\r\n\r\n").unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let status = response.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let body = response.split_once("\r\n\r\n").map_or("", |(_, body)| body);
+    (status, serde_json::from_str(body).unwrap_or(Value::Null))
+}
 
-    // A real form hydrates and verifies; a real plan's history is read for its view.
+#[test]
+fn the_fake_host_serves_the_canonical_snapshot_as_the_real_host_does() {
+    // Loaded with the canonical rows, the fake derives every shape the Host
+    // served for them: the three lists, both items in all three shapes, the
+    // 400 and the 404.
+    let host = Host::start("summary-canonical");
+    host.control("/__control/canonical-summary", json!({}));
+    for (query, file) in [("representation=summary-v1", "01-artifacts-summary-v1"), ("representation=flat-v1", "01-artifacts-flat-v1"), ("", "01-artifacts-default")] {
+        assert_eq!(get(&host, &format!("/artifacts?limit=200&{query}")), (200, canonical(&format!("{file}.body"))), "{file}");
+    }
+    assert_eq!(get(&host, "/artifacts?representation=bogus"), (400, canonical("05-artifacts-bogus-400.body")));
     let ids = canonical("manifest.json")["db_seed"]["ids"].clone();
+    for name in ["html_form_report", "plan_artifact"] {
+        let id = ids[name].as_str().unwrap();
+        for (query, shape) in [("", "default"), ("?representation=flat-v1", "flat-v1"), ("?representation=bogus", "bogus")] {
+            assert_eq!(get(&host, &format!("/artifacts/{id}{query}")), (200, canonical(&format!("04-item-{name}-{shape}.body"))), "{name} {shape}");
+        }
+    }
+    assert_eq!(get(&host, "/artifacts/artifact-none?representation=flat-v1"), (404, canonical("04-item-404.body")));
+
+    // The desktop on it: the canonical summary rows, a form that hydrates and
+    // verifies, a plan whose history is read for its view.
+    let mut d = listed(&host);
+    assert_eq!(d.engine.update_artifacts(), canonical("01-artifacts-summary-v1.body")["artifacts"].as_array().unwrap().as_slice());
     let report = ids["html_form_report"].as_str().unwrap();
     d.engine.need_artifact(report);
     ready(&mut d, report);
     assert_eq!(row(&d, report)["content"], canonical("04-item-html_form_report-flat-v1.body")["artifact"]["content"]);
-    assert_eq!(hydrations(&host, report), 1);
+    assert_eq!(d.engine.artifact_hydrations_sent(report), 1);
     let plan = ids["plan_artifact"].as_str().unwrap();
     d.engine.set_artifact_in_view(Some(plan));
     ready(&mut d, plan);
-    let count = row(&d, plan)["plan"]["goal"]["history_omitted"]["count"].as_u64();
-    assert_eq!(row(&d, plan)["plan"]["goal"]["history"].as_array().map(|h| h.len() as u64), count);
+    assert_eq!(row(&d, plan)["plan"]["goal"]["history"], canonical("04-item-plan_artifact-flat-v1.body")["artifact"]["plan"]["goal"]["history"]);
+    // Every vector form verifies, the empty one too.
+    for vector in canonical("06-c1-vectors.json")["vectors"].as_array().unwrap() {
+        let id = vector["artifact_id"].as_str().unwrap();
+        d.engine.need_artifact(id);
+        ready(&mut d, id);
+        assert_eq!(row(&d, id)["content"], vector["content"], "{}", vector["name"]);
+        assert_eq!(d.engine.artifact_hydrations_sent(id), 1, "{}: verified the first time", vector["name"]);
+    }
 }
 
 #[test]
