@@ -45,6 +45,9 @@ class SSEType:
     # A group call changed: started, a participant added, removed, held,
     # resumed, given the floor, or the call ended (docs/group-calls.md).
     GROUP_CALL = "group-call"
+    # An agent is calling the user, or its call was answered, declined,
+    # missed or cancelled (docs/agent-rings.md).
+    AGENT_RING = "agent-ring"
     # Item ops for a conversation's open turn, only to connections that asked
     # with GET /events?live=… (docs/live-items.md). Ephemeral, never replayed.
     LIVE = "live"

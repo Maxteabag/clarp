@@ -1213,3 +1213,107 @@ def send_live_activity(payload: dict, priority: str = "5") -> dict:
     except Exception as e:  # noqa: BLE001
         log_exception("apnsLiveActivityFail", e)
     return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
+
+
+# --------------------------------------------------------------------------
+# Agent rings (docs/agent-rings.md)
+# --------------------------------------------------------------------------
+# An agent calling the user is the one alert that is meant to interrupt: it
+# is time-sensitive, plays a sound, and carries the agent-call category with
+# Answer and Decline. Every later state reuses the ring's collapse id, so the
+# incoming call is replaced by "Missed call from Theo" (or quietly by the
+# answered/declined state) instead of lingering as a call nobody can answer.
+_RING_TITLES = {
+    "ring": "{persona} is calling",
+    "missed": "Missed call from {persona}",
+    "declined": "Declined call from {persona}",
+    "answered": "Call with {persona}",
+    "cancelled": "{persona} hung up",
+}
+
+
+def agent_ring_collapse_id(ring: dict) -> str:
+    return f"ring-{ring.get('ring_id', '')}"[:64]
+
+
+def agent_ring_payload(ring: dict, kind: str, *, avatar_url: str | None = None,
+                       avatar_custom: bool = False, server_instance_id: str = "") -> dict:
+    persona = str(ring.get("persona") or "").strip() or "Clarp"
+    title = _RING_TITLES.get(kind, _RING_TITLES["ring"]).format(persona=persona)
+    aps: dict = {
+        "alert": {"title": title, "body": str(ring.get("reason") or "")[:300]},
+        "mutable-content": 1,
+        "thread-id": f"ring-{ring.get('session', '')}",
+    }
+    if kind == "ring":
+        aps.update({"interruption-level": "time-sensitive", "sound": "default",
+                    "category": "agent-call", "relevance-score": 1.0})
+    else:
+        aps["interruption-level"] = "active" if kind == "missed" else "passive"
+    payload = {
+        "aps": aps,
+        "kind": "agent-ring",
+        "ring_id": str(ring.get("ring_id") or ""),
+        "ring_state": str(ring.get("state") or ""),
+        "session": str(ring.get("session") or ""),
+        "persona": persona,
+        "reason": str(ring.get("reason") or ""),
+        "opening_line": str(ring.get("opening_line") or ""),
+        "opening_audio_url": str(ring.get("opening_audio_url") or ""),
+        "expires_at": ring.get("expires_at"),
+        "notification_id": agent_ring_collapse_id(ring),
+    }
+    if server_instance_id:
+        payload["server_instance_id"] = server_instance_id
+    if avatar_url:
+        payload["avatar_url"] = avatar_url
+        if avatar_custom:
+            payload["avatar_custom"] = True
+    return payload
+
+
+def send_agent_ring(ring: dict, kind: str) -> dict:
+    """Push one ring state to every live token. Never raises.
+
+    Unlike replies and decisions, a ring ignores desktop presence: an agent
+    calling is the user's explicit choice of interruption, owner-switchable
+    in docs/agent-rings.md.
+    """
+    from . import config
+    cfg = config.load()
+    if not cfg.apns_enabled():
+        return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
+    tokens = active_tokens()
+    sent = failed = disabled = 0
+    collapse = agent_ring_collapse_id(ring)
+    try:
+        transport = _transport(cfg)
+        for row in tokens:
+            tok = row["token"]
+            avatar_url, avatar_custom = _avatar_details(
+                cfg, str(ring.get("persona") or ""), str(ring.get("agent_id") or ""),
+                str(row.get("base_url") or ""))
+            payload = agent_ring_payload(ring, kind, avatar_url=avatar_url, avatar_custom=avatar_custom,
+                                         server_instance_id=_server_instance_id())
+            try:
+                status, reason, apns_id = transport.send(
+                    tok, row.get("environment") or cfg.apns_environment, payload,
+                    grant=row.get("push_grant") or "", collapse_id=collapse)
+            except Exception as e:  # noqa: BLE001
+                log_exception("apnsRingSendFail", e, detail=f"ring={ring.get('ring_id')} token={tok[:12]}…")
+                transport.reset()
+                failed += 1
+                continue
+            if status == 200:
+                sent += 1
+                _mark_pushed(tok)
+            elif status == 410 or reason in _DEAD_REASONS:
+                disable_token(tok, reason or str(status))
+                disabled += 1
+            else:
+                failed += 1
+                log("apnsSendReject", f"{reason or status} token={tok[:12]}…")
+    except Exception as e:  # noqa: BLE001
+        log_exception("apnsRingBatchFail", e, detail=f"ring={ring.get('ring_id')}")
+    log("apnsAgentRing", f"ring={ring.get('ring_id')} kind={kind} sent={sent} failed={failed} disabled={disabled}")
+    return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}

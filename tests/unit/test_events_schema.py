@@ -102,6 +102,8 @@ FULL_SAMPLES = {
         key: "x" for key in events.FIELDS[SSEType.ORACLE_HANDOFF]}),
     SSEType.GROUP_CALL: lambda: events.group_call(**{
         key: "x" for key in events.FIELDS[SSEType.GROUP_CALL]}),
+    SSEType.AGENT_RING: lambda: events.agent_ring(**{
+        key: "x" for key in events.FIELDS[SSEType.AGENT_RING]}),
 }
 
 
