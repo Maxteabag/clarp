@@ -738,7 +738,10 @@ every action field are exactly `flat-v1`'s.
   and exceeded by at most one counting chunk; a marker it cannot afford is
   pending, never wrong. The
   Host's marker caches are bounded by entries and by the bytes they hold. An
-  unchanged list rebuild hashes nothing. None of this limits the response
+  unchanged list rebuild hashes nothing while its rows' identities fit those
+  caches; a larger list keeps a stable resident share and rehashes only the
+  excess each time, and rows past the budget stay pending (hydrating them
+  returns the real content). None of this limits the response
   itself, which is as large as its rows, like any list response. A plan that
   reaches the projection without its stored goal text gets `digest_pending`.
 
