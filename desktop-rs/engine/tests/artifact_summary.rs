@@ -62,14 +62,21 @@ fn row(d: &Driver, id: &str) -> Value {
     d.engine.update_artifacts().iter().find(|a| a["artifact_id"] == id).cloned().unwrap_or(Value::Null)
 }
 
-/// Hydrations: plain `GET /artifacts/<id>` (an event's read asks for flat-v1).
+/// Every `GET /artifacts/<id>` on the wire, each asking for exactly
+/// flat-v1. The tests that count them announce nothing after connecting,
+/// so each is a hydration; the event test tells the two apart by the
+/// engine's own count (`artifact_hydrations_sent`).
 fn hydrations(host: &Host, id: &str) -> usize {
-    host.requests("GET", &format!("/artifacts/{id}")).iter().filter(|r| r["query"].get("representation").is_none()).count()
+    let reads = host.requests("GET", &format!("/artifacts/{id}"));
+    assert!(reads.iter().all(|r| r["query"] == json!({"representation": "flat-v1"})), "item reads ask for flat-v1: {reads:?}");
+    reads.len()
 }
 
-/// An event's read of one artifact.
-fn event_reads(host: &Host, id: &str) -> usize {
-    host.requests("GET", &format!("/artifacts/{id}")).len() - hydrations(host, id)
+/// The bytes of each answer to `GET /artifacts/<id>` (the fake Host logs
+/// them as `RESPONSE`).
+fn item_bytes(host: &Host, id: &str) -> Vec<u64> {
+    let path = format!("/artifacts/{id}");
+    host.log().iter().filter(|r| r["method"] == "RESPONSE" && r["path"] == path.as_str()).filter_map(|r| r["bytes"].as_u64()).collect()
 }
 
 fn list_representations(host: &Host) -> Vec<String> {
@@ -375,10 +382,10 @@ fn an_event_reads_a_small_form_whole_but_a_big_one_waits_for_the_list() {
     host.control("/__control/artifact-update", json!({"id": "form-trip", "set": {"title": "Offsite, take two"}}));
     d.until("the small form's change", |e| e.update_artifacts().iter().any(|a| a["artifact_id"] == "form-trip" && a["title"] == "Offsite, take two"));
     let trip = row(&d, "form-trip");
-    assert_eq!(event_reads(&host, "form-trip"), 1);
+    assert_eq!((hydrations(&host, "form-trip"), d.engine.artifact_hydrations_sent("form-trip")), (1, 0), "one read on the wire, the event's");
     assert!(trip["content_omitted"]["sha256"].is_string() && trip["content"].as_str().is_some_and(|c| c.contains("destination")), "{trip}");
     assert_eq!(d.engine.need_artifact("form-trip"), Hydration::Ready, "the event's read serves an open");
-    assert_eq!(hydrations(&host, "form-trip"), 0);
+    assert_eq!((hydrations(&host, "form-trip"), d.engine.artifact_hydrations_sent("form-trip")), (1, 0), "with no read of its own");
 
     // The 1.16 MB report changes: not read whole; the next summary list
     // (within its interval) carries the change.
@@ -401,4 +408,33 @@ fn a_hash_of_another_kind_is_not_checked() {
     ready(&mut d, "form-a");
     assert_eq!(hydrations(&host, "form-a"), 1, "read once, not dropped as a mismatch");
     assert_eq!(row(&d, "form-a")["content"], json!(FORM));
+}
+
+/// The big report's body read whole, from a Host that honours flat-v1 on
+/// the item route and from one that ignores it: c1: verified both ways.
+fn hydrate_big(name: &str, item_ignores_flat: bool) -> (u64, String, String) {
+    let host = Host::start(name);
+    host.control("/__control/artifact-summary", json!({"on": true, "item_ignores_flat": item_ignores_flat}));
+    host.control("/__control/artifact-chat", json!({"session": "big", "types": ["html_big"]}));
+    let mut d = listed(&host);
+    let sha = row(&d, "big-report")["content_omitted"]["sha256"].as_str().unwrap_or_default().to_owned();
+    d.engine.need_artifact("big-report");
+    d.engine.need_artifact("big-report");
+    ready(&mut d, "big-report");
+    assert_eq!((hydrations(&host, "big-report"), d.engine.artifact_hydrations_sent("big-report")), (1, 1), "two opens, one read");
+    let content = row(&d, "big-report")["content"].as_str().unwrap_or_default().to_owned();
+    let bytes = item_bytes(&host, "big-report");
+    assert_eq!(bytes.len(), 1);
+    (bytes[0], sha, clarp_core::artifact_summary::content_hash_of(&content))
+}
+
+#[test]
+fn a_hydration_asks_for_flat_v1_and_reads_either_shape() {
+    let (flat, sha, verified) = hydrate_big("summary-item-flat", false);
+    assert!(sha.starts_with("c1:") && verified == sha, "the c1: hash holds on the flat-v1 body: {verified} {sha}");
+    let (legacy, sha, verified) = hydrate_big("summary-item-legacy", true);
+    assert!(sha.starts_with("c1:") && verified == sha, "and on the legacy body (payload ignored): {verified} {sha}");
+    // The body is ~1.16 MB; the legacy answer carries it twice.
+    assert!((1_100_000..1_300_000).contains(&flat), "flat-v1 hydration: {flat} bytes");
+    assert!((2_200_000..2_500_000).contains(&legacy), "legacy hydration: {legacy} bytes");
 }

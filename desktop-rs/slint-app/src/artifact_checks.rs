@@ -2658,16 +2658,28 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
 
 // ---- summary lists (artifact_summary_v1)
 
-/// Hydrations of `path` in the fake Host's log (`CLARP_TEST_HOST_LOG`):
-/// plain GETs (an event's read of one artifact asks for flat-v1).
+/// GETs of `path` in the fake Host's log (`CLARP_TEST_HOST_LOG`). The
+/// chat's own event reads happen before summary lists are on; the check
+/// counts from there (`READS_BEFORE`).
 fn host_gets(path: &str) -> usize {
     let Some(log) = std::env::var_os("CLARP_TEST_HOST_LOG") else { return 0 };
     std::fs::read_to_string(log)
         .unwrap_or_default()
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|r| r["method"] == "GET" && r["path"] == path && r["query"].get("representation").is_none())
+        .filter(|r| r["method"] == "GET" && r["path"] == path)
         .count()
+}
+
+thread_local! {
+    /// Item reads of the two reports when summary lists came on.
+    static READS_BEFORE: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
+}
+
+/// Reads of `big-report` and `big-net` since summary lists came on.
+fn reads_since() -> (usize, usize) {
+    let (report, net) = READS_BEFORE.with(Cell::get);
+    (host_gets("/artifacts/big-report") - report, host_gets("/artifacts/big-net") - net)
 }
 
 fn listed_row(app: &crate::App, id: &str) -> Value {
@@ -2690,6 +2702,7 @@ pub(super) fn artifact_summary_check(out: String) {
             if !placed(window, &["big-report", "big-net"], elapsed) {
                 return false;
             }
+            READS_BEFORE.with(|r| r.set((host_gets("/artifacts/big-report"), host_gets("/artifacts/big-net"))));
             check(control("/__control/artifact-summary", &json!({"on": true, "item_delay": 0.4})).is_ok(), "the Host offers summary lists");
             app.engine.borrow_mut().reconnect();
             true
@@ -2711,7 +2724,7 @@ pub(super) fn artifact_summary_check(out: String) {
             }
             check(big.get("content").is_none() && big["content_omitted"]["bytes"].as_u64().is_some_and(|b| b > 1_000_000), &format!("the list left the report's body out: {}", big["content_omitted"]));
             check(card(window, "big-report").is_some_and(|c| c.label == "REPORT" && c.action == "Open report"), "its card is whole without it");
-            check(host_gets("/artifacts/big-report") + host_gets("/artifacts/big-net") == 0, "nothing is read before it is opened");
+            check(reads_since() == (0, 0), &format!("nothing is read before it is opened: {:?}", reads_since()));
             // Updates' Open, twice quickly.
             window.invoke_open_report("big-report".into());
             window.invoke_open_report("big-report".into());
@@ -2723,7 +2736,7 @@ pub(super) fn artifact_summary_check(out: String) {
             }
             check(window.get_overlay() == "report" && window.get_report_title() == "Agentretten, offentlig stil" && window.get_report_blocks().row_count() > 0,
                 &format!("the report is read, then shows: overlay {:?} title {:?}", window.get_overlay(), window.get_report_title()));
-            check(host_gets("/artifacts/big-report") == 1, &format!("two quick opens read it once: {}", host_gets("/artifacts/big-report")));
+            check(reads_since().0 == 1, &format!("two quick opens read it once: {:?}", reads_since()));
             headless::press(slint::platform::Key::Escape);
             true
         })),
@@ -2747,7 +2760,7 @@ pub(super) fn artifact_summary_check(out: String) {
             let page = urls.last().map(|url| fetch("GET", url, "", None)).unwrap_or_else(|| Err("no page".into()));
             check(page.as_ref().is_ok_and(|(status, body)| *status == 200 && body.contains("Agentretten") && body.len() > 1_000_000),
                 &format!("its page holds the body read: {:?}", page.map(|(s, b)| (s, b.len()))));
-            check(host_gets("/artifacts/big-report") == 1, "from the cache, not read again");
+            check(reads_since().0 == 1, &format!("from the cache, not read again: {:?}", reads_since()));
             true
         })),
         ("deleted meanwhile", Box::new(|_, window, _| {
