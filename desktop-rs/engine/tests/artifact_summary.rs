@@ -439,31 +439,31 @@ fn a_hydration_asks_for_flat_v1_and_reads_either_shape() {
     assert!((2_200_000..2_500_000).contains(&legacy), "legacy hydration: {legacy} bytes");
 }
 
-/// The real Host's responses (`tests/fixtures/artifact_summary_v1_host.json`).
-fn real_host() -> Value {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/artifact_summary_v1_host.json");
-    serde_json::from_str(&std::fs::read_to_string(path).expect("the fixture")).expect("valid JSON")
+/// One file of the canonical summary-v1 fixtures (`tests/fixtures/summary-v1/`,
+/// Host dfc489bb; the core tests check each against its manifest).
+fn canonical(name: &str) -> Value {
+    let path = format!("{}/../tests/fixtures/summary-v1/{name}", env!("CARGO_MANIFEST_DIR"));
+    serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).expect("valid JSON")
 }
 
 #[test]
 fn the_fake_host_lists_real_rows_as_the_real_host_does() {
-    // The real flat-v1 rows (bodies intact: not the big or surrogate forms)
-    // seeded into the fake must come back as the real summary-v1 rows.
-    let real = real_host();
-    let skip = ["big", "big116", "surrogate"].map(|n| real["ids"][n].clone());
-    let flat: Vec<Value> = real["flat"]["body"]["artifacts"].as_array().unwrap().iter().filter(|r| !skip.contains(&r["artifact_id"])).cloned().collect();
-    let expected: Vec<Value> = real["summary"]["body"]["artifacts"].as_array().unwrap().iter().filter(|r| !skip.contains(&r["artifact_id"])).cloned().collect();
-    let host = seeded("summary-real-rows", Value::Array(flat), true);
+    // The Host's flat-v1 rows seeded into the fake come back as the Host's
+    // summary-v1 rows, exactly.
+    let flat = canonical("01-artifacts-flat-v1.body")["artifacts"].clone();
+    let expected = canonical("01-artifacts-summary-v1.body")["artifacts"].as_array().unwrap().clone();
+    let host = seeded("summary-real-rows", flat, true);
     let mut d = listed(&host);
     assert_eq!(d.engine.update_artifacts(), expected.as_slice(), "the fake's summary rows are the real Host's");
 
     // A real form hydrates and verifies; a real plan's history is read for its view.
-    let small = real["ids"]["small"].as_str().unwrap();
-    d.engine.need_artifact(small);
-    ready(&mut d, small);
-    assert_eq!(row(&d, small)["content"], real["items"]["small"]["flat"]["body"]["artifact"]["content"]);
-    assert_eq!(hydrations(&host, small), 1);
-    let plan = real["ids"]["plan_artifact"].as_str().unwrap();
+    let ids = canonical("manifest.json")["db_seed"]["ids"].clone();
+    let report = ids["html_form_report"].as_str().unwrap();
+    d.engine.need_artifact(report);
+    ready(&mut d, report);
+    assert_eq!(row(&d, report)["content"], canonical("04-item-html_form_report-flat-v1.body")["artifact"]["content"]);
+    assert_eq!(hydrations(&host, report), 1);
+    let plan = ids["plan_artifact"].as_str().unwrap();
     d.engine.set_artifact_in_view(Some(plan));
     ready(&mut d, plan);
     let count = row(&d, plan)["plan"]["goal"]["history_omitted"]["count"].as_u64();
