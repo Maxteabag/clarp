@@ -143,3 +143,26 @@ The ring alert says who is calling ("Theo is calling", body "Incoming
 call"). The reason shows on the lock screen only when the owner opts in:
 `POST /calls/ring/settings {"show_reason": true}`. The app still receives
 the reason in the payload.
+
+## Follow-ups (after the 23 Oct 2026 demo)
+
+Reply latency on an answered call: measured by rk-integration (Sonnet, low
+effort, everything the reply needs pre-loaded, no tool call before speaking),
+the agent's first spoken words come about 3.7 s after the user stops talking,
+and the full answer in under 10 s. That was accepted for the demo. The floor
+is on the Host: about 1 s to start or resume the provider CLI for each turn,
+then the first token, then TTS waiting for a finished text block. Two ways
+under 3 s, both deliberately not built before the demo:
+
+- **Acknowledgement clip.** At ring time, voice one more short line in the
+  agent's own voice (for example "Et øyeblikk."), the same way as the opening
+  line, and return it in the answer as `ack_audio_url`. The phone plays it
+  once, right after the user's first utterance in an answered-ring call;
+  the real reply follows through the normal queue. It hides the wait but
+  does not shorten it. Make it a per-ring option, off by default. Peter's
+  view on fillers is still needed.
+- **Warm provider process for the call.** Keep the agent's provider process
+  running (stream-json) while its call is live, so each turn skips the
+  spawn/resume. This is a runtime change; agree on it with the runtime owner
+  first. A related lever: start TTS on the first finished sentence instead
+  of the whole text block.
