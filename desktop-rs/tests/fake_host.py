@@ -148,7 +148,9 @@ UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 # budget); `wrong_sha` ones a hash their content does not have; `corrupt`
 # counts the next item reads of an artifact that answer altered content;
 # `item_delay` slows GET /artifacts/<id>; `refuse` advertises the feature
-# but answers the list as an old Host (400); `unknown_hash` ones carry a
+# but answers the list as an old Host (400); `item_ignores_flat` makes
+# GET /artifacts/<id> ignore representation=flat-v1 (an older item route);
+# `unknown_hash` ones carry a
 # content hash of a kind the client cannot check (not `c1:`).
 artifact_summary = {"on": False, "hash_pending": [], "digest_pending": [], "wrong_sha": [], "corrupt": {}, "item_delay": 0.0}
 # /server-info's server_id; /__control/server-id changes it (another Host).
@@ -993,15 +995,20 @@ class Handler(BaseHTTPRequestHandler):
                 rows = [represent(a, representation) for a in listed_artifacts(int(query.get("limit", "100")))]
                 return self.reply(200, {"artifacts": rows})
         if url.path.startswith("/artifacts/") and url.path.count("/") == 2:
-            # One artifact in full: the Host ignores `representation` here.
+            # One artifact: a Host with summary lists honours exactly
+            # representation=flat-v1 (only the duplicate `payload` left out);
+            # an older item route (or `item_ignores_flat`) ignores it and
+            # answers in full, as does any other value.
             artifact_id = unquote(url.path.split("/")[2])
+            flat_item = (query.get("representation") == "flat-v1" and artifact_summary["on"]
+                         and not artifact_summary.get("item_ignores_flat"))
             if artifact_summary["item_delay"]:
                 time.sleep(artifact_summary["item_delay"])
             with state_lock:
                 found = next((a for a in artifacts if a.get("artifact_id") == artifact_id), None)
                 if found is None:
                     return self.reply(404, {"error": "artifact not found"})
-                item = copy.deepcopy(represent(found, ""))
+                item = copy.deepcopy(represent(found, "flat-v1" if flat_item else ""))
                 if artifact_summary["corrupt"].get(artifact_id, 0) > 0:
                     artifact_summary["corrupt"][artifact_id] -= 1
                     item["content"] = item.get("content", "") + "<!-- altered -->"
