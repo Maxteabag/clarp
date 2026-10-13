@@ -102,6 +102,7 @@ FULL_SAMPLES = {
         key: "x" for key in events.FIELDS[SSEType.ORACLE_HANDOFF]}),
     SSEType.GROUP_CALL: lambda: events.group_call(**{
         key: "x" for key in events.FIELDS[SSEType.GROUP_CALL]}),
+    SSEType.CONTROLLER_ACTIONS_UPDATED: lambda: events.controller_actions_updated(revision=1),
 }
 
 

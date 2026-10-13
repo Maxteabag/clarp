@@ -64,6 +64,10 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/compaction.py", "_active"): JOBS,
     ("lib/compaction.py", "_runtime_client"): CLIENT,
     ("lib/config.py", "PERSONA_PERSONALITIES"): IMPORT,
+    # Request threads share which controller-action requests are in flight and
+    # when each action last ran; both are meaningless after a restart.
+    ("lib/controller_actions.py", "_IN_FLIGHT"): THROTTLE,
+    ("lib/controller_actions.py", "_LAST_RUN"): THROTTLE,
     ("lib/config.py", "_CACHED"): CONFIG,
     ("lib/config.py", "_CACHED_PATH"): CONFIG,
     ("lib/config.py", "_CACHED_STAT"): CONFIG,

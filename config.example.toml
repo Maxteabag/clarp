@@ -81,6 +81,12 @@ api_key = ""
 realtime_model = "gpt-realtime-2.1"
 realtime_voice = "cedar"
 
+[controller_actions]
+# Custom actions a Flic or Watch gesture can run (`clarp-admin controller-action`).
+# An http_post action may call loopback services on this machine; list any
+# other URL prefix it may call here.
+# allowed_urls = ["https://example.com/hooks/"]
+
 [network]
 # Phone connectivity is explicit. "tailscale" uses HTTPS Serve, "lan" uses
 # Bonjour discovery, "manual" records an existing HTTPS proxy, and "off" is

@@ -45,6 +45,9 @@ class SSEType:
     # A group call changed: started, a participant added, removed, held,
     # resumed, given the floor, or the call ended (docs/group-calls.md).
     GROUP_CALL = "group-call"
+    # The controller custom actions or their gesture mappings changed; clients
+    # refetch GET /controller-actions when `revision` is newer than theirs.
+    CONTROLLER_ACTIONS_UPDATED = "controller-actions-updated"
     # Item ops for a conversation's open turn, only to connections that asked
     # with GET /events?live=… (docs/live-items.md). Ephemeral, never replayed.
     LIVE = "live"

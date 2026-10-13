@@ -107,6 +107,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
     SSEType.ORACLE_HANDOFF: _ORACLE_HANDOFF_FIELDS,
     SSEType.GROUP_CALL: _GROUP_CALL_FIELDS,
+    SSEType.CONTROLLER_ACTIONS_UPDATED: ("revision",),
     SSEType.HEARTBEAT: ("ts",),
     SSEType.LIVE: (
         "agent_id", "session", "conv", "epoch", "lseq", "server_now_ms", "ops",
@@ -447,6 +448,10 @@ def group_call(**fields: Any) -> Event:
     return _build(SSEType.GROUP_CALL, [(key, fields.get(key)) for key in _GROUP_CALL_FIELDS])
 
 
+def controller_actions_updated(*, revision: int) -> Event:
+    return _build(SSEType.CONTROLLER_ACTIONS_UPDATED, [("revision", revision)])
+
+
 CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.AUDIO: audio,
     SSEType.SERVER_VERSION: server_version,
@@ -469,6 +474,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.ORCHESTRATOR_DECISION: orchestrator_decision,
     SSEType.ORACLE_HANDOFF: oracle_handoff,
     SSEType.GROUP_CALL: group_call,
+    SSEType.CONTROLLER_ACTIONS_UPDATED: controller_actions_updated,
     SSEType.LIVE: live,
     SSEType.HEARTBEAT: heartbeat,
 }
