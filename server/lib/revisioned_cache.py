@@ -95,21 +95,20 @@ class RevisionedCache(Generic[K, V]):
     def _store(self, k: K, revision: Hashable, value: V) -> None:
         """Insert or replace under the lock, then evict to both bounds."""
         self.weight -= self._weights.pop(k, 0)
+        self._entries.pop(k, None)
+        size = int(self._weight_fn(k, revision, value)) if self._weight_fn is not None else 0
+        if self.max_weight is not None and size > self.max_weight:
+            # Heavier than the whole bound: not kept, and the key's older
+            # entry is gone too (it was for another revision). The rest stay.
+            return
         self._entries[k] = (revision, value)
-        self._entries.move_to_end(k)
         if self._weight_fn is not None:
-            self._weights[k] = int(self._weight_fn(k, revision, value))
-            self.weight += self._weights[k]
+            self._weights[k] = size
+            self.weight += size
         while len(self._entries) > self.max_entries or (
-                self.max_weight is not None and self.weight > self.max_weight
-                and len(self._entries) > 1):
+                self.max_weight is not None and self.weight > self.max_weight):
             oldest, _ = self._entries.popitem(last=False)
             self.weight -= self._weights.pop(oldest, 0)
-        if self.max_weight is not None and self.weight > self.max_weight:
-            # A single entry heavier than the whole bound is not kept.
-            self._entries.clear()
-            self._weights.clear()
-            self.weight = 0
 
     def peek(self, key: object) -> tuple[Hashable, V] | None:
         """The stored (revision, value) for `key` without touching recency."""
