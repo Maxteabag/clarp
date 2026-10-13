@@ -366,3 +366,84 @@ def test_a_too_heavy_entry_is_not_stored_and_the_others_stay():
     finally:
         from lib import revisioned_cache
         revisioned_cache._REGISTRY.pop("test_heavy_entry", None)
+
+
+# --- c1 hits need the exact content ---------------------------------------------------
+
+def _report(content):
+    return artifacts.create(session="theo", type="html_form", title="Report", payload={
+        "content": content, "version": "1", "read_only": True})
+
+
+def _c1_of(artifact_id):
+    [item] = [i for i in _summary(type="html_form") if i["artifact_id"] == artifact_id]
+    return item["content_omitted"]
+
+
+def test_two_real_updates_on_a_frozen_clock_get_their_own_c1(theo, monkeypatch):
+    monkeypatch.setattr(db, "now_ms", lambda: 1_900_000_000_000)
+    row = _report("<p>zero</p>")
+    _c1_of(row["artifact_id"])                                # cached
+    first = artifacts.update(row["artifact_id"], {"payload_patch": {"content": "<p>one</p>"}})
+    second = artifacts.update(row["artifact_id"], {"payload_patch": {"content": "<p>two</p>"}})
+    assert second["updated_at"] > first["updated_at"] > row["updated_at"]  # MAX(now, +1)
+    marker = _c1_of(row["artifact_id"])
+    assert marker["sha256"] == "c1:" + hashlib.sha256(b"<p>two</p>").hexdigest()
+    assert marker["updated_at"] == second["updated_at"]
+
+
+def test_concurrent_real_updates_show_the_final_content(theo, monkeypatch):
+    import threading
+    monkeypatch.setattr(db, "now_ms", lambda: 1_900_000_000_000)
+    row = _report("<p>start</p>")
+    _c1_of(row["artifact_id"])
+    errors = []
+
+    def write(text):
+        try:
+            artifacts.update(row["artifact_id"], {"payload_patch": {"content": text}})
+        except Exception as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+        finally:
+            db.close_local()
+
+    threads = [threading.Thread(target=write, args=(f"<p>thread {n}</p>",)) for n in (1, 2)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    assert errors == []
+    final = artifacts.get(row["artifact_id"])["content"]
+    assert final in ("<p>thread 1</p>", "<p>thread 2</p>")
+    assert _c1_of(row["artifact_id"])["sha256"] == "c1:" + hashlib.sha256(final.encode()).hexdigest()
+
+
+def test_direct_sql_content_change_with_the_same_tuple_is_never_served_stale(theo, hashes):
+    row = _form("<p>original</p>")
+    before = _c1_of(row["artifact_id"])
+    payload = json.loads(db.conn().execute(
+        "SELECT payload_json FROM artifacts WHERE artifact_id=?", (row["artifact_id"],)).fetchone()[0])
+    db.conn().execute("UPDATE artifacts SET payload_json=? WHERE artifact_id=?",
+                      (json.dumps({**payload, "content": "<p>replaced</p>"}), row["artifact_id"]))
+    after = _c1_of(row["artifact_id"])
+    assert (after["updated_at"], after["version"]) == (before["updated_at"], before["version"])
+    assert after["sha256"] == "c1:" + hashlib.sha256(b"<p>replaced</p>").hexdigest()
+
+
+def test_a_resident_content_entry_weighs_its_content(theo):
+    import sys
+    content = "<p>" + "x" * 50_000 + "</p>"
+    _form(content)
+    _summary(type="html_form")
+    assert len(artifacts._CONTENT_IDENTITY) == 1
+    assert artifacts._CONTENT_IDENTITY.weight >= sys.getsizeof(content)
+
+
+def test_an_overweight_content_entry_is_not_cached_but_still_marked(theo, monkeypatch, hashes):
+    monkeypatch.setattr(artifacts._CONTENT_IDENTITY, "max_weight", 20_000)
+    content = "<p>" + "y" * 50_000 + "</p>"
+    _form(content)
+    marker = _summary(type="html_form")[0]["content_omitted"]
+    assert marker["sha256"] == "c1:" + hashlib.sha256(content.encode()).hexdigest()
+    assert len(artifacts._CONTENT_IDENTITY) == 0
+    hashes.clear()
+    assert _summary(type="html_form")[0]["content_omitted"] == marker   # recomputed, not cached
+    assert hashes == [len(content)]
