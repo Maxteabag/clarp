@@ -170,3 +170,44 @@ def test_bad_definitions_answer_400_and_unknown_ids_404(running_server):
                  {"id": "sh", "title": "Sh", "type": "shell", "command": "ls"})[0] == 400
     assert _call(running_server, "POST", "/controller-actions/run",
                  {"action_id": "missing"}, token=_device())[0] == 404
+
+
+def test_clarp_admin_seeds_maps_and_runs_the_demo_actions(running_server, scenario_server,
+                                                          tmp_path):
+    """The demo contract as an agent would set it up, through the real CLI."""
+    import os
+    import pathlib
+    import subprocess
+    import sys
+    url, received = scenario_server
+    port = int(running_server.rsplit(":", 1)[1])
+    config_dir = tmp_path / "admin-config"
+    config_dir.mkdir()
+    (config_dir / "config.toml").write_text(
+        f'[server]\nport = {port}\nauth_token = "avatar-test-token"\n')
+    admin = pathlib.Path(__file__).resolve().parents[2] / "bin/clarp-admin.py"
+    env = {**os.environ, "CLARP_CONFIG_DIR": str(config_dir)}
+    env.pop("CLARP_PROVIDER_TURN", None)
+
+    def cli(*args):
+        done = subprocess.run([sys.executable, str(admin), "controller-action", *args],
+                              env=env, text=True, capture_output=True, timeout=60)
+        assert done.returncode == 0, done.stderr
+        return done.stdout
+
+    for clip, action_id in (("leak", "rk-demo-leak"), ("normal", "rk-demo-reset")):
+        cli("add", action_id, "--title", f"Demo {clip}",
+            "--http-post", url + "/api/scenario",
+            "--body", json.dumps({"feed": "demo-cam-02", "clip": clip}))
+    cli("map", "--button", "secondary", "--gesture", "swipe-up", "--action", "rk-demo-leak")
+    cli("map", "--button", "secondary", "--gesture", "swipe-down", "--action", "rk-demo-reset")
+    listing = cli("list")
+    assert "secondary swipe-up" in listing and "rk-demo-reset" in listing
+    # The phone side: a gesture names only device, button and gesture.
+    status, result = _call(running_server, "POST", "/controller-actions/run", {
+        "device": "flic-abc", "button": "secondary", "gesture": "swipe-up"}, token=_device())
+    assert status == 200 and result["ok"] is True
+    assert '"ok": true' in cli("run", "rk-demo-reset")
+    assert received == [("/api/scenario", {"feed": "demo-cam-02", "clip": "leak"}),
+                        ("/api/scenario", {"feed": "demo-cam-02", "clip": "normal"})]
+    assert "rk-demo-reset" in cli("audit")
