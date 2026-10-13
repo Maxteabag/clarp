@@ -732,6 +732,13 @@ every action field are exactly `flat-v1`'s.
 - An older Host answers `summary-v1` with 400 `unsupported artifact
   representation` (the inbox: `invalid attention query`). Gate on the
   feature; fall back to `flat-v1` only when it is absent or on that exact 400.
+- What the Host bounds, and what it does not. Each request may hash at most
+  64 MiB of UTF-8 (the bytes fed to SHA-256 on cache misses), checked before
+  any body is encoded; a marker it cannot afford is pending, never wrong. The
+  Host's marker caches are bounded by entries and by the bytes they hold. An
+  unchanged list rebuild hashes nothing. None of this limits the response
+  itself, which is as large as its rows, like any list response. A plan that
+  reaches the projection without its stored goal text gets `digest_pending`.
 
 ### Tool explanation hit rate: `GET /tool-explanations/stats`
 
