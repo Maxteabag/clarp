@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import contextmanager
 import math
 import pathlib
 import re
@@ -402,7 +403,11 @@ def response_representation(item: dict, representation: str = "", *,
 #   bytes their entries hold (key, revision and value, measured with
 #   sys.getsizeof, plus a per-entry overhead), the history cache's exact
 #   goal_json text keys included.
-# * an unchanged list rebuild is all cache hits, so it hashes nothing.
+# * an unchanged list rebuild hashes nothing only while its rows' identities
+#   fit the caches. A list larger than a cache keeps a stable resident share
+#   (summary_request's scan-resistant admission) and rehashes only the excess
+#   on every build; rows past the budget stay pending, and hydrating them
+#   (GET /artifacts/<id>) returns the real content, never a missing item.
 
 SUMMARY_HASH_BUDGET_BYTES = 64 * 1024 * 1024
 _UTF8_COUNT_CHUNK = 256 * 1024          # characters encoded at a time to count bytes
@@ -410,10 +415,13 @@ _ENTRY_OVERHEAD = 256                   # an OrderedDict slot and the weight rec
 
 
 class SummaryBudget:
-    """UTF-8 bytes one request may still hash for summary-v1 markers."""
+    """UTF-8 bytes one request may still hash for summary-v1 markers, and,
+    for a request opened with summary_request(), its cache protection."""
 
-    def __init__(self, max_bytes: int) -> None:
+    def __init__(self, max_bytes: int, *, protect: bool = False) -> None:
         self.remaining = max_bytes
+        self._protect = protect
+        self._scopes: dict = {}
 
     def take(self, size: int) -> bool:
         if size > self.remaining:
@@ -421,9 +429,37 @@ class SummaryBudget:
         self.remaining -= size
         return True
 
+    def scope(self, cache: RevisionedCache):
+        """This request's protection on `cache`, or None outside a request."""
+        if not self._protect:
+            return None
+        if cache.name not in self._scopes:
+            self._scopes[cache.name] = cache.scope()
+        return self._scopes[cache.name]
+
+    def release(self) -> None:
+        for scope in self._scopes.values():
+            scope.release()
+        self._scopes.clear()
+
 
 def summary_budget(max_bytes: int | None = None) -> SummaryBudget:
     return SummaryBudget(SUMMARY_HASH_BUDGET_BYTES if max_bytes is None else max_bytes)
+
+
+@contextmanager
+def summary_request(max_bytes: int | None = None):
+    """One summary-v1 request: its hash budget, plus protection of the cache
+    entries it hits or admits from its own later admissions (scan resistance:
+    a list larger than a cache keeps a stable resident share instead of
+    evicting everything it will need next time). Released when the request
+    ends, by completion, error or cancellation."""
+    budget = SummaryBudget(SUMMARY_HASH_BUDGET_BYTES if max_bytes is None else max_bytes,
+                           protect=True)
+    try:
+        yield budget
+    finally:
+        budget.release()
 
 
 def _sha256(data: bytes) -> str:
@@ -504,19 +540,20 @@ def content_identity(content: str) -> tuple[int | None, str | None]:
 
 def _content_marker(item: dict, content: str, version: Any, budget: SummaryBudget) -> dict:
     revision = (item.get("updated_at"), version, content)
-    found, identity = _CONTENT_IDENTITY.get(item["artifact_id"], revision)
+    scope = budget.scope(_CONTENT_IDENTITY)
+    found, identity = _CONTENT_IDENTITY.get(item["artifact_id"], revision, scope=scope)
     if not found:
         size = _utf8_length(content, budget)
         if size is None:
             identity = (None, None)             # no UTF-8 encoding: cached, never hashed
-            _CONTENT_IDENTITY.put(item["artifact_id"], revision, identity)
+            _CONTENT_IDENTITY.put(item["artifact_id"], revision, identity, scope=scope)
         elif size is _OVER_BUDGET or not budget.take(size):
             if size is not _OVER_BUDGET:
                 budget.remaining = 0            # counted, cannot hash: no more misses
             identity = (None, None)             # pending this request; not cached
         else:
             identity = content_identity(content)
-            _CONTENT_IDENTITY.put(item["artifact_id"], revision, identity)
+            _CONTENT_IDENTITY.put(item["artifact_id"], revision, identity, scope=scope)
     size, digest = identity
     marker: dict[str, Any] = {"reason": "summary", "bytes": size}
     if size is None:
@@ -542,7 +579,8 @@ def _history_marker(plan: dict, history: Any, goal_text: str | None,
     plan_id = str(plan.get("plan_id") or "")
     digest = None
     if goal_text is not None and plan_id:
-        found, digest = _HISTORY_DIGEST.get(plan_id, goal_text)
+        scope = budget.scope(_HISTORY_DIGEST)
+        found, digest = _HISTORY_DIGEST.get(plan_id, goal_text, scope=scope)
         if not found:
             digest = None
             # The canonical history is a part of the stored goal text, so its
@@ -555,7 +593,7 @@ def _history_marker(plan: dict, history: Any, goal_text: str | None,
                 ).encode("utf-8", "surrogatepass")
                 if budget.take(len(canonical)):
                     digest = "h1:" + _sha256(canonical)
-                    _HISTORY_DIGEST.put(plan_id, goal_text, digest)
+                    _HISTORY_DIGEST.put(plan_id, goal_text, digest, scope=scope)
     marker["digest"] = digest
     if digest is None:
         marker["digest_pending"] = True

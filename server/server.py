@@ -4905,10 +4905,11 @@ class Handler(BaseHTTPRequestHandler):
             limit=limit, offset=offset,
             order=(qs.get("order", ["updated"])[0] or "updated").strip(),
         )
-        budget = artifacts.summary_budget()
-        return self._json_ok({"artifacts": [
-            artifacts.response_representation(row, representation, budget=budget)
-            for row in rows]})
+        with artifacts.summary_request() as budget:
+            body = {"artifacts": [
+                artifacts.response_representation(row, representation, budget=budget)
+                for row in rows]}
+        return self._json_ok(body)
 
     def _handle_artifact_events_config(self, artifact_id: str, *, write: bool = True):
         if getattr(self, "_request_device_scope", "") == "limited":
@@ -5166,10 +5167,11 @@ class Handler(BaseHTTPRequestHandler):
         representation = self._query().get("representation", [""])[0]
         if representation not in artifacts.REPRESENTATIONS:
             return self._json_error(400, "unsupported artifact representation")
-        budget = artifacts.summary_budget()
-        return self._json_ok({"artifacts": [
-            artifacts.response_representation(row, representation, budget=budget)
-            for row in artifacts.list_pinned()]})
+        with artifacts.summary_request() as budget:
+            body = {"artifacts": [
+                artifacts.response_representation(row, representation, budget=budget)
+                for row in artifacts.list_pinned()]}
+        return self._json_ok(body)
 
     def _handle_attention_inbox(self):
         from lib import attention_index

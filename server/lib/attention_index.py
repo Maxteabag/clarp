@@ -44,8 +44,12 @@ _OBJECT="CASE WHEN json_valid(a.payload_json) THEN json_type(a.payload_json)='ob
 _LITE=', '.join(f"CASE WHEN {_OBJECT} THEN json_extract(a.payload_json,'$.{k}') END AS pj_{k}" for k in _FIELDS)
 
 def page(*,limit=100,cursor='',representation=''):
+    # One summary request: its hash budget and cache protection end with it.
+    with artifacts.summary_request() as budget:
+        return _page(limit=limit,cursor=cursor,representation=representation,budget=budget)
+
+def _page(*,limit,cursor,representation,budget):
     if representation not in artifacts.REPRESENTATIONS: raise ValueError('unsupported artifact representation')
-    budget=artifacts.summary_budget()
     limit=max(1,min(int(limit),200))
     if len(cursor)>2048: raise ValueError("invalid attention cursor")
     # One SQLite read snapshot includes serialization, not only the ID query.
