@@ -92,10 +92,16 @@ registers: **Answer** (opens the app straight into the call, the opening line
 first) and **Decline**. A plain tap answers too. Later states are `active`
 (missed) or `passive` alerts without the category.
 
+Only a live ring answers. Tapping a ring that is over (missed, declined,
+cancelled, overdue, or answered on another device) opens the agent's chat and
+nothing else: declined, expired or dismissed rings never start the microphone
+or play audio, and whatever owns audio on the phone keeps it.
+
 The iOS app has no CallKit or PushKit today, and the push relay sends alert
 pushes only, so a time-sensitive alert is the most reliable route that works
 on every install. CallKit's full-screen ring would need a VoIP token, the
-`voip` background mode and VoIP push support in Audio Central.
+`voip` background mode and VoIP push support in Audio Central; it is a
+follow-up, not part of this feature.
 
 ## For agents
 
