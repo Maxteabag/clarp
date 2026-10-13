@@ -17,6 +17,7 @@ import copy
 import json
 import pathlib
 import queue
+import random
 import re
 import sys
 import threading
@@ -120,6 +121,26 @@ older_delay = 0.0
 send_delay = 0.0
 # Seconds GET /artifacts takes (a slow list); /__control/artifacts-delay sets it.
 artifacts_delay = 0.0
+# A Host that knows `representation` but not flat-v1 answers 400 to it;
+# /__control/representation sets it.
+flat_supported = True
+# /artifacts as the Host lists it (newest updated first, unlisted types
+# out, `limit`); off, the fixtures' order and all of them.
+host_order = False
+# The fields the Host copies from `payload` to the top level
+# (server/lib/artifacts.py `_public`); the default representation carries
+# both, flat-v1 only the top level.
+PUBLIC_FIELDS = ("target_at", "url", "thumbnail_url", "mime_type", "file_name", "content",
+                 "source_url", "commit", "branch", "repository", "progress",
+                 "duration_ms", "size_bytes", "row_count", "source_count",
+                 "sources", "columns", "rows", "chart", "recipients", "subject",
+                 "starts_at", "ends_at", "time_zone", "location", "notes", "all_day",
+                 "version", "build", "environment", "files_changed", "additions",
+                 "deletions", "diff", "path_label", "artifact_ids", "asset_id", "asset_ids",
+                 "root", "relative_path", "provider", "run_id", "run_url", "workflow_name",
+                 "current_step", "conclusion", "total_steps", "completed_steps", "podcast",
+                 "read_only", "connect_origins", "answer_schema")
+UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 CLOSE = object()
 # Live items (docs/live-items.md): off until /__control/live turns the
 # feature on. The recorded streams in contract/live/ are replayed as `live`
@@ -262,6 +283,113 @@ def append_form_events(artifact_id, data):
             accepted.append({"event_id": event_id, "seq": row["seq"]})
         journal.extend(added)
     return {"artifact_id": artifact_id, "version": version, "accepted": True, "events": accepted}
+
+
+def represent(artifact, representation):
+    """An artifact as the Host answers it: flat-v1 without `payload`, the
+    default with it (the top-level fields again)."""
+    if representation == "flat-v1":
+        return {k: v for k, v in artifact.items() if k != "payload"}
+    if "payload" in artifact:
+        return artifact
+    return {**artifact, "payload": {k: v for k, v in artifact.items() if k in PUBLIC_FIELDS}}
+
+
+def listed_artifacts(limit):
+    if not host_order:
+        return list(artifacts)
+    rows = [a for a in artifacts if a.get("type") not in UNLISTED_TYPES]
+    rows.sort(key=lambda a: (a.get("updated_at") or 0, a.get("artifact_id", "")), reverse=True)
+    return rows[:limit]
+
+
+def announce(ids, session=""):
+    """As the Host's `_broadcast_artifact`: one artifact-updated per
+    artifact, naming it."""
+    for artifact_id in dict.fromkeys(i for i in ids if i):
+        broadcast({"type": "artifact-updated", "session": session, "agent_id": "", "artifact_id": artifact_id})
+
+
+def seed_stream(body):
+    global artifacts, jobs, host_order
+    with state_lock:
+        if "seed" in body:
+            artifacts = body["seed"]
+        if "jobs" in body:
+            jobs = body["jobs"]
+        if "attention" in body:
+            attention[:] = body["attention"]
+        host_order = True
+
+
+def host_state(limit):
+    with state_lock:
+        return {"artifacts": [represent(a, "flat-v1") for a in listed_artifacts(limit)],
+                "attention": list(attention), "jobs": list(jobs)}
+
+
+def run_stream(spec):
+    """A busy fleet for `seconds`: every `artifact_every` s an artifact is
+    made, changed, archived or deleted (announced with an attention event,
+    as the Host pairs them), every `attention_every` s the attention list
+    changes, every `job_every` s a job moves on."""
+    global artifacts
+    rng = random.Random(spec.get("rng_seed", 7))
+    every = {"artifact": spec.get("artifact_every", 1.0), "attention": spec.get("attention_every", 3.0),
+             "job": spec.get("job_every", 0.3)}
+    start = time.time()
+    end = start + float(spec.get("seconds", 60))
+    due = dict.fromkeys(every, start)
+    made = 0
+    while True:
+        kind = min(due, key=due.get)
+        if due[kind] >= end:
+            break
+        wait = due[kind] - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        due[kind] += every[kind]
+        now_ms = int(time.time() * 1000)
+        if kind == "artifact":
+            with state_lock:
+                roll = rng.random()
+                pool = [a for a in artifacts if a.get("type") in ("document", "plan", "html_form")]
+                if roll < 0.25 or not pool:
+                    made += 1
+                    artifact = {"artifact_id": f"new-{made}", "session": "rachel", "agent_id": "a1", "type": "document",
+                                "title": f"New {made}", "summary": "Made while streaming", "status": "ready",
+                                "content": "# New\n\n" + "Words. " * 300, "created_at": now_ms, "updated_at": now_ms}
+                    artifacts.append(artifact)
+                else:
+                    artifact = rng.choice(pool)
+                    if roll < 0.35:
+                        artifacts = [a for a in artifacts if a is not artifact]
+                    elif roll < 0.45:
+                        artifact["archived_at"] = now_ms
+                        artifact["updated_at"] = now_ms
+                    else:
+                        artifact["title"] = artifact["title"].split(" ·")[0] + f" · {now_ms}"
+                        artifact["updated_at"] = now_ms
+                count = len(attention)
+            announce([artifact["artifact_id"]], artifact.get("session", ""))
+            broadcast({"type": "attention-updated", "attention_count": count})
+        elif kind == "attention":
+            with state_lock:
+                stamp = f"s{now_ms}"
+                keep = [a for a in attention if not str(a.get("id", "")).startswith("s")]
+                attention[:] = keep + [{"id": stamp, "session": "rachel", "kind": "question"}]
+                count = len(attention)
+            broadcast({"type": "attention-updated", "attention_count": count})
+        else:
+            with state_lock:
+                job = jobs[0] if jobs else None
+                if job is not None:
+                    job["metadata"] = {"completed": job.get("metadata", {}).get("completed", 0) + 1, "total": 1000}
+                    job["updated_at"] = now_ms
+                    event = {"type": "background-job-updated", "job_id": job["job_id"], "session": job.get("session", ""),
+                             "status": job["status"], "job": dict(job)}
+            if job is not None:
+                broadcast(event)
 
 
 def record(entry):
@@ -699,6 +827,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def reply(self, status, body):
         data = json.dumps(body).encode()
+        path = urlparse(self.path).path
+        if self.command == "GET" and (path.startswith("/artifacts") or path in ("/attention", "/background-jobs")):
+            record({"method": "RESPONSE", "path": path, "status": status, "bytes": len(data), "at": time.time()})
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -803,8 +934,20 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/artifacts":
             if artifacts_delay:
                 time.sleep(artifacts_delay)
+            representation = query.get("representation", "")
+            if representation not in ("", "flat-v1") or (representation and not flat_supported):
+                return self.reply(400, {"error": "unsupported artifact representation"})
             with state_lock:
-                return self.reply(200, {"artifacts": artifacts})
+                rows = [represent(a, representation) for a in listed_artifacts(int(query.get("limit", "100")))]
+                return self.reply(200, {"artifacts": rows})
+        if url.path.startswith("/artifacts/") and url.path.count("/") == 2:
+            # One artifact in full: the Host ignores `representation` here.
+            artifact_id = unquote(url.path.split("/")[2])
+            with state_lock:
+                found = next((a for a in artifacts if a.get("artifact_id") == artifact_id), None)
+                if found is None:
+                    return self.reply(404, {"error": "artifact not found"})
+                return self.reply(200, {"artifact": represent(found, "")})
         if url.path.startswith("/artifacts/") and url.path.endswith("/events"):
             artifact_id = url.path.split("/")[2]
             with state_lock:
@@ -1302,12 +1445,32 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "attention-updated"})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/artifacts":
-            # Test control: replace the artifact list and announce it.
+            # Test control: replace the artifact list and announce each
+            # artifact that came or went.
             global artifacts
             with state_lock:
+                gone = [a.get("artifact_id", "") for a in artifacts]
                 artifacts = body.get("artifacts", [])
-            broadcast({"type": "artifact-updated", "session": body.get("session", "")})
+                ids = gone + [a.get("artifact_id", "") for a in artifacts]
+            announce(ids, body.get("session", ""))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/representation":
+            # Test control: false makes /artifacts refuse flat-v1 (400), as
+            # a Host that knows no such representation.
+            global flat_supported
+            flat_supported = bool(body.get("flat", True))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/stream":
+            # Test control: `seed` replaces the artifacts (silently) and
+            # lists them as the Host does; then `seconds` of events
+            # (run_stream) on a thread of their own.
+            seed_stream(body)
+            if body.get("seconds"):
+                threading.Thread(target=run_stream, args=(body,), daemon=True).start()
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/state":
+            # Test control: what the Host would list now, flat.
+            return self.reply(200, host_state(int(body.get("limit", 50))))
         if url.path == "/__control/artifact-chat":
             # Test control: `session` (a new agent unless it exists) gets a
             # chat of one reply per fixture artifact of `types`; its
@@ -1327,6 +1490,7 @@ class Handler(BaseHTTPRequestHandler):
                     revision += 1
                     row["revision"] = revision
                 turns[session] = rows
+                gone = [a.get("artifact_id", "") for a in artifacts if a.get("session") == session]
                 artifacts = [a for a in artifacts if a.get("session") != session] + made
                 if not any(agent["session"] == session for agent in agents):
                     agents.append({"agent_id": session + "-id", "session": session, "persona": body.get("persona", session.title()),
@@ -1340,7 +1504,7 @@ class Handler(BaseHTTPRequestHandler):
             if created:
                 broadcast({"type": "agent-roster", "session": session, "kind": "created"})
             broadcast({"type": "transcript-updated", "session": session})
-            broadcast({"type": "artifact-updated", "session": session})
+            announce(gone + [a["artifact_id"] for a in made], session)
             return self.reply(200, {"ok": True, "artifacts": made})
         if url.path == "/__control/artifact-settle":
             # Test control: cards change height as the Host moves on: each
@@ -1381,7 +1545,8 @@ class Handler(BaseHTTPRequestHandler):
                         held.update({"status": "accepted", "resolved_choice": "accepted", "revision": held["revision"] + 1})
                         artifact["status"] = "completed"
                         artifact["updated_at"] = now_ms
-            broadcast({"type": "artifact-updated", "session": body.get("session", "")})
+                settled = [a.get("artifact_id", "") for a in artifacts if a.get("session") == body.get("session")]
+            announce(settled, body.get("session", ""))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/artifact-update":
             # Test control: change one artifact's fields in place (a later
@@ -1393,7 +1558,7 @@ class Handler(BaseHTTPRequestHandler):
                         artifact["updated_at"] = int(time.time() * 1000)
                 for extra in body.get("add", []):
                     artifacts.append({"created_at": int(time.time() * 1000), "updated_at": int(time.time() * 1000), **extra})
-            broadcast({"type": "artifact-updated", "session": body.get("session", "")})
+            announce([body.get("id", "")] + [extra.get("artifact_id", "") for extra in body.get("add", [])], body.get("session", ""))
             return self.reply(200, {"ok": True})
         if url.path == "/__control/job-log":
             # Test control: the job's log grows by `append`.
@@ -1557,7 +1722,7 @@ class Handler(BaseHTTPRequestHandler):
                     owner["status"] = "completed"
                     owner["updated_at"] = int(time.time() * 1000)
             if owner is not None:
-                broadcast({"type": "artifact-updated", "session": owner.get("session", "")})
+                announce([owner.get("artifact_id", "")], owner.get("session", ""))
             return self.reply(200, {"ok": True, "decision_id": decision, "status": body.get("choice")})
         if url.path.startswith("/artifacts/") and url.path.endswith("/submit"):
             # A form's answers: a receipt echoing the submission, or 409

@@ -15,7 +15,7 @@ impl Engine {
     /// True when a panel owned the failure; the rest become the engine's error.
     pub(crate) fn panels_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
-        self.updates_failure(tag, &detail) || self.teams_failure(tag, &detail) || self.avatar_failure(tag, &detail) || self.profile_failure(tag, message, status, &detail)
+        self.updates_failure(tag, &detail, status) || self.teams_failure(tag, &detail) || self.avatar_failure(tag, &detail) || self.profile_failure(tag, message, status, &detail)
     }
 
     /// Watches the stream; the engine handles every signal after.

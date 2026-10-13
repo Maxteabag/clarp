@@ -130,7 +130,7 @@ fn open(app: &App, window: &AppWindow, session: &str, job: &str) {
     commands::open_overlay(app, window, OVERLAY);
     // Titles and heartbeats come from the job list: read it now so the list
     // is never older than the counts beside the badge.
-    app.engine.borrow_mut().load_updates();
+    app.engine.borrow_mut().load_background_jobs();
     if !job.is_empty() {
         app.engine.borrow_mut().load_job_detail(job);
     }

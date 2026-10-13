@@ -4,10 +4,11 @@
 //! event stream connects, and again whenever the Host says one changed.
 
 use std::collections::HashSet;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clarp_core::jobs::JobTracker;
 use clarp_core::json::{self, Object};
+use clarp_core::update_feeds::{self, Gate, Intervals, Patch, Throttle};
 use clarp_net::SseSignal;
 use serde_json::{Value, json};
 
@@ -21,22 +22,74 @@ pub const FIRST_UPDATES_DELAY: Duration = Duration::from_millis(1500);
 /// every later one back: each request gives up after this.
 pub const UPDATES_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// One of the three lists the surface shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Feed {
+    Attention,
+    Jobs,
+    Artifacts,
+}
+
+impl Feed {
+    const ALL: [Feed; 3] = [Feed::Attention, Feed::Jobs, Feed::Artifacts];
+
+    fn name(self) -> &'static str {
+        match self {
+            Feed::Attention => "attention",
+            Feed::Jobs => "jobs",
+            Feed::Artifacts => "artifacts",
+        }
+    }
+
+    fn named(name: &str) -> Option<Feed> {
+        Feed::ALL.into_iter().find(|feed| feed.name() == name)
+    }
+}
+
+/// A reload asked for while one was in flight, run when it ends.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Owed {
+    #[default]
+    Nothing,
+    /// By an event: it waits out the list's interval.
+    Event,
+    /// By the user: at once.
+    User,
+}
+
+/// One list's reloads: one in flight at a time, event-driven ones at most
+/// once per interval with a trailing one so the list ends up current.
+#[derive(Default)]
+struct FeedState {
+    pending: bool,
+    /// Replies tagged with an older one are dropped.
+    generation: u64,
+    owed: Owed,
+    throttle: Option<Throttle>,
+}
+
 #[derive(Default)]
 pub(crate) struct Updates {
     attention_items: Vec<Value>,
     background_jobs: Vec<Value>,
     artifacts: Vec<Value>,
-    generation: u64,
-    pending: i32,
-    /// Something changed while a reload was in flight: reload once more
-    /// when it finishes. A busy fleet's events used to start one reload
-    /// each (36 a minute, 37 in flight, a 9.8 MB artifact list apiece).
-    dirty: bool,
-    /// A job-list-only refetch (a job event) is in flight; replies tagged
-    /// with an older `jobs_generation` are dropped.
-    jobs_pending: bool,
-    jobs_dirty: bool,
-    jobs_generation: u64,
+    /// Attention, jobs, artifacts (`Feed` order). A busy fleet's events
+    /// used to reload all three each (2026-10-09: 36 a minute, a 9.8 MB
+    /// artifact list apiece; 2026-10-13: 492 lists of 1-8 MB in two days).
+    feeds: [FeedState; 3],
+    intervals: Intervals,
+    /// The Host refused `representation=flat-v1` (400): ask in full.
+    plain_artifacts: bool,
+    /// Artifact ids being read one by one, and those that changed again
+    /// meanwhile (read once more).
+    items_pending: HashSet<String>,
+    items_owed: HashSet<String>,
+    /// Items read while the whole list was in flight: the list may predate
+    /// them, so they are applied again on top of it.
+    item_overrides: std::collections::HashMap<String, Option<Value>>,
+    /// How many items the last whole list held (at least the limit asked
+    /// for): a patched list never grows past it.
+    artifact_cap: usize,
     error: String,
     /// `decision:<id>` / `job:<id>` while its request is in flight.
     pending_actions: HashSet<String>,
@@ -53,6 +106,20 @@ pub(crate) struct Updates {
     /// job id -> how its latest stop went ("Stopping…", "Stopped", "Not
     /// stopped: …").
     job_outcomes: std::collections::HashMap<String, String>,
+}
+
+impl Updates {
+    fn feed(&mut self, feed: Feed) -> &mut FeedState {
+        &mut self.feeds[feed as usize]
+    }
+
+    fn interval(&self, feed: Feed) -> Duration {
+        match feed {
+            Feed::Attention => self.intervals.attention,
+            Feed::Jobs => self.intervals.jobs,
+            Feed::Artifacts => self.intervals.artifacts,
+        }
+    }
 }
 
 impl Engine {
@@ -73,13 +140,19 @@ impl Engine {
     }
     /// One of the three lists is still loading.
     pub fn updates_loading(&self) -> bool {
-        self.updates.pending > 0
+        self.updates.feeds.iter().any(|feed| feed.pending)
     }
     pub fn updates_error(&self) -> &str {
         &self.updates.error
     }
     pub fn process_revision(&self) -> u64 {
         self.updates.process_revision
+    }
+
+    /// Requests and bytes read per Updates route (`clarp_net::TRAFFIC_ROUTES`)
+    /// since the last call, for the minute's memory line.
+    pub fn take_list_traffic(&self) -> std::collections::BTreeMap<&'static str, clarp_net::Traffic> {
+        self.api.take_traffic()
     }
 
     /// The next chat that wants the user after the selected one: unread,
@@ -207,36 +280,96 @@ impl Engine {
         self.api.post_json(&format!("form-submit:{artifact_id}|{submission}|{version}"), &path, body, None);
     }
 
+    /// The user asked (opened Updates, Refresh, an action's reply): all
+    /// three lists reload now, past any interval.
     pub fn load_updates(&mut self) {
-        if self.updates.pending > 0 {
-            self.updates.dirty = true;
-            return;
-        }
-        self.updates.dirty = false;
-        self.updates.jobs_dirty = false;
-        // This reload's job list supersedes a job-only refetch in flight.
-        self.updates.jobs_generation += 1;
-        self.updates.generation += 1;
         self.updates.error.clear();
-        self.updates.pending = 3;
+        for feed in Feed::ALL {
+            self.request_list(feed, true);
+        }
         self.changes.push(Change::Updates);
-        let generation = self.updates.generation;
-        self.api.get_with_timeout(&format!("updates:{generation}:attention"), "/attention", UPDATES_TIMEOUT);
-        self.api.get_with_timeout(&format!("updates:{generation}:jobs"), "/background-jobs", UPDATES_TIMEOUT);
-        self.api.get_with_timeout(&format!("updates:{generation}:artifacts"), "/artifacts?limit=50&order=updated", UPDATES_TIMEOUT);
     }
 
-    /// A job changed: only the job list is refetched, once at a time.
-    fn load_background_jobs(&mut self) {
-        if self.updates.pending > 0 || self.updates.jobs_pending {
-            self.updates.jobs_dirty = true;
+    /// The open surface's timer: each list reloads when its interval allows.
+    pub fn poll_updates(&mut self) {
+        for feed in Feed::ALL {
+            self.request_list(feed, false);
+        }
+    }
+
+    /// The user opened the processes: the job list now, not the others.
+    pub fn load_background_jobs(&mut self) {
+        self.request_list(Feed::Jobs, true);
+    }
+
+    /// The least time between event-driven reloads (tests shorten it).
+    pub fn set_update_intervals(&mut self, intervals: Intervals) {
+        self.updates.intervals = intervals;
+    }
+
+    /// Reads one artifact (`GET /artifacts/<id>`) into the list: an event
+    /// named it, or (with a summary list) its content is needed to open it.
+    pub fn fetch_artifact(&mut self, artifact_id: &str) {
+        if artifact_id.is_empty() {
             return;
         }
-        self.updates.jobs_dirty = false;
-        self.updates.jobs_pending = true;
-        self.updates.jobs_generation += 1;
-        let tag = format!("updates-jobs:{}", self.updates.jobs_generation);
-        self.api.get_with_timeout(&tag, "/background-jobs", UPDATES_TIMEOUT);
+        if self.updates.items_pending.contains(artifact_id) {
+            self.updates.items_owed.insert(artifact_id.to_owned());
+            return;
+        }
+        self.updates.items_pending.insert(artifact_id.to_owned());
+        let path = update_feeds::artifact_item_path(artifact_id, !self.updates.plain_artifacts);
+        self.api.get_with_timeout(&format!("artifact-item:{artifact_id}"), &path, UPDATES_TIMEOUT);
+    }
+
+    /// `user`: now, past the interval; otherwise an event's, at most once
+    /// per interval with one trailing reload.
+    fn request_list(&mut self, feed: Feed, user: bool) {
+        let interval = self.updates.interval(feed);
+        let state = self.updates.feed(feed);
+        if state.pending {
+            state.owed = state.owed.max(if user { Owed::User } else { Owed::Event });
+            return;
+        }
+        let now = Instant::now();
+        if !user {
+            let throttle = state.throttle.get_or_insert_with(|| Throttle::new(interval));
+            throttle.set_interval(interval);
+            match throttle.request(now) {
+                Gate::Now => {}
+                Gate::After(delay) => return self.after(delay, Message::UpdatesFeedDue(feed)),
+                Gate::Armed => return,
+            }
+        }
+        self.start_list(feed, now);
+    }
+
+    fn start_list(&mut self, feed: Feed, now: Instant) {
+        let interval = self.updates.interval(feed);
+        let state = self.updates.feed(feed);
+        state.pending = true;
+        state.owed = Owed::Nothing;
+        state.generation += 1;
+        state.throttle.get_or_insert_with(|| Throttle::new(interval)).started(now);
+        let tag = format!("updates:{}:{}", feed.name(), state.generation);
+        let path = match feed {
+            Feed::Attention => "/attention".to_owned(),
+            Feed::Jobs => "/background-jobs".to_owned(),
+            Feed::Artifacts => {
+                self.updates.item_overrides.clear();
+                update_feeds::artifact_list_path(!self.updates.plain_artifacts)
+            }
+        };
+        self.changes.push(Change::Updates);
+        self.api.get_with_timeout(&tag, &path, UPDATES_TIMEOUT);
+    }
+
+    /// A list's trailing reload is due.
+    pub(crate) fn updates_feed_due(&mut self, feed: Feed) {
+        let owed = self.updates.feed(feed).throttle.as_mut().is_some_and(Throttle::fire);
+        if owed && self.connected {
+            self.request_list(feed, false);
+        }
     }
 
     /// Answers a decision: `yes`/`accepted` or `no`/`rejected`, against the
@@ -296,26 +429,74 @@ impl Engine {
 
     // ---- replies and events ----------------------------------------------
 
-    fn finish_update_request(&mut self, generation: u64) {
-        if generation != self.updates.generation {
-            return;
-        }
-        self.updates.pending = (self.updates.pending - 1).max(0);
+    /// The reply's list, when it is the one in flight.
+    fn current_list(&mut self, tag: &str) -> Option<Option<Feed>> {
+        let rest = tag.strip_prefix("updates:")?;
+        let (name, generation) = rest.split_once(':').unwrap_or((rest, ""));
+        let feed = Feed::named(name);
+        let current = feed.zip(generation.parse::<u64>().ok()).filter(|(feed, generation)| {
+            let state = &self.updates.feeds[*feed as usize];
+            state.pending && state.generation == *generation
+        });
+        Some(current.map(|(feed, _)| feed))
+    }
+
+    /// A list's reload ended: what was asked for meanwhile follows.
+    fn finish_list(&mut self, feed: Feed) {
+        let state = self.updates.feed(feed);
+        state.pending = false;
+        let owed = std::mem::take(&mut state.owed);
         self.changes.push(Change::Updates);
-        if self.updates.pending == 0 {
-            if self.updates.dirty {
-                self.load_updates();
-            } else if self.updates.jobs_dirty {
-                self.load_background_jobs();
-            }
+        match owed {
+            Owed::Nothing => {}
+            Owed::Event => self.request_list(feed, false),
+            Owed::User => self.request_list(feed, true),
         }
     }
 
-    /// A job-only refetch ended; a job event during it asks for one more.
-    fn finish_jobs_request(&mut self) {
-        self.updates.jobs_pending = false;
-        if self.updates.jobs_dirty {
-            self.load_background_jobs();
+    /// True when an item read meanwhile left it unlike the Host's.
+    fn apply_artifact_list(&mut self, object: &Object) -> bool {
+        let mut list = json::array(object, "artifacts");
+        let cap = list.len().max(update_feeds::ARTIFACT_LIST_LIMIT);
+        let mut stale = false;
+        // Items read after this list was asked for are newer than it,
+        // unless the list has a later version of them.
+        for (id, item) in std::mem::take(&mut self.updates.item_overrides) {
+            let listed = list.iter().find(|a| a.get("artifact_id").and_then(Value::as_str) == Some(id.as_str()));
+            let stamp = |a: &Value| a.get("updated_at").and_then(Value::as_i64);
+            if let (Some(listed), Some(item)) = (listed, item.as_ref())
+                && stamp(listed) > stamp(item)
+            {
+                continue;
+            }
+            stale |= update_feeds::patch_artifact(&mut list, &id, item, cap).needs_reload();
+        }
+        self.updates.artifacts = list;
+        self.updates.artifact_cap = cap;
+        stale
+    }
+
+    /// One artifact as the Host has it now (`None`: gone) into the list.
+    fn patch_artifact(&mut self, artifact_id: &str, item: Option<Value>) {
+        if self.updates.feeds[Feed::Artifacts as usize].pending {
+            self.updates.item_overrides.insert(artifact_id.to_owned(), item.clone());
+        }
+        let cap = self.updates.artifact_cap.max(update_feeds::ARTIFACT_LIST_LIMIT);
+        let patch = update_feeds::patch_artifact(&mut self.updates.artifacts, artifact_id, item, cap);
+        if patch != Patch::Unchanged {
+            self.changes.push(Change::Updates);
+        }
+        // The Host's list dropped its oldest item or moved the next one
+        // up; only a reload says which.
+        if patch.needs_reload() {
+            self.request_list(Feed::Artifacts, false);
+        }
+    }
+
+    fn finish_item(&mut self, artifact_id: &str) {
+        self.updates.items_pending.remove(artifact_id);
+        if self.updates.items_owed.remove(artifact_id) {
+            self.fetch_artifact(artifact_id);
         }
     }
 
@@ -338,25 +519,30 @@ impl Engine {
     }
 
     pub(crate) fn updates_json(&mut self, tag: &str, object: &Object) -> bool {
-        if let Some(generation) = tag.strip_prefix("updates-jobs:") {
-            if generation.parse::<u64>().ok() == Some(self.updates.jobs_generation) {
-                self.apply_job_list(object);
-                self.changes.push(Change::Updates);
+        if let Some(current) = self.current_list(tag) {
+            let Some(feed) = current else { return true };
+            let mut stale = false;
+            match feed {
+                Feed::Attention => self.updates.attention_items = json::array(object, "items"),
+                Feed::Jobs => self.apply_job_list(object),
+                Feed::Artifacts => stale = self.apply_artifact_list(object),
             }
-            self.finish_jobs_request();
-        } else if let Some(rest) = tag.strip_prefix("updates:") {
-            let (generation, kind) = rest.split_once(':').unwrap_or((rest, ""));
-            let Ok(generation) = generation.parse::<u64>() else { return true };
-            if generation != self.updates.generation {
-                return true;
+            self.finish_list(feed);
+            if stale {
+                self.request_list(feed, false);
             }
-            match kind {
-                "attention" => self.updates.attention_items = json::array(object, "items"),
-                "jobs" => self.apply_job_list(object),
-                "artifacts" => self.updates.artifacts = json::array(object, "artifacts"),
-                _ => {}
+        } else if let Some(artifact_id) = tag.strip_prefix("artifact-item:") {
+            let mut item = object.get("artifact").cloned().unwrap_or(Value::Null);
+            if !self.updates.plain_artifacts {
+                update_feeds::flatten(&mut item);
             }
-            self.finish_update_request(generation);
+            if item.is_object() {
+                self.patch_artifact(artifact_id, Some(item));
+            } else {
+                eprintln!("Updates: artifact {artifact_id} came without an artifact; reloading the list");
+                self.request_list(Feed::Artifacts, false);
+            }
+            self.finish_item(artifact_id);
         } else if let Some(job_id) = tag.strip_prefix("job-detail:") {
             self.updates.job_details.insert(job_id.to_owned(), Ok(object.clone()));
             self.changes.push(Change::Processes);
@@ -399,24 +585,40 @@ impl Engine {
         true
     }
 
-    pub(crate) fn updates_failure(&mut self, tag: &str, detail: &str) -> bool {
+    pub(crate) fn updates_failure(&mut self, tag: &str, detail: &str, status: u16) -> bool {
         if let Some(key) = artifact_bytes_key(tag) {
             self.updates.artifact_bytes.insert(key, Err(detail.to_owned()));
             self.changes.push(Change::Updates);
             return true;
         }
-        if let Some(generation) = tag.strip_prefix("updates-jobs:") {
-            if generation.parse::<u64>().ok() == Some(self.updates.jobs_generation) {
-                self.updates.error = detail.to_owned();
-                self.changes.push(Change::Updates);
+        let unsupported = update_feeds::is_unsupported_representation(status, detail);
+        if let Some(current) = self.current_list(tag) {
+            let Some(feed) = current else { return true };
+            if feed == Feed::Artifacts && unsupported && !self.updates.plain_artifacts {
+                // An older Host: the full representation, at once.
+                eprintln!("Updates: the Host refused representation={}; asking for full artifacts", update_feeds::FLAT_REPRESENTATION);
+                self.updates.plain_artifacts = true;
+                let owed = self.updates.feed(feed).owed;
+                self.start_list(feed, Instant::now());
+                self.updates.feed(feed).owed = owed;
+                return true;
             }
-            self.finish_jobs_request();
-        } else if let Some(rest) = tag.strip_prefix("updates:") {
-            let generation = rest.split(':').next().and_then(|g| g.parse::<u64>().ok());
-            if generation == Some(self.updates.generation) {
-                self.updates.error = detail.to_owned();
-                self.finish_update_request(self.updates.generation);
+            self.updates.error = detail.to_owned();
+            self.finish_list(feed);
+        } else if let Some(artifact_id) = tag.strip_prefix("artifact-item:") {
+            let artifact_id = artifact_id.to_owned();
+            if status == 404 {
+                self.patch_artifact(&artifact_id, None);
+            } else if unsupported && !self.updates.plain_artifacts {
+                eprintln!("Updates: the Host refused representation={} for an artifact; asking in full", update_feeds::FLAT_REPRESENTATION);
+                self.updates.plain_artifacts = true;
+                self.updates.items_owed.insert(artifact_id.clone());
+            } else {
+                // The list catches up instead, within its interval.
+                eprintln!("Updates: artifact {artifact_id} not read ({detail}); reloading the list");
+                self.request_list(Feed::Artifacts, false);
             }
+            self.finish_item(&artifact_id);
         } else if let Some(job_id) = tag.strip_prefix("job-detail:") {
             self.updates.job_details.insert(job_id.to_owned(), Err(detail.to_owned()));
             self.changes.push(Change::Processes);
@@ -446,7 +648,11 @@ impl Engine {
     /// Watches the stream; the engine's own handling runs after.
     pub(crate) fn updates_sse(&mut self, signal: &SseSignal) {
         match signal {
-            SseSignal::Connected(true) => self.after(FIRST_UPDATES_DELAY, Message::UpdatesDue),
+            SseSignal::Connected(true) => {
+                // It may be a newer Host: ask for flat artifacts again.
+                self.updates.plain_artifacts = false;
+                self.after(FIRST_UPDATES_DELAY, Message::UpdatesDue);
+            }
             SseSignal::Event(event) => match json::string(event, "type").as_str() {
                 "background-job-updated" => {
                     // Apply the event's job at once so rows and the header
@@ -456,9 +662,16 @@ impl Engine {
                         self.jobs_changed();
                     }
                     // Attention and artifacts did not change.
-                    self.load_background_jobs();
+                    self.request_list(Feed::Jobs, false);
                 }
-                "artifact-updated" | "attention-updated" => self.load_updates(),
+                "attention-updated" => self.request_list(Feed::Attention, false),
+                // The Host names the artifact: read it alone. Before the
+                // first list there is nothing to patch; that list has it.
+                "artifact-updated" => match json::string(event, "artifact_id") {
+                    id if id.is_empty() => self.request_list(Feed::Artifacts, false),
+                    _ if self.updates.feeds[Feed::Artifacts as usize].generation == 0 => {}
+                    id => self.fetch_artifact(&id),
+                },
                 _ => {}
             },
             _ => {}

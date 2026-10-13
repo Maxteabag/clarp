@@ -51,4 +51,5 @@ pub mod transcript_layout;
 pub mod transcript_rows;
 pub mod time_format;
 pub mod tree;
+pub mod update_feeds;
 pub mod workspace;

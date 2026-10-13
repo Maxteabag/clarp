@@ -3,7 +3,8 @@
 //! `memory {...}` line with what the process holds, so an out-of-memory
 //! kill leaves a trend in the journal, and how the window drew since the
 //! last line: the UI thread's CPU, frames per second and frame time (mean,
-//! 95th percentile, longest; ms).
+//! 95th percentile, longest; ms), and what the Updates lists read
+//! (`lists`: requests and bytes per route).
 //!
 //! `CLARP_STALL_THRESHOLD_MS` (150; 0 disables), `CLARP_STALL_MEMORY_MB`
 //! (1536), `CLARP_STALL_LOG` and `CLARP_MEMORY_LOG_SECONDS` (60; 0
@@ -94,6 +95,16 @@ pub fn log_memory() {
         report.insert("transcriptRows".into(), json!(rows));
         let engine = app.engine.borrow();
         report.insert("agents".into(), json!(engine.roster().agents().len()));
+        // The Updates lists' reads this minute: [requests, bytes] per route.
+        let traffic = engine.take_list_traffic();
+        let lists: Map<String, Value> = clarp_net::TRAFFIC_ROUTES
+            .iter()
+            .map(|route| {
+                let t = traffic.get(route).copied().unwrap_or_default();
+                ((*route).to_owned(), json!([t.requests, t.bytes]))
+            })
+            .collect();
+        report.insert("lists".into(), Value::Object(lists));
     }
     let cpu = std::fs::read_to_string("/proc/self/stat").ok().and_then(|stat| clarp_core::diagnostics::cpu_ticks(&stat));
     // SAFETY: sysconf has no preconditions.
