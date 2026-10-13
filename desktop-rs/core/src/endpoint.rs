@@ -113,7 +113,7 @@ impl SseCursor {
 /// The user-facing message for a failed request: the Host's `message`,
 /// `detail` or `error` field when the body is a JSON object, else fallback.
 pub fn error_message(body: &[u8], fallback: &str) -> String {
-    let Ok(Value::Object(object)) = crate::host_json::parse(body, "an error reply") else {
+    let Ok(Value::Object(object)) = serde_json::from_slice::<Value>(body) else {
         return fallback.to_owned();
     };
     ["message", "detail", "error"]

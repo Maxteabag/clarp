@@ -37,7 +37,7 @@ pub async fn exchange(base: &Url, code: &str, device_name: &str) -> Result<Strin
     if !status.is_success() {
         return Err(error_message(&body, &format!("Pairing failed with HTTP {}", status.as_u16())));
     }
-    match clarp_core::host_json::parse(&body, "the pairing reply") {
+    match serde_json::from_slice::<Value>(&body) {
         Ok(Value::Object(reply)) => device_token(&reply),
         _ => Err("The pairing reply was not JSON".into()),
     }
