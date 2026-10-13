@@ -56,6 +56,7 @@ button's swipes and presses. The small button's hold stays the emergency stop
 and the large button is never mapped. Every mappable gesture already has a
 voice behaviour (swipe up replays, swipe down skips, …), so a mapping is an
 explicit opt-in that replaces it for that controller.
+
 Every change to the registry sends the ephemeral SSE event
 `controller-actions-updated {revision}`; clients refetch when it is newer.
 Every definition change and run is audited (last 500 rows).
