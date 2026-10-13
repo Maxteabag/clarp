@@ -148,7 +148,8 @@ UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 # budget); `wrong_sha` ones a hash their content does not have; `corrupt`
 # counts the next item reads of an artifact that answer altered content;
 # `item_delay` slows GET /artifacts/<id>; `refuse` advertises the feature
-# but answers the list as an old Host (400).
+# but answers the list as an old Host (400); `unknown_hash` ones carry a
+# content hash of a kind the client cannot check (not `c1:`).
 artifact_summary = {"on": False, "hash_pending": [], "digest_pending": [], "wrong_sha": [], "corrupt": {}, "item_delay": 0.0}
 # /server-info's server_id; /__control/server-id changes it (another Host).
 server_id = "fake-host-1"
@@ -411,17 +412,21 @@ def summary_row(artifact):
     if row.get("type") == "html_form" and "content" in row:
         data = row.pop("content").encode("utf-8")
         marker = {"reason": "summary", "version": row.get("version"), "updated_at": row.get("updated_at", 0)}
-        if artifact_id in artifact_summary["hash_pending"]:
+        if artifact_id in artifact_summary.get("unknown_hash", []):
+            # Not a hash of this content either: a client must not check it.
+            marker.update({"bytes": len(data), "sha256": "c9:" + hashlib.sha256(data + b"x").hexdigest()})
+        elif artifact_id in artifact_summary["hash_pending"]:
             marker.update({"bytes": None, "size_unknown": True, "sha256": None, "hash_pending": True})
         else:
             sha = hashlib.sha256(data + (b"x" if artifact_id in artifact_summary["wrong_sha"] else b"")).hexdigest()
-            marker.update({"bytes": len(data), "sha256": sha})
+            marker.update({"bytes": len(data), "sha256": "c1:" + sha})
         row["content_omitted"] = marker
     goal = (row.get("plan") or {}).get("goal") if isinstance(row.get("plan"), dict) else None
     if isinstance(goal, dict) and "history" in goal:
         history = goal.pop("history")
-        canonical = json.dumps(history, sort_keys=True, separators=(",", ":")).encode()
-        digest = None if artifact_id in artifact_summary["digest_pending"] else hashlib.sha256(canonical).hexdigest()
+        # As the Host: opaque to clients, who only compare it.
+        canonical = json.dumps(history, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8", "surrogatepass")
+        digest = None if artifact_id in artifact_summary["digest_pending"] else "h1:" + hashlib.sha256(canonical).hexdigest()
         goal["history_omitted"] = {"reason": "summary", "count": len(history),
                                    "last_at": history[-1].get("at") if history else None, "digest": digest}
         if digest is None:

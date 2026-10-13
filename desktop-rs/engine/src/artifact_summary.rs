@@ -242,7 +242,7 @@ impl Engine {
         let sha = summary::sha256_hex(&content);
         object.insert(
             "content_omitted".into(),
-            serde_json::json!({"reason": "summary", "bytes": content.len(), "sha256": sha, "version": version, "updated_at": updated_at}),
+            serde_json::json!({"reason": "summary", "bytes": content.len(), "sha256": format!("{}{sha}", summary::CONTENT_HASH), "version": version, "updated_at": updated_at}),
         );
         let key = summary::content_key(&s.scope, &id, updated_at, &version);
         s.cache.insert(key, Entry::content(&id, &content, Some(sha)));
