@@ -2658,14 +2658,15 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
 
 // ---- summary lists (artifact_summary_v1)
 
-/// GETs of `path` in the fake Host's log (`CLARP_TEST_HOST_LOG`).
+/// Hydrations of `path` in the fake Host's log (`CLARP_TEST_HOST_LOG`):
+/// plain GETs (an event's read of one artifact asks for flat-v1).
 fn host_gets(path: &str) -> usize {
     let Some(log) = std::env::var_os("CLARP_TEST_HOST_LOG") else { return 0 };
     std::fs::read_to_string(log)
         .unwrap_or_default()
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|r| r["method"] == "GET" && r["path"] == path)
+        .filter(|r| r["method"] == "GET" && r["path"] == path && r["query"].get("representation").is_none())
         .count()
 }
 
@@ -2681,9 +2682,12 @@ fn listed_row(app: &crate::App, id: &str) -> Value {
 pub(super) fn artifact_summary_check(out: String) {
     let before = Rc::new(Cell::new(0usize));
     let before2 = before.clone();
-    let mut stages: Vec<Stage> = vec![
-        ("summary on", Box::new(|app, _, _| {
-            if app.engine.borrow().connection_state() != "live" {
+    // The chat first: a new artifact an event names is read whole once
+    // (its size is not known yet); these are then listed in summary shape.
+    let mut stages = load_chat("art-summary", &["html_big"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("summary on", Box::new(|app, window, elapsed| {
+            if !placed(window, &["big-report", "big-net"], elapsed) {
                 return false;
             }
             check(control("/__control/artifact-summary", &json!({"on": true, "item_delay": 0.4})).is_ok(), "the Host offers summary lists");
@@ -2698,8 +2702,7 @@ pub(super) fn artifact_summary_check(out: String) {
             check(on, "the desktop reads the feature from /server-info");
             true
         })),
-    ];
-    stages.extend(load_chat("art-summary", &["html_big"]));
+    ]);
     stages.extend::<Vec<Stage>>(vec![
         ("summary cards", Box::new(|app, window, elapsed| {
             let big = listed_row(app, "big-report");
