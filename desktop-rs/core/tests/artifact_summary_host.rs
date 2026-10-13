@@ -86,7 +86,7 @@ fn every_file_matches_the_manifest_of_the_final_host() {
         assert_eq!(entry["sha256"].as_str(), Some(sha.as_str()), "{name}");
     }
     // The v1 manifest still vouches for its own 33 files, unchanged by v2.
-    let v1 = manifest();
+    let v1 = self::manifest();
     for entry in v1["files"].as_array().unwrap() {
         let name = entry["file"].as_str().unwrap();
         let sha: String = Sha256::digest(std::fs::read(dir().join(name)).unwrap()).iter().map(|b| format!("{b:02x}")).collect();
