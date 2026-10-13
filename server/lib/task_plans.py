@@ -324,13 +324,21 @@ def cancel_for_agent(agent_id: str) -> None:
 
 
 def get(plan_id: str) -> dict | None:
+    return get_with_goal_text(plan_id)[0]
+
+
+def get_with_goal_text(plan_id: str) -> tuple[dict | None, str | None]:
+    """The plan as ``get`` returns it, and the exact ``goal_json`` text its goal
+    was decoded from. The artifact list's summary-v1 projection keys its plan
+    history digest on that text: ``_goal_save`` rewrites it without a revision
+    bump, so only the text itself proves the history unchanged."""
     plan = (
         db.conn()
         .execute("SELECT * FROM task_plans WHERE plan_id=?", (plan_id,))
         .fetchone()
     )
     if not plan:
-        return None
+        return None, None
     now = db.now_ms()
     items = []
     for row in db.conn().execute(
@@ -355,7 +363,8 @@ def get(plan_id: str) -> dict | None:
         root["subtasks"] = by_parent.get(root["item_id"], [])
     completed = sum(1 for item in items if item["status"] == "completed")
     data = dict(plan)
-    data["goal"] = json.loads(data.pop("goal_json") or "{}") or None
+    goal_text = data.pop("goal_json")
+    data["goal"] = json.loads(goal_text or "{}") or None
     data["history"] = json.loads(data.pop("history_json") or "[]")
     if data["goal"] is not None:
         from . import goal_ledger
@@ -374,7 +383,7 @@ def get(plan_id: str) -> dict | None:
         "completed_count": completed,
         "total_count": len(items),
         "server_now": now,
-    }
+    }, goal_text
 
 
 def list_for_session(session: str) -> list[dict]:
