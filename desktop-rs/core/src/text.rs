@@ -576,7 +576,14 @@ pub fn report_type_has_body(kind: &str) -> bool {
 }
 
 pub fn artifact_is_viewable_report(artifact: &Object) -> bool {
-    report_type_has_body(&crate::json::string(artifact, "type")) && !crate::json::string(artifact, "content").trim().is_empty()
+    report_type_has_body(&crate::json::string(artifact, "type")) && (!crate::json::string(artifact, "content").trim().is_empty() || body_omitted(artifact))
+}
+
+/// A summary row's html_form body: left out (read on opening), not empty.
+fn body_omitted(artifact: &Object) -> bool {
+    let marker = artifact.get("content").is_none().then(|| artifact.get("content_omitted")).flatten();
+    marker.and_then(|m| m.get("reason")).and_then(serde_json::Value::as_str) == Some("summary")
+        && marker.and_then(|m| m.get("bytes")).and_then(serde_json::Value::as_u64) != Some(0)
 }
 
 /// What the report view shows for an artifact: HTML is sanitised against
