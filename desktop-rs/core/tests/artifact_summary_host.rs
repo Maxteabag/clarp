@@ -223,6 +223,30 @@ fn some_fields_live_in_the_payload_only() {
     }
     assert!(item("html_form_report", "default")["payload"].get("answer_schema").is_some());
     assert!(item("plan_artifact", "default")["payload"].get("plan_id").is_some());
+    // Dagger's mappings hold in every shape the desktop reads: the plan id is
+    // the top-level reference_id (== plan.plan_id), report detection is the
+    // top-level read_only (absent here: these forms take answers).
+    let mut shapes: Vec<(String, Value)> = Vec::new();
+    for list in ["01-artifacts-summary-v1.body", "01-artifacts-flat-v1.body", "01-artifacts-default.body"] {
+        shapes.extend(rows(list).into_iter().map(|r| (list.to_owned(), r)));
+    }
+    for name in ["plan_artifact", "html_form_report"] {
+        for shape in ["default", "flat-v1", "bogus"] {
+            shapes.push((format!("{name} item {shape}"), item(name, shape)));
+        }
+    }
+    for (shape, row) in &shapes {
+        assert!(row.get("answer_schema").is_none() && row.get("plan_id").is_none(), "{shape}");
+        if row["type"] == "plan" {
+            assert_eq!(row["reference_id"], row["plan"]["plan_id"], "{shape}: reference_id is the plan id");
+            assert!(row["reference_id"].as_str().is_some_and(|id| !id.is_empty()), "{shape}");
+        }
+        if row["type"] == "html_form" {
+            let flagged = row.get("read_only") == Some(&Value::Bool(true)) || row.get("payload").and_then(|p| p.get("read_only")) == Some(&Value::Bool(true));
+            assert!(!flagged && row.get("read_only").is_none(), "{shape}: a form, flagged nowhere");
+        }
+    }
+    assert_eq!(shapes.iter().filter(|(_, r)| r["type"] == "plan").count(), 6, "the plan in 3 lists and 3 item shapes");
 }
 
 fn v2_id(name: &str) -> String {
