@@ -6,7 +6,7 @@ use clarp_core::sse::SseParser;
 use serde_json::{Value, json};
 
 // What Python's json.dumps writes for "\ud800", "\udc00", "\ud800x" and "😀".
-const BODY: &[u8] = br#"{"items":[{"id":"a","text":"\ud800"},{"id":"b","text":"\udc00"},{"id":"c","text":"\ud800x"},{"id":"d","text":"\ud83d\ude00"}],"total":4}"#;
+const BODY: &[u8] = br#"{"items":[{"id":"a","text":"\ud800"},{"id":"b","text":"\udc00"},{"id":"c","text":"\ud800x"},{"id":"d","text":"😀"}],"total":4}"#;
 
 #[test]
 fn serde_json_alone_rejects_the_whole_body_for_one_lone_surrogate() {
@@ -30,23 +30,23 @@ fn only_unpaired_escapes_are_rewritten_byte_for_byte() {
     let (repaired, count) = repair_lone_surrogates(BODY);
     assert_eq!(count, 3);
     assert_eq!(repaired.len(), BODY.len());
-    let expected = br#"{"items":[{"id":"a","text":"\ufffd"},{"id":"b","text":"\ufffd"},{"id":"c","text":"\ufffdx"},{"id":"d","text":"\ud83d\ude00"}],"total":4}"#;
+    let expected = br#"{"items":[{"id":"a","text":"�"},{"id":"b","text":"�"},{"id":"c","text":"�x"},{"id":"d","text":"😀"}],"total":4}"#;
     assert_eq!(&repaired[..], &expected[..]);
 
     let cases: [(&[u8], &[u8], usize); 8] = [
         // Two highs in a row: the first is lone, the second pairs.
-        (br#""\ud800\ud83d\ude00""#, br#""\ufffd\ud83d\ude00""#, 1),
+        (br#""\ud800😀""#, br#""�😀""#, 1),
         // A low that follows a lone high is lone too.
-        (br#""\ud800\u0041\udc00""#, br#""\ufffd\u0041\ufffd""#, 2),
+        (br#""\ud800A\udc00""#, br#""�A�""#, 2),
         // Upper-case hex is still an escape.
-        (br#""\uD800\uDBFF\uDFFF""#, br#""\ufffd\uDBFF\uDFFF""#, 1),
+        (br#""\uD800􏿿""#, br#""�􏿿""#, 1),
         // At the very end of the body.
-        (br#""\ud800"#, br#""\ufffd"#, 1),
+        (br#""\ud800"#, br#""�"#, 1),
         (br#""\ud8"#, br#""\ud8"#, 0),
         // A literal backslash then "ud800" is text, not an escape.
         (br#""\\ud800""#, br#""\\ud800""#, 0),
-        (br#""\\\ud800""#, br#""\\\ufffd""#, 1),
-        (br#""\"\ud800\n""#, br#""\"\ufffd\n""#, 1),
+        (br#""\\\ud800""#, br#""\\�""#, 1),
+        (br#""\"\ud800\n""#, br#""\"�\n""#, 1),
     ];
     for (input, output, replaced) in cases {
         let (repaired, count) = repair_lone_surrogates(input);
@@ -56,7 +56,7 @@ fn only_unpaired_escapes_are_rewritten_byte_for_byte() {
 
 #[test]
 fn a_body_without_lone_surrogates_is_not_copied() {
-    for body in [&br#"{"a":"\ud83d\ude00 \u00e9 \\ud800 plain \u00f8"}"#[..], b"", b"\\"] {
+    for body in [&br#"{"a":"😀 é \\ud800 plain ø"}"#[..], b"", b"\\"] {
         assert!(matches!(repair_lone_surrogates(body), (Cow::Borrowed(_), 0)), "{}", String::from_utf8_lossy(body));
     }
     assert_eq!(parse(br#"{"a":"\\ud800"}"#, "/x").unwrap()["a"], "\\ud800");
