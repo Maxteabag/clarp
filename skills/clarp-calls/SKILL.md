@@ -1,6 +1,6 @@
 ---
 name: clarp-calls
-description: Manage the user's Clarp group call. Add, remove, hold, resume or switch the agents in it, or call someone else, including bringing in another agent yourself. Use when the user is on a call or hands-free with you and asks for any of these, e.g. "can we add Mike to this conversation", "put Solu on hold", "switch me to Nadia", "call Omar instead", "drop Theo", "who's on the call", or when your turn carries a [Group call] header and another agent should join.
+description: Call the user yourself (their phone rings and you speak first), or manage the user's Clarp group call. Add, remove, hold, resume or switch the agents in it, or call someone else, including bringing in another agent yourself. Use when the user is on a call or hands-free with you and asks for any of these, e.g. "can we add Mike to this conversation", "put Solu on hold", "switch me to Nadia", "call Omar instead", "drop Theo", "who's on the call", or when your turn carries a [Group call] header and another agent should join.
 ---
 
 # Managing a group call
@@ -84,4 +84,29 @@ reach Solu: holding or removing yourself is fine, say a one-line goodbye.
 Holding or removing an agent never stops its work. A reply it is already
 writing still lands in its chat but is not played on the call.
 
-The wire contract is `docs/group-calls.md` in the Clarp repository.
+## Calling the user yourself
+
+When something needs the user *now* and is better said than written (an
+alarm, a decision that blocks real-world work, something they asked to be
+called about), ring them:
+
+```bash
+clarp-admin call ring --reason "Possible water leak at pump 01" \
+  --say "Camera 2 shows a possible water leak at pump 01. Shall I find an available field worker?" --wait
+```
+
+- `--reason` is what the incoming call shows (one short line). `--say` is your
+  opening line, played in your voice the moment they answer: say who/what and
+  end with the question you need answered.
+- `--wait` returns when the call is `answered`, `declined` or `missed`. When
+  answered, their reply comes as your next turn with a `[Group call]` header;
+  answer it in short `<speak>` lines, as on a phone call.
+- Declined or missed: don't ring again straight away. Send a normal message or
+  a decision instead; ring again only if it is still urgent.
+- Never ring for routine progress, a finished task, or anything a message
+  covers. Rings are rate-limited (one at a time, 60 s per agent, 10 an hour)
+  and audited; the owner can turn them off (`clarp-admin call rings off`).
+- `clarp-admin call ring-cancel RING_ID` hangs up before they answer.
+
+The wire contracts are `docs/group-calls.md` and `docs/agent-rings.md` in the
+Clarp repository.

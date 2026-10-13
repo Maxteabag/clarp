@@ -1116,6 +1116,48 @@ def cmd_call(args) -> int:
     return 0
 
 
+def _ring_request(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+    try:
+        return 0, api_request(method, path, body)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        try:
+            return 1, json.loads(raw) if raw else {"error": f"HTTP {exc.code}"}
+        except ValueError:
+            return 1, {"error": raw.decode("utf-8", "replace") or f"HTTP {exc.code}"}
+
+
+def cmd_call_ring(args) -> int:
+    """An agent calls its owner (docs/agent-rings.md)."""
+    command = args.call_command
+    if command == "ring":
+        body = {"reason": args.reason, "opening_line": args.say}
+        if args.agent:
+            body = {"agent": args.agent, **body}
+        code, result = _ring_request("POST", "/calls/ring", body)
+        ring_id = str((result.get("ring") or {}).get("ring_id") or "")
+        if code == 0 and args.wait and ring_id:
+            # Poll until the user answers, declines or misses the call.
+            deadline = time.time() + 90
+            while time.time() < deadline:
+                time.sleep(2)
+                code, result = _ring_request(
+                    "GET", "/calls/ring?ring_id=" + urllib.parse.quote(ring_id))
+                if code or (result.get("ring") or {}).get("state") != "ringing":
+                    break
+    elif command == "ring-status":
+        path = "/calls/ring" + (f"?ring_id={urllib.parse.quote(args.ring_id)}" if args.ring_id else "")
+        code, result = _ring_request("GET", path)
+    elif command == "ring-cancel":
+        code, result = _ring_request("POST", "/calls/ring/cancel", {"ring_id": args.ring_id})
+    elif args.switch == "status":
+        code, result = _ring_request("GET", "/calls/ring/settings")
+    else:
+        code, result = _ring_request("POST", "/calls/ring/settings", {"enabled": args.switch == "on"})
+    print(json.dumps(result, indent=2))
+    return code
+
+
 def cmd_explanations(args) -> int:
     from lib import tool_explanation_learning as learning
     from lib import tool_explanation_templates as templates
@@ -2706,6 +2748,21 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         command.add_argument("--call", default="", help="call id (default: the live call)")
         command.add_argument("--principal", default="", help="device principal when several calls are live")
         command.set_defaults(func=cmd_call)
+    ring = call.add_parser("ring", help="call the user yourself: their phone rings and you speak first")
+    ring.add_argument("--reason", required=True, help="why you are calling, shown on the incoming call")
+    ring.add_argument("--say", required=True, help="your opening line, spoken when the user answers")
+    ring.add_argument("--agent", default="", help="the calling agent (default: you)")
+    ring.add_argument("--wait", action="store_true", help="wait until the call is answered, declined or missed")
+    ring.set_defaults(func=cmd_call_ring)
+    ring_status = call.add_parser("ring-status", help="the ringing call, or one call by id")
+    ring_status.add_argument("ring_id", nargs="?", default="")
+    ring_status.set_defaults(func=cmd_call_ring)
+    ring_cancel = call.add_parser("ring-cancel", help="hang up a call that has not been answered")
+    ring_cancel.add_argument("ring_id")
+    ring_cancel.set_defaults(func=cmd_call_ring)
+    rings = call.add_parser("rings", help="the owner's switch for agent calls")
+    rings.add_argument("switch", choices=("on", "off", "status"))
+    rings.set_defaults(func=cmd_call_ring)
     onboard = sub.add_parser("onboard")
     onboard.add_argument("--url", default="")
     onboard.add_argument("--name", default="")

@@ -38,6 +38,11 @@ _ORACLE_HANDOFF_FIELDS = (
     "issued_at", "server_now", "ttl_ms", "expires_at",
 )
 
+_AGENT_RING_FIELDS = (
+    "ring_id", "session", "agent_id", "persona", "reason", "opening_line", "opening_audio_url",
+    "state", "created_at", "expires_at", "ended_at", "answered_by", "call_id", "server_now",
+)
+
 _GROUP_CALL_FIELDS = (
     "call_id", "host_id", "principal", "state", "reason", "revision", "started_at",
     "ended_at", "floor", "participants", "change", "server_now",
@@ -107,6 +112,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
     ),
     SSEType.ORACLE_HANDOFF: _ORACLE_HANDOFF_FIELDS,
     SSEType.GROUP_CALL: _GROUP_CALL_FIELDS,
+    SSEType.AGENT_RING: _AGENT_RING_FIELDS,
     SSEType.CONTROLLER_ACTIONS_UPDATED: ("revision",),
     SSEType.HEARTBEAT: ("ts",),
     SSEType.LIVE: (
@@ -448,6 +454,9 @@ def group_call(**fields: Any) -> Event:
     return _build(SSEType.GROUP_CALL, [(key, fields.get(key)) for key in _GROUP_CALL_FIELDS])
 
 
+def agent_ring(**fields: Any) -> Event:
+    """One agent ring record (docs/agent-rings.md)."""
+    return _build(SSEType.AGENT_RING, [(key, fields.get(key)) for key in _AGENT_RING_FIELDS])
 def controller_actions_updated(*, revision: int) -> Event:
     return _build(SSEType.CONTROLLER_ACTIONS_UPDATED, [("revision", revision)])
 
@@ -474,6 +483,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.ORCHESTRATOR_DECISION: orchestrator_decision,
     SSEType.ORACLE_HANDOFF: oracle_handoff,
     SSEType.GROUP_CALL: group_call,
+    SSEType.AGENT_RING: agent_ring,
     SSEType.CONTROLLER_ACTIONS_UPDATED: controller_actions_updated,
     SSEType.LIVE: live,
     SSEType.HEARTBEAT: heartbeat,
