@@ -61,3 +61,11 @@ def test_compatibility_table_matches_constants():
     assert int(newest_min_ios) == server_identity.MIN_IOS_CONTRACT
     for host, min_ios, _, _ in rows:
         assert int(min_ios) <= int(host)
+
+
+def test_agent_rings_arrive_with_host_contract_64():
+    """Agent rings ship after controller actions (contract 63), as 64."""
+    assert server_identity.FEATURE_CONTRACTS["agent_rings"] == 64
+    assert server_identity.HOST_CONTRACT >= 64
+    text = (ROOT / "docs" / "agent-rings.md").read_text()
+    assert "contract 64" in text
