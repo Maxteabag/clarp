@@ -388,3 +388,17 @@ fn an_event_reads_a_small_form_whole_but_a_big_one_waits_for_the_list() {
     assert!(host.requests("GET", "/artifacts").len() > lists, "a summary list carried it");
     assert!(row(&d, "big-report").get("content").is_none());
 }
+
+#[test]
+fn a_hash_of_another_kind_is_not_checked() {
+    // `c9:` is no hash this client knows (and not of this content): the
+    // body is identified by (id, updated_at, version) alone, as pending.
+    let host = seeded("summary-unknown-hash", fixtures(), true);
+    host.control("/__control/artifact-summary", json!({"unknown_hash": ["form-a"]}));
+    let mut d = listed(&host);
+    assert!(row(&d, "form-a")["content_omitted"]["sha256"].as_str().is_some_and(|h| h.starts_with("c9:")));
+    d.engine.need_artifact("form-a");
+    ready(&mut d, "form-a");
+    assert_eq!(hydrations(&host, "form-a"), 1, "read once, not dropped as a mismatch");
+    assert_eq!(row(&d, "form-a")["content"], json!(FORM));
+}
