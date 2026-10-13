@@ -56,11 +56,6 @@ def bind(ctx) -> None:
     _context["tts"] = getattr(ctx, "tts", None)
 
 
-def _reset_for_tests() -> None:
-    """Forget in-process state, as a restart would (records stay stored)."""
-    _context["stream"] = _context.get("stream")
-
-
 # ---- persistence ---------------------------------------------------------------
 
 def _load() -> list[dict]:

@@ -281,7 +281,7 @@ def test_the_audit_trail_keeps_every_outcome_newest_first(env):
 
 def test_rings_survive_a_restart(env):
     ring = _ring()["ring"]
-    rings._reset_for_tests()
+    # Nothing is cached in-process: the record is read back from the store.
     assert rings.current()["ring_id"] == ring["ring_id"]
 
 
