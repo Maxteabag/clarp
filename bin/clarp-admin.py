@@ -2452,8 +2452,9 @@ def cmd_controller_action(args) -> int:
             print(f"✓ {args.button} {args.gesture} on {args.device} → {target}")
             return 0
         if cmd == "run":
-            result = api_request("POST", "/controller-actions/run", {"action_id": args.action_id},
-                                 timeout=30)
+            result = api_request(
+                "POST", f"/controller-actions/{urllib.parse.quote(args.action_id, safe='')}/invoke",
+                {"request_id": f"clarp-admin-{secrets.token_hex(8)}"}, timeout=30)
             print(json.dumps(result, indent=2))
             return 0 if result.get("ok") else 1
         if cmd == "audit":

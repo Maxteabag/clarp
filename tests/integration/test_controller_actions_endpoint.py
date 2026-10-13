@@ -12,6 +12,12 @@ import pytest
 from .test_avatar_settings_endpoint import running_server, _get, _post  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def _fresh_debounce():
+    from lib import controller_actions
+    controller_actions._reset_runtime_state()
+
+
 @pytest.fixture
 def scenario_server():
     """A stand-in for the leak-watch demo's /api/scenario that records POSTs."""
@@ -78,10 +84,14 @@ def test_a_mapped_gesture_runs_the_demo_post_end_to_end(running_server, scenario
     assert {a["id"] for a in state["actions"]} == {"rk-demo-leak", "rk-demo-reset"}
     assert state["mappings"] == [mapped["mapping"]]
 
-    status, result = _call(running_server, "POST", "/controller-actions/run", {
-        "action_id": "rk-demo-leak", "request_id": "g-1",
+    status, result = _call(running_server, "POST", "/controller-actions/rk-demo-leak/invoke", {
+        "request_id": "g-1",
         "device": "flic-abc", "button": "secondary", "gesture": "swipe-up"}, token=phone)
     assert status == 200 and result["ok"] is True and result["status"] == 200
+    # A retry of the same request is answered, not run again.
+    status, again = _call(running_server, "POST", "/controller-actions/rk-demo-leak/invoke",
+                          {"request_id": "g-1"}, token=phone)
+    assert status == 200 and again["duplicate"] is True
     assert received == [("/api/scenario", {"feed": "demo-cam-02", "clip": "leak"})]
 
     status, audit = _call(running_server, "GET", "/controller-actions/audit?limit=5")
@@ -91,28 +101,27 @@ def test_a_mapped_gesture_runs_the_demo_post_end_to_end(running_server, scenario
     assert run["actor"].startswith("device:") and run["source"]["gesture"] == "swipe-up"
 
 
-def test_run_can_resolve_the_action_from_the_gesture(running_server, scenario_server):
+def test_invoke_needs_a_request_id_and_ignores_client_supplied_targets(
+        running_server, scenario_server):
     url, received = scenario_server
     _seed_demo(running_server, url)
-    _call(running_server, "POST", "/controller-actions/mappings", {
-        "device": "*", "button": "secondary", "gesture": "rotate-clockwise",
-        "action_id": "rk-demo-reset"})
-    status, result = _call(running_server, "POST", "/controller-actions/run", {
-        "device": "flic-abc", "button": "secondary", "gesture": "rotate-clockwise"},
-        token=_device())
-    assert status == 200 and result["action_id"] == "rk-demo-reset"
-    assert received == [("/api/scenario", {"feed": "demo-cam-02", "clip": "normal"})]
-    status, result = _call(running_server, "POST", "/controller-actions/run", {
-        "device": "flic-abc", "button": "primary", "gesture": "hold"}, token=_device())
-    assert status == 404
+    phone = _device()
+    assert _call(running_server, "POST", "/controller-actions/rk-demo-leak/invoke",
+                 {}, token=phone)[0] == 400
+    # Anything else in the body is ignored: the Host's definition decides.
+    status, result = _call(running_server, "POST", "/controller-actions/rk-demo-leak/invoke", {
+        "request_id": "x-1", "url": "http://127.0.0.1:9/evil", "body": {"clip": "boom"}},
+        token=phone)
+    assert status == 200 and result["ok"] is True
+    assert received == [("/api/scenario", {"feed": "demo-cam-02", "clip": "leak"})]
 
 
 def test_a_failing_target_is_a_reported_failure_not_a_server_error(running_server):
     _call(running_server, "POST", "/controller-actions", {
         "id": "dead", "title": "Dead", "type": "http_post",
         "url": "http://127.0.0.1:9/nothing", "body": {}})
-    status, result = _call(running_server, "POST", "/controller-actions/run",
-                           {"action_id": "dead"}, token=_device())
+    status, result = _call(running_server, "POST", "/controller-actions/dead/invoke",
+                           {"request_id": "d-1"}, token=_device())
     assert status == 200 and result["ok"] is False and result["error"]
 
 
@@ -144,14 +153,14 @@ def test_a_limited_device_can_run_but_not_remap(running_server, scenario_server)
     assert _call(running_server, "POST", "/controller-actions/mappings", {
         "device": "*", "button": "primary", "gesture": "hold",
         "action_id": "rk-demo-leak"}, token=watch)[0] == 403
-    status, result = _call(running_server, "POST", "/controller-actions/run",
-                           {"action_id": "rk-demo-leak"}, token=watch)
+    status, result = _call(running_server, "POST", "/controller-actions/rk-demo-leak/invoke",
+                           {"request_id": "w-1"}, token=watch)
     assert status == 200 and result["ok"] is True
 
 
 def test_unauthenticated_requests_are_refused(running_server):
     for method, path, body in (("GET", "/controller-actions", None),
-                               ("POST", "/controller-actions/run", {"action_id": "x"})):
+                               ("POST", "/controller-actions/x/invoke", {"request_id": "u-1"})):
         request = urllib.request.Request(
             running_server + path, method=method,
             data=json.dumps(body).encode() if body else None,
@@ -168,8 +177,8 @@ def test_bad_definitions_answer_400_and_unknown_ids_404(running_server):
     assert status == 400 and "allow" in body["error"]
     assert _call(running_server, "POST", "/controller-actions",
                  {"id": "sh", "title": "Sh", "type": "shell", "command": "ls"})[0] == 400
-    assert _call(running_server, "POST", "/controller-actions/run",
-                 {"action_id": "missing"}, token=_device())[0] == 404
+    assert _call(running_server, "POST", "/controller-actions/missing/invoke",
+                 {"request_id": "m-1"}, token=_device())[0] == 404
 
 
 def test_clarp_admin_seeds_maps_and_runs_the_demo_actions(running_server, scenario_server,
@@ -203,9 +212,9 @@ def test_clarp_admin_seeds_maps_and_runs_the_demo_actions(running_server, scenar
     cli("map", "--button", "secondary", "--gesture", "swipe-down", "--action", "rk-demo-reset")
     listing = cli("list")
     assert "secondary swipe-up" in listing and "rk-demo-reset" in listing
-    # The phone side: a gesture names only device, button and gesture.
-    status, result = _call(running_server, "POST", "/controller-actions/run", {
-        "device": "flic-abc", "button": "secondary", "gesture": "swipe-up"}, token=_device())
+    # The phone side: it names only the action and its own request id.
+    status, result = _call(running_server, "POST", "/controller-actions/rk-demo-leak/invoke", {
+        "request_id": "cli-1", "button": "secondary", "gesture": "swipe-up"}, token=_device())
     assert status == 200 and result["ok"] is True
     assert '"ok": true' in cli("run", "rk-demo-reset")
     assert received == [("/api/scenario", {"feed": "demo-cam-02", "clip": "leak"}),

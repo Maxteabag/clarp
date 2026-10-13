@@ -37,13 +37,25 @@ behaviour on the phone.
 | `POST /controller-actions/update` | local administrator | `{id, …changed fields}` |
 | `POST /controller-actions/delete` | local administrator | `{id}`; also clears its mappings |
 | `POST /controller-actions/mappings` | full device | `{device, button, gesture, action_id}`; `action_id: null` clears |
-| `POST /controller-actions/run` | any device, limited too | `{action_id}` or `{device, button, gesture}`, optional `request_id` |
+| `POST /controller-actions/<id>/invoke` | paired device, limited too | `{request_id}` required; optional `device`, `button`, `gesture`, `source_kind` for the audit |
 | `GET /controller-actions/audit?limit=` | any device | newest first |
 
-Run answers 200 `{ok, action_id, title, type, status?, error?, duration_ms}`
-even when the target fails (`ok: false`); 404 for an unknown or unmapped
-action, 409 for a disabled one. A repeated `request_id` within ten minutes
-returns the first result with `duplicate: true` instead of running again.
+Invoke answers 200 `{ok, action_id, title, type, status?, error?, duration_ms}`
+even when the target fails (`ok: false`); 400 without a `request_id`, 404 for
+an unknown action, 409 for a disabled one. Nothing else in the body is used:
+the phone never supplies a URL, body, prompt or command. A repeated
+`request_id` within ten minutes, even one arriving while the first is still
+running, returns the first result with `duplicate: true`. Another request for
+the same action within 1.5 s of a run that is in flight or succeeded returns
+`debounced: true` without running; a failure can be retried at once. The
+target has a 5 s timeout (`agent_prompt` 15 s).
+
+The phone resolves the gesture itself: it only invokes when the exact
+controller (or `*`), button and gesture are mapped, and only for the small
+button's swipes and presses. The small button's hold stays the emergency stop
+and the large button is never mapped. Every mappable gesture already has a
+voice behaviour (swipe up replays, swipe down skips, …), so a mapping is an
+explicit opt-in that replaces it for that controller.
 Every change to the registry sends the ephemeral SSE event
 `controller-actions-updated {revision}`; clients refetch when it is newer.
 Every definition change and run is audited (last 500 rows).
