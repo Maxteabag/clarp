@@ -85,6 +85,14 @@ fn every_file_matches_the_manifest_of_the_final_host() {
         let entry = manifest["files"].as_array().unwrap().iter().find(|f| f["file"] == name).unwrap();
         assert_eq!(entry["sha256"].as_str(), Some(sha.as_str()), "{name}");
     }
+    // The v1 manifest still vouches for its own 33 files, unchanged by v2.
+    let v1 = manifest();
+    for entry in v1["files"].as_array().unwrap() {
+        let name = entry["file"].as_str().unwrap();
+        let sha: String = Sha256::digest(std::fs::read(dir().join(name)).unwrap()).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(entry["sha256"].as_str(), Some(sha.as_str()), "v1 {name}");
+    }
+    assert_eq!(v1["files"].as_array().unwrap().len(), 33);
 }
 
 #[test]
@@ -253,4 +261,28 @@ fn a_question_reads_the_same_in_summary_and_flat_rows() {
 #[test]
 fn the_host_advertises_summary_lists_as_the_desktop_reads_them() {
     assert!(summary::advertised(file("v2-05-server-info.body").as_object().unwrap()));
+}
+
+/// KNOWN LATENT ISSUE (not hidden; the main-line guard was reverted): a row
+/// whose content holds a lone surrogate. The Host's create route refuses one
+/// (409); a row written directly is listed with a pending marker, which the
+/// desktop reads (the summary list carries no content, so no surrogate).
+/// The row's item GET would carry the content as a `\ud800` escape, which
+/// serde_json refuses: that one card's hydration fails ("Not loaded"), and a
+/// flat-v1 or default list holding such a row fails as a whole.
+#[test]
+fn a_lone_surrogate_row_is_listed_pending_and_its_body_cannot_be_read() {
+    let id = v2_id("html_form_lone_surrogate");
+    let row = find(&rows("v2-01-artifacts-summary-v1-lone-surrogate.body"), &id);
+    let m = &row["content_omitted"];
+    assert_eq!((m["bytes"].is_null(), m["size_unknown"].as_bool(), m["sha256"].is_null(), m["hash_pending"].as_bool()), (true, Some(true), true, Some(true)), "{m}");
+    let marker = summary::content_marker(&row).unwrap();
+    assert_eq!((marker.bytes, marker.sha256), (None, None));
+    assert!(!summary::complete(&row) && row.get("content").is_none());
+    let refused = file("v2-01-post-lone-surrogate-html-form.body");
+    assert_eq!(file("v2-01-post-lone-surrogate-html-form.meta.json")["status"], 409);
+    assert!(refused["error"].as_str().unwrap().contains("surrogates not allowed"));
+    // Today's real behaviour for the body itself, as the Host would send it.
+    let item = format!(r#"{{"artifact": {{"artifact_id": "{id}", "type": "html_form", "content": "bad \ud800 text"}}}}"#);
+    assert!(serde_json::from_str::<Value>(&item).is_err(), "a lone surrogate escape is refused: the latent issue");
 }
