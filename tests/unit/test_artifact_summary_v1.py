@@ -34,6 +34,18 @@ def _form(content, version="1"):
         "answer_schema": {"type": "object", "properties": {}, "additionalProperties": False}})
 
 
+def _rewrite(artifact_id, content):
+    """What the one payload writer does (artifacts._apply_update): new
+    payload_json and updated_at=MAX(now, updated_at+1). html_forms refuse
+    artifacts.update, so the test writes the row the same way."""
+    con = db.conn()
+    payload = json.loads(con.execute("SELECT payload_json FROM artifacts WHERE artifact_id=?",
+                                     (artifact_id,)).fetchone()[0])
+    con.execute("UPDATE artifacts SET payload_json=?, updated_at=MAX(?, updated_at+1) "
+                "WHERE artifact_id=?",
+                (json.dumps({**payload, "content": content}), db.now_ms(), artifact_id))
+
+
 def _summary(**query):
     budget = artifacts.summary_budget()
     return [artifacts.response_representation(row, "summary-v1", budget=budget)
@@ -62,7 +74,9 @@ def test_the_c1_vectors(text, size, hexdigest):
 
 @pytest.mark.parametrize("text,size,hexdigest", VECTORS)
 def test_the_c1_vectors_reach_the_list_marker(theo, text, size, hexdigest):
-    row = _form(text)
+    row = _form(text or "x")
+    if not text:
+        _rewrite(row["artifact_id"], text)      # creation rejects empty content
     [item] = [i for i in _summary(type="html_form") if i["artifact_id"] == row["artifact_id"]]
     assert item["content_omitted"]["bytes"] == size
     assert item["content_omitted"]["sha256"] == "c1:" + hexdigest
@@ -99,7 +113,7 @@ def test_a_content_change_rehashes_only_that_item(theo, hashes):
     first, second = _form("<p>one</p>"), _form("<p>two</p>")
     _summary(type="html_form")
     hashes.clear()
-    artifacts.update(second["artifact_id"], {"payload_patch": {"content": "<p>2!</p>"}})
+    _rewrite(second["artifact_id"], "<p>2!</p>")
     items = {i["artifact_id"]: i for i in _summary(type="html_form")}
     assert hashes == [len("<p>2!</p>")]
     assert items[second["artifact_id"]]["content_omitted"]["sha256"] == \
@@ -195,8 +209,7 @@ def test_the_caches_stay_bounded_under_churn(theo, monkeypatch):
     forms = [_form("<p>" + "x" * 90 + f"{n}</p>") for n in range(12)]
     for round_ in range(3):
         for form in forms[:6]:
-            artifacts.update(form["artifact_id"],
-                             {"payload_patch": {"content": f"<p>{round_}{'y' * 90}</p>"}})
+            _rewrite(form["artifact_id"], f"<p>{round_}{'y' * 90}</p>")
         _summary(type="html_form")
         assert len(artifacts._CONTENT_IDENTITY) <= 5
         assert artifacts._CONTENT_IDENTITY.weight <= 400
@@ -228,4 +241,4 @@ def test_the_feature_and_contract_are_advertised():
     assert "artifact_summary_v1" in server_identity.capabilities()["features"]
     contract = server_identity.contract()
     assert contract["features"]["artifact_summary_v1"] == 1
-    assert contract["host"] == 63
+    assert contract["host"] == 65
