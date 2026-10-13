@@ -21,6 +21,7 @@ import mimetypes
 import os
 import pathlib
 import queue
+import re
 import secrets
 import shutil
 import sqlite3
@@ -322,6 +323,58 @@ def _spawn_voice_metrics(audio_bytes: bytes, ctype: str, *, session, trace_id,
             db.close_local()
 
     threading.Thread(target=work, name="voice-metrics", daemon=True).start()
+
+
+def _compressible(content_type: str) -> bool:
+    """The types _send gzips for a client that accepts it."""
+    return (content_type.startswith("application/json")
+            or content_type.startswith("text/")
+            or content_type.startswith("application/javascript"))
+
+
+def _security_headers(secure: bool) -> dict:
+    return ({"X-Content-Type-Options": "nosniff",
+             "Content-Security-Policy": "sandbox; default-src 'none'"}
+            if secure else {})
+
+
+_BYTE_RANGE = re.compile(r"[ \t]*(?P<lo>[0-9]{0,4000})[ \t]*-[ \t]*(?P<hi>[0-9]{0,4000})[ \t]*",
+                         re.ASCII)
+
+
+def _byte_range(header: str, total: int) -> tuple[str, int, int]:
+    """Read a Range header against a representation of ``total`` bytes.
+
+    Returns ``("full", 0, total - 1)`` when there is no usable range (none, a
+    unit other than bytes, or a malformed or inverted spec, which RFC 9110
+    §14.2 says to ignore), ``("partial", start, end)`` with ``end`` clamped to
+    the last byte, or ``("unsatisfiable", 0, -1)`` when the range starts at or
+    past the end, or asks for a zero-length suffix (RFC 9110 §15.5.17). Of
+    several ranges only the first is served, as before.
+    """
+    full = ("full", 0, total - 1)
+    if not header.startswith("bytes="):
+        return full
+    # ASCII decimal digits only: str.isdigit() and int() also take
+    # superscripts, other scripts' digits and underscores, and int() raises
+    # past 4300 digits. Such a range is malformed, so it is ignored.
+    match = _BYTE_RANGE.fullmatch(header.split("=", 1)[1].split(",", 1)[0])
+    if not match or not (match["lo"] or match["hi"]):
+        return full
+    try:
+        lo = int(match["lo"]) if match["lo"] else None
+        hi = int(match["hi"]) if match["hi"] else None
+    except ValueError:
+        return full
+    if lo is None:                               # suffix: bytes=-N, the last N
+        if hi == 0 or total == 0:
+            return ("unsatisfiable", 0, -1)
+        return ("partial", max(0, total - hi), total - 1)
+    if hi is not None and hi < lo:
+        return full
+    if lo >= total:
+        return ("unsatisfiable", 0, -1)
+    return ("partial", lo, min(total - 1 if hi is None else hi, total - 1))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -788,8 +841,71 @@ class Handler(BaseHTTPRequestHandler):
             ctype, _ = mimetypes.guess_type(str(path))
         if not ctype:
             ctype = "application/octet-stream"
-        data = path.read_bytes()
-        return self._send_ranged_data(data, ctype, secure=secure, cache_headers=cache_headers)
+        if (_compressible(ctype)
+                and "gzip" in self.headers.get("Accept-Encoding", "").lower()):
+            # App text a client takes gzipped is compressed whole by _send, as
+            # before; such files are small.
+            data = path.read_bytes()
+            return self._send_ranged_data(data, ctype, secure=secure, cache_headers=cache_headers)
+        return self._stream_file(path, ctype, secure=secure, cache_headers=cache_headers)
+
+    # One bounded read and one bounded write at a time: memory per response
+    # stays at one chunk whatever the file size, each write gets the whole
+    # handler timeout (a slow reader that keeps up is never cut, a stalled one
+    # still is), and a client that goes away stops the reads at once.
+    FILE_CHUNK = 256 * 1024
+
+    def _stream_file(self, path: pathlib.Path, ctype: str, *, secure: bool = False,
+                     cache_headers: dict | None = None):
+        response_started = time.perf_counter()
+        request_started = getattr(self, "_request_started_monotonic", response_started)
+        try:
+            source = path.open("rb")
+        except OSError:
+            return self._send(404, b"not found")
+        with source:
+            total = os.fstat(source.fileno()).st_size
+            headers = {"Accept-Ranges": "bytes", **_security_headers(secure)}
+            kind, start, end = _byte_range(self.headers.get("Range", ""), total)
+            if kind == "unsatisfiable":
+                return self._send(416, b"", "text/plain", extra_headers={
+                    **headers, "Content-Range": f"bytes */{total}"})
+            headers.update(cache_headers or {})
+            length = end - start + 1
+            self.send_response(206 if kind == "partial" else 200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(length))
+            if "Cache-Control" not in headers:
+                self.send_header("Cache-Control", "no-store")
+            if kind == "partial":
+                self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+            for k, v in headers.items():
+                self.send_header(k, v)
+            self.end_headers()
+            write_started = time.perf_counter()
+            read = written = 0
+            try:
+                source.seek(start)
+                while written < length:
+                    chunk = source.read(min(self.FILE_CHUNK, length - written))
+                    if not chunk:
+                        # The file shrank under us: the body is short of its
+                        # Content-Length, so this connection cannot be reused.
+                        log("fileShortRead", f"path={path} expected={length} "
+                                             f"sent={written}")
+                        self.close_connection = True
+                        break
+                    read += len(chunk)
+                    self.wfile.write(chunk)
+                    written += len(chunk)
+            finally:
+                self._response_phases = {
+                    "handler_ms": round((write_started - request_started) * 1000, 3),
+                    "compression_ms": 0.0,
+                    "socket_write_ms": round((time.perf_counter() - write_started) * 1000, 3),
+                    "response_bytes": written,
+                    "file_bytes_read": read,
+                }
 
     def _send_not_modified(self, headers: dict) -> None:
         self.send_response(304)
@@ -814,31 +930,17 @@ class Handler(BaseHTTPRequestHandler):
     def _send_ranged_data(self, data: bytes, ctype: str, *, secure: bool = False,
                           cache_headers: dict | None = None):
         total = len(data)
-        security_headers = ({"X-Content-Type-Options": "nosniff",
-                             "Content-Security-Policy": "sandbox; default-src 'none'"}
-                            if secure else {})
+        security_headers = _security_headers(secure)
         # Honor Range requests. AVPlayer (iOS) will NOT stream a remote audio
         # file unless the server speaks byte ranges — without this it fails to
         # play plain mp3s with CoreMediaErrorDomain -12640 (the "X here, ready
         # for an update" herald clips were silent for exactly this reason).
-        rng = self.headers.get("Range", "")
-        if rng.startswith("bytes="):
-            start, end = 0, total - 1
-            try:
-                spec = rng.split("=", 1)[1].split(",", 1)[0]
-                lo, _, hi = spec.partition("-")
-                if lo:
-                    start = int(lo)
-                    if hi:
-                        end = int(hi)
-                elif hi:                       # suffix range: bytes=-N (last N)
-                    start = max(0, total - int(hi))
-                start = max(0, start)
-                end = min(end, total - 1)
-            except ValueError:
-                start, end = 0, total - 1
-            if start > end or start >= total:
-                start, end = 0, total - 1
+        kind, start, end = _byte_range(self.headers.get("Range", ""), total)
+        if kind == "unsatisfiable":
+            return self._send(416, b"", "text/plain", extra_headers={
+                "Accept-Ranges": "bytes", **security_headers,
+                "Content-Range": f"bytes */{total}"})
+        if kind == "partial":
             return self._send(206, data[start:end + 1], ctype, extra_headers={
                 "Content-Range": f"bytes {start}-{end}/{total}",
                 "Accept-Ranges": "bytes",
