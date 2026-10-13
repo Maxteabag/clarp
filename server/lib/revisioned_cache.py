@@ -10,8 +10,9 @@ Every cache registers itself by name so `reset_all()` (called autouse from
 `tests/conftest.py`) empties them between tests, and so the module-state
 guard has one place to look instead of a dict per module. Entries are
 bounded: past `max_entries` the least recently used key is dropped, and with
-a `weight` function also past `max_weight` total weight (bytes held or
-hashed, say).
+a `weight(key, revision, value)` function also past `max_weight` total weight
+(the bytes an entry holds, say). An entry heavier than the whole bound is not
+kept at all.
 """
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ class RevisionedCache(Generic[K, V]):
     def __init__(self, name: str, max_entries: int = 256,
                  key_fn: Callable[[object], K] | None = None, *,
                  max_weight: int | None = None,
-                 weight: Callable[[Hashable, V], int] | None = None) -> None:
+                 weight: Callable[[Hashable, Hashable, V], int] | None = None) -> None:
         if not name:
             raise ValueError("a RevisionedCache needs a name")
         self.name = name
@@ -97,7 +98,7 @@ class RevisionedCache(Generic[K, V]):
         self._entries[k] = (revision, value)
         self._entries.move_to_end(k)
         if self._weight_fn is not None:
-            self._weights[k] = int(self._weight_fn(revision, value))
+            self._weights[k] = int(self._weight_fn(k, revision, value))
             self.weight += self._weights[k]
         while len(self._entries) > self.max_entries or (
                 self.max_weight is not None and self.weight > self.max_weight
