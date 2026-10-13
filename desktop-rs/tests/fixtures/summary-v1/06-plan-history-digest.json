@@ -1,0 +1,60 @@
+{
+ "artifact_id": "artifact-b92542fbd30887e0e552ac79",
+ "plan_id": "0d80b9d107dcab70:work:19b608ab",
+ "history_omitted": {
+  "reason": "summary",
+  "count": 4,
+  "last_at": 1800000016000,
+  "digest": "h1:ca99a87450ff7ff51ae584ee8acaad9bf555c420f9d8bbb36fcf5bcc2efc0a9e"
+ },
+ "history_as_served_in_flat_v1_item": [
+  {
+   "at": 1800000013000,
+   "kind": "created",
+   "revision": 0,
+   "detail": {
+    "outcome": "Mål: rapport ✓"
+   }
+  },
+  {
+   "at": 1800000014000,
+   "kind": "checkpoint",
+   "revision": 1,
+   "detail": {
+    "progress": "Utkast påbegynt é",
+    "next_work": "steg 1",
+    "continuation": {
+     "kind": "timer",
+     "due_at": 1801000600000
+    }
+   }
+  },
+  {
+   "at": 1800000015000,
+   "kind": "checkpoint",
+   "revision": 2,
+   "detail": {
+    "progress": "Målinger 漢字 klare",
+    "next_work": "steg 2",
+    "continuation": {
+     "kind": "timer",
+     "due_at": 1801000600000
+    }
+   }
+  },
+  {
+   "at": 1800000016000,
+   "kind": "checkpoint",
+   "revision": 3,
+   "detail": {
+    "progress": "Gjennomgang 😀 ferdig",
+    "next_work": "steg 3",
+    "continuation": {
+     "kind": "timer",
+     "due_at": 1801000600000
+    }
+   }
+  }
+ ],
+ "note": "The 'h1:' digest is OPAQUE. Compare it for equality only; never recompute or validate it from the history. Store hydrated history under the digest the list marker carried. Here the digest and history come from one snapshot, so they correspond; in general hydration may return newer history (it only appends)."
+}

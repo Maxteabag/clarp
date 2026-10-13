@@ -1,0 +1,304 @@
+{
+ "description": "summary-v1 client fixtures (Host contract 63, feature artifact_summary_v1)",
+ "source_sha": "dfc489bba1d8ae6a47a3037eb352aa8a043ae228",
+ "generated_at": "2026-10-13T11:53:13+00:00",
+ "generator": "/var/tmp/dagger/summary-v1-fixtures-gen.py",
+ "db_seed": {
+  "kind": "synthetic only; a throwaway SQLite created by this run (never the live Host or a copy of its DB), deleted afterwards",
+  "agent": {
+   "session": "fixture",
+   "persona": "Fixture"
+  },
+  "data_clock_ms": 1800000000000,
+  "read_clock_ms": 1800000600000,
+  "snapshot": "one DB state; db.now_ms frozen at read_clock_ms for every request",
+  "hash_seed": "PYTHONHASHSEED=0 (the plan 'counts' key order follows the hash seed; pre-existing Host behaviour, values are unaffected)",
+  "rows": {
+   "html_form_report": "html_form with non-ASCII content and an inline data: image",
+   "html_form_vectors": {
+    "empty": "artifact-7917ea11d25be13320537473",
+    "p-hi": "artifact-e780769127642772455791f6",
+    "non-ascii": "artifact-b53ab95a852eeaf579e0a1cd",
+    "escapes": "artifact-64b3de5d56cd1c1cd72ef02f",
+    "data-uri": "artifact-75c1f8508ac41884ffd6bd9a"
+   },
+   "archived_document": "archived document",
+   "pinned_document": "pinned document",
+   "decision_pending": "pending decision (attention inbox, actions)",
+   "plan_artifact": "plan artifact; its goal has a multi-entry history incl. non-ASCII"
+  },
+  "ids": {
+   "html_form_report": "artifact-c59ade6d2e5c54a670d17bb5",
+   "archived_document": "artifact-9394509b3ef6dc4d11c7aab0",
+   "pinned_document": "artifact-743cc2aabd57772817609c64",
+   "decision_pending": "artifact-65dbeeae31460f90012ebb77",
+   "plan_id": "0d80b9d107dcab70:work:19b608ab",
+   "plan_artifact": "artifact-b92542fbd30887e0e552ac79"
+  },
+  "empty_vector_note": "the empty-content form is written directly (POST rejects an empty form body), as the single payload writer would"
+ },
+ "transport": "in-process ContextHTTPServer + Handler on 127.0.0.1; raw http.client; no Accept-Encoding (uncompressed JSON). Each request has a .body (exact bytes) and a .meta.json (status, reason, headers in order).",
+ "files": [
+  {
+   "file": "01-artifacts-summary-v1.body",
+   "bytes": 8696,
+   "sha256": "d45e3f0e5c76cfb106f7cbec6ff399a8b30904dbe8980695e9aa863c4cbc004c",
+   "note": "GET /artifacts summary-v1: every row of the snapshot",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts?limit=200&representation=summary-v1"
+  },
+  {
+   "file": "01-artifacts-summary-v1.meta.json",
+   "bytes": 373,
+   "sha256": "9f7b9fb72315be05cccf0bd1d3f7e4331acd751831556aa4028e8df97919723c",
+   "note": "status line and response headers for 01-artifacts-summary-v1.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "01-artifacts-flat-v1.body",
+   "bytes": 10320,
+   "sha256": "f3707673cad1c6b7f608076d9f915277c5c1057bf36e53979fb91c5f9836fd9d",
+   "note": "GET /artifacts flat-v1: the same rows",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts?limit=200&representation=flat-v1"
+  },
+  {
+   "file": "01-artifacts-flat-v1.meta.json",
+   "bytes": 371,
+   "sha256": "0f9417abf82e3679725c432ef3f228fa930076de9204eada13fc88fd787df53c",
+   "note": "status line and response headers for 01-artifacts-flat-v1.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "01-artifacts-default.body",
+   "bytes": 13310,
+   "sha256": "7c26bec6ec4e616a0cbf627810bb08d038342e46b401b48f815f80464bcbf184",
+   "note": "GET /artifacts with no representation (legacy full: payload plus flattened fields)",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts?limit=200"
+  },
+  {
+   "file": "01-artifacts-default.meta.json",
+   "bytes": 348,
+   "sha256": "fd844ef583b0e6494dc4ac44875206a7d9bbf844e3336179e56d2d7392d2af51",
+   "note": "status line and response headers for 01-artifacts-default.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "02-pinned-artifacts-summary-v1.body",
+   "bytes": 504,
+   "sha256": "e7aa55ab14a5191b213f0f97ed64bb9797d179044db45919e8c3f536c588acee",
+   "note": "GET /pinned-artifacts summary-v1",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/pinned-artifacts?representation=summary-v1"
+  },
+  {
+   "file": "02-pinned-artifacts-summary-v1.meta.json",
+   "bytes": 369,
+   "sha256": "88fb91bdff43c440efa4881acebd9f75582119eb5c755ffd338eaf5a52549f43",
+   "note": "status line and response headers for 02-pinned-artifacts-summary-v1.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "02-attention-inbox-summary-v1.body",
+   "bytes": 5357,
+   "sha256": "427e28ef6b5ef0f2ffb2467c927cb184a2c76993df2359a1877375aa31dfb1f2",
+   "note": "GET /attention/inbox summary-v1",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/attention/inbox?representation=summary-v1"
+  },
+  {
+   "file": "02-attention-inbox-summary-v1.meta.json",
+   "bytes": 369,
+   "sha256": "68858a3e4311d9f5f5df657bbb79aa1fa84d468ab159062bd5dd968784db9b13",
+   "note": "status line and response headers for 02-attention-inbox-summary-v1.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "04-item-plan_artifact-default.body",
+   "bytes": 3218,
+   "sha256": "cf226ca8eb2da7303ee0d5d49fc00700303905ad000ef616e7b8f84c66b3151e",
+   "note": "GET /artifacts/artifact-b92542fbd30887e0e552ac79 with no param: legacy full item",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts/artifact-b92542fbd30887e0e552ac79"
+  },
+  {
+   "file": "04-item-plan_artifact-default.meta.json",
+   "bytes": 371,
+   "sha256": "3a96a6cb70fbd854198644e8584b71f9d312c6bd03749740b7fcd407142946d8",
+   "note": "status line and response headers for 04-item-plan_artifact-default.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "04-item-plan_artifact-flat-v1.body",
+   "bytes": 3160,
+   "sha256": "047b2ec0356e5719cb072f72162c34cc253987dc82e516372f41c29ae6b7bb7d",
+   "note": "item route flat-v1: the legacy item minus the duplicate payload key",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts/artifact-b92542fbd30887e0e552ac79?representation=flat-v1"
+  },
+  {
+   "file": "04-item-plan_artifact-flat-v1.meta.json",
+   "bytes": 394,
+   "sha256": "427b65b905c8066c7efc778a50feb978022ddf2767754ff6897a98c367bc70c0",
+   "note": "status line and response headers for 04-item-plan_artifact-flat-v1.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "04-item-plan_artifact-bogus.body",
+   "bytes": 3218,
+   "sha256": "cf226ca8eb2da7303ee0d5d49fc00700303905ad000ef616e7b8f84c66b3151e",
+   "note": "item route with an unknown value: ignored, legacy full item (no 400)",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts/artifact-b92542fbd30887e0e552ac79?representation=bogus"
+  },
+  {
+   "file": "04-item-plan_artifact-bogus.meta.json",
+   "bytes": 392,
+   "sha256": "db970b478599914bc5654def752f6a51edc54ddb9738862bcf3e2d96562ce279",
+   "note": "status line and response headers for 04-item-plan_artifact-bogus.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "04-item-html_form_report-default.body",
+   "bytes": 4555,
+   "sha256": "509c708c0224f8647e573fa351f36f4e4928b97354e1554986a6d0ee8bc852b2",
+   "note": "GET /artifacts/artifact-c59ade6d2e5c54a670d17bb5 with no param: legacy full item",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts/artifact-c59ade6d2e5c54a670d17bb5"
+  },
+  {
+   "file": "04-item-html_form_report-default.meta.json",
+   "bytes": 371,
+   "sha256": "48b7028d0eec33446920f646b1f9e1ecdb7563e71bb29a1d3be25b7e8ab8a9e6",
+   "note": "status line and response headers for 04-item-html_form_report-default.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "04-item-html_form_report-flat-v1.body",
+   "bytes": 2474,
+   "sha256": "21b53e499eddfcb8be36720472b8719678ef9dd4de992691174e21645de960b9",
+   "note": "item route flat-v1: the legacy item minus the duplicate payload key",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts/artifact-c59ade6d2e5c54a670d17bb5?representation=flat-v1"
+  },
+  {
+   "file": "04-item-html_form_report-flat-v1.meta.json",
+   "bytes": 394,
+   "sha256": "e2d64796e39e1f5509a3f287dfa04332e963434fbd180bd2e51843ae69cddf33",
+   "note": "status line and response headers for 04-item-html_form_report-flat-v1.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "04-item-html_form_report-bogus.body",
+   "bytes": 4555,
+   "sha256": "509c708c0224f8647e573fa351f36f4e4928b97354e1554986a6d0ee8bc852b2",
+   "note": "item route with an unknown value: ignored, legacy full item (no 400)",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts/artifact-c59ade6d2e5c54a670d17bb5?representation=bogus"
+  },
+  {
+   "file": "04-item-html_form_report-bogus.meta.json",
+   "bytes": 392,
+   "sha256": "57b21bf300bfa9596bc092ee7c7356c520ad902e8649a0c52a0fa7054e2dc0f9",
+   "note": "status line and response headers for 04-item-html_form_report-bogus.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "04-item-404.body",
+   "bytes": 31,
+   "sha256": "abce2427260d0ba8bd3fe5b4541f64ebe54cfd5e806d58c8a032200748d3a346",
+   "note": "an unknown id: 404 {\"error\":\"artifact not found\"} (same with any representation)",
+   "kind": "http-body",
+   "status": 404,
+   "path": "/artifacts/artifact-does-not-exist?representation=flat-v1"
+  },
+  {
+   "file": "04-item-404.meta.json",
+   "bytes": 389,
+   "sha256": "2f308421025df1b9aba84e7e147a67a070ac32b5b2095719a1ef9860a45baf9a",
+   "note": "status line and response headers for 04-item-404.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "05-artifacts-bogus-400.body",
+   "bytes": 48,
+   "sha256": "c0d4fd923b7d2521661855ff0ecf097f71cb3e0df666671177101fb0a335256b",
+   "note": "unknown list representation on /artifacts: 400 unsupported artifact representation",
+   "kind": "http-body",
+   "status": 400,
+   "path": "/artifacts?representation=bogus"
+  },
+  {
+   "file": "05-artifacts-bogus-400.meta.json",
+   "bytes": 365,
+   "sha256": "bb61331592f7ac415790e317488d97e2cecb2416764e842b4f6f0374e7960435",
+   "note": "status line and response headers for 05-artifacts-bogus-400.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "05-attention-inbox-bogus-400.body",
+   "bytes": 36,
+   "sha256": "741ce38c71bf2e8c98d761d42a1948288fb37cb48c64e0d3fb23086580329264",
+   "note": "unknown representation on /attention/inbox: 400 invalid attention query",
+   "kind": "http-body",
+   "status": 400,
+   "path": "/attention/inbox?representation=bogus"
+  },
+  {
+   "file": "05-attention-inbox-bogus-400.meta.json",
+   "bytes": 371,
+   "sha256": "e6a45ced1890ad83bfa369455fd3222f3bc4f9928cfad2b74210ed45abaad025",
+   "note": "status line and response headers for 05-attention-inbox-bogus-400.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "03-artifacts-summary-v1-budget-16-bytes.body",
+   "bytes": 8560,
+   "sha256": "163e2299d769d8b686a722f5fbd40f4c7c7ff01aa0a3b6d0b0c09644899d3d51",
+   "note": "pending markers over HTTP: caches emptied and artifacts.SUMMARY_HASH_BUDGET_BYTES set to 16 for this request (summary_budget() reads it per request). Content markers over the budget carry sha256:null + hash_pending and bytes:null + size_unknown; the plan carries digest:null + digest_pending. Small bodies that fit are still complete.",
+   "kind": "http-body",
+   "status": 200,
+   "path": "/artifacts?limit=200&representation=summary-v1"
+  },
+  {
+   "file": "03-artifacts-summary-v1-budget-16-bytes.meta.json",
+   "bytes": 373,
+   "sha256": "8a58b8db65ef4f1c4ac62a97c9e75a5b7b0e6f07ee64dd822d2f4512a3f9919a",
+   "note": "status line and response headers for 03-artifacts-summary-v1-budget-16-bytes.body",
+   "kind": "http-meta"
+  },
+  {
+   "file": "03-plan-without-goal-text-summary-v1.json",
+   "bytes": 3053,
+   "sha256": "8f04d8c9666fae5caf31c8cdd55e059fb0f5c4d115fe4b11d85ecd3d011678be",
+   "note": "NOT an HTTP response: artifacts.response_representation(item, 'summary-v1') on the same plan row passed as a plain dict (no goal text carrier). The marker is digest:null + digest_pending, never a cached digest.",
+   "kind": "in-process"
+  },
+  {
+   "file": "06-plan-history-digest.json",
+   "bytes": 1496,
+   "sha256": "5135cbd735450e15d10a090ee6a2c0842d02c12ad41889b39d918bb09c44d807",
+   "note": "the plan's h1 digest from 01-artifacts-summary-v1 and its full history as served by 04-item-plan_artifact-flat-v1",
+   "kind": "derived"
+  },
+  {
+   "file": "06-c1-vectors.json",
+   "bytes": 1313,
+   "sha256": "4eee15b4b5bfa14f618ff9098bd511962826e73379bac2522572d05e2aef0d40",
+   "note": "the c1 vectors and their artifact ids",
+   "kind": "derived"
+  }
+ ]
+}
