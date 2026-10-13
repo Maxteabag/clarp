@@ -434,13 +434,15 @@ def _collapse_id(payload: dict) -> str:
 def _send_one(client, base: str, auth: str, bundle_id: str,
               token: str, payload: dict, *, push_type: str = "alert",
               priority: str = "10",
-              collapse_id: str | None = None) -> tuple[int, str, str]:
+              collapse_id: str | None = None,
+              expiration: int | None = None) -> tuple[int, str, str]:
     """POST one notification. Returns (status_code, reason, APNs request ID).
     Background pushes MUST use push_type="background" + priority "5" (Apple
     rejects priority 10 for them)."""
     url = f"{base}/3/device/{token}"
     # Live Activity pushes go to the app's dedicated liveactivity topic.
-    topic = f"{bundle_id}.push-type.liveactivity" if push_type == "liveactivity" else bundle_id
+    topic = (f"{bundle_id}.push-type.liveactivity" if push_type == "liveactivity"
+             else f"{bundle_id}.voip" if push_type == "voip" else bundle_id)
     headers = {
         "authorization": f"bearer {auth}",
         "apns-topic": topic,
@@ -448,6 +450,8 @@ def _send_one(client, base: str, auth: str, bundle_id: str,
         "apns-priority": priority,
         "apns-collapse-id": collapse_id or _collapse_id(payload),
     }
+    if expiration is not None:
+        headers["apns-expiration"] = str(int(expiration))
     resp = client.post(url, headers=headers, content=json.dumps(payload).encode())
     reason = ""
     if resp.status_code != 200:
@@ -1237,11 +1241,13 @@ def agent_ring_collapse_id(ring: dict) -> str:
 
 
 def agent_ring_payload(ring: dict, kind: str, *, avatar_url: str | None = None,
-                       avatar_custom: bool = False, server_instance_id: str = "") -> dict:
+                       avatar_custom: bool = False, server_instance_id: str = "",
+                       show_reason: bool = False) -> dict:
     persona = str(ring.get("persona") or "").strip() or "Clarp"
     title = _RING_TITLES.get(kind, _RING_TITLES["ring"]).format(persona=persona)
+    body = str(ring.get("reason") or "")[:300] if show_reason else "Incoming call"
     aps: dict = {
-        "alert": {"title": title, "body": str(ring.get("reason") or "")[:300]},
+        "alert": {"title": title, "body": body},
         "mutable-content": 1,
         "thread-id": f"ring-{ring.get('session', '')}",
     }
@@ -1283,7 +1289,9 @@ def send_agent_ring(ring: dict, kind: str) -> dict:
     cfg = config.load()
     if not cfg.apns_enabled():
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
+    from . import agent_rings
     tokens = active_tokens()
+    show_reason = agent_rings.settings()["show_reason"]
     sent = failed = disabled = 0
     collapse = agent_ring_collapse_id(ring)
     try:
@@ -1294,7 +1302,7 @@ def send_agent_ring(ring: dict, kind: str) -> dict:
                 cfg, str(ring.get("persona") or ""), str(ring.get("agent_id") or ""),
                 str(row.get("base_url") or ""))
             payload = agent_ring_payload(ring, kind, avatar_url=avatar_url, avatar_custom=avatar_custom,
-                                         server_instance_id=_server_instance_id())
+                                         server_instance_id=_server_instance_id(), show_reason=show_reason)
             try:
                 status, reason, apns_id = transport.send(
                     tok, row.get("environment") or cfg.apns_environment, payload,
@@ -1317,3 +1325,57 @@ def send_agent_ring(ring: dict, kind: str) -> dict:
         log_exception("apnsRingBatchFail", e, detail=f"ring={ring.get('ring_id')}")
     log("apnsAgentRing", f"ring={ring.get('ring_id')} kind={kind} sent={sent} failed={failed} disabled={disabled}")
     return {"enabled": True, "sent": sent, "failed": failed, "disabled": disabled}
+
+
+def agent_ring_voip_payload(ring: dict, *, server_instance_id: str = "") -> dict:
+    """The VoIP push for a live ring: no alert, only what CallKit needs to
+    report the incoming call at once (docs/agent-rings.md "CallKit")."""
+    payload = {
+        "kind": "agent-ring",
+        "ring_id": str(ring.get("ring_id") or ""),
+        "ring_state": "ringing",
+        "session": str(ring.get("session") or ""),
+        "persona": str(ring.get("persona") or "").strip() or "Clarp",
+        "reason": str(ring.get("reason") or ""),
+        "expires_at": ring.get("expires_at"),
+    }
+    if server_instance_id:
+        payload["server_instance_id"] = server_instance_id
+    return payload
+
+
+def send_agent_ring_voip(ring: dict, tokens: list[dict]) -> dict:
+    """VoIP push for a live ring, signed with this Host's own .p8 key.
+
+    The Audio Central relay carries no VoIP pushes, so without a direct key
+    nothing is sent and the caller falls back to the alert. Never raises.
+    """
+    from . import config
+    cfg = config.load()
+    if not tokens or not cfg.apns_direct_ready():
+        return {"enabled": bool(tokens) and cfg.apns_direct_ready(), "sent": 0, "failed": 0}
+    sent = failed = 0
+    expiration = int((ring.get("expires_at") or 0) // 1000) or None
+    payload = agent_ring_voip_payload(ring, server_instance_id=_server_instance_id())
+    try:
+        transport = _DirectTransport(cfg)
+        for row in tokens:
+            try:
+                status, reason, _apns_id = _send_one(
+                    transport._client, _host(row.get("environment") or cfg.apns_environment), transport._auth,
+                    cfg.apns_bundle_id, row["token"], payload, push_type="voip", priority="10",
+                    collapse_id=agent_ring_collapse_id(ring), expiration=expiration)
+            except Exception as e:  # noqa: BLE001
+                log_exception("apnsRingVoipSendFail", e, detail=f"ring={ring.get('ring_id')}")
+                transport.reset()
+                failed += 1
+                continue
+            if status == 200:
+                sent += 1
+            else:
+                failed += 1
+                log("apnsRingVoipReject", f"{reason or status} principal={row.get('principal')}")
+    except Exception as e:  # noqa: BLE001
+        log_exception("apnsRingVoipBatchFail", e, detail=f"ring={ring.get('ring_id')}")
+    log("apnsAgentRingVoip", f"ring={ring.get('ring_id')} sent={sent} failed={failed}")
+    return {"enabled": True, "sent": sent, "failed": failed}

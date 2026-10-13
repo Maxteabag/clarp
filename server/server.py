@@ -611,6 +611,7 @@ class Handler(BaseHTTPRequestHandler):
         "/calls/ring/decline": "_handle_calls_ring_decline",
         "/calls/ring/cancel": "_handle_calls_ring_cancel",
         "/calls/ring/settings": "_handle_calls_ring_settings_post",
+        "/calls/ring/voip-token": "_handle_calls_ring_voip_token",
         "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
         "/oracle/v2/calls/close": "_handle_oracle_live_call_close",
         "/oracle/v2/calls/control": "_handle_oracle_live_call_control",
@@ -4329,6 +4330,10 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_calls_ring_cancel(self):
         return self._calls_ring_run(lambda rings, _p, data: rings.cancel(
             self._turn_caller(), str(data.get("ring_id") or "")))
+
+    def _handle_calls_ring_voip_token(self):
+        return self._calls_ring_run(lambda rings, principal, data: rings.register_voip_token(
+            principal, str(data.get("token") or ""), environment=str(data.get("environment") or "")))
 
     def _handle_calls_ring_settings_get(self):
         return self._calls_ring_run(lambda rings, _p, _d: {

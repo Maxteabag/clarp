@@ -116,3 +116,30 @@ clarp-admin call rings on|off|status      # the owner's switch
 `--wait` returns when the call is answered, declined or missed. When it is
 answered, the user has heard the opening line and their reply arrives as the
 next turn, with a `[Group call]` header that says why you called.
+
+## CallKit (VoIP)
+
+A phone that supports CallKit registers its PushKit VoIP token with
+`POST /calls/ring/voip-token` `{"token": hex, "environment": "production"|"sandbox"}`
+(one token per principal; an empty token forgets it). A live ring is then
+pushed as VoIP:
+
+- `apns-push-type: voip`, `apns-topic: <bundle>.voip`, `apns-priority: 10`,
+  `apns-expiration` at the ring's `expires_at`, `apns-collapse-id: ring-<id>`.
+- Payload: `kind: agent-ring`, `ring_id`, `ring_state: ringing`, `session`,
+  `persona`, `reason`, `expires_at`, `server_instance_id`. No alert.
+- Signed with the Host's own APNs key (`[apns] key_path`). The Audio Central
+  relay carries no VoIP pushes, so a Host without a direct key sends only
+  the alert.
+- When a VoIP push is delivered the ring alert is skipped (it would be a
+  duplicate). Answered, declined, missed and cancelled are never VoIP: iOS
+  requires every VoIP push to report a new CallKit call. The phone ends its
+  CallKit call itself, from the `agent-ring` event, `GET /calls/ring?ring_id=`
+  or `expires_at`.
+
+## Lock-screen privacy
+
+The ring alert says who is calling ("Theo is calling", body "Incoming
+call"). The reason shows on the lock screen only when the owner opts in:
+`POST /calls/ring/settings {"show_reason": true}`. The app still receives
+the reason in the payload.

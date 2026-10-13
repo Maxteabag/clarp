@@ -75,7 +75,7 @@
       "aps": {
         "alert": {
           "title": "Theo is calling",
-          "body": "Possible water leak at pump 01"
+          "body": "Incoming call"
         },
         "mutable-content": 1,
         "thread-id": "ring-theo-97e5",
@@ -100,7 +100,7 @@
       "aps": {
         "alert": {
           "title": "Call with Theo",
-          "body": "Possible water leak at pump 01"
+          "body": "Incoming call"
         },
         "mutable-content": 1,
         "thread-id": "ring-theo-97e5",
@@ -122,7 +122,7 @@
       "aps": {
         "alert": {
           "title": "Theo is calling",
-          "body": "The leak is getting worse"
+          "body": "Incoming call"
         },
         "mutable-content": 1,
         "thread-id": "ring-theo-97e5",
@@ -147,7 +147,7 @@
       "aps": {
         "alert": {
           "title": "Missed call from Theo",
-          "body": "The leak is getting worse"
+          "body": "Incoming call"
         },
         "mutable-content": 1,
         "thread-id": "ring-theo-97e5",
@@ -166,6 +166,16 @@
       "server_instance_id": "host_fixture"
     }
   ],
+  "voip_push": {
+    "kind": "agent-ring",
+    "ring_id": "rng_00000000000000000000000000000001",
+    "ring_state": "ringing",
+    "session": "theo-97e5",
+    "persona": "Theo",
+    "reason": "Possible water leak at pump 01",
+    "expires_at": 1791160045000,
+    "server_instance_id": "host_fixture"
+  },
   "answer": {
     "ok": true,
     "ring": {
