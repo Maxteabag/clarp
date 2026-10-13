@@ -368,7 +368,11 @@ impl Engine {
         s.next_request += 1;
         let n = s.next_request;
         *s.sent.entry(request.artifact_id.clone()).or_default() += 1;
-        let path = format!("/artifacts/{}", clarp_core::endpoint::percent_encode_segment(&request.artifact_id));
+        // flat-v1: a summary-capable Host leaves out only the duplicate
+        // `payload`; an older one ignores it and answers in full. Either
+        // way the top-level fields are read.
+        let item = format!("/artifacts/{}", clarp_core::endpoint::percent_encode_segment(&request.artifact_id));
+        let path = summary::with_representation(&item, clarp_core::update_feeds::FLAT_REPRESENTATION);
         s.in_flight.insert(request.key.clone(), n);
         s.requests.insert(n, request);
         self.api.get_with_timeout(&format!("artifact-hydrate:{n}"), &path, crate::updates::UPDATES_TIMEOUT);
