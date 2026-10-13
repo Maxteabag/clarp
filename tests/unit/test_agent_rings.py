@@ -405,3 +405,43 @@ def test_the_routes_are_registered():
                            ('"/calls/ring/settings"', "_handle_calls_ring_settings_post")):
         assert f'{route}: "{handler}"' in source, route
     assert posts is None or "/calls/ring" in posts
+
+
+# ---- CLI ----------------------------------------------------------------------
+
+def _admin():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("clarp_admin_rings", ROOT / "bin/clarp-admin.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_cli_rings_waits_for_the_answer_and_cancels(monkeypatch, capsys):
+    admin = _admin()
+    sent, states = [], iter(["ringing", "ringing", "answered"])
+
+    def api(method, path, body=None, **kwargs):
+        sent.append((method, path, body))
+        if path == "/calls/ring":
+            return {"ok": True, "ring": {"ring_id": "rng_1", "state": "ringing"}, "summary": "Calling."}
+        if path.startswith("/calls/ring?"):
+            return {"ring": {"ring_id": "rng_1", "state": next(states)}}
+        return {"ok": True}
+    monkeypatch.setattr(admin, "api_request", api)
+    monkeypatch.setattr(admin.time, "sleep", lambda s: None)
+    run = lambda argv: admin.parser().parse_args(argv).func(admin.parser().parse_args(argv))  # noqa: E731
+    assert run(["call", "ring", "--reason", "Leak at pump 01", "--say", "Camera 2 shows a leak.", "--wait"]) == 0
+    assert sent[0] == ("POST", "/calls/ring", {"reason": "Leak at pump 01", "opening_line": "Camera 2 shows a leak."})
+    assert [p for _, p, _ in sent[1:]] == ["/calls/ring?ring_id=rng_1"] * 3
+    assert '"answered"' in capsys.readouterr().out
+    sent.clear()
+    assert run(["call", "ring", "--agent", "Theo", "--reason", "r", "--say", "s"]) == 0
+    assert sent == [("POST", "/calls/ring", {"agent": "Theo", "reason": "r", "opening_line": "s"})]
+    sent.clear()
+    assert run(["call", "ring-cancel", "rng_1"]) == 0
+    assert run(["call", "ring-status"]) == 0
+    assert run(["call", "rings", "off"]) == 0
+    assert run(["call", "rings", "status"]) == 0
+    assert sent == [("POST", "/calls/ring/cancel", {"ring_id": "rng_1"}), ("GET", "/calls/ring", None),
+                    ("POST", "/calls/ring/settings", {"enabled": False}), ("GET", "/calls/ring/settings", None)]
