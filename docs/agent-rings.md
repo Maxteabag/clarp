@@ -159,10 +159,11 @@ under 3 s, both deliberately not built before the demo:
   line, and return it in the answer as `ack_audio_url`. The phone plays it
   once, right after the user's first utterance in an answered-ring call;
   the real reply follows through the normal queue. It hides the wait but
-  does not shorten it. Make it a per-ring option, off by default. Peter's
-  view on fillers is still needed.
+  does not shorten it. Make it an opt-in per ring (`clarp-admin call ring
+  --ack "Et øyeblikk."`), off by default. Build it only after a yes from
+  Peter or Koko: Peter has banned fillers elsewhere.
 - **Warm provider process for the call.** Keep the agent's provider process
   running (stream-json) while its call is live, so each turn skips the
-  spawn/resume. This is a runtime change; agree on it with the runtime owner
-  first. A related lever: start TTS on the first finished sentence instead
-  of the whole text block.
+  spawn/resume. A related lever: start TTS on the first finished sentence
+  instead of the whole text block. Both are runtime and audio changes in
+  Avana's area, to take up with Avana after the demo.
