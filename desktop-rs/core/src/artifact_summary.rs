@@ -61,7 +61,8 @@ pub fn with_representation(path: &str, representation: &str) -> String {
 pub struct ContentMarker {
     /// UTF-8 bytes; None when the Host had no time to measure them.
     pub bytes: Option<u64>,
-    /// Lowercase hex; None while the Host's hash is pending.
+    /// The sha256 hex of a `c1:` hash; None while the Host's hash is
+    /// pending, or when it is of a kind this client cannot check.
     pub sha256: Option<String>,
     /// The payload's version (Null when it has none).
     pub version: Value,
@@ -73,7 +74,8 @@ pub struct ContentMarker {
 pub struct HistoryMarker {
     pub count: u64,
     pub last_at: Option<i64>,
-    /// The history's identity; None while the Host's digest is pending.
+    /// The history's identity (`h1:…`), opaque: only ever compared, never
+    /// recomputed. None while the Host's digest is pending.
     pub digest: Option<String>,
 }
 
@@ -81,8 +83,20 @@ fn summary_reason(marker: &Object) -> bool {
     marker.get("reason").and_then(Value::as_str) == Some("summary")
 }
 
-fn hex(value: Option<&Value>) -> Option<String> {
-    value.and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).map(str::to_ascii_lowercase)
+/// The prefix of a content hash this client can check: sha256 over the
+/// UTF-8 bytes of the decoded `content` string, as hex.
+pub const CONTENT_HASH: &str = "c1:";
+
+/// A marker's content hash as bare hex, when it is a `c1:` one. Another
+/// kind cannot be checked here: it counts as pending.
+fn content_hash(value: Option<&Value>) -> Option<String> {
+    let hex = value.and_then(Value::as_str)?.strip_prefix(CONTENT_HASH)?;
+    (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then(|| hex.to_ascii_lowercase())
+}
+
+/// `c1:<hex>`: the content hash a summary marker carries.
+pub fn content_hash_of(content: &str) -> String {
+    format!("{CONTENT_HASH}{}", sha256_hex(content))
 }
 
 /// The row's content marker, whether or not its body was put back.
@@ -90,7 +104,7 @@ pub fn content_marker(row: &Value) -> Option<ContentMarker> {
     let marker = row.get("content_omitted")?.as_object().filter(|m| summary_reason(m))?;
     Some(ContentMarker {
         bytes: marker.get("bytes").and_then(Value::as_u64),
-        sha256: hex(marker.get("sha256")),
+        sha256: content_hash(marker.get("sha256")),
         version: marker.get("version").cloned().unwrap_or(Value::Null),
         updated_at: marker.get("updated_at").and_then(Value::as_i64).or_else(|| row.get("updated_at").and_then(Value::as_i64)).unwrap_or(0),
     })
@@ -102,7 +116,7 @@ pub fn history_marker(row: &Value) -> Option<HistoryMarker> {
     Some(HistoryMarker {
         count: marker.get("count").and_then(Value::as_u64).unwrap_or(0),
         last_at: marker.get("last_at").and_then(Value::as_i64),
-        digest: hex(marker.get("digest")),
+        digest: marker.get("digest").and_then(Value::as_str).filter(|d| !d.is_empty()).map(str::to_owned),
     })
 }
 
