@@ -1179,8 +1179,7 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
 
 /// iOS `isHTMLReport`: read-only, or an answer schema that asks nothing.
 fn is_report(artifact: &Value) -> bool {
-    let flagged = |v: &Value| v.get("read_only").and_then(Value::as_bool) == Some(true);
-    if flagged(artifact) || artifact.get("payload").is_some_and(flagged) {
+    if artifact.get("read_only").and_then(Value::as_bool) == Some(true) {
         return true;
     }
     let schema = artifact.get("answer_schema").cloned().unwrap_or(Value::Null);
@@ -1758,9 +1757,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
     }
     let Some(artifact) = artifact(app, id) else { return };
     *app.artifact_cursor.borrow_mut() = id.to_owned();
-    let network = artifact.get("connect_origins")
-        .or_else(|| artifact.get("payload").and_then(|p| p.get("connect_origins")))
-        .cloned().unwrap_or(Value::Null);
+    let network = network_grant(&artifact);
     match text(&artifact, "type").as_str() {
         // A form, and a report with pictures or layout, open in the
         // browser: a report on a bridge-free page that may reach the web
@@ -1865,6 +1862,12 @@ pub fn rich_html(html: &str) -> bool {
 thread_local! {
     /// rich_html per report and version, as cards are built on every refresh.
     static RICH: std::cell::RefCell<std::collections::HashMap<String, bool>> = std::cell::RefCell::default();
+}
+
+/// The origins a form or report may reach (Host contract 59): top-level,
+/// as both list representations have it (flat-v1 has no `payload`).
+fn network_grant(artifact: &Value) -> Value {
+    artifact.get("connect_origins").cloned().unwrap_or(Value::Null)
 }
 
 /// What O on an html_form does: a form, or a report with pictures or
@@ -2118,6 +2121,55 @@ mod tests {
         assert_eq!(cancelled("withdrawn"), "Withdrawn by agent");
         assert_eq!(cancelled("superseded"), "Closed by your reply");
         assert_eq!(cancelled(""), "Discarded");
+    }
+
+    /// The Host's default representation: the flat fields again under
+    /// `payload` (server/lib/artifacts.py `_public`).
+    fn with_payload(flat: &Value) -> Value {
+        const PUBLIC: &[&str] = &["content", "url", "version", "read_only", "connect_origins", "answer_schema", "columns", "rows",
+            "duration_ms", "mime_type", "file_name", "commit", "branch", "repository", "diff", "files_changed", "target_at",
+            "conclusion", "current_step", "total_steps", "completed_steps", "run_url", "workflow_name", "sources", "relative_path", "root"];
+        let mut full = flat.clone();
+        let payload: serde_json::Map<String, Value> =
+            flat.as_object().unwrap().iter().filter(|(k, _)| PUBLIC.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
+        full["payload"] = Value::Object(payload);
+        full
+    }
+
+    #[test]
+    fn every_card_reads_the_same_from_flat_v1_as_from_the_full_representation() {
+        use serde_json::json;
+        let flat = [
+            json!({"artifact_id": "r", "type": "html_form", "title": "Report", "status": "ready", "content": "<p>Hi</p>", "version": 2,
+                   "read_only": true, "connect_origins": ["https://api.example"], "updated_at": 5}),
+            json!({"artifact_id": "f", "type": "html_form", "title": "Form", "status": "ready", "content": "<form></form>", "version": 1,
+                   "answer_schema": {"type": "object", "properties": {"a": {"type": "string"}}}}),
+            json!({"artifact_id": "d", "type": "decision", "title": "Ship?", "status": "ready",
+                   "decision": {"decision_id": "d1", "status": "pending", "revision": 1}}),
+            json!({"artifact_id": "q", "type": "question", "title": "Which?", "status": "ready",
+                   "decision": {"decision_id": "q1", "status": "pending", "revision": 1, "response_type": "text_input"}}),
+            json!({"artifact_id": "p", "type": "plan", "title": "Plan", "status": "active", "plan": {"total_count": 3, "completed_count": 1}}),
+            json!({"artifact_id": "doc", "type": "document", "title": "Notes", "summary": "S", "content": "# Notes"}),
+            json!({"artifact_id": "data", "type": "data", "title": "Rows", "columns": ["a"], "rows": [[1]]}),
+            json!({"artifact_id": "au", "type": "audio", "title": "Clip", "url": "/media/a.m4a", "duration_ms": 1000}),
+            json!({"artifact_id": "cc", "type": "code_change", "title": "Diff", "commit": "abc", "branch": "b", "files_changed": 2}),
+            json!({"artifact_id": "wf", "type": "workflow_run", "title": "CI", "conclusion": "failure", "total_steps": 4, "completed_steps": 2}),
+            json!({"artifact_id": "cd", "type": "countdown", "title": "Launch", "target_at": 1_900_000_000_000_i64}),
+        ];
+        for flat in &flat {
+            let full = with_payload(flat);
+            assert_eq!(artifact_item(flat), artifact_item(&full), "{}", flat["artifact_id"]);
+            assert_eq!(is_report(flat), is_report(&full), "{}", flat["artifact_id"]);
+            assert_eq!(network_grant(flat), network_grant(&full), "{}", flat["artifact_id"]);
+            let id = flat["artifact_id"].as_str().unwrap();
+            assert_eq!(
+                clarp_core::text::report_for_artifact(std::slice::from_ref(flat), id, "http://host"),
+                clarp_core::text::report_for_artifact(std::slice::from_ref(&full), id, "http://host"),
+                "{id}"
+            );
+        }
+        assert!(is_report(&flat[0]) && !is_report(&flat[1]));
+        assert_eq!(network_grant(&flat[0]), serde_json::json!(["https://api.example"]));
     }
 
     #[test]

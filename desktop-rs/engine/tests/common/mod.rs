@@ -45,8 +45,22 @@ impl Host {
             .collect()
     }
 
+    /// Every logged line (requests, and the responses' sizes as `RESPONSE`).
+    pub fn log(&self) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(&self.log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .collect()
+    }
+
     /// Posts to one of the fake Host's `/__control/…` test endpoints.
     pub fn control(&self, path: &str, body: serde_json::Value) {
+        self.control_json(path, body);
+    }
+
+    /// As `control`, with the endpoint's JSON answer.
+    pub fn control_json(&self, path: &str, body: serde_json::Value) -> serde_json::Value {
         let address = self.base.trim_start_matches("http://");
         let mut stream = std::net::TcpStream::connect(address).expect("fake host reachable");
         let body = body.to_string();
@@ -59,6 +73,8 @@ impl Host {
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
         assert!(response.starts_with("HTTP/1.1 200"), "control {path} failed: {response}");
+        let body = response.split_once("\r\n\r\n").map_or("", |(_, body)| body);
+        serde_json::from_str(body).unwrap_or(serde_json::Value::Null)
     }
 }
 
@@ -122,7 +138,12 @@ impl Driver {
     }
 
     fn until_with(&mut self, what: &str, done: impl Fn(&Engine, &[Change]) -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        self.until_within(what, Duration::from_secs(10), |engine, changes| done(engine, changes));
+    }
+
+    /// As `until`, with its own deadline.
+    pub fn until_within(&mut self, what: &str, within: Duration, mut done: impl FnMut(&Engine, &[Change]) -> bool) {
+        let deadline = Instant::now() + within;
         loop {
             self.changes.extend(self.engine.pump());
             if done(&self.engine, &self.changes) {

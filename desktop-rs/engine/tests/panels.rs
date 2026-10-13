@@ -7,6 +7,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use clarp_core::settings::Settings;
+use clarp_core::update_feeds::Intervals;
 use clarp_engine::{Change, Config, Engine};
 use serde_json::{Value, json};
 
@@ -139,7 +140,8 @@ fn updates_load_after_connecting_and_a_decision_resolves() {
     // Not requested at once: the updates follow the sidebar.
     d.until("updates loaded", |e| e.attention_count() == 1 && e.update_artifacts().len() == 4 && !e.updates_loading());
     assert!(d.saw(&Change::Updates));
-    assert_eq!(host.requests("GET", "/artifacts")[0]["query"], json!({"limit": "50", "order": "updated"}));
+    assert_eq!(host.requests("GET", "/artifacts")[0]["query"], json!({"limit": "50", "order": "updated", "representation": "flat-v1"}));
+    assert!(d.engine.update_artifacts().iter().all(|a| a.get("payload").is_none()), "flat-v1: no nested payload");
     assert_eq!(d.engine.selected_session(), "rachel");
     assert_eq!(d.engine.next_attention_session(), "mike", "a pending decision makes its chat the next target");
     assert_eq!(d.engine.artifacts_for_session("rachel").len(), 2);
@@ -200,6 +202,7 @@ fn job_events_refetch_only_the_job_list() {
     // 9.8 MB each, until the Host's socket writes timed out).
     let host = Host::start("job-events");
     let mut d = Driver::live(&host);
+    d.engine.set_update_intervals(Intervals { jobs: Duration::from_millis(100), ..Intervals::default() });
     d.until("updates loaded", |e| e.update_artifacts().len() == 4 && !e.updates_loading());
     let (artifacts, attention) = (host.requests("GET", "/artifacts").len(), host.requests("GET", "/attention").len());
     for n in 0..5 {
@@ -221,17 +224,21 @@ fn a_burst_of_events_while_updates_load_refetches_once_more() {
     let host = Host::start("coalesce");
     let mut d = Driver::live(&host);
     d.until("updates loaded", |e| e.update_artifacts().len() == 4 && !e.updates_loading());
+    d.engine.set_update_intervals(Intervals { artifacts: Duration::from_millis(300), ..Intervals::default() });
+    settle(&mut d, Duration::from_millis(400));
     let before = host.requests("GET", "/artifacts").len();
     host.control("artifacts-delay", json!({"seconds": 0.8}));
-    host.control("event", json!({"type": "attention-updated"}));
+    // An event naming no artifact reloads the list.
+    host.control("event", json!({"type": "artifact-updated"}));
     d.until("a reload started", |e| e.updates_loading());
     // Ten more changes arrive while that reload is in flight; the last one
     // replaces the list, so the trailing refetch must still see it.
     for _ in 0..9 {
         host.control("event", json!({"type": "artifact-updated"}));
     }
-    host.control("artifacts", json!({"artifacts": [{"artifact_id": "late", "session": "rachel", "type": "document",
-                                                     "title": "Late", "status": "ready", "payload": {}}]}));
+    host.control("stream", json!({"seed": [{"artifact_id": "late", "session": "rachel", "type": "document",
+                                            "title": "Late", "status": "ready", "payload": {}}]}));
+    host.control("event", json!({"type": "artifact-updated"}));
     d.until("the newest list", |e| e.update_artifacts().len() == 1 && !e.updates_loading());
     settle(&mut d, Duration::from_millis(1200));
     host.control("artifacts-delay", json!({"seconds": 0}));

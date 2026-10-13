@@ -136,7 +136,8 @@ pub fn open(app: &App, window: &AppWindow) {
             POLL.with(|p| p.borrow_mut().take());
             return;
         }
-        app.engine.borrow_mut().load_updates();
+        // Each list as its interval allows: the events keep them current.
+        app.engine.borrow_mut().poll_updates();
         pump_now(&app);
     });
     POLL.with(|p| *p.borrow_mut() = Some(timer));

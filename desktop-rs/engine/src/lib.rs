@@ -139,6 +139,8 @@ enum Message {
     /// Look again for a created session the roster did not show yet.
     CreatedAgentDue(String),
     UpdatesDue,
+    /// One Updates list's trailing reload is due.
+    UpdatesFeedDue(updates::Feed),
     /// Portraits rounded and written (or not) off the UI thread.
     PortraitsCached(Vec<avatars::Cached>),
     /// A chat's transcript is due to be cached.
@@ -431,6 +433,7 @@ impl Engine {
                 Message::CredentialRemoved { base, result } => self.credential_removed(&base, result),
                 Message::CreatedAgentDue(session) => self.created_agent_due(&session),
                 Message::UpdatesDue => self.updates_due(),
+                Message::UpdatesFeedDue(feed) => self.updates_feed_due(feed),
                 Message::PortraitsCached(cached) => cached.into_iter().for_each(|c| self.portrait_cached(c)),
                 Message::CacheSaveDue(session) => self.cache_save_due(&session),
                 Message::SearchCache(chats) => self.search_cache_read(chats),

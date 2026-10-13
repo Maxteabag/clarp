@@ -1,7 +1,8 @@
 //! Port of the C++ client's `ApiClient`.
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use clarp_core::endpoint::{error_message, normalize_base, redirect_is_no_less_safe, resolve, same_origin};
@@ -29,6 +30,30 @@ struct Endpoint {
 
 type Sink = Arc<dyn Fn(ApiReply) + Send + Sync>;
 
+/// Requests to one of the Updates lists and the bytes they read (after
+/// gzip decoding), for the minute's memory line: the 2026-10-13 artifact
+/// reloads were found from the Host's log, not the client's.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Traffic {
+    pub requests: u64,
+    pub bytes: u64,
+}
+
+/// The routes counted: `GET /artifacts`, `GET /artifacts/<id>`,
+/// `/attention` and `/background-jobs`.
+pub const TRAFFIC_ROUTES: [&str; 4] = ["artifacts", "artifact", "attention", "jobs"];
+
+fn traffic_route(url: &Url) -> Option<&'static str> {
+    let segments: Vec<&str> = url.path_segments()?.filter(|s| !s.is_empty()).collect();
+    match segments.as_slice() {
+        ["artifacts"] => Some("artifacts"),
+        ["artifacts", _] => Some("artifact"),
+        ["attention"] => Some("attention"),
+        ["background-jobs"] => Some("jobs"),
+        _ => None,
+    }
+}
+
 /// Every reply is tagged by the caller. Replies to requests issued before the
 /// latest `set_endpoint` are dropped: a slow answer from the previous Host
 /// must never land in the new Host's state.
@@ -40,6 +65,7 @@ pub struct ApiClient {
     media: reqwest::Client,
     runtime: Handle,
     sink: Sink,
+    traffic: Arc<Mutex<BTreeMap<&'static str, Traffic>>>,
 }
 
 enum Body {
@@ -89,6 +115,7 @@ impl ApiClient {
             media,
             runtime,
             sink: Arc::new(sink),
+            traffic: Arc::default(),
         }
     }
 
@@ -97,6 +124,11 @@ impl ApiClient {
         let mut endpoint = self.endpoint.write().expect("endpoint lock");
         endpoint.base = Some(normalize_base(base));
         endpoint.token = token.to_owned();
+    }
+
+    /// The counted routes' requests and bytes since the last call.
+    pub fn take_traffic(&self) -> BTreeMap<&'static str, Traffic> {
+        std::mem::take(&mut *self.traffic.lock().expect("traffic lock"))
     }
 
     pub fn resolve(&self, path: &str) -> Option<Url> {
@@ -203,6 +235,7 @@ impl ApiClient {
         };
         let generation = self.generation.load(Ordering::SeqCst);
         let (_, token) = self.snapshot();
+        let route = (method == Method::GET).then(|| traffic_route(&url)).flatten();
         let mut request = self.api.request(method, url).headers(auth_headers(&token, "application/json"));
         request = match body {
             Body::None => request,
@@ -227,7 +260,14 @@ impl ApiClient {
                 Err(error) => ApiReply::Failed { tag, message: request_error(&error, timeout), status: 0 },
                 Ok(response) => {
                     let status = response.status();
-                    match response.bytes().await {
+                    let body = response.bytes().await;
+                    if let Some(route) = route {
+                        let mut traffic = this.traffic.lock().expect("traffic lock");
+                        let entry = traffic.entry(route).or_default();
+                        entry.requests += 1;
+                        entry.bytes += body.as_ref().map_or(0, |b| b.len() as u64);
+                    }
+                    match body {
                         Err(error) => ApiReply::Failed { tag, message: request_error(&error, timeout), status: status.as_u16() },
                         Ok(body) if !status.is_success() => ApiReply::Failed {
                             tag,
