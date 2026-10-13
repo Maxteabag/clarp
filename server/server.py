@@ -491,6 +491,8 @@ class Handler(BaseHTTPRequestHandler):
         "/oracle/voice-provider": "_handle_oracle_voice_provider_get",
         "/oracle/handoff": "_handle_oracle_handoff_get",
         "/calls": "_handle_calls_get",
+        "/calls/ring": "_handle_calls_ring_get",
+        "/calls/ring/settings": "_handle_calls_ring_settings_get",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
         "/oracle/v2": "_handle_oracle_v2",
@@ -604,6 +606,12 @@ class Handler(BaseHTTPRequestHandler):
         "/calls/switch": "_handle_calls_switch",
         "/calls/transfer": "_handle_calls_transfer",
         "/calls/end": "_handle_calls_end",
+        "/calls/ring": "_handle_calls_ring",
+        "/calls/ring/answer": "_handle_calls_ring_answer",
+        "/calls/ring/decline": "_handle_calls_ring_decline",
+        "/calls/ring/cancel": "_handle_calls_ring_cancel",
+        "/calls/ring/settings": "_handle_calls_ring_settings_post",
+        "/calls/ring/voip-token": "_handle_calls_ring_voip_token",
         "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
         "/oracle/v2/calls/close": "_handle_oracle_live_call_close",
         "/oracle/v2/calls/control": "_handle_oracle_live_call_control",
@@ -4288,6 +4296,61 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_calls_end(self):
         return self._handle_calls_action("end")
+
+    # ---- agent rings (docs/agent-rings.md) ----
+
+    def _calls_ring_run(self, work, *, body: bool = True):
+        from lib import agent_rings, group_calls
+        principal = self._calls_principal()
+        if principal is None:
+            return
+        data = self._read_json() if body else {}
+        if not isinstance(data, dict):
+            return self._json_error(400, "bad json")
+        agent_rings.bind(self.ctx)
+        group_calls.bind(self.ctx)
+        try:
+            return self._json_ok(work(agent_rings, principal, data))
+        except group_calls.CallError as exc:
+            return self._json(exc.status, exc.body())
+
+    def _handle_calls_ring_get(self):
+        def work(rings, _principal, _data):
+            ring_id = (self._query().get("ring_id") or [""])[0]
+            ring = rings.get(ring_id) if ring_id else rings.current()
+            if ring_id and ring is None:
+                raise rings.CallError(404, "unknown call")
+            return {"ring": ring, "settings": rings.settings()}
+        return self._calls_ring_run(work, body=False)
+
+    def _handle_calls_ring(self):
+        return self._calls_ring_run(lambda rings, _p, data: rings.ring(
+            caller_agent_id=self._turn_caller(), agent=str(data.get("agent") or ""),
+            reason=str(data.get("reason") or ""), opening_line=str(data.get("opening_line") or "")))
+
+    def _handle_calls_ring_answer(self):
+        return self._calls_ring_run(lambda rings, principal, data: rings.answer(
+            principal, str(data.get("ring_id") or "")))
+
+    def _handle_calls_ring_decline(self):
+        return self._calls_ring_run(lambda rings, principal, data: rings.decline(
+            principal, str(data.get("ring_id") or "")))
+
+    def _handle_calls_ring_cancel(self):
+        return self._calls_ring_run(lambda rings, _p, data: rings.cancel(
+            self._turn_caller(), str(data.get("ring_id") or "")))
+
+    def _handle_calls_ring_voip_token(self):
+        return self._calls_ring_run(lambda rings, principal, data: rings.register_voip_token(
+            principal, str(data.get("token") or ""), environment=str(data.get("environment") or "")))
+
+    def _handle_calls_ring_settings_get(self):
+        return self._calls_ring_run(lambda rings, _p, _d: {
+            "ok": True, "settings": rings.settings(), "audit": rings.audit()[:50]}, body=False)
+
+    def _handle_calls_ring_settings_post(self):
+        return self._calls_ring_run(lambda rings, _p, data: {
+            "ok": True, "settings": rings.update_settings(data), "audit": rings.audit()[:50]})
 
     def _apply_group_call(self, req):
         """A /send in a group call: (request routed to a reachable participant,

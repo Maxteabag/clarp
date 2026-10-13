@@ -359,8 +359,12 @@ def snapshot(caller: str, *, principal: str = "") -> dict:
 
 
 def start(caller: str, agents: list[str], *, request_id: str = "", principal: str = "",
-          by: str = "") -> dict:
-    """Start a call with 1..MAX_PARTICIPANTS agents; the first gets the floor."""
+          by: str = "", ring: dict | None = None) -> dict:
+    """Start a call with 1..MAX_PARTICIPANTS agents; the first gets the floor.
+
+    ``ring`` marks a call the first agent placed itself (docs/agent-rings.md):
+    its reason and opening line go into that agent's call header.
+    """
     names = [str(a).strip() for a in (agents or []) if str(a or "").strip()]
     if not names:
         raise CallError(400, "agents required")
@@ -392,6 +396,8 @@ def start(caller: str, agents: list[str], *, request_id: str = "", principal: st
                               "joined_at": now, "changed_at": now} for i, a in enumerate(resolved)],
             "_floor_order": [resolved[0]["session"]], "_request_id": request_id, "_changed_at": now,
         }
+        if ring:
+            call["_ring"] = {"session": resolved[0]["session"], **ring}
         data["calls"].append(call)
         everyone = _names(call["participants"])
         _commit(who, data, call, {"action": "start", "session": call["floor"], "by": by},
@@ -584,6 +590,10 @@ def prompt_header(session: str) -> str:
              + (f" On hold: {_names(held)}." if held else "")
              + " The user is talking to you now. The other participants do not hear this turn;"
              " they see it quoted like the lines below when they speak next."]
+    placed = call.get("_ring") or {}
+    if placed.get("session") == session:
+        lines.append(f"You called the user about: {placed.get('reason', '')}. They answered and heard"
+                     f" your opening line: \"{placed.get('opening_line', '')}\"")
     if quotes:
         lines.append("Since you last spoke:")
         lines.extend(quotes)

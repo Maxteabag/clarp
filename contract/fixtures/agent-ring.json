@@ -1,0 +1,227 @@
+{
+  "principal": "device_fixture",
+  "events": [
+    {
+      "type": "agent-ring",
+      "ring_id": "rng_00000000000000000000000000000001",
+      "session": "theo-97e5",
+      "agent_id": "a-theo",
+      "persona": "Theo",
+      "reason": "Possible water leak at pump 01",
+      "opening_line": "Camera 2 shows a possible water leak at pump 01. Shall I find an available field worker?",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "state": "ringing",
+      "created_at": 1791160000000,
+      "expires_at": 1791160045000,
+      "ended_at": null,
+      "answered_by": "",
+      "call_id": "",
+      "server_now": 1791160000000
+    },
+    {
+      "type": "agent-ring",
+      "ring_id": "rng_00000000000000000000000000000001",
+      "session": "theo-97e5",
+      "agent_id": "a-theo",
+      "persona": "Theo",
+      "reason": "Possible water leak at pump 01",
+      "opening_line": "Camera 2 shows a possible water leak at pump 01. Shall I find an available field worker?",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "state": "answered",
+      "created_at": 1791160000000,
+      "expires_at": 1791160045000,
+      "ended_at": 1791160005000,
+      "answered_by": "device_fixture",
+      "call_id": "gcl_00000000000000000000000000000002",
+      "server_now": 1791160005000
+    },
+    {
+      "type": "agent-ring",
+      "ring_id": "rng_00000000000000000000000000000003",
+      "session": "theo-97e5",
+      "agent_id": "a-theo",
+      "persona": "Theo",
+      "reason": "The leak is getting worse",
+      "opening_line": "It's me again.",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "state": "ringing",
+      "created_at": 1791160065000,
+      "expires_at": 1791160110000,
+      "ended_at": null,
+      "answered_by": "",
+      "call_id": "",
+      "server_now": 1791160065000
+    },
+    {
+      "type": "agent-ring",
+      "ring_id": "rng_00000000000000000000000000000003",
+      "session": "theo-97e5",
+      "agent_id": "a-theo",
+      "persona": "Theo",
+      "reason": "The leak is getting worse",
+      "opening_line": "It's me again.",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "state": "missed",
+      "created_at": 1791160065000,
+      "expires_at": 1791160110000,
+      "ended_at": 1791160110000,
+      "answered_by": "",
+      "call_id": "",
+      "server_now": 1791160110000
+    }
+  ],
+  "pushes": [
+    {
+      "aps": {
+        "alert": {
+          "title": "Theo is calling",
+          "body": "Incoming call"
+        },
+        "mutable-content": 1,
+        "thread-id": "ring-theo-97e5",
+        "interruption-level": "time-sensitive",
+        "sound": "default",
+        "category": "agent-call",
+        "relevance-score": 1.0
+      },
+      "kind": "agent-ring",
+      "ring_id": "rng_00000000000000000000000000000001",
+      "ring_state": "ringing",
+      "session": "theo-97e5",
+      "persona": "Theo",
+      "reason": "Possible water leak at pump 01",
+      "opening_line": "Camera 2 shows a possible water leak at pump 01. Shall I find an available field worker?",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "expires_at": 1791160045000,
+      "notification_id": "ring-rng_00000000000000000000000000000001",
+      "server_instance_id": "host_fixture"
+    },
+    {
+      "aps": {
+        "alert": {
+          "title": "Call with Theo",
+          "body": "Incoming call"
+        },
+        "mutable-content": 1,
+        "thread-id": "ring-theo-97e5",
+        "interruption-level": "passive"
+      },
+      "kind": "agent-ring",
+      "ring_id": "rng_00000000000000000000000000000001",
+      "ring_state": "answered",
+      "session": "theo-97e5",
+      "persona": "Theo",
+      "reason": "Possible water leak at pump 01",
+      "opening_line": "Camera 2 shows a possible water leak at pump 01. Shall I find an available field worker?",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "expires_at": 1791160045000,
+      "notification_id": "ring-rng_00000000000000000000000000000001",
+      "server_instance_id": "host_fixture"
+    },
+    {
+      "aps": {
+        "alert": {
+          "title": "Theo is calling",
+          "body": "Incoming call"
+        },
+        "mutable-content": 1,
+        "thread-id": "ring-theo-97e5",
+        "interruption-level": "time-sensitive",
+        "sound": "default",
+        "category": "agent-call",
+        "relevance-score": 1.0
+      },
+      "kind": "agent-ring",
+      "ring_id": "rng_00000000000000000000000000000003",
+      "ring_state": "ringing",
+      "session": "theo-97e5",
+      "persona": "Theo",
+      "reason": "The leak is getting worse",
+      "opening_line": "It's me again.",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "expires_at": 1791160110000,
+      "notification_id": "ring-rng_00000000000000000000000000000003",
+      "server_instance_id": "host_fixture"
+    },
+    {
+      "aps": {
+        "alert": {
+          "title": "Missed call from Theo",
+          "body": "Incoming call"
+        },
+        "mutable-content": 1,
+        "thread-id": "ring-theo-97e5",
+        "interruption-level": "active"
+      },
+      "kind": "agent-ring",
+      "ring_id": "rng_00000000000000000000000000000003",
+      "ring_state": "missed",
+      "session": "theo-97e5",
+      "persona": "Theo",
+      "reason": "The leak is getting worse",
+      "opening_line": "It's me again.",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "expires_at": 1791160110000,
+      "notification_id": "ring-rng_00000000000000000000000000000003",
+      "server_instance_id": "host_fixture"
+    }
+  ],
+  "voip_push": {
+    "kind": "agent-ring",
+    "ring_id": "rng_00000000000000000000000000000001",
+    "ring_state": "ringing",
+    "session": "theo-97e5",
+    "persona": "Theo",
+    "reason": "Possible water leak at pump 01",
+    "expires_at": 1791160045000,
+    "server_instance_id": "host_fixture"
+  },
+  "answer": {
+    "ok": true,
+    "ring": {
+      "ring_id": "rng_00000000000000000000000000000001",
+      "session": "theo-97e5",
+      "persona": "Theo",
+      "agent_id": "a-theo",
+      "reason": "Possible water leak at pump 01",
+      "opening_line": "Camera 2 shows a possible water leak at pump 01. Shall I find an available field worker?",
+      "opening_audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "state": "answered",
+      "created_at": 1791160000000,
+      "expires_at": 1791160045000,
+      "ended_at": 1791160005000,
+      "answered_by": "device_fixture",
+      "call_id": "gcl_00000000000000000000000000000002",
+      "server_now": 1791160005000
+    },
+    "call": {
+      "call_id": "gcl_00000000000000000000000000000002",
+      "host_id": "host_fixture",
+      "principal": "device_fixture",
+      "state": "live",
+      "reason": "",
+      "revision": 1,
+      "started_at": 1791160005000,
+      "ended_at": null,
+      "floor": "theo-97e5",
+      "participants": [
+        {
+          "session": "theo-97e5",
+          "agent_id": "a-theo",
+          "persona": "Theo",
+          "state": "active",
+          "joined_at": 1791160005000,
+          "changed_at": 1791160005000
+        }
+      ],
+      "server_now": 1791160005000
+    },
+    "changed": true,
+    "opening": {
+      "text": "Camera 2 shows a possible water leak at pump 01. Shall I find an available field worker?",
+      "audio_url": "/audio/1791160000000__theo-97e5.mp3",
+      "session": "theo-97e5",
+      "persona": "Theo"
+    }
+  }
+}
