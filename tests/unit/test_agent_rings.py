@@ -528,3 +528,11 @@ def test_the_owner_opts_in_to_the_reason_on_the_lock_screen(env):
     assert rings.update_settings({"show_reason": True})["show_reason"] is True
     with pytest.raises(calls.CallError):
         rings.update_settings({"show_reason": "yes"})
+
+
+def test_a_missed_ring_is_audited(env):
+    ring = _ring()["ring"]
+    env.clock.advance(rings.RING_TIMEOUT_MS / 1000 + 1)
+    rings.expire_due()
+    entry = rings.audit()[0]
+    assert entry["outcome"] == "missed" and entry["ring_id"] == ring["ring_id"] and entry["session"] == "theo-97e5"
