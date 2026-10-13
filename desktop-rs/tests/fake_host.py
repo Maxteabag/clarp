@@ -140,7 +140,11 @@ PUBLIC_FIELDS = ("target_at", "url", "thumbnail_url", "mime_type", "file_name", 
                  "deletions", "diff", "path_label", "artifact_ids", "asset_id", "asset_ids",
                  "root", "relative_path", "provider", "run_id", "run_url", "workflow_name",
                  "current_step", "conclusion", "total_steps", "completed_steps", "podcast",
-                 "read_only", "connect_origins", "answer_schema")
+                 "read_only", "connect_origins")
+# Fields the Host keeps in `payload` only (`_public` never copies them up): a
+# fixture may name them at the top level, but no representation shows them
+# there (real Host @ dfc489bb, tests/fixtures/artifact_summary_v1_host.json).
+PAYLOAD_ONLY = ("answer_schema", "plan_id")
 UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 # The summary-v1 artifact list (feature artifact_summary_v1), off until
 # /__control/artifact-summary turns it on. Its `hash_pending` and
@@ -303,11 +307,12 @@ def append_form_events(artifact_id, data):
 def represent(artifact, representation):
     """An artifact as the Host answers it: flat-v1 without `payload`, the
     default with it (the top-level fields again)."""
+    top = {k: v for k, v in artifact.items() if k != "payload" and k not in PAYLOAD_ONLY}
     if representation == "flat-v1":
-        return {k: v for k, v in artifact.items() if k != "payload"}
+        return top
     if "payload" in artifact:
-        return artifact
-    return {**artifact, "payload": {k: v for k, v in artifact.items() if k in PUBLIC_FIELDS}}
+        return {**top, "payload": artifact["payload"]}
+    return {**top, "payload": {k: v for k, v in artifact.items() if k in PUBLIC_FIELDS + PAYLOAD_ONLY}}
 
 
 def stored(artifact):
