@@ -1,23 +1,24 @@
 {
- "_about": "Real Host responses (feat/artifact-summary-v1 @ ee0fb54b, in-process HTTP harness, temp DB, frozen clock). Captured by the desktop's parity step; contents of the two big forms and the lone-surrogate form are replaced by a size note (their markers keep the real bytes/sha). Regenerate rather than hand-edit.",
+ "_about": "Real Host responses (feat/artifact-summary-v1 @ dfc489bb, in-process HTTP harness, temp DB, frozen clock). Big and lone-surrogate form contents are replaced by a size note; their markers keep the real bytes and hashes. Regenerate with artifact_summary_v1_capture.py + make_artifact_summary_v1_host.py; do not hand-edit.",
+ "host_sha": "dfc489bb",
  "ids": {
-  "big": "artifact-11d398d0cdc3d98ce7e57f93",
-  "small": "artifact-73dfecd1d58b23325d538252",
-  "archived_form": "artifact-210d12929802bbf6a17677ed",
-  "doc0": "artifact-e63dcf85b58982405d2d9459",
-  "doc1": "artifact-a290d57d37920988d77e6e1c",
-  "doc2": "artifact-b61507da62acef8040b48930",
-  "decision": "artifact-a3f162061d65b7c0f2a6499e",
-  "plan": "22ccec8f5c27816d:work:fcee6ece",
-  "plan_artifact": "artifact-6e8afc2102e32760573f88c4",
-  "big116": "artifact-2b69ae43370727575cc9c2a3",
-  "surrogate": "artifact-f10f4b6ebf17aff992e3e62d",
-  "question": "artifact-d2c0e8ddd0a6550f8ed6cf71"
+  "big": "artifact-45241bf82a0e21aa5a9376dc",
+  "small": "artifact-7f0e3f1b70824356fc9d115b",
+  "archived_form": "artifact-e840af056c8375e59f19c6db",
+  "doc0": "artifact-32428336a2f73d6516c36d54",
+  "doc1": "artifact-acf3cd947046aff888cc9986",
+  "doc2": "artifact-904d44a8857182c562e7f7d8",
+  "decision": "artifact-ec74c81ad21d9936a3540d88",
+  "plan": "fdda8de962f91a15:work:272df387",
+  "plan_artifact": "artifact-429a8a55f1b937c12273f1f8",
+  "big116": "artifact-af1addc32f0c8a208e14b27c",
+  "surrogate": "artifact-64271892bca1bfca211171b2",
+  "question": "artifact-aed16494c5bc6803c586f278"
  },
  "server_info": {
   "status": 200,
   "body": {
-   "server_id": "2bb08a59-37f2-42c3-ad7f-2e597bbf00e3",
+   "server_id": "d847940f-af88-4068-a627-5960665e5c2f",
    "capabilities": {
     "features": [
      "artifact_summary_v1",
@@ -110,7 +111,7 @@
   }
  },
  "big116_content_c1": "c1:70cb19e5fd8b1d545c5cce0d0d4e0945376e607770fc70adb7f9e276451d9ae8",
- "surrogate_item_flat_raw": "{\"artifact\": {\"artifact_id\": \"artifact-f10f4b6ebf17aff992e3e62d\", \"agent_id\": \"22ccec8f5c27816d\", \"session\": \"theo\", \"type\": \"html_form\", \"title\": \"Lone surrogate form\", \"summary\": \"\", \"status\": \"ready\", \"reference_id\": \"\", \"payload_version\": 1, \"source_message_id\": \"\", \"source_trace_id\": \"\", \"created_at\": 1800000010014, \"updated_at\": 1800000010014, \"completed_at\": null, \"deleted_at\": null, \"archived_at\": null, \"pinned_at\": null, \"agent_name\": \"Theo\", \"pinned\": false, \"content\": \"bad \\ud800 text\", \"version\": \"1\"}}",
+ "surrogate_item_flat_raw": "{\"artifact\": {\"artifact_id\": \"artifact-64271892bca1bfca211171b2\", \"agent_id\": \"fdda8de962f91a15\", \"session\": \"theo\", \"type\": \"html_form\", \"title\": \"Lone surrogate form\", \"summary\": \"\", \"status\": \"ready\", \"reference_id\": \"\", \"payload_version\": 1, \"source_message_id\": \"\", \"source_trace_id\": \"\", \"created_at\": 1800000010014, \"updated_at\": 1800000010014, \"completed_at\": null, \"deleted_at\": null, \"archived_at\": null, \"pinned_at\": null, \"agent_name\": \"Theo\", \"pinned\": false, \"content\": \"bad \\ud800 text\", \"version\": \"1\"}}",
  "summary": {
   "path": "/artifacts?representation=summary-v1&limit=200",
   "status": 200,
@@ -118,8 +119,8 @@
   "body": {
    "artifacts": [
     {
-     "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-aed16494c5bc6803c586f278",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "question",
      "title": "Which region?",
@@ -138,8 +139,8 @@
      "agent_name": "Theo",
      "pinned": false,
      "decision": {
-      "decision_id": "decision-789a17f4ffec9708bc31d0f1",
-      "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
+      "decision_id": "decision-e171ab92eb9b243ac3dc5ccb",
+      "artifact_id": "artifact-aed16494c5bc6803c586f278",
       "question": "Where?",
       "context": "",
       "yes_label": "Yes",
@@ -175,8 +176,8 @@
      }
     },
     {
-     "artifact_id": "artifact-f10f4b6ebf17aff992e3e62d",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-64271892bca1bfca211171b2",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Lone surrogate form",
@@ -206,8 +207,8 @@
      }
     },
     {
-     "artifact_id": "artifact-2b69ae43370727575cc9c2a3",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-af1addc32f0c8a208e14b27c",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Big report 1.16 MB",
@@ -235,14 +236,14 @@
      }
     },
     {
-     "artifact_id": "artifact-6e8afc2102e32760573f88c4",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-429a8a55f1b937c12273f1f8",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "plan",
      "title": "Goal",
      "summary": "",
      "status": "active",
-     "reference_id": "22ccec8f5c27816d:work:fcee6ece",
+     "reference_id": "fdda8de962f91a15:work:272df387",
      "payload_version": 1,
      "source_message_id": "",
      "source_trace_id": "",
@@ -257,8 +258,8 @@
      "plan": {
       "revision": 4,
       "recovery_enabled": 1,
-      "plan_id": "22ccec8f5c27816d:work:fcee6ece",
-      "agent_id": "22ccec8f5c27816d",
+      "plan_id": "fdda8de962f91a15:work:272df387",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "title": "Goal",
       "status": "active",
@@ -268,7 +269,7 @@
       "goal": {
        "outcome": "Goal",
        "limits": "none",
-       "owner_agent_id": "22ccec8f5c27816d",
+       "owner_agent_id": "fdda8de962f91a15",
        "native_session_id": "native-theo",
        "criteria": [
         {
@@ -315,19 +316,19 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 1,
-       "skipped": 0,
+       "deferred": 0,
        "removed": 0,
        "completed": 0,
+       "skipped": 0,
        "blocked": 0,
        "in_progress": 0,
-       "deferred": 0
+       "pending": 1
       },
       "items": [
        {
         "required": 1,
-        "item_id": "22ccec8f5c27816d:work:fcee6ece:a",
-        "plan_id": "22ccec8f5c27816d:work:fcee6ece",
+        "item_id": "fdda8de962f91a15:work:272df387:a",
+        "plan_id": "fdda8de962f91a15:work:272df387",
         "parent_id": null,
         "position": 0,
         "title": "A",
@@ -347,8 +348,8 @@
      }
     },
     {
-     "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "decision",
      "title": "Ship it?",
@@ -367,8 +368,8 @@
      "agent_name": "Theo",
      "pinned": false,
      "decision": {
-      "decision_id": "decision-7573ccc753ff0cd9227b11f9",
-      "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
+      "decision_id": "decision-48ff87919b864b8d66b9361b",
+      "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
       "question": "Ship?",
       "context": "ctx",
       "yes_label": "Yes",
@@ -395,8 +396,8 @@
      }
     },
     {
-     "artifact_id": "artifact-b61507da62acef8040b48930",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-904d44a8857182c562e7f7d8",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 2",
@@ -417,8 +418,8 @@
      "content": "# Doc 2 ü"
     },
     {
-     "artifact_id": "artifact-a290d57d37920988d77e6e1c",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-acf3cd947046aff888cc9986",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 1",
@@ -439,8 +440,8 @@
      "content": "# Doc 1 ü"
     },
     {
-     "artifact_id": "artifact-e63dcf85b58982405d2d9459",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-32428336a2f73d6516c36d54",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 0",
@@ -461,8 +462,8 @@
      "content": "# Doc 0 ü"
     },
     {
-     "artifact_id": "artifact-210d12929802bbf6a17677ed",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-e840af056c8375e59f19c6db",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Archived form",
@@ -490,8 +491,8 @@
      }
     },
     {
-     "artifact_id": "artifact-73dfecd1d58b23325d538252",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-7f0e3f1b70824356fc9d115b",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Small form",
@@ -519,8 +520,8 @@
      }
     },
     {
-     "artifact_id": "artifact-11d398d0cdc3d98ce7e57f93",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-45241bf82a0e21aa5a9376dc",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Big report",
@@ -553,12 +554,12 @@
  "summary_pending": {
   "path": "/artifacts?representation=summary-v1&limit=200",
   "status": 200,
-  "bytes": 8948,
+  "bytes": 8967,
   "body": {
    "artifacts": [
     {
-     "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-aed16494c5bc6803c586f278",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "question",
      "title": "Which region?",
@@ -577,8 +578,8 @@
      "agent_name": "Theo",
      "pinned": false,
      "decision": {
-      "decision_id": "decision-789a17f4ffec9708bc31d0f1",
-      "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
+      "decision_id": "decision-e171ab92eb9b243ac3dc5ccb",
+      "artifact_id": "artifact-aed16494c5bc6803c586f278",
       "question": "Where?",
       "context": "",
       "yes_label": "Yes",
@@ -614,8 +615,8 @@
      }
     },
     {
-     "artifact_id": "artifact-f10f4b6ebf17aff992e3e62d",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-64271892bca1bfca211171b2",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Lone surrogate form",
@@ -645,8 +646,8 @@
      }
     },
     {
-     "artifact_id": "artifact-2b69ae43370727575cc9c2a3",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-af1addc32f0c8a208e14b27c",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Big report 1.16 MB",
@@ -676,14 +677,14 @@
      }
     },
     {
-     "artifact_id": "artifact-6e8afc2102e32760573f88c4",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-429a8a55f1b937c12273f1f8",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "plan",
      "title": "Goal",
      "summary": "",
      "status": "active",
-     "reference_id": "22ccec8f5c27816d:work:fcee6ece",
+     "reference_id": "fdda8de962f91a15:work:272df387",
      "payload_version": 1,
      "source_message_id": "",
      "source_trace_id": "",
@@ -698,8 +699,8 @@
      "plan": {
       "revision": 4,
       "recovery_enabled": 1,
-      "plan_id": "22ccec8f5c27816d:work:fcee6ece",
-      "agent_id": "22ccec8f5c27816d",
+      "plan_id": "fdda8de962f91a15:work:272df387",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "title": "Goal",
       "status": "active",
@@ -709,7 +710,7 @@
       "goal": {
        "outcome": "Goal",
        "limits": "none",
-       "owner_agent_id": "22ccec8f5c27816d",
+       "owner_agent_id": "fdda8de962f91a15",
        "native_session_id": "native-theo",
        "criteria": [
         {
@@ -757,19 +758,19 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 1,
-       "skipped": 0,
+       "deferred": 0,
        "removed": 0,
        "completed": 0,
+       "skipped": 0,
        "blocked": 0,
        "in_progress": 0,
-       "deferred": 0
+       "pending": 1
       },
       "items": [
        {
         "required": 1,
-        "item_id": "22ccec8f5c27816d:work:fcee6ece:a",
-        "plan_id": "22ccec8f5c27816d:work:fcee6ece",
+        "item_id": "fdda8de962f91a15:work:272df387:a",
+        "plan_id": "fdda8de962f91a15:work:272df387",
         "parent_id": null,
         "position": 0,
         "title": "A",
@@ -789,8 +790,8 @@
      }
     },
     {
-     "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "decision",
      "title": "Ship it?",
@@ -809,8 +810,8 @@
      "agent_name": "Theo",
      "pinned": false,
      "decision": {
-      "decision_id": "decision-7573ccc753ff0cd9227b11f9",
-      "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
+      "decision_id": "decision-48ff87919b864b8d66b9361b",
+      "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
       "question": "Ship?",
       "context": "ctx",
       "yes_label": "Yes",
@@ -837,8 +838,8 @@
      }
     },
     {
-     "artifact_id": "artifact-b61507da62acef8040b48930",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-904d44a8857182c562e7f7d8",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 2",
@@ -859,8 +860,8 @@
      "content": "# Doc 2 ü"
     },
     {
-     "artifact_id": "artifact-a290d57d37920988d77e6e1c",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-acf3cd947046aff888cc9986",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 1",
@@ -881,8 +882,8 @@
      "content": "# Doc 1 ü"
     },
     {
-     "artifact_id": "artifact-e63dcf85b58982405d2d9459",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-32428336a2f73d6516c36d54",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 0",
@@ -903,8 +904,8 @@
      "content": "# Doc 0 ü"
     },
     {
-     "artifact_id": "artifact-210d12929802bbf6a17677ed",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-e840af056c8375e59f19c6db",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Archived form",
@@ -925,17 +926,15 @@
      "version": "1",
      "content_omitted": {
       "reason": "summary",
-      "bytes": null,
-      "size_unknown": true,
-      "sha256": null,
-      "hash_pending": true,
+      "bytes": 10,
+      "sha256": "c1:d9cf2422b35b8f3dafe9ae7f7eff7b7349630701989600b60be0d426d1d86ea3",
       "version": "1",
       "updated_at": 1800000000028
      }
     },
     {
-     "artifact_id": "artifact-73dfecd1d58b23325d538252",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-7f0e3f1b70824356fc9d115b",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Small form",
@@ -965,8 +964,8 @@
      }
     },
     {
-     "artifact_id": "artifact-11d398d0cdc3d98ce7e57f93",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-45241bf82a0e21aa5a9376dc",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Big report",
@@ -1005,8 +1004,8 @@
   "body": {
    "artifacts": [
     {
-     "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-aed16494c5bc6803c586f278",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "question",
      "title": "Which region?",
@@ -1025,8 +1024,8 @@
      "agent_name": "Theo",
      "pinned": false,
      "decision": {
-      "decision_id": "decision-789a17f4ffec9708bc31d0f1",
-      "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
+      "decision_id": "decision-e171ab92eb9b243ac3dc5ccb",
+      "artifact_id": "artifact-aed16494c5bc6803c586f278",
       "question": "Where?",
       "context": "",
       "yes_label": "Yes",
@@ -1062,8 +1061,8 @@
      }
     },
     {
-     "artifact_id": "artifact-f10f4b6ebf17aff992e3e62d",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-64271892bca1bfca211171b2",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Lone surrogate form",
@@ -1085,8 +1084,8 @@
      "version": "1"
     },
     {
-     "artifact_id": "artifact-2b69ae43370727575cc9c2a3",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-af1addc32f0c8a208e14b27c",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Big report 1.16 MB",
@@ -1108,14 +1107,14 @@
      "version": "1"
     },
     {
-     "artifact_id": "artifact-6e8afc2102e32760573f88c4",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-429a8a55f1b937c12273f1f8",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "plan",
      "title": "Goal",
      "summary": "",
      "status": "active",
-     "reference_id": "22ccec8f5c27816d:work:fcee6ece",
+     "reference_id": "fdda8de962f91a15:work:272df387",
      "payload_version": 1,
      "source_message_id": "",
      "source_trace_id": "",
@@ -1130,8 +1129,8 @@
      "plan": {
       "revision": 4,
       "recovery_enabled": 1,
-      "plan_id": "22ccec8f5c27816d:work:fcee6ece",
-      "agent_id": "22ccec8f5c27816d",
+      "plan_id": "fdda8de962f91a15:work:272df387",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "title": "Goal",
       "status": "active",
@@ -1141,7 +1140,7 @@
       "goal": {
        "outcome": "Goal",
        "limits": "none",
-       "owner_agent_id": "22ccec8f5c27816d",
+       "owner_agent_id": "fdda8de962f91a15",
        "native_session_id": "native-theo",
        "criteria": [
         {
@@ -1244,19 +1243,19 @@
       "legacy": false,
       "completion_verified": false,
       "counts": {
-       "pending": 1,
-       "skipped": 0,
+       "deferred": 0,
        "removed": 0,
        "completed": 0,
+       "skipped": 0,
        "blocked": 0,
        "in_progress": 0,
-       "deferred": 0
+       "pending": 1
       },
       "items": [
        {
         "required": 1,
-        "item_id": "22ccec8f5c27816d:work:fcee6ece:a",
-        "plan_id": "22ccec8f5c27816d:work:fcee6ece",
+        "item_id": "fdda8de962f91a15:work:272df387:a",
+        "plan_id": "fdda8de962f91a15:work:272df387",
         "parent_id": null,
         "position": 0,
         "title": "A",
@@ -1276,8 +1275,8 @@
      }
     },
     {
-     "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "decision",
      "title": "Ship it?",
@@ -1296,8 +1295,8 @@
      "agent_name": "Theo",
      "pinned": false,
      "decision": {
-      "decision_id": "decision-7573ccc753ff0cd9227b11f9",
-      "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
+      "decision_id": "decision-48ff87919b864b8d66b9361b",
+      "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
       "question": "Ship?",
       "context": "ctx",
       "yes_label": "Yes",
@@ -1324,8 +1323,8 @@
      }
     },
     {
-     "artifact_id": "artifact-b61507da62acef8040b48930",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-904d44a8857182c562e7f7d8",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 2",
@@ -1346,8 +1345,8 @@
      "content": "# Doc 2 ü"
     },
     {
-     "artifact_id": "artifact-a290d57d37920988d77e6e1c",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-acf3cd947046aff888cc9986",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 1",
@@ -1368,8 +1367,8 @@
      "content": "# Doc 1 ü"
     },
     {
-     "artifact_id": "artifact-e63dcf85b58982405d2d9459",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-32428336a2f73d6516c36d54",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 0",
@@ -1390,8 +1389,8 @@
      "content": "# Doc 0 ü"
     },
     {
-     "artifact_id": "artifact-210d12929802bbf6a17677ed",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-e840af056c8375e59f19c6db",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Archived form",
@@ -1413,8 +1412,8 @@
      "version": "1"
     },
     {
-     "artifact_id": "artifact-73dfecd1d58b23325d538252",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-7f0e3f1b70824356fc9d115b",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Small form",
@@ -1436,8 +1435,8 @@
      "version": "3"
     },
     {
-     "artifact_id": "artifact-11d398d0cdc3d98ce7e57f93",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-45241bf82a0e21aa5a9376dc",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Big report",
@@ -1468,8 +1467,8 @@
   "body": {
    "artifacts": [
     {
-     "artifact_id": "artifact-73dfecd1d58b23325d538252",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-7f0e3f1b70824356fc9d115b",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Small form",
@@ -1497,8 +1496,8 @@
      }
     },
     {
-     "artifact_id": "artifact-a290d57d37920988d77e6e1c",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-acf3cd947046aff888cc9986",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 1",
@@ -1528,8 +1527,8 @@
   "body": {
    "artifacts": [
     {
-     "artifact_id": "artifact-73dfecd1d58b23325d538252",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-7f0e3f1b70824356fc9d115b",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "html_form",
      "title": "Small form",
@@ -1551,8 +1550,8 @@
      "version": "3"
     },
     {
-     "artifact_id": "artifact-a290d57d37920988d77e6e1c",
-     "agent_id": "22ccec8f5c27816d",
+     "artifact_id": "artifact-acf3cd947046aff888cc9986",
+     "agent_id": "fdda8de962f91a15",
      "session": "theo",
      "type": "document",
      "title": "Doc 1",
@@ -1610,13 +1609,13 @@
  "items": {
   "small": {
    "legacy": {
-    "path": "/artifacts/artifact-73dfecd1d58b23325d538252",
+    "path": "/artifacts/artifact-7f0e3f1b70824356fc9d115b",
     "status": 200,
     "bytes": 651,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-73dfecd1d58b23325d538252",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-7f0e3f1b70824356fc9d115b",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Small form",
@@ -1649,13 +1648,13 @@
     }
    },
    "flat": {
-    "path": "/artifacts/artifact-73dfecd1d58b23325d538252?representation=flat-v1",
+    "path": "/artifacts/artifact-7f0e3f1b70824356fc9d115b?representation=flat-v1",
     "status": 200,
     "bytes": 512,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-73dfecd1d58b23325d538252",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-7f0e3f1b70824356fc9d115b",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Small form",
@@ -1679,13 +1678,13 @@
     }
    },
    "other": {
-    "path": "/artifacts/artifact-73dfecd1d58b23325d538252?representation=summary-v1",
+    "path": "/artifacts/artifact-7f0e3f1b70824356fc9d115b?representation=summary-v1",
     "status": 200,
     "bytes": 651,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-73dfecd1d58b23325d538252",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-7f0e3f1b70824356fc9d115b",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Small form",
@@ -1720,19 +1719,19 @@
   },
   "plan_artifact": {
    "legacy": {
-    "path": "/artifacts/artifact-6e8afc2102e32760573f88c4",
+    "path": "/artifacts/artifact-429a8a55f1b937c12273f1f8",
     "status": 200,
     "bytes": 2882,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-6e8afc2102e32760573f88c4",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-429a8a55f1b937c12273f1f8",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "plan",
       "title": "Goal",
       "summary": "",
       "status": "active",
-      "reference_id": "22ccec8f5c27816d:work:fcee6ece",
+      "reference_id": "fdda8de962f91a15:work:272df387",
       "payload_version": 1,
       "source_message_id": "",
       "source_trace_id": "",
@@ -1745,13 +1744,13 @@
       "agent_name": "Theo",
       "pinned": false,
       "payload": {
-       "plan_id": "22ccec8f5c27816d:work:fcee6ece"
+       "plan_id": "fdda8de962f91a15:work:272df387"
       },
       "plan": {
        "revision": 4,
        "recovery_enabled": 1,
-       "plan_id": "22ccec8f5c27816d:work:fcee6ece",
-       "agent_id": "22ccec8f5c27816d",
+       "plan_id": "fdda8de962f91a15:work:272df387",
+       "agent_id": "fdda8de962f91a15",
        "session": "theo",
        "title": "Goal",
        "status": "active",
@@ -1761,7 +1760,7 @@
        "goal": {
         "outcome": "Goal",
         "limits": "none",
-        "owner_agent_id": "22ccec8f5c27816d",
+        "owner_agent_id": "fdda8de962f91a15",
         "native_session_id": "native-theo",
         "criteria": [
          {
@@ -1864,19 +1863,19 @@
        "legacy": false,
        "completion_verified": false,
        "counts": {
-        "pending": 1,
-        "skipped": 0,
+        "deferred": 0,
         "removed": 0,
         "completed": 0,
+        "skipped": 0,
         "blocked": 0,
         "in_progress": 0,
-        "deferred": 0
+        "pending": 1
        },
        "items": [
         {
          "required": 1,
-         "item_id": "22ccec8f5c27816d:work:fcee6ece:a",
-         "plan_id": "22ccec8f5c27816d:work:fcee6ece",
+         "item_id": "fdda8de962f91a15:work:272df387:a",
+         "plan_id": "fdda8de962f91a15:work:272df387",
          "parent_id": null,
          "position": 0,
          "title": "A",
@@ -1898,19 +1897,19 @@
     }
    },
    "flat": {
-    "path": "/artifacts/artifact-6e8afc2102e32760573f88c4?representation=flat-v1",
+    "path": "/artifacts/artifact-429a8a55f1b937c12273f1f8?representation=flat-v1",
     "status": 200,
     "bytes": 2824,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-6e8afc2102e32760573f88c4",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-429a8a55f1b937c12273f1f8",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "plan",
       "title": "Goal",
       "summary": "",
       "status": "active",
-      "reference_id": "22ccec8f5c27816d:work:fcee6ece",
+      "reference_id": "fdda8de962f91a15:work:272df387",
       "payload_version": 1,
       "source_message_id": "",
       "source_trace_id": "",
@@ -1925,8 +1924,8 @@
       "plan": {
        "revision": 4,
        "recovery_enabled": 1,
-       "plan_id": "22ccec8f5c27816d:work:fcee6ece",
-       "agent_id": "22ccec8f5c27816d",
+       "plan_id": "fdda8de962f91a15:work:272df387",
+       "agent_id": "fdda8de962f91a15",
        "session": "theo",
        "title": "Goal",
        "status": "active",
@@ -1936,7 +1935,7 @@
        "goal": {
         "outcome": "Goal",
         "limits": "none",
-        "owner_agent_id": "22ccec8f5c27816d",
+        "owner_agent_id": "fdda8de962f91a15",
         "native_session_id": "native-theo",
         "criteria": [
          {
@@ -2039,19 +2038,19 @@
        "legacy": false,
        "completion_verified": false,
        "counts": {
-        "pending": 1,
-        "skipped": 0,
+        "deferred": 0,
         "removed": 0,
         "completed": 0,
+        "skipped": 0,
         "blocked": 0,
         "in_progress": 0,
-        "deferred": 0
+        "pending": 1
        },
        "items": [
         {
          "required": 1,
-         "item_id": "22ccec8f5c27816d:work:fcee6ece:a",
-         "plan_id": "22ccec8f5c27816d:work:fcee6ece",
+         "item_id": "fdda8de962f91a15:work:272df387:a",
+         "plan_id": "fdda8de962f91a15:work:272df387",
          "parent_id": null,
          "position": 0,
          "title": "A",
@@ -2073,19 +2072,19 @@
     }
    },
    "other": {
-    "path": "/artifacts/artifact-6e8afc2102e32760573f88c4?representation=summary-v1",
+    "path": "/artifacts/artifact-429a8a55f1b937c12273f1f8?representation=summary-v1",
     "status": 200,
     "bytes": 2882,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-6e8afc2102e32760573f88c4",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-429a8a55f1b937c12273f1f8",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "plan",
       "title": "Goal",
       "summary": "",
       "status": "active",
-      "reference_id": "22ccec8f5c27816d:work:fcee6ece",
+      "reference_id": "fdda8de962f91a15:work:272df387",
       "payload_version": 1,
       "source_message_id": "",
       "source_trace_id": "",
@@ -2098,13 +2097,13 @@
       "agent_name": "Theo",
       "pinned": false,
       "payload": {
-       "plan_id": "22ccec8f5c27816d:work:fcee6ece"
+       "plan_id": "fdda8de962f91a15:work:272df387"
       },
       "plan": {
        "revision": 4,
        "recovery_enabled": 1,
-       "plan_id": "22ccec8f5c27816d:work:fcee6ece",
-       "agent_id": "22ccec8f5c27816d",
+       "plan_id": "fdda8de962f91a15:work:272df387",
+       "agent_id": "fdda8de962f91a15",
        "session": "theo",
        "title": "Goal",
        "status": "active",
@@ -2114,7 +2113,7 @@
        "goal": {
         "outcome": "Goal",
         "limits": "none",
-        "owner_agent_id": "22ccec8f5c27816d",
+        "owner_agent_id": "fdda8de962f91a15",
         "native_session_id": "native-theo",
         "criteria": [
          {
@@ -2217,19 +2216,19 @@
        "legacy": false,
        "completion_verified": false,
        "counts": {
-        "pending": 1,
-        "skipped": 0,
+        "deferred": 0,
         "removed": 0,
         "completed": 0,
+        "skipped": 0,
         "blocked": 0,
         "in_progress": 0,
-        "deferred": 0
+        "pending": 1
        },
        "items": [
         {
          "required": 1,
-         "item_id": "22ccec8f5c27816d:work:fcee6ece:a",
-         "plan_id": "22ccec8f5c27816d:work:fcee6ece",
+         "item_id": "fdda8de962f91a15:work:272df387:a",
+         "plan_id": "fdda8de962f91a15:work:272df387",
          "parent_id": null,
          "position": 0,
          "title": "A",
@@ -2253,13 +2252,13 @@
   },
   "decision": {
    "legacy": {
-    "path": "/artifacts/artifact-a3f162061d65b7c0f2a6499e",
+    "path": "/artifacts/artifact-ec74c81ad21d9936a3540d88",
     "status": 200,
     "bytes": 1100,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "decision",
       "title": "Ship it?",
@@ -2279,8 +2278,8 @@
       "pinned": false,
       "payload": {},
       "decision": {
-       "decision_id": "decision-7573ccc753ff0cd9227b11f9",
-       "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
+       "decision_id": "decision-48ff87919b864b8d66b9361b",
+       "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
        "question": "Ship?",
        "context": "ctx",
        "yes_label": "Yes",
@@ -2309,13 +2308,13 @@
     }
    },
    "flat": {
-    "path": "/artifacts/artifact-a3f162061d65b7c0f2a6499e?representation=flat-v1",
+    "path": "/artifacts/artifact-ec74c81ad21d9936a3540d88?representation=flat-v1",
     "status": 200,
     "bytes": 1085,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "decision",
       "title": "Ship it?",
@@ -2334,8 +2333,8 @@
       "agent_name": "Theo",
       "pinned": false,
       "decision": {
-       "decision_id": "decision-7573ccc753ff0cd9227b11f9",
-       "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
+       "decision_id": "decision-48ff87919b864b8d66b9361b",
+       "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
        "question": "Ship?",
        "context": "ctx",
        "yes_label": "Yes",
@@ -2364,13 +2363,13 @@
     }
    },
    "other": {
-    "path": "/artifacts/artifact-a3f162061d65b7c0f2a6499e?representation=summary-v1",
+    "path": "/artifacts/artifact-ec74c81ad21d9936a3540d88?representation=summary-v1",
     "status": 200,
     "bytes": 1100,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "decision",
       "title": "Ship it?",
@@ -2390,8 +2389,8 @@
       "pinned": false,
       "payload": {},
       "decision": {
-       "decision_id": "decision-7573ccc753ff0cd9227b11f9",
-       "artifact_id": "artifact-a3f162061d65b7c0f2a6499e",
+       "decision_id": "decision-48ff87919b864b8d66b9361b",
+       "artifact_id": "artifact-ec74c81ad21d9936a3540d88",
        "question": "Ship?",
        "context": "ctx",
        "yes_label": "Yes",
@@ -2422,13 +2421,13 @@
   },
   "question": {
    "legacy": {
-    "path": "/artifacts/artifact-d2c0e8ddd0a6550f8ed6cf71",
+    "path": "/artifacts/artifact-aed16494c5bc6803c586f278",
     "status": 200,
     "bytes": 1164,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-aed16494c5bc6803c586f278",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "question",
       "title": "Which region?",
@@ -2448,8 +2447,8 @@
       "pinned": false,
       "payload": {},
       "decision": {
-       "decision_id": "decision-789a17f4ffec9708bc31d0f1",
-       "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
+       "decision_id": "decision-e171ab92eb9b243ac3dc5ccb",
+       "artifact_id": "artifact-aed16494c5bc6803c586f278",
        "question": "Where?",
        "context": "",
        "yes_label": "Yes",
@@ -2487,13 +2486,13 @@
     }
    },
    "flat": {
-    "path": "/artifacts/artifact-d2c0e8ddd0a6550f8ed6cf71?representation=flat-v1",
+    "path": "/artifacts/artifact-aed16494c5bc6803c586f278?representation=flat-v1",
     "status": 200,
     "bytes": 1149,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-aed16494c5bc6803c586f278",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "question",
       "title": "Which region?",
@@ -2512,8 +2511,8 @@
       "agent_name": "Theo",
       "pinned": false,
       "decision": {
-       "decision_id": "decision-789a17f4ffec9708bc31d0f1",
-       "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
+       "decision_id": "decision-e171ab92eb9b243ac3dc5ccb",
+       "artifact_id": "artifact-aed16494c5bc6803c586f278",
        "question": "Where?",
        "context": "",
        "yes_label": "Yes",
@@ -2551,13 +2550,13 @@
     }
    },
    "other": {
-    "path": "/artifacts/artifact-d2c0e8ddd0a6550f8ed6cf71?representation=summary-v1",
+    "path": "/artifacts/artifact-aed16494c5bc6803c586f278?representation=summary-v1",
     "status": 200,
     "bytes": 1164,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-aed16494c5bc6803c586f278",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "question",
       "title": "Which region?",
@@ -2577,8 +2576,8 @@
       "pinned": false,
       "payload": {},
       "decision": {
-       "decision_id": "decision-789a17f4ffec9708bc31d0f1",
-       "artifact_id": "artifact-d2c0e8ddd0a6550f8ed6cf71",
+       "decision_id": "decision-e171ab92eb9b243ac3dc5ccb",
+       "artifact_id": "artifact-aed16494c5bc6803c586f278",
        "question": "Where?",
        "context": "",
        "yes_label": "Yes",
@@ -2618,13 +2617,13 @@
   },
   "surrogate": {
    "legacy": {
-    "path": "/artifacts/artifact-f10f4b6ebf17aff992e3e62d",
+    "path": "/artifacts/artifact-64271892bca1bfca211171b2",
     "status": 200,
     "bytes": 664,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-f10f4b6ebf17aff992e3e62d",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-64271892bca1bfca211171b2",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Lone surrogate form",
@@ -2657,13 +2656,13 @@
     }
    },
    "flat": {
-    "path": "/artifacts/artifact-f10f4b6ebf17aff992e3e62d?representation=flat-v1",
+    "path": "/artifacts/artifact-64271892bca1bfca211171b2?representation=flat-v1",
     "status": 200,
     "bytes": 519,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-f10f4b6ebf17aff992e3e62d",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-64271892bca1bfca211171b2",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Lone surrogate form",
@@ -2687,13 +2686,13 @@
     }
    },
    "other": {
-    "path": "/artifacts/artifact-f10f4b6ebf17aff992e3e62d?representation=summary-v1",
+    "path": "/artifacts/artifact-64271892bca1bfca211171b2?representation=summary-v1",
     "status": 200,
     "bytes": 664,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-f10f4b6ebf17aff992e3e62d",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-64271892bca1bfca211171b2",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Lone surrogate form",
@@ -2728,13 +2727,13 @@
   },
   "big116": {
    "legacy": {
-    "path": "/artifacts/artifact-2b69ae43370727575cc9c2a3",
+    "path": "/artifacts/artifact-af1addc32f0c8a208e14b27c",
     "status": 200,
     "bytes": 2319233,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-2b69ae43370727575cc9c2a3",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-af1addc32f0c8a208e14b27c",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Big report 1.16 MB",
@@ -2767,13 +2766,13 @@
     }
    },
    "flat": {
-    "path": "/artifacts/artifact-2b69ae43370727575cc9c2a3?representation=flat-v1",
+    "path": "/artifacts/artifact-af1addc32f0c8a208e14b27c?representation=flat-v1",
     "status": 200,
     "bytes": 1159803,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-2b69ae43370727575cc9c2a3",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-af1addc32f0c8a208e14b27c",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Big report 1.16 MB",
@@ -2797,13 +2796,13 @@
     }
    },
    "other": {
-    "path": "/artifacts/artifact-2b69ae43370727575cc9c2a3?representation=summary-v1",
+    "path": "/artifacts/artifact-af1addc32f0c8a208e14b27c?representation=summary-v1",
     "status": 200,
     "bytes": 2319233,
     "body": {
      "artifact": {
-      "artifact_id": "artifact-2b69ae43370727575cc9c2a3",
-      "agent_id": "22ccec8f5c27816d",
+      "artifact_id": "artifact-af1addc32f0c8a208e14b27c",
+      "agent_id": "fdda8de962f91a15",
       "session": "theo",
       "type": "html_form",
       "title": "Big report 1.16 MB",
