@@ -25,6 +25,7 @@ fn only_the_exact_refusal_falls_back() {
     assert!(!summary::is_unsupported_representation(400, "Bad Request"));
     assert_eq!(summary::with_representation("/artifacts?limit=50", "summary-v1"), "/artifacts?limit=50&representation=summary-v1");
     assert_eq!(summary::with_representation("/artifacts/pinned", "summary-v1"), "/artifacts/pinned?representation=summary-v1");
+    assert_eq!(summary::with_representation("/artifacts?limit=50&representation=flat-v1&order=updated", "summary-v1"), "/artifacts?limit=50&order=updated&representation=summary-v1", "instead of flat-v1, not beside it");
 }
 
 #[test]
