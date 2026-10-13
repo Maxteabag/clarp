@@ -2655,3 +2655,114 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
     ]);
     stages
 }
+
+// ---- summary lists (artifact_summary_v1)
+
+/// GETs of `path` in the fake Host's log (`CLARP_TEST_HOST_LOG`).
+fn host_gets(path: &str) -> usize {
+    let Some(log) = std::env::var_os("CLARP_TEST_HOST_LOG") else { return 0 };
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|r| r["method"] == "GET" && r["path"] == path)
+        .count()
+}
+
+fn listed_row(app: &crate::App, id: &str) -> Value {
+    app.engine.borrow().update_artifacts().iter().find(|a| a["artifact_id"] == id).cloned().unwrap_or(Value::Null)
+}
+
+/// `--check artifact-summary`: on a Host offering summary lists, the
+/// cards show without their forms' bodies, a report opened twice quickly is
+/// read once and shows, a form opens in the browser with its body, and one
+/// deleted meanwhile leaves the chat and says so.
+pub(super) fn artifact_summary_check(out: String) {
+    let before = Rc::new(Cell::new(0usize));
+    let before2 = before.clone();
+    let mut stages: Vec<Stage> = vec![
+        ("summary on", Box::new(|app, _, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/artifact-summary", &json!({"on": true, "item_delay": 0.4})).is_ok(), "the Host offers summary lists");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("advertised", Box::new(|app, _, elapsed| {
+            let on = app.engine.borrow().artifact_summary_enabled() && app.engine.borrow().connection_state() == "live";
+            if !on && elapsed < Duration::from_secs(10) {
+                return false;
+            }
+            check(on, "the desktop reads the feature from /server-info");
+            true
+        })),
+    ];
+    stages.extend(load_chat("art-summary", &["html_form"]));
+    stages.extend::<Vec<Stage>>(vec![
+        ("summary cards", Box::new(|app, window, elapsed| {
+            let trip = listed_row(app, "form-trip");
+            if (!placed(window, &["form-trip", "form-report", "form-stale"], elapsed) || trip.get("content").is_some()) && elapsed < Duration::from_secs(10) {
+                return false;
+            }
+            check(trip.get("content").is_none() && trip["content_omitted"]["bytes"].as_u64().is_some_and(|b| b > 0), &format!("the list left the form's body out: {trip}"));
+            let (form, report) = (card(window, "form-trip"), card(window, "form-report"));
+            check(form.as_ref().is_some_and(|c| c.label == "FORM" && c.action == "Open form"), "the form's card is whole without it");
+            check(report.as_ref().is_some_and(|c| c.label == "REPORT" && c.action == "Open report"), "so is the report's");
+            check(host_gets("/artifacts/form-trip") + host_gets("/artifacts/form-report") == 0, "nothing is read before it is opened");
+            // Two quick clicks.
+            let bridge = window.global::<ArtifactBridge>();
+            bridge.invoke_open("form-report".into());
+            bridge.invoke_open("form-report".into());
+            true
+        })),
+        ("report opens", Box::new(|_, window, elapsed| {
+            if (window.get_overlay() != "report" || window.get_report_blocks().row_count() == 0) && elapsed < Duration::from_secs(10) {
+                return false;
+            }
+            check(window.get_overlay() == "report" && window.get_report_title() == "Quarterly cost report" && window.get_report_blocks().row_count() > 0,
+                &format!("the report is read, then shows: overlay {:?} title {:?}", window.get_overlay(), window.get_report_title()));
+            check(host_gets("/artifacts/form-report") == 1, &format!("two quick clicks read it once: {}", host_gets("/artifacts/form-report")));
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("report closed", Box::new(move |_, window, elapsed| {
+            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            before.set(opened().len());
+            window.global::<ArtifactBridge>().invoke_open("form-trip".into());
+            true
+        })),
+        ("form opens", Box::new(move |_, _, elapsed| {
+            let urls = opened();
+            if urls.len() <= before2.get() {
+                if elapsed > Duration::from_secs(10) {
+                    check(false, &format!("the form opens once read: {urls:?}"));
+                    return true;
+                }
+                return false;
+            }
+            let page = urls.last().map(|url| fetch("GET", url, "", None)).unwrap_or_else(|| Err("no page".into()));
+            check(page.as_ref().is_ok_and(|(status, body)| *status == 200 && body.contains("name=\"destination\"")), &format!("its page holds the body read: {:?}", page.map(|(s, b)| (s, b.len()))));
+            check(host_gets("/artifacts/form-trip") == 1, "read once");
+            true
+        })),
+        ("deleted meanwhile", Box::new(|_, window, _| {
+            check(control("/__control/fail", &json!({"path": "/artifacts/form-stale", "status": 404})).is_ok(), "the Host deletes the lunch order");
+            window.global::<ArtifactBridge>().invoke_open("form-stale".into());
+            true
+        })),
+        ("deleted", Box::new(move |_, window, elapsed| {
+            let gone = card(window, "form-stale").is_none();
+            if !gone && elapsed < Duration::from_secs(10) {
+                return false;
+            }
+            check(gone, "a form deleted on the Host leaves the chat when it is opened");
+            check(window.get_error().contains("“Lunch order” was deleted on the Host"), &format!("and says so: {:?}", window.get_error()));
+            shot(&out, "artifact-summary");
+            true
+        })),
+    ]);
+    run_stages(stages);
+}
