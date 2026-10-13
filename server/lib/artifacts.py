@@ -440,12 +440,16 @@ def _retained_bytes(*objects: Any) -> int:
     return size
 
 
-# (artifact_id) at (updated_at, version) -> (UTF-8 bytes, "c1:" sha) or
-# (None, None) for content that has no UTF-8 encoding. Content is immutable
-# per (artifact_id, updated_at): its only writer bumps updated_at. Over-budget
-# results are never cached. ``version`` is a scalar: an html_form's single
-# writer accepts only a string of at most 80 characters (html_forms.py), so
-# weighing it shallow is exact.
+# (artifact_id) at (updated_at, version, exact content text) -> (UTF-8 bytes,
+# "c1:" sha) or (None, None) for content that has no UTF-8 encoding. A hit
+# needs the current content to equal the stored text exactly: updated_at and
+# version alone do not prove it (a direct write could keep both). The tuple
+# compares updated_at and version first, so the string comparison only runs
+# when they match. The text is held, so an entry weighs it; an entry heavier
+# than the whole bound is not kept and that body is rehashed (under the
+# request budget) each time. Over-budget results are never cached.
+# ``version`` is a scalar: an html_form's single writer accepts only a string
+# of at most 80 characters (html_forms.py), so weighing it shallow is exact.
 _CONTENT_IDENTITY: RevisionedCache[str, tuple[int | None, str | None]] = RevisionedCache(
     "artifact_content_identity", max_entries=4096, max_weight=8 * 1024 * 1024,
     weight=lambda key, revision, value: _retained_bytes(key, revision, value))
@@ -499,7 +503,7 @@ def content_identity(content: str) -> tuple[int | None, str | None]:
 
 
 def _content_marker(item: dict, content: str, version: Any, budget: SummaryBudget) -> dict:
-    revision = (item.get("updated_at"), version)
+    revision = (item.get("updated_at"), version, content)
     found, identity = _CONTENT_IDENTITY.get(item["artifact_id"], revision)
     if not found:
         size = _utf8_length(content, budget)
