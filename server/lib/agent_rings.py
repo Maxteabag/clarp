@@ -131,6 +131,7 @@ def _settle(records: list[dict]) -> list[dict]:
     if missed:
         _save(records)
         for ring in missed:
+            _audit({"outcome": "missed", "ring_id": ring["ring_id"], "session": ring["session"], "by": "timeout"})
             _announce(ring, "missed")
     return missed
 
