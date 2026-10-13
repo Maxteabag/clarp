@@ -205,19 +205,20 @@ def test_an_unchanged_goal_is_a_cache_hit_without_rehash(theo, hashes):
 
 def test_the_caches_stay_bounded_under_churn(theo, monkeypatch):
     monkeypatch.setattr(artifacts._CONTENT_IDENTITY, "max_entries", 5)
-    monkeypatch.setattr(artifacts._CONTENT_IDENTITY, "max_weight", 400)
+    monkeypatch.setattr(artifacts._CONTENT_IDENTITY, "max_weight", 3_000)   # a few entries
     forms = [_form("<p>" + "x" * 90 + f"{n}</p>") for n in range(12)]
     for round_ in range(3):
         for form in forms[:6]:
             _rewrite(form["artifact_id"], f"<p>{round_}{'y' * 90}</p>")
         _summary(type="html_form")
-        assert len(artifacts._CONTENT_IDENTITY) <= 5
-        assert artifacts._CONTENT_IDENTITY.weight <= 400
-    monkeypatch.setattr(artifacts._HISTORY_DIGEST, "max_weight", 2_000)
+        assert 1 <= len(artifacts._CONTENT_IDENTITY) <= 5
+        assert artifacts._CONTENT_IDENTITY.weight <= 3_000
+    monkeypatch.setattr(artifacts._HISTORY_DIGEST, "max_weight", 20_000)
     for n in range(5):
         _checkpoint(_goal_plan(), f"plan {n}")
     _summary(type="plan")
-    assert artifacts._HISTORY_DIGEST.weight <= 2_000
+    assert len(artifacts._HISTORY_DIGEST) >= 1
+    assert artifacts._HISTORY_DIGEST.weight <= 20_000
 
 
 def test_over_budget_takes_the_pending_paths(theo):
@@ -242,3 +243,79 @@ def test_the_feature_and_contract_are_advertised():
     contract = server_identity.contract()
     assert contract["features"]["artifact_summary_v1"] == 1
     assert contract["host"] == 65
+
+
+# --- budget counts UTF-8 bytes; caches weigh retained bytes -------------------------
+
+def test_a_non_ascii_body_under_the_budget_in_chars_but_over_in_bytes_is_pending(theo):
+    _form("😀" * 1000)                                # 1000 chars, 4000 UTF-8 bytes
+    budget = artifacts.summary_budget(max_bytes=2500)
+    [item] = [artifacts.response_representation(r, "summary-v1", budget=budget)
+              for r in artifacts.list_artifacts(limit=200, type="html_form")]
+    marker = item["content_omitted"]
+    assert marker["sha256"] is None and marker["hash_pending"] is True
+    assert marker["bytes"] is None and marker["size_unknown"] is True
+
+
+def test_a_mostly_ascii_body_with_a_few_wide_chars_is_measured_exactly(theo):
+    """No 4x-per-character guess: 2,000 ASCII chars and one emoji is 2,004
+    bytes, under a 2,100-byte budget, so the marker completes exactly."""
+    content = "a" * 2000 + "😀"
+    _form(content)
+    budget = artifacts.summary_budget(max_bytes=2100)
+    [item] = [artifacts.response_representation(r, "summary-v1", budget=budget)
+              for r in artifacts.list_artifacts(limit=200, type="html_form")]
+    assert item["content_omitted"]["bytes"] == 2004
+    assert item["content_omitted"]["sha256"] == "c1:" + hashlib.sha256(
+        content.encode()).hexdigest()
+    assert budget.remaining == 2100 - 2004
+
+
+def test_a_wide_history_under_the_budget_in_chars_but_over_in_bytes_is_pending(theo):
+    plan = _checkpoint(_goal_plan(), "😀" * 400)
+    goal_text = db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?",
+                                  (plan["plan_id"],)).fetchone()[0]
+    budget = artifacts.summary_budget(max_bytes=len(goal_text) + 10)   # chars fit
+    [item] = [artifacts.response_representation(r, "summary-v1", budget=budget)
+              for r in artifacts.list_artifacts(limit=200, type="plan")]
+    marker = item["plan"]["goal"]["history_omitted"]
+    assert marker["digest"] is None and marker["digest_pending"] is True
+
+
+def test_the_history_cache_weighs_its_goal_text_key_in_bytes(theo, monkeypatch):
+    plan = _checkpoint(_goal_plan(), "😀" * 2000)     # wide text: 4 bytes per char held
+    goal_text = db.conn().execute("SELECT goal_json FROM task_plans WHERE plan_id=?",
+                                  (plan["plan_id"],)).fetchone()[0]
+    import sys
+    assert len(goal_text) < 10_000 < sys.getsizeof(goal_text)
+    monkeypatch.setattr(artifacts._HISTORY_DIGEST, "max_weight", 10_000)
+    _summary(type="plan")
+    assert len(artifacts._HISTORY_DIGEST) == 0          # too heavy to retain
+    assert artifacts._HISTORY_DIGEST.weight == 0
+
+
+def test_every_content_entry_weighs_its_retained_bytes(theo):
+    row = _form("<p>ok</p>")
+    db.conn().execute("UPDATE artifacts SET payload_json=? WHERE artifact_id=?", (
+        json.dumps({**json.loads(db.conn().execute(
+            "SELECT payload_json FROM artifacts WHERE artifact_id=?",
+            (row["artifact_id"],)).fetchone()[0]), "content": "bad \ud800"}),
+        row["artifact_id"]))
+    _summary(type="html_form")                       # caches (None, None)
+    assert len(artifacts._CONTENT_IDENTITY) == 1
+    assert artifacts._CONTENT_IDENTITY.weight >= len(row["artifact_id"])
+
+
+def test_a_plan_without_its_goal_text_is_pending_and_never_reuses_a_digest(theo, hashes):
+    plan = _checkpoint(_goal_plan(), "first")
+    _summary(type="plan")                            # caches the real digest
+    cached = len(artifacts._HISTORY_DIGEST)
+    [row] = artifacts.list_artifacts(limit=200, type="plan")
+    bare = {**row, "plan": dict(row["plan"])}        # a plain dict: no goal text
+    hashes.clear()
+    item = artifacts.response_representation(bare, "summary-v1",
+                                             budget=artifacts.summary_budget())
+    marker = item["plan"]["goal"]["history_omitted"]
+    assert marker["digest"] is None and marker["digest_pending"] is True
+    assert marker["count"] == len(row["plan"]["goal"]["history"])
+    assert hashes == [] and len(artifacts._HISTORY_DIGEST) == cached
