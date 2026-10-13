@@ -390,11 +390,14 @@ def response_representation(item: dict, representation: str = "", *,
 # body is whatever its rows are, like any list response):
 #
 # * hashing work per request: SummaryBudget counts the UTF-8 bytes this request
-#   may still feed to SHA-256 on cache misses. It is checked BEFORE a body is
-#   encoded, from a bound that never undercounts (characters for content, where
-#   bytes >= characters, then an exact chunked count; the stored goal text for
-#   history, whose canonical history is a part of it), and charged the exact
-#   bytes hashed. Past it a marker says pending; it never carries a wrong value.
+#   may still encode for markers on cache misses: the counting pass of a
+#   non-ASCII body and the hashing pass alike, so such a body costs twice its
+#   size. It is checked BEFORE a body is encoded, from a bound that never
+#   undercounts (characters for content, where bytes >= characters; the stored
+#   goal text for history, whose canonical history is a part of it). A body
+#   that turns out to be over spends what remained, so later misses in the
+#   request encode nothing: total encoding stays within the budget plus one
+#   counting chunk. Past it a marker says pending; it never carries a wrong value.
 # * retained memory: the two caches are LRU-bounded by entry count and by the
 #   bytes their entries hold (key, revision and value, measured with
 #   sys.getsizeof, plus a per-entry overhead), the history cache's exact
@@ -440,7 +443,9 @@ def _retained_bytes(*objects: Any) -> int:
 # (artifact_id) at (updated_at, version) -> (UTF-8 bytes, "c1:" sha) or
 # (None, None) for content that has no UTF-8 encoding. Content is immutable
 # per (artifact_id, updated_at): its only writer bumps updated_at. Over-budget
-# results are never cached.
+# results are never cached. ``version`` is a scalar: an html_form's single
+# writer accepts only a string of at most 80 characters (html_forms.py), so
+# weighing it shallow is exact.
 _CONTENT_IDENTITY: RevisionedCache[str, tuple[int | None, str | None]] = RevisionedCache(
     "artifact_content_identity", max_entries=4096, max_weight=8 * 1024 * 1024,
     weight=lambda key, revision, value: _retained_bytes(key, revision, value))
@@ -456,21 +461,29 @@ _HISTORY_DIGEST: RevisionedCache[str, str] = RevisionedCache(
 _OVER_BUDGET = object()
 
 
-def _utf8_length(content: str, limit: int) -> int | None | object:
-    """The exact UTF-8 length of ``content`` if it is at most ``limit``;
-    _OVER_BUDGET past it (stopping as soon as it is known); None when the
-    text has no UTF-8 encoding. Never encodes more than one chunk at a time."""
-    if len(content) > limit:
+def _encode_utf8(text: str) -> bytes:
+    return text.encode("utf-8")
+
+
+def _utf8_length(content: str, budget: SummaryBudget) -> int | None | object:
+    """The exact UTF-8 length of ``content`` if it fits the budget, charging
+    the bytes this counting encodes; _OVER_BUDGET past it, stopping at the
+    chunk that shows it and spending the rest of the budget (that work was
+    done); None when the text has no UTF-8 encoding. Encodes one chunk at a
+    time. ASCII needs no counting pass: its bytes are its characters."""
+    if len(content) > budget.remaining:
         return _OVER_BUDGET                  # bytes >= characters
     if content.isascii():
         return len(content)
     total = 0
     for start in range(0, len(content), _UTF8_COUNT_CHUNK):
         try:
-            total += len(content[start:start + _UTF8_COUNT_CHUNK].encode("utf-8"))
+            size = len(_encode_utf8(content[start:start + _UTF8_COUNT_CHUNK]))
         except UnicodeEncodeError:
             return None
-        if total > limit:
+        total += size
+        if not budget.take(size):
+            budget.remaining = 0
             return _OVER_BUDGET
     return total
 
@@ -479,7 +492,7 @@ def content_identity(content: str) -> tuple[int | None, str | None]:
     """(UTF-8 byte length, "c1:" sha256 of those bytes), or (None, None) when
     the content cannot be encoded as UTF-8 (a lone surrogate)."""
     try:
-        data = content.encode("utf-8")
+        data = _encode_utf8(content)
     except UnicodeEncodeError:
         return None, None
     return len(data), "c1:" + _sha256(data)
@@ -489,11 +502,13 @@ def _content_marker(item: dict, content: str, version: Any, budget: SummaryBudge
     revision = (item.get("updated_at"), version)
     found, identity = _CONTENT_IDENTITY.get(item["artifact_id"], revision)
     if not found:
-        size = _utf8_length(content, budget.remaining)
+        size = _utf8_length(content, budget)
         if size is None:
             identity = (None, None)             # no UTF-8 encoding: cached, never hashed
             _CONTENT_IDENTITY.put(item["artifact_id"], revision, identity)
         elif size is _OVER_BUDGET or not budget.take(size):
+            if size is not _OVER_BUDGET:
+                budget.remaining = 0            # counted, cannot hash: no more misses
             identity = (None, None)             # pending this request; not cached
         else:
             identity = content_identity(content)
