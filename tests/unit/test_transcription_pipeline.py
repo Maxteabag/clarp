@@ -270,3 +270,15 @@ def test_engine_is_read_once_per_request():
     out = _run(ctx, Recorder())
     assert out.status == 200 and out.payload["text"] == "first"
     assert replacement.calls == []
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_retained_clips_record_the_language_resolved_for_the_session(monkeypatch, fail):
+    from lib import heard_audio, stt_language
+    kept = []
+    monkeypatch.setattr(heard_audio, "retain", lambda *a, **kw: kept.append(kw))
+    monkeypatch.setattr(stt_language, "language_for",
+                        lambda session: "no" if session == "pebble" else "en")
+    stt = StubSTT(raise_=RuntimeError("provider down")) if fail else ModelSTT()
+    _run(_ctx(stt), Recorder(), focus="pebble")
+    assert kept and kept[-1]["language"] == "no"

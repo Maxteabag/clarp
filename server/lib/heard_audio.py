@@ -56,7 +56,7 @@ def valid_trace(trace_id: str) -> bool:
 
 def retain(cache_dir: pathlib.Path, *, trace_id: str, audio_bytes: bytes,
            content_type: str, session: str = "", run_id: int = 0,
-           model: str = "") -> pathlib.Path | None:
+           model: str = "", language: str = "") -> pathlib.Path | None:
     """Write the clip and a sidecar. Returns the path, or None when disabled.
 
     Never raises: retention is a diagnostic, and a full disk must not fail a
@@ -71,7 +71,7 @@ def retain(cache_dir: pathlib.Path, *, trace_id: str, audio_bytes: bytes,
         path.write_bytes(audio_bytes)
         (root / f"{trace_id}.json").write_text(json.dumps({
             "trace_id": trace_id, "session": session, "run_id": run_id,
-            "model": model, "content_type": content_type,
+            "model": model, "language": language, "content_type": content_type,
             "bytes": len(audio_bytes), "created_at": now_ms(),
         }))
         sweep(root)
