@@ -447,3 +447,133 @@ def test_an_overweight_content_entry_is_not_cached_but_still_marked(theo, monkey
     hashes.clear()
     assert _summary(type="html_form")[0]["content_omitted"] == marker   # recomputed, not cached
     assert hashes == [len(content)]
+
+
+# --- scan-resistant admission for summary requests (Option A) -------------------------
+
+def _request(**query):
+    """One summary request as the handlers make it."""
+    rows = artifacts.list_artifacts(limit=200, **query)
+    open_request = getattr(artifacts, "summary_request", None)
+    if open_request is None:                       # before Option A: no protection
+        budget = artifacts.summary_budget()
+        return [artifacts.response_representation(r, "summary-v1", budget=budget) for r in rows]
+    with open_request() as budget:
+        return [artifacts.response_representation(r, "summary-v1", budget=budget) for r in rows]
+
+
+def _corpus_over_the_bound(monkeypatch, forms=6, fit=3):
+    """`forms` html_forms of equal size; the content cache holds `fit` of them."""
+    import sys
+    bodies = [f"<p>{n}</p>" + "z" * 20_000 for n in range(forms)]
+    rows = [_form(b) for b in bodies]
+    revision = (rows[0]["updated_at"], "1", bodies[0])
+    one = artifacts._retained_bytes(rows[0]["artifact_id"], revision, (len(bodies[0]), "c1:" + "0" * 64))
+    monkeypatch.setattr(artifacts._CONTENT_IDENTITY, "max_weight", one * fit + one // 2)
+    return rows
+
+
+def test_a_corpus_over_the_bound_keeps_a_stable_resident_share(theo, monkeypatch, hashes):
+    _corpus_over_the_bound(monkeypatch)
+    _request(type="html_form")                     # cold: all 6 hashed
+    for _ in range(3):
+        hashes.clear()
+        _request(type="html_form")
+        assert len(hashes) == 3                     # only the excess, every list
+        assert len(artifacts._CONTENT_IDENTITY) == 3
+
+
+def test_churn_rehashes_exactly_the_changed_items(theo, monkeypatch, hashes):
+    rows = _corpus_over_the_bound(monkeypatch)
+    _request(type="html_form"); _request(type="html_form")
+    resident = {k for k in artifacts._CONTENT_IDENTITY._entries}
+    changed = next(r for r in rows if r["artifact_id"] in resident)
+    _rewrite(changed["artifact_id"], "<p>changed</p>" + "z" * 20_000)
+    hashes.clear()
+    items = {i["artifact_id"]: i for i in _request(type="html_form")}
+    assert len(hashes) == 3 + 1                     # the excess plus the changed one
+    assert items[changed["artifact_id"]]["content_omitted"]["sha256"] == "c1:" + hashlib.sha256(
+        ("<p>changed</p>" + "z" * 20_000).encode()).hexdigest()
+    assert resident == {k for k in artifacts._CONTENT_IDENTITY._entries}
+
+
+def test_a_resident_entry_with_changed_content_gets_a_fresh_c1(theo, monkeypatch):
+    rows = _corpus_over_the_bound(monkeypatch)
+    _request(type="html_form")
+    resident = next(r for r in rows if r["artifact_id"] in artifacts._CONTENT_IDENTITY._entries)
+    payload = json.loads(db.conn().execute("SELECT payload_json FROM artifacts WHERE artifact_id=?",
+                                           (resident["artifact_id"],)).fetchone()[0])
+    db.conn().execute("UPDATE artifacts SET payload_json=? WHERE artifact_id=?",   # same tuple
+                      (json.dumps({**payload, "content": "<p>swapped</p>"}), resident["artifact_id"]))
+    items = {i["artifact_id"]: i for i in _request(type="html_form")}
+    assert items[resident["artifact_id"]]["content_omitted"]["sha256"] == \
+        "c1:" + hashlib.sha256(b"<p>swapped</p>").hexdigest()
+
+
+def test_an_overweight_entry_is_not_admitted_and_evicts_nothing(theo, monkeypatch, hashes):
+    _corpus_over_the_bound(monkeypatch)
+    _request(type="html_form")
+    before = dict(artifacts._CONTENT_IDENTITY._entries)
+    big = _form("<p>big</p>" + "w" * 200_000)
+    hashes.clear()
+    items = {i["artifact_id"]: i for i in _request(type="html_form")}
+    assert items[big["artifact_id"]]["content_omitted"]["sha256"] == "c1:" + hashlib.sha256(
+        ("<p>big</p>" + "w" * 200_000).encode()).hexdigest()
+    assert big["artifact_id"] not in artifacts._CONTENT_IDENTITY._entries
+    assert dict(artifacts._CONTENT_IDENTITY._entries) == before
+
+
+def test_concurrent_requests_release_their_protection(theo, monkeypatch):
+    _corpus_over_the_bound(monkeypatch)
+    open_request = getattr(artifacts, "summary_request", None)
+    assert open_request is not None
+    rows = artifacts.list_artifacts(limit=200, type="html_form")
+    with open_request() as first:
+        for r in rows[:3]:
+            artifacts.response_representation(r, "summary-v1", budget=first)
+        with open_request() as second:              # interleaved: disjoint sets
+            for r in rows[3:]:
+                artifacts.response_representation(r, "summary-v1", budget=second)
+        assert artifacts._CONTENT_IDENTITY.weight <= artifacts._CONTENT_IDENTITY.max_weight
+    assert artifacts._CONTENT_IDENTITY._pins == {}      # all released
+    newcomer = _form("<p>new</p>" + "n" * 20_000)       # no starvation: a later request admits
+    _request(type="html_form")
+    assert newcomer["artifact_id"] in artifacts._CONTENT_IDENTITY._entries
+
+
+def test_an_error_mid_request_releases_the_protection(theo, monkeypatch):
+    _corpus_over_the_bound(monkeypatch)
+    open_request = getattr(artifacts, "summary_request", None)
+    assert open_request is not None
+    rows = artifacts.list_artifacts(limit=200, type="html_form")
+    with pytest.raises(RuntimeError):
+        with open_request() as budget:
+            artifacts.response_representation(rows[0], "summary-v1", budget=budget)
+            raise RuntimeError("client went away")
+    assert artifacts._CONTENT_IDENTITY._pins == {}
+    assert artifacts._HISTORY_DIGEST._pins == {}
+
+
+def test_other_revisioned_cache_users_keep_plain_lru():
+    from lib.revisioned_cache import RevisionedCache
+    from lib import revisioned_cache
+    cache = RevisionedCache("test_plain_lru", max_entries=3)
+    try:
+        for n in range(5):                              # a sequential scan evicts the oldest
+            cache.put(f"k{n}", 1, n)
+        assert list(cache._entries) == ["k2", "k3", "k4"]
+        assert cache.get("k0", 1) == (False, None)
+    finally:
+        revisioned_cache._REGISTRY.pop("test_plain_lru", None)
+
+
+def test_pending_rows_over_the_budget_hydrate_correctly(theo):
+    content = "<p>pending é</p>" + "q" * 5_000
+    row = _form(content)
+    budget = artifacts.summary_budget(max_bytes=10)
+    [item] = [artifacts.response_representation(r, "summary-v1", budget=budget)
+              for r in artifacts.list_artifacts(limit=200, type="html_form")]
+    assert item["content_omitted"]["hash_pending"] is True
+    hydrated = artifacts.get(row["artifact_id"])["content"]
+    [later] = _request(type="html_form")
+    assert later["content_omitted"]["sha256"] == "c1:" + hashlib.sha256(hydrated.encode()).hexdigest()
