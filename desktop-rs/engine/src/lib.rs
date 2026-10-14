@@ -255,6 +255,7 @@ pub struct Engine {
     panes: workspace::Panes,
     /// The restored layout's active chat, opened once the roster has it.
     restored_session: String,
+    restored_from_cache: bool,
     host_status: host_status::HostStatus,
     keyring: bool,
     has_stored_credential: bool,
@@ -369,6 +370,7 @@ impl Engine {
             draft_flush_token: 0,
             pending_uploads: HashMap::new(),
             restored_session: String::new(),
+            restored_from_cache: false,
             host_status: host_status::HostStatus::default(),
             keyring,
             has_stored_credential: false,
@@ -666,11 +668,74 @@ impl Engine {
     /// when there is no token.
     pub fn start(&mut self) {
         self.restored_session = self.panes.tree.active_session();
+        self.restore_startup_cache();
         if !self.token.is_empty() {
             self.reconnect();
             return;
         }
         self.look_up_credential();
+    }
+
+    /// Shows the last cached roster and open pane transcripts on Frame 1
+    /// before the Host answers `/agents/snapshot`.
+    fn restore_startup_cache(&mut self) {
+        if std::env::var_os("CLARP_EMPTY_STARTUP").is_some() {
+            return;
+        }
+        let Some(cache) = self.transcript_cache.clone() else { return };
+        let snapshot = cache.load_roster(&self.base_url);
+        if !snapshot.is_empty() && self.roster.agents().is_empty() {
+            self.mutate_roster(|r| r.apply_snapshot(&snapshot));
+            self.changes.push(Change::Roster);
+            self.archived.apply_snapshot(&snapshot);
+            if !self.archived.take_ops().is_empty() {
+                self.changes.push(Change::Archive);
+            }
+            self.restored_from_cache = true;
+            let restored = self.restored_session.clone();
+            let first = Some(restored)
+                .filter(|s| !s.is_empty() && (self.roster.find(s).is_some() || s.starts_with("pair:")))
+                .or_else(|| self.roster.first_session().map(str::to_owned));
+            if let Some(first) = first.filter(|_| !self.waiting_for_session_choice) {
+                self.selected = first.clone();
+                self.mutate_roster(|r| r.clear_unread(&first));
+                self.ensure_conversation(&first);
+                self.changes.push(Change::Selection);
+                if self.panes.tree.active_session() != first {
+                    self.panes.tree.set_active_session(&first);
+                    let _ = self.panes.tree.take_signals();
+                    self.changes.push(Change::Panes);
+                }
+            }
+        } else if self.selected.is_empty() && !self.restored_session.is_empty() && !self.waiting_for_session_choice {
+            let cached = cache.load(&self.base_url, &self.restored_session);
+            if !cached.is_empty() {
+                let first = self.restored_session.clone();
+                self.restored_from_cache = true;
+                self.selected = first.clone();
+                self.ensure_conversation(&first);
+                self.changes.push(Change::Selection);
+            }
+        }
+        let mut sessions: Vec<String> = self
+            .panes
+            .tree
+            .view_layout()
+            .iter()
+            .filter(|pane| pane.get("shown").and_then(Value::as_bool) == Some(true))
+            .filter_map(|pane| pane.get("session").and_then(Value::as_str).map(str::to_owned))
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !self.selected.is_empty() && !sessions.contains(&self.selected) {
+            sessions.push(self.selected.clone());
+        }
+        for session in sessions {
+            self.ensure_conversation(&session);
+            let cached = cache.load(&self.base_url, &session);
+            if !cached.is_empty() {
+                self.with_conversation(&session, |c| c.restore_cache_snapshot(&cached));
+            }
+        }
     }
 
     fn credential_looked_up(&mut self, server: &str, token: String) {
@@ -709,6 +774,26 @@ impl Engine {
         self.set_connection_state("connecting");
         self.api.get("server-info", "/server-info", &[]);
         self.force_snapshot();
+        if self.restored_from_cache && !self.selected.is_empty() {
+            let selected = self.selected.clone();
+            if !selected.starts_with("pair:") && !self.roster.find(&selected).is_some_and(|a| a.janitor) {
+                self.api.post_json(&format!("select:{selected}"), "/select", json!({"session": selected}), None);
+            }
+            self.open_log(&selected);
+            self.request_recoverable_clips(&selected);
+            let shown: Vec<String> = self
+                .panes
+                .tree
+                .view_layout()
+                .iter()
+                .filter(|pane| pane.get("shown").and_then(Value::as_bool) == Some(true))
+                .filter_map(|pane| pane.get("session").and_then(Value::as_str).map(str::to_owned))
+                .filter(|s| !s.is_empty() && *s != selected)
+                .collect();
+            for session in shown {
+                self.open_log(&session);
+            }
+        }
     }
 
     fn reset_transient_state(&mut self) {
@@ -845,6 +930,12 @@ impl Engine {
     }
 
     fn apply_snapshot(&mut self, object: &Object) {
+        self.restored_from_cache = false;
+        if let Some(cache) = &self.transcript_cache {
+            if let Err(error) = cache.save_roster(&self.base_url, object) {
+                eprintln!("clarp-engine: roster cache: {error}");
+            }
+        }
         if self.live.enabled {
             self.live_explanations(object.get("tool_explanations").and_then(Value::as_object));
         }

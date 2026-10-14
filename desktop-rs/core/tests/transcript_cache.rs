@@ -83,8 +83,12 @@ fn every_chat_cached_for_a_host_is_listed() {
     cache.save("http://a", "rachel", &snapshot("one")).unwrap();
     cache.save("http://a", "mike", &snapshot("two")).unwrap();
     cache.save("http://b", "rachel", &snapshot("elsewhere")).unwrap();
+    let roster_snap = log(json!({"agents": [{"session": "rachel", "persona_name": "Rachel"}], "archived_agents": []}));
+    cache.save_roster("http://a", &roster_snap).unwrap();
+    assert_eq!(cache.load_roster("http://a")["agents"][0]["session"], "rachel");
+    assert!(cache.load_roster("http://b").is_empty(), "roster cache is scoped to base_url");
     let chats = cache.all("http://a").unwrap();
-    assert_eq!(chats.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(), ["mike", "rachel"], "only this Host's chats, by session");
+    assert_eq!(chats.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(), ["mike", "rachel"], "only this Host's chats, by session (.roster files ignored)");
     assert_eq!(chats[1].1["turns"][0]["text"], "one");
     std::fs::remove_dir_all(&directory).unwrap();
 }

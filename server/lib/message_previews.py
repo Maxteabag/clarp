@@ -314,15 +314,25 @@ def _dashboard_revisions() -> tuple[dict[str, dict[str, int]], dict[str, dict[st
     stamps: dict[str, dict[str, int]] = {}
     for row in conn().execute("""
         SELECT agent_id, backend_session_id, MAX(revision) AS revision,
-               MAX(updated_at) AS updated_at FROM (
-            SELECT agent_id, backend_session_id, revision, updated_at FROM messages
-            UNION ALL
-            SELECT agent_id, backend_session_id, revision, NULL AS updated_at FROM conversation_heads
-        ) WHERE agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
-        GROUP BY agent_id, backend_session_id
+               MAX(updated_at) AS updated_at
+          FROM messages
+         WHERE agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
+         GROUP BY agent_id, backend_session_id
+        UNION ALL
+        SELECT agent_id, backend_session_id, revision, 0 AS updated_at
+          FROM conversation_heads
+         WHERE agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NULL)
     """):
-        revisions.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['revision'] or 0)
-        stamps.setdefault(row['agent_id'], {})[row['backend_session_id']] = int(row['updated_at'] or 0)
+        aid = row['agent_id']
+        bsid = row['backend_session_id']
+        rev = int(row['revision'] or 0)
+        upd = int(row['updated_at'] or 0)
+        agent_revs = revisions.setdefault(aid, {})
+        if rev > agent_revs.get(bsid, 0) or bsid not in agent_revs:
+            agent_revs[bsid] = rev
+        agent_stamps = stamps.setdefault(aid, {})
+        if upd > agent_stamps.get(bsid, 0) or bsid not in agent_stamps:
+            agent_stamps[bsid] = upd
     live = [row['agent_id'] for row in conn().execute("SELECT agent_id FROM agents WHERE deleted_at IS NULL")]
     return revisions, stamps, live
 

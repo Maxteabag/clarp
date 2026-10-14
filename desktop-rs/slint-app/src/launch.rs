@@ -86,10 +86,30 @@ fn forwarded(arguments: Vec<String>) {
     if let Err(error) = window.show() {
         eprintln!("clarp-slint: cannot show the window: {error}");
     }
+    focus_hyprland_window();
     let setting = app.engine.borrow().settings().boolean("launch/newAgentOnStartup", false);
     if options.launch_on_startup(false, setting, false) {
         start(&app, &window, Request::from_options(&options));
     }
+}
+
+fn focus_hyprland_window() {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return;
+    }
+    let pid = std::process::id();
+    let _ = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "ws=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty'); \
+             addr=$(hyprctl clients -j 2>/dev/null | jq -r 'map(select(.pid == {pid})) | first | .address // empty'); \
+             if [ -n \"$addr\" ] && [ -n \"$ws\" ]; then \
+                 hyprctl --batch \"dispatch movetoworkspacesilent $ws,address:$addr ; dispatch focuswindow address:$addr\" >/dev/null 2>&1; \
+             elif [ -n \"$addr\" ]; then \
+                 hyprctl dispatch focuswindow \"address:$addr\" >/dev/null 2>&1; \
+             fi"
+        ))
+        .spawn();
 }
 
 /// Starts `request` in the window: the New Session hub, or at once when it
