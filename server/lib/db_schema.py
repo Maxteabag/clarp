@@ -699,6 +699,7 @@ CREATE TABLE background_jobs (
     started_trace_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_background_jobs_active ON background_jobs(status, updated_at DESC);
+CREATE INDEX idx_background_jobs_agent_active ON background_jobs(agent_id) WHERE terminal_at IS NULL;
 CREATE INDEX idx_background_jobs_session ON background_jobs(session, updated_at DESC);
 CREATE INDEX idx_background_jobs_computer ON background_jobs(owner_kind, computer_id, updated_at DESC);
 

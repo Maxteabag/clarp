@@ -46,6 +46,8 @@ TURN_SCHEMA = (
  PRIMARY KEY(agent_id,native_id,tool_use_id))""",
     """CREATE INDEX IF NOT EXISTS idx_provider_task_turns_token
  ON provider_task_turns(turn_token)""",
+    """CREATE INDEX IF NOT EXISTS idx_background_jobs_agent_active
+ ON background_jobs(agent_id) WHERE terminal_at IS NULL""",
 )
 TURN_ENV = "CLARP_PROVIDER_TURN"
 _TOKEN = re.compile(r"[0-9a-f]{24}\Z")
