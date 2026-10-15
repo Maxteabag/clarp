@@ -89,8 +89,37 @@ _RECEIPTS_LOCK = threading.Lock()
 
 
 class CodexRpcError(RuntimeError):
-    """The app-server answered a request with a JSON-RPC error: a definitive
-    refusal, unlike a timeout or a lost reader."""
+    """The app-server answered a request with a JSON-RPC error. Whether that
+    proves the request did nothing depends on the method and the code (see
+    _STEER_REFUSALS for turn/steer)."""
+
+    def __init__(self, message: str, code: int | None = None):
+        super().__init__(message)
+        self.code = code
+
+
+class CodexNotSent(RuntimeError):
+    """Raised only before the first byte of a request is written (stdin gone,
+    or the process already exited): the app-server provably never saw it."""
+
+
+# JSON-RPC codes that prove a turn/steer was NOT accepted, for codex 0.159.2
+# (rust-v0.159.2, ff6aec96). In app-server/src/request_processors/
+# turn_processor.rs turn_steer_inner (1024-1162) every -32600 comes before
+# thread.steer_turn (thread load 380-386, direct-input gate in
+# thread_queue_processor.rs 298-305, empty expectedTurnId 1043, input limit
+# 1048-1054) or from a NotSubmitted reason (draining 1085, 1156-1159);
+# steer_input queues the input only on success. -32601/-32602
+# (error_code.rs 4-5) are raised before any handler runs. -32603 can follow a
+# submission ("failed to steer turn", 1076) and -32001 is overload: neither is
+# proof. Do not extend this set without the same proof for the new version.
+_STEER_REFUSALS = frozenset({-32600, -32601, -32602})
+
+
+class _ReservedSlot:
+    """A receipt slot held while its row is being registered (outside the
+    module lock); the reader skips it, the registering thread owns it."""
+    __slots__ = ()
 
 
 class CodexReaderLost(RuntimeError):
@@ -169,10 +198,11 @@ class _Client:
     def _send(self, message: dict) -> None:
         line = json.dumps(message, separators=(",", ":")) + "\n"
         with self._write_lock:
-            if self.proc.stdin is None:
-                raise RuntimeError("codex app-server stdin closed")
-            self.proc.stdin.write(line)
-            self.proc.stdin.flush()
+            stdin = self.proc.stdin
+            if stdin is None or getattr(stdin, "closed", False) or self.proc.poll() is not None:
+                raise CodexNotSent("codex app-server stdin closed")
+            stdin.write(line)
+            stdin.flush()
 
     def request(self, method: str, params: dict, timeout: float = 30) -> dict:
         with self._lock:
@@ -181,7 +211,12 @@ class _Client:
             done = threading.Event()
             box: dict = {}
             self._pending[rid] = (done, box)
-        self._send({"method": method, "id": rid, "params": params})
+        try:
+            self._send({"method": method, "id": rid, "params": params})
+        except BaseException:
+            with self._lock:
+                self._pending.pop(rid, None)       # never answered, never replayed
+            raise
         if not done.wait(timeout):
             with self._lock:
                 self._pending.pop(rid, None)
@@ -189,7 +224,9 @@ class _Client:
         if "error" in box:
             error = box["error"]
             if isinstance(error, dict) and "code" in error:
-                raise CodexRpcError(f"{method}: {error}")
+                code = error.get("code")
+                raise CodexRpcError(f"{method}: {error}",
+                                    code=code if isinstance(code, int) else None)
             if isinstance(error, dict) and error.get("reader_lost"):
                 raise CodexReaderLost(f"{method}: {error.get('message')}")
             raise RuntimeError(f"{method}: {error}")
@@ -415,10 +452,12 @@ class _Client:
         if kind == "userMessage":
             client_id = str(item.get("clientId") or "")
             receipt = active.receipts.get(client_id) if client_id else None
-            if receipt is not None:
+            if isinstance(receipt, steer_receipts.Receipt):
                 receipt.consume(active.seq)
             elif not client_id:
                 active.no_client_id = True
+            elif receipt is not None:
+                pass                                   # still registering: not yet sent
             else:
                 log("steerReceiptUnknownClientId", f"agent={active.agent_id} id={client_id}")
         elif kind == "agentMessage":
@@ -443,7 +482,10 @@ class _Client:
 
     def _settle_receipts(self, active: _ActiveTurn, status: str, *, coverage: str) -> None:
         with _RECEIPTS_LOCK:
-            taken = list(active.receipts.values())
+            # A reserved slot is still being registered: its thread sees the
+            # turn closed and settles its own row.
+            taken = [r for r in active.receipts.values()
+                     if isinstance(r, steer_receipts.Receipt)]
             active.receipts = {}
             active.receipts_closed = True
         for receipt in taken:
@@ -680,22 +722,9 @@ class _Client:
         }
         receipt = None
         if client_msg_id:
-            context = steer_receipts.current_context()
-            with _RECEIPTS_LOCK:
-                if active.receipts_closed:
-                    # The turn ended and its receipts are settled: nothing can
-                    # be steered into it. Unregistered, so dispatch goes on as
-                    # for any finished turn.
-                    log("steerReceiptTurnEnded",
-                        f"agent={active.agent_id} id={client_msg_id}")
-                    return False
-                receipt = steer_receipts.register(
-                    active.agent_id, client_msg_id,
-                    prompt_admission_id=context["prompt_admission_id"],
-                    trace_id=context["trace_id"], thread_id=active.thread_id,
-                    expected_turn_id=active.turn_id, gen=self.gen)
-                if receipt is not None:
-                    active.receipts[client_msg_id] = receipt
+            receipt = self._register_steer(active, client_msg_id)
+            if receipt is False:
+                return False
             if receipt is None:
                 # Already steered under this id: no second RPC (§11.2).
                 log("steerReceiptDuplicate", f"agent={active.agent_id} id={client_msg_id}")
@@ -715,10 +744,16 @@ class _Client:
             result = self.request("turn/steer", params)
         except TimeoutError:
             outcome = "timeout"
+        except CodexNotSent:
+            outcome = "not_sent"                 # no byte left: provably not accepted
         except CodexReaderLost:
             outcome = "reader_end"
-        except (CodexRpcError, OSError, RuntimeError):
-            outcome = "error"                    # refused, or never written
+        except CodexRpcError as exc:
+            outcome = "error" if exc.code in _STEER_REFUSALS else "rpc_error_ambiguous"
+        except (OSError, ValueError):
+            outcome = "send_failed"              # the write began: Codex may have it
+        except Exception:  # noqa: BLE001 - nothing else proves a refusal
+            outcome = "rpc_error_ambiguous"
         else:
             outcome = steer_receipts.ack_outcome(result, params["expectedTurnId"])
         before = (steer_receipts.get(active.agent_id, client_msg_id) or {}).get("state", "")
@@ -734,6 +769,48 @@ class _Client:
             raise CodexRpcError(f"turn/steer rejected for {client_msg_id}")
         # Anything else may have reached Codex (§11.11): never re-dispatch.
         return True
+
+    def _register_steer(self, active: _ActiveTurn, client_msg_id: str):
+        """The steer's durable receipt, written before its RPC: a Receipt,
+        None for an id already steered, or False when the turn closed first.
+
+        Only memory is touched under _RECEIPTS_LOCK: a slot is reserved, the
+        row is written outside the lock (it may wait on SQLite), and the slot
+        is claimed under the lock again. If the reader closed the turn in
+        between, nothing was sent: the row is rejected(turn_closed_before_send)
+        and dispatch carries on as for any finished turn."""
+        slot = _ReservedSlot()
+        with _RECEIPTS_LOCK:
+            if active.receipts_closed:
+                log("steerReceiptTurnEnded", f"agent={active.agent_id} id={client_msg_id}")
+                return False
+            if client_msg_id in active.receipts:
+                return None                             # in flight under this id
+            active.receipts[client_msg_id] = slot
+        context = steer_receipts.current_context()
+        try:
+            receipt = steer_receipts.register(
+                active.agent_id, client_msg_id,
+                prompt_admission_id=context["prompt_admission_id"],
+                trace_id=context["trace_id"], thread_id=active.thread_id,
+                expected_turn_id=active.turn_id, gen=self.gen)
+        except BaseException:
+            with _RECEIPTS_LOCK:
+                if active.receipts.get(client_msg_id) is slot:
+                    del active.receipts[client_msg_id]
+            raise
+        with _RECEIPTS_LOCK:
+            ours = active.receipts.get(client_msg_id) is slot and not active.receipts_closed
+            if ours:
+                if receipt is None:
+                    del active.receipts[client_msg_id]
+                else:
+                    active.receipts[client_msg_id] = receipt
+        if receipt is None or ours:
+            return receipt
+        receipt.close_before_send()
+        log("steerReceiptTurnEnded", f"agent={active.agent_id} id={client_msg_id} registered")
+        return False
 
     def interrupt_active(self, agent_id: str = "") -> None:
         active = self._actives.get(agent_id) if agent_id else self.active
