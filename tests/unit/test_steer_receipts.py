@@ -267,3 +267,43 @@ def test_readers_tolerate_a_missing_table():
     db.conn().execute("DROP TABLE steer_receipts")
     assert sr.responses_for(["u-x"]) == {}
     assert sr.receipt_for_message("u-x") is None
+
+
+# --- §11.12 rulings ----------------------------------------------------------------------
+
+@pytest.mark.parametrize("result,expected,outcome", [
+    ({"turnId": "turn-1"}, "turn-1", "ok"),
+    ({}, "turn-1", "ok"),                       # older codex: no turnId, still evidence-driven
+    ({"turnId": ""}, "turn-1", "ok"),
+    ({"turnId": "turn-9"}, "turn-1", "mismatch"),
+])
+def test_ack_outcome_from_the_steer_reply(result, expected, outcome):
+    assert sr.ack_outcome(result, expected) == outcome
+
+
+def test_the_steer_context_is_scoped_and_never_leaks():
+    assert sr.current_context() == {"prompt_admission_id": "", "trace_id": ""}
+    with sr.steer_context(prompt_admission_id="adm-1", trace_id="tr-1"):
+        assert sr.current_context() == {"prompt_admission_id": "adm-1", "trace_id": "tr-1"}
+    assert sr.current_context() == {"prompt_admission_id": "", "trace_id": ""}
+    with pytest.raises(RuntimeError):
+        with sr.steer_context(prompt_admission_id="adm-2", trace_id="tr-2"):
+            raise RuntimeError("steer failed")
+    assert sr.current_context() == {"prompt_admission_id": "", "trace_id": ""}
+
+
+def test_older_code_deleting_a_message_on_a_118_database_removes_the_receipt(tmp_path, monkeypatch):
+    from lib import db_schema
+    path = tmp_path / "state.sqlite"
+    db.reset_for_tests(path)
+    message_writes.record_user_message(agent_id=AGENT, backend_session_id=SESSION,
+                                       client_msg_id="older", text="x")
+    _register_settle("older", consumed=True, finals=[3])
+    db.conn().commit()
+    monkeypatch.setattr(db_schema, "_SCHEMA_VERSION", 117)    # older code opens the file
+    db.reset_for_tests(path)
+    db.conn().execute("DELETE FROM messages WHERE message_id='u-older'")
+    db.conn().commit()
+    monkeypatch.undo()
+    db.reset_for_tests(path)
+    assert _row("older") is None
