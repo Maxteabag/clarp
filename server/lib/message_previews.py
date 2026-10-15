@@ -9,7 +9,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from .db import change_stamp, conn
-from . import origins, team_leader
+from . import origins, steer_receipts, team_leader
 from .revisioned_cache import RevisionedCache
 from .voice_markup import clean_for_display
 from .message_context import _automation_kind, _display_text_for_message
@@ -122,6 +122,10 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
                         ON sender.agent_id = m.sender_agent_id
                      ORDER BY COALESCE(m.timestamp, '') ASC, m.seq ASC"""
     rows = conn().execute(query, tuple(params)).fetchall()
+    # Steer receipts: a user row whose steered message got no final reply,
+    # or whose reply status is unknown, says so (docs/protocol.md).
+    responses = steer_receipts.responses_for(
+        [row["message_id"] for row in rows if row["role"] == "user"])
     out: list[dict[str, Any]] = []
     for row in rows:
         automation_kind = _automation_kind(
@@ -159,6 +163,8 @@ def list_messages(*, agent_id: str, backend_session_id: str = "",
             # The settled turn's summary, on its last row only
             # (docs/live-items.md §9).
             **_turn_field(row["turn_json"]),
+            **({"response": responses[row["message_id"]]}
+               if row["message_id"] in responses else {}),
         })
     return out
 

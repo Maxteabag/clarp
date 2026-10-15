@@ -12,6 +12,7 @@ import time
 from typing import Any, Callable
 
 from . import agents as agents_db, artifacts, db, origins, quiet_agents, settings_store
+from . import steer_receipts
 from .log import log
 from .policies import notifications as notification_policy
 from .policies.notifications import (
@@ -114,6 +115,39 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
              LIMIT 1""",
         tuple(params),
     ).fetchone()
+
+
+def _receipt_disowns(cause_message_id: str, source) -> bool:
+    """A steer receipt can prove the time-window cause is not what the turn
+    answered (docs/protocol.md "Steer receipts"): its steered message got no
+    final reply, or the reply was written before the message was steered.
+    Without a receipt (an older runtime, an unsteered row) nothing changes."""
+    receipt = steer_receipts.receipt_for_message(cause_message_id)
+    if receipt is None:
+        return False
+    if receipt["state"] == "no_final_response":
+        return True
+    return source is not None and int(source["updated_at"] or 0) < int(receipt["registered_at"] or 0)
+
+
+def _originating_row(agent_id: str, trace_id: str, source, *, exclude: str):
+    """The user row that started this turn, when it precedes the reply."""
+    if not trace_id:
+        return None
+    row = db.conn().execute(
+        """SELECT message_id, origin, sender_agent_id, updated_at,
+                  backend_session_id, text, prompt_admission_id
+             FROM messages
+            WHERE agent_id = ? AND role = 'user' AND trace_id = ? AND message_id != ?
+            ORDER BY updated_at DESC, revision DESC, seq DESC
+            LIMIT 1""",
+        (agent_id, trace_id, exclude),
+    ).fetchone()
+    if row is None:
+        return None
+    if source is not None and int(row["updated_at"] or 0) > int(source["updated_at"] or 0):
+        return None
+    return row
 
 
 def _sending_client(prompt_admission_id: str) -> str:
@@ -369,6 +403,14 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
             _assistant_candidates(agent_id, backend_session_id, floor_ms, ceiling_ms)),
         timeout,
     )
+
+    if cause is not None and _receipt_disowns(cause["message_id"] or "", source):
+        cause = _originating_row(agent_id, trace_id, source, exclude=cause["message_id"])
+        origin = cause_message_id = client = ""
+        if cause is not None:
+            client = _sending_client(cause["prompt_admission_id"] or "")
+            origin = (cause["origin"] or "user").strip() or "user"
+            cause_message_id = cause["message_id"] or ""
 
     source_message_id = source["message_id"] if source is not None else ""
     agent = agents_db.get_by_agent_id(agent_id) if agent_id else None

@@ -321,6 +321,33 @@ answers; it lived only in that agent's own chat. Private user chats with either
 agent are never included, and the projection never moves or relays transcript
 rows. Sending into a pair conversation is not supported.
 
+#### Steer receipts (feature `steer_receipts`, contract 66)
+
+A message sent while a Codex turn is running is steered into that turn. Its
+user row may then carry `response`:
+
+```json
+"response": {"state": "no_final_response", "reason": "", "turn_id": "…"}
+```
+
+- `no_final_response`: the turn took the message and completed, with no final
+  answer after it. Show a muted "received — no final reply" on that row.
+- `unknown`: the reply status cannot be established. `reason` is a machine
+  code (`coverage`, `rebind`, `no_phase`, `no_client_id`,
+  `accepted_not_observed`, `ack_turn_mismatch`, `ack_timeout`), never shown.
+  Show a muted "received — reply status unknown"; never claim absence.
+- No `response` means answered, or no receipt (older runtime, not steered).
+  An unrecognized `state` or a malformed `response` is ignored; it never
+  fails the row.
+
+`response` appears when the receipt settles, which bumps the row's `revision`
+and emits `transcript-updated`; the ordinary delta brings it. Gate on the
+advertised feature, not on the contract number. The decision rests on protocol
+evidence of the turn (the UserMessage item echoing `client_msg_id`, then an
+agent message with phase `final_answer`), never on the reply's content. A
+steer whose RPC times out is not re-dispatched, because Codex may have taken
+it; a definitive JSON-RPC rejection still falls through to the queue.
+
 ### 3. Stay in sync: `GET /events` (SSE)
 
 One `text/event-stream` per client. Every event is a JSON object with a
