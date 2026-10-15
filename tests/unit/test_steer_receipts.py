@@ -309,12 +309,143 @@ def test_older_code_deleting_a_message_on_a_118_database_removes_the_receipt(tmp
     assert _row("older") is None
 
 
-def test_a_rejected_message_steered_again_from_the_queue_gets_a_fresh_receipt():
-    """Rejection proves the text never reached the turn; the fall-through
-    queues it, and a later steer of that queued message is a new delivery."""
+def test_a_rejected_message_steered_again_gets_a_new_attempt_and_the_old_row_stays():
+    """§11.13 Q2: rejection proves the text never reached the turn and the
+    fall-through queues it; a later steer of that queued message inserts
+    attempt n+1. The rejected row is never rewritten; readers use the latest."""
     receipt = _register("again")
     assert receipt.apply_ack("error") is True
+    rejected = tuple(db.conn().execute(
+        "SELECT * FROM steer_receipts WHERE client_msg_id='again' AND attempt=1").fetchone())
     fresh = _register("again", turn="turn-2")
-    assert fresh is not None
+    assert fresh is not None and fresh.attempt == 2
+    rows = db.conn().execute("SELECT attempt, state FROM steer_receipts"
+                             " WHERE client_msg_id='again' ORDER BY attempt").fetchall()
+    assert [tuple(r) for r in rows] == [(1, "rejected"), (2, "registered")]
+    assert tuple(db.conn().execute(
+        "SELECT * FROM steer_receipts WHERE client_msg_id='again' AND attempt=1").fetchone()) == rejected
     row = _row("again")
-    assert (row["state"], row["ack"], row["expected_turn_id"]) == ("registered", "pending", "turn-2")
+    assert (row["attempt"], row["state"], row["expected_turn_id"]) == (2, "registered", "turn-2")
+    fresh.consume(4)
+    fresh.settle_at_terminal(turn_status="completed", final_seqs=[2], unphased_seqs=[],
+                             coverage="", no_client_id=False)
+    assert sr.responses_for(["u-again"]) == {
+        "u-again": {"state": "no_final_response", "reason": "", "turn_id": "turn-2"}}
+    assert sr.receipt_for_message("u-again")["attempt"] == 2
+    assert _register("again", turn="turn-3") is None          # attempt 2 is not rejected
+    # Only the latest attempt's writes count: an old Receipt cannot touch attempt 2.
+    receipt.consume(9)
+    assert _row("again")["consumed_seq"] == 4
+
+
+def test_the_primary_key_carries_the_attempt():
+    pk = [r[1] for r in sorted(db.conn().execute("PRAGMA table_info(steer_receipts)"),
+                               key=lambda r: r[5]) if r[5]]
+    assert pk == ["agent_id", "client_msg_id", "attempt"]
+
+
+def test_the_last_final_seq_is_kept_whatever_the_outcome():
+    """§11.13 deviation 5: ordering facts persist even when nothing answered
+    the message, so notifications never need updated_at for them."""
+    _register_settle("fs", consumed=True, finals=[3])
+    row = _row("fs")
+    assert (row["state"], row["consumed_seq"], row["final_seq"]) == ("no_final_response", 5, 3)
+
+
+# --- §11.13 Q3: the runtime-boot sweep ---------------------------------------------------
+
+def test_runtime_boot_settles_every_open_receipt_before_any_dispatch():
+    from types import SimpleNamespace
+    from lib.runtime_startup import recover_runtime
+    for cid in ("boot-reg", "boot-acked", "boot-consumed"):
+        message_writes.record_user_message(agent_id=AGENT, backend_session_id=SESSION,
+                                           client_msg_id=cid, text=cid)
+    _register("boot-reg", gen="dead")
+    acked = _register("boot-acked", gen="dead"); acked.apply_ack("ok")
+    consumed = _register("boot-consumed", gen="dead"); consumed.consume(3)
+    _register_settle("boot-await")
+    _register_settle("boot-done", consumed=True, finals=[9])
+    done = _full_row("boot-done")
+    revisions = {cid: db.conn().execute("SELECT revision FROM messages WHERE message_id=?",
+                                        (f"u-{cid}",)).fetchone()[0]
+                 for cid in ("boot-reg", "boot-acked", "boot-consumed")}
+    seen = {}
+
+    def recover_queued():                   # dispatch starts only after the sweep
+        seen.update({cid: _row(cid)["state"] for cid in
+                     ("boot-reg", "boot-acked", "boot-consumed", "boot-await")})
+        return 0
+
+    result = recover_runtime(SimpleNamespace(stream=None),
+                             SimpleNamespace(recover_queued=recover_queued),
+                             restore_agents=lambda _ctx: None,
+                             mark_interrupted=lambda stream=None: [],
+                             reconcile=lambda: 0, repair_receipts=lambda: {})
+    assert set(seen.values()) == {"unknown"}
+    for cid in ("boot-reg", "boot-acked", "boot-consumed", "boot-await"):
+        assert (_row(cid)["state"], _row(cid)["reason"]) == ("unknown", "coverage")
+    assert _full_row("boot-done") == done
+    assert result["steer_receipts"] == 4
+    for cid, before in revisions.items():                     # clients see it without a turn
+        after = db.conn().execute("SELECT revision FROM messages WHERE message_id=?",
+                                  (f"u-{cid}",)).fetchone()[0]
+        assert after > before
+
+
+# --- §11.13 deviation 5: notification ordering from receipt seq facts ------------------
+
+def _notification_turn(*, late_state: str):
+    from lib import agents as agents_db
+    aid = agents_db.create_agent(persona="Seq", voice_id="v", cwd="/tmp", session="seq")
+    base = db.now_ms() - 20_000
+    message_writes.record_user_message(agent_id=aid, backend_session_id="bs", client_msg_id="first",
+                                       text="first", trace_id="turn-trace")
+    message_writes.record_user_message(agent_id=aid, backend_session_id="bs", client_msg_id="late",
+                                       text="late", trace_id="late-trace")
+    db.conn().execute("INSERT INTO messages (message_id, agent_id, backend_session_id, seq, role,"
+                      " text, tools_json, updated_at, origin, trace_id) VALUES"
+                      " ('a-old', ?, 'bs', 1, 'assistant', 'The old answer', '[]', ?, 'user',"
+                      " 'turn-trace')", (aid, base + 1000))
+    db.conn().execute("UPDATE messages SET updated_at=? WHERE message_id='u-first'", (base,))
+    db.conn().execute("UPDATE messages SET updated_at=? WHERE message_id='u-late'", (base + 3000,))
+    receipt = sr.register(aid, "late", prompt_admission_id="", trace_id="late-trace",
+                          thread_id="bs", expected_turn_id="turn-1", gen="g1")
+    if late_state == "consumed-after-the-final":
+        receipt.consume(5)
+        receipt.settle_at_terminal(turn_status="completed", final_seqs=[3], unphased_seqs=[],
+                                   coverage="coverage", no_client_id=False)
+    else:                                                      # no seq facts at all
+        receipt.apply_ack("ok")
+        receipt.settle_at_terminal(turn_status="completed", final_seqs=[], unphased_seqs=[],
+                                   coverage="", no_client_id=False)
+    db.conn().execute("UPDATE steer_receipts SET registered_at=? WHERE client_msg_id='late'",
+                      (base + 3000,))
+    return aid, base
+
+
+def _classify(aid, done_ts):
+    from lib import user_notifications
+    return user_notifications.classify_completed_turn(
+        agent_id=aid, session="seq", persona="Seq", backend_session_id="bs", trace_id="turn-trace",
+        done_ts=done_ts, settle_timeout_s=0, wait_for_message=lambda select, _t: select())
+
+
+def test_seq_facts_disown_an_old_answer_whose_row_was_touched_after_the_steer():
+    aid, base = _notification_turn(late_state="consumed-after-the-final")
+    assert (_row_for(aid, "late")["state"], _row_for(aid, "late")["reason"]) == ("unknown", "coverage")
+    # A later write (finalize, import, edit) bumps the old answer past the steer.
+    db.conn().execute("UPDATE messages SET updated_at=? WHERE message_id='a-old'", (base + 5000,))
+    note = _classify(aid, base + 6000)
+    assert note["source_message_id"] == "a-old"
+    assert note["cause_message_id"] == "u-first"              # not the steered row
+
+
+def test_without_seq_facts_updated_at_still_decides():
+    aid, base = _notification_turn(late_state="accepted-not-observed")
+    assert _row_for(aid, "late")["reason"] == "accepted_not_observed"
+    note = _classify(aid, base + 6000)                         # a-old predates the steer
+    assert note["cause_message_id"] == "u-first"
+
+
+def _row_for(aid, cid):
+    return sr.get(aid, cid)
