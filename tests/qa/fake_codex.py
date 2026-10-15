@@ -339,6 +339,8 @@ def app_server():
                 def answer(rid=rid, outcome=outcome, turn_id=turn_id):
                     if outcome == "ok":
                         emit({"id": rid, "result": {"turnId": turn_id}})
+                    elif outcome == "ok-no-turn-id":
+                        emit({"id": rid, "result": {}})   # an older codex answer
                     elif outcome == "mismatch":
                         emit({"id": rid, "result": {"turnId": "turn-elsewhere"}})
                     elif outcome == "error":

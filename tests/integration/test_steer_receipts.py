@@ -37,6 +37,17 @@ def send(host, text, cid, **extra):
                                   "synthesize_audio": False, **extra})
 
 
+def send_outstanding(host, text, cid):
+    """A /send whose steer RPC stays outstanding (no ACK) holds the request
+    until the runtime's 30 s RPC timeout; the client stops waiting at 5 s and
+    the Host carries on."""
+    import socket
+    try:
+        send(host, text, cid)
+    except (TimeoutError, socket.timeout, urllib.error.URLError):
+        pass
+
+
 def sql(host, query, *args):
     with sqlite3.connect(host.root / "state.sqlite") as con:
         con.row_factory = sqlite3.Row
@@ -54,7 +65,19 @@ def receipt(host, cid):
 TERMINAL = {"answered", "no_final_response", "interrupted", "failed", "rejected", "unknown"}
 
 
-def wait_receipt(host, cid, timeout=45.0):
+def require_receipts(host):
+    """Fail at once on a Host without receipts (the RED baseline), instead
+    of polling for rows that can never appear."""
+    with sqlite3.connect(host.root / "state.sqlite") as con:
+        found = con.execute("SELECT 1 FROM sqlite_master WHERE name='steer_receipts'").fetchone()
+    if found is None:
+        pytest.fail("this Host keeps no steer receipts (no steer_receipts table)")
+
+
+def wait_receipt(host, cid, timeout=15.0):
+    """The fake settles a steer within a few seconds; only tests that ride the
+    30 s RPC timeout pass a longer bound."""
+    require_receipts(host)
     deadline = time.monotonic() + timeout
     row = None
     while time.monotonic() < deadline:
@@ -165,6 +188,7 @@ def test_row_6_stop_with_an_acked_steer_is_interrupted(host):
     send(host, "[qa-slow] typed work", "slow")
     time.sleep(0.4)
     send(host, "Aside before stop", "stopme")
+    require_receipts(host)
     deadline = time.monotonic() + 10
     while receipt(host, "stopme") is None or receipt(host, "stopme")["ack"] == "pending":
         assert time.monotonic() < deadline
@@ -220,8 +244,8 @@ def test_row_11_native_rebind_mid_turn_is_unknown(host):
     send(host, "Rebound note", "rebound")
     time.sleep(0.4)
     with sqlite3.connect(host.root / "state.sqlite") as con:
-        con.execute("UPDATE agent_runtime SET backend_session_id='rebound-thread'"
-                    " WHERE agent_id=(SELECT agent_id FROM agents WHERE session='rachel')")
+        con.execute("UPDATE runtimes SET backend_session_id='rebound-thread'"
+                    " WHERE ended_at IS NULL AND agent_id=(SELECT agent_id FROM agents WHERE session='rachel')")
     row = wait_receipt(host, "rebound")
     assert (row["state"], row["reason"]) == ("unknown", "rebind")
 
@@ -301,7 +325,10 @@ def test_T_e_unseen_then_ack_mismatch(host):
 
 def test_T_f_unseen_then_no_ack_times_out_without_fall_through(host):
     mode(host, "ack-after-terminal=never")
-    row = late_steer(host, "tf")
+    send(host, "First request", "first")
+    host.wait_reply("rachel", "QA reply: First request")
+    send_outstanding(host, "Late note", "tf")
+    row = wait_receipt(host, "tf", timeout=45.0)   # the existing 30 s steer RPC timeout
     assert (row["state"], row["reason"]) == ("unknown", "ack_timeout")
     time.sleep(0.5)
     assert len(provider_requests(host, "turn/start")) == 1
@@ -327,8 +354,8 @@ def test_accepted_but_ack_lost_keeps_the_evidence_and_never_resends(host):
     mode(host, "mid,ack-after-terminal=never,consume")
     send(host, "[qa-slow] typed work", "slow")
     time.sleep(0.4)
-    send(host, "Lost ack", "lostack")
-    row = wait_receipt(host, "lostack")
+    send_outstanding(host, "Lost ack", "lostack")
+    row = wait_receipt(host, "lostack")       # settles at turn end, before the RPC times out
     assert row["state"] == "answered"                                  # consumed + final
     deadline = time.monotonic() + 45
     while receipt(host, "lostack")["ack"] == "pending":                # the 30 s RPC timeout
@@ -351,6 +378,7 @@ def test_stop_racing_an_outstanding_steer_rpc(host):
     send(host, "[qa-slow] typed work", "slow")
     time.sleep(0.4)
     send(host, "Racing aside", "race")
+    require_receipts(host)
     deadline = time.monotonic() + 5
     while receipt(host, "race") is None:
         assert time.monotonic() < deadline
@@ -364,6 +392,34 @@ def test_stop_racing_an_outstanding_steer_rpc(host):
     assert len(provider_requests(host, "turn/start")) == 1             # no re-dispatch
     queue = host.request("/turn-queue?session=rachel")
     assert queue["paused"] is True                                     # the stop-hold is intact
+
+
+def test_a_steer_reply_without_turn_id_counts_as_ok_and_stays_evidence_driven(host):
+    mode(host, "ack-after-terminal=ok-no-turn-id")
+    row = late_steer(host, "noturnid")
+    assert (row["state"], row["reason"], row["ack"]) == ("unknown", "accepted_not_observed", "ok")
+
+
+def test_receipt_metadata_reaches_each_receipt_and_does_not_leak(host):
+    mode(host, "mid")
+    send(host, "[qa-slow] typed work", "slow")
+    time.sleep(0.4)
+    send(host, "Aside one", "m1")
+    send(host, "Aside two", "m2")
+    one, two = wait_receipt(host, "m1"), wait_receipt(host, "m2")
+    admissions = {r["client_admission_id"]: r["admission_id"]
+                  for r in sql(host, "SELECT admission_id, client_admission_id FROM prompt_admissions")}
+    assert one["prompt_admission_id"] == admissions["m1"]
+    assert two["prompt_admission_id"] == admissions["m2"]
+    traces = {r["message_id"]: r["trace_id"] for r in sql(
+        host, "SELECT message_id, trace_id FROM messages WHERE message_id IN ('u-m1','u-m2')")}
+    assert one["trace_id"] == traces["u-m1"] and two["trace_id"] == traces["u-m2"]
+    assert one["trace_id"] != two["trace_id"]
+    mode(host, "")
+    wait_idle(host)
+    send(host, "A plain turn", "plain")                                 # no steer: no receipt
+    host.wait_reply("rachel", "QA reply: A plain turn")
+    assert receipt(host, "plain") is None
 
 
 # --- T-i: no per-turn state outlives the turn (in process) ----------------------------
