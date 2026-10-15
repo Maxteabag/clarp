@@ -18,8 +18,14 @@ def record(method, params):
             log.write(json.dumps({"method": method, **params}) + "\n")
 
 
+_EMIT_LOCK = threading.Lock()
+
+
 def emit(event):
-    print(json.dumps(event), flush=True)
+    # One whole line per event: several threads write to stdout.
+    with _EMIT_LOCK:
+        sys.stdout.write(json.dumps(event) + "\n")
+        sys.stdout.flush()
 
 
 def _thread_lock(thread_id: str):
@@ -39,6 +45,33 @@ def _thread_lock(thread_id: str):
     return handle
 
 
+def steer_modes():
+    """Opt-in steer behaviours (all off by default): CLARP_QA_STEER_MODE or the
+    provider root's ``steer-mode`` file, comma separated, read per call.
+
+    late, mid, reopen, commentary-only: where a steer is drained relative to
+      the turn's final answer (mirroring codex 0.159.2's pending-input drain
+      before sampling and its leftover drain in on_task_finished);
+    item-before-ack: the UserMessage item is emitted before the RPC answer;
+    ack-error, ack-mismatch: the RPC answer;
+    ack-after-terminal=ok|error|mismatch|never: the turn completes without
+      consuming the steer, then the RPC answer follows (or never comes);
+    no-client-id: UserMessage items carry no clientId;
+    restart: the app-server process exits once a steer is held.
+    """
+    raw = os.environ.get("CLARP_QA_STEER_MODE", "")
+    root = os.environ.get("CLARP_QA_PROVIDER_ROOT")
+    if root and (Path(root) / "steer-mode").is_file():
+        raw = (Path(root) / "steer-mode").read_text()
+    modes = {}
+    for token in raw.replace("\n", ",").split(","):
+        token = token.strip()
+        if token:
+            key, _, value = token.partition("=")
+            modes[key] = value or True
+    return modes
+
+
 def app_server():
     """JSON-RPC stdio app-server with per-thread flock and per-turn cancel.
 
@@ -51,6 +84,13 @@ def app_server():
     quota_file = Path(os.environ.get("CLARP_QA_PROVIDER_ROOT", "/nonexistent")) / "quota-mode"
     quota_mode = quota_file.read_text().strip() if quota_file.exists() else ""
     cancel_by_turn = {}
+    # Steered input per turn, drained into UserMessage items like Codex does.
+    pending_steers = {}
+    steered_turns = set()
+    steer_arrived = {}
+    steer_answers = {}
+    current_thread_for = {}
+    write_lock = threading.Lock()
     current_thread = str(uuid.uuid4())
     goals = {}
 
@@ -108,6 +148,25 @@ def app_server():
             held_locks[thread_id] = lock
         return lock
 
+    def drain_steers(turn_id, thread_id, modes):
+        """Emit the turn's pending steered input as UserMessage items."""
+        drained = pending_steers.pop(turn_id, [])
+        base = {"threadId": thread_id, "turnId": turn_id}
+        for client_id, text in drained:
+            item = {"id": str(uuid.uuid4()), "type": "userMessage",
+                    "content": [{"type": "text", "text": text}]}
+            if client_id and not modes.get("no-client-id"):
+                item["clientId"] = client_id
+            emit({"method": "item/started", "params": {**base, "item": item}})
+            emit({"method": "item/completed", "params": {**base, "item": item}})
+        return drained
+
+    def hold_for_steer(turn_id, seconds=10.0):
+        arrived = steer_arrived.setdefault(turn_id, threading.Event())
+        released = arrived.wait(seconds)
+        record("qa/steer-hold", {"turnId": turn_id, "released": released})
+        return released
+
     def complete(params, turn_id, stop, thread_id):
         time.sleep(0.05)  # let turn/start's response establish ownership
         base = {"threadId": thread_id, "turnId": turn_id}
@@ -140,12 +199,41 @@ def app_server():
                 return
             emit({"method": "item/updated", "params": {**base, "item": {
                 "id": turn_id, "type": "agentMessage", "text": part}}})
-        emit({"method": "item/completed", "params": {**base, "item": {
-            "id": turn_id, "type": "agentMessage", "text": text}}})
+        modes = steer_modes()
+        steering = bool(set(modes) & {"late", "mid", "reopen", "commentary-only", "restart",
+                                      "ack-after-terminal"})
+        # Input steered before the final is drained first and answered by it
+        # (codex drains pending input before each sampling request).
+        if drain_steers(turn_id, thread_id, modes) or turn_id in steered_turns:
+            steering = True
+        final = {"id": turn_id, "type": "agentMessage", "text": text}
+        if steering:
+            final["phase"] = "final_answer"   # codex 0.159 marks the answer
+        emit({"method": "item/completed", "params": {**base, "item": final}})
         persist(thread_id, "event_msg", {
             "type": "agent_message", "message": text, "phase": "final_answer"})
+        if set(modes) & {"late", "reopen", "commentary-only", "restart"} and hold_for_steer(turn_id):
+            if modes.get("restart"):
+                record("qa/restart", {"turnId": turn_id})
+                os._exit(3)           # the app-server dies mid-turn
+            drain_steers(turn_id, thread_id, modes)
+            if modes.get("reopen"):
+                # Input drained before the turn ends reopens it: a new answer.
+                emit({"method": "item/completed", "params": {**base, "item": {
+                    "id": str(uuid.uuid4()), "type": "agentMessage",
+                    "text": "QA second answer", "phase": "final_answer"}}})
+            elif modes.get("commentary-only"):
+                emit({"method": "item/completed", "params": {**base, "item": {
+                    "id": str(uuid.uuid4()), "type": "agentMessage",
+                    "text": "QA commentary", "phase": "commentary"}}})
+            # "late": leftover input recorded by on_task_finished, no reply.
+        elif modes.get("ack-after-terminal"):
+            hold_for_steer(turn_id)   # the steer arrives but is not consumed
         emit({"method": "turn/completed", "params": {**base, "turn": {
             "id": turn_id, "status": "completed"}}})
+        answer = steer_answers.pop(turn_id, None)
+        if answer is not None:
+            answer()
 
     for line in sys.stdin:
         request = json.loads(line)
@@ -218,6 +306,7 @@ def app_server():
             cancelled = threading.Event()
             turn_id = str(uuid.uuid4())
             cancel_by_turn[turn_id] = cancelled
+            current_thread_for[turn_id] = thread_id
             result = {"turn": {"id": turn_id, "threadId": thread_id}}
             persist(thread_id, "event_msg", {"type": "user_message",
                 "message": "".join(
@@ -229,7 +318,38 @@ def app_server():
                 ev.set()
         elif method == "turn/steer":
             record("turn/steer", params)
-            result = {}
+            turn_id = str(params.get("expectedTurnId") or "")
+            client_id = str(params.get("clientUserMessageId") or "")
+            text = "".join(item.get("text", "") for item in params.get("input", []))
+            modes = steer_modes()
+            if modes.get("ack-error"):
+                emit({"id": request["id"], "error": {
+                    "code": -32600, "message": f"no active turn to steer: {turn_id}"}})
+                continue
+            if modes.get("ack-after-terminal"):
+                outcome = str(modes["ack-after-terminal"])
+                rid = request["id"]
+
+                def answer(rid=rid, outcome=outcome, turn_id=turn_id):
+                    if outcome == "ok":
+                        emit({"id": rid, "result": {"turnId": turn_id}})
+                    elif outcome == "mismatch":
+                        emit({"id": rid, "result": {"turnId": "turn-elsewhere"}})
+                    elif outcome == "error":
+                        emit({"id": rid, "error": {"code": -32600,
+                                                    "message": "expected turn is no longer active"}})
+                    # "never": no answer; the Host's own RPC timeout ends it.
+                steer_answers[turn_id] = answer
+                steered_turns.add(turn_id)
+                steer_arrived.setdefault(turn_id, threading.Event()).set()
+                continue
+            steered_turns.add(turn_id)
+            pending_steers.setdefault(turn_id, []).append((client_id, text))
+            if modes.get("item-before-ack"):
+                # The turn loop can drain the input before the RPC answer.
+                drain_steers(turn_id, current_thread_for.get(turn_id, current_thread), modes)
+            steer_arrived.setdefault(turn_id, threading.Event()).set()
+            result = {"turnId": "turn-elsewhere" if modes.get("ack-mismatch") else turn_id}
         elif method == "thread/goal/set":
             thread_id = params.get("threadId") or current_thread
             goal = goals.get(thread_id) or {"objective": "", "status": "active", "tokens": 0,
