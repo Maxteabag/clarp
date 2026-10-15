@@ -649,6 +649,26 @@ def test_normal_send_admitted_during_stop_runs_after_interrupt(tmp_path):
     assert backends.spawned[0][1]["text"] == "new work after stop"
 
 
+def test_a_steer_without_client_msg_id_uses_the_user_row_identity(tmp_path):
+    """Steer receipts (§11.13 Q1): every steer carries the identity its user
+    row is filed under, client_msg_id or else the trace, so it gets a receipt."""
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path),
+        session="mike", backend="codex",
+    )
+    agents_db.start_runtime(agent_id, "mike")
+    backends = _SteerableBackends()
+    ctx = SimpleNamespace(default_session="mike",
+                          agents_path=tmp_path / "unused.json", stream=_Stream())
+    service = TurnDispatchService(ctx, backend_registry=backends, home=tmp_path,
+                                  uuid_factory=lambda: "backend-session-1")
+    service.dispatch(text="original request", requested_session="mike",
+                     trace_id="tA", synthesize_audio=False)
+    service.dispatch(text="no client id", requested_session="mike",
+                     trace_id="tB", synthesize_audio=False)
+    assert backends.steered == [("codex", agent_id, "no client id", "tB", False)]
+
+
 def test_explicit_queue_does_not_steer_busy_codex_turn(tmp_path):
     agent_id = agents_db.create_agent(
         persona="Mike", voice_id="V", cwd=str(tmp_path),
