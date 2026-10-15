@@ -180,3 +180,34 @@ def test_anonymous_launch_names_speak_with_their_archetype_voice(tmp_path):
     assert loaded.cartesia_voice_for("Nobody-5628") is None
     assert loaded.cartesia_voice_for("Claude-Smith") is None
     config.reset_cache()
+
+
+def test_oracle_languages_default_empty(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("[oracle]\nvoice_provider = \"gemini\"\n")
+    config.reset_cache()
+    assert config.load(path).oracle_languages == ()
+
+
+def test_oracle_languages_keeps_valid_bcp47_codes_in_order(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[oracle]\nlanguages = [" nb-NO ", "en-US", "nb-NO", "yue-Hant-HK"]\n')
+    config.reset_cache()
+    assert config.load(path).oracle_languages == ("nb-NO", "en-US", "yue-Hant-HK")
+
+
+def test_oracle_languages_drops_invalid_entries_with_a_warning(tmp_path, capsys):
+    path = tmp_path / "config.toml"
+    path.write_text('[oracle]\nlanguages = ["nb-NO", "Norwegian", "", 7, "en_US"]\n')
+    config.reset_cache()
+    assert config.load(path).oracle_languages == ("nb-NO",)
+    err = capsys.readouterr().err
+    assert "oracle_languages" in err and "'Norwegian'" in err and "'en_US'" in err and "7" in err
+
+
+def test_oracle_languages_that_is_not_a_list_is_ignored_with_a_warning(tmp_path, capsys):
+    path = tmp_path / "config.toml"
+    path.write_text('[oracle]\nlanguages = "nb-NO"\n')
+    config.reset_cache()
+    assert config.load(path).oracle_languages == ()
+    assert "oracle_languages" in capsys.readouterr().err

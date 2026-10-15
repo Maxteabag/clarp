@@ -204,6 +204,24 @@ def test_live_config_roster_is_capped_at_forty_and_voice_context_appended():
     assert '"Sqlit"' in text and "Prepared vocabulary reference" in text
 
 
+def test_live_config_states_the_users_languages_as_one_fact_line():
+    base = mod.live_config(voice_context={"terms": ["Sqlit"]})
+    cfg = mod.live_config(voice_context={"terms": ["Sqlit"]}, languages=("nb-NO", "en-US"))
+    assert cfg["instructions"] == base["instructions"] + "\nThe user speaks Norwegian (nb-NO) and English (en-US)."
+    assert {k: v for k, v in cfg.items() if k != "instructions"} == {k: v for k, v in base.items() if k != "instructions"}
+
+
+def test_language_fact_names_known_codes_and_falls_back_to_the_code():
+    assert mod.language_fact(("en-GB",)) == "The user speaks English (en-GB)."
+    assert mod.language_fact(("nb-NO", "sv-SE", "xq-ZZ")) == \
+        "The user speaks Norwegian (nb-NO), Swedish (sv-SE) and xq-ZZ."
+    assert mod.language_fact(()) == ""
+
+
+def test_live_config_without_languages_is_unchanged():
+    assert mod.live_config(languages=()) == mod.live_config() == mod.live_config(languages=None)
+
+
 # ---- Conversation ------------------------------------------------------------
 
 

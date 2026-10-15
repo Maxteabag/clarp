@@ -9,6 +9,16 @@ OpenAI's GPT-Live. GPT-Live stays the default.
   optional `gemini_model` (default `gemini-3.8-live`) and `gemini_voice`
   (default: the `Oracle` entry in `[gemini_tts.voices]`, else
   `[gemini_tts] voice`).
+- `[oracle] languages = ["nb-NO", "en-US"]`: the BCP-47 codes of the
+  languages the user speaks (default empty). On Gemini they become
+  `inputAudioTranscription.languageCodes`, which biases the transcription of
+  the user's speech toward them; empty means Gemini's automatic language
+  detection, which hears a short Norwegian "Hallo?" as Spanish or German. On
+  both GPT-Live and Gemini the instructions end with one line stating them
+  ("The user speaks Norwegian (nb-NO) and English (en-US).") and nothing
+  else, so the model still answers in whichever language fits. The reply
+  language (`speechConfig.languageCode`) is not pinned. Invalid codes are
+  dropped with a `config.oracle_languages` log line.
 - At runtime, overriding the config: `POST /oracle/voice-provider
   {"provider": "gemini"}` or `{"provider": "openai"}`; `GET` shows the choice,
   what new calls actually use and why they differ. The next call uses it; a
