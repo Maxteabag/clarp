@@ -307,3 +307,14 @@ def test_older_code_deleting_a_message_on_a_118_database_removes_the_receipt(tmp
     monkeypatch.undo()
     db.reset_for_tests(path)
     assert _row("older") is None
+
+
+def test_a_rejected_message_steered_again_from_the_queue_gets_a_fresh_receipt():
+    """Rejection proves the text never reached the turn; the fall-through
+    queues it, and a later steer of that queued message is a new delivery."""
+    receipt = _register("again")
+    assert receipt.apply_ack("error") is True
+    fresh = _register("again", turn="turn-2")
+    assert fresh is not None
+    row = _row("again")
+    assert (row["state"], row["ack"], row["expected_turn_id"]) == ("registered", "pending", "turn-2")

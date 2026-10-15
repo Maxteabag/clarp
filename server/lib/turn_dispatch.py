@@ -16,7 +16,7 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
-from . import recovery_backoff, turn_lifecycle, turn_slots
+from . import recovery_backoff, steer_receipts, turn_lifecycle, turn_slots
 from . import events
 from .turn_lifecycle import TurnEvent
 from .turn_slots import OwnershipLock, defer_on
@@ -1890,11 +1890,15 @@ class TurnDispatchService:
                 _with_delivery_context(
                     peer_text, unheard_audio=spec.unheard_audio),
                 digest=spec.team_digest, protocol=spec.team_protocol)
-            accepted = bool(steer(
-                spec.backend, spec.agent_id, steer_text,
-                client_msg_id=spec.client_msg_id,
-                synthesize_audio=spec.synthesize_audio,
-            ))
+            # The receipt (lib/steer_receipts.py) records which admission and
+            # trace it belongs to; the backend steer signatures stay unchanged.
+            with steer_receipts.steer_context(
+                    prompt_admission_id=spec.prompt_admission_id, trace_id=spec.trace_id):
+                accepted = bool(steer(
+                    spec.backend, spec.agent_id, steer_text,
+                    client_msg_id=spec.client_msg_id,
+                    synthesize_audio=spec.synthesize_audio,
+                ))
         except Exception as e:  # noqa: BLE001
             log_exception("turnSteerFail", e, detail=spec.agent_id)
             # A peer message falls through to wait behind the turn (it is
