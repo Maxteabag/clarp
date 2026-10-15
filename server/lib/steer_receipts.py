@@ -28,8 +28,6 @@ import sqlite3
 import threading
 from typing import Iterator
 
-from . import db
-
 log = logging.getLogger(__name__)
 
 NON_TERMINAL = ("registered", "acked", "consumed", "awaiting_ack")
@@ -66,6 +64,9 @@ CREATE INDEX idx_steer_receipts_message ON steer_receipts(message_id);
 CREATE TRIGGER steer_receipts_follow_message AFTER DELETE ON messages
 BEGIN DELETE FROM steer_receipts WHERE message_id = OLD.message_id; END;
 """
+
+# After SCHEMA: db_schema imports it while `db` is still loading.
+from . import db  # noqa: E402
 
 
 def decide(consumed_seq: int | None, final_seqs, unphased_seqs, turn_status: str,
