@@ -81,8 +81,11 @@ def decide(consumed_seq: int | None, final_seqs, unphased_seqs, turn_status: str
     evidence outcome. "unbound" (the agent lost its binding mid-turn) is a
     weaker gap: it only keeps absence from being asserted, so it turns
     no_final_response into unknown(coverage) and changes nothing else. `ack`
-    is the steer RPC outcome so far: pending, ok, error, mismatch, timeout or
-    reader_end."""
+    is the steer RPC outcome so far: pending, ok, mismatch, timeout,
+    reader_end, error (a JSON-RPC refusal that proves non-acceptance),
+    not_sent (refused before any byte was written), send_failed (the write
+    began and failed) or rpc_error_ambiguous (any other error). Only error and
+    not_sent are rejections."""
     unbound = coverage == "unbound"
     if unbound:
         coverage = ""
@@ -98,6 +101,10 @@ def decide(consumed_seq: int | None, final_seqs, unphased_seqs, turn_status: str
         return ("unknown", "coverage") if unbound else ("no_final_response", "")
     if ack == "error":
         return "rejected", ""
+    if ack == "not_sent":
+        return "rejected", "not_sent"
+    if ack in ("send_failed", "rpc_error_ambiguous"):
+        return "unknown", ack
     if ack == "mismatch":
         return "unknown", "ack_turn_mismatch"
     if ack == "timeout":
@@ -178,11 +185,19 @@ class Receipt:
         return state, reason
 
     @_locked
+    def close_before_send(self) -> None:
+        """The turn closed while this row was being registered and no RPC
+        was sent: Codex never saw the message."""
+        self._update("state='rejected', reason='turn_closed_before_send', settled_at=?",
+                     "state='registered'", (db.now_ms(),))
+
+    @_locked
     def apply_ack(self, outcome: str) -> bool:
         """Record the steer RPC's outcome. True only when this ACK proves Codex
         never took the message (a definitive rejection with no consumption):
-        the caller then runs the existing fall-through. A timeout or reader end
-        never falls through, since acceptance cannot be ruled out."""
+        the caller then runs the existing fall-through. A timeout, a reader
+        end, a failed write or an ambiguous error never falls through, since
+        acceptance cannot be ruled out."""
         first = self.ack == "pending"
         if first and outcome != "reader_end":
             self.ack = outcome
