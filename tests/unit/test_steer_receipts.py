@@ -630,3 +630,318 @@ def test_the_reader_survives_an_insert_into_the_receipts_it_took(monkeypatch, re
         client._fail_all("codex app-server exited")
         assert active.handle._done.is_set()
     assert _row("c1")["state"] != "registered"
+
+
+# --- §11.15 A: only proven non-acceptance falls through --------------------------------
+
+class _Wire:
+    """The app-server's stdin as the Host sees it: records each complete line
+    that reached the other side and can answer it through the client's own
+    pending table, the way the reader would. Can refuse before any byte
+    (closed), fail mid-write or fail the flush after delivery."""
+
+    def __init__(self, client, *, answer=None, fail_write=None, fail_flush=None,
+                 closed=False, on_write=None):
+        self.client, self.answer = client, answer
+        self.fail_write, self.fail_flush = fail_write, fail_flush
+        self.closed, self.on_write = closed, on_write
+        self.buf, self.sent = "", []
+
+    def write(self, line):
+        if self.closed:
+            raise ValueError("I/O operation on closed file.")
+        if self.on_write:
+            self.on_write()
+        if self.fail_write:
+            self.buf += line[: len(line) // 2]
+            raise self.fail_write
+        self.buf += line
+
+    def flush(self):
+        *lines, self.buf = self.buf.split("\n")
+        for raw in lines:
+            message = __import__("json").loads(raw)
+            self.sent.append(message)
+            if self.answer:
+                self.answer(self.client, message)
+        if self.fail_flush:
+            raise self.fail_flush
+
+    def steers(self):
+        return [m for m in self.sent if m.get("method") == "turn/steer"]
+
+
+def _reply(client, message, *, result=None, error=None):
+    with client._lock:
+        pending = client._pending.pop(message["id"], None)
+    if pending:
+        done, box = pending
+        box.update({"id": message["id"]},
+                   **({"error": error} if error is not None else {"result": result or {}}))
+        done.set()
+
+
+def _ok(client, message):
+    _reply(client, message, result={"turnId": message["params"]["expectedTurnId"]})
+
+
+def _wire_client(monkeypatch, *, agent=AGENT, turn="turn-1", client=None, **wire):
+    """A Codex client using the real request()/_send() over a _Wire."""
+    import threading
+    from types import SimpleNamespace
+    from lib import codex_app_server as cas
+    from lib.backend.codex import TurnState
+    if client is None:
+        client = object.__new__(cas._Client)
+        client.agent_id, client.gen, client.stream = agent, "g1", None
+        client._lock, client._write_lock = threading.Lock(), threading.Lock()
+        client._pending, client._actives, client._next_id = {}, {}, 1
+        client.proc = SimpleNamespace(stdin=_Wire(client, **wire), poll=lambda: None)
+        client.active = None
+        monkeypatch.setattr(cas.agents_db, "live_backend_session", lambda _a: SESSION)
+    handle = SimpleNamespace(is_alive=lambda: True, _done=threading.Event())
+    active = cas._ActiveTurn(turn, SESSION, agent, "s", "trace",
+                             TurnState(live_backend_session_id=SESSION), handle, None, None,
+                             None, lambda **_k: 0)
+    active.steer_ready.set()
+    client._actives[agent] = active
+    client.active = active
+    return client, active, client.proc.stdin
+
+
+def _consume_then(reply):
+    """The UserMessage echo is read before the RPC's answer."""
+    def answer(client, message):
+        active = client._actives[AGENT]
+        active.seq += 1
+        client._receipt_evidence(active, {"type": "userMessage",
+                                          "clientId": message["params"]["clientUserMessageId"]})
+        reply(client, message)
+    return answer
+
+
+def test_A1_accepted_then_the_flush_fails_is_unknown_send_failed(monkeypatch):
+    client, _active, wire = _wire_client(monkeypatch, answer=_ok, fail_flush=BrokenPipeError(32, "pipe"))
+    assert client.steer("aside", "a1", agent_id=AGENT) is True          # no fall-through
+    row = _row("a1")
+    assert (row["state"], row["reason"], row["ack"]) == ("unknown", "send_failed", "send_failed")
+    assert len(wire.steers()) == 1                                       # Codex has it; never replayed
+    assert client._pending == {}
+
+
+@pytest.mark.parametrize("reply", ["timeout-free -32603", "-32600 after consumption"])
+def test_A2_a_lost_or_failed_ack_after_consumption_keeps_the_evidence(monkeypatch, reply):
+    code = -32603 if reply.startswith("timeout") else -32600
+    client, active, wire = _wire_client(monkeypatch, answer=_consume_then(
+        lambda c, m: _reply(c, m, error={"code": code, "message": "x"})))
+    assert client.steer("aside", "a2", agent_id=AGENT) is True
+    active.seq += 1
+    client._receipt_evidence(active, {"type": "agentMessage", "phase": "final_answer"})
+    client._settle_receipts(active, "completed", coverage="")
+    assert _row("a2")["state"] == "answered"
+    assert len(wire.steers()) == 1
+
+
+def test_A3_a_partial_write_is_unknown_send_failed(monkeypatch):
+    client, _active, _wire = _wire_client(monkeypatch, fail_write=OSError(5, "EIO"))
+    assert client.steer("aside", "a3", agent_id=AGENT) is True
+    assert (_row("a3")["state"], _row("a3")["reason"]) == ("unknown", "send_failed")
+    assert client._pending == {}
+
+
+def test_A4_a_closed_stdin_before_any_byte_is_rejected_and_falls_through(monkeypatch):
+    client, _active, wire = _wire_client(monkeypatch, closed=True)
+    with pytest.raises(RuntimeError):                                    # the fall-through signal
+        client.steer("aside", "a4", agent_id=AGENT)
+    row = _row("a4")
+    assert (row["state"], row["reason"], row["ack"]) == ("rejected", "not_sent", "not_sent")
+    assert wire.sent == [] and wire.buf == ""
+    assert client._pending == {}
+
+
+@pytest.mark.parametrize("code", [-32600, -32601, -32602])
+def test_A5_a_definitive_json_rpc_refusal_is_rejected_and_falls_through(monkeypatch, code):
+    client, _active, _wire = _wire_client(
+        monkeypatch, answer=lambda c, m: _reply(c, m, error={"code": code, "message": "no"}))
+    with pytest.raises(RuntimeError):
+        client.steer("aside", "a5", agent_id=AGENT)
+    assert (_row("a5")["state"], _row("a5")["ack"]) == ("rejected", "error")
+
+
+@pytest.mark.parametrize("code", [-32603, -32001, -32000, 1])
+def test_A6_any_other_json_rpc_error_is_unknown_without_fall_through(monkeypatch, code):
+    client, _active, wire = _wire_client(
+        monkeypatch, answer=lambda c, m: _reply(c, m, error={"code": code, "message": "failed to steer turn"}))
+    assert client.steer("aside", "a6", agent_id=AGENT) is True
+    row = _row("a6")
+    assert (row["state"], row["reason"], row["ack"]) == ("unknown", "rpc_error_ambiguous",
+                                                         "rpc_error_ambiguous")
+    assert len(wire.steers()) == 1
+
+
+@pytest.mark.parametrize("failure", ["uncoded error reply", "generic RuntimeError"])
+def test_A7_an_uncoded_or_generic_error_is_unknown_without_fall_through(monkeypatch, failure):
+    if failure == "uncoded error reply":
+        client, _active, _wire = _wire_client(
+            monkeypatch, answer=lambda c, m: _reply(c, m, error={"message": "odd"}))
+    else:
+        client, _active, _wire = _wire_client(monkeypatch, fail_flush=RuntimeError("odd"))
+    assert client.steer("aside", "a7", agent_id=AGENT) is True
+    assert _row("a7")["state"] == "unknown"
+    assert _row("a7")["reason"] in ("rpc_error_ambiguous", "send_failed")
+    assert client._pending == {}
+
+
+def test_A8_reader_loss_while_awaiting_the_ack_is_unknown_coverage(monkeypatch):
+    client, _active, _wire = _wire_client(
+        monkeypatch, answer=lambda c, _m: c._fail_all("codex app-server exited"))
+    assert client.steer("aside", "a8", agent_id=AGENT) is True
+    assert (_row("a8")["state"], _row("a8")["reason"]) == ("unknown", "coverage")
+
+
+@pytest.mark.parametrize("consumed", [True, False])
+def test_A9_a_stop_racing_an_outstanding_steer_keeps_the_evidence(monkeypatch, consumed):
+    def stop_then_fail(client, message):
+        active = client._actives[AGENT]
+        if consumed:
+            active.seq += 1
+            client._receipt_evidence(active, {"type": "userMessage",
+                                              "clientId": message["params"]["clientUserMessageId"]})
+        client._settle_receipts(active, "interrupted", coverage="")      # the Stop lands first
+        _reply(client, message, error={"code": -32603, "message": "failed to steer turn"})
+    client, _active, wire = _wire_client(monkeypatch, answer=stop_then_fail)
+    assert client.steer("aside", "a9", agent_id=AGENT) is True          # never re-dispatched
+    row = _row("a9")
+    if consumed:
+        assert row["state"] == "interrupted"
+    else:
+        assert (row["state"], row["reason"]) == ("unknown", "rpc_error_ambiguous")
+    assert len(wire.steers()) == 1
+
+
+# --- §11.15 B: no SQLite I/O under the module lock ---------------------------------------
+
+def test_B1prime_a_blocked_register_never_stalls_another_turns_settle(monkeypatch):
+    import sqlite3
+    import threading
+    import time
+    from lib import codex_app_server as cas
+    client, active_a, _wire = _wire_client(monkeypatch, answer=_ok)
+    _client, active_b, _ = _wire_client(monkeypatch, agent="agent-other", client=client)
+    entering = threading.Event()
+    register = sr.register
+
+    def slow_register(*args, **kwargs):
+        entering.set()
+        return register(*args, **kwargs)
+    monkeypatch.setattr(sr, "register", slow_register)
+    holder = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")                         # another writer holds the DB
+    steering = threading.Thread(target=lambda: _swallow(lambda: client.steer(
+        "aside", "b1", agent_id=AGENT)))
+    try:
+        steering.start()
+        assert entering.wait(5)
+        started = time.monotonic()
+        settling = threading.Thread(target=client._settle_receipts, args=(active_b, "completed"),
+                                    kwargs={"coverage": ""})
+        settling.start()
+        settling.join(1.0)
+        elapsed = time.monotonic() - started
+        assert not settling.is_alive(), "the reader waited on a DB write behind the module lock"
+        assert elapsed < 1.0                                    # busy_timeout is 5 s
+        assert not cas._RECEIPTS_LOCK.locked()
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+        steering.join(10)
+        settling.join(10)
+    assert active_b.receipts_closed
+
+
+def _swallow(call):
+    try:
+        call()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _close_during_register(monkeypatch, client, active, event):
+    """Run the reader's `event` on its own thread while steer() registers."""
+    import threading
+    register = sr.register
+    ran = []
+
+    def racing_register(*args, **kwargs):
+        receipt = register(*args, **kwargs)
+        reader = threading.Thread(target=event)
+        reader.start()
+        reader.join(2)
+        ran.append(not reader.is_alive())
+        return receipt
+    monkeypatch.setattr(sr, "register", racing_register)
+    return ran
+
+
+def test_B2prime_a_turn_closed_during_registration_is_rejected_before_send(monkeypatch):
+    client, active, wire = _wire_client(monkeypatch, answer=_ok)
+    ran = _close_during_register(monkeypatch, client, active,
+                                 lambda: client._settle_receipts(active, "completed", coverage=""))
+    assert client.steer("aside", "b2", agent_id=AGENT) is False          # normal dispatch runs
+    assert ran == [True]                                                 # the reader never waited
+    row = _row("b2")
+    assert (row["attempt"], row["state"], row["reason"]) == (1, "rejected", "turn_closed_before_send")
+    assert wire.steers() == []                                           # no RPC
+    assert "b2" not in active.receipts
+    monkeypatch.undo()
+    monkeypatch.setattr(__import__("lib.codex_app_server", fromlist=["x"]).agents_db,
+                        "live_backend_session", lambda _a: SESSION)
+    client2, _active2, _ = _wire_client(monkeypatch, turn="turn-2", client=client)
+    assert client.steer("aside", "b2", agent_id=AGENT) is True
+    assert (_row("b2")["attempt"], _row("b2")["expected_turn_id"]) == (2, "turn-2")
+    assert len(wire.steers()) == 1
+
+
+@pytest.mark.parametrize("point", ["register", "before_send", "outstanding"])
+@pytest.mark.parametrize("event", ["completed", "interrupted", "reader_loss"])
+def test_B3prime_register_settle_reader_loss_and_stop_interleave_safely(monkeypatch, point, event):
+    import threading
+    holder = {}
+
+    def reader_event():
+        client, active = holder["client"], holder["active"]
+        if event == "reader_loss":
+            client._fail_all("codex app-server exited")
+        else:
+            client._settle_receipts(active, event, coverage="")
+
+    def in_thread():
+        t = threading.Thread(target=reader_event)
+        t.start()
+        t.join(5)
+        assert not t.is_alive()
+
+    answer = _ok
+    on_write = None
+    if point == "before_send":
+        on_write = lambda: in_thread() if not holder.get("fired") and not holder.update(fired=1) else None  # noqa: E731
+    if point == "outstanding":
+        def answer(client, message):
+            in_thread()
+            _ok(client, message)
+    client, active, wire = _wire_client(monkeypatch, answer=answer, on_write=on_write)
+    holder.update(client=client, active=active)
+    if point == "register":
+        _close_during_register(monkeypatch, client, active, reader_event)
+    try:
+        client.steer("aside", "b3", agent_id=AGENT)
+    except RuntimeError as exc:
+        assert "dictionary changed size" not in str(exc)
+    assert len(wire.steers()) <= 1                                       # never a duplicate RPC
+    if point == "register":
+        assert wire.steers() == []
+    row = _row("b3")
+    assert row["state"] not in sr.NON_TERMINAL                           # no orphan open row
+    assert db.conn().execute(
+        "SELECT count(*) FROM steer_receipts WHERE state IN"
+        " ('registered','acked','consumed','awaiting_ack')").fetchone()[0] == 0

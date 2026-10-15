@@ -2784,3 +2784,30 @@ def test_leaked_slot_release_can_be_scoped_to_one_agent(tmp_path):
     assert service.release_leaked_slots(agent_id="someone-else") == {}
     assert _td.runtime_status()["active"][agent_id] == "tA"
     assert service.release_leaked_slots(agent_id=agent_id) == {agent_id: "tA"}
+
+
+def test_a_steer_proven_never_sent_queues_it_exactly_once_in_order(tmp_path):
+    """Steer receipts §11.15 A4: a provable non-acceptance (the steer raises
+    the rejection) runs the existing fall-through: one queued turn, FIFO."""
+    from lib import turn_queue
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path),
+        session="mike", backend="codex",
+    )
+    agents_db.start_runtime(agent_id, "mike")
+    backends = _SteerableBackends()
+
+    def refused(*_args, **_kwargs):
+        raise RuntimeError("turn/steer rejected: codex app-server stdin closed before sending")
+    backends.steer_turn = refused
+    ctx = SimpleNamespace(default_session="mike",
+                          agents_path=tmp_path / "unused.json", stream=_Stream())
+    service = TurnDispatchService(ctx, backend_registry=backends, home=tmp_path,
+                                  uuid_factory=lambda: "backend-session-1")
+    service.dispatch(text="original request", requested_session="mike",
+                     trace_id="tA", synthesize_audio=False)
+    for cid in ("first", "second"):
+        service.dispatch(text=f"{cid} aside", requested_session="mike", trace_id=f"t-{cid}",
+                         client_msg_id=cid, synthesize_audio=False, queue_if_busy=True)
+    assert [row["client_msg_id"] for row in turn_queue.pending(agent_id)] == ["first", "second"]
+    assert len(backends.spawned) == 1
