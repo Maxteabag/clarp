@@ -77,6 +77,15 @@ class _ActiveTurn:
     final_seqs: list = field(default_factory=list)
     unphased_seqs: list = field(default_factory=list)
     no_client_id: bool = False
+    # Set when the turn's receipts were settled; no steer may register after.
+    receipts_closed: bool = False
+
+
+# Guards every ActiveTurn's `receipts`: steer() registers and inserts under
+# it, the reader takes the dict and closes it under it. Without it a steer
+# could insert into the dict the reader is iterating, raise in the reader
+# and leave a live app-server with a dead reader.
+_RECEIPTS_LOCK = threading.Lock()
 
 
 class CodexRpcError(RuntimeError):
@@ -420,17 +429,24 @@ class _Client:
                 active.unphased_seqs.append(active.seq)
 
     def _coverage(self, active: _ActiveTurn) -> str:
-        """"" when this reader saw the whole turn on the bound thread."""
+        """"" when this reader saw the whole turn on the bound thread;
+        "rebind" for another thread; "unbound" when the agent lost its binding
+        (a gap that can only turn no_final_response into unknown)."""
         try:
             bound = agents_db.live_backend_session(active.agent_id)
         except Exception as exc:  # noqa: BLE001
             log_exception("steerReceiptCoverageFail", exc, detail=active.agent_id)
             return "coverage"
-        return "rebind" if bound and bound != active.thread_id else ""
+        if not bound:
+            return "unbound"
+        return "rebind" if bound != active.thread_id else ""
 
     def _settle_receipts(self, active: _ActiveTurn, status: str, *, coverage: str) -> None:
-        receipts, active.receipts = active.receipts, {}
-        for receipt in receipts.values():
+        with _RECEIPTS_LOCK:
+            taken = list(active.receipts.values())
+            active.receipts = {}
+            active.receipts_closed = True
+        for receipt in taken:
             try:
                 state, _reason = receipt.settle_at_terminal(
                     turn_status=status, final_seqs=active.final_seqs,
@@ -448,7 +464,7 @@ class _Client:
         and tell clients, so they refresh through the existing sync."""
         if state not in steer_receipts.MARKED:
             return
-        message_writes.bump_message_revision(f"u-{client_msg_id.removeprefix('u-')}")
+        message_writes.bump_message_revision(message_writes._client_message_id(client_msg_id))
         _backend().broadcast_transcript(stream, agent_id, session)
 
     def _mirror_goal(self, thread_id: str, goal: dict | None) -> None:
@@ -662,6 +678,28 @@ class _Client:
             "input": [{"type": "text", "text": text}],
             **({"clientUserMessageId": client_msg_id} if client_msg_id else {}),
         }
+        receipt = None
+        if client_msg_id:
+            context = steer_receipts.current_context()
+            with _RECEIPTS_LOCK:
+                if active.receipts_closed:
+                    # The turn ended and its receipts are settled: nothing can
+                    # be steered into it. Unregistered, so dispatch goes on as
+                    # for any finished turn.
+                    log("steerReceiptTurnEnded",
+                        f"agent={active.agent_id} id={client_msg_id}")
+                    return False
+                receipt = steer_receipts.register(
+                    active.agent_id, client_msg_id,
+                    prompt_admission_id=context["prompt_admission_id"],
+                    trace_id=context["trace_id"], thread_id=active.thread_id,
+                    expected_turn_id=active.turn_id, gen=self.gen)
+                if receipt is not None:
+                    active.receipts[client_msg_id] = receipt
+            if receipt is None:
+                # Already steered under this id: no second RPC (§11.2).
+                log("steerReceiptDuplicate", f"agent={active.agent_id} id={client_msg_id}")
+                return True
         if synthesize_audio and not active.voice:
             params["additionalContext"] = {"clarp-voice-followup": {
                 "kind": "application",
@@ -673,16 +711,6 @@ class _Client:
         if not client_msg_id:
             self.request("turn/steer", params)
             return True
-        context = steer_receipts.current_context()
-        receipt = steer_receipts.register(
-            active.agent_id, client_msg_id, prompt_admission_id=context["prompt_admission_id"],
-            trace_id=context["trace_id"], thread_id=active.thread_id,
-            expected_turn_id=active.turn_id, gen=self.gen)
-        if receipt is None:
-            # Already steered under this id: no second RPC (§11.2).
-            log("steerReceiptDuplicate", f"agent={active.agent_id} id={client_msg_id}")
-            return True
-        active.receipts[client_msg_id] = receipt
         try:
             result = self.request("turn/steer", params)
         except TimeoutError:
@@ -700,7 +728,8 @@ class _Client:
             self._surface_receipt(active.agent_id, client_msg_id, state, active.stream,
                                   active.session)
         if rejected:
-            active.receipts.pop(client_msg_id, None)
+            with _RECEIPTS_LOCK:
+                active.receipts.pop(client_msg_id, None)
             # Codex never took the message: the existing fall-through runs.
             raise CodexRpcError(f"turn/steer rejected for {client_msg_id}")
         # Anything else may have reached Codex (§11.11): never re-dispatch.
