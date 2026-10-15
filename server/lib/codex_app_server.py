@@ -15,10 +15,12 @@ import shutil
 import subprocess
 import sys
 import threading
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from . import agent_goals, agents as agents_db, backend_usage, eventlog, tts_queue
+from . import message_writes, steer_receipts
 from .backend.codex import CodexBackend, TurnState
 from .backend.registry import by_id
 from .log import log, log_exception
@@ -68,6 +70,22 @@ class _ActiveTurn:
     voice: bool = False
     produced_output: bool = False
     steer_ready: threading.Event = field(default_factory=threading.Event)
+    # Steer receipts (lib/steer_receipts.py): this turn's notification counter
+    # and the evidence its receipts settle on. Dropped with the turn.
+    seq: int = 0
+    receipts: dict = field(default_factory=dict)
+    final_seqs: list = field(default_factory=list)
+    unphased_seqs: list = field(default_factory=list)
+    no_client_id: bool = False
+
+
+class CodexRpcError(RuntimeError):
+    """The app-server answered a request with a JSON-RPC error: a definitive
+    refusal, unlike a timeout or a lost reader."""
+
+
+class CodexReaderLost(RuntimeError):
+    """The reader ended before the request was answered."""
 
 
 class AppTurnHandle:
@@ -104,6 +122,10 @@ class _Client:
         self.auth_fingerprint = _auth_fingerprint()
         self.refresh_requested = False
         self.rate_limits = {}
+        # The reader generation steer receipts are registered under; a new
+        # process is a new generation (steer_receipts.sweep).
+        self.gen = f"{os.getpid()}-{uuid.uuid4().hex[:12]}"
+        self.receipts_swept = False
         env = {**os.environ, "CLAUDE_PWA_SESSION": session}
         env.pop("CLARP_PROVIDER_TURN", None)   # one shared server has no turn identity
         self.proc = subprocess.Popen(
@@ -156,7 +178,12 @@ class _Client:
                 self._pending.pop(rid, None)
             raise TimeoutError(f"Codex app-server timed out: {method}")
         if "error" in box:
-            raise RuntimeError(f"{method}: {box['error']}")
+            error = box["error"]
+            if isinstance(error, dict) and "code" in error:
+                raise CodexRpcError(f"{method}: {error}")
+            if isinstance(error, dict) and error.get("reader_lost"):
+                raise CodexReaderLost(f"{method}: {error.get('message')}")
+            raise RuntimeError(f"{method}: {error}")
         return box.get("result") or {}
 
     def notify(self, method: str, params: dict) -> None:
@@ -209,7 +236,7 @@ class _Client:
             pending = list(self._pending.values())
             self._pending.clear()
         for done, box in pending:
-            box["error"] = {"message": message}
+            box["error"] = {"message": message, "reader_lost": True}
             done.set()
         actives = list(getattr(self, "_actives", {}).values())
         if self.active is not None and self.active not in actives:
@@ -218,6 +245,9 @@ class _Client:
         if hasattr(self, "_actives"):
             self._actives.clear()
         for active in actives:
+            if active is not None:
+                # The reader cannot vouch for the rest of the turn.
+                self._settle_receipts(active, "", coverage="coverage")
             if active and not active.handle._done.is_set():
                 active.handle._done.set()
                 if active.on_error:
@@ -283,6 +313,7 @@ class _Client:
             active = self._adopt_server_turn(params)
         if active is None:
             return
+        active.seq += 1
         notified_turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
         event_turn_id = str(params.get("turnId") or notified_turn.get("id") or "")
         if (method != "turn/started" and event_turn_id and active.turn_id
@@ -309,6 +340,8 @@ class _Client:
             live_items.on_notification(method, params)
         if method in ("item/started", "item/updated", "item/completed"):
             item = params.get("item")
+            if isinstance(item, dict) and method == "item/completed" and active.receipts:
+                self._receipt_evidence(active, item)
             if isinstance(item, dict):
                 active.produced_output = True
                 normalized = _normalize_item(item)
@@ -346,6 +379,7 @@ class _Client:
                 active.state, agent_id=active.agent_id,
                 session=active.session, trace_id=active.trace_id,
                 stream=active.stream, force=True)
+            self._settle_receipts(active, status, coverage=self._coverage(active))
             if hasattr(self, "_actives"):
                 self._actives.pop(active.agent_id, None)
             if self.active is active:
@@ -366,6 +400,56 @@ class _Client:
                     "last_agent_message": active.state.last_agent_message,
                 })
             _backend().broadcast_transcript(active.stream, active.agent_id, active.session)
+
+    def _receipt_evidence(self, active: _ActiveTurn, item: dict) -> None:
+        kind = str(item.get("type") or "")
+        if kind == "userMessage":
+            client_id = str(item.get("clientId") or "")
+            receipt = active.receipts.get(client_id) if client_id else None
+            if receipt is not None:
+                receipt.consume(active.seq)
+            elif not client_id:
+                active.no_client_id = True
+            else:
+                log("steerReceiptUnknownClientId", f"agent={active.agent_id} id={client_id}")
+        elif kind == "agentMessage":
+            phase = str(item.get("phase") or "")
+            if phase == "final_answer":
+                active.final_seqs.append(active.seq)
+            elif not phase:
+                active.unphased_seqs.append(active.seq)
+
+    def _coverage(self, active: _ActiveTurn) -> str:
+        """"" when this reader saw the whole turn on the bound thread."""
+        try:
+            bound = agents_db.live_backend_session(active.agent_id)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("steerReceiptCoverageFail", exc, detail=active.agent_id)
+            return "coverage"
+        return "rebind" if bound and bound != active.thread_id else ""
+
+    def _settle_receipts(self, active: _ActiveTurn, status: str, *, coverage: str) -> None:
+        receipts, active.receipts = active.receipts, {}
+        for receipt in receipts.values():
+            try:
+                state, _reason = receipt.settle_at_terminal(
+                    turn_status=status, final_seqs=active.final_seqs,
+                    unphased_seqs=active.unphased_seqs, coverage=coverage,
+                    no_client_id=active.no_client_id)
+                self._surface_receipt(active.agent_id, receipt.client_msg_id, state,
+                                      active.stream, active.session)
+            except Exception as exc:  # noqa: BLE001 - never stop the reader
+                log_exception("steerReceiptSettleFail", exc, detail=active.agent_id)
+
+    @staticmethod
+    def _surface_receipt(agent_id: str, client_msg_id: str, state: str, stream,
+                         session: str) -> None:
+        """A marked state changes the user row's /log view: bump its revision
+        and tell clients, so they refresh through the existing sync."""
+        if state not in steer_receipts.MARKED:
+            return
+        message_writes.bump_message_revision(f"u-{client_msg_id.removeprefix('u-')}")
+        _backend().broadcast_transcript(stream, agent_id, session)
 
     def _mirror_goal(self, thread_id: str, goal: dict | None) -> None:
         """Keep Clarp's goal table and clients in step with the app-server."""
@@ -586,7 +670,40 @@ class _Client:
             }}
             active.voice = True
             agents_db.enable_latest_turn_audio(active.agent_id)
-        self.request("turn/steer", params)
+        if not client_msg_id:
+            self.request("turn/steer", params)
+            return True
+        context = steer_receipts.current_context()
+        receipt = steer_receipts.register(
+            active.agent_id, client_msg_id, prompt_admission_id=context["prompt_admission_id"],
+            trace_id=context["trace_id"], thread_id=active.thread_id,
+            expected_turn_id=active.turn_id, gen=self.gen)
+        if receipt is None:
+            # Already steered under this id: no second RPC (§11.2).
+            log("steerReceiptDuplicate", f"agent={active.agent_id} id={client_msg_id}")
+            return True
+        active.receipts[client_msg_id] = receipt
+        try:
+            result = self.request("turn/steer", params)
+        except TimeoutError:
+            outcome = "timeout"
+        except CodexReaderLost:
+            outcome = "reader_end"
+        except (CodexRpcError, OSError, RuntimeError):
+            outcome = "error"                    # refused, or never written
+        else:
+            outcome = steer_receipts.ack_outcome(result, params["expectedTurnId"])
+        before = (steer_receipts.get(active.agent_id, client_msg_id) or {}).get("state", "")
+        rejected = receipt.apply_ack(outcome)
+        state = (steer_receipts.get(active.agent_id, client_msg_id) or {}).get("state", "")
+        if state != before:
+            self._surface_receipt(active.agent_id, client_msg_id, state, active.stream,
+                                  active.session)
+        if rejected:
+            active.receipts.pop(client_msg_id, None)
+            # Codex never took the message: the existing fall-through runs.
+            raise CodexRpcError(f"turn/steer rejected for {client_msg_id}")
+        # Anything else may have reached Codex (§11.11): never re-dispatch.
         return True
 
     def interrupt_active(self, agent_id: str = "") -> None:
@@ -790,6 +907,14 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
         )
     with _LOCK:
         client = _client(agent_id, session, stream=stream)
+        if not client.receipts_swept:
+            # A new reader generation: open receipts of an earlier process
+            # (restart, crash) can no longer be settled from evidence.
+            client.receipts_swept = True
+            try:
+                steer_receipts.sweep(current_gen=client.gen)
+            except Exception as exc:  # noqa: BLE001
+                log_exception("steerReceiptSweepFail", exc, detail=agent_id)
         handle = AppTurnHandle(client, agent_id=agent_id)
         agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
         persona = (agent or {}).get("persona") or ""

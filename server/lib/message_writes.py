@@ -298,6 +298,30 @@ def record_user_message(*, agent_id: str, backend_session_id: str,
 MARKER_ORIGIN = origins.MARKER_ORIGIN
 
 
+def bump_message_revision(message_id: str) -> int | None:
+    """Give an existing row a new revision without touching its content, so
+    clients re-fetch it (a steer receipt settled on it). updated_at stays:
+    it orders rows. None when the row does not exist yet."""
+    database = conn()
+    row = database.execute(
+        "SELECT agent_id, backend_session_id FROM messages WHERE message_id = ?",
+        (message_id,)).fetchone()
+    if row is None:
+        return None
+    revision = _next_revision(database)
+    database.execute("UPDATE messages SET revision = ? WHERE message_id = ?",
+                     (revision, message_id))
+    database.execute(
+        """INSERT INTO conversation_heads (
+               agent_id, backend_session_id, revision, replace_revision
+           ) VALUES (?, ?, ?, 0)
+           ON CONFLICT(agent_id, backend_session_id) DO UPDATE SET
+               revision = MAX(conversation_heads.revision, excluded.revision)""",
+        (row["agent_id"], row["backend_session_id"], revision),
+    )
+    return revision
+
+
 def marker_message_id(cause_message_id: str) -> str:
     return f"marker-{cause_message_id}"
 

@@ -25,6 +25,7 @@ import contextlib
 import contextvars
 import logging
 import sqlite3
+import threading
 from typing import Iterator
 
 from . import db
@@ -110,6 +111,14 @@ def ack_outcome(result, expected_turn_id: str) -> str:
     return "mismatch"
 
 
+def _locked(method):
+    def run(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    run.__name__, run.__doc__ = method.__name__, method.__doc__
+    return run
+
+
 class Receipt:
     """One steered message's receipt as its runtime writer sees it."""
 
@@ -121,6 +130,8 @@ class Receipt:
         self.ack = "pending"
         self.turn_status = ""
         self.no_client_id = False
+        # The reader thread consumes and settles; the steer thread applies the ACK.
+        self._lock = threading.RLock()
 
     def _update(self, assignments: str, condition: str, params: tuple) -> bool:
         cur = db.conn().execute(
@@ -129,6 +140,7 @@ class Receipt:
             (*params, self.agent_id, self.client_msg_id))
         return cur.rowcount > 0
 
+    @_locked
     def consume(self, seq: int) -> None:
         """The UserMessage item echoing this message arrived; the first wins."""
         if self.consumed_seq is not None:
@@ -137,6 +149,7 @@ class Receipt:
         self._update("state='consumed', consumed_seq=?",
                      f"consumed_seq IS NULL AND state IN ('registered','acked')", (seq,))
 
+    @_locked
     def settle_at_terminal(self, *, turn_status: str, final_seqs, unphased_seqs,
                            coverage: str, no_client_id: bool) -> tuple[str, str]:
         self.turn_status = turn_status
@@ -149,6 +162,7 @@ class Receipt:
                      (state, reason, final_seq, settled_at))
         return state, reason
 
+    @_locked
     def apply_ack(self, outcome: str) -> bool:
         """Record the steer RPC's outcome. True only when this ACK proves Codex
         never took the message (a definitive rejection with no consumption):
@@ -203,7 +217,18 @@ def register(agent_id: str, client_msg_id: str, *, prompt_admission_id: str = ""
          prompt_admission_id or "", trace_id or "", thread_id or "", expected_turn_id or "",
          gen, db.now_ms()))
     if cur.rowcount == 0:
-        return None
+        # A rejected steer never reached the turn and fell through to the
+        # queue; when that queued message is later steered, it is a new
+        # delivery. Every other existing receipt refuses a second RPC.
+        cur = db.conn().execute(
+            "UPDATE steer_receipts SET prompt_admission_id=?, trace_id=?, thread_id=?,"
+            " expected_turn_id=?, gen=?, state='registered', reason='', ack='pending',"
+            " consumed_seq=NULL, final_seq=NULL, registered_at=?, settled_at=NULL"
+            " WHERE agent_id=? AND client_msg_id=? AND state='rejected'",
+            (prompt_admission_id or "", trace_id or "", thread_id or "", expected_turn_id or "",
+             gen, db.now_ms(), agent_id, client_msg_id))
+        if cur.rowcount == 0:
+            return None
     return Receipt(agent_id, client_msg_id, expected_turn_id=expected_turn_id)
 
 

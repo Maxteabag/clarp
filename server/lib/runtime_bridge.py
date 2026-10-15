@@ -228,12 +228,15 @@ class RuntimeClient:
 
     def steer(self, backend: str, agent_id: str, text: str, *,
               client_msg_id: str = "", synthesize_audio: bool = False) -> bool:
+        from . import steer_receipts
         response = self._request("steer", {
             "backend": backend,
             "agent_id": agent_id,
             "text": text,
             "client_msg_id": client_msg_id,
             "synthesize_audio": synthesize_audio,
+            # The steer receipt's admission and trace (lib/steer_receipts.py).
+            **steer_receipts.current_context(),
         })
         return bool(response.get("ok") and response.get("result"))
 
@@ -553,12 +556,16 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             elif method == "interrupt_any":
                 result = backends.interrupt_any(agent_id)
             else:
-                result = backends.steer_turn(
-                    str(params.get("backend") or ""), agent_id,
-                    str(params.get("text") or ""),
-                    client_msg_id=str(params.get("client_msg_id") or ""),
-                    synthesize_audio=bool(params.get("synthesize_audio")),
-                )
+                from . import steer_receipts
+                with steer_receipts.steer_context(
+                        prompt_admission_id=str(params.get("prompt_admission_id") or ""),
+                        trace_id=str(params.get("trace_id") or "")):
+                    result = backends.steer_turn(
+                        str(params.get("backend") or ""), agent_id,
+                        str(params.get("text") or ""),
+                        client_msg_id=str(params.get("client_msg_id") or ""),
+                        synthesize_audio=bool(params.get("synthesize_audio")),
+                    )
             return {"ok": True, "result": result}
         if method == "begin_stop":
             from . import backends, turn_dispatch, turn_queue
