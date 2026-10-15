@@ -54,8 +54,12 @@ def steer_modes():
       before sampling and its leftover drain in on_task_finished);
     item-before-ack: the UserMessage item is emitted before the RPC answer;
     ack-error, ack-mismatch: the RPC answer;
-    ack-after-terminal=ok|error|mismatch|never: the turn completes without
-      consuming the steer, then the RPC answer follows (or never comes);
+    ack-after-terminal=ok|error|mismatch|never|exit: the turn completes
+      without consuming the steer, then the RPC answer follows (or never
+      comes, or the app-server exits while it is outstanding);
+    ack-delay=SECONDS: the steer is queued; its RPC answer comes that late;
+    consume (with ack-after-terminal): the steer is still drained;
+    hold-after-steer=SECONDS: wait that long before draining a held steer;
     no-client-id: UserMessage items carry no clientId;
     restart: the app-server process exits once a steer is held.
     """
@@ -213,6 +217,8 @@ def app_server():
         persist(thread_id, "event_msg", {
             "type": "agent_message", "message": text, "phase": "final_answer"})
         if set(modes) & {"late", "reopen", "commentary-only", "restart"} and hold_for_steer(turn_id):
+            if modes.get("hold-after-steer"):
+                time.sleep(float(modes["hold-after-steer"]))   # a window mid-turn
             if modes.get("restart"):
                 record("qa/restart", {"turnId": turn_id})
                 os._exit(3)           # the app-server dies mid-turn
@@ -338,13 +344,28 @@ def app_server():
                     elif outcome == "error":
                         emit({"id": rid, "error": {"code": -32600,
                                                     "message": "expected turn is no longer active"}})
+                    elif outcome == "exit":
+                        os._exit(4)   # the reader is lost while the RPC is outstanding
                     # "never": no answer; the Host's own RPC timeout ends it.
                 steer_answers[turn_id] = answer
                 steered_turns.add(turn_id)
+                if modes.get("consume"):
+                    # The input is drained (consumed); only the answer is late.
+                    pending_steers.setdefault(turn_id, []).append((client_id, text))
                 steer_arrived.setdefault(turn_id, threading.Event()).set()
                 continue
             steered_turns.add(turn_id)
             pending_steers.setdefault(turn_id, []).append((client_id, text))
+            if modes.get("ack-delay"):
+                # The RPC stays outstanding for a while (a Stop can race it).
+                rid, delay = request["id"], float(modes["ack-delay"])
+
+                def late_ack(rid=rid, delay=delay, turn_id=turn_id):
+                    time.sleep(delay)
+                    emit({"id": rid, "result": {"turnId": turn_id}})
+                threading.Thread(target=late_ack, daemon=True).start()
+                steer_arrived.setdefault(turn_id, threading.Event()).set()
+                continue
             if modes.get("item-before-ack"):
                 # The turn loop can drain the input before the RPC answer.
                 drain_steers(turn_id, current_thread_for.get(turn_id, current_thread), modes)
