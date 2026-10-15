@@ -180,6 +180,9 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 117:
             _migrate_to_v117(con)
 
+        if version < 118:
+            _migrate_to_v118(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -904,3 +907,18 @@ def _migrate_to_v117(con: sqlite3.Connection) -> None:
     end = db_schema._SCHEMA_SQL.index(");", start) + 2
     con.execute(db_schema._SCHEMA_SQL[start:end].replace(
         "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
+
+
+def _migrate_to_v118(con: sqlite3.Connection) -> None:
+    """Steer receipts (lib/steer_receipts.py). A new table, its indexes and
+    the trigger that deletes a receipt with its message: older code ignores
+    the table, and its message deletes still clean up through the trigger."""
+    from .steer_receipts import SCHEMA
+    statement = ""
+    for line in SCHEMA.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            con.execute(statement.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+                        .replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
+                        .replace("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1))
+            statement = ""
