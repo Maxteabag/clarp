@@ -466,3 +466,47 @@ def test_T_i_no_turn_structures_remain(tmp_path, monkeypatch):
             assert getattr(client, "_actives", {}) == {} and client.active is None
     finally:
         codex_app_server.recycle_clients()
+
+
+# --- §11.13 -------------------------------------------------------------------------------
+
+def test_a_steer_without_client_msg_id_gets_a_receipt_under_its_trace(host):
+    """Q1: the same identity the pending user row uses (client_msg_id or
+    trace_id) keys the receipt and goes out as clientUserMessageId."""
+    mode(host, "late")
+    send(host, "First request", "first")
+    host.wait_reply("rachel", "QA reply: First request")
+    answer = host.request("/send", {"session": "rachel", "text": "Late note, no id",
+                                    "synthesize_audio": False})
+    trace = answer["trace_id"]
+    row = wait_receipt(host, trace)
+    assert (row["state"], row["message_id"]) == ("no_final_response", f"u-{trace}")
+    [steer] = provider_requests(host, "turn/steer")
+    assert steer["clientUserMessageId"] == trace
+    wait_idle(host)
+    marked = next(t for t in host.request("/log?session=rachel")["turns"] if t["id"] == f"u-{trace}")
+    assert marked["response"]["state"] == "no_final_response"
+
+
+def test_a_runtime_crash_with_open_receipts_is_visible_at_boot_without_a_new_turn(host):
+    """Q3: receipts of a dead runtime settle at its next boot, before any dispatch."""
+    mode(host, "late,hold-after-steer=8")
+    send(host, "First request", "first")
+    host.wait_reply("rachel", "QA reply: First request")
+    send(host, "Late note", "crash")
+    require_receipts(host)
+    deadline = time.monotonic() + 5
+    while (receipt(host, "crash") or {}).get("state") not in ("registered", "acked", "consumed"):
+        assert time.monotonic() < deadline, receipt(host, "crash")
+        time.sleep(0.02)
+    host.process.kill()                                     # the runtime dies mid-turn
+    host.process.wait(timeout=5)
+    host.log.close()
+    host.process = None
+    mode(host, "")
+    host.start()
+    row = receipt(host, "crash")                            # at once: no wait, no new turn
+    assert (row["state"], row["reason"]) == ("unknown", "coverage")
+    assert log_row(host, "crash")["response"] == {"state": "unknown", "reason": "coverage",
+                                                  "turn_id": row["expected_turn_id"]}
+    assert len(provider_requests(host, "turn/start")) == 1
