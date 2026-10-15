@@ -449,3 +449,184 @@ def test_without_seq_facts_updated_at_still_decides():
 
 def _row_for(aid, cid):
     return sr.get(aid, cid)
+
+
+# --- §11.14 B1: a steer racing the reader's settle / fail_all ------------------------------
+
+def _racing_client(monkeypatch):
+    """A Codex client with one active turn that already holds one receipt
+    (c1). `gate` holds the next steer() after it has fetched the active turn;
+    `iterating`/`release` hold the reader inside its receipt loop."""
+    import threading
+    from types import SimpleNamespace
+    from lib import codex_app_server as cas
+    from lib.backend.codex import TurnState
+    client = object.__new__(cas._Client)
+    client.agent_id, client.gen, client.stream = AGENT, "g1", None
+    client._lock, client._pending, client._actives = threading.Lock(), {}, {}
+    sent = []
+
+    def request(method, params, timeout=30):
+        sent.append((method, params.get("clientUserMessageId")))
+        return {"turnId": params["expectedTurnId"]}
+    client.request = request
+    handle = SimpleNamespace(is_alive=lambda: True, _done=threading.Event())
+    active = cas._ActiveTurn("turn-1", SESSION, AGENT, "s", "trace",
+                             TurnState(live_backend_session_id=SESSION), handle, None, None,
+                             None, lambda **_k: 0)
+    active.steer_ready.set()
+    client._actives[AGENT], client.active = active, active
+    monkeypatch.setattr(cas.agents_db, "live_backend_session", lambda _a: SESSION)
+    assert client.steer("one", "c1", agent_id=AGENT) is True
+    gate, iterating, release = threading.Event(), threading.Event(), threading.Event()
+
+    class _Gated:                      # steer() waits here after fetching `active`
+        def wait(self, _timeout=None):
+            return gate.wait(5)
+    active.steer_ready = _Gated()
+    settle = sr.Receipt.settle_at_terminal
+
+    def held_settle(self, **kwargs):
+        if self.client_msg_id == "c1":
+            iterating.set()
+            assert release.wait(5)
+        return settle(self, **kwargs)
+    monkeypatch.setattr(sr.Receipt, "settle_at_terminal", held_settle)
+    return client, active, sent, gate, iterating, release
+
+
+def _race(client, reader_call, gate, iterating, release):
+    import threading
+    errors, results = [], []
+
+    def reader():
+        try:
+            reader_call()
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+    steerer = threading.Thread(target=lambda: results.append(
+        client.steer("two", "c2", agent_id=AGENT)))
+    steerer.start()                                 # parked at the gate, holding `active`
+    reading = threading.Thread(target=reader)
+    reading.start()
+    assert iterating.wait(5)                        # the reader is inside its receipt loop
+    gate.set()
+    steerer.join(5)
+    assert not steerer.is_alive()                   # the steer never waits on the reader
+    release.set()
+    reading.join(5)
+    assert not reading.is_alive()
+    return errors, results
+
+
+def test_a_steer_arriving_while_the_reader_settles_never_breaks_the_reader(monkeypatch):
+    client, active, sent, gate, iterating, release = _racing_client(monkeypatch)
+    errors, results = _race(client, lambda: client._settle_receipts(active, "completed", coverage=""),
+                            gate, iterating, release)
+    assert errors == []
+    assert results == [False]                       # the turn is over: no steer into it
+    assert sr.get(AGENT, "c2") is None              # unregistered, nothing left open
+    assert [cid for _m, cid in sent] == ["c1"]      # no RPC for c2
+    assert _row("c1")["state"] != "registered"
+
+
+def test_a_steer_arriving_while_the_reader_fails_all_never_breaks_the_reader(monkeypatch):
+    client, active, sent, gate, iterating, release = _racing_client(monkeypatch)
+    errors, results = _race(client, lambda: client._fail_all("codex app-server exited"),
+                            gate, iterating, release)
+    assert errors == []
+    assert results == [False]
+    assert sr.get(AGENT, "c2") is None
+    assert [cid for _m, cid in sent] == ["c1"]
+    assert (_row("c1")["state"], _row("c1")["reason"]) == ("unknown", "coverage")
+    assert active.handle._done.is_set()             # every active still ends
+
+
+# --- §11.14 N2, N3 ---------------------------------------------------------------------
+
+def test_a_surfaced_receipt_bumps_the_row_of_a_padded_id():
+    from lib import codex_app_server as cas
+    message_writes.record_user_message(agent_id=AGENT, backend_session_id=SESSION,
+                                       client_msg_id=" padded ", text="x")
+    before = db.conn().execute("SELECT revision FROM messages WHERE message_id='u-padded'").fetchone()[0]
+    cas._Client._surface_receipt(AGENT, " padded ", "unknown", None, "s")
+    after = db.conn().execute("SELECT revision FROM messages WHERE message_id='u-padded'").fetchone()[0]
+    assert after > before
+
+
+@pytest.mark.parametrize("kwargs,expect", [
+    (dict(consumed_seq=5, final_seqs=[9]), ("answered", "")),             # never blocks answered
+    (dict(consumed_seq=5, final_seqs=[3]), ("unknown", "coverage")),      # only downgrades this
+    (dict(consumed_seq=5, final_seqs=[], turn_status="interrupted"), ("interrupted", "")),
+    (dict(consumed_seq=5, final_seqs=[], unphased_seqs=[7]), ("unknown", "no_phase")),
+    (dict(consumed_seq=None, ack="ok"), ("unknown", "accepted_not_observed")),
+    (dict(consumed_seq=None, ack="pending"), ("awaiting_ack", "")),
+])
+def test_an_empty_binding_only_downgrades_no_final_response(kwargs, expect):
+    args = dict(final_seqs=[], unphased_seqs=[], turn_status="completed", coverage="unbound",
+                ack="ok", no_client_id=False)
+    args.update(kwargs)
+    assert sr.decide(**args) == expect
+
+
+def test_an_agent_unbound_mid_turn_is_reported_as_unbound(monkeypatch):
+    from types import SimpleNamespace
+    from lib import codex_app_server as cas
+    client = object.__new__(cas._Client)
+    active = SimpleNamespace(agent_id=AGENT, thread_id=SESSION)
+    monkeypatch.setattr(cas.agents_db, "live_backend_session", lambda _a: "")
+    assert client._coverage(active) == "unbound"
+    monkeypatch.setattr(cas.agents_db, "live_backend_session", lambda _a: "other")
+    assert client._coverage(active) == "rebind"
+    monkeypatch.setattr(cas.agents_db, "live_backend_session", lambda _a: SESSION)
+    assert client._coverage(active) == ""
+
+
+# --- §11.14 L1: single-process boot sweeps before agents resume ---------------------------
+
+def test_the_single_process_boot_sweeps_steer_receipts_before_resuming_agents(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from lib import runtime_startup
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "server"))
+    import server
+    order = []
+    monkeypatch.setattr(server, "broadcast_boot_version", lambda _ctx: None)
+    monkeypatch.setattr(server, "resume_persisted_agents", lambda _ctx: order.append("resume"))
+    monkeypatch.setattr(runtime_startup, "_settle_dead_steer_receipts",
+                        lambda _stream: order.append("sweep") or 0)
+
+    class _Dispatch:
+        def __init__(self, _ctx):
+            pass
+
+        def recover_queued(self):
+            order.append("queued")
+            return 0
+    monkeypatch.setattr(server, "TurnDispatchService", _Dispatch)
+    server._recover_after_start(SimpleNamespace(runtime_client=None, stream=None), None,
+                                restart_recovery=False)
+    assert order == ["sweep", "resume", "queued"]
+
+
+@pytest.mark.parametrize("reader", ["settle", "fail_all"])
+def test_the_reader_survives_an_insert_into_the_receipts_it_took(monkeypatch, reader):
+    """The review's probe for B1: a steer preempted between loading the
+    receipts dict and storing into it lands in the dict the reader is
+    iterating. The reader must neither raise nor stop."""
+    client, active, _sent, gate, _iterating, release = _racing_client(monkeypatch)
+    gate.set()
+    release.set()
+    taken = active.receipts
+    settle = sr.Receipt.settle_at_terminal
+
+    def inserting_settle(self, **kwargs):
+        taken["late"] = sr.Receipt(AGENT, "late", expected_turn_id="turn-1")
+        return settle(self, **kwargs)
+    monkeypatch.setattr(sr.Receipt, "settle_at_terminal", inserting_settle)
+    if reader == "settle":
+        client._settle_receipts(active, "completed", coverage="")
+    else:
+        client._fail_all("codex app-server exited")
+        assert active.handle._done.is_set()
+    assert _row("c1")["state"] != "registered"
