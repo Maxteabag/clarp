@@ -334,7 +334,7 @@ user row may then carry `response`:
   answer after it. Show a muted "received — no final reply" on that row.
 - `unknown`: the reply status cannot be established. `reason` is a machine
   code (`coverage`, `rebind`, `no_phase`, `no_client_id`,
-  `accepted_not_observed`, `ack_turn_mismatch`, `ack_timeout`), never shown.
+  `accepted_not_observed`, `ack_turn_mismatch`, `ack_timeout`, `send_failed`, `rpc_error_ambiguous`), never shown.
   Show a muted "received — reply status unknown"; never claim absence.
 - No `response` means answered, or no receipt (older runtime, not steered).
   An unrecognized `state` or a malformed `response` is ignored; it never
@@ -345,8 +345,11 @@ and emits `transcript-updated`; the ordinary delta brings it. Gate on the
 advertised feature, not on the contract number. The decision rests on protocol
 evidence of the turn (the UserMessage item echoing `client_msg_id`, then an
 agent message with phase `final_answer`), never on the reply's content. A
-steer whose RPC times out is not re-dispatched, because Codex may have taken
-it; a definitive JSON-RPC rejection still falls through to the queue.
+steer is re-dispatched (queued) only when Codex provably never took it: the
+request could not be written at all, or Codex refused it with -32600, -32601
+or -32602. A timeout, a failed or partial write, any other error code and an
+uncoded error leave it `unknown` and are never re-dispatched, because Codex
+may have taken it.
 
 ### 3. Stay in sync: `GET /events` (SSE)
 
