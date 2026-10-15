@@ -781,12 +781,14 @@ class _Client:
         and dispatch carries on as for any finished turn."""
         slot = _ReservedSlot()
         with _RECEIPTS_LOCK:
-            if active.receipts_closed:
-                log("steerReceiptTurnEnded", f"agent={active.agent_id} id={client_msg_id}")
-                return False
-            if client_msg_id in active.receipts:
-                return None                             # in flight under this id
-            active.receipts[client_msg_id] = slot
+            closed = active.receipts_closed
+            if not closed:
+                if client_msg_id in active.receipts:
+                    return None                         # in flight under this id
+                active.receipts[client_msg_id] = slot
+        if closed:
+            log("steerReceiptTurnEnded", f"agent={active.agent_id} id={client_msg_id}")
+            return False
         context = steer_receipts.current_context()
         try:
             receipt = steer_receipts.register(
