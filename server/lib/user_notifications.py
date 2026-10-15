@@ -120,13 +120,21 @@ def _causing_user_row(agent_id: str, backend_session_id: str,
 def _receipt_disowns(cause_message_id: str, source) -> bool:
     """A steer receipt can prove the time-window cause is not what the turn
     answered (docs/protocol.md "Steer receipts"): its steered message got no
-    final reply, or the reply was written before the message was steered.
-    Without a receipt (an older runtime, an unsteered row) nothing changes."""
+    final reply, or the turn's final answer came before the message.
+    Without a receipt (an older runtime, an unsteered row) nothing changes.
+
+    Ordering comes from the receipt's protocol seqs (the turn's last final
+    answer against the message's consumption). A row's updated_at moves with
+    later writes (finalize, imports, edits), so it decides only when the
+    receipt has no seq facts."""
     receipt = steer_receipts.receipt_for_message(cause_message_id)
     if receipt is None:
         return False
     if receipt["state"] == "no_final_response":
         return True
+    consumed, final = receipt["consumed_seq"], receipt["final_seq"]
+    if consumed is not None and final is not None:
+        return int(final) < int(consumed)
     return source is not None and int(source["updated_at"] or 0) < int(receipt["registered_at"] or 0)
 
 

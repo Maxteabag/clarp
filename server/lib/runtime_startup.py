@@ -76,6 +76,7 @@ def recover_runtime(
         interrupted = ([] if clean_handoff else
                        mark_interrupted(stream=getattr(ctx, "stream", None)))
         reconciled = int(reconcile() or 0)
+        steer = _settle_dead_steer_receipts(getattr(ctx, "stream", None))
     queued = int(dispatch.recover_queued() or 0)
     if repair_receipts is None:
         repair_receipts = _terminalize_ended_receipts
@@ -89,7 +90,20 @@ def recover_runtime(
         "reconciled": reconciled,
         "queued": queued,
         "receipts": receipts,
+        "steer_receipts": steer,
     }
+
+
+def _settle_dead_steer_receipts(stream) -> int:
+    """Steer receipts the previous runtime left open can never be settled
+    from evidence: its reader is gone. Settle them unknown(coverage) before
+    anything dispatches, so the marker shows without waiting for a turn."""
+    from . import steer_receipts
+    try:
+        return steer_receipts.recover(stream=stream)
+    except Exception as exc:  # noqa: BLE001 - receipts never block a boot
+        log_exception("steerReceiptBootSweepFail", exc)
+        return 0
 
 
 def _terminalize_ended_receipts() -> dict[str, int]:

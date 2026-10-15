@@ -41,6 +41,9 @@ SCHEMA = """
 CREATE TABLE steer_receipts (
     agent_id TEXT NOT NULL,
     client_msg_id TEXT NOT NULL,
+    -- A rejected steer falls through to the queue; a later steer of that
+    -- message is attempt n+1. Rows are never rewritten; readers use the latest.
+    attempt INTEGER NOT NULL DEFAULT 1,
     message_id TEXT NOT NULL,
     prompt_admission_id TEXT NOT NULL DEFAULT '',
     trace_id TEXT NOT NULL DEFAULT '',
@@ -54,11 +57,11 @@ CREATE TABLE steer_receipts (
     final_seq INTEGER,
     registered_at INTEGER NOT NULL,
     settled_at INTEGER,
-    PRIMARY KEY (agent_id, client_msg_id)
+    PRIMARY KEY (agent_id, client_msg_id, attempt)
 );
 CREATE INDEX idx_steer_receipts_open ON steer_receipts(state)
     WHERE state IN ('registered','acked','consumed','awaiting_ack');
-CREATE INDEX idx_steer_receipts_message ON steer_receipts(message_id);
+CREATE INDEX idx_steer_receipts_message ON steer_receipts(message_id, attempt);
 -- A receipt lives exactly as long as its user message, including when older
 -- code (which knows nothing of receipts) deletes the message.
 CREATE TRIGGER steer_receipts_follow_message AFTER DELETE ON messages
@@ -123,9 +126,11 @@ def _locked(method):
 class Receipt:
     """One steered message's receipt as its runtime writer sees it."""
 
-    def __init__(self, agent_id: str, client_msg_id: str, *, expected_turn_id: str):
+    def __init__(self, agent_id: str, client_msg_id: str, *, expected_turn_id: str,
+                 attempt: int = 1):
         self.agent_id = agent_id
         self.client_msg_id = client_msg_id
+        self.attempt = attempt
         self.expected_turn_id = expected_turn_id
         self.consumed_seq: int | None = None
         self.ack = "pending"
@@ -137,8 +142,8 @@ class Receipt:
     def _update(self, assignments: str, condition: str, params: tuple) -> bool:
         cur = db.conn().execute(
             f"UPDATE steer_receipts SET {assignments}"
-            f" WHERE agent_id=? AND client_msg_id=? AND {condition}",
-            (*params, self.agent_id, self.client_msg_id))
+            f" WHERE agent_id=? AND client_msg_id=? AND attempt=? AND {condition}",
+            (*params, self.agent_id, self.client_msg_id, self.attempt))
         return cur.rowcount > 0
 
     @_locked
@@ -157,7 +162,9 @@ class Receipt:
         self.no_client_id = no_client_id
         state, reason = decide(self.consumed_seq, final_seqs, unphased_seqs, turn_status,
                                coverage, self.ack, no_client_id)
-        final_seq = max(final_seqs, default=None) if state == "answered" else None
+        # The last final answer of the turn, whatever the outcome: ordering
+        # facts for notifications (user_notifications._receipt_disowns).
+        final_seq = max(final_seqs, default=None)
         settled_at = None if state in NON_TERMINAL else db.now_ms()
         self._update("state=?, reason=?, final_seq=?, settled_at=?", f"state IN {_UNSETTLED}",
                      (state, reason, final_seq, settled_at))
@@ -207,45 +214,72 @@ class Receipt:
 def register(agent_id: str, client_msg_id: str, *, prompt_admission_id: str = "",
              trace_id: str = "", thread_id: str, expected_turn_id: str,
              gen: str) -> Receipt | None:
-    """Write the receipt before the steer RPC. None when any receipt already
-    exists for this message: a second steer of the same id sends no RPC."""
+    """Write the receipt before the steer RPC. None when the message already
+    has a receipt that is not `rejected`: a second steer sends no RPC. After a
+    rejection (the message fell through to the queue) a later steer of it is
+    a new delivery and gets the next attempt; the rejected row stays."""
     from .message_writes import _client_message_id
+    # One statement: the latest attempt decides, so two writers cannot both win.
     cur = db.conn().execute(
-        "INSERT OR IGNORE INTO steer_receipts(agent_id, client_msg_id, message_id,"
+        "INSERT INTO steer_receipts(agent_id, client_msg_id, attempt, message_id,"
         " prompt_admission_id, trace_id, thread_id, expected_turn_id, gen, state,"
-        " registered_at) VALUES (?,?,?,?,?,?,?,?, 'registered', ?)",
+        " registered_at)"
+        " SELECT ?, ?, COALESCE(MAX(attempt), 0) + 1, ?, ?, ?, ?, ?, ?, 'registered', ?"
+        " FROM steer_receipts WHERE agent_id=? AND client_msg_id=?"
+        " HAVING COALESCE((SELECT state FROM steer_receipts WHERE agent_id=? AND client_msg_id=?"
+        "                  ORDER BY attempt DESC LIMIT 1), 'rejected') = 'rejected'"
+        " RETURNING attempt",
         (agent_id, client_msg_id, _client_message_id(client_msg_id),
          prompt_admission_id or "", trace_id or "", thread_id or "", expected_turn_id or "",
-         gen, db.now_ms()))
-    if cur.rowcount == 0:
-        # A rejected steer never reached the turn and fell through to the
-        # queue; when that queued message is later steered, it is a new
-        # delivery. Every other existing receipt refuses a second RPC.
-        cur = db.conn().execute(
-            "UPDATE steer_receipts SET prompt_admission_id=?, trace_id=?, thread_id=?,"
-            " expected_turn_id=?, gen=?, state='registered', reason='', ack='pending',"
-            " consumed_seq=NULL, final_seq=NULL, registered_at=?, settled_at=NULL"
-            " WHERE agent_id=? AND client_msg_id=? AND state='rejected'",
-            (prompt_admission_id or "", trace_id or "", thread_id or "", expected_turn_id or "",
-             gen, db.now_ms(), agent_id, client_msg_id))
-        if cur.rowcount == 0:
-            return None
-    return Receipt(agent_id, client_msg_id, expected_turn_id=expected_turn_id)
+         gen, db.now_ms(), agent_id, client_msg_id, agent_id, client_msg_id))
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return Receipt(agent_id, client_msg_id, expected_turn_id=expected_turn_id,
+                   attempt=int(row[0]))
+
+
+def _settle_open(where: str, params: tuple) -> list[tuple[str, str]]:
+    rows = db.conn().execute(
+        f"UPDATE steer_receipts SET state='unknown', reason='coverage', settled_at=?"
+        f" WHERE state IN {_OPEN}{where} RETURNING agent_id, message_id",
+        (db.now_ms(), *params)).fetchall()
+    return [(r[0], r[1]) for r in rows]
 
 
 def sweep(*, current_gen: str) -> int:
     """A new reader generation cannot vouch for the old one's open receipts:
     settle them all unknown(coverage) in one statement. Terminal rows stay."""
-    cur = db.conn().execute(
-        f"UPDATE steer_receipts SET state='unknown', reason='coverage', settled_at=?"
-        f" WHERE state IN {_OPEN} AND gen <> ?", (db.now_ms(), current_gen))
-    return cur.rowcount
+    return len(_settle_open(" AND gen <> ?", (current_gen,)))
+
+
+def recover(*, current_gen: str | None = None, stream=None) -> int:
+    """Settle open receipts no live reader can settle, and show it.
+
+    At runtime boot (`current_gen` None) every open receipt belongs to a dead
+    reader: receipts are written only by this process's steer path. With a
+    generation, only older generations are swept. Each settled user row gets a
+    new revision and its agent's clients a transcript-updated, so the marker
+    appears without waiting for a turn."""
+    settled = (_settle_open("", ()) if current_gen is None
+               else _settle_open(" AND gen <> ?", (current_gen,)))
+    if not settled:
+        return 0
+    from . import agents as agents_db, events, message_writes
+    for _agent, message_id in settled:
+        message_writes.bump_message_revision(message_id)
+    if stream is not None:
+        for agent_id in sorted({agent for agent, _ in settled}):
+            agent = agents_db.get_by_agent_id(agent_id) or {}
+            events.broadcast(stream, events.transcript_updated(
+                agent_id=agent_id, session=agent.get("session")))
+    return len(settled)
 
 
 def get(agent_id: str, client_msg_id: str) -> dict | None:
     row = db.conn().execute(
-        "SELECT * FROM steer_receipts WHERE agent_id=? AND client_msg_id=?",
-        (agent_id, client_msg_id)).fetchone()
+        "SELECT * FROM steer_receipts WHERE agent_id=? AND client_msg_id=?"
+        " ORDER BY attempt DESC LIMIT 1", (agent_id, client_msg_id)).fetchone()
     return dict(row) if row is not None else None
 
 
@@ -261,9 +295,11 @@ def responses_for(message_ids) -> dict[str, dict]:
             rows = db.conn().execute(
                 "SELECT message_id, state, reason, expected_turn_id FROM steer_receipts"
                 f" WHERE message_id IN ({','.join('?' * len(chunk))})"
-                " AND state IN ('no_final_response','unknown')", chunk).fetchall()
-            for row in rows:
-                out[row[0]] = {"state": row[1], "reason": row[2], "turn_id": row[3]}
+                " ORDER BY message_id, attempt", chunk).fetchall()
+            latest = {row[0]: row for row in rows}          # the last attempt wins
+            for message_id, row in latest.items():
+                if row[1] in MARKED:
+                    out[message_id] = {"state": row[1], "reason": row[2], "turn_id": row[3]}
     except sqlite3.OperationalError:
         return {}                                       # an older runtime: no receipts
     return out
@@ -272,7 +308,7 @@ def responses_for(message_ids) -> dict[str, dict]:
 def receipt_for_message(message_id: str) -> dict | None:
     try:
         row = db.conn().execute(
-            "SELECT * FROM steer_receipts WHERE message_id=? ORDER BY registered_at DESC LIMIT 1",
+            "SELECT * FROM steer_receipts WHERE message_id=? ORDER BY attempt DESC LIMIT 1",
             (message_id,)).fetchone()
     except sqlite3.OperationalError:
         return None
