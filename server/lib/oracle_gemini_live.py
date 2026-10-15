@@ -108,10 +108,12 @@ class GeminiUpstream:
 
     provider = "gemini"
 
-    def __init__(self, api_key, *, model, voice, clock=time.monotonic):
+    def __init__(self, api_key, *, model, voice, languages=(), clock=time.monotonic):
         if not api_key:
             raise GeminiUnavailable("Gemini Live needs a Gemini API key on this Host")
         self.api_key, self.model, self.voice, self.clock = api_key, model, voice, clock
+        # BCP-47 hints for input transcription ([oracle] languages); none: automatic detection.
+        self.languages = tuple(languages or ())
         import websocket
         self.timeout_exc = websocket.WebSocketTimeoutException
         try:
@@ -173,7 +175,8 @@ class GeminiUpstream:
                     "parameters": {"type": "OBJECT", "required": ["request"], "properties": {
                         "request": {"type": "STRING", "description": "The user's request, in their words."}}}}]}],
                 "realtimeInputConfig": {"automaticActivityDetection": {"silenceDurationMs": 700}},
-                "inputAudioTranscription": {}, "outputAudioTranscription": {},
+                "inputAudioTranscription": {"languageCodes": list(self.languages)} if self.languages else {},
+                "outputAudioTranscription": {},
                 "contextWindowCompression": {"slidingWindow": {}},
                 "sessionResumption": {}}
 
