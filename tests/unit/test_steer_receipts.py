@@ -924,7 +924,10 @@ def test_B3prime_register_settle_reader_loss_and_stop_interleave_safely(monkeypa
     answer = _ok
     on_write = None
     if point == "before_send":
-        on_write = lambda: in_thread() if not holder.get("fired") and not holder.update(fired=1) else None  # noqa: E731
+        def on_write():                                 # the first byte has not left yet
+            if not holder.get("fired"):
+                holder["fired"] = True
+                in_thread()
     if point == "outstanding":
         def answer(client, message):
             in_thread()
