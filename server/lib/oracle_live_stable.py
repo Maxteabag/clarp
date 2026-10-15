@@ -235,7 +235,26 @@ def router_tools():
     return tools
 
 
-def live_config(*, roster=None, delegation_strategy="operator", voice_context=None, history=()):
+# Display names for [oracle] languages, by primary subtag; other codes are named by the code.
+LANGUAGE_NAMES = {"nb": "Norwegian", "nn": "Norwegian", "no": "Norwegian", "en": "English",
+    "sv": "Swedish", "da": "Danish", "fi": "Finnish", "is": "Icelandic", "de": "German",
+    "fr": "French", "es": "Spanish", "it": "Italian", "nl": "Dutch", "pt": "Portuguese",
+    "pl": "Polish", "uk": "Ukrainian", "ru": "Russian", "ar": "Arabic", "tr": "Turkish",
+    "hi": "Hindi", "ja": "Japanese", "ko": "Korean", "zh": "Chinese"}
+
+
+def language_fact(codes):
+    """The user's configured languages as one neutral sentence; "" when none."""
+    names = []
+    for code in codes or ():
+        name = LANGUAGE_NAMES.get(code.split("-")[0].lower())
+        names.append(f"{name} ({code})" if name else code)
+    if not names:
+        return ""
+    return "The user speaks " + (names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]) + "."
+
+
+def live_config(*, roster=None, delegation_strategy="operator", voice_context=None, history=(), languages=()):
     """Session config; the roster and contact ride in the instructions.
 
     The voice model holds no tools, so unless it is told who the agents are it
@@ -249,6 +268,8 @@ def live_config(*, roster=None, delegation_strategy="operator", voice_context=No
         instructions += ("\nRoster: " + (names or "no agents are running") + ".")
         instructions += ("\nYour contact: " + contact + ".") if contact else "\nNo contact is configured; ask which agent should take work."
     instructions += oracle_voice_context.instructions(voice_context)
+    if languages:
+        instructions += "\n" + language_fact(languages)
     result = {"model": MODEL, "instructions": instructions,
             "audio": {"format": {"type": "audio/pcm", "rate": 24000},
                       "output": {"voice": VOICE}}, "delegation": {"type": "client"}}
@@ -1155,7 +1176,8 @@ def _connect_voice(cfg, key, provider):
         try:
             return oracle_gemini_live.GeminiUpstream(cfg.gemini_key(),
                 model=oracle_voice_provider.gemini_model(cfg),
-                voice=oracle_voice_provider.gemini_voice(cfg)), "gemini"
+                voice=oracle_voice_provider.gemini_voice(cfg),
+                languages=getattr(cfg, "oracle_languages", ())), "gemini"
         except Exception as exc:
             log_exception("oracleV2Gemini", exc, "Gemini Live unavailable; using GPT-Live for this call")
     return _connect_upstream(key), "openai"
@@ -1331,6 +1353,7 @@ def serve(handler):
         conversation.send({"type": "session.start", "session":
             podcast_live.session_config(podcast_context, stable=True) if podcast_context is not None
             else live_config(roster=tools.execute("list_agents", {}, "startup"), delegation_strategy=strategy, voice_context=voice_context,
+                languages=cfg.oracle_languages,
                 history=memory.startup_history(roster=tools.execute("list_agents", {}, "history")) if memory else ())})
         while not conversation.stop.is_set():
             frame = ws.read_frame(handler.rfile)

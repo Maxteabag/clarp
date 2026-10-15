@@ -129,6 +129,31 @@ def test_setup_carries_prompt_voice_delegate_tool_vad_transcripts_and_resumption
     assert call.down[0]["type"] == "session.started"
 
 
+def _setup(languages=(), instructions="Prompt."):
+    upstream = oracle_gemini_live.GeminiUpstream.__new__(oracle_gemini_live.GeminiUpstream)
+    upstream.model, upstream.voice, upstream.languages = "gemini-3.8-live", "Kore", languages
+    return upstream.setup_message({"instructions": instructions})
+
+
+def test_configured_languages_bias_input_transcription_only():
+    plain = _setup()
+    biased = _setup(("nb-NO", "en-US"))
+    assert biased["inputAudioTranscription"] == {"languageCodes": ["nb-NO", "en-US"]}
+    assert "languageCode" not in json.dumps(biased["generationConfig"])
+    assert {k: v for k, v in biased.items() if k != "inputAudioTranscription"} == \
+        {k: v for k, v in plain.items() if k != "inputAudioTranscription"}
+
+
+def test_no_languages_keeps_automatic_detection():
+    assert _setup()["inputAudioTranscription"] == {}
+
+
+def test_languages_default_to_none_configured(monkeypatch):
+    monkeypatch.setattr(oracle_gemini_live, "_connect", lambda key: FakeGemini())
+    upstream = oracle_gemini_live.GeminiUpstream("k", model="gemini-3.8-live", voice="Kore")
+    assert upstream.setup_message({"instructions": "P"})["inputAudioTranscription"] == {}
+
+
 def test_audio_goes_up_at_declared_24k_and_comes_down_as_output_deltas(call):
     audio = pcm(3000)
     call.c.input({"type": "session.input_audio.append", "audio": audio})
@@ -267,6 +292,16 @@ def test_unreachable_gemini_falls_back_to_gpt_live_for_the_call(monkeypatch):
     # Held off afterwards: the phone's reconnect does not try Gemini again.
     assert oracle_live_stable._connect_voice(cfg, "openai-key", "gemini") == ("openai-socket", "openai")
     assert attempts == ["key"]
+
+
+def test_gemini_call_gets_the_configured_languages(monkeypatch):
+    socket = FakeGemini()
+    monkeypatch.setattr(oracle_gemini_live, "_connect", lambda key: socket)
+    cfg = SimpleNamespace(gemini_key=lambda: "key", oracle_gemini_model="gemini-3.8-live", oracle_gemini_voice="",
+                          gemini_voice_for=lambda _: None, gemini_voice="Kore", oracle_languages=("nb-NO",))
+    upstream, provider = oracle_live_stable._connect_voice(cfg, "openai-key", "gemini")
+    assert provider == "gemini"
+    assert upstream.setup_message({})["inputAudioTranscription"] == {"languageCodes": ["nb-NO"]}
 
 
 def test_closing_while_the_reader_waits_still_delivers_session_closed(monkeypatch):
