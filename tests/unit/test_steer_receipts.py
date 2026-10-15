@@ -835,6 +835,7 @@ def test_B1prime_a_blocked_register_never_stalls_another_turns_settle(monkeypatc
         entering.set()
         return register(*args, **kwargs)
     monkeypatch.setattr(sr, "register", slow_register)
+    db.conn()                                                 # the schema exists first
     holder = sqlite3.connect(str(db.DB_PATH), isolation_level=None)
     holder.execute("BEGIN IMMEDIATE")                         # another writer holds the DB
     steering = threading.Thread(target=lambda: _swallow(lambda: client.steer(
@@ -851,6 +852,7 @@ def test_B1prime_a_blocked_register_never_stalls_another_turns_settle(monkeypatc
         assert not settling.is_alive(), "the reader waited on a DB write behind the module lock"
         assert elapsed < 1.0                                    # busy_timeout is 5 s
         assert not cas._RECEIPTS_LOCK.locked()
+        assert steering.is_alive()                            # the register really is blocked
     finally:
         holder.execute("ROLLBACK")
         holder.close()
