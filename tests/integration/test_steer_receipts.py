@@ -377,7 +377,10 @@ def test_stop_racing_an_outstanding_steer_rpc(host):
     mode(host, "ack-delay=2")
     send(host, "[qa-slow] typed work", "slow")
     time.sleep(0.4)
-    send(host, "Racing aside", "race")
+    import threading
+    # /send waits for the steer RPC, so it runs beside the Stop.
+    racing = threading.Thread(target=send_outstanding, args=(host, "Racing aside", "race"))
+    racing.start()
     require_receipts(host)
     deadline = time.monotonic() + 5
     while receipt(host, "race") is None:
@@ -388,6 +391,7 @@ def test_stop_racing_an_outstanding_steer_rpc(host):
     row = wait_receipt(host, "race")
     assert row["state"] in {"interrupted", "unknown"}
     time.sleep(2.5)                                                    # the late answer arrives
+    racing.join(timeout=10)
     assert receipt(host, "race")["state"] == row["state"]
     assert len(provider_requests(host, "turn/start")) == 1             # no re-dispatch
     queue = host.request("/turn-queue?session=rachel")
