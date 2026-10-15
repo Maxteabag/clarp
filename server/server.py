@@ -6540,6 +6540,10 @@ def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
     broadcast_boot_version(ctx)
     runtime_client = getattr(ctx, "runtime_client", None)
     if runtime_client is None:
+        # This process runs the turns, so its boot is the runtime's boot:
+        # settle the dead runtime's steer receipts before anything resumes.
+        from lib.runtime_startup import _settle_dead_steer_receipts
+        _settle_dead_steer_receipts(getattr(ctx, "stream", None))
         resume_persisted_agents(ctx)
     if restart_recovery and runtime_client is None:
         # Mark the turns the previous process took down with it before the
@@ -6549,10 +6553,6 @@ def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
             stream=getattr(ctx, "stream", None))
         if interrupted:
             log("turnRestartRecovery", f"marked={len(interrupted)}")
-    if runtime_client is None:
-        # This process runs the turns, so its boot is the runtime's boot.
-        from lib.runtime_startup import _settle_dead_steer_receipts
-        _settle_dead_steer_receipts(getattr(ctx, "stream", None))
     try:
         recovered_queues = TurnDispatchService(ctx).recover_queued()
     except Exception as exc:  # runtime may still be starting; its own boot recovers

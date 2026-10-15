@@ -77,8 +77,15 @@ def decide(consumed_seq: int | None, final_seqs, unphased_seqs, turn_status: str
     """The receipt's state at (or after) the turn's terminal event.
 
     `coverage` is "" when the reader saw the whole turn on the bound thread,
-    "coverage" for a gap and "rebind" for a thread change. `ack` is the steer
-    RPC outcome so far: pending, ok, error, mismatch, timeout or reader_end."""
+    "coverage" for a gap and "rebind" for a thread change; both block every
+    evidence outcome. "unbound" (the agent lost its binding mid-turn) is a
+    weaker gap: it only keeps absence from being asserted, so it turns
+    no_final_response into unknown(coverage) and changes nothing else. `ack`
+    is the steer RPC outcome so far: pending, ok, error, mismatch, timeout or
+    reader_end."""
+    unbound = coverage == "unbound"
+    if unbound:
+        coverage = ""
     if consumed_seq is not None:
         if coverage:
             return "unknown", coverage
@@ -88,7 +95,7 @@ def decide(consumed_seq: int | None, final_seqs, unphased_seqs, turn_status: str
             return "answered", ""
         if any(seq > consumed_seq for seq in unphased_seqs):
             return "unknown", "no_phase"
-        return "no_final_response", ""
+        return ("unknown", "coverage") if unbound else ("no_final_response", "")
     if ack == "error":
         return "rejected", ""
     if ack == "mismatch":
