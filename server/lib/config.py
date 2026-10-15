@@ -444,6 +444,10 @@ class Config:
     oracle_voice_provider: str = "openai"
     oracle_gemini_model: str = "gemini-3.8-live"
     oracle_gemini_voice: str = ""
+    # [oracle] languages: BCP-47 codes of the languages the user speaks, e.g.
+    # ["nb-NO", "en-US"]. Gemini Live biases its input transcription toward
+    # them, and both voice models are told them as a fact. Empty: automatic.
+    oracle_languages: tuple[str, ...] = ()
     openai_realtime_transcription_model: str = "gpt-4o-mini-transcribe"
     cartesia_model: str = "sonic-3.5"
     cartesia_voices: dict[str, str] = field(
@@ -744,6 +748,29 @@ _LAST_STAT_AT = 0.0
 RELOAD_CHECK_INTERVAL_SEC = 1.0
 
 
+_BCP47 = re.compile(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*")
+
+
+def _oracle_languages(raw: Any) -> tuple[str, ...]:
+    """`[oracle] languages` as distinct BCP-47 codes; invalid entries are logged and dropped."""
+    from .log import log
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        log("config.oracle_languages", f"ignored: expected a list of BCP-47 codes, got {raw!r}")
+        return ()
+    codes, invalid = [], []
+    for entry in raw:
+        code = entry.strip() if isinstance(entry, str) else ""
+        if not _BCP47.fullmatch(code):
+            invalid.append(entry)
+        elif code not in codes:
+            codes.append(code)
+    if invalid:
+        log("config.oracle_languages", "dropped invalid BCP-47 codes: " + ", ".join(map(repr, invalid)))
+    return tuple(codes)
+
+
 # "Claude-5628": the anonymous-launch name suffix (agent_lifecycle mints token_hex(2)).
 _ANONYMOUS_SUFFIX = re.compile(r"-[0-9a-f]{4}$")
 
@@ -955,6 +982,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         oracle_voice_provider = str(_oracle.get("voice_provider", "openai")).strip().lower() or "openai",
         oracle_gemini_model = str(_oracle.get("gemini_model", "gemini-3.8-live")).strip() or "gemini-3.8-live",
         oracle_gemini_voice = str(_oracle.get("gemini_voice", "")).strip(),
+        oracle_languages = _oracle_languages(_oracle.get("languages")),
         openai_realtime_transcription_model = str(openai.get(
             "realtime_transcription_model", "gpt-4o-mini-transcribe")).strip(),
         cartesia_model  = str(cartesia.get("model", "sonic-3.5")),

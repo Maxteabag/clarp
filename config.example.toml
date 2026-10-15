@@ -81,6 +81,12 @@ api_key = ""
 realtime_model = "gpt-realtime-2.1"
 realtime_voice = "cedar"
 
+[oracle]
+# Languages you speak, as BCP-47 codes (docs/oracle-gemini-live.md). Gemini
+# Live biases its transcription of your speech toward them, and Oracle is told
+# them as a fact on either voice model. Empty: automatic language detection.
+# languages = ["nb-NO", "en-US"]
+
 [controller_actions]
 # Custom actions a Flic or Watch gesture can run (`clarp-admin controller-action`).
 # An http_post action may call loopback services on this machine; list any
