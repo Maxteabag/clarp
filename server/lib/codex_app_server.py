@@ -912,7 +912,7 @@ def spawn_turn(*, text: str, cwd: pathlib.Path, backend_session_id: str = "",
             # (restart, crash) can no longer be settled from evidence.
             client.receipts_swept = True
             try:
-                steer_receipts.sweep(current_gen=client.gen)
+                steer_receipts.recover(current_gen=client.gen, stream=stream)
             except Exception as exc:  # noqa: BLE001
                 log_exception("steerReceiptSweepFail", exc, detail=agent_id)
         handle = AppTurnHandle(client, agent_id=agent_id)

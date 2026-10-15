@@ -1896,7 +1896,9 @@ class TurnDispatchService:
                     prompt_admission_id=spec.prompt_admission_id, trace_id=spec.trace_id):
                 accepted = bool(steer(
                     spec.backend, spec.agent_id, steer_text,
-                    client_msg_id=spec.client_msg_id,
+                    # The identity the user row is filed under (_record_user_message):
+                    # it keys the steer receipt and Codex echoes it back.
+                    client_msg_id=spec.client_msg_id or spec.trace_id,
                     synthesize_audio=spec.synthesize_audio,
                 ))
         except Exception as e:  # noqa: BLE001
