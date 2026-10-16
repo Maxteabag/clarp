@@ -371,6 +371,8 @@ def _record_google(env):
     from lib import google_tts
 
     def google(*, text, voice, out_path, creds, on_chunk=None, **_kwargs):
+        if voice not in google_tts.VOICES:                  # the core's own voice check
+            raise google_tts.GoogleTTSError("voice_unavailable")
         env.builtin.append({"provider": "google", "voice": voice, "text": text})
         pathlib.Path(out_path).write_bytes(b"ID3google")
         return 9
@@ -394,3 +396,15 @@ def test_an_agents_google_override_never_hijacks_another_providers_preview(env):
     answer = _preview(env, {"voice_id": "previewed-voice", "text": "Hello"})   # session: Sander
     assert answer["status"] == 200
     assert env.spoken() == [("elevenlabs-direct", "previewed-voice")]   # today's global path, no google
+
+
+@pytest.mark.parametrize("requested", ["nb-NO-Chirp3-HD-Nobody", "21m00Tcm4TlvDq8ikWAM"],
+                         ids=["off-list-google-id", "elevenlabs-id"])
+def test_a_google_preview_of_a_voice_off_the_list_fails_and_never_plays_the_default(env, requested):
+    """A preview auditions the REQUESTED voice (FINAL r2): with google selected, an id that is
+    not a Google voice is refused, never replaced by Kore."""
+    _record_google(env)
+    env.configure("google")
+    answer = _preview(env, {"voice_id": requested, "text": "Hello"})
+    assert answer["status"] == 500
+    assert env.spoken() == []
