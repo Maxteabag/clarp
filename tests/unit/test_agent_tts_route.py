@@ -379,3 +379,15 @@ def test_without_an_effective_override_the_elevenlabs_backup_is_unchanged(env):
 
 def test_no_installed_adapter_outside_the_tests_ever_ran():
     assert not _SENTINEL_RAN.exists(), _SENTINEL_RAN.read_text()
+
+
+def test_the_adapter_dir_is_the_sessions_own_empty_dir(tmp_path_factory):
+    """tests/unit/conftest.py points CLARP_TTS_ADAPTERS_DIR at an empty directory
+    under the session's temp dir before any lib import, so neither this module
+    nor any other ever sees an installed adapter unless a test installs one."""
+    from lib import tts_providers
+    root = pathlib.Path(os.environ.get("CLARP_TTS_ADAPTERS_DIR", ""))
+    assert custom_tts_adapters.ROOT == root
+    assert root.is_relative_to(tmp_path_factory.getbasetemp())
+    assert custom_tts_adapters.discover() == []
+    assert not [row["id"] for row in tts_providers.status()["providers"] if row["id"].startswith("custom.")]
