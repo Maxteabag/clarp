@@ -51,6 +51,16 @@ server start; clips use the table immediately.
 An agent always speaks with one voice. `[tts] fallback` still applies when the
 agent's provider fails; leave it `none` to keep one voice per agent.
 
+Clips the Host makes directly for an agent (a ring's opening line, the herald,
+"is ready" announcements) follow the same route as its queued replies when the
+entry changes something: another provider, or a `<provider>_voice` for the
+provider in use. Such a clip then falls back only to `[tts] fallback`; the
+built-in ElevenLabs backup of the global direct path no longer applies, so with
+`fallback = "none"` a failing provider leaves that clip silent (the ring still
+rings, the herald reports a failed synthesis). An entry that changes neither
+(an empty voice, or a voice for a provider not in use) keeps the global path.
+A voice preview always plays the voice it was given.
+
 ## Gemini
 
 `lib/gemini_tts.py` streams Gemini 3.8 Flash TTS (24 kHz PCM over SSE) through

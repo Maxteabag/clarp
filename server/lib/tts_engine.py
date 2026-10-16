@@ -139,16 +139,19 @@ class ElevenLabsEngine(TTSEngine):
             cfg = _load()
             if cfg.tts_provider == "none":
                 raise RuntimeError("server audio is disabled: no voice provider")
-            agent = None
+            agent = route = None
             if session and _agent_route:
-                from . import agents as _agents
+                from . import agents as _agents, tts_mode
                 agent = _agents.get_by_session(session)
-            if agent and cfg.tts_override_for(agent):
-                # The agent's own [tts.agents.*] route, exactly as the queued
-                # worker takes it (tts_worker: tts_mode.route into
-                # _synthesize): its provider, voice and fallback. A failure
-                # raises; every direct caller already goes on without audio.
-                from . import tts_mode
+                route = tts_mode.route(cfg, agent) if agent else None
+            if route is not None and (route.provider != cfg.tts_provider or route.voice):
+                # An effective [tts.agents.*] override (another provider, or a
+                # voice for the one in use) takes the agent's route exactly as
+                # the queued worker does (tts_mode.route into _synthesize): its
+                # provider, voice and only its configured fallback, never the
+                # built-in ElevenLabs backup below. A failure raises; every
+                # direct caller already goes on without audio. Fields that
+                # change neither keep the legacy path.
                 from .tts_worker import _synthesize as _provider_synthesize
                 _provider_synthesize(
                     cfg=cfg,
@@ -156,7 +159,7 @@ class ElevenLabsEngine(TTSEngine):
                     agent=agent, out_path=tmp_path,
                     on_chunk=None, trace_id="",
                     delivery_fields={"delivery": "chunked-file"},
-                    clip_route=tts_mode.route(cfg, agent))
+                    clip_route=route)
             elif cfg.tts_provider not in {"cartesia", "elevenlabs"}:
                 from . import agents as _agents
                 from .tts_worker import _synthesize as _provider_synthesize
@@ -198,6 +201,8 @@ class ElevenLabsEngine(TTSEngine):
                     session=session,
                     bytes_=target.stat().st_size,
                     text_len=len(text),
+                    # This engine's ElevenLabs settings, recorded as before;
+                    # not evidence of the provider that actually spoke.
                     extra={"model": self.model, "speed": self.speed},
                 )
             except Exception:
