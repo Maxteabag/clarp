@@ -8,10 +8,12 @@ spoke, which admits exactly one initiative turn and never a user row.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
 import urllib.error
+import urllib.request
 
 import pytest
 
@@ -21,22 +23,36 @@ REASON = "Possible water leak at pump 01"
 LINE = "Camera 2 shows a possible water leak. Shall I find a field worker?"
 
 
+PHONE_TOKEN = "cld_qa_listen_first_phone_token_0001"
+
+
 @pytest.fixture
 def host(tmp_path):
     h = QAHost(tmp_path / "lf-host")
     try:
-        yield h.start()
+        h.start()
+        # The answering phone: a paired full-scope device (calls belong to a device).
+        with sqlite3.connect(h.root / "state.sqlite") as con:
+            con.execute("INSERT INTO paired_devices(device_id, name, token_hash, scope, created_at)"
+                        " VALUES ('device_qa_phone', 'QA phone', ?, 'full', 1)",
+                        (hashlib.sha256(PHONE_TOKEN.encode()).hexdigest(),))
+        yield h
     finally:
         h.stop()
 
 
 def post(host, path, body):
-    return host.request(path, body)
+    """As the paired phone."""
+    request = urllib.request.Request(
+        host.url + path, data=json.dumps(body).encode(),
+        headers={"Authorization": "Bearer " + PHONE_TOKEN, "Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.load(response)
 
 
 def refused(host, path, body):
     with pytest.raises(urllib.error.HTTPError) as err:
-        host.request(path, body)
+        post(host, path, body)
     return err.value.code, json.loads(err.value.read() or b"{}")
 
 
@@ -69,7 +85,7 @@ def wait_idle(host, timeout=20.0):
 
 
 def ring(host, **extra):
-    return post(host, "/calls/ring", {"agent": "rachel", "reason": REASON, "opening_line": LINE, **extra})
+    return host.request("/calls/ring", {"agent": "rachel", "reason": REASON, "opening_line": LINE, **extra})
 
 
 def answered(host, mode="listen_first"):
@@ -100,9 +116,9 @@ def test_the_host_advertises_listen_first(host):
 
 
 def test_an_unknown_ring_opening_mode_is_refused(host):
-    code, body = refused(host, "/calls/ring", {"agent": "rachel", "reason": REASON, "opening_line": LINE,
-                                                "opening_mode": "listen"})
-    assert (code, body["error"]) == (400, "unknown opening_mode")
+    with pytest.raises(urllib.error.HTTPError) as err:
+        ring(host, opening_mode="listen")
+    assert (err.value.code, json.loads(err.value.read())["error"]) == (400, "unknown opening_mode")
 
 
 def test_a_capable_answer_runs_nothing(host):
@@ -132,13 +148,17 @@ def test_a_silence_claim_runs_exactly_one_initiative_turn(host, kind):
     claim(host, op, "listening", "rq-1")
     res = claim(host, op, kind, "rq-2")
     assert res["opening"]["state"] in ("initiative_queued", "initiative_started")
-    starts = wait_for(lambda: provider(host, "turn/start"), what="the initiative turn")
+    wait_for(lambda: provider(host, "turn/start"), what="the initiative turn")
+    log = host.wait_reply("rachel", "QA reply:")                          # the agent spoke first
     wait_idle(host)
+    time.sleep(0.5)                                                      # the transcript import ran
     starts = provider(host, "turn/start")
     assert len(starts) == 1
     sent = json.dumps(starts[0])
     assert REASON in sent and "Open the conversation" in sent
     assert user_rows(host) == []                                          # never a user row
+    assert [t for t in host.request("/log?session=rachel")["turns"] if t["role"] == "user"] == []
+    assert log["turns"][-1]["role"] == "assistant"
     assert host.request(f"/calls/ring?ring_id={rid}")["ring"]["opening"]["state"] == "initiative_started"
     # An ambiguous ACK: the phone repeats the same request, nothing new runs.
     again = claim(host, op, kind, "rq-2")
@@ -192,6 +212,7 @@ def test_speech_after_a_started_initiative_is_an_ordinary_utterance(host):
     op = out["opening"]
     claim(host, op, "silence", "rq-1")
     wait_for(lambda: provider(host, "turn/start"), what="the initiative")
+    host.wait_reply("rachel", "QA reply:")
     wait_idle(host)
     sent = post(host, "/send", {"session": "rachel", "text": "Who is this?", "client_msg_id": "u-who",
                                 "call_id": op["call_id"], "call_opening": {"token": op["token"], "epoch": 1},

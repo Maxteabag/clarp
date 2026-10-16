@@ -1507,7 +1507,7 @@ class TurnDispatchService:
             # A listen-first initiative that a greeting withdrew: never runs.
             self._finish_turn(spec)
             return DispatchResult(session=session, backend=backend)
-        if queue_if_busy and not _is_call_opening(spec):
+        if queue_if_busy:
             # Idle queue request: it starts immediately, so admit its visible
             # user row now. Recovery may find the row already present.
             try:
@@ -2171,7 +2171,7 @@ class TurnDispatchService:
             return
         agents_db.set_trace_for_session(next_spec.session, next_spec.trace_id)
         try:
-            if next_spec.queue_id and not _is_call_opening(next_spec):
+            if next_spec.queue_id:
                 # Queue admission is intentionally invisible. Materialize the
                 # ordinary user turn only at the moment execution begins.
                 self._record_user_message(next_spec)
@@ -2284,6 +2284,9 @@ class TurnDispatchService:
         """Durably admit the user row. With `deferred`, the transcript
         wake-up is appended there for the caller to broadcast after COMMIT
         instead of fanning out while a write transaction is open."""
+        if _is_call_opening(spec):
+            # A listen-first initiative is the agent's own opening: no user row.
+            return True
         try:
             appended = agents_db.record_user_message(
                 agent_id=spec.agent_id,

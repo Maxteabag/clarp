@@ -631,11 +631,14 @@ _OPENING_CAUSES = {
 def opening_header(reason: str, cause: str, silence_ms: int) -> str:
     """The whole input of a listen-first initiative turn: the call header and
     why the agent speaks first. Never words for the agent to say."""
+    from .message_context import CALL_OPENING_CLOSE, CALL_OPENING_OPEN
     seconds = f"{silence_ms / 1000:g}"
     return "\n".join([
+        CALL_OPENING_OPEN,
         f"[Group call] You called the user about: {reason}.",
         _OPENING_CAUSES[cause].format(seconds=seconds),
         "Open the conversation briefly in your own words; do not assume what they said.",
+        CALL_OPENING_CLOSE,
     ])
 
 
