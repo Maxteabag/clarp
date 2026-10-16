@@ -81,6 +81,17 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         from . import call_transcription
         focus = call_scope["session"]
         call_stt = call_transcription.resolve(focus, in_call=True, requested_model=requested_model)
+        # The one policy snapshot this clip resolved, planned and reports with.
+        policy = call_stt["_policy"]
+        if policy["error"]:
+            # A stored policy that can never work (an impossible or unreadable
+            # pair, or one the global engine has since broken) is refused before
+            # any provider, never treated as unset or global.
+            return TranscriptionOutcome(status=409, payload={
+                "ok": False, "error": "call policy invalid", "call_policy_error": policy["error"],
+                "language": policy["languages"],
+                "engines": [call_transcription.concrete(e) for e in policy["engines"]],
+                "attempts": []})
         engines = list(call_stt["_plan"])
         if call_stt["engines"]["source"] in ("device", "global"):
             # The long-form escalation applies as it does outside a call.
@@ -91,7 +102,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                     engines = [long_model]
             except Exception as e:  # noqa: BLE001
                 log_exception("sttLongFormRouteFail", e)
-        if call_transcription.policy_configured():
+        if policy["configured"]:
             call_steps = call_transcription.plan(engines, call_stt["language"]["value"])
         else:
             # No call policy: exactly today's engines and languages (§12.2).

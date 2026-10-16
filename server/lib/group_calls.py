@@ -117,9 +117,10 @@ def _transcription_view(call: dict) -> dict | None:
     try:
         from . import call_transcription
         listen_first = (call.get("_ring") or {}).get("opening_mode") == "listen_first"
-        if not listen_first and not call_transcription.policy_configured():
+        policy = call_transcription.policy_snapshot()
+        if not listen_first and not policy["configured"]:
             return None
-        return call_transcription.participants_view(call)
+        return call_transcription.participants_view(call, policy)
     except Exception as exc:  # noqa: BLE001 - the record never fails on it
         log_exception("groupCallTranscriptionViewFail", exc, f"call={call.get('call_id')}")
         return None

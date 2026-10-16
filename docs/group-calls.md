@@ -225,6 +225,15 @@ skips>]}`. Saving settings refuses a policy that can never work (the call
 languages against `call_engines`, or, when those are unset, the resolved
 global engine), including a later change of the global engine; the readback
 adds `call_policy_error` (empty, or why the stored policy can no longer work).
+Settings save `call_languages`, `call_engines` and the global engine in one
+transaction, and each clip reads all three in one read: a clip resolves,
+plans and reports with one policy, never a mix of an old and a new one. A
+stored policy that can never work (written around the settings check, an
+unreadable value, or broken by a later global engine) is refused for every
+call clip before any provider: **409** `{"ok": false, "error": "call policy
+invalid", "call_policy_error": "<why>", "language": "<stored call_languages>",
+"engines": ["<call_engines as real model ids>"], "attempts": []}`. It is never
+treated as unset or global, and the call record then omits `transcription`.
 
 The call record (`GET /calls`, the answer's `call`, route responses) adds
 `transcription: {session: {language: {value, source}, engines: {value,

@@ -48,6 +48,28 @@ def call_engines() -> list[str]:
     return [e.strip() for e in raw.split(",") if e.strip()]
 
 
+def policy_snapshot() -> dict:
+    """The call policy as one consistent read: both keys and the global
+    engine they are checked against come from a single statement, so a clip,
+    its plan and its report never mix two configurations. ``configured`` is
+    whether either key is set; ``error`` why the stored pair can never work
+    ("" when it can), with the same rule as saving it."""
+    from . import stt_providers
+    stored = settings_store.get_many([CALL_LANGUAGES_KEY, CALL_ENGINES_KEY, stt_providers.ENGINE_KEY])
+    languages = (stored.get(CALL_LANGUAGES_KEY) or "").strip()
+    engines = [e.strip() for e in (stored.get(CALL_ENGINES_KEY) or "").split(",") if e.strip()]
+    snapshot = {"languages": languages, "engines": engines,
+                "global_engine": stored.get(stt_providers.ENGINE_KEY) or stt_providers.LOCAL_ENGINE,
+                "configured": bool(languages or engines), "error": ""}
+    try:
+        snapshot["languages"], _ = validate_settings(
+            languages, ",".join(engines), is_valid=lambda e: stt_providers._model_row(e) is not None,
+            global_engine=snapshot["global_engine"])
+    except ValueError as exc:
+        snapshot["error"] = str(exc)
+    return snapshot
+
+
 def single_code(engine: str) -> bool:
     return engine.split(":", 1)[0] not in SET_PROVIDERS
 
@@ -120,11 +142,15 @@ def validate_scope(principal: str, call_id: str, session: str) -> dict:
 
 # ---- resolution ------------------------------------------------------------------------
 
-def resolve(session: str, *, in_call: bool, requested_model: str = "") -> dict:
+def resolve(session: str, *, in_call: bool, requested_model: str = "", policy: dict | None = None) -> dict:
     """Per-field language and engines with their sources, plus the device
-    header's fate. Outside a call the call policy never applies."""
+    header's fate. Outside a call the call policy never applies. In a call
+    every policy value comes from one ``policy_snapshot()`` (taken here unless
+    given), returned as ``_policy`` for the caller's planning and refusal."""
+    if in_call and policy is None:
+        policy = policy_snapshot()
     agent_language = stt_language._for_session(stt_language.agent_languages(), session)
-    policy_language = call_languages() if in_call else ""
+    policy_language = policy["languages"] if in_call else ""
     if agent_language:
         language = {"value": agent_language, "source": "agent"}
     elif policy_language:
@@ -132,7 +158,7 @@ def resolve(session: str, *, in_call: bool, requested_model: str = "") -> dict:
     else:
         language = {"value": stt_language.selected(), "source": "global"}
     agent_engines = stt_language.engines_for(session)
-    policy_engines = call_engines() if in_call else []
+    policy_engines = policy["engines"] if in_call else []
     if agent_engines:
         engines = {"value": agent_engines, "source": "agent"}
     elif policy_engines:
@@ -140,7 +166,8 @@ def resolve(session: str, *, in_call: bool, requested_model: str = "") -> dict:
     elif requested_model:
         engines = {"value": [requested_model], "source": "device"}
     else:
-        engines = {"value": [_global_engine()], "source": "global"}
+        engines = {"value": [_global_engine(policy["global_engine"] if in_call else None)],
+                   "source": "global"}
     # Plan on the engines as named (an alias stays recognisable), report the
     # real models (docs/group-calls.md "Transcription in a call").
     planned = list(engines["value"])
@@ -150,12 +177,13 @@ def resolve(session: str, *, in_call: bool, requested_model: str = "") -> dict:
         applied = engines["source"] == "device"
         requested = {"value": requested_model, "applied": applied,
                      "reason": None if applied else engines["source"]}
-    return {"language": language, "engines": engines, "requested_model": requested, "_plan": planned}
+    return {"language": language, "engines": engines, "requested_model": requested, "_plan": planned,
+            "_policy": policy}
 
 
-def _global_engine() -> str:
+def _global_engine(engine: str | None = None) -> str:
     from . import stt_providers
-    engine = stt_providers.selected_engine()
+    engine = stt_providers.selected_engine() if engine is None else engine
     return engine if stt_providers.is_cloud_model(engine) else "server-default"
 
 
@@ -240,16 +268,16 @@ def unchanged_plan(engines: list[str], session: str, stt=None) -> list[dict]:
     return steps
 
 
-def policy_configured() -> bool:
-    return bool(call_languages() or call_engines())
-
-
-def participants_view(call: dict) -> dict | None:
-    """``{session: {language, engines}}`` for a call's participants, or None
-    when every field is the global default (nothing to show)."""
+def participants_view(call: dict, policy: dict | None = None) -> dict | None:
+    """``{session: {language, engines}}`` for a call's participants from one
+    policy snapshot, or None when every field is the global default (nothing
+    to show) or the stored policy is invalid (unknown, never global)."""
+    policy = policy_snapshot() if policy is None else policy
+    if policy["error"]:
+        return None
     view = {}
     for part in call.get("participants", []):
-        resolved = resolve(part["session"], in_call=True)
+        resolved = resolve(part["session"], in_call=True, policy=policy)
         view[part["session"]] = {"language": resolved["language"], "engines": resolved["engines"]}
     if all(v["language"]["source"] == "global" and v["engines"]["source"] == "global" for v in view.values()):
         return None

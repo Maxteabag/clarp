@@ -484,8 +484,11 @@ global`; `attempts[].language` is what that engine actually received (`auto`
 for a local engine that detects it). With a call policy configured, when no
 engine can take the call language the clip is refused, with no provider call:
 409 `{"ok": false, "error": "no compatible engine", "language", "engines",
-"attempts"}`. Multilingual or unknown local engines never receive the code, so
-they are skipped when a call policy is configured. Without a call policy,
+"attempts"}`. A stored call policy that can never work is refused the same
+way for every call clip: 409 `{"ok": false, "error": "call policy invalid",
+"call_policy_error", "language", "engines", "attempts": []}`. Multilingual or
+unknown local engines never receive the code, so they are skipped when a call
+policy is configured. Without a call policy,
 in-call transcription is unchanged. The transcription settings take `call_languages` and
 `call_engines`, refuse a combination that can never work, and read back
 `call_policy_error`. Without the header nothing changes. See
