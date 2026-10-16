@@ -13,6 +13,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The job token must not sit in .git/config where a test could read it.
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -24,11 +27,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: uv sync --frozen --group dev
       - run: npm ci --no-audit --no-fund
+      # Everything the tests need is installed above, with the network. The tests themselves run with
+      # no network (loopback only), no credentials, no privilege, an empty HOME and only their own
+      # processes (scripts/ci_contained.sh, which self-checks that before the command starts).
       - name: Python unit, integration and contract tests
-        run: uv run --frozen --group dev python -m pytest -n 2 --junitxml=test-results/python.xml
+        run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n 2 --junitxml=test-results/python.xml
       - name: JavaScript behavior and contract tests
         if: ${{ !cancelled() }}
-        run: uv run --frozen --group dev npm test -- --reporter=default --reporter=junit --outputFile=test-results/javascript.xml
+        run: bash scripts/ci_contained.sh npm test -- --reporter=default --reporter=junit --outputFile=test-results/javascript.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
