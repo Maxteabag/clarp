@@ -2764,3 +2764,103 @@ def test_leaked_slot_release_can_be_scoped_to_one_agent(tmp_path):
     assert service.release_leaked_slots(agent_id="someone-else") == {}
     assert _td.runtime_status()["active"][agent_id] == "tA"
     assert service.release_leaked_slots(agent_id=agent_id) == {agent_id: "tA"}
+
+
+# ---- listen-first initiatives: the dispatcher's claim (docs/agent-rings.md) -------------
+
+def _call_open_admitted(tmp_path, monkeypatch):
+    """A listen_first ring answered by a capable phone, then a silence claim:
+    the initiative is admitted as a queued call-open row the drain has not
+    picked up yet. Returns (service, backends, ring opening, queue id)."""
+    from lib import agent_rings, group_calls
+    _td.reset_for_tests()
+    service, backends, agent_id = _make_service(tmp_path)
+    backends.live = False
+    for name, value in (("_kick_queue", lambda: None), ("_push", lambda ring, kind: {}),
+                        ("_push_voip", lambda ring: {}), ("_schedule_expiry", lambda ring: None)):
+        monkeypatch.setattr(agent_rings, name, value)
+    ctx = SimpleNamespace(stream=None, tts=None)
+    agent_rings.bind(ctx)
+    group_calls.bind(ctx)
+    monkeypatch.setattr(group_calls, "resolve_name", lambda name, participants=(): {
+        "session": "mike", "persona": "Mike", "agent_id": agent_id})
+    ring = agent_rings.ring(agent="mike", reason="Leak at pump 01", opening_line="Line",
+                            opening_mode="listen_first")["ring"]
+    op = agent_rings.answer("device_phone", ring["ring_id"], opening_mode="listen_first")["opening"]
+    out = agent_rings.opening_claim("device_phone", {
+        "token": op["token"], "epoch": 1, "claim": "silence", "request_id": "rq-silence",
+        "capture_gen": 1, "at_ms": 1250, "watermark_ms": 1290})
+    queue_id = out["opening"]["intent"]["admission_id"]
+    assert out["opening"]["intent"]["state"] == "admitted" and turn_queue.status(queue_id) == "queued"
+    return service, backends, op, queue_id
+
+
+def _greet(op):
+    from lib import agent_rings
+    return agent_rings.greeting("device_phone", token=op["token"], epoch=1, client_msg_id="u-hallo",
+                                trace_id="tr-hallo", session="mike", call_id=op["call_id"])
+
+
+def test_a_greeting_that_withdraws_first_means_the_dispatcher_never_spawns(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    claim = agent_rings.claim_initiative
+    seen = []
+
+    def greeting_wins(qid):
+        # The drain has picked the row; the user's greeting commits first.
+        seen.append(_greet(op)["route"])
+        result = claim(qid)
+        seen.append(result)
+        return result
+    monkeypatch.setattr(agent_rings, "claim_initiative", greeting_wins)
+    service.recover_queued()
+    assert seen == ["greeting", False]
+    assert backends.spawned == []                                  # no spawn on loss
+    assert turn_queue.status(queue_id) == "withdrawn"
+    assert _td._INFLIGHT.get(op["session"] and agents_db.get_by_session("mike")["agent_id"]) is None
+    assert agents_db.conn().execute("SELECT count(*) FROM messages WHERE role='user'").fetchone()[0] == 0
+
+
+def test_a_dispatcher_claim_that_commits_first_spawns_once_and_the_greeting_is_ordinary(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    claim = agent_rings.claim_initiative
+    seen = []
+
+    def claim_wins(qid):
+        result = claim(qid)
+        seen.extend([result, _greet(op)["route"]])               # the greeting lands right after
+        return result
+    monkeypatch.setattr(agent_rings, "claim_initiative", claim_wins)
+    service.recover_queued()
+    assert seen == [True, "ordinary"]
+    assert len(backends.spawned) == 1                             # the initiative runs exactly once
+    assert "Open the conversation" in backends.spawned[0][1]["text"]
+    assert turn_queue.status(queue_id) == "started"
+    assert agent_rings.opening_state(op["ring_id"])["state"] == "initiative_started"
+    assert agents_db.conn().execute("SELECT count(*) FROM messages WHERE role='user'").fetchone()[0] == 0
+    backends.live = False
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+
+
+def test_ordinary_queued_rows_drain_exactly_as_before_without_the_opening_claim(tmp_path, monkeypatch):
+    from lib import agent_rings
+    calls = []
+    # raising=False: the same test runs unchanged on 006e9e70, which has no claim hook.
+    monkeypatch.setattr(agent_rings, "claim_initiative", lambda qid: calls.append(qid) or True, raising=False)
+    service, backends, agent_id = _make_service(tmp_path)
+    backends.live = False
+    for n in (1, 2):
+        turn_queue.enqueue(
+            queue_id=f"u-plain-{n}", agent_id=agent_id, session="mike", text=f"plain {n}",
+            trace_id=f"t-plain-{n}", client_msg_id=f"u-plain-{n}", synthesize_audio=False,
+            origin="user", sender_agent_id="")
+    service.recover_queued()
+    # This fake backend reports no live turn, so recovery drains both, in FIFO order.
+    assert [s[1]["text"] for s in backends.spawned] == ["plain 1", "plain 2"]
+    assert [turn_queue.status(f"u-plain-{n}") for n in (1, 2)] == ["started", "started"]
+    rows = agents_db.conn().execute("SELECT message_id FROM messages WHERE role='user' ORDER BY seq DESC").fetchall()
+    assert sorted(r[0] for r in rows) == ["u-plain-1", "u-plain-2"]           # their user rows, as before
+    assert calls == []                                                        # never consulted
