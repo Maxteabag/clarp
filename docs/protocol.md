@@ -471,6 +471,17 @@ recording, e.g. `audio/webm`), headers `X-Hands-Free: 1` for dictation,
 to pick a model. Response includes `text`, `trace_id`, and `transcription_id`;
 pass both ids on the following `/send`.
 
+In a group call (feature `call_transcription_policy`), a clip captured for a
+participant also sends `X-Clarp-Call-Id: <call_id>` and
+`X-Transcription-Session: <that participant>`. The Host checks them before any
+transcription and refuses with no transcript: 400 `bad call id`, 404 `unknown
+call`, 403 `not your call` (another device or Host), 409 `call ended` (+
+`call_id`, `reason`), 409 `not a call participant` (+ `session`). A valid one
+answers with `stt`: `{language: {value, source}, engines: {value, source},
+effective_engine, attempts: [{engine, outcome, ms|reason}], language_adapted,
+requested_model}`, sources `agent | call_policy | device | global`. Without
+the header nothing changes. See [group-calls.md](group-calls.md).
+
 **Out:** an `audio` event announces a clip. Pick a source in this order:
 
 1. `playlist_url` (HLS) when present: assign it to an `<audio>` element.
