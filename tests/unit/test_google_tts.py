@@ -5,7 +5,11 @@ Offline only: every test hands synthesize() a recording transport and token sour
 from __future__ import annotations
 
 import base64
+import io
 import json
+import time
+import traceback
+import urllib.error
 
 import pytest
 
@@ -87,7 +91,8 @@ def test_clarp_pauses_become_the_only_ssml_element(creds, tmp_path, text, ssml):
 
 def test_markup_without_a_usable_pause_is_sent_as_plain_text(creds, tmp_path):
     transport = Transport()
-    speak(creds, tmp_path, 'Hei<break/>der <break time="0ms"/> og <volume ratio="1"/>slutt', transport)
+    speak(creds, tmp_path, 'Hei<break/>der <break time="0ms"/> og <break time="0.4ms"/> '
+                           '<volume ratio="1"/>slutt', transport)
     assert transport.calls[0]["body"]["input"] == {"text": "Hei der og slutt"}
 
 
@@ -153,15 +158,120 @@ def test_a_bad_or_oversized_reply_leaves_no_file_behind(creds, tmp_path, payload
     assert not clips.exists() or list(clips.iterdir()) == []
 
 
-def test_errors_never_carry_the_reply_or_the_token(creds, tmp_path):
+@pytest.mark.parametrize("token_error, transport_error, code", [
+    (google_stt.GoogleSTTError('Google token HTTP 400: {"error": "invalid_grant secret"}'), None,
+     "google_auth_failed"),
+    (google_stt.GoogleSTTError("cannot read Google credentials: [Errno 13] Permission denied: "
+                               "'/home/someone/secret/adc.json'"), None, "google_auth_failed"),
+    (None, OSError("connection to secret.example reset"), "google_request_failed"),
+], ids=["token-reply", "credentials-path", "transport"])
+def test_errors_never_carry_the_reply_the_path_or_their_cause(creds, tmp_path, token_error,
+                                                               transport_error, code):
     def failing_token(credentials_file, *, timeout):
-        raise google_stt.GoogleSTTError('Google token HTTP 400: {"error": "invalid_grant secret"}')
+        raise token_error
 
     with pytest.raises(google_tts.GoogleTTSError) as error:
         google_tts.synthesize(text="Hei", voice=VOICE, out_path=tmp_path / "c.mp3", creds=creds,
-                              transport=Transport(), token=failing_token)
-    assert error.value.code == "google_auth_failed"
-    assert "secret" not in str(error.value) and "invalid_grant" not in str(error.value)
+                              transport=Transport(raises=transport_error),
+                              token=failing_token if token_error else token)
+    assert error.value.code == code
+    assert error.value.__cause__ is None and error.value.__suppress_context__
+    assert "secret" not in "".join(traceback.format_exception(error.value))   # what a log records
+
+
+@pytest.mark.parametrize("message, code", [
+    ("Google token HTTP 401: {}", "google_auth_failed"),
+    ("Google token HTTP 429: {}", "google_quota"),
+    ("Google token HTTP 503: {}", "google_http_error"),
+    ("Google token request failed: <urlopen error timed out>", "google_timeout"),
+    ("Google token request failed: <urlopen error [Errno 111] Connection refused>",
+     "google_request_failed"),
+    ("Google credentials must be an authorized_user ADC file", "google_auth_failed"),
+], ids=["401", "429", "503", "timeout", "unreachable", "not-authorized-user"])
+def test_a_token_failure_is_classified_by_what_went_wrong(creds, tmp_path, message, code):
+    def failing_token(credentials_file, *, timeout):
+        raise google_stt.GoogleSTTError(message)
+
+    transport = Transport()
+    with pytest.raises(google_tts.GoogleTTSError) as error:
+        google_tts.synthesize(text="Hei", voice=VOICE, out_path=tmp_path / "c.mp3", creds=creds,
+                              transport=transport, token=failing_token)
+    assert error.value.code == code
+    assert transport.calls == []
+
+
+def test_unencodable_or_xml_invalid_characters_never_fail_the_request(creds, tmp_path):
+    transport = Transport()
+    speak(creds, tmp_path, "Hei\ud800 der", transport)
+    speak(creds, tmp_path, 'a\x01b <break time="1s"/> c\x1f', transport)
+    assert [call["body"]["input"] for call in transport.calls] == [
+        {"text": "Hei? der"}, {"ssml": '<speak>a b <break time="1000ms"/> c</speak>'}]
+
+
+def test_a_failed_write_leaves_no_file_behind(creds, tmp_path, monkeypatch):
+    def refuse(*_args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(google_tts.os, "replace", refuse)
+    with pytest.raises(OSError):
+        speak(creds, tmp_path, "Hei", Transport())
+    assert list((tmp_path / "clips").iterdir()) == []
+
+
+class FakeResponse:
+    def __init__(self, body: bytes):
+        self.status, self.body = 200, io.BytesIO(body)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+    def read1(self, size):
+        return self.body.read(min(size, 1_000))   # a receive returns whatever arrived
+
+
+class UnreadableBody(io.BytesIO):
+    def read(self, *_args):
+        raise AssertionError("the error body was read")
+
+
+class FakeOpener:
+    def __init__(self, result):
+        self.result, self.opened = result, []
+
+    def open(self, request, timeout):
+        self.opened.append((request, timeout))
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def test_the_transport_reads_at_most_one_byte_past_the_limit(monkeypatch):
+    opener = FakeOpener(FakeResponse(b"x" * 5_000))
+    monkeypatch.setattr(google_tts, "_OPENER", opener)
+    status, body = google_tts._urllib_transport(
+        google_tts.ENDPOINT, b"{}", {"Authorization": "Bearer t"}, time.monotonic() + 30, 2_500)
+    assert (status, len(body)) == (200, 2_501)
+    [(request, timeout)] = opener.opened
+    assert (request.full_url, request.get_method()) == (google_tts.ENDPOINT, "POST")
+    assert 0 < timeout <= google_tts.RECEIVE_TIMEOUT_SECONDS
+
+
+def test_the_transport_returns_an_error_status_without_reading_its_body(monkeypatch):
+    body = UnreadableBody(b'{"error": "secret"}')
+    monkeypatch.setattr(google_tts, "_OPENER", FakeOpener(urllib.error.HTTPError(
+        google_tts.ENDPOINT, 500, "Server Error", {}, body)))
+    assert google_tts._urllib_transport(
+        google_tts.ENDPOINT, b"{}", {}, time.monotonic() + 30, 2_500) == (500, b"")
+    assert body.closed
+
+
+def test_the_transport_stops_after_the_receive_that_passes_the_budget(monkeypatch):
+    monkeypatch.setattr(google_tts, "_OPENER", FakeOpener(FakeResponse(b"x" * 5_000)))
+    with pytest.raises(TimeoutError):
+        google_tts._urllib_transport(google_tts.ENDPOINT, b"{}", {}, time.monotonic() - 1, 9_999)
 
 
 def test_an_unconfigured_source_refuses_before_any_request(tmp_path):
@@ -209,6 +319,9 @@ def test_an_explicit_google_tts_section_is_the_only_source(tmp_path, no_ambient_
 
     empty_section = google_tts.credentials(load(tmp_path, stt + "[google_tts]\n"))
     assert (empty_section.source, empty_section.error) == ("google_tts", "google_credentials_missing")
+
+    not_a_table = google_tts.credentials(load(tmp_path, 'google_tts = "x"\n' + stt))
+    assert (not_a_table.source, not_a_table.error) == ("google_tts", "google_credentials_missing")
 
 
 def test_without_a_google_tts_section_it_speaks_with_google_stt(tmp_path, no_ambient_adc):
