@@ -204,16 +204,29 @@ def _say_scenario(env, **ring_kw):
     return ring, out, list(env.stream.events), list(env.pushes), notices
 
 
+_TIMES = {"created_at", "expires_at", "ended_at", "server_now", "started_at", "joined_at", "changed_at",
+          "updated_at"}
+
+
 def _scrub(value):
+    """Ids, the clock and the TTS file counter differ between two runs; nothing else may."""
     text = json.dumps(value, sort_keys=True)
     text = re.sub(r"(rng|gcl)_[0-9a-f]{32}", r"\1_X", text)
-    return json.loads(text)
+    text = re.sub(r"/audio/\d+__", "/audio/N__", text)
+
+    def drop(node):
+        if isinstance(node, dict):
+            return {k: (None if k in _TIMES else drop(v)) for k, v in node.items()}
+        if isinstance(node, list):
+            return [drop(v) for v in node]
+        return node
+    return drop(json.loads(text))
 
 
 def test_a_say_ring_is_identical_to_a_ring_without_opening_mode(env, tmp_path):
     first = _say_scenario(env)
-    db.conn().execute("DELETE FROM messages")
     calls.end(PHONE)
+    db.conn().execute("DELETE FROM messages")
     env.clock.now += rings.AGENT_INTERVAL_MS
     second = _say_scenario(env, opening_mode="say")
     assert _scrub(first[0]) == _scrub(second[0])                     # record
