@@ -109,7 +109,7 @@ def test_1_the_real_resume_handler_launch_fails_its_test_at_teardown(tmp_path):
     assert done.returncode == 1, out
     assert "1 passed, 1 error" in out, out                    # the call passed; teardown failed it
     assert "ERROR at teardown of test_the_real_resume_handler_reaches_the_claude_backend" in out, out
-    assert "real provider CLI launch attempted (blocked)" in out and "claude" in out, out
+    assert "real provider CLI launch or network access attempted (blocked)" in out and "claude" in out, out
 
 
 # ---- 2. a swallowed refusal still fails the test ----------------------------------------
@@ -130,7 +130,7 @@ def test_2_a_swallowed_launch_still_fails_its_test(tmp_path):
     out = done.stdout + done.stderr
     assert not marker.exists(), marker.read_text()
     assert done.returncode == 1 and "1 passed, 1 error" in out, out
-    assert "real provider CLI launch attempted (blocked)" in out, out
+    assert "real provider CLI launch or network access attempted (blocked)" in out, out
 
 
 # ---- 3. every launch boundary is intercepted (in-process; acknowledged with take()) -------
