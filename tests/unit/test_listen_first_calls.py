@@ -1028,3 +1028,195 @@ def test_I_a_committed_gen_1_then_speech_and_abandonment_make_no_gen_2(env):
     assert rings.recover_openings() == 0
     assert [r["queue_id"] for r in _queue(rid)] == [f"call-open:{rid}:1"]
     assert _state(rid)["intent"] == {**_state(rid)["intent"], "gen": 1, "state": "started"}
+
+
+# ---- §11.L scoped pause authority: the answer passes an EXISTING pause, nothing newer -------
+
+class _Backends:
+    CLAUDE = CODEX = "codex"
+
+    def __init__(self):
+        self.spawned = []
+
+    def normalize(self, backend):
+        return backend or "codex"
+
+    def interrupt(self, backend, agent_id):
+        return 0
+
+    def active_handles(self, backend, agent_id):
+        return []
+
+    def spawn_turn(self, backend, **kwargs):
+        self.spawned.append(kwargs)
+
+
+def _service(tmp_path):
+    from types import SimpleNamespace
+    import lib.turn_dispatch as td
+    td.reset_for_tests()
+    backends = _Backends()
+    ctx = SimpleNamespace(default_session="theo-97e5", agents_path=tmp_path / "unused.json", stream=None)
+    return td.TurnDispatchService(ctx, backend_registry=backends, home=tmp_path,
+                                  uuid_factory=lambda: "backend-session-1", now=lambda: 12.5,
+                                  retry_scheduler=lambda delay, fn: None), backends
+
+
+def _stop(agent_id="a-theo"):
+    """What every Stop does to the queue (turn_dispatch.clear_for_agent / begin_stop)."""
+    turn_queue.set_paused(agent_id, True)
+
+
+def _held(queue_id, *, origin="user", agent_id="a-theo"):
+    turn_queue.enqueue(queue_id=queue_id, agent_id=agent_id, session="theo-97e5", text=queue_id,
+                       trace_id=f"t-{queue_id}", client_msg_id=queue_id, synthesize_audio=False,
+                       origin=origin, sender_agent_id="")
+
+
+def _silence(op, rid="rq-silence"):
+    return _claim(op, "silence", request_id=rid)
+
+
+def _L_retired(ring_id):
+    final = _state(ring_id)
+    assert final["retired"]["reason"] == "stopped_after_answer", final["retired"]
+    assert final["state"] == "retired"
+    assert (final.get("intent") or {}).get("state") in (None, "cancelled")
+
+
+def test_L1_a_pause_before_the_answer_passes_exactly_one_opening_and_nothing_else(env, tmp_path):
+    service, backends = _service(tmp_path)
+    _held("u-held-1")
+    _stop()                                                     # paused BEFORE the answer
+    _held("u-held-2")
+    ring, op = _answered()
+    out = _silence(op)
+    assert out["opening"]["intent"]["state"] == "admitted"
+    service.recover_queued()
+    assert [s["text"].count("Open the conversation") for s in backends.spawned] == [1]   # exactly one
+    assert turn_queue.status("u-held-1") == "queued" and turn_queue.status("u-held-2") == "queued"
+    assert db.conn().execute("SELECT count(*) FROM queued_turns WHERE queue_id LIKE 'u-held-%'"
+                             " AND claimed_at IS NOT NULL").fetchone()[0] == 0
+    assert turn_queue.is_paused("a-theo") is True               # the queue stays paused
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+
+
+def test_L1_the_opening_starting_never_ends_the_pause_even_with_nothing_else_held(env, tmp_path):
+    service, backends = _service(tmp_path)
+    _stop()
+    ring, op = _answered()
+    _silence(op)
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+    assert turn_queue.is_paused("a-theo") is True
+
+
+def test_L2_a_stop_after_the_answer_before_admission_admits_nothing(env, tmp_path):
+    service, backends = _service(tmp_path)
+    ring, op = _answered()
+    _stop()                                                     # newer than the answer
+    err = _refused(lambda: _silence(op), 409, "opening retired")
+    assert err.extra["reason"] == "stopped_after_answer"
+    _L_retired(ring["ring_id"])
+    assert _queue(ring["ring_id"]) == [] and _admissions(ring["ring_id"]) == []
+    service.recover_queued()
+    assert backends.spawned == [] and rings.recover_openings() == 0
+
+
+def test_L2_the_admitter_rechecks_the_fence_in_its_own_transaction(env, tmp_path):
+    ring, op = _queued(env)                                     # resolved; the admitter has not run
+    _stop()
+    assert rings.admit_initiative(ring["ring_id"]) == "fenced"
+    _L_retired(ring["ring_id"])
+    assert _queue(ring["ring_id"]) == [] and _admissions(ring["ring_id"]) == []
+
+
+def test_L3_a_stop_after_admission_before_the_claim_means_no_spawn(env, tmp_path):
+    service, backends = _service(tmp_path)
+    ring, op = _queued(env)
+    assert rings.admit_initiative(ring["ring_id"]) == "admitted"
+    _stop()
+    service.recover_queued()
+    assert backends.spawned == []
+    assert rings.claim_initiative(_aid(ring["ring_id"])) is False
+    _L_retired(ring["ring_id"])
+    assert _queue(ring["ring_id"])[0]["status"] == "withdrawn"
+    assert rings.recover_openings() == 0
+
+
+def test_L4_a_stop_after_the_claim_keeps_existing_stop_semantics_and_no_resurrection(env, tmp_path):
+    ring, op = _queued(env)
+    rings.admit_initiative(ring["ring_id"])
+    assert _dispatch(ring["ring_id"]) is True                  # claimed: the initiative is running
+    _stop()                                                     # Stop semantics as today (interrupt/hold)
+    final = _state(ring["ring_id"])
+    assert final["state"] == "initiative_started" and final["intent"]["state"] == "started"
+    assert rings.recover_openings() == 0 and _dispatch(ring["ring_id"]) is False
+    assert len(_queue(ring["ring_id"])) == 1
+
+
+@pytest.mark.parametrize("case", ["late_answer", "other_principal", "other_auth_generation", "duplicate_answer"])
+def test_L5_no_extra_admission_for_late_foreign_reauthenticated_or_duplicate_answers(env, case):
+    db.conn().execute("INSERT INTO paired_devices(device_id, name, token_hash, scope, created_at)"
+                      " VALUES (?,?,?,?,?)", (PHONE, "Phone", "hash-1", "full", db.now_ms()))
+    ring = _lf()
+    if case == "late_answer":
+        rings.decline(PHONE, ring["ring_id"])
+        _refused(lambda: rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first"), 409, "the call is over")
+        assert rings.opening_state(ring["ring_id"]) is None
+        return
+    op = rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")["opening"]
+    if case == "other_principal":
+        _refused(lambda: _silence({**op}, rid="rq-x") if False else rings.opening_claim(
+            "device_other", {"token": op["token"], "epoch": 1, "claim": "silence", "request_id": "rq-x",
+                             "capture_gen": 1, "at_ms": 1250, "watermark_ms": 1290}), 403, "not the answering device")
+        assert _queue(ring["ring_id"]) == []
+        return
+    if case == "duplicate_answer":
+        again = rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")
+        assert again["changed"] is False and again["opening"]["token"] == op["token"]
+        _silence(op)
+        _silence(op, rid="rq-again")
+        assert len(_queue(ring["ring_id"])) == 1 and len(_admissions(ring["ring_id"])) == 1
+        return
+    # The phone re-paired: a new token for the same device id is another auth generation.
+    db.conn().execute("UPDATE paired_devices SET token_hash='hash-2' WHERE device_id=?", (PHONE,))
+    err = _refused(lambda: _silence(op), 409, "opening retired")
+    assert err.extra["reason"] == "auth_changed"
+    assert _queue(ring["ring_id"]) == [] and _admissions(ring["ring_id"]) == []
+
+
+@pytest.mark.parametrize("stopped", [False, True])
+@pytest.mark.parametrize("crash", ["before_admit", "before_claim"])
+def test_L6_recovery_rechecks_the_fence_and_admits_at_most_once(env, tmp_path, stopped, crash):
+    service, backends = _service(tmp_path)
+    ring, op = _queued(env)                                     # crash right after the resolve txn
+    if crash == "before_claim":
+        assert rings.admit_initiative(ring["ring_id"]) == "admitted"
+    if stopped:
+        _stop()
+    admitted = rings.recover_openings()
+    service.recover_queued()
+    service.recover_queued()
+    if stopped:
+        assert admitted == 0 and backends.spawned == []
+        _L_retired(ring["ring_id"])
+        assert all(r["status"] == "withdrawn" for r in _queue(ring["ring_id"]))
+    else:
+        assert admitted == (1 if crash == "before_admit" else 0)
+        assert len(backends.spawned) == 1
+        assert len(_admissions(ring["ring_id"])) == 1
+
+
+def test_L7_other_automation_for_the_agent_stays_held(env, tmp_path):
+    service, backends = _service(tmp_path)
+    _stop()
+    _held("hb-1", origin="heartbeat")
+    ring, op = _answered()
+    _held("auto-2", origin="automation")
+    _silence(op)
+    service.recover_queued()
+    assert len(backends.spawned) == 1 and "Open the conversation" in backends.spawned[0]["text"]
+    assert turn_queue.status("hb-1") == "queued" and turn_queue.status("auto-2") == "queued"
+    assert turn_queue.is_paused("a-theo") is True
