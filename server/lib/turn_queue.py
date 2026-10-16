@@ -577,11 +577,13 @@ def withdraw_unclaimed(queue_id: str) -> bool:
     return cursor.rowcount == 1
 
 
-def claim_for_dispatch(queue_id: str) -> bool:
-    """The dispatcher's claim of an opening row before it spawns."""
+def claim_for_dispatch(queue_id: str, *, reclaim: bool = False) -> bool:
+    """The dispatcher's claim of an opening row before it spawns; `reclaim`
+    also takes a row it claimed before that never started."""
+    statuses = "('queued', 'claimed')" if reclaim else "('queued')"
     cursor = db.conn().execute(
-        """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
-            WHERE queue_id = ? AND status = 'queued'""", (db.now_ms(), queue_id))
+        f"""UPDATE queued_turns SET status = 'claimed', claimed_at = ?
+            WHERE queue_id = ? AND status IN {statuses}""", (db.now_ms(), queue_id))
     return cursor.rowcount == 1
 
 
@@ -762,6 +764,24 @@ def stop_generation(agent_id: str) -> int:
 
 
 def set_paused(agent_id: str, paused: bool) -> bool:
+    """Pause or resume the agent's queue. A pause (every Stop or cancel) also
+    moves the stop generation, in the same transaction as the pause itself."""
+    con = db.conn()
+    own = not con.in_transaction
+    if own:
+        con.execute("BEGIN IMMEDIATE")
+    try:
+        changed = _set_paused(agent_id, paused)
+        if own:
+            con.execute("COMMIT")
+    except BaseException:
+        if own:
+            con.execute("ROLLBACK")
+        raise
+    return changed
+
+
+def _set_paused(agent_id: str, paused: bool) -> bool:
     if paused:
         from . import settings_store
         settings_store.increment(STOP_GENERATION_KEY + agent_id)
