@@ -67,6 +67,11 @@ class TTSEngine(ABC):
         Returns the destination path.
         """
 
+    def synthesize_preview(self, text: str, voice_id: str, *,
+                           session: str | None = None) -> pathlib.Path:
+        """Audition `voice_id` itself (a voice picker's preview)."""
+        return self.synthesize(text, voice_id, session=session)
+
 
 class ElevenLabsEngine(TTSEngine):
     def __init__(self, audio_dir: pathlib.Path, *,
@@ -113,8 +118,13 @@ class ElevenLabsEngine(TTSEngine):
             _filename_prefix="herald-internal-",
         )
 
+    def synthesize_preview(self, text, voice_id, *, session=None) -> pathlib.Path:
+        # A preview auditions the voice it was given, never the agent's route.
+        return self.synthesize(text, voice_id, session=session, _agent_route=False)
+
     def synthesize(self, text, voice_id, *, session=None,
-                   _filename_prefix: str = "") -> pathlib.Path:
+                   _filename_prefix: str = "",
+                   _agent_route: bool = True) -> pathlib.Path:
         import time as _t
         self.audio_dir.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(suffix=".mp3", prefix="claude-pwa-tts-")
@@ -129,7 +139,25 @@ class ElevenLabsEngine(TTSEngine):
             cfg = _load()
             if cfg.tts_provider == "none":
                 raise RuntimeError("server audio is disabled: no voice provider")
-            if cfg.tts_provider not in {"cartesia", "elevenlabs"}:
+            agent = None
+            if session and _agent_route:
+                from . import agents as _agents
+                agent = _agents.get_by_session(session)
+            if agent and cfg.tts_override_for(agent):
+                # The agent's own [tts.agents.*] route, exactly as the queued
+                # worker takes it (tts_worker: tts_mode.route into
+                # _synthesize): its provider, voice and fallback. A failure
+                # raises; every direct caller already goes on without audio.
+                from . import tts_mode
+                from .tts_worker import _synthesize as _provider_synthesize
+                _provider_synthesize(
+                    cfg=cfg,
+                    row={"text": text, "voice_id": voice_id, "session": session},
+                    agent=agent, out_path=tmp_path,
+                    on_chunk=None, trace_id="",
+                    delivery_fields={"delivery": "chunked-file"},
+                    clip_route=tts_mode.route(cfg, agent))
+            elif cfg.tts_provider not in {"cartesia", "elevenlabs"}:
                 from . import agents as _agents
                 from .tts_worker import _synthesize as _provider_synthesize
                 agent = _agents.get_by_session(session) if session else {}

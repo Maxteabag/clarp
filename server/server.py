@@ -4144,7 +4144,7 @@ class Handler(BaseHTTPRequestHandler):
         if not voice_id:
             return self._json_error(400, "voice_id required")
         try:
-            path = self.ctx.tts.synthesize(text[:200], voice_id, session=session)
+            path = self.ctx.tts.synthesize_preview(text[:200], voice_id, session=session)
         except Exception as e:
             log_exception("previewSynthFail", e, detail=voice_id)
             return self._json_error(500, str(e))
