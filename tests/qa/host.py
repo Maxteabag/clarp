@@ -95,9 +95,11 @@ def main():
     allowed_get = {'/status', '/agents/snapshot', '/artifacts', '/attention',
         '/automation-settings', '/clips/recoverable', '/events', '/log', '/server-info',
         '/task-plan', '/task-plans', '/task-plan/document', '/teams', '/transcription-capabilities', '/transcription-providers',
-        '/voice-catalog', '/turn-queue', '/goal-ledger', '/goal-ledger/delegations'}
+        '/voice-catalog', '/turn-queue', '/goal-ledger', '/goal-ledger/delegations', '/calls/ring'}
     allowed_post = {'/send', '/select', '/focus', '/clog', '/clips/ack', '/devices', '/stop', '/turn-queue/resume', '/task-plan/action',
-        '/goal-ledger/delegations', '/goal-ledger/delegations/stop'}
+        '/goal-ledger/delegations', '/goal-ledger/delegations/stop',
+        # Agent rings and listen-first openings (docs/agent-rings.md).
+        '/calls/ring', '/calls/ring/answer', '/calls/ring/opening', '/calls/end'}
     for method, allowed in [('GET', allowed_get), ('POST', allowed_post), ('PUT', set()), ('DELETE', set())]:
         original = getattr(module.Handler, 'do_' + method)
         def scoped(self, original=original, allowed=allowed):
