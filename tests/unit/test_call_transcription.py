@@ -537,3 +537,62 @@ def test_R2_an_invalid_stored_policy_is_refused_before_any_provider(env, languag
     assert out.payload["attempts"] == []
     assert stt.calls == []                                               # never silently unset or global
     assert "transcription" not in calls.snapshot(PHONE)["call"]          # the view is unknown, not global
+
+
+# ---- R1: an explicit server-default or local header in a call is today's chat call --------------
+
+class MethodSTT(FakeSTT):
+    """Records which provider method ran, with what, and refuses the aliases
+    the way the real Whisper engine does (they are not installed model ids)."""
+
+    def __init__(self, *, refuse_aliases=False):
+        super().__init__()
+        self.refuse_aliases = refuse_aliases
+
+    def transcribe_model_bytes(self, engine, audio, ctype, prompt, *, wait=0.0):
+        self.calls.append(("transcribe_model_bytes", engine, stt_language.current_language()))
+        if self.refuse_aliases and engine in ("server-default", "local"):
+            from lib.stt import STTUnknownModelError
+            raise STTUnknownModelError(f"transcription model not installed: {engine}")
+        return "hei", True, 1.0
+
+    def transcribe_bytes(self, audio, ctype, prompt, *, wait=0.0):
+        self.calls.append(("transcribe_bytes", None, stt_language.current_language()))
+        return "hello", True, 1.0
+
+
+@pytest.mark.parametrize("header", ["server-default", "local"])
+@pytest.mark.parametrize("refuse_aliases", [False, True])
+def test_R1_an_explicit_alias_header_in_a_call_is_the_chat_call(env, header, refuse_aliases):
+    chat = MethodSTT(refuse_aliases=refuse_aliases)
+    plain = _transcribe(chat, scope=None, requested_model=header, focus="mike-86db", tid="tx-plain")
+    stt = MethodSTT(refuse_aliases=refuse_aliases)
+    out = _transcribe(stt, scope=_scope(env), requested_model=header)
+    assert stt.calls == chat.calls == [("transcribe_model_bytes", header, None)]
+    assert out.status == plain.status and out.payload.get("error") == plain.payload.get("error")
+    record = out.payload["stt"]
+    assert record["engines"]["source"] == "device"
+    assert record["requested_model"] == {"value": header, "applied": True, "reason": None}
+
+
+def test_R1_without_a_header_the_global_default_is_unchanged(env):
+    chat = MethodSTT()
+    _transcribe(chat, scope=None, focus="mike-86db", tid="tx-plain")
+    stt = MethodSTT()
+    record = _transcribe(stt, scope=_scope(env)).payload["stt"]
+    assert stt.calls == chat.calls == [("transcribe_bytes", None, None)]
+    assert record["engines"]["source"] == "global" and record["requested_model"] is None
+
+
+@pytest.mark.parametrize("header", ["server-default", "local"])
+def test_R1_the_policy_and_the_agent_still_shadow_an_alias_header(env, header):
+    _set(call_engines="google:chirp_3")
+    stt = MethodSTT()
+    record = _transcribe(stt, scope=_scope(env), requested_model=header).payload["stt"]
+    assert stt.calls == [("transcribe_model_bytes", "google:chirp_3", "en")]
+    assert record["requested_model"] == {"value": header, "applied": False, "reason": "call_policy"}
+    _set(agent_engines={"mike": "elevenlabs:scribe_v2"})
+    stt = MethodSTT()
+    record = _transcribe(stt, scope=_scope(env), requested_model=header, tid="tx-agent").payload["stt"]
+    assert stt.calls == [("transcribe_model_bytes", "elevenlabs:scribe_v2", "en")]
+    assert record["requested_model"] == {"value": header, "applied": False, "reason": "agent"}
