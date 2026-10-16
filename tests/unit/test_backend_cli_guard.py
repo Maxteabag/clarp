@@ -455,3 +455,64 @@ def test_9_a_fake_that_names_an_installed_cli_is_refused(backend_cli_guard, fake
         fake_backend_cli(wrapper)
     fake_backend_cli.dir(tmp_path / "bin")
     _blocked(backend_cli_guard, lambda: subprocess.run([str(wrapper), "--version"]))
+
+
+# ---- 10. N1: every resolver entry point and sendmsg ---------------------------------------------
+
+@pytest.mark.parametrize("lookup", [
+    lambda: socket.gethostbyname("guard-probe.invalid"),
+    lambda: socket.gethostbyname_ex("guard-probe.invalid"),
+    lambda: socket.gethostbyaddr("192.0.2.1"),
+    lambda: socket.getnameinfo(("192.0.2.1", 9), 0),
+    lambda: socket.getfqdn("guard-probe.invalid"),
+    lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendmsg([b""], [], 0, ("192.0.2.1", 9)),
+])
+def test_10_name_lookups_and_sendmsg_are_refused_and_recorded(backend_cli_guard, lookup):
+    try:
+        lookup()
+    except OSError:
+        pass                     # getfqdn swallows the refused lookup; the record still fails it
+    assert any("socket." in entry for entry in backend_cli_guard.take())
+
+
+def test_10_loopback_forms_stay_local():
+    import backend_cli_guard_core as core
+    for host in ("127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost", "api.localhost", "0.0.0.0", "",
+                 socket.gethostname()):
+        assert core._loopback(host), host
+    for host in ("192.0.2.1", "guard-probe.invalid", "::ffff:192.0.2.1"):
+        assert not core._loopback(host), host
+
+
+# ---- 11. N2: only command positions count (parsed, never executed) ------------------------------
+
+@pytest.mark.parametrize("command", [
+    "git log --grep claude",
+    "pytest -k codex tests/unit",
+    "echo 'the claude backend' && grep -r gemini docs",
+    "FOO=claude make test",
+])
+def test_11_a_provider_name_as_an_argument_is_not_a_launch(backend_cli_guard, command):
+    assert backend_cli_guard.forbidden_shell(command, "/nonexistent") == ""
+
+
+@pytest.mark.parametrize("argv", [
+    ["uv", "run", "pytest", "-k", "codex"],
+    ["uv", "run", "--group", "dev", "python", "-m", "pytest", "-k", "claude"],
+    ["node", "scripts/build.js", "claude"],
+])
+def test_11_a_runner_judges_only_the_program_it_starts(backend_cli_guard, argv):
+    assert backend_cli_guard.forbidden_argv(argv, "/nonexistent") == ""
+
+
+@pytest.mark.parametrize("command", [
+    "cd /tmp; claude --version",
+    "make && FOO=1 codex --version",
+    "true | gemini --version",
+    "(grok --version)",
+    "uv run --group dev claude --version",
+    "npx -c 'opencode --version'",
+    "npx -p @anthropic-ai/claude-code claude-code --version",
+])
+def test_11_a_provider_cli_at_a_command_position_is_a_launch(backend_cli_guard, command):
+    assert backend_cli_guard.forbidden_shell(command, "/nonexistent") != ""

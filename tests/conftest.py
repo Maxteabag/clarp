@@ -193,7 +193,8 @@ def pytest_configure(config):
         _write_backend_cli_shims(root / "backend-cli-shims")
         site = root / "guard-site"
         site.mkdir()
-        (site / "sitecustomize.py").write_text(_guard_core.SITECUSTOMIZE.format(tests_dir=str(_TESTS_DIR)))
+        (site / "sitecustomize.py").write_text(_guard_core.SITECUSTOMIZE.format(
+            tests_dir=str(_TESTS_DIR), fallback_log=str(root / "outside-children.log")))
     session_log = root / f"outside-{worker or 'main'}-{os.getpid()}.log"
     os.environ.update({
         "HOME": str(home),
@@ -229,10 +230,28 @@ def pytest_sessionfinish(session, exitstatus):
         return
     for log in sorted(pathlib.Path(state["root"]).glob("outside-*.log")):
         outside += [line for line in log.read_text().splitlines() if line]
+    state["outside"] = outside
     if outside:
         sys.stderr.write("\nreal provider CLI launch or network access attempted outside any test "
                          "(blocked):\n  " + "\n  ".join(outside) + "\n")
-        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+        if session.exitstatus in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED):
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED   # never mask an interrupt or internal error
+
+
+def pytest_unconfigure(config):
+    """Remove the session's guard directories after a clean session; keep them
+    as evidence when anything was attempted outside a test."""
+    state = getattr(config, "_clarp_guard", None)
+    if state is None or state["worker"] or state.get("outside") or "outside" not in state:
+        return
+
+    def report(function, path, error):
+        error = error[1] if isinstance(error, tuple) else error
+        sys.stderr.write(f"guard session dir cleanup: {function.__name__} {path}: {error!r}\n")
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(state["root"], onexc=report)
+    else:
+        shutil.rmtree(state["root"], onerror=report)
 
 
 def _track_retry_timers() -> None:

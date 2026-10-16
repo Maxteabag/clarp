@@ -46,6 +46,19 @@ WRAPPER_VALUE_OPTIONS = {
 }
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "fish", "ksh"})
 RUNNERS = frozenset({"node", "npx", "bunx", "bun", "uv", "uvx", "pnpm", "pnpx", "yarn", "deno"})
+# A runner's own words before the program it starts (uv run, uv tool run, pnpm dlx, bun x).
+RUNNER_SUBCOMMANDS = frozenset({"run", "tool", "dlx", "exec", "x"})
+# Runner options that take a separate value. A value that is a provider package spec
+# (npx -p @anthropic-ai/claude-code ...) is itself a launch.
+RUNNER_VALUE_OPTIONS = frozenset({
+    "--with", "--with-requirements", "--with-editable", "--from", "--python", "-p", "--package",
+    "--group", "--only-group", "--no-group", "--extra", "--directory", "--project", "--env-file",
+    "--index", "--index-url", "--default-index", "--extra-index-url", "--config-file", "--cache-dir",
+    "-c", "--call", "--filter", "-C", "--dir", "--cwd", "--require", "-r", "--import", "--loader",
+    "--inspect-port", "--max-old-space-size"})
+# Shell operators after which the next word is a command.
+SHELL_SEPARATORS = frozenset({";", "&&", "||", "|", "|&", "&", "(", ")", "{", "}", "!", "\n",
+                              "then", "do", "else", "elif", "time"})
 _EXEC_NAMES = ("execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe")
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain", "ip6-localhost", ""})
 _CONTENT_SCAN_LIMIT = 1 << 20
@@ -246,14 +259,34 @@ class Guard:
                             return self.forbidden_shell(rest[j + 1], env_path)
                 return ""
             if name in RUNNERS:
-                # A runner's own subcommands come first (uv run, pnpm dlx, npx -y):
-                # any later word that names a provider CLI or package is a launch.
-                for arg in argv[i + 1:]:
-                    if arg.startswith("-"):
+                # Skip the runner's options (checking any package value) and its own
+                # subcommand words; the next word is the program it starts.
+                j = i + 1
+                while j < len(argv):
+                    arg = argv[j]
+                    if arg in RUNNER_VALUE_OPTIONS and j + 1 < len(argv):
+                        if self._package_spec(argv[j + 1]):
+                            return argv[j + 1]
+                        if arg in ("-c", "--call"):          # npx -c / pnpm exec -c: a command line
+                            hit = self.forbidden_shell(argv[j + 1], env_path)
+                            if hit:
+                                return hit
+                        j += 2
                         continue
-                    if self.forbidden_program(arg, env_path) or self._package_spec(arg):
-                        return arg
-                return ""
+                    if arg.startswith("-"):
+                        value = arg.split("=", 1)[1] if "=" in arg else ""
+                        if value and self._package_spec(value):
+                            return value
+                        j += 1
+                        continue
+                    if arg.lower() in RUNNER_SUBCOMMANDS:
+                        j += 1
+                        continue
+                    break
+                if j >= len(argv):
+                    return ""
+                i = j
+                continue
             if name not in WRAPPERS:
                 return ""
             value_options = WRAPPER_VALUE_OPTIONS.get(name, set())
@@ -273,17 +306,31 @@ class Guard:
         return ""
 
     def forbidden_shell(self, command, env_path) -> str:
+        """The provider CLI a shell command line would run, judged only at command
+        positions (the start, after ; && || | & ( and the like, after VAR=value),
+        so ``git log --grep claude`` or ``pytest -k codex`` is not a launch."""
         command = os.fsdecode(command) if isinstance(command, bytes) else str(command)
         try:
-            tokens = shlex.split(command)
+            lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|()")
+            lexer.whitespace_split = True
+            tokens = list(lexer)
         except ValueError:
             tokens = command.split()
-        for k, token in enumerate(tokens):
-            if self.forbidden_program(token, env_path) or self._package_spec(token):
-                return token
-            if os.path.basename(token).lower() in SHELLS or os.path.basename(token).lower() in WRAPPERS \
-                    or os.path.basename(token).lower() in RUNNERS:
-                hit = self.forbidden_argv(tokens[k:], env_path)
+        segment: list[str] = []
+        segments = [segment]
+        for token in tokens:
+            if token in SHELL_SEPARATORS or (token and set(token) <= set(";&|()")):
+                segment = []
+                segments.append(segment)
+            else:
+                segment.append(token)
+        for words in segments:
+            k = 0
+            while k < len(words) and "=" in words[k] and not words[k].startswith(("=", "-")) \
+                    and words[k].split("=", 1)[0].replace("_", "a").isalnum():
+                k += 1                                   # VAR=value before the command
+            if k < len(words):
+                hit = self.forbidden_argv(words[k:], env_path)
                 if hit:
                     return hit
         return ""
@@ -382,10 +429,15 @@ def _loopback(host) -> bool:
     host = host.strip("[]").split("%", 1)[0].lower()
     if host in _LOOPBACK_NAMES or host == socket.gethostname().lower():
         return True
+    if host.endswith(".localhost"):
+        return True                                   # RFC 6761: always loopback, never sent out
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
         return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        address = mapped                              # ::ffff:127.0.0.1
     return address.is_loopback or address.is_unspecified
 
 
@@ -406,6 +458,54 @@ def _guarded_sendto(original):
                 and not _loopback(address[0]):
             GUARD.refuse(f"socket.sendto {address[0]!r}", error=NetworkBlocked)
         return original(self, data, *rest)
+    guarded.__clarp_guard__ = True
+    return guarded
+
+
+def _guarded_sendmsg(original):
+    def guarded(self, buffers, *rest):
+        address = rest[2] if len(rest) > 2 else None             # sendmsg(buffers, ancdata, flags, address)
+        if self.family in (socket.AF_INET, socket.AF_INET6) and isinstance(address, tuple) \
+                and not _loopback(address[0]):
+            GUARD.refuse(f"socket.sendmsg {address[0]!r}", error=NetworkBlocked)
+        return original(self, buffers, *rest)
+    guarded.__clarp_guard__ = True
+    return guarded
+
+
+def _refuse_lookup(label, host):
+    try:
+        GUARD.refuse(f"socket.{label} {host!r}", error=NetworkBlocked)
+    except NetworkBlocked as blocked:
+        raise socket.gaierror(socket.EAI_NONAME, str(blocked)) from None
+
+
+def _is_literal(host) -> bool:
+    try:
+        ipaddress.ip_address((host.decode() if isinstance(host, bytes) else str(host)).strip("[]").split("%", 1)[0])
+    except ValueError:
+        return False
+    return True
+
+
+def _guarded_forward_lookup(original, label):
+    """gethostbyname / gethostbyname_ex: a real name sends a query off the host."""
+    def guarded(host, *args, **kwargs):
+        if not _loopback(host) and not _is_literal(host):
+            _refuse_lookup(label, host)
+        return original(host, *args, **kwargs)
+    guarded.__clarp_guard__ = True
+    return guarded
+
+
+def _guarded_reverse_lookup(original, label):
+    """gethostbyaddr (and so getfqdn) / getnameinfo: a reverse query for a
+    non-loopback address, or a forward one for a name, leaves the host too."""
+    def guarded(target, *args, **kwargs):
+        host = target[0] if isinstance(target, tuple) else target
+        if not _loopback(host):
+            _refuse_lookup(label, host)
+        return original(target, *args, **kwargs)
     guarded.__clarp_guard__ = True
     return guarded
 
@@ -454,10 +554,22 @@ def install(*, child: bool) -> Guard:
     _ORIGINALS["connect_ex"] = socket.socket.connect_ex
     _ORIGINALS["sendto"] = socket.socket.sendto
     _ORIGINALS["getaddrinfo"] = socket.getaddrinfo
+    for name in ("sendmsg", "gethostbyname", "gethostbyname_ex", "gethostbyaddr", "getnameinfo"):
+        owner = socket.socket if name == "sendmsg" else socket
+        if hasattr(owner, name):
+            _ORIGINALS[name] = getattr(owner, name)
     socket.socket.connect = _guarded_connect(socket.socket.connect, "connect")
     socket.socket.connect_ex = _guarded_connect(socket.socket.connect_ex, "connect_ex")
     socket.socket.sendto = _guarded_sendto(socket.socket.sendto)
     socket.getaddrinfo = _guarded_getaddrinfo(socket.getaddrinfo)
+    if "sendmsg" in _ORIGINALS:
+        socket.socket.sendmsg = _guarded_sendmsg(_ORIGINALS["sendmsg"])
+    for name in ("gethostbyname", "gethostbyname_ex"):
+        if name in _ORIGINALS:
+            setattr(socket, name, _guarded_forward_lookup(_ORIGINALS[name], name))
+    for name in ("gethostbyaddr", "getnameinfo"):
+        if name in _ORIGINALS:
+            setattr(socket, name, _guarded_reverse_lookup(_ORIGINALS[name], name))
     GUARD.installed = True
     return GUARD
 
@@ -470,6 +582,8 @@ _sys.path.insert(0, {tests_dir!r})
 try:
     import backend_cli_guard_core as _guard
     _guard.install(child=True)
+    # A child that scrubbed $CLARP_TEST_BACKEND_CLI_LOG still reports: the session reads this log.
+    _guard.GUARD.log = {fallback_log!r}
 finally:
     del _sys.path[0]
 '''
