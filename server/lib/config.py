@@ -425,6 +425,12 @@ class Config:
     google_stt_project: str = ""
     google_stt_location: str = "eu"
     google_stt_credentials: str = ""
+    # [google_tts] Chirp 3 HD text-to-speech (the built-in `google` voice provider). Absent, it
+    # speaks with [google_stt]'s ADC file and project; present, it must name both itself and
+    # never borrows either from [google_stt] (lib/google_tts.credentials).
+    google_tts_section: bool = False
+    google_tts_project: str = ""
+    google_tts_credentials: str = ""
     openai_api_key: str = ""             # [openai] api_key or env OPENAI_API_KEY
     typesafe_api_key: str = ""           # [typesafe] api_key or env TYPESAFE_API_KEY
     openai_realtime_model: str = "gpt-realtime-2.1"
@@ -882,6 +888,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
     cartesia = data.get("cartesia", {}) or {}
     deepgram = data.get("deepgram", {}) or {}
     google_stt = data.get("google_stt", {}) or {}
+    google_tts = data.get("google_tts")
+    google_tts_values = google_tts if isinstance(google_tts, dict) else {}
     openai  = data.get("openai", {}) or {}
     typesafe = data.get("typesafe", {}) or {}
     tts     = data.get("tts", {}) or {}
@@ -962,6 +970,9 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         google_stt_project = str(google_stt.get("project", "")).strip(),
         google_stt_location = str(google_stt.get("location", "eu")).strip() or "eu",
         google_stt_credentials = str(google_stt.get("credentials", "")).strip(),
+        google_tts_section = google_tts is not None,
+        google_tts_project = str(google_tts_values.get("project", "")).strip(),
+        google_tts_credentials = str(google_tts_values.get("credentials", "")).strip(),
         openai_api_key  = str(openai.get("api_key", "")),
         typesafe_api_key = str(typesafe.get("api_key", "")),
         openai_realtime_model = str(
