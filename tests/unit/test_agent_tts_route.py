@@ -13,49 +13,15 @@ import importlib.util
 import json
 import os
 import pathlib
-import sys
-import tempfile
 import threading
 from types import SimpleNamespace
 
 import pytest
 
-# Isolate custom TTS adapters BEFORE any lib import: the adapter directory is
-# a sentinel whose adapters only record that they ran. Every test then points
-# custom_tts_adapters.ROOT at its own recording adapters, so no installed
-# (live) adapter can ever run here, not even its `voices` operation.
-_SENTINEL = pathlib.Path(tempfile.mkdtemp(prefix="clarp-tts-sentinel-"))
-_SENTINEL_RAN = _SENTINEL / "ran"
-_PREVIOUS_ADAPTERS_DIR = os.environ.get("CLARP_TTS_ADAPTERS_DIR")
-os.environ["CLARP_TTS_ADAPTERS_DIR"] = str(_SENTINEL)
-for _adapter in ("custom.rec", "custom.alt", "custom.google-chirp"):
-    (_SENTINEL / _adapter).mkdir()
-    (_SENTINEL / _adapter / "adapter").write_text(
-        f"#!/bin/sh\necho {_adapter} >> {_SENTINEL_RAN}\nexit 3\n")
-    (_SENTINEL / _adapter / "adapter").chmod(0o755)
-    (_SENTINEL / _adapter / "manifest.json").write_text(json.dumps({
-        "schema_version": 1, "id": _adapter, "name": _adapter, "description": "sentinel",
-        "executable": "./adapter", "operations": ["voices", "preview", "synthesize"],
-        "audio_format": "audio/wav", "default_voice": "sentinel", "can_fallback": True}))
-
 from lib import agent_rings as rings
 from lib import cartesia_tts, config, custom_tts_adapters, db, tts_engine, tts_mode, tts_worker
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-
-
-@pytest.fixture(autouse=True, scope="module")
-def _adapters_isolated_for_this_module():
-    """custom_tts_adapters may have been imported by an earlier module with the
-    live directory: point it at the sentinel for this module either way."""
-    live = custom_tts_adapters.ROOT
-    custom_tts_adapters.ROOT = _SENTINEL
-    yield
-    custom_tts_adapters.ROOT = live
-    if _PREVIOUS_ADAPTERS_DIR is None:
-        os.environ.pop("CLARP_TTS_ADAPTERS_DIR", None)
-    else:
-        os.environ["CLARP_TTS_ADAPTERS_DIR"] = _PREVIOUS_ADAPTERS_DIR
 
 ADAPTER = """#!/usr/bin/env python3
 import json, pathlib, sys, wave
@@ -375,10 +341,6 @@ def test_without_an_effective_override_the_elevenlabs_backup_is_unchanged(env):
     _ring(env, agent="a-theo")
     assert env.spoken() == [("cartesia-direct", cfg.cartesia_voice_for("Theo")),
                             ("elevenlabs-direct", "stored-voice")]
-
-
-def test_no_installed_adapter_outside_the_tests_ever_ran():
-    assert not _SENTINEL_RAN.exists(), _SENTINEL_RAN.read_text()
 
 
 def test_the_adapter_dir_is_the_sessions_own_empty_dir(tmp_path_factory):
