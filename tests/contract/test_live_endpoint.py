@@ -12,6 +12,8 @@ import time
 import urllib.error
 import urllib.request
 
+import pytest
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -20,6 +22,22 @@ from lib import agents as agents_db  # noqa: E402
 from lib import live_hub  # noqa: E402
 
 SCHEMA = json.loads((REPO / "contract/schemas/live.json").read_text())
+
+
+@pytest.fixture(autouse=True)
+def explanations(monkeypatch):
+    """A tool row the server sees (hub.tool_start) is explained in the background by
+    ``codex exec``. The model is replaced exactly there, at the one method that would
+    start it: every request batch is recorded and answered deterministically in the
+    real method's return shape, so the explanation path still runs end to end."""
+    from lib import tool_explanations
+    batches: list[tuple[int, list[dict]]] = []
+
+    def recording_run_codex(self, level, items, *, run):
+        batches.append((level, items))
+        return {item["id"]: {"text": "Waits for a while.", "template": ""} for item in items}
+    monkeypatch.setattr(tool_explanations.ToolExplanations, "_run_codex", recording_run_codex)
+    return batches
 
 
 def _get(base, path):

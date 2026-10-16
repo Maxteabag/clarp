@@ -514,7 +514,8 @@ def _turn(owner, pid=None):
     return token
 
 
-def test_normal_turn_exit_ends_its_watcher_while_the_detached_render_survives(case, tmp_path, monkeypatch):
+def test_normal_turn_exit_ends_its_watcher_while_the_detached_render_survives(case, tmp_path, monkeypatch,
+                                                                            fake_backend_cli):
     """Ziggy, 2026-10-04: the render ran detached and finished; the background
     Bash watching it ended with the ordinary claude -p turn exit, and the job
     stayed "running" until the next user turn 45 minutes later. A fake CLI in
@@ -542,6 +543,7 @@ def test_normal_turn_exit_ends_its_watcher_while_the_detached_render_survives(ca
         print(json.dumps({{"type": "result", "subtype": "success", "result": "Render running"}}))
         """))
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    fake_backend_cli(fake)            # this deterministic fake only; nothing else on PATH is allowed
     monkeypatch.setenv('PATH', f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv('CLAUDE_PWA_DB', str(db.DB_PATH))
     monkeypatch.setenv('CLARP_CODE_ROOT', str(root / 'server'))
