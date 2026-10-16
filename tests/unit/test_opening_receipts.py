@@ -281,3 +281,17 @@ def test_a_client_voice_event_cannot_suppress_the_server_receipt(env):
     assert sources.count("server") == 1
     # The server receipt is then deduplicated against itself only.
     assert _ack({"clip_id": "ring-opening-" + ring["ring_id"], "status": "play-start"})[1]["updated"] is False
+
+
+def test_a_client_batch_claiming_server_source_cannot_forge_a_receipt(env):
+    """Review F1 (delta): POST /voice-events takes `source` from the body, so a
+    client batch must never be stored as source 'server'."""
+    ring = _answered(env)
+    voice_events.record_batch(source="server", events=[{"event": "opening_started", "trace_id": ring["ring_id"],
+                                                        "detail": {"attempt": 1}}])
+    stored = db.conn().execute(
+        "SELECT source FROM voice_events WHERE trace_id = ? AND event = 'opening_started'",
+        (ring["ring_id"],)).fetchall()
+    assert [r["source"] for r in stored] == ["other"]
+    status, body = _ack({"clip_id": "ring-opening-" + ring["ring_id"], "status": "play-start"})
+    assert status == 200 and body["updated"] is True
