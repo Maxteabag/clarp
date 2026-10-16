@@ -52,7 +52,8 @@ def single_code(engine: str) -> bool:
     return engine.split(":", 1)[0] not in SET_PROVIDERS
 
 
-def validate_settings(languages, engines, *, is_valid) -> tuple[str | None, str | None]:
+def validate_settings(languages, engines, *, is_valid,
+                      global_engine: str = "") -> tuple[str | None, str | None]:
     """Normalised (languages, engines) to store; None leaves one unchanged and
     "" unsets it. A language set with any single-code engine is refused."""
     if languages is not None:
@@ -71,6 +72,14 @@ def validate_settings(languages, engines, *, is_valid) -> tuple[str | None, str 
     effective_engines = call_engines() if engines is None else [e for e in engines.split(",") if e]
     if "," in effective_languages and any(single_code(e) for e in effective_engines):
         raise ValueError("call_languages is a language set, but a call engine takes a single language")
+    if effective_languages:
+        # The engines a call clip would use: the call's own, else the global
+        # engine (an alias resolved to the real model). None that can take
+        # the language means the policy can never work.
+        usable = effective_engines or [global_engine or "server-default"]
+        if not any("skip" not in step for step in plan(usable, effective_languages)):
+            raise ValueError(f"call_languages {effective_languages!r} can never work with "
+                             + ", ".join(concrete(e) for e in usable))
     return languages, engines
 
 
@@ -132,12 +141,16 @@ def resolve(session: str, *, in_call: bool, requested_model: str = "") -> dict:
         engines = {"value": [requested_model], "source": "device"}
     else:
         engines = {"value": [_global_engine()], "source": "global"}
+    # Plan on the engines as named (an alias stays recognisable), report the
+    # real models (docs/group-calls.md "Transcription in a call").
+    planned = list(engines["value"])
+    engines = {"value": [concrete(e) for e in planned], "source": engines["source"]}
     requested = None
     if requested_model:
         applied = engines["source"] == "device"
         requested = {"value": requested_model, "applied": applied,
                      "reason": None if applied else engines["source"]}
-    return {"language": language, "engines": engines, "requested_model": requested}
+    return {"language": language, "engines": engines, "requested_model": requested, "_plan": planned}
 
 
 def _global_engine() -> str:
@@ -146,28 +159,67 @@ def _global_engine() -> str:
     return engine if stt_providers.is_cloud_model(engine) else "server-default"
 
 
-def compatible(engine: str, code: str) -> bool:
-    """An English-only local model (``*.en``) cannot take another language."""
-    return not engine.endswith(".en") or code == "en"
+DEFAULT_ALIASES = frozenset({"server-default", "local", ""})
+
+
+def concrete(engine: str) -> str:
+    """The real model behind an engine name: the server default (and its
+    aliases) is the configured local model."""
+    if engine in DEFAULT_ALIASES:
+        from .config import load
+        cfg = load()
+        return f"{cfg.whisper_provider}:{cfg.whisper_model}"
+    return engine
+
+
+def capability(engine: str) -> str:
+    """What an engine actually does with the language it is given:
+    ``set`` (a bounded set), ``single`` (one code), ``en_only`` (English, the
+    only language it transcribes) or ``none`` (it never receives a code: a
+    local multilingual model auto-detects, so a call language is not applied)."""
+    from . import stt_providers, transcription_catalog
+    if stt_providers.is_cloud_model(engine):
+        return "set" if not single_code(engine) else "single"
+    row = transcription_catalog.model_by_id(engine)
+    if row is not None:
+        return "en_only" if list(row.get("languages") or []) == ["en"] else "none"
+    return "en_only" if engine.endswith(".en") else "none"
 
 
 def plan(engines: list[str], language: str) -> list[dict]:
-    """Per engine, in order: the language it is sent (a set only to a
-    set-capable engine, else its first code) or a skip."""
+    """Per engine, in order: the language it really receives (a set only to
+    a set-capable engine, else its first code; English only to an
+    English-only model) or a skip when it cannot take the language at all."""
     codes = language.split(",")
     steps = []
-    for engine in engines:
-        sent = language if not single_code(engine) or len(codes) == 1 else codes[0]
-        if not compatible(engine, sent.split(",")[0]):
+    for named in engines:
+        engine = concrete(named)
+        kind = capability(engine)
+        if kind == "set":
+            sent = language
+        elif kind == "single":
+            sent = codes[0]
+        elif kind == "en_only":
+            sent = "en" if codes[0] == "en" else None
+        else:
+            sent = None
+        if sent is None:
             steps.append({"engine": engine, "skip": "language_incompatible"})
             continue
-        steps.append({"engine": engine, "language": sent, "adapted": sent != language})
+        step = {"engine": engine, "language": sent, "adapted": sent != language}
+        if named in DEFAULT_ALIASES:
+            step["local_default"] = True
+        steps.append(step)
     return steps
 
 
+def policy_configured() -> bool:
+    return bool(call_languages() or call_engines())
+
+
 def participants_view(call: dict) -> dict | None:
-    """``{session: {language, engines}}`` for a live call's participants, or
-    None when every field is the global default (nothing to show)."""
+    """``{session: {language, engines}}`` for a call's participants, or None
+    when every field is the global default (nothing to show)."""
     view = {}
     for part in call.get("participants", []):
         resolved = resolve(part["session"], in_call=True)
