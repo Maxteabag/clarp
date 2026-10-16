@@ -491,6 +491,8 @@ def test_10_loopback_forms_stay_local():
     "pytest -k codex tests/unit",
     "echo 'the claude backend' && grep -r gemini docs",
     "FOO=claude make test",
+    "command -v claude",
+    "echo $((1 + 2))",
 ])
 def test_11_a_provider_name_as_an_argument_is_not_a_launch(backend_cli_guard, command):
     assert backend_cli_guard.forbidden_shell(command, "/nonexistent") == ""
@@ -513,6 +515,17 @@ def test_11_a_runner_judges_only_the_program_it_starts(backend_cli_guard, argv):
     "uv run --group dev claude --version",
     "npx -c 'opencode --version'",
     "npx -p @anthropic-ai/claude-code claude-code --version",
+    # P1: keywords, eval and command substitution (by absolute path too)
+    "if claude --version; then :; fi",
+    "while /opt/x/bin/claude --version; do break; done",
+    "until codex --version; do :; done",
+    "coproc gemini --version",
+    "eval 'claude --version'",
+    "echo `claude --version`",
+    'echo "$(/home/u/.local/bin/codex --version)"',
+    "x=$(echo $(grok --version))",
+    # P2: deno package specifiers
+    "deno run -A npm:@anthropic-ai/claude-code --version",
 ])
 def test_11_a_provider_cli_at_a_command_position_is_a_launch(backend_cli_guard, command):
     assert backend_cli_guard.forbidden_shell(command, "/nonexistent") != ""

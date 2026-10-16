@@ -58,7 +58,7 @@ RUNNER_VALUE_OPTIONS = frozenset({
     "--inspect-port", "--max-old-space-size"})
 # Shell operators after which the next word is a command.
 SHELL_SEPARATORS = frozenset({";", "&&", "||", "|", "|&", "&", "(", ")", "{", "}", "!", "\n",
-                              "then", "do", "else", "elif", "time"})
+                              "then", "do", "else", "elif", "time", "if", "while", "until", "coproc"})
 _EXEC_NAMES = ("execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe")
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain", "ip6-localhost", ""})
 _CONTENT_SCAN_LIMIT = 1 << 20
@@ -90,6 +90,31 @@ def _sha256(path: str) -> str:
         for block in iter(lambda: handle.read(1 << 20), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _substitutions(command: str) -> list[str]:
+    """The command lines inside backticks and $( ... ) (balanced, nested), quoted or not."""
+    found = []
+    i = 0
+    while i < len(command):
+        if command[i] == "`":
+            end = command.find("`", i + 1)
+            if end < 0:
+                found.append(command[i + 1:])
+                break
+            found.append(command[i + 1:end])
+            i = end + 1
+            continue
+        if command.startswith("$(", i) and not command.startswith("$((", i):
+            depth, j = 1, i + 2
+            while j < len(command) and depth:
+                depth += {"(": 1, ")": -1}.get(command[j], 0)
+                j += 1
+            found.append(command[i + 2:j - 1 if depth == 0 else j])
+            i = j
+            continue
+        i += 1
+    return found
 
 
 class Guard:
@@ -234,6 +259,9 @@ class Guard:
 
     def _package_spec(self, token: str) -> bool:
         spec = token.lower()
+        for prefix in ("npm:", "jsr:"):                  # deno run npm:@anthropic-ai/claude-code
+            if spec.startswith(prefix):
+                spec = spec[len(prefix):]
         if spec.startswith("@"):
             scope, _, rest = spec.partition("/")
             spec = scope + "/" + rest.split("@", 1)[0]
@@ -287,8 +315,12 @@ class Guard:
                     return ""
                 i = j
                 continue
+            if name == "eval":                              # eval 'claude --version'
+                return self.forbidden_shell(" ".join(argv[i + 1:]), env_path)
             if name not in WRAPPERS:
                 return ""
+            if name == "command" and any(arg in ("-v", "-V") for arg in argv[i + 1:i + 3]):
+                return ""                                   # command -v claude only looks it up
             value_options = WRAPPER_VALUE_OPTIONS.get(name, set())
             i += 1
             while i < len(argv):
@@ -310,6 +342,10 @@ class Guard:
         positions (the start, after ; && || | & ( and the like, after VAR=value),
         so ``git log --grep claude`` or ``pytest -k codex`` is not a launch."""
         command = os.fsdecode(command) if isinstance(command, bytes) else str(command)
+        for inner in _substitutions(command):              # `claude`, $(claude), "$(claude)"
+            hit = self.forbidden_shell(inner, env_path)
+            if hit:
+                return hit
         try:
             lexer = shlex.shlex(command.replace("\n", " ; "), posix=True, punctuation_chars=";&|()")
             lexer.whitespace_split = True
