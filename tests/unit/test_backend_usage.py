@@ -3,9 +3,17 @@ from __future__ import annotations
 import json
 import threading
 
+import os
 import pytest
 
 from lib import backend_usage
+
+
+@pytest.fixture(autouse=True)
+def _fake_clis_are_this_tests_own(fake_backend_cli, tmp_path):
+    """This module's fake provider CLIs are files it writes under tmp_path:
+    the explicit opt-in of tests/conftest.py's real-CLI guard."""
+    fake_backend_cli.dir(tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -155,6 +163,13 @@ def test_codex_usage_fetch_uses_chatgpt_auth_and_wham_path(tmp_path, monkeypatch
 
 def test_codex_usage_unknown_without_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "missing"))
+    # The app-server fallback must not reach the user's installed codex: an
+    # inert stand-in (registered with this module's tmp_path) fails instead.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "codex").write_text("#!/bin/sh\nexit 1\n")
+    (bin_dir / "codex").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
     result = backend_usage.get_backend_usage(refresh_codex=True)
     codex = result["backends"][1]

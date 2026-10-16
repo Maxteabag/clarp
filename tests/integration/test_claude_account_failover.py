@@ -14,6 +14,13 @@ from lib.account_failover import AccountFailover
 from lib.protocol import AgentState
 
 
+@pytest.fixture(autouse=True)
+def _fake_clis_are_this_tests_own(fake_backend_cli, tmp_path):
+    """This module's fake provider CLIs are files it writes under tmp_path:
+    the explicit opt-in of tests/conftest.py's real-CLI guard."""
+    fake_backend_cli.dir(tmp_path)
+
+
 @pytest.mark.skipif(os.name != "posix", reason="requires POSIX subprocess groups")
 def test_two_claude_processes_stop_and_resume_existing_conversations(tmp_path, monkeypatch):
     fake = tmp_path / "claude"

@@ -6,8 +6,11 @@ don't see one another's agents.
 """
 from __future__ import annotations
 
+import inspect
 import os
 import pathlib
+import shlex
+import shutil
 import subprocess
 import sys
 import pytest
@@ -104,6 +107,295 @@ def _no_real_agy_cli(monkeypatch, tmp_path):
     store via CLAUDE_PWA_AGY_HOME."""
     monkeypatch.setenv("CLARP_AGY_BIN", "clarp-test-no-agy")
     monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path / "no-agy-home"))
+
+
+# ---- real provider CLIs are never launched from a test --------------------------
+#
+# A unit test once ran a real Claude Code turn through a handler that built its
+# own dispatcher on the real backend registry. Every exec primitive is
+# intercepted for every test: a launch of a provider CLI (by name, through a
+# wrapper, by its real installed path or under the Clarp toolchains) is refused
+# and RECORDED, and the test fails at teardown even when the application
+# swallowed the refusal. A deterministic fake runs only after the test
+# registered it with ``fake_backend_cli(path)``. Name shims on PATH record a
+# child process that resolves one of these names, too.
+
+BACKEND_CLIS = frozenset({"claude", "clarp", "codex", "agy", "grok", "opencode", "gemini", "tmux"})
+_REAL_HOME = pathlib.Path(os.path.expanduser("~")).resolve()
+_REAL_PATH = os.environ.get("PATH", "")
+_TOOLCHAINS = os.path.realpath(_REAL_HOME / ".local" / "share" / "clarp" / "toolchains")
+_REPO = pathlib.Path(__file__).resolve().parents[1]
+_WRAPPERS = frozenset({"env", "timeout", "nohup", "setsid", "stdbuf", "nice", "ionice", "sudo",
+                       "exec", "command", "unbuffer", "xargs", "script"})
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "fish"})
+_RUNNERS = frozenset({"node", "npx", "bunx", "bun", "uv", "uvx", "pnpm", "yarn", "deno"})
+_POPEN_INIT = subprocess.Popen.__init__
+_POPEN_SIGNATURE = inspect.signature(_POPEN_INIT)
+_EXEC_NAMES = ("execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe")
+
+
+class BackendLaunchBlocked(OSError):
+    """A test reached a real provider CLI launch."""
+
+
+def _under(path, root) -> bool:
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def _ambient_cli_paths() -> frozenset[str]:
+    found = set()
+    for name in BACKEND_CLIS:
+        hit = shutil.which(name, path=_REAL_PATH)
+        if hit:
+            found.add(os.path.realpath(hit))
+    if os.path.isdir(_TOOLCHAINS):
+        for entry in pathlib.Path(_TOOLCHAINS).glob("*/bin/*"):
+            found.add(os.path.realpath(entry))
+    return frozenset(found)
+
+
+AMBIENT_CLI_PATHS = _ambient_cli_paths()
+
+
+class _BackendCliGuard:
+    def __init__(self):
+        self.reset(None)
+
+    def reset(self, log):
+        self.attempts: list[str] = []
+        self.allowed: set[str] = set()
+        self.allowed_dirs: set[str] = set()
+        self.log = log
+        self.pid = os.getpid()
+        self.ambient = AMBIENT_CLI_PATHS
+        self.toolchains = _TOOLCHAINS
+
+    def take(self) -> list[str]:
+        """Every refused launch so far (in-process and from child processes),
+        cleared: a test that provokes refusals on purpose acknowledges them."""
+        taken = list(self.attempts)
+        self.attempts.clear()
+        if self.log is not None and os.path.exists(self.log):
+            taken += [line for line in pathlib.Path(self.log).read_text().splitlines() if line]
+            os.unlink(self.log)
+        return taken
+
+
+BACKEND_CLI_GUARD = _BackendCliGuard()
+BACKEND_CLI_GUARD.install = lambda mp: install_backend_cli_guard(mp)
+
+
+def _forbidden_program(program, env_path) -> bool:
+    program = str(program)
+    name = os.path.basename(program).lower()
+    for ext in (".exe", ".cmd", ".bat"):
+        if name.endswith(ext):
+            name = name[:-len(ext)]
+    if os.sep in program:
+        target = os.path.realpath(program)
+    else:
+        hit = shutil.which(program, path=env_path)
+        target = os.path.realpath(hit) if hit else None
+    if target is not None and target in BACKEND_CLI_GUARD.allowed:
+        return False
+    if (target is not None and os.path.isfile(target)
+            and any(_under(target, root) for root in BACKEND_CLI_GUARD.allowed_dirs)
+            and target not in BACKEND_CLI_GUARD.ambient
+            and not _under(target, BACKEND_CLI_GUARD.toolchains)):
+        return False
+    if name in BACKEND_CLIS:
+        return True
+    return target is not None and (target in BACKEND_CLI_GUARD.ambient
+                                   or _under(target, BACKEND_CLI_GUARD.toolchains))
+
+
+def _forbidden_argv(argv, env_path) -> str:
+    """The provider CLI ``argv`` would run (through wrappers, shells and script
+    runners), or ""."""
+    argv = [str(a) for a in argv]
+    i = 0
+    while i < len(argv):
+        program = argv[i]
+        name = os.path.basename(program).lower()
+        if _forbidden_program(program, env_path):
+            return program
+        if name in _SHELLS:
+            rest = argv[i + 1:]
+            if "-c" in rest and rest.index("-c") + 1 < len(rest):
+                return _forbidden_shell(rest[rest.index("-c") + 1], env_path)
+            return ""
+        if name in _RUNNERS:
+            return next((a for a in argv[i + 1:] if not a.startswith("-")
+                         and _forbidden_program(a, env_path)), "")
+        if name not in _WRAPPERS:
+            return ""
+        i += 1
+        while i < len(argv) and (argv[i].startswith("-") or "=" in argv[i]
+                                 or (name == "timeout" and argv[i][:1].isdigit())):
+            i += 1
+    return ""
+
+
+def _forbidden_shell(command, env_path) -> str:
+    try:
+        tokens = shlex.split(str(command))
+    except ValueError:
+        tokens = str(command).split()
+    for token in tokens:
+        if _forbidden_program(token, env_path):
+            return token
+    return ""
+
+
+def _refuse(what: str) -> None:
+    entry = f"{what}"
+    if os.getpid() != BACKEND_CLI_GUARD.pid:
+        # A forked child (pty.fork + exec): tell the parent through the log.
+        if BACKEND_CLI_GUARD.log is not None:
+            with open(BACKEND_CLI_GUARD.log, "a") as handle:
+                handle.write(entry + "\n")
+        os._exit(127)
+    BACKEND_CLI_GUARD.attempts.append(entry)
+    raise BackendLaunchBlocked(f"test attempted to launch a real provider CLI: {entry}")
+
+
+def _guarded_popen_init(self, *args, **kwargs):
+    bound = _POPEN_SIGNATURE.bind(self, *args, **kwargs)
+    call = bound.arguments
+    command = call.get("args")
+    env = call.get("env")
+    env_path = (env or {}).get("PATH", os.environ.get("PATH", "")) if env is not None \
+        else os.environ.get("PATH", "")
+    if call.get("shell"):
+        hit = _forbidden_shell(command if isinstance(command, str) else " ".join(map(str, command)), env_path)
+    else:
+        argv = [command] if isinstance(command, (str, bytes, os.PathLike)) else list(command or [])
+        if call.get("executable"):
+            argv = [call["executable"], *argv[1:]]
+        hit = _forbidden_argv(argv, env_path)
+    if hit:
+        _refuse(f"Popen {command!r}")
+    return _POPEN_INIT(self, *args, **kwargs)
+
+
+def _guarded_exec(name, original):
+    def guarded(path, *rest):
+        argv = rest[0] if name in ("execv", "execve", "execvp", "execvpe") and rest else [path, *rest]
+        env_path = os.environ.get("PATH", "")
+        if _forbidden_program(path, env_path) or _forbidden_argv(list(argv) or [path], env_path):
+            _refuse(f"os.{name} {path!r}")
+        return original(path, *rest)
+    return guarded
+
+
+def _guarded_spawn(name, original):
+    def guarded(path, argv, *rest, **kwargs):
+        if _forbidden_program(path, os.environ.get("PATH", "")) or \
+                _forbidden_argv(list(argv) or [path], os.environ.get("PATH", "")):
+            _refuse(f"os.{name} {path!r}")
+        return original(path, argv, *rest, **kwargs)
+    return guarded
+
+
+def _guarded_system(original):
+    def guarded(command):
+        if _forbidden_shell(command, os.environ.get("PATH", "")):
+            _refuse(f"os.system {command!r}")
+        return original(command)
+    return guarded
+
+
+def install_backend_cli_guard(mp: pytest.MonkeyPatch) -> None:
+    """Patch every exec primitive through ``mp`` (undone with it)."""
+    mp.setattr(subprocess.Popen, "__init__", _guarded_popen_init)
+    for name in _EXEC_NAMES:
+        if hasattr(os, name):
+            mp.setattr(os, name, _guarded_exec(name, getattr(os, name)))
+    for name in ("posix_spawn", "posix_spawnp"):
+        if hasattr(os, name):
+            mp.setattr(os, name, _guarded_spawn(name, getattr(os, name)))
+    mp.setattr(os, "system", _guarded_system(os.system))
+
+
+@pytest.fixture(scope="session")
+def _backend_cli_shims(tmp_path_factory):
+    """Executables named after every provider CLI, first on PATH: a child
+    process that resolves one by name records the attempt and exits 127."""
+    shims = tmp_path_factory.mktemp("backend-cli-shims")
+    for name in BACKEND_CLIS:
+        shim = shims / name
+        shim.write_text(
+            "#!/bin/sh\n"
+            'if [ -n "$CLARP_TEST_BACKEND_CLI_LOG" ]; then\n'
+            f'  echo "child exec {name} $*" >> "$CLARP_TEST_BACKEND_CLI_LOG"\n'
+            "fi\n"
+            f"echo 'test blocked a real {name} launch' >&2\n"
+            "exit 127\n")
+        shim.chmod(0o755)
+    return shims
+
+
+@pytest.fixture(autouse=True)
+def _guard_backend_clis(_backend_cli_shims, tmp_path):
+    """Intercept every provider CLI launch for this test; fail it at teardown
+    if any was attempted, even when the application swallowed the refusal."""
+    log = tmp_path.parent / f"{tmp_path.name}-backend-cli-guard.log"
+    mp = pytest.MonkeyPatch()
+    BACKEND_CLI_GUARD.reset(str(log))
+    mp.setenv("CLARP_TEST_BACKEND_CLI_LOG", str(log))
+    mp.setenv("PATH", f"{_backend_cli_shims}{os.pathsep}{os.environ.get('PATH', '')}")
+    install_backend_cli_guard(mp)
+    try:
+        yield BACKEND_CLI_GUARD
+    finally:
+        attempts = BACKEND_CLI_GUARD.take()
+        mp.undo()
+        BACKEND_CLI_GUARD.reset(None)
+    if attempts:
+        pytest.fail("real provider CLI launch attempted (blocked):\n  " + "\n  ".join(attempts),
+                    pytrace=False)
+
+
+@pytest.fixture
+def backend_cli_guard(_guard_backend_clis):
+    """The active guard: ``take()`` acknowledges refusals a test provoked on purpose."""
+    return _guard_backend_clis
+
+
+@pytest.fixture
+def fake_backend_cli(_guard_backend_clis, tmp_path):
+    """Register a deterministic fake CLI this test may run. Only a file inside
+    this test's tmp_path or the repo's tests/ directory, never one the user's
+    PATH or the Clarp toolchains resolve."""
+    roots = (os.path.realpath(tmp_path), os.path.realpath(_REPO / "tests"))
+
+    def register(path):
+        path = pathlib.Path(path)
+        real = os.path.realpath(path)
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise ValueError(f"not an executable file: {path}")
+        if not any(_under(real, root) for root in roots):
+            raise ValueError(f"not a disposable fake (outside tmp_path and tests/): {path}")
+        if real in AMBIENT_CLI_PATHS or _under(real, _TOOLCHAINS):
+            raise ValueError(f"an installed provider CLI, not a fake: {path}")
+        ambient = shutil.which(path.name, path=_REAL_PATH)
+        if ambient and os.path.realpath(ambient) == real:
+            raise ValueError(f"resolvable on the user's PATH: {path}")
+        BACKEND_CLI_GUARD.allowed.add(real)
+        return path
+
+    def register_dir(path):
+        """Every executable file a test writes under ``path`` (inside its
+        tmp_path or tests/), each still checked when it is launched."""
+        real = os.path.realpath(path)
+        if not any(_under(real, root) for root in roots):
+            raise ValueError(f"not a disposable fake directory (outside tmp_path and tests/): {path}")
+        if _under(real, _TOOLCHAINS) or any(_under(cli, real) for cli in AMBIENT_CLI_PATHS):
+            raise ValueError(f"holds an installed provider CLI: {path}")
+        BACKEND_CLI_GUARD.allowed_dirs.add(real)
+        return pathlib.Path(path)
+    register.dir = register_dir
+    return register
 
 
 @pytest.fixture(autouse=True)
