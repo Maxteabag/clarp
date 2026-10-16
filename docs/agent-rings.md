@@ -138,11 +138,14 @@ A receipt says what the phone reported, never that anything was audible.
 Classes are accepted in any order, because the phone may coalesce pending
 acknowledgements. The same ring, attempt and class is recorded once; a repeat
 answers `updated: false`. Receipts are voice-timeline rows (`opening_<class>`,
-`trace_id` = ring id). A receipt that arrives after the call ended is kept as
+`trace_id` = ring id, `source` = `server`); client-posted voice events with the
+same names are not receipts and never suppress one. A receipt that arrives after the call ended is kept as
 history (`historical: true`) and never plays, dispatches or changes the ring or
 the call. Refusals: 400 `bad opening_id`, `conflicting clip ids`,
 `bad opening_attempt`, `bad status`; 401 limited device; 403 `not your ring`;
-404 `unknown opening`; 409 `ring not answered`. Integer clip ids and every
+404 `unknown opening`; 409 `ring not answered`. The Host keeps the newest 50 ring
+records, so a receipt for a ring older than that answers 404 rather than
+`historical`; the phone should not retry it. Integer clip ids and every
 other string keep their old behaviour.
 
 ## CallKit (VoIP)

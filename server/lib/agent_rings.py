@@ -440,7 +440,9 @@ def _expire_quietly() -> None:
 # (attempted, started, first media-clock progress, terminal), never proof that
 # anything was audible. Receipts are stored as voice-timeline rows; the ring
 # record, the call and every event stay untouched, and a receipt that arrives
-# after the call ended is kept as history only.
+# after the call ended is kept as history only. Only rows with source 'server'
+# are receipts: clients can post any voice-event name, so their rows never
+# count as, or suppress, a receipt.
 
 OPENING_ID = re.compile(r"ring-opening-(rng_[0-9a-f]{32})")
 OPENING_CLASSES = {
@@ -500,7 +502,7 @@ def record_opening_receipt(principal: str, opening_id: str, *, status: str,
         con.execute("BEGIN IMMEDIATE")
         try:
             seen = con.execute(
-                "SELECT 1 FROM voice_events WHERE trace_id = ? AND event = ?"
+                "SELECT 1 FROM voice_events WHERE trace_id = ? AND event = ? AND source = 'server'"
                 " AND json_extract(detail, '$.attempt') = ? LIMIT 1",
                 (ring_id, event, attempt)).fetchone()
             if seen is None:
