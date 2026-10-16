@@ -276,7 +276,9 @@ def test_tick_emits_quiet_once_after_silence(conv):
     assert conv.last_output_active is False
 
 
-def test_user_transcript_bumps_revision_and_merges_adjacent_fragments(conv):
+def test_user_transcript_bumps_revision_and_merges_adjacent_fragments(conv, monkeypatch):
+    wall = iter([1_000, 2_000, 3_000])
+    monkeypatch.setattr(mod, "wall_ms", lambda: next(wall))
     conv.receive({"type": "session.input_transcript.delta", "delta": "Ask Omar ",
                   "start_ms": 0, "end_ms": 500})
     conv.receive({"type": "session.input_transcript.delta", "delta": "to run tests",
@@ -284,7 +286,7 @@ def test_user_transcript_bumps_revision_and_merges_adjacent_fragments(conv):
     assert conv.revision == 2 and conv.last_transcript == 100.0
     assert conv.fragments == [{"role": "user", "text": "Ask Omar to run tests",
                                "provider_session": conv.provider_session,
-                               "end_ms": 1400, "revision": 2}]
+                               "end_ms": 1400, "revision": 2, "at": 1_000}]
     # A gap over 1.1 s starts a new fragment.
     conv.receive({"type": "session.input_transcript.delta", "delta": "Also",
                   "start_ms": 3000, "end_ms": 3200})
