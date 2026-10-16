@@ -385,7 +385,8 @@ def test_7_a_child_interpreter_is_guarded_and_reports_to_its_test(tmp_path):
 
 def test_8_the_live_desktop_is_out_of_reach():
     for var in ("WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "XAUTHORITY", "SWAYSOCK",
-                "NIRI_SOCKET", "TMUX", "KITTY_LISTEN_ON"):
+                "NIRI_SOCKET", "TMUX", "KITTY_LISTEN_ON", "PULSE_SERVER", "PIPEWIRE_REMOTE", "WAYLAND_SOCKET",
+                "XDG_ACTIVATION_TOKEN", "WEZTERM_UNIX_SOCKET", "SSH_AGENT_PID", "GPG_AGENT_INFO"):
         assert var not in os.environ, var
 
 
@@ -505,6 +506,10 @@ def test_10_loopback_forms_stay_local():
     "gdb -batch -ex bt ./core",
     "strace -o /tmp/trace -f true",
     "systemctl --user is-active clarp.service",
+    "/usr/bin/systemctl --user --property=ActiveState show clarp.service",
+    "/usr/bin/systemctl --user -p ActiveState show clarp.service",
+    "/usr/bin/systemctl --version",
+    "/usr/bin/systemctl --user list-units",
     "/var/tmp/shims/systemctl --user start x.service",
 ])
 def test_11_a_provider_name_as_an_argument_is_not_a_launch(backend_cli_guard, command):
@@ -575,6 +580,26 @@ def test_11_a_runner_judges_only_the_program_it_starts(backend_cli_guard, argv):
     "crontab -l",
     "/usr/bin/systemctl --user start some.service",
     "/usr/bin/systemctl --user daemon-reload",
+    # R1: a value option never hides the verb, and only read-only verbs pass
+    "/usr/bin/systemctl --user -M host start x.service",
+    "/usr/bin/systemctl --user --signal HUP kill x.service",
+    "/usr/bin/systemctl --user --job-mode fail start x.service",
+    "/usr/bin/systemctl --user set-default x.target",
+    "/usr/bin/systemctl --user freeze x.service",
+    "/usr/bin/systemctl --user reset-failed",
+    "/usr/bin/systemctl -H remote status x.service",
+    # R2: D-Bus clients, terminal multiplexers, desktop audio
+    "busctl --user call org.freedesktop.systemd1 /org/freedesktop/systemd1 x StartTransientUnit",
+    "gdbus call --session --dest org.freedesktop.systemd1 --method x",
+    "dbus-send --session --dest=org.freedesktop.Notifications /x y.z",
+    "loginctl lock-session",
+    "notify-send hello",
+    "wezterm cli spawn -- true",
+    "zellij run -- true",
+    "screen -dm true",
+    "paplay /usr/share/sounds/x.oga",
+    "pw-play x.wav",
+    "ffplay -nodisp x.mp3",
 ])
 def test_11_a_provider_cli_at_a_command_position_is_a_launch(backend_cli_guard, command):
     assert backend_cli_guard.forbidden_shell(command, "/nonexistent") != ""

@@ -40,14 +40,28 @@ ESCAPE_LAUNCHERS = frozenset({"systemd-run", "run0", "flatpak-spawn", "dbus-run-
                               # Host IPC: make a running HOST daemon (compositor, session manager,
                               # desktop portal, cron/at) start a command with the host's environment.
                               "hyprctl", "uwsm", "swaymsg", "niri", "gio", "xdg-open", "at", "batch",
-                              "crontab"})
-# systemctl verbs that start or change units in the HOST service manager.
-SYSTEMCTL_MUTATING = frozenset({"start", "stop", "restart", "try-restart", "reload", "reload-or-restart",
-                                "try-reload-or-restart", "enable", "disable", "reenable", "mask", "unmask",
-                                "link", "kill", "isolate", "edit", "set-environment", "unset-environment",
-                                "import-environment", "daemon-reload", "daemon-reexec", "set-property",
-                                "revert", "preset", "preset-all", "add-wants", "add-requires", "default",
-                                "rescue", "emergency", "halt", "poweroff", "reboot", "suspend", "hibernate"})
+                              "crontab",
+                              # D-Bus clients can call StartTransientUnit (systemd-run in another
+                              # form) or drive the session; terminal multiplexers run commands in the
+                              # owner's live terminal; audio players sound on the live desktop.
+                              "busctl", "gdbus", "dbus-send", "loginctl", "notify-send", "wezterm",
+                              "zellij", "screen", "paplay", "pw-play", "pw-cat", "ffplay", "aplay"})
+# The ONLY verbs the REAL systemctl may run from a test: read-only queries. Anything
+# else (start, kill, set-default, freeze, clean, bind, daemon-reload, the power verbs,
+# and verbs added later) would change the HOST service manager, so it is refused.
+SYSTEMCTL_READ_ONLY = frozenset({"is-active", "is-enabled", "is-failed", "is-system-running", "status",
+                                 "show", "cat", "list-units", "list-sockets", "list-timers", "list-jobs",
+                                 "list-unit-files", "list-dependencies", "list-machines", "list-automounts",
+                                 "list-paths", "show-environment", "help", "get-default"})
+# systemctl options that take a separate value (so the verb is not the next word).
+SYSTEMCTL_VALUE_OPTIONS = frozenset({"-t", "--type", "--state", "-p", "--property", "-P", "-s", "--signal",
+                                     "--kill-whom", "--kill-value", "--job-mode", "--root", "--image",
+                                     "--image-policy", "-n", "--lines", "-o", "--output", "--what",
+                                     "--timestamp", "--when", "--message", "--reboot-argument",
+                                     "--preset-mode", "--drop-in", "--boot-loader-menu",
+                                     "--boot-loader-entry", "--check-inhibitors"})
+# Options that point the real systemctl at another machine or container.
+SYSTEMCTL_REMOTE_OPTIONS = frozenset({"-H", "--host", "-M", "--machine"})
 # Where the real systemctl lives; a fake elsewhere (the conftest shim, a test's own) stays usable.
 _SYSTEM_DIRS = ("/usr/", "/bin/", "/sbin/", "/lib/", "/lib64/", "/etc/", "/opt/")
 # Options of a wrapper that take a separate value (``nice -n 10 claude``).
@@ -315,10 +329,25 @@ class Guard:
             if name == "systemctl":
                 hit = shutil.which(program, path=env_path) if os.sep not in program else program
                 target = os.path.realpath(hit) if hit else ""
-                verbs = [arg for arg in argv[i + 1:] if not arg.startswith("-")]
-                if target.startswith(_SYSTEM_DIRS) and verbs and verbs[0].lower() in SYSTEMCTL_MUTATING:
-                    return program                          # the real host service manager
-                return ""
+                if not target.startswith(_SYSTEM_DIRS):
+                    return ""                               # a fake (the conftest shim, a test's own)
+                verb, j = None, i + 1
+                while j < len(argv):
+                    arg = argv[j]
+                    if arg in SYSTEMCTL_REMOTE_OPTIONS or arg.startswith(("--host=", "--machine=")) \
+                            or (arg[:2] in ("-H", "-M") and len(arg) > 2):
+                        return program                      # another machine or container
+                    if arg in SYSTEMCTL_VALUE_OPTIONS:
+                        j += 2
+                        continue
+                    if arg.startswith("-"):
+                        j += 1
+                        continue
+                    verb = arg.lower()
+                    break
+                if verb is None or verb in SYSTEMCTL_READ_ONLY:
+                    return ""                               # plain listing, --version, or a query
+                return program                              # the real host service manager
             if name == "find":
                 rest = argv[i + 1:]
                 for k, arg in enumerate(rest):
