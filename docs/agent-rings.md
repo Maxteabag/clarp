@@ -144,6 +144,76 @@ call"). The reason shows on the lock screen only when the owner opts in:
 `POST /calls/ring/settings {"show_reason": true}`. The app still receives
 the reason in the payload.
 
+## Listen-first (feature `agent_ring_listen_first`, contract 67)
+
+The normative contract is the agreed listen-first v5 (§11, then §10, §9, §9.1).
+A ring may ask the phone to let the user speak first:
+
+- `POST /calls/ring` takes `opening_mode`: `say` (the default, exactly the
+  ring above) or `listen_first`. Any other value is 400 `unknown opening_mode`.
+  `opening_line` stays required and is still voiced at ring time: it is the
+  line a phone that cannot listen first plays. `clarp-admin call ring
+  --listen-first` sends it; without the flag the request is unchanged.
+- `POST /calls/ring/answer` takes `opening_mode: "listen_first"` from a phone
+  that can. On a listen_first ring it is an ACK only: the call starts, nothing
+  is spoken, synthesized, written to history or run, and the answer's
+  `opening` is `{mode, ring_id, call_id, token, owner_nonce, epoch: 1,
+  state: "pending", silence_ms: 1250, session, persona, server_id, intent:
+  null}`. Without `opening_mode` the answer is today's, byte for byte; with any
+  other value (or on a say ring) it is today's answer plus `opening.mode:
+  "say"`. A listen_first ring answered the legacy way is `fallback`: the line
+  plays, nothing is dispatched.
+- The phone owns timing (readiness, VAD onset, the 1.25 s deadline). It reports
+  through `POST /calls/ring/opening {token, epoch, claim, request_id,
+  capture_gen, at_ms}` with `claim` one of `listening`, `speech_started`
+  (latches the greeting; later silence claims get 409 `speech latched`),
+  `speech_abandoned` (`reason`: `empty_capture` or `capture_aborted` only),
+  `silence` (needs `at_ms` and `watermark_ms` at or past the deadline),
+  `no_mic`, `not_ready`, and `renew` (`expected_epoch`, `owner_nonce`; a
+  compare-and-set that bumps the epoch and rotates the nonce, before any
+  resolution only). It answers `{ok, opening, changed}`; the same
+  `request_id` answers again with `changed: false`.
+- The greeting is the phone's ordinary captured-turn `/send` with `call_id`
+  and `call_opening: {token, epoch}`. It goes to the calling agent only (no
+  selection, no orchestrator) with the header "They answered and spoke first",
+  and the response carries `opening`. A retry of the same `client_msg_id` is
+  the same greeting, even across a renewal.
+- A silence claim (or no_mic, not_ready, speech_abandoned) admits ONE
+  initiative turn: prompt admission and queued row `call-open:<ring_id>`,
+  origin `automation`, whose whole input is the call header and why the agent
+  speaks first. It is never a user row; the reply is the agent's own words.
+- Refusals dispatch nothing: 400 `bad claim`, 403 `not the answering device`,
+  404 `unknown opening`, 409 `stale epoch`, `owner changed`, `already
+  resolved` (+`outcome`), `opening retired` (+`reason`), `wrong call`,
+  `speech latched`.
+
+Atomicity. The opening lives in its own settings row per ring
+(`agent_ring.opening.<ring_id>`), written only inside SQLite transactions.
+The initiative's intent is `intended` (no row yet), `admitted`, `cancelled`
+or `started`. The admitter inserts the admission and queued row only while the
+intent is still `intended`, in the same transaction; a greeting or speech
+onset cancels an intended intent, or withdraws an admitted, unclaimed row
+(`status = 'withdrawn'`), in one transaction; the dispatcher claims the row
+(`queued` to `claimed`) and starts the intent in one transaction before the
+turn runs. Whichever commits first wins; a greeting after the claim is an
+ordinary call utterance (`opening.greeting: "ordinary"`). Recovery (Host start
+and every read of the ring) admits only an `intended` intent.
+
+Retirement. The call ending or being superseded, the device being revoked, or
+another Host instance retires the opening: later claims and greetings get 409
+`opening retired`. A committed opening keeps its outcome but loses its output.
+A replacement ring gets a new token.
+
+Audio. Clips of an opening turn carry `call_id` and `opening: {ring_id, token,
+epoch, kind: "initiative"|"greeting_reply", admission_id}`; ordinary clips are
+untagged. The Host skips voicing an initiative clip once its intent is
+cancelled or a greeting arrived after it started, and any opening clip once
+retired (best effort; the phone's fence decides).
+
+The `agent-ring` event and `GET /calls/ring` carry `opening_mode` and
+`opening` (state and epoch, never the token or nonce) for listen_first rings
+only; a say ring's event is unchanged.
+
 ## Follow-ups (after the 23 Oct 2026 demo)
 
 Reply latency on an answered call: measured by rk-integration (Sonnet, low
