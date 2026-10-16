@@ -177,6 +177,36 @@ Nadia: The migration is the only risk.
   transcript parsers strip back off (`lib.voice_preamble`). The header is read
   only; building it never changes the call.
 
+## Transcription in a call (feature `call_transcription_policy`, contract 67)
+
+Owner settings (via the transcription settings endpoint, read back by the
+same GET), unset by default: `call_languages` (one ISO code or a set of up to
+three, e.g. `no,en`) and `call_engines` (an ordered fallback list, e.g.
+`google:chirp_3,elevenlabs:scribe_v2`). A language set together with an engine
+that takes a single language (anything but Google Chirp and ElevenLabs
+Scribe) is refused when saved.
+
+A clip is in a call only when `/transcribe` carries `X-Clarp-Call-Id` and
+`X-Transcription-Session`, the call is live, belongs to this device on this
+Host, and the session is a reachable participant of the call record (never UI
+focus or name delegation). Otherwise the request is refused before any
+provider sees the audio; an absent header is ordinary chat transcription.
+
+Per field, independently: the language is the agent's own
+(`agent_languages`), else `call_languages`, else the global language; the
+engines are the agent's own (`agent_engines`), else `call_engines`, else the
+device's `X-Transcription-Model`, else the global engine. A device header
+that is not applied is reported (`requested_model.applied: false` with the
+reason), never refused. Engines run in order, the next only on failure; an
+engine that takes one language gets the first code of a set
+(`language_adapted: "first_code"`); one that cannot take the language at all
+is skipped (`skipped: language_incompatible`), and none at all is an explicit
+error. Every attempt is in `stt.attempts` and the `transcribe` event.
+
+The call record (`GET /calls`, the answer's `call`) adds `transcription:
+{session: {language, engines}}` when a call policy or an agent override
+applies to a participant; otherwise it is absent.
+
 ## Events
 
 Every change emits one durable SSE event:
