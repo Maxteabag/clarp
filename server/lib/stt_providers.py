@@ -231,11 +231,11 @@ def update_settings(data: dict) -> dict:
     # Only the keys a save names are written; an omitted engine or turn
     # taking is read inside the transaction below, so a concurrent save of it
     # is neither reverted nor validated against a stale value.
+    # Omission is the absent key; an explicit null is refused, as before.
+    if any(key in data and not isinstance(data[key], str) for key in ("engine", "turn_taking")):
+        raise ValueError("engine and turn_taking must be strings")
     engine = data.get("engine")
     strategy = data.get("turn_taking")
-    if (engine is not None and not isinstance(engine, str)) or (
-            strategy is not None and not isinstance(strategy, str)):
-        raise ValueError("engine and turn_taking must be strings")
     if engine is not None:
         engine = engine.strip() or LOCAL_ENGINE
         if engine != LOCAL_ENGINE and _model_row(engine) is None:
