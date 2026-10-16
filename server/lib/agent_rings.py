@@ -629,36 +629,68 @@ def _retire(op: dict, reason: str) -> bool:
     if op["state"] in OPEN_STATES:
         op["state"] = "retired"
     elif op["state"] == "initiative_queued":
-        if _cancel_or_lose(op):
-            op["state"] = "retired"
-        else:
-            op["state"] = "initiative_started"
+        settled = _supersede(op)
+        op["state"] = "initiative_started" if settled == "started" else "retired"
+    elif op["state"] == "unknown":
+        op["state"] = "retired"
     op["retired"] = {"reason": reason, "at": now_ms()}
     return True
 
 
-def _withdraw(op: dict) -> bool:
-    """Withdraw the admitted, unclaimed initiative row (same transaction)."""
+# Queue statuses that prove the initiative's row was claimed and ran (or ran
+# and ended): turn_queue.mark_started / settle_receipt / terminalize.
+_STARTED_ROWS = frozenset({"started", "done", "failed", "interrupted", "ended"})
+# Statuses of a row that is still waiting and unclaimed: queued, or held by a Stop.
+_WAITING_ROWS = frozenset({"queued", "parked"})
+# A row that is gone without having run: withdrawn here, cancelled by the queue.
+_DROPPED_ROWS = frozenset({"withdrawn", "cancelled"})
+
+
+def _withdraw_row(queue_id: str) -> bool:
     cursor = db.conn().execute(
         """UPDATE queued_turns SET status = 'withdrawn', text = ''
-            WHERE queue_id = ? AND status = 'queued' AND claimed_at IS NULL""",
-        (op["intent"]["admission_id"],))
+            WHERE queue_id = ? AND status IN ('queued', 'parked') AND claimed_at IS NULL""",
+        (queue_id,))
     return cursor.rowcount == 1
 
 
-def _cancel_or_lose(op: dict) -> bool:
-    """A greeting (or speech onset, or retire) against initiative_queued:
-    True when the initiative is cancelled (no row, or its row withdrawn),
-    False when the dispatcher already claimed it (it is started)."""
+def _supersede(op: dict) -> str:
+    """A greeting, speech onset or retire against initiative_queued, decided
+    from evidence read in the caller's transaction (§11.H): the intent, the
+    exact admission's queued row and any turn under the intent's trace.
+
+    ``cancelled``: nothing ran (no row yet, a waiting row now withdrawn, or a
+    row dropped or deleted without start evidence); never resurrected.
+    ``started``: positive claim/start evidence for this exact admission.
+    ``unknown``: the evidence disagrees; the opening is ``unknown`` and no
+    initiative runs (a waiting row is withdrawn, a claim is refused)."""
     intent = op["intent"]
+    if intent["state"] in ("cancelled", "started", "unknown"):
+        return intent["state"]
     if intent["state"] == "intended":
         intent["state"] = "cancelled"
-        return True
-    if intent["state"] == "admitted" and _withdraw(op):
-        intent["state"] = "cancelled"
-        return True
-    intent["state"] = "started"
-    return False
+        return "cancelled"
+    con = db.conn()
+    row = con.execute("SELECT status, claimed_at FROM queued_turns WHERE queue_id = ?",
+                      (intent["admission_id"],)).fetchone()
+    ran = con.execute("SELECT 1 FROM turns WHERE agent_id = ? AND trace_id = ? LIMIT 1",
+                      (op["agent_id"], intent["trace_id"])).fetchone() is not None
+    status = str(row["status"]) if row is not None else ""
+    if status in _STARTED_ROWS:
+        verdict = "started"
+    elif ran:
+        verdict = "unknown"                       # a turn ran, yet the row says otherwise
+    elif status in _WAITING_ROWS and row["claimed_at"] is None and _withdraw_row(intent["admission_id"]):
+        verdict = "cancelled"
+    elif row is None or status in _DROPPED_ROWS:
+        verdict = "cancelled"
+    else:
+        verdict = "unknown"                       # claimed by someone else, or a status we do not know
+    if verdict == "unknown":
+        _withdraw_row(intent["admission_id"])
+        op["state"] = "unknown"
+    intent["state"] = verdict
+    return verdict
 
 
 def _check_live(op: dict, box: dict) -> bool:
@@ -679,9 +711,12 @@ def _header(op: dict, cause: str) -> str:
 
 def _intend(op: dict, cause: str) -> None:
     previous = op.get("intent") or {}
+    gen = int(previous.get("gen") or 0) + 1
     op["state"] = "initiative_queued"
-    op["intent"] = {"kind": "initiative", "admission_id": CALL_OPEN + op["ring_id"],
-                    "gen": int(previous.get("gen") or 0) + 1, "state": "intended", "cause": cause,
+    # One admission per intent generation (§11.I): a withdrawn gen never
+    # collides with its successor on the UNIQUE admission key.
+    op["intent"] = {"kind": "initiative", "admission_id": f"{CALL_OPEN}{op['ring_id']}:{gen}",
+                    "gen": gen, "state": "intended", "cause": cause,
                     "trace_id": "callopen-" + secrets.token_hex(6)}
 
 
@@ -768,12 +803,15 @@ def _apply_claim(op: dict, claim: str, body: dict, box: dict) -> bool:
         box["error"] = _refuse(op, 409, "stale epoch")
         return False
     if claim == "speech_started" and state == "initiative_queued":
-        if _cancel_or_lose(op):
+        verdict = _supersede(op)
+        if verdict == "cancelled":
             op["state"] = "speech_latched"
             op["latch"] = {"epoch": op["epoch"], "at_ms": _int(body.get("at_ms")),
                            "capture_gen": _int(body.get("capture_gen"))}
         else:
-            op["state"] = "initiative_started"
+            if verdict == "started":
+                op["state"] = "initiative_started"
+            box["dirty"] = True
             box["error"] = _refuse(op, 409, "already resolved", outcome=op["state"])
         return False
     if state not in OPEN_STATES:
@@ -840,10 +878,16 @@ def greeting(principal: str, *, token: Any, epoch: Any, client_msg_id: str, trac
             elif op["state"] in ("greeting", "fallback"):
                 box["error"] = _refuse(op, 409, "already resolved", outcome=op["state"])
             else:
-                started = op["state"] == "initiative_started"
+                verdict = "started" if op["state"] == "initiative_started" else None
                 if op["state"] == "initiative_queued":
-                    started = not _cancel_or_lose(op)
-                if started:
+                    verdict = _supersede(op)
+                elif op["state"] == "unknown":
+                    verdict = "unknown"
+                if verdict == "unknown":
+                    # Whether the initiative ran is unknown: the utterance is
+                    # delivered as an ordinary one, never as the opening.
+                    box["result"] = ("ordinary", True)
+                elif verdict == "started":
                     op["state"] = "initiative_started"
                     if not op.get("late_greeting"):
                         op["late_greeting"] = {"client_msg_id": client_msg_id, "trace_id": trace_id,
@@ -926,27 +970,33 @@ def _admit_after_resolve(ring_id: str) -> None:
 
 def claim_initiative(queue_id: str) -> bool:
     """The dispatcher's claim of a call-open queued row, before it spawns:
-    queued -> claimed and the intent -> started in one transaction. False
-    when the row is not claimable (never admitted, withdrawn, or already
-    claimed): the dispatcher then does not run it."""
+    queued -> claimed and the intent -> started in one transaction, only
+    while this exact admission is the opening's admitted intent. Otherwise
+    the row is withdrawn (if still waiting) and False: the dispatcher does
+    not run it. Other queue rows pass (True)."""
     queue_id = str(queue_id or "")
     if not queue_id.startswith(CALL_OPEN):
         return True
-    ring_id = queue_id[len(CALL_OPEN):]
+    ring_id = queue_id[len(CALL_OPEN):].rsplit(":", 1)[0]
     with _opening_txn(ring_id) as box:
-        cursor = db.conn().execute(
-            """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
-                WHERE queue_id = ? AND status = 'queued'""", (now_ms(), queue_id))
-        if cursor.rowcount != 1:
+        op = box["op"]
+        intent = (op or {}).get("intent") or {}
+        if (op is None or intent.get("admission_id") != queue_id or intent.get("state") != "admitted"
+                or op.get("retired")):
+            _withdraw_row(queue_id)
             box["result"] = False
         else:
-            op = box["op"]
-            if op is not None and op.get("intent"):
-                op["intent"]["state"] = "started"
+            cursor = db.conn().execute(
+                """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
+                    WHERE queue_id = ? AND status = 'queued'""", (now_ms(), queue_id))
+            if cursor.rowcount != 1:
+                box["result"] = False
+            else:
+                intent["state"] = "started"
                 if op["state"] == "initiative_queued":
                     op["state"] = "initiative_started"
                 box["dirty"] = True
-            box["result"] = True
+                box["result"] = True
     if box["result"]:
         _announce_opening(ring_id)
     return box["result"]
@@ -1051,4 +1101,4 @@ def skip_opening_synthesis(trace_id: str) -> bool:
     op, kind = found
     if op.get("retired"):
         return True
-    return kind == "initiative" and (op["intent"]["state"] == "cancelled" or bool(op.get("late_greeting")))
+    return kind == "initiative" and (op["intent"]["state"] in ("cancelled", "unknown") or bool(op.get("late_greeting")))
