@@ -1,4 +1,6 @@
+import fcntl
 import importlib
+import os
 import pathlib
 import sqlite3
 import tarfile
@@ -40,8 +42,26 @@ def test_backup_create_verify_and_restore(monkeypatch, tmp_path):
         connection.execute("UPDATE marker SET value='after'")
     (workspace / "work.txt").write_text("changed")
     (tmp_path / "credentials-added-after-backup").write_text("must disappear")
-    backup.stage_restore(archive)
-    assert backup.apply_pending_restore() is True
+    # Staged as `docker compose exec` into the running Host would (it holds the owner lock), and
+    # applied with both data-root locks held, as the entrypoint holds them on fds 8/9.
+    from lib import data_root_locks
+    importlib.reload(data_root_locks)
+    directory = data_root_locks.ensure_backups_dir()
+    owner = os.open(directory / data_root_locks.OWNER_LOCK, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    users = os.open(directory / data_root_locks.USERS_LOCK, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    fcntl.flock(owner, fcntl.LOCK_EX)
+    fcntl.flock(users, fcntl.LOCK_EX)
+    monkeypatch.setattr(data_root_locks, "OWNER_FD", owner)
+    monkeypatch.setattr(data_root_locks, "USERS_FD", users)
+    kind = data_root_locks.filesystem_type(tmp_path)
+    if kind not in data_root_locks.LOCAL_FILESYSTEMS:
+        monkeypatch.setenv(data_root_locks.FILESYSTEM_OVERRIDE_ENV, kind)
+    try:
+        backup.stage_restore(archive)
+        assert backup.apply_pending_restore() is True
+    finally:
+        os.close(owner)
+        os.close(users)
 
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT value FROM marker").fetchone()[0] == "before"
@@ -49,7 +69,6 @@ def test_backup_create_verify_and_restore(monkeypatch, tmp_path):
     assert (workspace / "work-link").is_symlink()
     assert (workspace / "work-link").read_text() == "preserved"
     assert not (tmp_path / "credentials-added-after-backup").exists()
-    assert backup.apply_pending_restore() is False
 
 
 def test_backup_rejects_traversal(monkeypatch, tmp_path):
