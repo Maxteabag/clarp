@@ -15,8 +15,16 @@ CI_OFFLINE_URL=""
 
 ci_offline_create() {
     # $1: a name unique to this run. Creates the network and the resolv.conf the containers mount.
+    # Engines before 26.0.0 forwarded DNS for --internal networks from the host namespace
+    # (CVE-2024-29018); require a patched engine so the embedded resolver forwards nothing.
+    local engine
+    engine="$(docker version -f '{{.Server.Version}}')"
+    [[ "${engine%%.*}" =~ ^[0-9]+$ && "${engine%%.*}" -ge 26 ]] || {
+        echo "docker engine $engine is older than 26.0.0 (internal-network DNS forwarding)" >&2; exit 1; }
+    # The name is recorded as ours only after the create succeeded, so cleanup never removes a
+    # network this run did not create.
+    docker network create --internal --driver bridge "$1" >/dev/null
     CI_OFFLINE_NET="$1"
-    docker network create --internal --driver bridge "$CI_OFFLINE_NET" >/dev/null
     [[ "$(docker network inspect -f '{{.Internal}}' "$CI_OFFLINE_NET")" == true ]] || {
         echo "network $CI_OFFLINE_NET is not internal" >&2; exit 1; }
     [[ "$(docker network inspect -f '{{.EnableIPv6}}' "$CI_OFFLINE_NET")" == false ]] || {
@@ -42,7 +50,7 @@ ci_offline_run_args() {
 
 ci_offline_preflight() {
     # $1: image. Proves, BEFORE any Host container starts, that a container of this image on this
-    # network has no way out: only lo and one interface, no default route (IPv4 or IPv6), a
+    # network has no way out: no default route (IPv4 or IPv6), a
     # zero-packet UDP connect to public resolvers fails with ENETUNREACH, and resolv.conf names
     # only the container's own loopback, where nothing answers. The Host never runs in this probe.
     local -a args
