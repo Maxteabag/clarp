@@ -6,13 +6,17 @@ names or paths that cannot run anything real (sentinel fakes in tmp, paths
 that do not exist), and acknowledge the refusals they provoke with ``take()``.
 Fail-closed behaviour is shown by inner pytest sessions in a child process
 whose PATH holds only sentinel CLIs and system directories, with its own HOME:
-even with no guard at all, such a child can reach nothing real.
+even with no guard at all, such a child can reach nothing real. The in-process
+cases run with a PATH of sentinels only and ask for ``--version`` at most, so
+a regression in the guard would reach a sentinel, never a real CLI or model.
+Network cases use zero-packet UDP connects to TEST-NET-1 and ``.invalid`` names.
 """
 from __future__ import annotations
 
 import os
 import pathlib
 import pty
+import socket
 import subprocess
 import sys
 import textwrap
@@ -28,6 +32,18 @@ def _sentinel(path: pathlib.Path, marker: pathlib.Path) -> pathlib.Path:
     path.write_text(f"#!/bin/sh\necho \"$0 $*\" >> {marker}\nexit 0\n")
     path.chmod(0o755)
     return path
+
+
+@pytest.fixture
+def sentinel_path(tmp_path, monkeypatch):
+    """PATH holds only sentinels for every provider CLI (they mark that they ran)."""
+    marker = tmp_path / "sentinel-path-ran"
+    bin_dir = tmp_path / "sentinel-path"
+    for name in NAMES:
+        _sentinel(bin_dir / name, marker)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    yield marker
+    assert not marker.exists(), marker.read_text()
 
 
 def _inner_session(tmp_path, source: str) -> tuple[subprocess.CompletedProcess, pathlib.Path]:
@@ -128,23 +144,31 @@ def _blocked(guard, call):
 
 
 @pytest.mark.parametrize("name", NAMES)
-def test_3_popen_of_each_provider_cli_name(backend_cli_guard, name):
+def test_3_popen_of_each_provider_cli_name(backend_cli_guard, sentinel_path, name):
     _blocked(backend_cli_guard, lambda: subprocess.Popen([name, "--version"]))
 
 
 @pytest.mark.parametrize("argv", [
-    ["env", "FOO=1", "claude", "-p", "x"],
-    ["timeout", "5", "codex", "exec", "x"],
-    ["setsid", "nohup", "grok"],
-    ["sh", "-c", "agy chat x"],
-    ["node", "/somewhere/node_modules/.bin/opencode", "run"],
+    ["env", "FOO=1", "claude", "--version"],
+    ["timeout", "5", "codex", "--version"],
+    ["setsid", "nohup", "grok", "--version"],
+    ["sh", "-c", "agy --version"],
+    ["node", "/somewhere/node_modules/.bin/opencode", "--version"],
+    # M3: a runner's subcommand, a package spec, a wrapper option with a value.
+    ["uv", "run", "claude", "--version"],
+    ["npx", "-y", "@anthropic-ai/claude-code", "--version"],
+    ["pnpm", "dlx", "@openai/codex@latest", "--version"],
+    ["nice", "-n", "10", "claude", "--version"],
+    ["ionice", "-c", "3", "nice", "-n", "19", "codex", "--version"],
+    ["env", "-S", "claude --version"],
+    ["sh", "-lc", "cd /tmp && exec gemini --version"],
 ])
-def test_3_launches_through_wrappers_shells_and_runners(backend_cli_guard, argv):
+def test_3_launches_through_wrappers_shells_and_runners(backend_cli_guard, sentinel_path, argv):
     _blocked(backend_cli_guard, lambda: subprocess.run(argv, capture_output=True))
 
 
-def test_3_a_shell_string(backend_cli_guard):
-    _blocked(backend_cli_guard, lambda: subprocess.run("gemini --prompt x", shell=True))
+def test_3_a_shell_string(backend_cli_guard, sentinel_path):
+    _blocked(backend_cli_guard, lambda: subprocess.run("gemini --version", shell=True))
 
 
 def test_3_the_claude_absolute_path_fallback(backend_cli_guard):
@@ -172,18 +196,18 @@ def test_3_a_renamed_alias_of_an_installed_cli(backend_cli_guard, tmp_path, monk
     assert not marker.exists()
 
 
-def test_3_the_stream_json_runner(backend_cli_guard, tmp_path):
+def test_3_the_stream_json_runner(backend_cli_guard, sentinel_path, tmp_path):
     from lib.backend import stream_json
     _blocked(backend_cli_guard,
-             lambda: stream_json.popen_turn(["claude", "-p", "x"], cwd=tmp_path, session="s"))
+             lambda: stream_json.popen_turn(["claude", "--version"], cwd=tmp_path, session="s"))
 
 
-def test_3_the_codex_app_server_client(backend_cli_guard):
+def test_3_the_codex_app_server_client(backend_cli_guard, sentinel_path):
     from lib import codex_app_server
     _blocked(backend_cli_guard, lambda: codex_app_server._Client("agent", "session"))
 
 
-def test_3_os_system_and_posix_spawn(backend_cli_guard):
+def test_3_os_system_and_posix_spawn(backend_cli_guard, sentinel_path):
     with pytest.raises(OSError):
         os.system("claude --version")
     with pytest.raises(OSError):
@@ -192,12 +216,12 @@ def test_3_os_system_and_posix_spawn(backend_cli_guard):
 
 
 @pytest.mark.parametrize("fork", [os.fork, lambda: pty.fork()[0]])
-def test_3_exec_in_a_forked_child_like_the_terminal(backend_cli_guard, fork):
+def test_3_exec_in_a_forked_child_like_the_terminal(backend_cli_guard, sentinel_path, fork):
     # terminal_ws: pty.fork(), then os.execvp(argv[0], argv) in the child.
     pid = fork()
     if pid == 0:
         try:
-            os.execvp("claude", ["claude"])
+            os.execvp("claude", ["claude", "--version"])
         finally:
             os._exit(99)
     _, status = os.waitpid(pid, 0)
@@ -211,8 +235,8 @@ def test_4_a_registered_fake_runs_and_an_unregistered_one_is_blocked(backend_cli
                                                                      tmp_path):
     ran = tmp_path / "fake-ran"
     fake = fake_backend_cli(_sentinel(tmp_path / "bin" / "claude", ran))
-    assert subprocess.run([str(fake), "-p", "x"]).returncode == 0
-    assert ran.read_text().strip().endswith("claude -p x")
+    assert subprocess.run([str(fake), "--version"]).returncode == 0
+    assert ran.read_text().strip().endswith("claude --version")
     assert backend_cli_guard.take() == []
     other_ran = tmp_path / "other-ran"
     other = _sentinel(tmp_path / "other" / "claude", other_ran)        # same kind of path, not registered
@@ -261,23 +285,173 @@ def test_5_an_opt_in_never_leaks_into_the_next_test(tmp_path):
     assert "2 passed, 1 error" in out, out
 
 
-def test_5_the_patched_primitives_are_restored(backend_cli_guard):
-    # Known stand-ins first (nothing is launched meanwhile), then the guard over
-    # them, then its undo: exactly the stand-ins come back.
-    def inert(*args, **kwargs):
-        raise AssertionError("not called")
-    stand_ins = {"__init__": inert, "execvp": inert, "system": inert, "posix_spawnp": inert}
-    base = pytest.MonkeyPatch()
-    base.setattr(subprocess.Popen, "__init__", stand_ins["__init__"])
-    for name in ("execvp", "system", "posix_spawnp"):
-        base.setattr(os, name, stand_ins[name])
-    try:
-        mp = pytest.MonkeyPatch()
-        backend_cli_guard.install(mp)
-        assert subprocess.Popen.__init__ is not inert and os.execvp is not inert
-        assert os.system is not inert and os.posix_spawnp is not inert
-        mp.undo()
-        assert subprocess.Popen.__init__ is inert and os.execvp is inert
-        assert os.system is inert and os.posix_spawnp is inert
-    finally:
-        base.undo()
+def test_5_the_guard_is_installed_once_and_stays_installed(backend_cli_guard):
+    # Installed in pytest_configure for the whole session and never undone, so a
+    # timer firing between tests or after the last one meets it too. Installing
+    # again wraps nothing twice.
+    import backend_cli_guard_core as core
+    assert core.GUARD is backend_cli_guard and core.GUARD.installed
+    before = (subprocess.Popen.__init__, os.execvp, os.system, os.posix_spawnp, socket.socket.connect)
+    core.install(child=False)
+    assert (subprocess.Popen.__init__, os.execvp, os.system, os.posix_spawnp, socket.socket.connect) == before
+    assert subprocess.Popen.__init__ is core._guarded_popen_init
+    assert not getattr(core._ORIGINALS["execvp"], "__clarp_guard__", False)
+    assert not getattr(core._ORIGINALS["connect"], "__clarp_guard__", False)
+
+
+# ---- 6. H1: attempts outside any test's window ------------------------------------------------
+
+OUTSIDE = """
+import subprocess, threading, time
+import pytest
+
+@pytest.fixture(scope="session", autouse=True)
+def _late_session_fixture():
+    yield
+    time.sleep(0.6)                           # the timer below fires during session teardown
+
+def test_arms_a_timer_and_returns():
+    def late():
+        try:
+            subprocess.run(["claude", "--version"])
+        except OSError:
+            pass                              # swallowed, and no test owns it any more
+    timer = threading.Timer(0.2, late)
+    timer.daemon = True
+    timer.start()
+"""
+
+
+def test_6_an_attempt_outside_any_test_fails_the_session(tmp_path):
+    done, marker = _inner_session(tmp_path, OUTSIDE)
+    out = done.stdout + done.stderr
+    assert not marker.exists(), marker.read_text()
+    assert "1 passed" in out, out
+    assert done.returncode == 1, out
+    assert "attempted outside any test (blocked)" in out and "claude" in out, out
+
+
+RETRY = """
+import time
+from lib import turn_dispatch
+
+def test_a_arms_the_default_retry_timer(tmp_path):
+    marker = tmp_path.parent / "retry-fired"
+    turn_dispatch._default_retry_scheduler(0.3, lambda: marker.write_text("fired"))
+
+def test_b_the_timer_never_fires_after_its_test(tmp_path):
+    time.sleep(0.8)
+    assert not (tmp_path.parent / "retry-fired").exists()
+    assert not list(tmp_path.parent.parent.glob("*/retry-fired"))
+"""
+
+
+def test_6_the_dispatchers_retry_timer_never_outlives_its_test(tmp_path):
+    done, _ = _inner_session(tmp_path, RETRY)
+    out = done.stdout + done.stderr
+    assert done.returncode == 0 and "2 passed" in out, out
+
+
+# ---- 7. H2: a child Python process is guarded, whatever PATH it builds ------------------------
+
+CHILD = """
+import os, subprocess, sys
+
+def test_a_child_interpreter_launch_fails_its_owner(tmp_path):
+    fake = tmp_path / "abs" / "claude"
+    fake.parent.mkdir()
+    fake.write_text("#!/bin/sh\\necho ran >> " + str(tmp_path / "child-ran") + "\\n")
+    fake.chmod(0o755)
+    code = ("import os, subprocess\\n"
+            "os.environ['PATH'] = '/usr/bin:/bin'\\n"                 # a rebuilt PATH
+            "try:\\n"
+            "    subprocess.run([%r, '--version'])\\n"                  # an absolute path
+            "except OSError:\\n"
+            "    pass\\n") % str(fake)
+    subprocess.run([sys.executable, "-c", code], check=True)
+    assert not (tmp_path / "child-ran").exists()
+"""
+
+
+def test_7_a_child_interpreter_is_guarded_and_reports_to_its_test(tmp_path):
+    done, marker = _inner_session(tmp_path, CHILD)
+    out = done.stdout + done.stderr
+    assert not marker.exists(), marker.read_text()
+    assert done.returncode == 1 and "1 passed, 1 error" in out, out
+    assert "real provider CLI launch or network access attempted (blocked)" in out and "claude" in out, out
+
+
+# ---- 8. H3/M1: the session's HOME, adapter dirs and toolchain mode ------------------------------
+
+def test_8_home_adapters_and_toolchains_are_the_sessions_own():
+    real_home = os.environ["CLARP_TEST_REAL_HOME"]
+    root = os.environ["CLARP_TEST_GUARD_DIR"]
+    assert os.path.realpath(os.environ["HOME"]) != os.path.realpath(real_home)
+    assert os.environ["HOME"].startswith(root)
+    assert os.path.expanduser("~") == os.environ["HOME"]
+    for var in ("CLARP_TTS_ADAPTERS_DIR", "CLARP_STT_ADAPTERS_DIR"):
+        assert os.environ[var].startswith(root)
+        assert not any(pathlib.Path(os.environ[var]).iterdir())
+    assert os.environ["CLARP_TOOLCHAIN_MODE"] == "none"
+    for var in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK"):
+        assert var not in os.environ
+    from lib import custom_stt_adapters, custom_tts_adapters
+    assert str(custom_tts_adapters.ROOT).startswith(root)
+    assert str(custom_stt_adapters.ROOT).startswith(root)
+
+
+@pytest.mark.parametrize("connect", [
+    lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).connect(("192.0.2.1", 9)),
+    lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).connect_ex(("192.0.2.1", 9)),
+    lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b"", ("192.0.2.1", 9)),
+    lambda: socket.getaddrinfo("guard-probe.invalid", 443),
+])
+def test_8_non_loopback_network_is_refused_and_recorded(backend_cli_guard, connect):
+    attempts = _blocked(backend_cli_guard, connect)
+    assert any("socket." in entry for entry in attempts)
+
+
+def test_8_loopback_still_works(backend_cli_guard):
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    client = socket.create_connection(server.getsockname(), timeout=2)
+    accepted, _ = server.accept()
+    for sock in (accepted, client, server):
+        sock.close()
+    assert backend_cli_guard.take() == []
+
+
+# ---- 9. M2: a registered fake is checked by content -------------------------------------------
+
+def test_9_a_copy_of_an_installed_cli_is_never_a_fake(backend_cli_guard, fake_backend_cli, tmp_path, monkeypatch):
+    marker = tmp_path / "ran"
+    installed = _sentinel(tmp_path / "installed" / "real-cli", marker)   # stands in for an installed CLI
+    copy = tmp_path / "bin" / "claude"
+    copy.parent.mkdir()
+    copy.write_bytes(installed.read_bytes())
+    copy.chmod(0o755)
+    stat = installed.stat()
+    monkeypatch.setattr(backend_cli_guard, "ambient", frozenset({os.path.realpath(installed)}))
+    monkeypatch.setattr(backend_cli_guard, "_ambient_sizes", {stat.st_size: [os.path.realpath(installed)]})
+    monkeypatch.setattr(backend_cli_guard, "_ambient_hashes", {})
+    with pytest.raises(ValueError):
+        fake_backend_cli(copy)
+    fake_backend_cli.dir(tmp_path / "bin")
+    _blocked(backend_cli_guard, lambda: subprocess.run([str(copy), "--version"]))
+    assert not marker.exists()
+
+
+def test_9_a_fake_that_names_an_installed_cli_is_refused(backend_cli_guard, fake_backend_cli, tmp_path, monkeypatch):
+    real = tmp_path / "installed" / "claude-real"
+    real.parent.mkdir()
+    real.write_text("#!/bin/sh\nexit 0\n")
+    monkeypatch.setattr(backend_cli_guard, "ambient", frozenset({os.path.realpath(real)}))
+    wrapper = tmp_path / "bin" / "claude"
+    wrapper.parent.mkdir()
+    wrapper.write_text(f"#!/bin/sh\nexec {real} \"$@\"\n")       # would exec the real CLI by path
+    wrapper.chmod(0o755)
+    with pytest.raises(ValueError):
+        fake_backend_cli(wrapper)
+    fake_backend_cli.dir(tmp_path / "bin")
+    _blocked(backend_cli_guard, lambda: subprocess.run([str(wrapper), "--version"]))

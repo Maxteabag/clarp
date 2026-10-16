@@ -6,13 +6,14 @@ don't see one another's agents.
 """
 from __future__ import annotations
 
-import inspect
 import os
 import pathlib
-import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+
 import pytest
 
 
@@ -109,219 +110,45 @@ def _no_real_agy_cli(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path / "no-agy-home"))
 
 
-# ---- real provider CLIs are never launched from a test --------------------------
+# ---- real provider CLIs, the network and the real HOME are never reached from a test ----
 #
 # A unit test once ran a real Claude Code turn through a handler that built its
-# own dispatcher on the real backend registry. Every exec primitive is
-# intercepted for every test: a launch of a provider CLI (by name, through a
-# wrapper, by its real installed path or under the Clarp toolchains) is refused
-# and RECORDED, and the test fails at teardown even when the application
-# swallowed the refusal. A deterministic fake runs only after the test
-# registered it with ``fake_backend_cli(path)``. Name shims on PATH record a
-# child process that resolves one of these names, too.
+# own dispatcher on the real backend registry. The guard (tests/
+# backend_cli_guard_core.py) is installed ONCE for the whole session, before
+# any lib import, and never undone: every exec primitive and the socket entry
+# points refuse a provider CLI (by name, through a wrapper, shell or runner, by
+# its real installed path, a copy of it, or under the Clarp toolchains) and any
+# non-loopback address, and RECORD the attempt. Inside a test the test fails
+# at teardown, even when the application swallowed the refusal; outside any
+# test (a retry timer after the last test, a session fixture) the session
+# fails. Child Python processes install the same guard through a
+# ``sitecustomize`` on the session's PYTHONPATH; name shims first on PATH
+# record any other child that resolves a provider CLI by name. HOME, the
+# custom TTS/STT adapter directories and the toolchain mode point at empty
+# session directories. A deterministic fake runs only after the test
+# registered it with ``fake_backend_cli(path)``.
 
-BACKEND_CLIS = frozenset({"claude", "clarp", "codex", "agy", "grok", "opencode", "gemini", "tmux"})
-_REAL_HOME = pathlib.Path(os.path.expanduser("~")).resolve()
-_REAL_PATH = os.environ.get("PATH", "")
-_TOOLCHAINS = os.path.realpath(_REAL_HOME / ".local" / "share" / "clarp" / "toolchains")
+_TESTS_DIR = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_TESTS_DIR))
+try:
+    import backend_cli_guard_core as _guard_core  # noqa: E402  (stdlib only; shared with child processes)
+finally:
+    del sys.path[0]
+
+BACKEND_CLIS = _guard_core.BACKEND_CLIS
+BackendLaunchBlocked = _guard_core.BackendLaunchBlocked
+BACKEND_CLI_GUARD = _guard_core.GUARD
+AMBIENT_CLI_PATHS = BACKEND_CLI_GUARD.ambient
+_TOOLCHAINS = BACKEND_CLI_GUARD.toolchains
 _REPO = pathlib.Path(__file__).resolve().parents[1]
-_WRAPPERS = frozenset({"env", "timeout", "nohup", "setsid", "stdbuf", "nice", "ionice", "sudo",
-                       "exec", "command", "unbuffer", "xargs", "script"})
-_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "fish"})
-_RUNNERS = frozenset({"node", "npx", "bunx", "bun", "uv", "uvx", "pnpm", "yarn", "deno"})
-_POPEN_INIT = subprocess.Popen.__init__
-_POPEN_SIGNATURE = inspect.signature(_POPEN_INIT)
-_EXEC_NAMES = ("execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe")
+_GITCONFIG = ("[user]\n\tname = Clarp Test\n\temail = test@clarp.invalid\n"
+              "[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n")
 
 
-class BackendLaunchBlocked(OSError):
-    """A test reached a real provider CLI launch."""
-
-
-def _under(path, root) -> bool:
-    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
-
-
-def _ambient_cli_paths() -> frozenset[str]:
-    found = set()
-    for name in BACKEND_CLIS:
-        hit = shutil.which(name, path=_REAL_PATH)
-        if hit:
-            found.add(os.path.realpath(hit))
-    if os.path.isdir(_TOOLCHAINS):
-        for entry in pathlib.Path(_TOOLCHAINS).glob("*/bin/*"):
-            found.add(os.path.realpath(entry))
-    return frozenset(found)
-
-
-AMBIENT_CLI_PATHS = _ambient_cli_paths()
-
-
-class _BackendCliGuard:
-    def __init__(self):
-        self.reset(None)
-
-    def reset(self, log):
-        self.attempts: list[str] = []
-        self.allowed: set[str] = set()
-        self.allowed_dirs: set[str] = set()
-        self.log = log
-        self.pid = os.getpid()
-        self.ambient = AMBIENT_CLI_PATHS
-        self.toolchains = _TOOLCHAINS
-
-    def take(self) -> list[str]:
-        """Every refused launch so far (in-process and from child processes),
-        cleared: a test that provokes refusals on purpose acknowledges them."""
-        taken = list(self.attempts)
-        self.attempts.clear()
-        if self.log is not None and os.path.exists(self.log):
-            taken += [line for line in pathlib.Path(self.log).read_text().splitlines() if line]
-            os.unlink(self.log)
-        return taken
-
-
-BACKEND_CLI_GUARD = _BackendCliGuard()
-BACKEND_CLI_GUARD.install = lambda mp: install_backend_cli_guard(mp)
-
-
-def _forbidden_program(program, env_path) -> bool:
-    program = str(program)
-    name = os.path.basename(program).lower()
-    for ext in (".exe", ".cmd", ".bat"):
-        if name.endswith(ext):
-            name = name[:-len(ext)]
-    if os.sep in program:
-        target = os.path.realpath(program)
-    else:
-        hit = shutil.which(program, path=env_path)
-        target = os.path.realpath(hit) if hit else None
-    if target is not None and target in BACKEND_CLI_GUARD.allowed:
-        return False
-    if (target is not None and os.path.isfile(target)
-            and any(_under(target, root) for root in BACKEND_CLI_GUARD.allowed_dirs)
-            and target not in BACKEND_CLI_GUARD.ambient
-            and not _under(target, BACKEND_CLI_GUARD.toolchains)):
-        return False
-    if name in BACKEND_CLIS:
-        return True
-    return target is not None and (target in BACKEND_CLI_GUARD.ambient
-                                   or _under(target, BACKEND_CLI_GUARD.toolchains))
-
-
-def _forbidden_argv(argv, env_path) -> str:
-    """The provider CLI ``argv`` would run (through wrappers, shells and script
-    runners), or ""."""
-    argv = [str(a) for a in argv]
-    i = 0
-    while i < len(argv):
-        program = argv[i]
-        name = os.path.basename(program).lower()
-        if _forbidden_program(program, env_path):
-            return program
-        if name in _SHELLS:
-            rest = argv[i + 1:]
-            if "-c" in rest and rest.index("-c") + 1 < len(rest):
-                return _forbidden_shell(rest[rest.index("-c") + 1], env_path)
-            return ""
-        if name in _RUNNERS:
-            return next((a for a in argv[i + 1:] if not a.startswith("-")
-                         and _forbidden_program(a, env_path)), "")
-        if name not in _WRAPPERS:
-            return ""
-        i += 1
-        while i < len(argv) and (argv[i].startswith("-") or "=" in argv[i]
-                                 or (name == "timeout" and argv[i][:1].isdigit())):
-            i += 1
-    return ""
-
-
-def _forbidden_shell(command, env_path) -> str:
-    try:
-        tokens = shlex.split(str(command))
-    except ValueError:
-        tokens = str(command).split()
-    for token in tokens:
-        if _forbidden_program(token, env_path):
-            return token
-    return ""
-
-
-def _refuse(what: str) -> None:
-    entry = f"{what}"
-    if os.getpid() != BACKEND_CLI_GUARD.pid:
-        # A forked child (pty.fork + exec): tell the parent through the log.
-        if BACKEND_CLI_GUARD.log is not None:
-            with open(BACKEND_CLI_GUARD.log, "a") as handle:
-                handle.write(entry + "\n")
-        os._exit(127)
-    BACKEND_CLI_GUARD.attempts.append(entry)
-    raise BackendLaunchBlocked(f"test attempted to launch a real provider CLI: {entry}")
-
-
-def _guarded_popen_init(self, *args, **kwargs):
-    bound = _POPEN_SIGNATURE.bind(self, *args, **kwargs)
-    call = bound.arguments
-    command = call.get("args")
-    env = call.get("env")
-    env_path = (env or {}).get("PATH", os.environ.get("PATH", "")) if env is not None \
-        else os.environ.get("PATH", "")
-    if call.get("shell"):
-        hit = _forbidden_shell(command if isinstance(command, str) else " ".join(map(str, command)), env_path)
-    else:
-        argv = [command] if isinstance(command, (str, bytes, os.PathLike)) else list(command or [])
-        if call.get("executable"):
-            argv = [call["executable"], *argv[1:]]
-        hit = _forbidden_argv(argv, env_path)
-    if hit:
-        _refuse(f"Popen {command!r}")
-    return _POPEN_INIT(self, *args, **kwargs)
-
-
-def _guarded_exec(name, original):
-    def guarded(path, *rest):
-        argv = rest[0] if name in ("execv", "execve", "execvp", "execvpe") and rest else [path, *rest]
-        env_path = os.environ.get("PATH", "")
-        if _forbidden_program(path, env_path) or _forbidden_argv(list(argv) or [path], env_path):
-            _refuse(f"os.{name} {path!r}")
-        return original(path, *rest)
-    return guarded
-
-
-def _guarded_spawn(name, original):
-    def guarded(path, argv, *rest, **kwargs):
-        if _forbidden_program(path, os.environ.get("PATH", "")) or \
-                _forbidden_argv(list(argv) or [path], os.environ.get("PATH", "")):
-            _refuse(f"os.{name} {path!r}")
-        return original(path, argv, *rest, **kwargs)
-    return guarded
-
-
-def _guarded_system(original):
-    def guarded(command):
-        if _forbidden_shell(command, os.environ.get("PATH", "")):
-            _refuse(f"os.system {command!r}")
-        return original(command)
-    return guarded
-
-
-def install_backend_cli_guard(mp: pytest.MonkeyPatch) -> None:
-    """Patch every exec primitive through ``mp`` (undone with it)."""
-    mp.setattr(subprocess.Popen, "__init__", _guarded_popen_init)
-    for name in _EXEC_NAMES:
-        if hasattr(os, name):
-            mp.setattr(os, name, _guarded_exec(name, getattr(os, name)))
-    for name in ("posix_spawn", "posix_spawnp"):
-        if hasattr(os, name):
-            mp.setattr(os, name, _guarded_spawn(name, getattr(os, name)))
-    mp.setattr(os, "system", _guarded_system(os.system))
-
-
-@pytest.fixture(scope="session")
-def _backend_cli_shims(tmp_path_factory):
+def _write_backend_cli_shims(shims: pathlib.Path) -> None:
     """Executables named after every provider CLI, first on PATH: a child
     process that resolves one by name records the attempt and exits 127."""
-    shims = tmp_path_factory.mktemp("backend-cli-shims")
+    shims.mkdir(exist_ok=True)
     for name in BACKEND_CLIS:
         shim = shims / name
         shim.write_text(
@@ -332,28 +159,124 @@ def _backend_cli_shims(tmp_path_factory):
             f"echo 'test blocked a real {name} launch' >&2\n"
             "exit 127\n")
         shim.chmod(0o755)
-    return shims
+
+
+def _prepend(var: str, entry: str) -> None:
+    current = os.environ.get(var, "")
+    if entry not in current.split(os.pathsep):
+        os.environ[var] = entry + (os.pathsep + current if current else "")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "probes_provider_clis: the test exercises provider CLI resolution itself, "
+                   "so the model-catalog warm-up stub stays off")
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    shared = os.environ.get("CLARP_TEST_GUARD_DIR")
+    home, site = None, None
+    if worker and shared and os.path.isdir(shared):
+        # An xdist worker reuses the controller's session directories as they
+        # are: another worker may already be executing the shims.
+        root = pathlib.Path(shared)
+        home, site = root / "home", root / "guard-site"
+    else:
+        root = pathlib.Path(tempfile.mkdtemp(prefix="clarp-test-guard-", dir=_TEMP_ROOT))
+        os.environ["CLARP_TEST_GUARD_DIR"] = str(root)
+        # What the guard recognises as the real installation (read before HOME moves).
+        os.environ.setdefault("CLARP_TEST_REAL_HOME", str(pathlib.Path(os.path.expanduser("~")).resolve()))
+        os.environ.setdefault("CLARP_TEST_REAL_PATH", os.environ.get("PATH", ""))
+        home = root / "home"
+        home.mkdir()
+        (home / ".gitconfig").write_text(_GITCONFIG)
+        for name in ("tts-adapters.d", "stt-adapters.d"):
+            (root / name).mkdir()
+        _write_backend_cli_shims(root / "backend-cli-shims")
+        site = root / "guard-site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(_guard_core.SITECUSTOMIZE.format(tests_dir=str(_TESTS_DIR)))
+    session_log = root / f"outside-{worker or 'main'}-{os.getpid()}.log"
+    os.environ.update({
+        "HOME": str(home),
+        "CLARP_TTS_ADAPTERS_DIR": str(root / "tts-adapters.d"),
+        "CLARP_STT_ADAPTERS_DIR": str(root / "stt-adapters.d"),
+        "CLARP_TOOLCHAIN_MODE": "none",
+        "CLARP_TEST_BACKEND_CLI_LOG": str(session_log),
+    })
+    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+                "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "GNUPGHOME"):
+        os.environ.pop(var, None)
+    _prepend("PATH", str(root / "backend-cli-shims"))
+    _prepend("PYTHONPATH", str(site))
+    _guard_core.install(child=False)
+    BACKEND_CLI_GUARD.log = str(session_log)
+    config._clarp_guard = {"root": root, "session_log": str(session_log), "worker": worker}
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    """Fail the session for an attempt no test owned (after the session fixtures
+    were torn down, which run before this hook)."""
+    state = getattr(session.config, "_clarp_guard", None)
+    if state is None:
+        return
+    for timer in list(BACKEND_CLI_GUARD.timers):
+        timer.cancel()
+    outside = list(BACKEND_CLI_GUARD.outside) + list(BACKEND_CLI_GUARD.attempts)
+    if state["worker"]:
+        if outside:                                  # the controller reports it
+            with open(state["session_log"], "a") as handle:
+                handle.write("".join(entry + "\n" for entry in outside))
+        return
+    for log in sorted(pathlib.Path(state["root"]).glob("outside-*.log")):
+        outside += [line for line in log.read_text().splitlines() if line]
+    if outside:
+        sys.stderr.write("\nreal provider CLI launch or network access attempted outside any test "
+                         "(blocked):\n  " + "\n  ".join(outside) + "\n")
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def _track_retry_timers() -> None:
+    """The dispatcher's default retry timer never outlives the test that armed it."""
+    turn_dispatch = sys.modules.get("lib.turn_dispatch")
+    if turn_dispatch is None or getattr(turn_dispatch._default_retry_scheduler, "__clarp_guard__", False):
+        return
+
+    def tracked(delay, fn):
+        timer = None
+
+        def run():
+            BACKEND_CLI_GUARD.timers.discard(timer)
+            fn()
+        timer = threading.Timer(delay, run)
+        timer.daemon = True
+        BACKEND_CLI_GUARD.timers.add(timer)
+        timer.start()
+    tracked.__clarp_guard__ = True
+    tracked.__doc__ = turn_dispatch._default_retry_scheduler.__doc__
+    turn_dispatch._default_retry_scheduler = tracked
 
 
 @pytest.fixture(autouse=True)
-def _guard_backend_clis(_backend_cli_shims, tmp_path):
-    """Intercept every provider CLI launch for this test; fail it at teardown
-    if any was attempted, even when the application swallowed the refusal."""
+def _guard_backend_clis(request, tmp_path):
+    """Attribute every refused launch to this test; fail it at teardown if any
+    was attempted, even when the application swallowed the refusal."""
+    state = request.config._clarp_guard
     log = tmp_path.parent / f"{tmp_path.name}-backend-cli-guard.log"
     mp = pytest.MonkeyPatch()
-    BACKEND_CLI_GUARD.reset(str(log))
     mp.setenv("CLARP_TEST_BACKEND_CLI_LOG", str(log))
-    mp.setenv("PATH", f"{_backend_cli_shims}{os.pathsep}{os.environ.get('PATH', '')}")
-    install_backend_cli_guard(mp)
+    BACKEND_CLI_GUARD.begin(request.node.nodeid, str(log))
+    _track_retry_timers()
     try:
         yield BACKEND_CLI_GUARD
     finally:
-        attempts = BACKEND_CLI_GUARD.take()
+        for timer in list(BACKEND_CLI_GUARD.timers):
+            timer.cancel()
+        BACKEND_CLI_GUARD.timers.clear()
         mp.undo()
-        BACKEND_CLI_GUARD.reset(None)
+        attempts = BACKEND_CLI_GUARD.end(state["session_log"])
     if attempts:
-        pytest.fail("real provider CLI launch attempted (blocked):\n  " + "\n  ".join(attempts),
-                    pytrace=False)
+        pytest.fail("real provider CLI launch or network access attempted (blocked):\n  "
+                    + "\n  ".join(attempts), pytrace=False)
 
 
 @pytest.fixture
@@ -366,36 +289,49 @@ def backend_cli_guard(_guard_backend_clis):
 def fake_backend_cli(_guard_backend_clis, tmp_path):
     """Register a deterministic fake CLI this test may run. Only a file inside
     this test's tmp_path or the repo's tests/ directory, never one the user's
-    PATH or the Clarp toolchains resolve."""
+    PATH or the Clarp toolchains resolve, and never a copy of an installed CLI
+    or a script that names one (checked again each time it is launched)."""
     roots = (os.path.realpath(tmp_path), os.path.realpath(_REPO / "tests"))
+    guard = _guard_backend_clis
 
     def register(path):
         path = pathlib.Path(path)
         real = os.path.realpath(path)
         if not path.is_file() or not os.access(path, os.X_OK):
             raise ValueError(f"not an executable file: {path}")
-        if not any(_under(real, root) for root in roots):
+        if not any(_guard_core._under(real, root) for root in roots):
             raise ValueError(f"not a disposable fake (outside tmp_path and tests/): {path}")
-        if real in AMBIENT_CLI_PATHS or _under(real, _TOOLCHAINS):
-            raise ValueError(f"an installed provider CLI, not a fake: {path}")
-        ambient = shutil.which(path.name, path=_REAL_PATH)
+        if real in guard.ambient or _guard_core._under(real, guard.toolchains) or guard.is_ambient_copy(real):
+            raise ValueError(f"an installed provider CLI (or a copy of one), not a fake: {path}")
+        ambient = shutil.which(path.name, path=_guard_core._real_path())
         if ambient and os.path.realpath(ambient) == real:
             raise ValueError(f"resolvable on the user's PATH: {path}")
-        BACKEND_CLI_GUARD.allowed.add(real)
+        guard.allow(real)
         return path
 
     def register_dir(path):
         """Every executable file a test writes under ``path`` (inside its
         tmp_path or tests/), each still checked when it is launched."""
         real = os.path.realpath(path)
-        if not any(_under(real, root) for root in roots):
+        if not any(_guard_core._under(real, root) for root in roots):
             raise ValueError(f"not a disposable fake directory (outside tmp_path and tests/): {path}")
-        if _under(real, _TOOLCHAINS) or any(_under(cli, real) for cli in AMBIENT_CLI_PATHS):
+        if _guard_core._under(real, guard.toolchains) or any(_guard_core._under(cli, real) for cli in guard.ambient):
             raise ValueError(f"holds an installed provider CLI: {path}")
-        BACKEND_CLI_GUARD.allowed_dirs.add(real)
+        guard.allow_dir(real)
         return pathlib.Path(path)
     register.dir = register_dir
     return register
+
+
+@pytest.fixture(autouse=True)
+def _model_catalog_never_probes_installed_clis(request, monkeypatch):
+    """The server's cache warm-up builds the model catalog in the background by
+    running each provider CLI it can resolve (``codex debug models``, ``agy
+    models``). Tests resolve none, except the ones that test that resolution."""
+    if request.node.get_closest_marker("probes_provider_clis"):
+        return
+    from lib import provider_capabilities
+    monkeypatch.setattr(provider_capabilities, "_resolve_executable", lambda provider_id: None)
 
 
 @pytest.fixture(autouse=True)
@@ -562,33 +498,6 @@ def _isolated_db(tmp_path, monkeypatch):
             mod.reset_for_tests(log_dir)
         except (ImportError, AttributeError):
             pass
-
-
-@pytest.fixture(autouse=True)
-def _forbid_network(monkeypatch):
-    """Fail fast if a test reaches past loopback.
-
-    Provider usage, voice catalogs, and update checks all talk to the internet
-    in production. A test that gets there by accident is slow, flaky, and
-    leaks the developer's credentials into a fixture; refuse the connection
-    instead so the missing stub is obvious.
-    """
-    import socket
-
-    real_connect = socket.socket.connect
-
-    def guarded_connect(self, address):
-        if self.family == socket.AF_UNIX:
-            return real_connect(self, address)
-        host = address[0] if isinstance(address, tuple) else address
-        if isinstance(host, str) and host not in {
-            "127.0.0.1", "::1", "localhost", "0.0.0.0", "::",
-        } and not host.startswith("127."):
-            raise AssertionError(
-                f"test attempted a network connection to {host!r}")
-        return real_connect(self, address)
-
-    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
 
 
 def _seed_agents_via_db(rows: dict[str, dict]) -> None:
