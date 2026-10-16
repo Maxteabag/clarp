@@ -232,3 +232,30 @@ def test_hanging_up_retires_the_opening(host):
     assert (code, body["error"], body["reason"]) == (409, "opening retired", "call_ended")
     time.sleep(0.5)
     assert provider(host, "turn/start") == []
+
+
+# ---- §11.H on the real Host: a Stop between admission and the greeting ------------------
+
+def test_a_stop_between_admit_and_greeting_withdraws_the_initiative(host):
+    rid, out = answered(host)
+    op = out["opening"]
+    post(host, "/send", {"session": "rachel", "text": "[qa-slow] earlier work", "client_msg_id": "u-busy",
+                         "synthesize_audio": False})
+    wait_for(lambda: provider(host, "turn/start"), what="the busy turn")
+    res = claim(host, op, "silence", "rq-1")
+    assert res["opening"]["state"] == "initiative_queued" and res["opening"]["intent"]["state"] == "admitted"
+    post(host, "/stop", {"session": "rachel", "reason": "the user pressed Stop"})
+    queued = sql(host, "SELECT status FROM queued_turns WHERE queue_id LIKE 'call-open:%'")
+    assert [r["status"] for r in queued] == ["queued"]                 # held by the Stop, unclaimed
+    sent = post(host, "/send", {"session": "rachel", "text": "Hallo?", "client_msg_id": "u-hallo",
+                                "call_id": op["call_id"], "call_opening": {"token": op["token"], "epoch": 1},
+                                "synthesize_audio": False})
+    assert sent["opening"]["state"] == "greeting" and sent["opening"]["intent"]["state"] == "cancelled"
+    host.wait_reply("rachel", "QA reply: Hallo?")
+    wait_idle(host)
+    assert [r["status"] for r in sql(host, "SELECT status FROM queued_turns WHERE queue_id LIKE 'call-open:%'")] \
+        == ["withdrawn"]
+    host.request("/turn-queue/resume", {"session": "rachel"})
+    time.sleep(1.0)
+    starts = provider(host, "turn/start")
+    assert not any("clarp-call-opening" in json.dumps(s) for s in starts)   # the initiative never ran
