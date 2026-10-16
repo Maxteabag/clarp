@@ -16,9 +16,10 @@ Every failure of the exchange with Google is a GoogleTTSError whose `code` is on
 raised without its cause, so no response body, header or credential path reaches an error or a
 logged traceback. A local write failure stays an OSError and leaves no file behind.
 
-Time: one TIME_BUDGET_SECONDS budget covers the token and the request. A single receive waits at
-most RECEIVE_TIMEOUT_SECONDS and the budget is checked after every receive, so a clip ends at most
-one receive past it.
+Time: one TIME_BUDGET_SECONDS budget per clip. It is checked before the request and after every
+body receive. Each socket operation of the request (connect, TLS handshake, sending, the status and
+header lines, a body receive) waits at most RECEIVE_TIMEOUT_SECONDS. The token refresh is
+google_stt's own per-operation timeout from the remaining budget. DNS resolution has no timeout.
 """
 from __future__ import annotations
 
