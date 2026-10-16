@@ -597,10 +597,14 @@ def _public_opening(op: dict, *, secret: bool = False) -> dict:
 def _open(ring: dict, principal: str, *, capable: bool) -> None:
     """The opening record at answer: pending for a capable phone, fallback
     (today's answer, nothing dispatched) for any other."""
+    from . import turn_queue
     now = now_ms()
     with _opening_txn(ring["ring_id"]) as box:
         if box["op"] is not None:
             return
+        # §11.L: the answer may pass a pause that exists now, nothing newer.
+        fence = {"answered_at": now, "stop_generation": turn_queue.stop_generation(ring["agent_id"]),
+                 "paused_at_answer": turn_queue.is_paused(ring["agent_id"]), "auth": _auth_proof(principal)}
         box["op"] = {
             "ring_id": ring["ring_id"], "call_id": ring["call_id"], "principal": principal,
             "server_id": _server_id(), "agent_id": ring["agent_id"], "session": ring["session"],
@@ -609,11 +613,61 @@ def _open(ring: dict, principal: str, *, capable: bool) -> None:
             "owner_nonce": "own_" + secrets.token_hex(16) if capable else "",
             "epoch": 1, "state": "pending" if capable else "fallback", "silence_ms": SILENCE_MS,
             "capture": None, "latch": None, "intent": None, "greeting": None, "late_greeting": None,
-            "retired": None, "requests": {}, "created_at": now,
+            "retired": None, "requests": {}, "created_at": now, "fence": fence,
         }
         box["dirty"] = True
     _audit({"outcome": "opening", "ring_id": ring["ring_id"], "state": "pending" if capable else "fallback",
             "by": principal})
+
+
+def _auth_proof(principal: str) -> dict | None:
+    """The answering device's auth generation (its token hash), or None for a
+    principal that is not a paired device (the local administrator)."""
+    row = db.conn().execute("SELECT token_hash FROM paired_devices WHERE device_id = ?",
+                            (principal,)).fetchone()
+    return {"token_hash": str(row[0])} if row else None
+
+
+def _fence_breach(op: dict) -> str:
+    """§11.L, read in the caller's transaction: why the answer no longer
+    authorizes the initiative, or "". A Stop or cancel newer than the answer,
+    a ring, call or auth that is no longer the one answered, another Host."""
+    from . import turn_queue
+    if op.get("retired"):
+        return op["retired"]["reason"]
+    if op["server_id"] != _server_id():
+        return "host_changed"
+    fence = op.get("fence") or {}
+    con = db.conn()
+    records = con.execute("SELECT value FROM settings WHERE key = ?", (KEY,)).fetchone()
+    ring = next((r for r in (json.loads(records[0]) if records else []) if r["ring_id"] == op["ring_id"]), None)
+    if ring is None or ring["state"] != "answered" or ring["answered_by"] != op["principal"] \
+            or ring["call_id"] != op["call_id"]:
+        return "ring_changed"
+    calls = con.execute("SELECT value FROM settings WHERE key = ?", ("group_call." + op["principal"],)).fetchone()
+    live = calls and any(c["call_id"] == op["call_id"] and c["state"] == "live"
+                         for c in json.loads(calls[0]).get("calls", []))
+    if not live:
+        return "call_ended"
+    if fence.get("auth"):
+        device = con.execute("SELECT token_hash, revoked_at FROM paired_devices WHERE device_id = ?",
+                             (op["principal"],)).fetchone()
+        if device is None or device["revoked_at"] is not None:
+            return "auth_revoked"
+        if str(device["token_hash"]) != fence["auth"]["token_hash"]:
+            return "auth_changed"
+    if "stop_generation" in fence and turn_queue.stop_generation(op["agent_id"]) != fence["stop_generation"]:
+        return "stopped_after_answer"
+    return ""
+
+
+def _enforce_fence(op: dict) -> str:
+    """Retire (intent cancelled, a waiting row withdrawn) when the fence is
+    breached; returns the reason or ""."""
+    reason = _fence_breach(op)
+    if reason and not op.get("retired"):
+        _retire(op, reason)
+    return reason
 
 
 def _refuse(op: dict, status: int, error: str, **extra: Any) -> CallError:
@@ -763,6 +817,12 @@ def opening_claim(principal: str, body: dict) -> dict:
             box["result"] = (seen.get("opening") if claim == "renew" else None, False)
         elif _check_live(op, box):
             queued = _apply_claim(op, claim, body, box)
+            if queued:
+                reason = _enforce_fence(op)
+                if reason:
+                    queued = False
+                    box["dirty"] = True
+                    box["error"] = _refuse(op, 409, "opening retired", reason=reason)
             if box.get("error") is None:
                 op["requests"][request_id] = {"fingerprint": _fingerprint(body), "at": now_ms()}
                 if len(op["requests"]) > KEEP_REQUESTS:
@@ -933,6 +993,10 @@ def admit_initiative(ring_id: str) -> str:
         if not intent or intent["state"] != "intended" or op.get("retired"):
             box["result"] = "fenced"
             return "fenced"
+        if _enforce_fence(op):                      # a newer Stop/cancel/retire wins
+            box["dirty"] = True
+            box["result"] = "fenced"
+            return "fenced"
         admission_id = intent["admission_id"]
         con = db.conn()
         existing = con.execute(
@@ -985,6 +1049,10 @@ def claim_initiative(queue_id: str) -> bool:
                 or op.get("retired")):
             _withdraw_row(queue_id)
             box["result"] = False
+        elif _enforce_fence(op):                    # a newer Stop/cancel/retire wins: no spawn
+            _withdraw_row(queue_id)
+            box["dirty"] = True
+            box["result"] = False
         else:
             cursor = db.conn().execute(
                 """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
@@ -1004,7 +1072,16 @@ def claim_initiative(queue_id: str) -> bool:
 
 def _recover_one(ring_id: str) -> int:
     op = opening_state(ring_id)
-    if not op or (op.get("intent") or {}).get("state") != "intended" or op.get("retired"):
+    state = (op or {}).get("intent", {}) or {}
+    if not op or op.get("retired") or state.get("state") not in ("intended", "admitted"):
+        return 0
+    if state["state"] == "admitted":
+        # Admitted but not yet claimed: the same fence; a newer Stop retires
+        # it now (the held row withdrawn) instead of waiting for a claim.
+        with _opening_txn(ring_id) as box:
+            if box["op"] is not None and (box["op"].get("intent") or {}).get("state") == "admitted" \
+                    and _enforce_fence(box["op"]):
+                box["dirty"] = True
         return 0
     try:
         result = admit_initiative(ring_id)
@@ -1021,7 +1098,7 @@ def recover_openings() -> int:
     """At Host start (and lazily per ring on read): admit every initiative
     whose intent is still ``intended``. Never acts on anything else."""
     return sum(_recover_one(op["ring_id"]) for op in _openings()
-               if (op.get("intent") or {}).get("state") == "intended")
+               if (op.get("intent") or {}).get("state") in ("intended", "admitted") and not op.get("retired"))
 
 
 def _retire_where(match, reason: str) -> int:
