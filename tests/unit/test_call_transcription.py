@@ -599,3 +599,50 @@ def test_R1_the_policy_and_the_agent_still_shadow_an_alias_header(env, header):
     record = _transcribe(stt, scope=_scope(env), requested_model=header, tid="tx-agent").payload["stt"]
     assert stt.calls == [("transcribe_model_bytes", "elevenlabs:scribe_v2", "en")]
     assert record["requested_model"] == {"value": header, "applied": False, "reason": "agent"}
+
+
+# ---- C3(ii): Scribe drops a language set, so a configured set skips it -------------------------
+
+def test_C3_a_configured_set_skips_scribe_and_runs_the_next_engine(env):
+    _set(call_languages="no,en", call_engines="elevenlabs:scribe_v2,google:chirp_3")
+    stt = FakeSTT()
+    record = _transcribe(stt, scope=_scope(env)).payload["stt"]
+    assert record["attempts"][0] == {"engine": "elevenlabs:scribe_v2", "outcome": "skipped",
+                                     "reason": "language_incompatible"}
+    assert record["effective_engine"] == "google:chirp_3"
+    assert stt.calls == [("google:chirp_3", "no,en")]
+
+
+def test_C3_a_configured_set_with_only_scribe_is_no_compatible_engine(env):
+    _set(call_languages="no,en", call_engines="google:chirp_3", agent_engines={"mike": "elevenlabs:scribe_v2"})
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 409 and out.payload["error"] == "no compatible engine"
+    assert out.payload["attempts"] == [{"engine": "elevenlabs:scribe_v2", "outcome": "skipped",
+                                        "reason": "language_incompatible"}]
+    assert stt.calls == []
+
+
+def test_C3_settings_refuse_a_set_only_scribe_can_take_and_a_stored_one_is_invalid(env):
+    with pytest.raises(ValueError) as err:
+        _set(call_languages="no,en", call_engines="elevenlabs:scribe_v2")
+    assert "can never work" in str(err.value)
+    settings_store.set_text(ct.CALL_LANGUAGES_KEY, "no,en")
+    settings_store.set_text(ct.CALL_ENGINES_KEY, "elevenlabs:scribe_v2")
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 409 and out.payload["error"] == "call policy invalid"
+    assert "can never work" in out.payload["call_policy_error"]
+    assert stt.calls == []
+
+
+def test_C3_pins_single_code_scribe_under_a_policy_and_no_policy_sets(env):
+    _set(call_languages="no", call_engines="elevenlabs:scribe_v2")
+    stt = FakeSTT()
+    assert _transcribe(stt, scope=_scope(env)).status == 200
+    assert stt.calls == [("elevenlabs:scribe_v2", "no")]
+    _set(call_languages="", call_engines="", agent_languages={"mike": "no,en"},
+         agent_engines={"mike": "elevenlabs:scribe_v2"})
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env), tid="tx-nopolicy")
+    assert out.status == 200 and stt.calls == [("elevenlabs:scribe_v2", None)]   # today's chain, unbound
