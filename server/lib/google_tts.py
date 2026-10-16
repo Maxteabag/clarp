@@ -7,11 +7,18 @@ agent markup reaches Google. Google marks SSML breaks for Chirp 3 HD as Preview,
 approximate. Text over Google's 5,000-byte input limit is refused (`text_too_long`), never cut.
 
 It authenticates like [google_stt] (lib/google_stt.access_token: an authorized_user ADC file,
-no scope request), from ONE source: an explicit [google_tts] section, or else [google_stt].
-"Configured" says nothing about whether that account may call Text-to-Speech.
+no scope request), from ONE source: an explicit [google_tts] section, or else what [google_stt]
+effectively uses (its credentials file, else GOOGLE_APPLICATION_CREDENTIALS, else gcloud's ADC
+file, plus its project). "Configured" says nothing about whether that account may call
+Text-to-Speech.
 
-Every failure is a GoogleTTSError whose `code` is one of ERROR_CODES; no response body, header
-or credential path is ever put in an error.
+Every failure of the exchange with Google is a GoogleTTSError whose `code` is one of ERROR_CODES,
+raised without its cause, so no response body, header or credential path reaches an error or a
+logged traceback. A local write failure stays an OSError and leaves no file behind.
+
+Time: one TIME_BUDGET_SECONDS budget covers the token and the request. A single receive waits at
+most RECEIVE_TIMEOUT_SECONDS and the budget is checked after every receive, so a clip ends at most
+one receive past it.
 """
 from __future__ import annotations
 
@@ -49,6 +56,7 @@ MAX_INPUT_BYTES = 5_000            # Google's limit on input.text / input.ssml, 
 MAX_AUDIO_BYTES = 8 * 1024 * 1024  # decoded MP3
 MAX_RESPONSE_BYTES = MAX_AUDIO_BYTES * 4 // 3 + 64 * 1024   # base64 audio plus the JSON around it
 TIME_BUDGET_SECONDS = 30.0         # token refresh and the request together
+RECEIVE_TIMEOUT_SECONDS = 10.0     # one socket operation
 MAX_BREAK_MS = 3_000
 CHUNK_BYTES = 64 * 1024
 
@@ -60,6 +68,8 @@ ERROR_CODES = CATALOG_ERROR_CODES + (
     "google_http_error", "google_bad_response", "google_audio_too_large", "google_empty_audio")
 
 _MARKUP_RE = re.compile(r"<(/?)(break|speed|volume|emotion)\b([^>]*)>", re.IGNORECASE)
+_XML_INVALID_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")   # not allowed in XML 1.0
+_TOKEN_HTTP_RE = re.compile(r"Google token HTTP (\d{3})")
 _BREAK_TIME_RE = re.compile(r"""\btime\s*=\s*["'](\d{1,6}(?:\.\d{1,3})?)\s*(ms|s)["']""",
                             re.IGNORECASE)
 
@@ -114,13 +124,15 @@ def _break_ms(attributes: str) -> int | None:
     if not match:
         return None
     value = float(match.group(1)) * (1 if match.group(2).lower() == "ms" else 1000)
-    return min(MAX_BREAK_MS, round(value)) if value > 0 else None
+    milliseconds = min(MAX_BREAK_MS, round(value))
+    return milliseconds if milliseconds > 0 else None
 
 
 def synthesis_input(text: str) -> dict:
     """`{"text": …}`, or `{"ssml": …}` when a Clarp pause survives. Only <break> becomes an
     element; Clarp's other voice tags are dropped and everything else is escaped text."""
-    text = strip_emotion_tags(text)
+    # A lone surrogate cannot be sent as UTF-8; it becomes "?" rather than failing the clip.
+    text = strip_emotion_tags(text).encode("utf-8", "replace").decode("utf-8")
     parts: list[str] = []
     pauses = 0
     position = 0
@@ -137,28 +149,55 @@ def synthesis_input(text: str) -> dict:
     parts.append(escape(text[position:]))
     if not pauses:
         return {"text": " ".join(_MARKUP_RE.sub(" ", text).split())}
-    return {"ssml": "<speak>" + "".join(parts).strip() + "</speak>"}
+    return {"ssml": "<speak>" + _XML_INVALID_RE.sub(" ", "".join(parts)).strip() + "</speak>"}
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is an error status: the request and its token go to the endpoint only."""
+
+    def redirect_request(self, *_args, **_kwargs):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def _urllib_transport(url: str, body: bytes, headers: dict, deadline: float,
                       limit: int) -> tuple[int, bytes]:
-    """(status, at most limit + 1 body bytes); TimeoutError once `deadline` passes. An error
-    status comes back without its body."""
+    """(status, at most limit + 1 body bytes); TimeoutError once `deadline` passes, checked after
+    every receive. An error status comes back without its body, which is never read."""
     request = urllib.request.Request(url, data=body, method="POST", headers=headers)
+    timeout = max(0.1, min(RECEIVE_TIMEOUT_SECONDS, deadline - time.monotonic()))
     try:
-        with urllib.request.urlopen(request, timeout=deadline - time.monotonic()) as response:
+        with _OPENER.open(request, timeout=timeout) as response:
             chunks, size = [], 0
             while size <= limit:
+                chunk = response.read1(min(CHUNK_BYTES, limit + 1 - size))
                 if time.monotonic() > deadline:
                     raise TimeoutError("Google TTS time budget spent")
-                chunk = response.read(min(CHUNK_BYTES, limit + 1 - size))
                 if not chunk:
                     break
                 chunks.append(chunk)
                 size += len(chunk)
             return response.status, b"".join(chunks)
     except urllib.error.HTTPError as error:
+        error.close()
         return error.code, b""
+
+
+def _token_error(error: Exception) -> GoogleTTSError:
+    """google_stt.access_token words its failures; map them to fixed codes by that wording."""
+    message = str(error)
+    status = _TOKEN_HTTP_RE.search(message)
+    if status:
+        code = int(status.group(1))
+        return GoogleTTSError("google_quota" if code == 429 else
+                              "google_http_error" if code >= 500 else "google_auth_failed")
+    if "timed out" in message:
+        return GoogleTTSError("google_timeout")
+    if "request failed" in message:
+        return GoogleTTSError("google_request_failed")
+    return GoogleTTSError("google_auth_failed")
 
 
 def _http_error(status: int) -> GoogleTTSError:
@@ -185,9 +224,7 @@ def synthesize(*, text: str, voice: str, out_path: pathlib.Path, creds: Credenti
     try:
         access = token(creds.credentials_file, timeout=max(0.1, deadline - time.monotonic()))
     except google_stt.GoogleSTTError as error:
-        # access_token words a transport failure "request failed"; anything else is the account.
-        raise GoogleTTSError("google_request_failed" if "request failed" in str(error)
-                             else "google_auth_failed") from error
+        raise _token_error(error) from None
     body = json.dumps({
         "input": spoken,
         "voice": {"languageCode": language_code(voice), "name": voice},
@@ -199,28 +236,28 @@ def synthesize(*, text: str, voice: str, out_path: pathlib.Path, creds: Credenti
         raise GoogleTTSError("google_timeout")
     try:
         status, payload = transport(ENDPOINT, body, headers, deadline, MAX_RESPONSE_BYTES)
-    except TimeoutError as error:
-        raise GoogleTTSError("google_timeout") from error
-    except (urllib.error.URLError, OSError) as error:
+    except TimeoutError:
+        raise GoogleTTSError("google_timeout") from None
+    except (urllib.error.URLError, OSError, ValueError) as error:
         if isinstance(getattr(error, "reason", None), TimeoutError):
-            raise GoogleTTSError("google_timeout") from error
-        raise GoogleTTSError("google_request_failed") from error
+            raise GoogleTTSError("google_timeout") from None
+        raise GoogleTTSError("google_request_failed") from None
     if status != 200:
         raise _http_error(status)
     if len(payload) > MAX_RESPONSE_BYTES:
         raise GoogleTTSError("google_audio_too_large")
     try:
         encoded = json.loads(payload).get("audioContent")
-    except (ValueError, AttributeError) as error:
-        raise GoogleTTSError("google_bad_response") from error
+    except (ValueError, AttributeError):
+        raise GoogleTTSError("google_bad_response") from None
     if not isinstance(encoded, str):
         raise GoogleTTSError("google_bad_response")
     if len(encoded) // 4 * 3 > MAX_AUDIO_BYTES:
         raise GoogleTTSError("google_audio_too_large")
     try:
         audio = base64.b64decode(encoded, validate=True)
-    except (binascii.Error, ValueError) as error:
-        raise GoogleTTSError("google_bad_response") from error
+    except (binascii.Error, ValueError):
+        raise GoogleTTSError("google_bad_response") from None
     if not audio:
         raise GoogleTTSError("google_empty_audio")
     _publish(audio, out_path)
