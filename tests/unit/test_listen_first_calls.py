@@ -491,8 +491,9 @@ def test_A_greeting_after_the_dispatcher_claim_is_ordinary(env):
     assert out["route"] == "ordinary" and out["opening"]["state"] == "initiative_started"
     assert out["opening"]["greeting"] == "ordinary" and out["opening"]["intent"]["state"] == "started"
     [row] = _queue(ring["ring_id"])
-    assert row["status"] == "claimed"                                          # it runs once
-    assert _dispatch(ring["ring_id"]) is False
+    assert row["status"] == "claimed"
+    turn_queue.mark_started(_aid(ring["ring_id"]))                            # it ran
+    assert _dispatch(ring["ring_id"]) is False                                # never a second run
 
 
 def test_A_the_dispatcher_claim_before_admission_finds_nothing(env):
@@ -1014,7 +1015,9 @@ def test_I_crash_and_recovery_at_each_step_admits_exactly_one_gen_2(env, monkeyp
     assert rows[gen2] == "queued" and list(rows.values()).count("queued") == 1
     assert [a["client_admission_id"] for a in _admissions(rid)].count(gen2) == 1
     assert rings.claim_initiative(f"call-open:{rid}:1") is False
-    assert rings.claim_initiative(gen2) is True and rings.claim_initiative(gen2) is False
+    assert rings.claim_initiative(gen2) is True
+    turn_queue.mark_started(gen2)                                             # it ran
+    assert rings.claim_initiative(gen2) is False
 
 
 def test_I_a_committed_gen_1_then_speech_and_abandonment_make_no_gen_2(env):

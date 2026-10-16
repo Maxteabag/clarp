@@ -5672,9 +5672,12 @@ class Handler(BaseHTTPRequestHandler):
             req, opening = self._apply_call_opening(req, data["call_opening"])
             if req is None:
                 return
-        req, call_sessions = self._apply_group_call(req)
-        if req is None:
-            return
+        if opening is None:
+            req, call_sessions = self._apply_group_call(req)
+            if req is None:
+                return
+        else:
+            call_sessions = None                  # routed with the greeting, as one decision
         if not req.force_session:
             handled = self._send_via_orchestrator(req, prompt_admission, only_sessions=call_sessions)
             if handled:
@@ -5774,7 +5777,7 @@ class Handler(BaseHTTPRequestHandler):
         agent_rings.bind(self.ctx)
         group_calls.bind(self.ctx)
         try:
-            result = agent_rings.greeting(
+            result = agent_rings.greeting_routed(
                 principal_of(self).principal, token=call_opening.get("token"),
                 epoch=call_opening.get("epoch"), client_msg_id=req.client_msg_id,
                 trace_id=req.trace_id, session=req.session, call_id=req.call_id)

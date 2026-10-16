@@ -344,9 +344,15 @@ def answer(principal: str, ring_id: str, opening_mode: Any = _ABSENT) -> dict:
             principal, [ring["session"]], request_id=ring["ring_id"], by=ring["session"], ring=placed)
         call = started["call"]
         ring.update(state="answered", ended_at=now_ms(), answered_by=principal, call_id=call["call_id"])
-        _save(records)
         if listen:
-            _open(ring, principal, capable=capable)
+            # The answer, its opening and the §11.L fence commit together.
+            with _opening_txn(ring["ring_id"]) as box:
+                _save(records)
+                _open_record(box, ring, principal, capable=capable)
+            _audit({"outcome": "opening", "ring_id": ring["ring_id"],
+                    "state": "pending" if capable else "fallback", "by": principal})
+        else:
+            _save(records)
         _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
                 "call_id": call["call_id"]})
     _announce(ring, "answered")
@@ -579,8 +585,9 @@ def _public_intent(op: dict) -> dict | None:
 
 
 def _public_opening(op: dict, *, secret: bool = False) -> dict:
-    """The wire opening. Token and owner nonce go only to the answering
-    phone (answer and claim responses), never into events or reads."""
+    """The wire opening. The owner nonce goes only to the answering phone
+    (answer and claim responses); the token also, plus opening-turn `audio`
+    events (§11.B), never `agent-ring` events or reads."""
     out: dict[str, Any] = {"mode": LISTEN_FIRST, "ring_id": op["ring_id"], "call_id": op["call_id"]}
     if secret and op.get("token"):
         out["token"], out["owner_nonce"] = op["token"], op["owner_nonce"]
@@ -594,14 +601,13 @@ def _public_opening(op: dict, *, secret: bool = False) -> dict:
     return out
 
 
-def _open(ring: dict, principal: str, *, capable: bool) -> None:
-    """The opening record at answer: pending for a capable phone, fallback
-    (today's answer, nothing dispatched) for any other."""
+def _open_record(box: dict, ring: dict, principal: str, *, capable: bool) -> None:
+    """The opening record at answer (inside the answer's transaction):
+    pending for a capable phone, fallback (today's answer, nothing
+    dispatched) for any other."""
     from . import turn_queue
     now = now_ms()
-    with _opening_txn(ring["ring_id"]) as box:
-        if box["op"] is not None:
-            return
+    if box["op"] is None:
         # §11.L: the answer may pass a pause that exists now, nothing newer.
         fence = {"answered_at": now, "stop_generation": turn_queue.stop_generation(ring["agent_id"]),
                  "paused_at_answer": turn_queue.is_paused(ring["agent_id"]), "auth": _auth_proof(principal)}
@@ -616,8 +622,6 @@ def _open(ring: dict, principal: str, *, capable: bool) -> None:
             "retired": None, "requests": {}, "created_at": now, "fence": fence,
         }
         box["dirty"] = True
-    _audit({"outcome": "opening", "ring_id": ring["ring_id"], "state": "pending" if capable else "fallback",
-            "by": principal})
 
 
 def _auth_proof(principal: str) -> dict | None:
@@ -698,6 +702,19 @@ _STARTED_ROWS = frozenset({"started", "done", "failed", "interrupted", "ended"})
 _WAITING_ROWS = frozenset({"queued", "parked"})
 # A row that is gone without having run: withdrawn here, cancelled by the queue.
 _DROPPED_ROWS = frozenset({"withdrawn", "cancelled"})
+
+
+def _start_evidence(op: dict) -> bool:
+    """Proof that the claimed initiative reached the backend: its row
+    started (or ended), or any state recorded under its trace that is not an
+    explicit pre-launch failure."""
+    from . import agents as agents_db
+    intent = op["intent"]
+    row = db.conn().execute("SELECT status FROM queued_turns WHERE queue_id = ?",
+                            (intent["admission_id"],)).fetchone()
+    if row is not None and str(row["status"]) in _STARTED_ROWS:
+        return True
+    return agents_db.trace_launch_status(op["agent_id"], intent["trace_id"]) == "observed"
 
 
 def _withdraw_row(queue_id: str) -> bool:
@@ -964,6 +981,29 @@ def greeting(principal: str, *, token: Any, epoch: Any, client_msg_id: str, trac
     return {"route": route, "session": op["session"], "opening": _public_opening(op), "changed": changed}
 
 
+def greeting_routed(principal: str, *, token: Any, epoch: Any, client_msg_id: str, trace_id: str,
+                    session: str, call_id: str) -> dict:
+    """The greeting and its call route as ONE decision: under the call lock
+    the call must be live with the caller reachable, then the opening commits
+    and the caller takes the floor. A 409 never touches the opening, and the
+    utterance is never re-routed elsewhere."""
+    from . import group_calls
+    with group_calls._lock:
+        try:
+            _who, _data, call = group_calls._locate(principal, call_id=call_id)
+        except CallError as exc:
+            raise CallError(409, "call ended", call_id=call_id) from exc
+        part = group_calls._participant(call, session)
+        if part is None or part["state"] not in group_calls.REACHABLE:
+            raise CallError(409, "wrong call", reason="not_reachable", session=session)
+        result = greeting(principal, token=token, epoch=epoch, client_msg_id=client_msg_id,
+                          trace_id=trace_id, session=session, call_id=call_id)
+        routed = group_calls.route(principal, call_id, result["session"])
+        if routed["session"] != result["session"]:     # cannot happen under the lock
+            raise CallError(409, "wrong call", reason="rerouted", session=routed["session"])
+    return result
+
+
 def greeting_admitted(ring_id: str, client_msg_id: str, *, ok: bool) -> None:
     """The greeting's ordinary dispatch returned: its admission is confirmed,
     or unknown on an ambiguous result (the phone's retry completes it)."""
@@ -1042,7 +1082,22 @@ def claim_initiative(queue_id: str) -> bool:
     with _opening_txn(ring_id) as box:
         op = box["op"]
         intent = (op or {}).get("intent") or {}
-        if (op is None or intent.get("admission_id") != queue_id or intent.get("state") != "admitted"
+        reclaim = (op is not None and intent.get("admission_id") == queue_id
+                   and intent.get("state") == "started" and not op.get("retired"))
+        if reclaim and _start_evidence(op):
+            box["result"] = False                   # it ran (or may have): never a second spawn
+        elif reclaim:
+            # Claimed before, never started (a failed launch, a crash before
+            # the spawn): the same admission may be claimed again, once more
+            # through the same fence.
+            if _enforce_fence(op):
+                _withdraw_row(queue_id)
+                box["dirty"] = True
+                box["result"] = False
+            else:
+                from . import turn_queue
+                box["result"] = turn_queue.claim_for_dispatch(queue_id, reclaim=True)
+        elif (op is None or intent.get("admission_id") != queue_id or intent.get("state") != "admitted"
                 or op.get("retired")):
             _withdraw_row(queue_id)
             box["result"] = False
