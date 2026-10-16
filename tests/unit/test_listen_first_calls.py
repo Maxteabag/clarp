@@ -766,3 +766,45 @@ def test_a_retired_greeting_reply_is_skipped_too(env):
     _greet(op, trace_id="tr-greet")
     calls.end(PHONE)
     assert rings.skip_opening_synthesis("tr-greet") is True
+
+
+# ---- the CLI ------------------------------------------------------------------------
+
+def test_the_cli_rings_listen_first_and_the_demo_ring_is_unchanged(monkeypatch, capsys):
+    import importlib.util
+    root = pathlib.Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("clarp_admin_listen_first", root / "bin/clarp-admin.py")
+    admin = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(admin)
+    sent = []
+    monkeypatch.setattr(admin, "api_request", lambda method, path, body=None, **kw: sent.append(
+        (method, path, body)) or {"ok": True, "ring": {"ring_id": "rng_1", "state": "ringing"}})
+    run = lambda argv: admin.parser().parse_args(argv).func(admin.parser().parse_args(argv))  # noqa: E731
+    assert run(["call", "ring", "--agent", "rk-sander", "--reason", "Leak", "--say", "Sander here."]) == 0
+    assert sent[-1] == ("POST", "/calls/ring", {"agent": "rk-sander", "reason": "Leak", "opening_line": "Sander here."})
+    assert run(["call", "ring", "--reason", "Leak", "--say", "Fallback.", "--listen-first"]) == 0
+    assert sent[-1] == ("POST", "/calls/ring", {"reason": "Leak", "opening_line": "Fallback.",
+                                                "opening_mode": "listen_first"})
+
+
+# ---- audio events carry the tag; legacy clips do not -------------------------------------
+
+def test_the_tts_worker_tags_opening_clips_and_skips_fenced_ones(env, tmp_path, monkeypatch):
+    from lib import tts_worker
+    ring, op = _answered()
+    _greet(op, trace_id="tr-greet")
+    stream = Stream()
+    session = type("S", (), {"target_path": tmp_path / "1__theo.mp3", "clip_id": 7, "sse_fields": {}})()
+    row = {"session": "theo-97e5", "voice_id": "v", "source": "pwa", "text": "hi"}
+    agent = {"agent_id": "a-theo", "persona": "Theo"}
+    tts_worker._publish_clip_event(stream=stream, herald=None, session=session, row=row, agent=agent,
+                                   trace_id="tr-greet")
+    tts_worker._publish_clip_event(stream=stream, herald=None, session=session, row=row, agent=agent,
+                                   trace_id="tr-other")
+    tagged, plain = stream.of("audio")
+    assert tagged["call_id"] == op["call_id"]
+    assert tagged["opening"] == {"ring_id": ring["ring_id"], "token": op["token"], "epoch": 1,
+                                 "kind": "greeting_reply", "admission_id": "u-hallo"}
+    assert "opening" not in plain and "call_id" not in plain
+    calls.end(PHONE)
+    assert tts_worker._opening_fenced("tr-greet") is True and tts_worker._opening_fenced("tr-other") is False

@@ -84,6 +84,10 @@ def synth_one(*,
         return False
 
     queue_id = row["queue_id"]
+    if _opening_fenced(row.get("trace_id")):
+        # A listen-first opening clip that lost its authority (docs/agent-rings.md).
+        tts_queue.mark_failed(queue_id, "listen-first opening fenced")
+        return True
     try:
         agent = agents_db.get_by_agent_id(row["agent_id"])
         # The queue row's trace_id is authoritative — set the agent's
@@ -452,6 +456,30 @@ def _publish_tts_error(stream: Any | None, row: dict,
         log_exception("ttsErrorBroadcastFail", e, detail=message)
 
 
+def _opening_fenced(trace_id: str | None) -> bool:
+    """Best effort: skip voicing an opening clip whose authority is gone."""
+    if not trace_id:
+        return False
+    try:
+        from . import agent_rings
+        return agent_rings.skip_opening_synthesis(trace_id)
+    except Exception as exc:  # noqa: BLE001 - never block ordinary speech
+        log_exception("ttsWorkerOpeningFenceFail", exc, detail=str(trace_id))
+        return False
+
+
+def _opening_tag(trace_id: str | None) -> dict:
+    """``call_id`` + ``opening`` for a clip of a listen-first opening turn."""
+    if not trace_id:
+        return {}
+    try:
+        from . import agent_rings
+        return agent_rings.opening_audio(trace_id) or {}
+    except Exception as exc:  # noqa: BLE001 - an untagged clip still plays
+        log_exception("ttsWorkerOpeningTagFail", exc, detail=str(trace_id))
+        return {}
+
+
 def _publish_clip_event(*, stream: Any | None, herald: Any | None,
                         session: ClipDeliverySession,
                         row: dict, agent: dict,
@@ -489,6 +517,8 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
         "text_len": len(row["text"] or ""),
         **fields,
     }
+    tag = _opening_tag(trace_id)
+    meta.update(tag)
     try:
         ts_str = name.split("__", 1)[0].split(".", 1)[0]
         ts = int(ts_str) if ts_str.isdigit() else 0
@@ -510,6 +540,7 @@ def _publish_clip_event(*, stream: Any | None, herald: Any | None,
             persona=agent.get("persona"),
             trace_id=trace_id,
             **session.sse_fields,
+            **tag,
         ))
 
 

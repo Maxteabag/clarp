@@ -549,6 +549,11 @@ def _default_retry_scheduler(delay: float, fn: Callable[[], None]) -> None:
     timer.start()
 
 
+def _is_call_opening(spec) -> bool:
+    """A listen-first initiative (agent_rings): its own turn, never a user row."""
+    return str(getattr(spec, "client_msg_id", "") or "").startswith("call-open:")
+
+
 def _with_team_context(text: str, *, digest: str = "", protocol: str = "") -> str:
     """Wrap a turn's prompt with team context.
 
@@ -1498,7 +1503,11 @@ class TurnDispatchService:
                 session=session, backend=backend, queued=True,
                 queue_depth=queue_state["count"],
                 queue_revision=queue_state["revision"])
-        if queue_if_busy:
+        if not self._call_opening_claimed(spec):
+            # A listen-first initiative that a greeting withdrew: never runs.
+            self._finish_turn(spec)
+            return DispatchResult(session=session, backend=backend)
+        if queue_if_busy and not _is_call_opening(spec):
             # Idle queue request: it starts immediately, so admit its visible
             # user row now. Recovery may find the row already present.
             try:
@@ -1852,8 +1861,20 @@ class TurnDispatchService:
             f"agent={spec.agent_id} killed={killed or '∅'} "
             f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
 
+    def _call_opening_claimed(self, spec: _TurnSpec) -> bool:
+        """The dispatcher's claim of a listen-first initiative before it runs
+        (agent_rings.claim_initiative): the queued row becomes claimed and the
+        opening's intent started in one transaction, or the initiative was
+        withdrawn by a greeting and must not run. Other turns pass."""
+        if not _is_call_opening(spec):
+            return True
+        from . import agent_rings
+        return agent_rings.claim_initiative(spec.queue_id or spec.client_msg_id)
+
     def _steer_if_supported(self, spec: _TurnSpec) -> bool:
         """Append a follow-up to an active steerable turn without replacing it."""
+        if _is_call_opening(spec):
+            return False                    # an opening is its own turn, never a steer
         with _TURN_LOCK:
             active_trace = _INFLIGHT.get(spec.agent_id, "")
             busy = bool(active_trace)
@@ -2145,9 +2166,12 @@ class TurnDispatchService:
                 _SLOTS.release(agent_id, next_spec.trace_id)
                 self.retry_scheduler(1.0, self.recover_queued)
             return
+        if not self._call_opening_claimed(next_spec):
+            self._finish_turn(next_spec)
+            return
         agents_db.set_trace_for_session(next_spec.session, next_spec.trace_id)
         try:
-            if next_spec.queue_id:
+            if next_spec.queue_id and not _is_call_opening(next_spec):
                 # Queue admission is intentionally invisible. Materialize the
                 # ordinary user turn only at the moment execution begins.
                 self._record_user_message(next_spec)
