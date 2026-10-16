@@ -126,6 +126,43 @@ The entrypoint verifies and applies the archive before the server opens SQLite.
 Backups contain CLI and peer credentials; they are mode `0600` but are not
 encrypted. Encrypt them before copying them outside the Docker host.
 
+### Restore needs exclusive use of the volume
+
+A restore replaces the whole data volume, so it is applied only when the Host
+owns the volume alone. The entrypoint holds two locks in `/data/clarp/backups`
+(`host-owner.lock` for the running Host, `data-root-users.lock` for everything
+it starts):
+
+- `backup restore` stages only inside the running Host (`exec`, as above). It
+  records the archive's exact size and SHA-256; an archive staged any other way,
+  or changed after staging, is never applied.
+- The archive is applied only by the Host's own start (the image's default
+  command), only while no other Clarp process holds the volume, and only on a
+  local filesystem (ext4, xfs, btrfs or zfs; others are refused unless
+  `CLARP_RESTORE_ALLOW_FILESYSTEM` names that type). An archive that carries
+  anything under `clarp/backups` is refused.
+- A refusal keeps the staged archive and changes nothing. The entrypoint exits
+  with 75 (another Host owns this volume), 76 (the volume is in use, or a
+  restore elsewhere is still running), 77 (locking is unsupported here) or
+  78 (the archive or its staging record is not acceptable).
+- On a filesystem where locking is unsupported, the Host still starts, with a
+  warning that the one-Host guarantee is unavailable; only a restore is refused.
+
+The locks only see Clarp processes started by this image's entrypoint. These
+are unsupported while a restore is staged or applied, and nothing can detect
+them: `docker compose run` against a running node (use `docker compose exec`),
+`docker exec` into another container that mounts the volume, `--entrypoint`
+overrides, other images or sidecars mounting the volume (including the `chown`
+command below), and host-side access to the volume path or a bind mount.
+
+After upgrading from an image without these locks, the old container holds no
+lock. Before staging a restore, stop the old stack and make sure no other
+container mounts the volume (`docker ps --filter volume=…`), then start the new
+Host: `docker compose pull && docker compose up -d` already stops the old
+container first; for a plain `docker run` install use `docker stop clarp &&
+docker rm clarp`, then `docker run` the new image. Never start a new Host next
+to a running old one.
+
 ## Tailscale
 
 The optional sidecar gives the node its own Tailnet identity; the Docker host
@@ -238,7 +275,7 @@ services:
       - /home/USER/.config/git:/home/clarp/.config/git:ro
 ```
 
-When switching an existing volume to a custom UID, ensure the data volume ownership matches:
+When switching an existing volume to a custom UID, ensure the data volume ownership matches (with every Clarp container on the volume stopped, and never while a restore is staged):
 ```bash
 docker run --rm -v clarp_clarp-data:/data alpine chown -R 1000:1000 /data
 ```

@@ -1222,7 +1222,12 @@ def cmd_backup(args) -> int:
     if args.backup_command == "restore":
         if os.environ.get("CLARP_DEPLOYMENT_MODE") != "container":
             raise SystemExit("restart-applied restore is currently container-only")
-        pending = instance_backup.stage_restore(path)
+        from lib import data_root_locks
+        try:
+            pending = instance_backup.stage_restore(path)
+        except data_root_locks.RestoreRefused as refused:
+            print(f"clarp-admin: {refused}", file=sys.stderr)
+            return refused.code
         print(f"restore staged at {pending}; restart this container to apply")
         return 0
     return 2

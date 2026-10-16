@@ -40,7 +40,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=node-runtime /usr/local/ /usr/local/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates curl ffmpeg git gh iproute2 jq openssh-client sqlite3 tini \
+      ca-certificates curl ffmpeg git gh iproute2 jq openssh-client sqlite3 tini util-linux \
     && npm install --global --allow-scripts=@anthropic-ai/claude-code \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" \
@@ -67,6 +67,7 @@ ARG CLARP_VERSION=dev
 RUN printf '%s\n' "$CLARP_VERSION" > ./DEPLOYED_VERSION \
     && printf '%s\n' "$CLARP_UPDATE_REMOTE" > ./SOURCE_REMOTE
 COPY docker/entrypoint.sh /usr/local/bin/clarp-entrypoint
+COPY docker/data-root-locks.sh /usr/local/lib/clarp/data-root-locks.sh
 
 ENV HOME=/home/clarp \
     CLARP_DATA_DIR=/data \
