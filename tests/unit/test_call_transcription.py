@@ -843,3 +843,87 @@ def test_L2_captures_are_per_attempt_nested_and_per_thread():
     for t in threads:
         t.join()
     assert seen == {"a": {"language": "no"}, "b": {"language": "en"}}
+
+
+# ---- L2 ruling: whisper.cpp and OpenAI whisper note at their own boundaries -------------------------
+
+def _whisper_cpp(monkeypatch, model_name="small.en", *, returncode=0):
+    """A real WhisperCppSTT whose whisper-cli run is recorded (its argv) instead of executed."""
+    import subprocess as subprocess_mod
+    from lib import stt as stt_mod
+    engine = stt_mod.WhisperCppSTT(model_name, model_source="/models/ggml.bin", runtime_source="/bin/whisper-cli")
+    engine._model = "/models/ggml.bin"
+    engine.ready.set()
+    engine.load_done.set()
+    argv = []
+
+    def run(command, **kwargs):
+        argv.append(list(command))
+        output = command[command.index("-of") + 1]
+        with open(output + ".json", "w") as handle:
+            json.dump({"transcription": [{"text": "hei"}]}, handle)
+        return subprocess_mod.CompletedProcess(command, returncode, "", "cli failed" if returncode else "")
+    monkeypatch.setattr(stt_mod.subprocess, "run", run)
+    monkeypatch.setattr(stt_mod, "_write_whisper_cpp_wav", lambda audio, destination: destination.write_bytes(audio))
+    return engine, argv
+
+
+def _l_value(argv):
+    return argv[argv.index("-l") + 1]
+
+
+def test_L2_whisper_cpp_records_the_l_value_it_runs_with(env, monkeypatch):
+    engine, argv = _whisper_cpp(monkeypatch, "small.en")
+    out = _transcribe(engine, scope=_scope(env))
+    assert out.status == 200 and _l_value(argv[0]) == "en"
+    assert _attempts(out)[0][1:] == ("ok", "en")
+    _local_default(monkeypatch, "small")
+    engine, argv = _whisper_cpp(monkeypatch, "small")
+    out = _transcribe(engine, scope=_scope(env), tid="tx-multi")
+    assert _l_value(argv[0]) == "auto" and _attempts(out)[0][1:] == ("ok", "auto")
+
+
+def test_L2_whisper_cpp_failing_after_its_boundary_keeps_the_observed_value(env, monkeypatch):
+    engine, argv = _whisper_cpp(monkeypatch, "small.en", returncode=1)
+    out = _transcribe(engine, scope=_scope(env))
+    assert out.status == 500 and len(argv) == 1
+    assert _attempts(out)[0][1:] == ("error", "en")
+
+
+class RecordingOpenAIModel:
+    """openai-whisper stand-in: records the language= kwarg it is handed."""
+
+    def __init__(self, fail=False):
+        self.languages, self.fail = [], fail
+
+    def transcribe(self, path, language=None, **kwargs):
+        self.languages.append(language)
+        if self.fail:
+            raise RuntimeError("model crashed")
+        return {"text": "hei"}
+
+
+@pytest.mark.parametrize("model_name,handed,recorded", [("small.en", "en", "en"), ("small", None, "auto")])
+def test_L2_openai_whisper_records_the_language_kwarg(env, monkeypatch, model_name, handed, recorded):
+    from lib import stt as stt_mod
+    _local_default(monkeypatch, model_name)
+    engine = stt_mod.OpenAIWhisperSTT(model_name)
+    engine._model = RecordingOpenAIModel()
+    engine.ready.set()
+    out = _transcribe(engine, scope=_scope(env))
+    assert engine._model.languages == [handed]
+    assert _attempts(out)[0][1:] == ("ok", recorded)
+
+
+def test_L2_openai_whisper_failing_after_its_boundary_and_an_unnoted_engine_is_null(env):
+    from lib import stt as stt_mod
+    engine = stt_mod.OpenAIWhisperSTT("small.en")
+    engine._model = RecordingOpenAIModel(fail=True)
+    engine.ready.set()
+    out = _transcribe(engine, scope=_scope(env))
+    assert out.status == 500 and engine._model.languages == ["en"]
+    assert _attempts(out)[0][1:] == ("error", "en")
+    disabled = stt_mod.DisabledSTT()
+    disabled.available = True                                        # its transcribe raises, unnoted
+    out = _transcribe(disabled, scope=_scope(env), tid="tx-disabled")
+    assert _attempts(out)[0][1:] == ("error", None)
