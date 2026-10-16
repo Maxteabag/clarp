@@ -329,6 +329,10 @@ class WhisperSTT:
             if not acquired:
                 raise STTBusyError("whisper busy")
             try:
+                # The boundary for every faster-whisper path (in process, the
+                # worker loaded with this language, and its fallback).
+                from .stt_language import note_handed
+                note_handed(self.language)
                 segments = self._run_inference(path, vocab_prompt)
             finally:
                 self._lock.release()

@@ -221,9 +221,15 @@ configured. An incompatible engine is skipped (`{engine, outcome: "skipped",
 reason: "language_incompatible"}`); the rest run in order, the next only on
 failure.
 
-Either way every attempt records the `language` the engine actually received,
-in `stt.attempts` and the `transcribe` event (a local engine that detects the
-language records `auto`); the Host never claims a code an engine did not get.
+Either way every attempt records, in `stt.attempts` and the `transcribe`
+event, the `language` the Host handed at that engine's boundary: the local
+faster-whisper model (its own language, in process or in its worker), a
+custom adapter (none: the protocol carries no language), or the cloud
+provider adapter (the exact argument; Scribe is handed none for a set). It is
+not what a provider sent on, received or detected. `auto` means no language
+constraint was handed (not a detection); `null` means the boundary was not
+observed for that attempt (it failed before it, or the engine has no recorded
+boundary, e.g. whisper.cpp), and the Host never fills it in.
 
 When a call policy is configured and no engine can take the call language,
 the clip is refused before any provider sees it: **409** `{"ok": false, "error": "no compatible engine",

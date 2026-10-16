@@ -480,8 +480,9 @@ call`, 403 `not your call` (another device or Host), 409 `call ended` (+
 answers with `stt`: `{language: {value, source}, engines: {value, source},
 effective_engine, attempts: [{engine, outcome, language, ms|reason}],
 language_adapted, requested_model}`, sources `agent | call_policy | device |
-global`; `attempts[].language` is what that engine actually received (`auto`
-for a local engine that detects it). With a call policy configured, when no
+global`; `attempts[].language` is the language the Host handed at that
+engine's boundary (`auto` = no constraint handed, not a detection; `null` =
+the boundary was not observed for that attempt). With a call policy configured, when no
 engine can take the call language the clip is refused, with no provider call:
 409 `{"ok": false, "error": "no compatible engine", "language", "engines",
 "attempts"}`. A stored call policy that can never work is refused the same
