@@ -25,6 +25,11 @@ export CLARP_WORKSPACE_ROOT="${CLARP_WORKSPACE_ROOT:-$CLARP_DATA_DIR/workspace}"
 export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$CLARP_DATA_DIR/git/gh}"
 export CLAUDE_PWA_BIND="${CLAUDE_PWA_BIND:-0.0.0.0}"
 
+# Exclusive data-root ownership: take the data-root locks and, for the Host's own start only,
+# apply a staged restore and recover its marker before anything else touches the volume.
+. /usr/local/lib/clarp/data-root-locks.sh
+clarp_data_root_locks "$@"
+
 python3 - <<'PY'
 from pathlib import Path
 import os
@@ -40,10 +45,8 @@ if not os.access(root, os.W_OK):
 from lib.deployment import LAYOUT
 LAYOUT.create_container_directories()
 
-# Restores are staged by `clarp-admin backup restore` and applied only during
-# startup, before any server or hook process has opened SQLite.
-from lib.instance_backup import apply_pending_restore
-apply_pending_restore()
+# A staged restore was already applied (or refused) by clarp_data_root_locks above, with the
+# data-root locks held and before any server or hook process opened SQLite.
 
 home = Path.home()
 claude_json = LAYOUT.ensure_claude_json()
@@ -163,7 +166,7 @@ if not list_devices():
         print(f"Notice: could not emit bootstrap pairing QR: {exc}", flush=True)
 PY
 
-if [ "${1:-}" = "python3" ] && [ "${2:-}" = "/opt/clarp/server.py" ]; then
+if [ "$CLARP_ENTRYPOINT_ROLE" = server ]; then
     python3 /opt/clarp/runtime.py &
     runtime_pid=$!
     "$@" &

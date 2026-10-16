@@ -27,6 +27,10 @@ from lib.turn_dispatch import TurnDispatchService  # noqa: E402
 
 
 def main() -> int:
+    # Keep holding the entrypoint's data-root locks but never pass them to children (agent
+    # terminals): a no-op unless fds 8/9 are exactly the lock files.
+    from lib.data_root_locks import seal_inherited_lock_fds
+    seal_inherited_lock_fds()
     ctx = ServerContext.production(connect_runtime=False).with_(
         stream=RuntimeEventStream())
     paths = RuntimePaths.from_home(pathlib.Path.home())
