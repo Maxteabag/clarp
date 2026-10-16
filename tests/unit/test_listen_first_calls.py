@@ -1290,7 +1290,10 @@ def test_Q3_a_failed_stop_retires_the_opening_and_restores_the_pause(env, tmp_pa
     err = _refused(lambda: _silence(op), 409, "opening retired")
     assert err.extra["reason"] == "stopped_after_answer"
     service.recover_queued()
-    assert spawner.spawned == [] and _admissions(ring["ring_id"]) == []
+    assert not any("Open the conversation" in s["text"] for s in spawner.spawned)   # no opening, ever
+    assert _admissions(ring["ring_id"]) == []
+    # Held work stays held under the restored pause; with no pause it is ordinary queued work.
+    assert turn_queue.status("u-held-q3") == ("queued" if paused_before else "started")
     assert rings.recover_openings() == 0
     _refused(lambda: _greet(op), 409, "opening retired")       # the opening path is closed
     assert calls.route(PHONE, op["call_id"], "theo-97e5")["session"] == "theo-97e5"   # ordinary speech works
