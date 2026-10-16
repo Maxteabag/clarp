@@ -31,7 +31,7 @@ class _Ack:
 
     def __getattr__(self, name):
         if name in {"_handle_clip_ack", "_record_voice", "_calls_principal",
-                    "_handle_opening_ack"}:
+                    "_handle_opening_ack", "_is_opening_ack"}:
             return getattr(_server().Handler, name).__get__(self)
         raise AttributeError(name)
 
