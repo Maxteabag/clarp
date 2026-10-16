@@ -24,6 +24,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PHONE = "device_phone1"
 OTHER = "device_tablet"
 ADMIN = calls.ADMINISTRATOR
+# The classes every other module imported from group_calls; a test that
+# reloaded the module in this process would replace them for later files.
+_IMPORTED_CALL_ERROR = calls.CallError
 
 
 def _agent(agent_id, persona, session, *, archived=False, janitor=False, helper=False, runtime=True):
@@ -410,6 +413,14 @@ def test_a_live_call_survives_an_http_restart(stream):
     out = restarted.change(PHONE, "resume", "Mike")
     assert out["call"]["revision"] == 3
     assert restarted.route(PHONE, call["call_id"], "mike-86db")["session"] == "mike-86db"
+
+
+def test_the_restart_leaves_this_process_s_group_calls_alone(stream):
+    """The restart above runs elsewhere: the module here, and the CallError
+    other modules imported from it, are the ones loaded at import."""
+    from lib import call_transcription
+    assert calls.CallError is _IMPORTED_CALL_ERROR
+    assert call_transcription.CallError is calls.CallError
 
 
 def test_a_call_untouched_for_twelve_hours_ends_as_stale(stream, monkeypatch):
