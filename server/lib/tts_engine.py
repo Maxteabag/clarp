@@ -160,6 +160,20 @@ class ElevenLabsEngine(TTSEngine):
                     on_chunk=None, trace_id="",
                     delivery_fields={"delivery": "chunked-file"},
                     clip_route=route)
+            elif not _agent_route and cfg.tts_provider == "google":
+                # A preview auditions exactly the requested Google voice: as the route's voice,
+                # an id off the list is refused (voice_unavailable; then only the configured
+                # fallback), never replaced by the default for a new choice.
+                from . import tts_mode
+                from .tts_worker import _synthesize as _provider_synthesize
+                _provider_synthesize(
+                    cfg=cfg,
+                    row={"text": text, "voice_id": voice_id, "session": session or ""},
+                    agent={}, out_path=tmp_path,
+                    on_chunk=None, trace_id="",
+                    delivery_fields={"delivery": "chunked-file"},
+                    clip_route=tts_mode.Route(
+                        "google", voice_id.strip(), tts_mode.fallback_for(cfg, "google")))
             elif cfg.tts_provider not in {"cartesia", "elevenlabs"}:
                 from . import agents as _agents
                 from .tts_worker import _synthesize as _provider_synthesize
