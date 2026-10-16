@@ -227,9 +227,11 @@ faster-whisper model (its own language, in process or in its worker), a
 custom adapter (none: the protocol carries no language), or the cloud
 provider adapter (the exact argument; Scribe is handed none for a set). It is
 not what a provider sent on, received or detected. `auto` means no language
-constraint was handed (not a detection); `null` means the boundary was not
-observed for that attempt (it failed before it, or the engine has no recorded
-boundary, e.g. whisper.cpp), and the Host never fills it in.
+constraint was handed (not a detection). `null`, or no `language` at all (a
+skipped engine), means the boundary was unobserved for that attempt, and only
+that: it does not say whether the engine was invoked, and the Host never fills
+it in (an attempt can fail without its boundary noted, and some engines, e.g.
+whisper.cpp, have no recorded boundary).
 
 When a call policy is configured and no engine can take the call language,
 the clip is refused before any provider sees it: **409** `{"ok": false, "error": "no compatible engine",

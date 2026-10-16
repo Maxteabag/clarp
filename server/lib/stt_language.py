@@ -65,7 +65,8 @@ def current_language() -> str | None:
 
 # The language handed at the Host->engine boundary for one call-transcription
 # attempt (docs/group-calls.md): what the Host passed, not what a provider did
-# with it. An attempt whose boundary never noted it records null.
+# with it. An attempt whose boundary was not noted records null: unobserved,
+# never evidence that the engine was or was not invoked.
 _HANDED: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "transcription_language_handed", default=None)
 

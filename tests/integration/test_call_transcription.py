@@ -154,3 +154,20 @@ def test_C3_on_the_host_a_set_skips_scribe_and_nothing_runnable_is_409(recording
     assert status == 409 and body["error"] == "no compatible engine" and handed == []
     assert body["attempts"] == [{"engine": "elevenlabs:scribe_v2", "outcome": "skipped",
                                  "reason": "language_incompatible"}]
+
+
+def test_C3_on_the_host_single_code_scribe_runs_and_a_stored_impossible_policy_is_invalid(recording_host):
+    host = recording_host
+    status, body, handed = _case(host, "tx-scribe-single", {"call_languages": "no",
+                                                            "call_engines": "elevenlabs:scribe_v2"})
+    assert status == 200 and handed == [{"provider": "elevenlabs", "model": "scribe_v2", "language": "no"}]
+    assert _attempts(body) == [("elevenlabs:scribe_v2", "ok", "no")]
+    with sqlite3.connect(host.root / "state.sqlite") as con:      # stored around the settings check
+        con.execute("UPDATE settings SET value = 'no,en' WHERE key = 'transcription.call_languages'")
+        con.execute("UPDATE settings SET value = 'elevenlabs:scribe_v2' WHERE key = 'transcription.call_engines'")
+    before = len(_handoffs(host))
+    status, started = call(host, "POST", "/calls", {"agents": ["rachel"]})
+    status, body = transcribe(host, "tx-invalid", {"X-Clarp-Call-Id": started["call"]["call_id"],
+                                                   "X-Transcription-Session": "rachel"})
+    assert status == 409 and body["error"] == "call policy invalid" and "can never work" in body["call_policy_error"]
+    assert body["attempts"] == [] and _handoffs(host)[before:] == []
