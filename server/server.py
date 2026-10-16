@@ -608,6 +608,7 @@ class Handler(BaseHTTPRequestHandler):
         "/calls/end": "_handle_calls_end",
         "/calls/ring": "_handle_calls_ring",
         "/calls/ring/answer": "_handle_calls_ring_answer",
+        "/calls/ring/opening": "_handle_calls_ring_opening",
         "/calls/ring/decline": "_handle_calls_ring_decline",
         "/calls/ring/cancel": "_handle_calls_ring_cancel",
         "/calls/ring/settings": "_handle_calls_ring_settings_post",
@@ -4324,13 +4325,20 @@ class Handler(BaseHTTPRequestHandler):
         return self._calls_ring_run(work, body=False)
 
     def _handle_calls_ring(self):
+        # ``opening_mode`` is passed only when sent: a ring without it is today's ring.
         return self._calls_ring_run(lambda rings, _p, data: rings.ring(
             caller_agent_id=self._turn_caller(), agent=str(data.get("agent") or ""),
-            reason=str(data.get("reason") or ""), opening_line=str(data.get("opening_line") or "")))
+            reason=str(data.get("reason") or ""), opening_line=str(data.get("opening_line") or ""),
+            **({"opening_mode": data["opening_mode"]} if "opening_mode" in data else {})))
 
     def _handle_calls_ring_answer(self):
         return self._calls_ring_run(lambda rings, principal, data: rings.answer(
-            principal, str(data.get("ring_id") or "")))
+            principal, str(data.get("ring_id") or ""),
+            **({"opening_mode": data["opening_mode"]} if "opening_mode" in data else {})))
+
+    def _handle_calls_ring_opening(self):
+        """A listen-first opening claim (docs/agent-rings.md "Listen-first")."""
+        return self._calls_ring_run(lambda rings, principal, data: rings.opening_claim(principal, data))
 
     def _handle_calls_ring_decline(self):
         return self._calls_ring_run(lambda rings, principal, data: rings.decline(
@@ -5659,6 +5667,11 @@ class Handler(BaseHTTPRequestHandler):
             req.require_text()
         except SendRequestError as e:
             return self._send_request_error(e)
+        opening = None
+        if "call_opening" in data:
+            req, opening = self._apply_call_opening(req, data["call_opening"])
+            if req is None:
+                return
         req, call_sessions = self._apply_group_call(req)
         if req is None:
             return
@@ -5666,7 +5679,7 @@ class Handler(BaseHTTPRequestHandler):
             handled = self._send_via_orchestrator(req, prompt_admission, only_sessions=call_sessions)
             if handled:
                 return
-        self._send_direct(req, prompt_admission)
+        self._send_direct(req, prompt_admission, opening=opening)
 
     def _send_request_error(self, e: SendRequestError) -> None:
         if e.trace_id:
@@ -5746,7 +5759,31 @@ class Handler(BaseHTTPRequestHandler):
         self._json(status, body)
         return True
 
-    def _send_direct(self, req: SendRequest, prompt_admission) -> None:
+    def _apply_call_opening(self, req, call_opening):
+        """A listen-first greeting (docs/agent-rings.md "Listen-first"): the
+        utterance goes to the exact calling agent, never through selection or
+        the orchestrator. Returns (request, opening result) or (None, None)
+        after answering the refusal; a refusal dispatches nothing."""
+        from dataclasses import replace
+        from lib import agent_rings, group_calls
+        from lib.http_utils import principal_of
+        if (not isinstance(call_opening, dict) or not isinstance(call_opening.get("token"), str)
+                or not req.call_id):
+            self._json_error(400, "bad call_opening")
+            return None, None
+        agent_rings.bind(self.ctx)
+        group_calls.bind(self.ctx)
+        try:
+            result = agent_rings.greeting(
+                principal_of(self).principal, token=call_opening.get("token"),
+                epoch=call_opening.get("epoch"), client_msg_id=req.client_msg_id,
+                trace_id=req.trace_id, session=req.session, call_id=req.call_id)
+        except group_calls.CallError as exc:
+            self._json(exc.status, exc.body())
+            return None, None
+        return replace(req, session=result["session"], force_session=True), result
+
+    def _send_direct(self, req: SendRequest, prompt_admission, opening=None) -> None:
         from lib import transcription_results
         try:
             result = TurnDispatchService(self.ctx).submit(DispatchCommand(
@@ -5761,7 +5798,11 @@ class Handler(BaseHTTPRequestHandler):
                 unheard_audio_sessions=tuple(req.unheard_audio_sessions),
             ))
         except DispatchError as e:
+            if opening is not None and opening["route"] == "greeting":
+                self._greeting_admitted(opening, req, ok=False)
             return self._send(e.status, str(e).encode(), "text/plain")
+        if opening is not None and opening["route"] == "greeting":
+            self._greeting_admitted(opening, req, ok=True)
         if req.origin == "agent" and req.sender_agent_id:
             self._note_helper_message(req.sender_agent_id, result.session)
         if req.origin == "user" and not req.sender_agent_id:
@@ -5777,12 +5818,20 @@ class Handler(BaseHTTPRequestHandler):
                 detail={"dispatch": result.backend, "queued": result.queued,
                         "client_msg_id": req.client_msg_id,
                         "hands_free": req.hands_free})
-        self._json_ok({"ok": True, "session": result.session,
-                       "dispatch": result.backend,
-                       "queued": result.queued,
-                       "queue_depth": result.queue_depth,
-                       "queue_revision": result.queue_revision,
-                       "trace_id": req.trace_id})
+        body = {"ok": True, "session": result.session,
+                "dispatch": result.backend,
+                "queued": result.queued,
+                "queue_depth": result.queue_depth,
+                "queue_revision": result.queue_revision,
+                "trace_id": req.trace_id}
+        if opening is not None:
+            body["opening"] = opening["opening"]
+        self._json_ok(body)
+
+    @staticmethod
+    def _greeting_admitted(opening, req, *, ok: bool) -> None:
+        from lib import agent_rings
+        agent_rings.greeting_admitted(opening["opening"]["ring_id"], req.client_msg_id, ok=ok)
 
     def _note_helper_message(self, sender_agent_id: str, target_session: str) -> None:
         """A helper reporting to its parent, or a parent re-tasking it."""
@@ -6559,6 +6608,16 @@ def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
         recovered_queues = 0
     if recovered_queues:
         log("queuedRecovery", f"recovered={recovered_queues}")
+    try:
+        # A listen-first initiative resolved but never admitted (the Host died
+        # in between) is admitted now, exactly once (docs/agent-rings.md).
+        from lib import agent_rings
+        agent_rings.bind(ctx)
+        recovered_openings = agent_rings.recover_openings()
+        if recovered_openings:
+            log("agentRingOpeningRecovery", f"admitted={recovered_openings}")
+    except Exception as exc:  # noqa: BLE001 - a boot never fails on it
+        log_exception("agentRingOpeningRecoveryFail", exc)
 
 
 def build_server(ctx: ServerContext, port: int,

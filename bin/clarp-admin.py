@@ -1134,6 +1134,10 @@ def cmd_call_ring(args) -> int:
         body = {"reason": args.reason, "opening_line": args.say}
         if args.agent:
             body = {"agent": args.agent, **body}
+        if args.listen_first:
+            # The phone listens first; --say stays the fallback line for a
+            # phone that cannot (docs/agent-rings.md "Listen-first").
+            body["opening_mode"] = "listen_first"
         code, result = _ring_request("POST", "/calls/ring", body)
         ring_id = str((result.get("ring") or {}).get("ring_id") or "")
         if code == 0 and args.wait and ring_id:
@@ -2753,6 +2757,8 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     ring.add_argument("--say", required=True, help="your opening line, spoken when the user answers")
     ring.add_argument("--agent", default="", help="the calling agent (default: you)")
     ring.add_argument("--wait", action="store_true", help="wait until the call is answered, declined or missed")
+    ring.add_argument("--listen-first", action="store_true",
+                      help="let the user speak first; --say is then only the line for a phone that cannot")
     ring.set_defaults(func=cmd_call_ring)
     ring_status = call.add_parser("ring-status", help="the ringing call, or one call by id")
     ring_status.add_argument("ring_id", nargs="?", default="")

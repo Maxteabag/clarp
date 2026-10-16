@@ -236,6 +236,13 @@ def _finish(call: dict, reason: str) -> None:
         _set_state(call, part, "left")
     call["state"], call["reason"], call["floor"] = "ended", reason, ""
     call["ended_at"] = now_ms()
+    if (call.get("_ring") or {}).get("opening_mode") == "listen_first":
+        # The call's listen-first opening loses its output authority.
+        try:
+            from . import agent_rings
+            agent_rings.retire_for_call(call["call_id"], f"call_{reason}")
+        except Exception as exc:  # noqa: BLE001 - the call still ends
+            log_exception("groupCallOpeningRetireFail", exc, f"call={call['call_id']}")
 
 
 def _commit(principal: str, data: dict, call: dict, change: dict, *, quiet_notices: bool = False,
@@ -591,13 +598,45 @@ def prompt_header(session: str) -> str:
              + " The user is talking to you now. The other participants do not hear this turn;"
              " they see it quoted like the lines below when they speak next."]
     placed = call.get("_ring") or {}
-    if placed.get("session") == session:
+    if placed.get("session") == session and placed.get("opening_mode") == "listen_first":
+        lines.append(_listen_first_line(placed))
+    elif placed.get("session") == session:
         lines.append(f"You called the user about: {placed.get('reason', '')}. They answered and heard"
                      f" your opening line: \"{placed.get('opening_line', '')}\"")
     if quotes:
         lines.append("Since you last spoke:")
         lines.extend(quotes)
     return "\n".join(lines)
+
+
+def _listen_first_line(placed: dict) -> str:
+    """How a listen-first call opened, for the calling agent's header."""
+    from . import agent_rings
+    reason = placed.get("reason", "")
+    state = (agent_rings.opening_state(placed.get("ring_id", "")) or {}).get("state")
+    if state == "initiative_started":
+        return f"You called the user about: {reason}. They answered and you opened the conversation."
+    return f"You called the user about: {reason}. They answered and spoke first; respond to what they said."
+
+
+_OPENING_CAUSES = {
+    "silence": "They answered and have not spoken within about {seconds} seconds of listening.",
+    "no_mic": "They answered, but their microphone is unavailable, so they cannot speak to you yet;"
+              " they may reply by text.",
+    "not_ready": "They answered, but their microphone could not start.",
+    "speech_abandoned": "They answered and started to speak, but nothing usable was captured.",
+}
+
+
+def opening_header(reason: str, cause: str, silence_ms: int) -> str:
+    """The whole input of a listen-first initiative turn: the call header and
+    why the agent speaks first. Never words for the agent to say."""
+    seconds = f"{silence_ms / 1000:g}"
+    return "\n".join([
+        f"[Group call] You called the user about: {reason}.",
+        _OPENING_CAUSES[cause].format(seconds=seconds),
+        "Open the conversation briefly in your own words; do not assume what they said.",
+    ])
 
 
 def _call_turn_for(session: str) -> dict | None:
