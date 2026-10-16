@@ -701,11 +701,8 @@ _DROPPED_ROWS = frozenset({"withdrawn", "cancelled"})
 
 
 def _withdraw_row(queue_id: str) -> bool:
-    cursor = db.conn().execute(
-        """UPDATE queued_turns SET status = 'withdrawn', text = ''
-            WHERE queue_id = ? AND status IN ('queued', 'parked') AND claimed_at IS NULL""",
-        (queue_id,))
-    return cursor.rowcount == 1
+    from . import turn_queue
+    return turn_queue.withdraw_unclaimed(queue_id)
 
 
 def _supersede(op: dict) -> str:
@@ -1019,7 +1016,7 @@ def admit_initiative(ring_id: str) -> str:
                 origin="automation", sender_agent_id="", prompt_admission_id=admission_row)
             # Answering the call is the owner's fresh intent: a Stop's leftover
             # pause must not hold the opening while the phone listens.
-            con.execute("UPDATE queued_turns SET allow_paused = 1 WHERE queue_id = ?", (admission_id,))
+            turn_queue.allow_paused_for(admission_id)
             box["result"] = "admitted"
     _audit({"outcome": "opening", "ring_id": ring_id, "admission": box["result"]})
     return box["result"]
@@ -1054,10 +1051,8 @@ def claim_initiative(queue_id: str) -> bool:
             box["dirty"] = True
             box["result"] = False
         else:
-            cursor = db.conn().execute(
-                """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
-                    WHERE queue_id = ? AND status = 'queued'""", (now_ms(), queue_id))
-            if cursor.rowcount != 1:
+            from . import turn_queue
+            if not turn_queue.claim_for_dispatch(queue_id):
                 box["result"] = False
             else:
                 intent["state"] = "started"

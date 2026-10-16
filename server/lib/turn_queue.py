@@ -566,6 +566,30 @@ def update_text(queue_id: str, text: str) -> bool:
     return bool(cursor.rowcount)
 
 
+# --- listen-first openings (agent_rings): writes run in the caller's transaction ---
+
+def withdraw_unclaimed(queue_id: str) -> bool:
+    """A waiting (queued or Stop-held), unclaimed row that must never run."""
+    cursor = db.conn().execute(
+        """UPDATE queued_turns SET status = 'withdrawn', text = ''
+            WHERE queue_id = ? AND status IN ('queued', 'parked') AND claimed_at IS NULL""",
+        (queue_id,))
+    return cursor.rowcount == 1
+
+
+def claim_for_dispatch(queue_id: str) -> bool:
+    """The dispatcher's claim of an opening row before it spawns."""
+    cursor = db.conn().execute(
+        """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
+            WHERE queue_id = ? AND status = 'queued'""", (db.now_ms(), queue_id))
+    return cursor.rowcount == 1
+
+
+def allow_paused_for(queue_id: str) -> None:
+    """The opening row may pass a pause that already existed at the answer."""
+    db.conn().execute("UPDATE queued_turns SET allow_paused = 1 WHERE queue_id = ?", (queue_id,))
+
+
 def claim(queue_id: str) -> dict | None:
     """Atomically reserve one queued item for an explicit manual send."""
     row = db.conn().execute(
@@ -733,19 +757,14 @@ def stop_generation(agent_id: str) -> int:
     """How many times this agent's queue was paused by a Stop or cancel: an
     ordering marker that moves on every Stop, even onto an already paused
     queue (agent_rings fences a listen-first opening against it)."""
-    row = db.conn().execute("SELECT value FROM settings WHERE key = ?",
-                            (STOP_GENERATION_KEY + agent_id,)).fetchone()
-    return int(row[0]) if row else 0
+    from . import settings_store
+    return settings_store.get_int(STOP_GENERATION_KEY + agent_id, default=0)
 
 
 def set_paused(agent_id: str, paused: bool) -> bool:
     if paused:
-        db.conn().execute(
-            """INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)
-               ON CONFLICT(key) DO UPDATE SET
-                   value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
-                   updated_at = excluded.updated_at""",
-            (STOP_GENERATION_KEY + agent_id, db.now_ms()))
+        from . import settings_store
+        settings_store.increment(STOP_GENERATION_KEY + agent_id)
         # A Stop (the only pauser) takes back every right the release drain
         # persisted for this agent's waiting work, as it does for work waiting
         # in memory when the runtime restarts: nothing queued before this Stop
