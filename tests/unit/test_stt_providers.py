@@ -326,3 +326,19 @@ def test_L1_an_uncontended_save_is_unchanged(keys):
     with pytest.raises(ValueError):
         stt_providers.update_settings({"turn_taking": "provider", "engine": "google:chirp_3"})
     assert _stored() == ("deepgram:nova-3", "provider", "no")
+
+
+# ---- an explicit null is not an omission (as at 006e9e70 and a99cd589) ----------------------
+
+@pytest.mark.parametrize("key", ["engine", "turn_taking"])
+def test_an_explicit_null_engine_or_turn_taking_is_refused_and_nothing_is_written(keys, key):
+    stt_providers.update_settings({"engine": "deepgram:nova-3", "turn_taking": "provider"})
+    with pytest.raises(ValueError) as err:
+        stt_providers.update_settings({key: None, "call_languages": "no"})
+    assert str(err.value) == "engine and turn_taking must be strings"
+    assert _stored() == ("deepgram:nova-3", "provider", "")
+
+
+def test_omitting_engine_and_turn_taking_keeps_them():
+    stt_providers.update_settings({"engine": "google:chirp_3"})
+    assert stt_providers.update_settings({"call_languages": "no"})["engine"] == "google:chirp_3"
