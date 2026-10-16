@@ -383,6 +383,12 @@ def test_7_a_child_interpreter_is_guarded_and_reports_to_its_test(tmp_path):
 
 # ---- 8. H3/M1: the session's HOME, adapter dirs and toolchain mode ------------------------------
 
+def test_8_the_live_desktop_is_out_of_reach():
+    for var in ("WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "XAUTHORITY", "SWAYSOCK",
+                "NIRI_SOCKET", "TMUX", "KITTY_LISTEN_ON"):
+        assert var not in os.environ, var
+
+
 def test_8_home_adapters_and_toolchains_are_the_sessions_own():
     real_home = os.environ["CLARP_TEST_REAL_HOME"]
     root = os.environ["CLARP_TEST_GUARD_DIR"]
@@ -498,6 +504,8 @@ def test_10_loopback_forms_stay_local():
     "watch -n 1 date",
     "gdb -batch -ex bt ./core",
     "strace -o /tmp/trace -f true",
+    "systemctl --user is-active clarp.service",
+    "/var/tmp/shims/systemctl --user start x.service",
 ])
 def test_11_a_provider_name_as_an_argument_is_not_a_launch(backend_cli_guard, command):
     assert backend_cli_guard.forbidden_shell(command, "/nonexistent") == ""
@@ -555,6 +563,18 @@ def test_11_a_runner_judges_only_the_program_it_starts(backend_cli_guard, argv):
     "find . -name x -exec claude --version {} ;",
     "parallel -j 2 'codex --version {}' ::: a b",
     "parallel -S remote.example true ::: a",
+    # N4: host IPC that makes a live host daemon run a command
+    "hyprctl dispatch exec kitty",
+    "uwsm app -- true",
+    "swaymsg exec true",
+    "niri msg action spawn -- true",
+    "gio launch /usr/share/applications/x.desktop",
+    "xdg-open https://example.invalid",
+    "echo true | at now",
+    "batch",
+    "crontab -l",
+    "/usr/bin/systemctl --user start some.service",
+    "/usr/bin/systemctl --user daemon-reload",
 ])
 def test_11_a_provider_cli_at_a_command_position_is_a_launch(backend_cli_guard, command):
     assert backend_cli_guard.forbidden_shell(command, "/nonexistent") != ""

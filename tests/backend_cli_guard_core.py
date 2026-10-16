@@ -36,7 +36,20 @@ WRAPPERS = frozenset({"env", "timeout", "nohup", "setsid", "stdbuf", "nice", "io
 # user manager, another user, another sandbox), escaping env, shims, sitecustomize,
 # HOME and every guard layer. Always refused unless the file is a registered fake.
 ESCAPE_LAUNCHERS = frozenset({"systemd-run", "run0", "flatpak-spawn", "dbus-run-session", "su", "runuser",
-                              "doas", "pkexec", "sudo", "machinectl", "systemd-nspawn", "firejail", "bwrap"})
+                              "doas", "pkexec", "sudo", "machinectl", "systemd-nspawn", "firejail", "bwrap",
+                              # Host IPC: make a running HOST daemon (compositor, session manager,
+                              # desktop portal, cron/at) start a command with the host's environment.
+                              "hyprctl", "uwsm", "swaymsg", "niri", "gio", "xdg-open", "at", "batch",
+                              "crontab"})
+# systemctl verbs that start or change units in the HOST service manager.
+SYSTEMCTL_MUTATING = frozenset({"start", "stop", "restart", "try-restart", "reload", "reload-or-restart",
+                                "try-reload-or-restart", "enable", "disable", "reenable", "mask", "unmask",
+                                "link", "kill", "isolate", "edit", "set-environment", "unset-environment",
+                                "import-environment", "daemon-reload", "daemon-reexec", "set-property",
+                                "revert", "preset", "preset-all", "add-wants", "add-requires", "default",
+                                "rescue", "emergency", "halt", "poweroff", "reboot", "suspend", "hibernate"})
+# Where the real systemctl lives; a fake elsewhere (the conftest shim, a test's own) stays usable.
+_SYSTEM_DIRS = ("/usr/", "/bin/", "/sbin/", "/lib/", "/lib64/", "/etc/", "/opt/")
 # Options of a wrapper that take a separate value (``nice -n 10 claude``).
 WRAPPER_VALUE_OPTIONS = {
     "nice": {"-n", "--adjustment"},
@@ -299,6 +312,13 @@ class Guard:
                 return program
             if any(c.isspace() for c in program) and not os.path.exists(program):
                 return self.forbidden_shell(program, env_path)   # parallel 'claude {}', a quoted command
+            if name == "systemctl":
+                hit = shutil.which(program, path=env_path) if os.sep not in program else program
+                target = os.path.realpath(hit) if hit else ""
+                verbs = [arg for arg in argv[i + 1:] if not arg.startswith("-")]
+                if target.startswith(_SYSTEM_DIRS) and verbs and verbs[0].lower() in SYSTEMCTL_MUTATING:
+                    return program                          # the real host service manager
+                return ""
             if name == "find":
                 rest = argv[i + 1:]
                 for k, arg in enumerate(rest):
