@@ -146,10 +146,12 @@ _GITCONFIG = ("[user]\n\tname = Clarp Test\n\temail = test@clarp.invalid\n"
 
 
 def _write_backend_cli_shims(shims: pathlib.Path) -> None:
-    """Executables named after every provider CLI, first on PATH: a child
-    process that resolves one by name records the attempt and exits 127."""
+    """Executables named after every provider CLI and escape launcher, first on
+    PATH: a child process that resolves one by name records the attempt and exits 127."""
     shims.mkdir(exist_ok=True)
-    for name in BACKEND_CLIS:
+    # Escape launchers too (systemd-run hands a command to the host's user manager):
+    # a test that needs one puts its own fake first on PATH.
+    for name in BACKEND_CLIS | _guard_core.ESCAPE_LAUNCHERS:
         shim = shims / name
         shim.write_text(
             "#!/bin/sh\n"

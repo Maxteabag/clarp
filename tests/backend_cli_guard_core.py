@@ -28,8 +28,15 @@ BACKEND_CLIS = frozenset({"claude", "clarp", "codex", "agy", "grok", "opencode",
 # Package specs a runner can fetch and start (npx -y @anthropic-ai/claude-code ...).
 BACKEND_PACKAGES = frozenset({"@anthropic-ai/claude-code", "@openai/codex", "@google/gemini-cli",
                               "opencode-ai", "@vibe-kit/grok-cli"})
-WRAPPERS = frozenset({"env", "timeout", "nohup", "setsid", "stdbuf", "nice", "ionice", "sudo",
-                      "exec", "command", "unbuffer", "xargs", "script", "chrt", "taskset", "flock"})
+WRAPPERS = frozenset({"env", "timeout", "nohup", "setsid", "stdbuf", "nice", "ionice",
+                      "exec", "command", "unbuffer", "xargs", "script", "chrt", "taskset", "flock",
+                      "strace", "ltrace", "valgrind", "parallel", "xvfb-run", "unshare", "nsenter",
+                      "watch", "gdb", "chroot"})
+# Launchers that hand a command to something OUTSIDE this process tree (the host's
+# user manager, another user, another sandbox), escaping env, shims, sitecustomize,
+# HOME and every guard layer. Always refused unless the file is a registered fake.
+ESCAPE_LAUNCHERS = frozenset({"systemd-run", "run0", "flatpak-spawn", "dbus-run-session", "su", "runuser",
+                              "doas", "pkexec", "sudo", "machinectl", "systemd-nspawn", "firejail", "bwrap"})
 # Options of a wrapper that take a separate value (``nice -n 10 claude``).
 WRAPPER_VALUE_OPTIONS = {
     "nice": {"-n", "--adjustment"},
@@ -43,6 +50,17 @@ WRAPPER_VALUE_OPTIONS = {
     "taskset": {"-p"},
     "flock": {"-w", "-E", "-c"},
     "stdbuf": {"-i", "-o", "-e"},
+    "exec": {"-a"},
+    "strace": {"-o", "-e", "-p", "-s", "-E", "-u", "-a", "-b", "-I", "-O", "-S", "-X", "-P", "-U"},
+    "ltrace": {"-o", "-e", "-p", "-s", "-u", "-a", "-n", "-l", "-x", "-w", "-A", "-D"},
+    "parallel": {"-j", "--jobs", "-a", "--arg-file", "--delay", "--timeout", "-N", "-n", "-I", "--colsep",
+                 "--joblog", "--results", "-d", "--delimiter", "-E"},
+    "xvfb-run": {"-n", "--server-num", "-e", "--error-file", "-f", "--auth-file", "-p", "--xauth-protocol",
+                 "-s", "--server-args", "-w", "--wait"},
+    "unshare": {"--map-user", "--map-group", "-R", "--root", "-w", "--wd", "-S", "--setuid", "-G", "--setgid"},
+    "nsenter": {"-t", "--target", "-S", "--setuid", "-G", "--setgid", "-w", "--wd", "-R", "--root"},
+    "watch": {"-n", "--interval"},
+    "chroot": {"--userspec", "--groups"},
 }
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "fish", "ksh"})
 RUNNERS = frozenset({"node", "npx", "bunx", "bun", "uv", "uvx", "pnpm", "pnpx", "yarn", "deno"})
@@ -253,7 +271,7 @@ class Guard:
             # A registered fake runs only while it is not (a copy of) a real CLI.
             return (target in self.ambient or _under(target, self.toolchains)
                     or self.is_ambient_copy(target))
-        if name in BACKEND_CLIS or name in BACKEND_PACKAGES:
+        if name in BACKEND_CLIS or name in BACKEND_PACKAGES or name in ESCAPE_LAUNCHERS:
             return True
         return target is not None and (target in self.ambient or _under(target, self.toolchains))
 
@@ -279,6 +297,25 @@ class Guard:
             name = os.path.basename(program).lower()
             if self.forbidden_program(program, env_path) or self._package_spec(program):
                 return program
+            if any(c.isspace() for c in program) and not os.path.exists(program):
+                return self.forbidden_shell(program, env_path)   # parallel 'claude {}', a quoted command
+            if name == "find":
+                rest = argv[i + 1:]
+                for k, arg in enumerate(rest):
+                    if arg in ("-exec", "-execdir", "-ok", "-okdir"):
+                        end = next((m for m in range(k + 1, len(rest)) if rest[m] in (";", "+")), len(rest))
+                        hit = self.forbidden_argv(rest[k + 1:end], env_path)
+                        if hit:
+                            return hit
+                return ""
+            if name == "gdb":
+                if "--args" not in argv[i + 1:]:
+                    return ""
+                i = argv.index("--args", i + 1) + 1
+                continue
+            if name == "parallel" and any(arg in ("-S", "--sshlogin") or arg.startswith("--sshlogin=")
+                                          for arg in argv[i + 1:]):
+                return program                              # runs commands on another host
             if name in SHELLS:
                 rest = argv[i + 1:]
                 for j, arg in enumerate(rest):
@@ -319,8 +356,15 @@ class Guard:
                 return self.forbidden_shell(" ".join(argv[i + 1:]), env_path)
             if name not in WRAPPERS:
                 return ""
-            if name == "command" and any(arg in ("-v", "-V") for arg in argv[i + 1:i + 3]):
-                return ""                                   # command -v claude only looks it up
+            if name == "command":
+                leading = []
+                for arg in argv[i + 1:]:
+                    if not arg.startswith("-") or arg == "--":
+                        break
+                    leading.append(arg)
+                if any(arg in ("-v", "-V") or (arg[1:] and set(arg[1:]) <= set("pvV") and ("v" in arg or "V" in arg))
+                       for arg in leading):
+                    return ""                               # command -v claude only looks it up
             value_options = WRAPPER_VALUE_OPTIONS.get(name, set())
             i += 1
             while i < len(argv):
@@ -334,6 +378,10 @@ class Guard:
                         or (name == "timeout" and arg[:1].isdigit())):
                     i += 1
                     continue
+                if name == "watch":                          # watch joins its words into a sh -c line
+                    return self.forbidden_shell(" ".join(argv[i:]), env_path)
+                if name == "chroot":
+                    i += 1                                  # NEWROOT; the command follows it
                 break
         return ""
 
