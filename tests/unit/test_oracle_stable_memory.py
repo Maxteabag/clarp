@@ -167,3 +167,14 @@ def test_pending_work_can_finish_after_normal_reconnect_without_new_user_speech(
         assert any('Background result' in raw for raw in sent)
         assert len(dispatched)==1
     finally:close(second)
+
+
+def test_new_transcript_fragments_record_their_wall_clock_time(tmp_path,monkeypatch):
+    _,make=rig(tmp_path,monkeypatch)
+    monkeypatch.setattr(oracle_live_stable,'wall_ms',lambda:1_792_152_000_000)
+    c,store,_,_=make('one')
+    try:
+        user(c,'Hallo.','u1')
+        assert c.fragments[-1]['at']==1_792_152_000_000
+        assert store.load()['fragments'][-1]['at']==1_792_152_000_000
+    finally:close(c)
