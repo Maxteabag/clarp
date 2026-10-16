@@ -42,7 +42,7 @@ def _inner_session(tmp_path, source: str) -> tuple[subprocess.CompletedProcess, 
     (suite / "conftest.py").write_text(textwrap.dedent(f"""
         import sys
         sys.path[:0] = [{str(REPO)!r}, {str(REPO / 'server')!r}]
-        from tests.conftest import *  # noqa: F401,F403 - the session setup under test
+        pytest_plugins = ["tests.conftest"]        # the session setup under test
     """))
     (suite / "test_inner.py").write_text(f"REPO = {str(REPO)!r}\n" + textwrap.dedent(source))
     home = tmp_path / "home"
@@ -246,7 +246,10 @@ def test_a_registered(fake_backend_cli, tmp_path):
     assert subprocess.run([str(fake_backend_cli(_fake(tmp_path)))]).returncode == 0
 
 def test_b_the_next_test_is_guarded_again(tmp_path):
-    subprocess.run([str(_fake(tmp_path))])
+    try:
+        subprocess.run([str(_fake(tmp_path))])
+    except OSError:
+        pass                                   # swallowed: only the teardown can fail it
 """
 
 
@@ -259,9 +262,22 @@ def test_5_an_opt_in_never_leaks_into_the_next_test(tmp_path):
 
 
 def test_5_the_patched_primitives_are_restored(backend_cli_guard):
-    before = (subprocess.Popen.__init__, os.execvp, os.system, os.posix_spawnp)
-    mp = pytest.MonkeyPatch()
-    backend_cli_guard.install(mp)
-    assert subprocess.Popen.__init__ is not before[0] and os.execvp is not before[1]
-    mp.undo()
-    assert (subprocess.Popen.__init__, os.execvp, os.system, os.posix_spawnp) == before
+    # Known stand-ins first (nothing is launched meanwhile), then the guard over
+    # them, then its undo: exactly the stand-ins come back.
+    def inert(*args, **kwargs):
+        raise AssertionError("not called")
+    stand_ins = {"__init__": inert, "execvp": inert, "system": inert, "posix_spawnp": inert}
+    base = pytest.MonkeyPatch()
+    base.setattr(subprocess.Popen, "__init__", stand_ins["__init__"])
+    for name in ("execvp", "system", "posix_spawnp"):
+        base.setattr(os, name, stand_ins[name])
+    try:
+        mp = pytest.MonkeyPatch()
+        backend_cli_guard.install(mp)
+        assert subprocess.Popen.__init__ is not inert and os.execvp is not inert
+        assert os.system is not inert and os.posix_spawnp is not inert
+        mp.undo()
+        assert subprocess.Popen.__init__ is inert and os.execvp is inert
+        assert os.system is inert and os.posix_spawnp is inert
+    finally:
+        base.undo()

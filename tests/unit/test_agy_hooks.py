@@ -12,6 +12,13 @@ from lib import agents, db
 from lib.snapshot import build_agent_snapshot
 from lib.state_watcher import StateLogWatcher
 
+
+@pytest.fixture(autouse=True)
+def _fake_clis_are_this_tests_own(fake_backend_cli, tmp_path):
+    """This module's fake provider CLIs are files it writes under tmp_path:
+    the explicit opt-in of tests/conftest.py's real-CLI guard."""
+    fake_backend_cli.dir(tmp_path)
+
 ROOT = Path(__file__).resolve().parents[2]
 CONVERSATION = "11111111-2222-4333-8444-555555555555"
 
