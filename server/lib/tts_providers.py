@@ -17,6 +17,12 @@ CATALOG = (
     {"id": "deepgram", "name": "Deepgram", "kind": "cloud",
      "streaming": True, "credential": "DEEPGRAM_API_KEY", "can_fallback": True,
      "supports_preview": True, "allows_custom_voice": False, "custom": False},
+    # Built-in Google Chirp 3 HD (lib/google_tts). The installed custom.google-chirp adapter,
+    # if any, is a separate provider with its own voices and stored maps.
+    {"id": "google", "name": "Google Chirp 3 HD", "kind": "cloud",
+     "streaming": False, "credential": "google", "can_fallback": True,
+     "supports_preview": True, "allows_custom_voice": False, "custom": False,
+     "capabilities": {"batch_ssml_breaks": True, "streaming": False}},
     {"id": "none", "name": "No voice output", "kind": "disabled",
      "streaming": False, "can_fallback": False, "supports_preview": False,
      "allows_custom_voice": False, "custom": False},
@@ -50,7 +56,9 @@ def valid_ids() -> frozenset[str]:
 
 def status() -> dict:
     from .config import load
+    from . import google_tts
     cfg = load()
+    google = google_tts.credentials(cfg).status()
     rows = []
     for definition in definitions():
         provider = definition["id"]
@@ -59,8 +67,13 @@ def status() -> dict:
             bool(cfg.eleven_key()) if provider == "elevenlabs" else
             bool(cfg.deepgram_key()) if provider == "deepgram" else
             bool(cfg.gemini_key()) if provider == "gemini" else
+            google["configured"] if provider == "google" else
             bool(definition.get("installed", True))
         )
+        if provider == "google":
+            # Which source would sign in and why it cannot, never the file or project.
+            definition = dict(definition, credential_source=google["credential_source"],
+                              error=google["error"])
         rows.append(dict(
             definition, available=(
                 bool(definition.get("available", True))

@@ -33,7 +33,7 @@ from .paths import RuntimePaths
 from .voice_markup import strip_emotion_tags
 from . import tts_mode
 from .voice import (
-    CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, resolve_voice,
+    CARTESIA, DEEPGRAM, ELEVENLABS, GEMINI, GOOGLE, resolve_voice,
 )
 
 
@@ -209,6 +209,21 @@ def _gemini_voice(cfg, raw_voice, persona: str, agent: dict | None,
                 if cfg.tts_override_for(agent).get("provider") == GEMINI else None))
 
 
+def _google_voice(raw_voice: str | None, route_voice: str | None) -> str:
+    """The agent's Google voice: its [tts.agents] google_voice, else its stored google key, else a
+    bare stored id that is a Google voice (a preview passes the voice it auditions). Only an agent
+    with no Google voice at all gets the documented default for a new choice. A saved voice off
+    the allowlist is returned as it is, so synthesis refuses it (voice_unavailable) and it is
+    never replaced by the default."""
+    from . import google_tts
+    saved = route_voice or resolve_voice(raw_voice, GOOGLE)
+    if saved:
+        return saved
+    if raw_voice and raw_voice.strip() in google_tts.VOICES:
+        return raw_voice.strip()
+    return google_tts.DEFAULT_VOICE
+
+
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
     """False only when the routed provider certainly has no voice and no
     fallback could speak instead (Cartesia and Gemini; others decide later)."""
@@ -225,6 +240,9 @@ def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
     if clip_route.provider == GEMINI:
         return bool(_gemini_voice(cfg, raw_voice, persona, agent,
                                   route_voice, cartesia_voice))
+    if clip_route.provider == GOOGLE:
+        from . import google_tts
+        return _google_voice(raw_voice, route_voice) in google_tts.VOICES
     return True
 
 
@@ -283,11 +301,14 @@ def _synthesize(*, cfg, row: dict, agent: dict,
             sample_rate=getattr(cfg, "raw_pcm_sample_rate", 44100),
         )
 
+    spoke: dict[str, str | None] = {}   # the voice the provider that ran actually used
+
     def run(selected: str) -> int:
         text = spoken if selected == GEMINI else plain
         if selected == CARTESIA:
             if not (cartesia_voice and cfg.cartesia_key()):
                 raise CartesiaError("Cartesia key or voice is not configured")
+            spoke["voice"] = cartesia_voice
             return cartesia_synthesize(
                 text=text, voice_id=cartesia_voice, out_path=out_path,
                 api_key=cfg.cartesia_key(), model=cfg.cartesia_model,
@@ -295,6 +316,7 @@ def _synthesize(*, cfg, row: dict, agent: dict,
         if selected == ELEVENLABS:
             if not (eleven_voice and cfg.eleven_key()):
                 raise ElevenWSError("ElevenLabs key or voice is not configured")
+            spoke["voice"] = eleven_voice
             return synthesize_streaming(
                 text=text, voice_id=eleven_voice, out_path=out_path,
                 api_key=cfg.eleven_key(), model=cfg.eleven_model,
@@ -307,6 +329,7 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 clip_route.voice if provider == GEMINI else None, cartesia_voice)
             if not gemini_voice:
                 raise GeminiTTSError(f"no Gemini voice configured for {persona!r}")
+            spoke["voice"] = gemini_voice
             return gemini_synthesize(
                 text=text,
                 voice=cfg.gemini_tts_voice(gemini_voice),
@@ -317,22 +340,31 @@ def _synthesize(*, cfg, row: dict, agent: dict,
         if selected == DEEPGRAM:
             from .deepgram_tts import synthesize as deepgram_synthesize
             deepgram_voice = voice_for(DEEPGRAM) or cfg.deepgram_model
+            spoke["voice"] = deepgram_voice
             return deepgram_synthesize(
                 text=text, voice_id=deepgram_voice, out_path=out_path,
                 api_key=cfg.deepgram_key(), on_chunk=on_chunk,
                 trace_id=trace_id)
+        if selected == GOOGLE:
+            from . import google_tts
+            google_voice = _google_voice(raw_voice, clip_route.voice if provider == GOOGLE else None)
+            spoke["voice"] = google_voice
+            return google_tts.synthesize(
+                text=text, voice=google_voice, out_path=out_path,
+                creds=google_tts.credentials(cfg), on_chunk=on_chunk)
         from .custom_tts_adapters import get as custom_adapter
         from .tts_providers import VALID_IDS, synthesize as provider_synthesize
         manifest = custom_adapter(selected, reserved_ids=VALID_IDS)
         if manifest is not None:
             adapter_voice = voice_for(selected) or manifest.default_voice
+            spoke["voice"] = adapter_voice
             return provider_synthesize(
                 selected, text=text, voice=adapter_voice,
                 out_path=out_path, on_chunk=on_chunk)
         raise RuntimeError(f"unsupported server TTS provider: {selected}")
 
     try:
-        return run(provider)
+        written = run(provider)
     except Exception as primary_error:
         fallback = clip_route.fallback
         if fallback in {"", "none", provider}:
@@ -341,7 +373,15 @@ def _synthesize(*, cfg, row: dict, agent: dict,
               context=_event_context(row, agent), level="warn",
               detail={"provider": provider, "error": str(primary_error)[:200],
                       "fallback": fallback})
-        return run(fallback)
+        spoke.clear()
+        written = run(fallback)
+        # Provenance: the provider and voice that actually spoke, not the route's.
+        _emit("tts_worker", "spoke", context=_event_context(row, agent),
+              detail={"provider": fallback, "voice": spoke.get("voice"), "fallback_for": provider})
+        return written
+    _emit("tts_worker", "spoke", context=_event_context(row, agent),
+          detail={"provider": provider, "voice": spoke.get("voice")})
+    return written
 
 
 def _synth_pwa_via_delivery(row: dict, agent: dict,
@@ -434,7 +474,18 @@ def _publish_tts_error(stream: Any | None, row: dict,
     if stream is None:
         return
     low = (error or "").lower()
-    if "quota" in low or "401" in low:
+    from . import google_tts
+    google_code = low.split(":", 1)[0].strip()
+    if google_code in google_tts.ERROR_CODES:
+        # A Google Chirp failure names Google, never the ElevenLabs fallback text below.
+        message = {
+            "google_quota": "Voice paused: Google Chirp 3 HD quota exceeded.",
+            "google_auth_failed": "Voice unavailable: Google Chirp 3 HD sign-in failed.",
+            "google_credentials_missing": "Voice unavailable: Google Chirp 3 HD is not configured.",
+            "google_project_missing": "Voice unavailable: Google Chirp 3 HD is not configured.",
+            "voice_unavailable": "Voice unavailable: this Google Chirp 3 HD voice is not available.",
+        }.get(google_code, "Voice synthesis failed.")
+    elif "quota" in low or "401" in low:
         message = "Voice paused: ElevenLabs quota exceeded."
     elif "api_key" in low or "not configured" in low:
         message = "Voice unavailable: TTS not configured."

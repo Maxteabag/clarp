@@ -181,6 +181,12 @@ def catalog(agents: dict, current_session: str = "") -> dict:
             current_info.get("name") or current_info.get("persona") or ""))
     for row in voices["gemini"]:
         row["current"] = row["id"] == current_gemini
+    from . import google_tts
+    voices["google"] = _rows("google", [
+        (voice_id, voice_id.rsplit("-", 1)[1], "") for voice_id in google_tts.VOICES],
+        agents, current_session)
+    for row in voices["google"]:
+        row["language"] = google_tts.language_code(row["id"])   # display only
     try:
         from .cartesia_voices import english_voices
         cartesia = english_voices()
@@ -219,8 +225,9 @@ def catalog(agents: dict, current_session: str = "") -> dict:
         provider = row["id"]
         if provider == "none":
             continue
-        error = custom_errors.get(provider, "")
-        providers.append({
+        error = custom_errors.get(provider, "") or (
+            row.get("error") or "" if provider == "google" else "")
+        entry = {
             "id": provider, "name": row.get("name", provider.title()),
             "description": row.get("description", ""),
             "kind": row.get("kind", "provider"),
@@ -233,7 +240,10 @@ def catalog(agents: dict, current_session: str = "") -> dict:
             "fallback": provider == status["fallback"],
             "voices": voices.get(provider, []),
             "error": error or None,
-        })
+        }
+        if row.get("capabilities"):
+            entry["capabilities"] = dict(row["capabilities"])
+        providers.append(entry)
     return {
         "provider": status["provider"], "fallback": status["fallback"],
         "voice_available": any(
