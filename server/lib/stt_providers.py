@@ -228,23 +228,26 @@ def status() -> dict:
 
 def update_settings(data: dict) -> dict:
     """Validate and store the two switches. Raises ValueError on bad input."""
-    engine = data.get("engine", selected_engine())
-    strategy = data.get("turn_taking", selected_turn_taking())
-    if not isinstance(engine, str) or not isinstance(strategy, str):
+    # Only the keys a save names are written; an omitted engine or turn
+    # taking is read inside the transaction below, so a concurrent save of it
+    # is neither reverted nor validated against a stale value.
+    engine = data.get("engine")
+    strategy = data.get("turn_taking")
+    if (engine is not None and not isinstance(engine, str)) or (
+            strategy is not None and not isinstance(strategy, str)):
         raise ValueError("engine and turn_taking must be strings")
-    engine = engine.strip() or LOCAL_ENGINE
-    strategy = strategy.strip() or TURN_NATIVE
-    if engine != LOCAL_ENGINE and _model_row(engine) is None:
-        # Local model ids ("faster-whisper:small.en") are governed by the
-        # installed-model registry, not this catalogue; only reject cloud ids
-        # we do not know.
-        if is_cloud_model(engine) or ":" not in engine:
-            raise ValueError(f"unknown transcription engine: {engine}")
-    if strategy not in VALID_TURN_TAKING:
-        raise ValueError(f"unknown turn-taking strategy: {strategy}")
-    row = _model_row(engine)
-    if strategy == TURN_PROVIDER and not (row and _definition(row["id"].split(":")[0])["turn_detection"] == "own"):
-        raise ValueError("provider-owned turn taking needs an engine that detects turns")
+    if engine is not None:
+        engine = engine.strip() or LOCAL_ENGINE
+        if engine != LOCAL_ENGINE and _model_row(engine) is None:
+            # Local model ids ("faster-whisper:small.en") are governed by the
+            # installed-model registry, not this catalogue; only reject cloud ids
+            # we do not know.
+            if is_cloud_model(engine) or ":" not in engine:
+                raise ValueError(f"unknown transcription engine: {engine}")
+    if strategy is not None:
+        strategy = strategy.strip() or TURN_NATIVE
+        if strategy not in VALID_TURN_TAKING:
+            raise ValueError(f"unknown turn-taking strategy: {strategy}")
     retain = data.get("retain_audio")
     if retain is not None and not isinstance(retain, bool):
         raise ValueError("retain_audio must be boolean")
@@ -280,14 +283,23 @@ def update_settings(data: dict) -> dict:
     if agent_languages is not None:
         agent_languages = stt_language.merge_agent_languages(agent_languages)
     from . import call_transcription
-    # The call pair and the global engine it is checked against are checked
-    # and published in one transaction: a reader sees the old triple or the
-    # new one, never one key changed without the other.
+    # The engine, the turn taking and the call pair are checked against one
+    # in-transaction view (what this save names, else what is stored now) and
+    # published together: a reader sees the old settings or the new ones.
     with settings_store.transaction():
+        current_engine = selected_engine() if engine is None else engine
+        current_strategy = selected_turn_taking() if strategy is None else strategy
+        row = _model_row(current_engine)
+        if current_strategy == TURN_PROVIDER and not (
+                row and _definition(row["id"].split(":")[0])["turn_detection"] == "own"):
+            raise ValueError("provider-owned turn taking needs an engine that detects turns")
         call_languages, call_engines = call_transcription.validate_settings(
             data.get("call_languages"), data.get("call_engines"),
-            is_valid=lambda e: _model_row(e) is not None, global_engine=engine)
-        settings_store.set_text(ENGINE_KEY, engine)
+            is_valid=lambda e: _model_row(e) is not None, global_engine=current_engine)
+        if engine is not None:
+            settings_store.set_text(ENGINE_KEY, engine)
+        if strategy is not None:
+            settings_store.set_text(TURN_TAKING_KEY, strategy)
         if call_languages is not None:
             settings_store.set_text(call_transcription.CALL_LANGUAGES_KEY, call_languages)
         if call_engines is not None:
@@ -302,7 +314,6 @@ def update_settings(data: dict) -> dict:
         settings_store.set_text(LONG_FORM_MODEL_KEY, long_model)
     if threshold is not None:
         settings_store.set_int(LONG_FORM_THRESHOLD_KEY, threshold)
-    settings_store.set_text(TURN_TAKING_KEY, strategy)
     if retain is not None:
         from .heard_audio import set_enabled
         set_enabled(retain)
