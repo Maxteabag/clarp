@@ -355,22 +355,30 @@ def test_N2_outside_calls_server_default_while_loading_is_unchanged():
     assert "stt" not in out.payload
 
 
-# ---- review: no group-call mutation drops or resets the transcription view ----------------------
+# ---- §12.4: the view is derived per read for a live call, never stored or on the SSE ----------
 
-@pytest.mark.parametrize("policy", [True, False])
-def test_every_call_mutation_keeps_the_transcription_view(env, policy):
-    if policy:
-        _set(call_languages="no", call_engines="google:chirp_3", agent_languages={"theo": "pt"})
-    def view():
-        return calls.get_call(env.call["call_id"]).get("transcription", "absent")
-    first = view()
-    if policy:
-        assert first["theo-97e5"]["language"] == {"value": "pt", "source": "agent"}
-        assert first["mike-86db"]["language"]["source"] == "call_policy"
-    else:
-        assert first == "absent"
-    for step in (lambda: calls.change(PHONE, "hold", "mike-86db"), lambda: calls.change(PHONE, "resume", "mike-86db"),
-                 lambda: calls.change(PHONE, "switch", "mike-86db"), lambda: calls.route(PHONE, env.call["call_id"], "theo-97e5"),
-                 lambda: calls.end(PHONE)):
+def test_the_transcription_view_is_never_stored_or_streamed_and_derives_for_a_live_call(env):
+    _set(call_languages="no", call_engines="google:chirp_3", agent_languages={"theo": "pt"})
+    stream = SimpleNamespace(events=[])
+    stream.broadcast = lambda event: stream.events.append(json.loads(json.dumps(event)))
+    calls.bind(SimpleNamespace(stream=stream))
+    call_id = calls.start(PHONE, ["theo-97e5", "mike-86db"])["call"]["call_id"]
+
+    def stored():
+        return json.loads(settings_store.get(calls.KEY + PHONE))["calls"]
+    steps = [("start", lambda: None),
+             ("hold", lambda: calls.change(PHONE, "hold", "mike-86db")),
+             ("resume", lambda: calls.change(PHONE, "resume", "mike-86db")),
+             ("route", lambda: calls.route(PHONE, call_id, "theo-97e5")),
+             ("end", lambda: calls.end(PHONE))]
+    for name, step in steps:
         step()
-        assert view() == first
+        assert all("transcription" not in c for c in stored()), name          # never persisted
+        assert all("transcription" not in e for e in stream.events
+                   if e["type"] == "group-call"), name                        # never on the SSE
+        live = calls.get_call(call_id)
+        if name != "end":
+            assert live["transcription"]["theo-97e5"]["language"] == {"value": "pt", "source": "agent"}, name
+            assert live["transcription"]["mike-86db"]["language"]["source"] == "call_policy", name
+        else:
+            assert "transcription" not in live                               # not live: absent
