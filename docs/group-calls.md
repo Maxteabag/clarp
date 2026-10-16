@@ -203,9 +203,27 @@ engine that takes one language gets the first code of a set
 is skipped (`skipped: language_incompatible`), and none at all is an explicit
 error. Every attempt is in `stt.attempts` and the `transcribe` event.
 
-The call record (`GET /calls`, the answer's `call`) adds `transcription:
-{session: {language, engines}}` when a call policy or an agent override
-applies to a participant; otherwise it is absent.
+The call record (`GET /calls`, the answer's `call`, route responses) adds
+`transcription: {session: {language: {value, source}, engines: {value,
+source}}}`. It is a **live derived view, not a snapshot**: the Host computes
+it at each read from the same per-field resolution the next clip would use,
+never stores it, and never sends it on the `group-call` event. A policy or
+override change mid-call shows at the next read; the per-clip `stt` of a
+transcription stays the authority for what actually ran.
+
+**Absence of `transcription` means unknown**, never "reset to global". It can
+mean any of:
+- neither a configured call policy nor a listen-first call makes it relevant
+  (a say-path call stays identical to before, even with agent overrides);
+- every participant field resolves to `global`;
+- the call is not live (ended, superseded);
+- computing the view failed;
+- an older Host.
+
+A client omits `X-Transcription-Model` on call-scoped requests only when the
+view explicitly shows `engines.source` exactly `"call_policy"` for the
+captured participant (and the Host advertises `call_transcription_policy`).
+Absence, or any other source, fails safe: keep sending the header.
 
 ## Events
 

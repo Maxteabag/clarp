@@ -102,11 +102,12 @@ def public(call: dict) -> dict:
     out = {key: value for key, value in call.items() if not key.startswith("_")}
     out["participants"] = [{k: v for k, v in p.items() if not k.startswith("_")}
                            for p in call["participants"]]
-    view = _transcription_view(call)
+    view = _transcription_view(call) if call.get("state") == "live" else None
     if view is not None:
-        # How each participant is transcribed in this call: only for a
-        # listen-first call or a configured call policy, so a say-path call
-        # stays byte-identical even with agent overrides (docs/group-calls.md).
+        # How each participant of a live call is transcribed, derived at read
+        # time and never stored: only for a listen-first call or a configured
+        # call policy, so a say-path call stays byte-identical even with agent
+        # overrides (docs/group-calls.md "Transcription in a call").
         out["transcription"] = view
     out["server_now"] = now_ms()
     return out
