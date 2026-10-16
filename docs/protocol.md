@@ -486,7 +486,8 @@ engine can take the call language the clip is refused, with no provider call:
 409 `{"ok": false, "error": "no compatible engine", "language", "engines",
 "attempts"}`. A stored call policy that can never work is refused the same
 way for every call clip: 409 `{"ok": false, "error": "call policy invalid",
-"call_policy_error", "language", "engines", "attempts": []}`. Multilingual or
+"call_policy_error", "language", "engines", "attempts": []}`. A configured
+language set skips ElevenLabs Scribe, which would drop it. Multilingual or
 unknown local engines never receive the code, so they are skipped when a call
 policy is configured. Without a call policy,
 in-call transcription is unchanged. The transcription settings take `call_languages` and

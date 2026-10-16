@@ -25,6 +25,9 @@ CALL_LANGUAGES_KEY = "transcription.call_languages"
 CALL_ENGINES_KEY = "transcription.call_engines"
 # Providers that take a bounded language set; every other engine takes one code.
 SET_PROVIDERS = frozenset({"google", "elevenlabs"})
+# Providers that accept a set only by dropping it and detecting without bound
+# (Scribe): under a call policy they take one code, and a set skips them.
+SET_DROPPED = frozenset({"elevenlabs"})
 _CALL_ID = re.compile(r"^gcl_[0-9a-f]{32}$")
 
 
@@ -202,11 +205,14 @@ def concrete(engine: str) -> str:
 
 def capability(engine: str) -> str:
     """What an engine actually does with the language it is given:
-    ``set`` (a bounded set), ``single`` (one code), ``en_only`` (English, the
+    ``set`` (a bounded set), ``single`` (one code), ``code_only`` (one code,
+    while a set would be dropped, so it is skipped), ``en_only`` (English, the
     only language it transcribes) or ``none`` (it never receives a code: a
     local multilingual model auto-detects, so a call language is not applied)."""
     from . import stt_providers, transcription_catalog
     if stt_providers.is_cloud_model(engine):
+        if engine.split(":", 1)[0] in SET_DROPPED:
+            return "code_only"
         return "set" if not single_code(engine) else "single"
     row = transcription_catalog.model_by_id(engine)
     if row is not None:
@@ -227,6 +233,8 @@ def plan(engines: list[str], language: str) -> list[dict]:
             sent = language
         elif kind == "single":
             sent = codes[0]
+        elif kind == "code_only":
+            sent = language if len(codes) == 1 else None
         elif kind == "en_only":
             sent = "en" if codes[0] == "en" else None
         else:
