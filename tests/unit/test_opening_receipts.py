@@ -295,3 +295,14 @@ def test_a_client_batch_claiming_server_source_cannot_forge_a_receipt(env):
     assert [r["source"] for r in stored] == ["other"]
     status, body = _ack({"clip_id": "ring-opening-" + ring["ring_id"], "status": "play-start"})
     assert status == 200 and body["updated"] is True
+
+
+def test_a_refusal_is_answered_after_group_calls_is_reloaded(env, monkeypatch):
+    """CI 38868445627: test_group_calls reloads lib.group_calls, which rebinds
+    group_calls.CallError while agent_rings keeps the class it imported. The
+    route must catch the class record_opening_receipt actually raises."""
+    from lib import group_calls as calls
+    monkeypatch.setattr(calls, "CallError", type("CallError", (Exception,), {}))
+    ring = _answered(env)
+    status, body = _ack({"clip_id": "ring-opening-" + ring["ring_id"], "status": "nope"})
+    assert (status, body) == (400, {"error": "bad status"})
