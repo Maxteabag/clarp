@@ -492,7 +492,12 @@ def test_10_loopback_forms_stay_local():
     "echo 'the claude backend' && grep -r gemini docs",
     "FOO=claude make test",
     "command -v claude",
+    "command -pv codex",
     "echo $((1 + 2))",
+    "find . -name claude -print",
+    "watch -n 1 date",
+    "gdb -batch -ex bt ./core",
+    "strace -o /tmp/trace -f true",
 ])
 def test_11_a_provider_name_as_an_argument_is_not_a_launch(backend_cli_guard, command):
     assert backend_cli_guard.forbidden_shell(command, "/nonexistent") == ""
@@ -526,6 +531,30 @@ def test_11_a_runner_judges_only_the_program_it_starts(backend_cli_guard, argv):
     "x=$(echo $(grok --version))",
     # P2: deno package specifiers
     "deno run -A npm:@anthropic-ai/claude-code --version",
+    # Q1: command runs its argument unless a LEADING option asks it to look it up
+    "command claude -v",
+    "command -p codex --version",
+    # N3: launchers that leave the process tree are refused whatever they start
+    "systemd-run --user --collect /bin/true",
+    "flatpak-spawn --host true",
+    "dbus-run-session -- true",
+    "sudo -n true",
+    "su -c true nobody",
+    "pkexec true",
+    # N3: wrappers with value options, find -exec, exec -a, quoted parallel commands
+    "strace -o /tmp/trace -f claude --version",
+    "ltrace -o /tmp/trace codex --version",
+    "valgrind --tool=none grok --version",
+    "gdb -batch --args claude --version",
+    "watch -n 1 claude --version",
+    "xvfb-run -a -s '-screen 0 1x1x8' gemini --version",
+    "unshare -r opencode --version",
+    "nsenter -t 1 -m agy --version",
+    "chroot /srv/root claude --version",
+    "exec -a innocent claude --version",
+    "find . -name x -exec claude --version {} ;",
+    "parallel -j 2 'codex --version {}' ::: a b",
+    "parallel -S remote.example true ::: a",
 ])
 def test_11_a_provider_cli_at_a_command_position_is_a_launch(backend_cli_guard, command):
     assert backend_cli_guard.forbidden_shell(command, "/nonexistent") != ""
