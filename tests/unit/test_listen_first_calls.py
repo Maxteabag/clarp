@@ -972,3 +972,59 @@ def test_I_recovery_admits_only_the_current_gen(env):
     statuses = {r["queue_id"]: r["status"] for r in _queue(ring["ring_id"])}
     assert statuses == {f"call-open:{ring['ring_id']}:1": "withdrawn", f"call-open:{ring['ring_id']}:2": "queued"}
     assert rings.recover_openings() == 0
+
+
+@pytest.mark.parametrize("gen1", ["intended", "admitted"])
+@pytest.mark.parametrize("crash", ["after_latch", "after_resolve", "mid_admit", "after_admit"])
+def test_I_crash_and_recovery_at_each_step_admits_exactly_one_gen_2(env, monkeypatch, gen1, crash):
+    """§11.I: gen 1 cancelled (intended) or withdrawn (admitted) by speech; a
+    definitive abandonment makes gen 2; a crash at any step and recovery give
+    exactly one gen-2 initiative and never touch gen 1."""
+    ring, op = _queued(env)                                   # gen 1 intended, admitter held back
+    rid = ring["ring_id"]
+    if gen1 == "admitted":
+        assert rings.admit_initiative(rid) == "admitted"
+    _claim(op, "speech_started")
+    assert _state(rid)["intent"]["state"] == "cancelled" and _state(rid)["state"] == "speech_latched"
+    gen1_rows = [r["status"] for r in _queue(rid)]
+    assert gen1_rows == ([] if gen1 == "intended" else ["withdrawn"])
+    if crash == "after_latch":
+        assert rings.recover_openings() == 0 and [r["status"] for r in _queue(rid)] == gen1_rows
+        return
+    _claim(op, "speech_abandoned", reason="empty_capture")    # gen 2 intended; the admitter "crashed"
+    assert _state(rid)["intent"]["gen"] == 2 and _state(rid)["intent"]["state"] == "intended"
+    if crash == "mid_admit":
+        enqueue = turn_queue.enqueue
+
+        def dies(**kwargs):
+            enqueue(**kwargs)
+            raise RuntimeError("the Host died inside the gen-2 admitter transaction")
+        monkeypatch.setattr(turn_queue, "enqueue", dies)
+        with pytest.raises(RuntimeError):
+            rings.admit_initiative(rid)
+        monkeypatch.setattr(turn_queue, "enqueue", enqueue)
+        assert _state(rid)["intent"]["state"] == "intended"
+        assert [r["status"] for r in _queue(rid)] == gen1_rows
+    elif crash == "after_admit":
+        assert rings.admit_initiative(rid) == "admitted"
+    assert rings.recover_openings() == (0 if crash == "after_admit" else 1)
+    assert rings.recover_openings() == 0
+    gen2 = f"call-open:{rid}:2"
+    rows = {r["queue_id"]: r["status"] for r in _queue(rid)}
+    assert rows[gen2] == "queued" and list(rows.values()).count("queued") == 1
+    assert [a["client_admission_id"] for a in _admissions(rid)].count(gen2) == 1
+    assert rings.claim_initiative(f"call-open:{rid}:1") is False
+    assert rings.claim_initiative(gen2) is True and rings.claim_initiative(gen2) is False
+
+
+def test_I_a_committed_gen_1_then_speech_and_abandonment_make_no_gen_2(env):
+    ring, op = _queued(env)
+    rid = ring["ring_id"]
+    rings.admit_initiative(rid)
+    assert _dispatch(rid) is True                             # gen 1 committed
+    err = _refused(lambda: _claim(op, "speech_started"), 409, "already resolved")
+    assert err.extra["outcome"] == "initiative_started"
+    _refused(lambda: _claim(op, "speech_abandoned", reason="capture_aborted"), 409, "already resolved")
+    assert rings.recover_openings() == 0
+    assert [r["queue_id"] for r in _queue(rid)] == [f"call-open:{rid}:1"]
+    assert _state(rid)["intent"] == {**_state(rid)["intent"], "gen": 1, "state": "started"}
