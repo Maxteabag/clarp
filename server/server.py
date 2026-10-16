@@ -5949,6 +5949,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, str(e))
         fingerprint = transcription_results.request_fingerprint(
             audio_bytes, ctype, requested_model, hands_free)
+        call_scope = None
+        if self.headers.get("X-Clarp-Call-Id") is not None:
+            # A clip that names its call is validated before anything else,
+            # a cached result and any provider included: it refuses rather
+            # than silently becoming chat transcription (docs/group-calls.md).
+            from lib import call_transcription, group_calls
+            try:
+                call_scope = call_transcription.validate_scope(
+                    self.principal().principal, self.headers.get("X-Clarp-Call-Id") or "",
+                    (self.headers.get("X-Transcription-Session") or "").strip())
+            except group_calls.CallError as exc:
+                return self._json(exc.status, exc.body())
 
         # A retry can arrive while the original request is still finishing.
         # Serialize equal IDs, then consult the durable result before invoking
@@ -5974,7 +5986,8 @@ class Handler(BaseHTTPRequestHandler):
                 utterance_id=utterance_id, client_ts=client_ts,
                 record_voice=self._record_voice,
                 spawn_voice_metrics=_spawn_voice_metrics,
-                **({"focus_session": lambda: target} if target else {}))
+                **({"call_scope": call_scope} if call_scope is not None
+                   else {"focus_session": lambda: target} if target else {}))
             if outcome.trace_id:
                 self._trace_id = outcome.trace_id
             return self._json(outcome.status, outcome.payload)

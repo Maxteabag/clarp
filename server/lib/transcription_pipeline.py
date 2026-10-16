@@ -55,12 +55,18 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                record_voice: RecordVoice,
                spawn_voice_metrics: SpawnVoiceMetrics,
                focus_session: Callable[[], str] = current_focus_session,
+               call_scope: dict | None = None,
                ) -> TranscriptionOutcome:
     """Run one utterance through STT and file every side effect.
 
     `record_voice(event, **fields)` and `spawn_voice_metrics(...)` are the
     handler's helpers; they are passed in so this module never imports
     `server`. The caller must hold `transcription_results.serialize(id)`.
+
+    `call_scope` is a validated call identity (call_transcription.validate_scope):
+    the clip's session then comes from it, never from UI focus, and language
+    and engines follow the call policy with their sources reported as `stt`.
+    Without it nothing here changes.
     """
     from . import transcription_results
 
@@ -69,21 +75,44 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
     stt = ctx.stt
     if getattr(stt, "available", True) is False:
         return TranscriptionOutcome.error(503, "server transcription disabled")
-    focus = focus_session()
+    call_stt = None
+    call_steps: list[dict] = []
+    if call_scope is not None:
+        from . import call_transcription
+        focus = call_scope["session"]
+        call_stt = call_transcription.resolve(focus, in_call=True, requested_model=requested_model)
+        engines = list(call_stt["engines"]["value"])
+        if call_stt["engines"]["source"] in ("device", "global"):
+            # The long-form escalation applies as it does outside a call.
+            try:
+                from . import audio_duration, stt_providers
+                long_model = stt_providers.long_form_model_for(audio_duration.seconds(audio_bytes))
+                if long_model:
+                    engines = [long_model]
+            except Exception as e:  # noqa: BLE001
+                log_exception("sttLongFormRouteFail", e)
+        call_steps = call_transcription.plan(engines, call_stt["language"]["value"])
+        if not any("skip" not in step for step in call_steps):
+            return TranscriptionOutcome.error(
+                400, "no compatible transcription engine for "
+                f"{call_stt['language']['value']!r}: " + ", ".join(engines))
+        requested_model = next(step["engine"] for step in call_steps if "skip" not in step)
+    else:
+        focus = focus_session()
     # An agent's own engine is more specific than the phone's device-wide
     # model choice (sent as X-Transcription-Model), so it wins over both.
     agent_engine = None
     agent_fallbacks: list[str] = []
     try:
         from .stt_language import engines_for
-        agent_engines = engines_for(focus)
+        agent_engines = engines_for(focus) if call_stt is None else []
         if agent_engines:
             agent_engine, agent_fallbacks = agent_engines[0], agent_engines[1:]
     except Exception as e:  # noqa: BLE001
         log_exception("sttAgentEngineFail", e)
     if agent_engine:
         requested_model = agent_engine
-    if not requested_model:
+    if not requested_model and call_stt is None:
         # A cloud engine chosen in settings stands in for the server
         # default; an explicit header from the client still wins.
         try:
@@ -101,8 +130,9 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         from . import audio_duration, stt_providers
         clip_seconds = audio_duration.seconds(audio_bytes)
         long_model = stt_providers.long_form_model_for(clip_seconds)
-        # An agent's own engine was chosen for its language; keep it.
-        if long_model and long_model != requested_model and not agent_engine:
+        # An agent's own engine was chosen for its language; keep it. A call
+        # already planned its engines (call_transcription).
+        if long_model and long_model != requested_model and not agent_engine and call_stt is None:
             log("sttLongFormRoute",
                 f"{clip_seconds:.1f}s >= "
                 f"{stt_providers.long_form_threshold_sec()}s → {long_model}"
@@ -110,7 +140,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
             requested_model = long_model
     except Exception as e:  # noqa: BLE001 - escalation never blocks STT
         log_exception("sttLongFormRouteFail", e)
-    if not requested_model and not stt.ready.is_set():
+    if (not requested_model or requested_model == "server-default") and not stt.ready.is_set():
         return TranscriptionOutcome.error(503, "whisper model loading")
     # The trace is minted before compiling so the vocab run, the
     # transcribe event and everything downstream share one id.
@@ -133,7 +163,12 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         # Authoritative transcript: wait for the whisper lock rather than
         # 429 — best-effort live-transcription partials must yield to it.
         model_transcribe = getattr(stt, "transcribe_model_bytes", None)
-        if requested_model and callable(model_transcribe):
+        if call_stt is not None:
+            text, ends_terminal, _dur, effective = _run_call_steps(
+                stt, call_steps, call_stt, focus=focus, audio_bytes=audio_bytes, ctype=ctype,
+                prompt=prompt)
+            requested_model = effective
+        elif requested_model and callable(model_transcribe):
             from .stt_language import bound_session
             with bound_session(focus):
                 # The agent's fallback engines are tried in order when its
@@ -183,7 +218,10 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         record_voice("error", utterance_id=utterance_id or None,
                      client_ts=client_ts,
                      detail={"message": str(e)[:300], "stage": "stt"})
-        return TranscriptionOutcome.error(500, str(e), trace_id)
+        failed = TranscriptionOutcome.error(500, str(e), trace_id)
+        if call_stt is not None and "report" in call_stt:
+            failed.payload["stt"] = call_stt["report"]          # every attempt, not hidden
+        return failed
     latency_ms = int((time.monotonic() - started) * 1000)
     try:
         from . import heard_audio
@@ -235,7 +273,8 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                           "hands_free": hands_free,
                           "orchestrator_skip_herald": skip_herald,
                           "vocab_run_id": vocab_run_id or None,
-                          "stt_latency_ms": latency_ms})
+                          "stt_latency_ms": latency_ms,
+                          **({"stt": call_stt["report"]} if call_stt is not None else {})})
     record_voice(
         "transcript", session=focus or ctx.default_session or None,
         trace_id=trace_id,
@@ -261,6 +300,9 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                 "orchestrator_skip_herald": skip_herald,
                 "vocab_run_id": vocab_run_id or None,
                 "cached": False}
+    if call_stt is not None:
+        # Call-scoped only: what was asked for and what ran, field by field.
+        response["stt"] = call_stt["report"]
     try:
         transcription_results.store(
             transcription_id, fingerprint, response)
@@ -271,3 +313,49 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         return TranscriptionOutcome.error(
             500, "transcription result persistence failed", trace_id)
     return TranscriptionOutcome(status=200, payload=response, trace_id=trace_id)
+
+
+def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio_bytes: bytes,
+                    ctype: str, prompt) -> tuple[str, bool, float, str]:
+    """Run a call-scoped clip through its planned engines in order: the next
+    only on failure, an incompatible one skipped, every attempt recorded in
+    ``call_stt["report"]``. Returns (text, ends_terminal, duration, engine)."""
+    from .stt_language import bound_language, bound_session
+    attempts: list[dict] = []
+    report = {"language": call_stt["language"], "engines": call_stt["engines"],
+              "effective_engine": None, "attempts": attempts, "language_adapted": None,
+              "requested_model": call_stt["requested_model"]}
+    call_stt["report"] = report
+    runnable = [step for step in steps if "skip" not in step]
+    model_transcribe = getattr(stt, "transcribe_model_bytes", None)
+    for step in steps:
+        if "skip" in step:
+            attempts.append({"engine": step["engine"], "outcome": "skipped", "reason": step["skip"]})
+            continue
+        started = time.monotonic()
+        try:
+            with bound_session(focus), bound_language(step["language"]):
+                if step["engine"] == "server-default":
+                    text, ends_terminal, dur = stt.transcribe_bytes(audio_bytes, ctype, prompt, wait=10.0)
+                elif callable(model_transcribe):
+                    text, ends_terminal, dur = model_transcribe(
+                        step["engine"], audio_bytes, ctype, prompt, wait=10.0)
+                else:
+                    raise STTUnknownModelError(f"transcription model not installed: {step['engine']}")
+        except (STTUnknownModelError, STTModelLoadingError, STTBusyError) as e:
+            attempts.append({"engine": step["engine"], "outcome": "error",
+                             "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
+            raise
+        except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error
+            attempts.append({"engine": step["engine"], "outcome": "error",
+                             "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
+            if step is runnable[-1]:
+                raise
+            log_exception("sttCallEngineFallback", e, detail=step["engine"])
+            continue
+        attempts.append({"engine": step["engine"], "outcome": "ok",
+                         "ms": int((time.monotonic() - started) * 1000)})
+        report["effective_engine"] = step["engine"]
+        report["language_adapted"] = "first_code" if step["adapted"] else None
+        return text, ends_terminal, dur, step["engine"]
+    raise RuntimeError("no transcription engine ran")

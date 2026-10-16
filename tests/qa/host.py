@@ -99,7 +99,9 @@ def main():
     allowed_post = {'/send', '/select', '/focus', '/clog', '/clips/ack', '/devices', '/stop', '/turn-queue/resume', '/task-plan/action',
         '/goal-ledger/delegations', '/goal-ledger/delegations/stop',
         # Agent rings and listen-first openings (docs/agent-rings.md).
-        '/calls/ring', '/calls/ring/answer', '/calls/ring/opening', '/calls/end'}
+        '/calls/ring', '/calls/ring/answer', '/calls/ring/opening', '/calls/end',
+        # Call-scoped transcription (docs/group-calls.md); the QA STT is a stub.
+        '/transcribe', '/calls'}
     for method, allowed in [('GET', allowed_get), ('POST', allowed_post), ('PUT', set()), ('DELETE', set())]:
         original = getattr(module.Handler, 'do_' + method)
         def scoped(self, original=original, allowed=allowed):
