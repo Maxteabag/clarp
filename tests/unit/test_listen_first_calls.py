@@ -1168,7 +1168,7 @@ def test_L5_no_extra_admission_for_late_foreign_reauthenticated_or_duplicate_ans
         return
     op = rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")["opening"]
     if case == "other_principal":
-        _refused(lambda: _silence({**op}, rid="rq-x") if False else rings.opening_claim(
+        _refused(lambda: rings.opening_claim(
             "device_other", {"token": op["token"], "epoch": 1, "claim": "silence", "request_id": "rq-x",
                              "capture_gen": 1, "at_ms": 1250, "watermark_ms": 1290}), 403, "not the answering device")
         assert _queue(ring["ring_id"]) == []
