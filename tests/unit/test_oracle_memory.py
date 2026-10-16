@@ -109,7 +109,7 @@ def test_current_v88_database_gets_context_notification_dedup_table():
 
 
 DAY = 86_400_000
-NOW = 1_792_152_000_000  # 2026-10-16T08:00:00Z
+NOW = 1_792_152_000_000  # 2026-10-16T12:00:00Z
 
 
 def _payload(store, **kwargs):
@@ -154,10 +154,13 @@ def test_startup_history_states_now_and_when_each_dated_item_happened(tmp_path):
 def test_dated_history_still_respects_the_startup_budget():
     store = memory.open_thread("phone", "main", connection_id="one")
     store.save({"revision": 1, "fragments": [
-        {"role": "user", "text": "line %d " % index + "words " * 60, "at": NOW - index * DAY} for index in range(30)]})
-    text = store.startup_history(roster={"agents": []}, now_ms=NOW)[0]["content"][0]["text"]
-    assert len(text.split("\n", 1)[1].encode()) <= 6500
-    assert "line 0 " in text and '"age":"less than a minute ago"' in text
+        {"role": "user", "text": "line %d " % index + "words " * 60, "at": NOW - (29 - index) * DAY} for index in range(30)]})
+    payload = _payload(store, now_ms=NOW)
+    del payload["history_is_excerpt"]  # added after the budgeted records
+    assert len(memory._json(payload).encode()) <= 6500
+    kept = [row["text"].split(" words")[0] for row in payload["recent_conversation"]]
+    assert kept[-1] == "line 29" and "line 0" not in kept
+    assert payload["recent_conversation"][-1]["age"] == "less than a minute ago"
 
 
 def test_lab_promise_from_an_old_call_is_replayed_with_its_real_age():
