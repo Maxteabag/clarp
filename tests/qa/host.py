@@ -26,8 +26,8 @@ def recording_stt(root, stub):
     stt_providers.transcribe, exactly as WhisperSTT routes it; only the
     provider adapters behind it are replaced by recorders. Each appends the
     language it was handed to provider/stt-handoffs.jsonl. provider/stt-control.json
-    ({"no_key": [...], "fail_after": [...]}) makes a provider refuse before
-    the handoff (no key) or fail after it. The local default stays the stub.
+    ({"no_key": [...], "fail_after": [...]}) makes a provider's key check
+    fail (its handoff is then unobserved) or the provider fail after it. The local default stays the stub.
     """
     from lib import cartesia_stt, cartesia_stt_ws, deepgram_stt, eleven_stt, google_stt, stt_providers
     from lib.stt import STTUnknownModelError

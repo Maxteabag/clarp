@@ -780,9 +780,9 @@ def test_L2_scribe_without_a_policy_is_handed_no_constraint_for_a_set(env, monke
     assert _attempts(out) == [("elevenlabs:scribe_v2", "ok", "auto")]
 
 
-def test_L2_a_failure_before_the_boundary_is_null_after_it_observed_and_nothing_leaks(env, monkeypatch):
+def test_L2_an_unobserved_failure_is_null_an_observed_one_keeps_its_value_and_nothing_leaks(env, monkeypatch):
     _set(agent_languages={"mike": "no,en"}, agent_engines={"mike": "google:chirp_3,elevenlabs:scribe_v2"})
-    recorded = _cloud(monkeypatch, no_key={"google"})               # refused before the handoff
+    recorded = _cloud(monkeypatch, no_key={"google"})               # fails with no handoff noted: unobserved
     out = _transcribe(_whisper(), scope=_scope(env))
     assert recorded == [("elevenlabs", None)]
     assert _attempts(out) == [("google:chirp_3", "error", None), ("elevenlabs:scribe_v2", "ok", "auto")]
@@ -792,9 +792,9 @@ def test_L2_a_failure_before_the_boundary_is_null_after_it_observed_and_nothing_
     assert _attempts(out) == [("google:chirp_3", "error", "no,en"), ("elevenlabs:scribe_v2", "ok", "auto")]
 
 
-def test_L2_a_local_failure_before_and_after_the_model(env):
+def test_L2_a_local_failure_unobserved_and_observed(env):
     engine = _whisper("small.en")
-    engine._model = None                                            # not available: before the boundary
+    engine._model = None                                            # fails with no boundary noted: unobserved
     out = _transcribe(engine, scope=_scope(env))
     assert out.status == 500 and _attempts(out) == [("faster-whisper:small.en", "error", None)]
     engine = _whisper("small.en", fail=True)                        # the model fails after it was handed "en"

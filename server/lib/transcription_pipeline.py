@@ -361,7 +361,7 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
             continue
         started = time.monotonic()
         # Each attempt records only what its own engine boundary was handed
-        # (null when none was observed); nothing carries over to a fallback.
+        # (null when it was unobserved); nothing carries over to a fallback.
         handed: dict = {}
         try:
             with bound_session(focus), bound_language(step["language"]), capturing_handed() as handed:
