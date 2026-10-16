@@ -18,16 +18,29 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    # The test containers run the bundled provider CLIs, so this job holds no write or OIDC scope.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/test_docker_node.sh
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Browser suite against the built image
+      # Dependencies come first, with the network; the test containers below run on an internal
+      # Docker network with no route out (scripts/ci_docker_offline.sh), proven before each starts.
+      - name: Prepare the browser suite's dependencies
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
+      - name: Container smoke test (offline test containers)
+        run: >-
+          env -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL
+          scripts/test_docker_node.sh
+      - name: Browser suite against the built image (offline test container)
+        run: >-
+          env -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL
           CLARP_E2E_SKIP_BUILD=1 scripts/test_e2e_docker.sh
       - name: Scan fixable CRITICAL vulnerabilities
         run: |
@@ -57,6 +70,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
