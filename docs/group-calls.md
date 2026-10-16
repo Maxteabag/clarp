@@ -199,20 +199,27 @@ device's `X-Transcription-Model`, else the global engine. A device header
 that is not applied is reported (`requested_model.applied: false` with the
 reason), never refused.
 
-Engines are planned on the real model and what it does with a language:
-`server-default` (and `local`) means the configured local model. Google Chirp
-and ElevenLabs Scribe take a language set; other cloud engines take one code
-and get the first code of a set (`language_adapted: "first_code"`); an
-English-only local model (catalog `["en"]`, e.g. `small.en`) takes `en` only.
-A multilingual or unknown local model never receives a code (it auto-detects),
-so it is incompatible with every call language, `en` included: the Host never
-claims a language an engine did not get. An incompatible engine is skipped
-(`{engine, outcome: "skipped", reason: "language_incompatible"}`); the rest run
-in order, the next only on failure. Every attempt records the `language` the
-engine actually received, in `stt.attempts` and the `transcribe` event.
+Without a call policy (`call_languages` and `call_engines` both unset),
+in-call transcription is unchanged: the same engine chain as chat, nothing
+skipped and no new refusal, with the sources still reported.
 
-When no engine can take the call language, the clip is refused before any
-provider sees it: **409** `{"ok": false, "error": "no compatible engine",
+With a call policy configured, engines are planned on the real model and what
+it does with a language: `server-default` (and `local`) means the configured
+local model. Google Chirp and ElevenLabs Scribe take a language set; other
+cloud engines take one code and get the first code of a set
+(`language_adapted: "first_code"`); an English-only local model (catalog
+`["en"]`, e.g. `small.en`) takes `en` only. Multilingual or unknown local
+engines never receive the code, so they are skipped when a call policy is
+configured. An incompatible engine is skipped (`{engine, outcome: "skipped",
+reason: "language_incompatible"}`); the rest run in order, the next only on
+failure.
+
+Either way every attempt records the `language` the engine actually received,
+in `stt.attempts` and the `transcribe` event (a local engine that detects the
+language records `auto`); the Host never claims a code an engine did not get.
+
+When a call policy is configured and no engine can take the call language,
+the clip is refused before any provider sees it: **409** `{"ok": false, "error": "no compatible engine",
 "language": "<code(s)>", "engines": ["<real model ids>"], "attempts": [<the
 skips>]}`. Saving settings refuses a policy that can never work (the call
 languages against `call_engines`, or, when those are unset, the resolved
