@@ -354,13 +354,14 @@ def test_without_an_effective_override_the_elevenlabs_backup_is_unchanged(env):
                             ("elevenlabs-direct", "stored-voice")]
 
 
-def test_the_adapter_dir_is_the_sessions_own_empty_dir(tmp_path_factory):
-    """tests/unit/conftest.py points CLARP_TTS_ADAPTERS_DIR at an empty directory
-    under the session's temp dir before any lib import, so neither this module
-    nor any other ever sees an installed adapter unless a test installs one."""
+def test_the_adapter_dir_is_the_sessions_own_empty_dir():
+    """tests/conftest.py (the backend guard's pytest_configure) points
+    CLARP_TTS_ADAPTERS_DIR at an empty directory of the test session before any
+    lib import, in every directory and xdist worker, so neither this module nor
+    any other ever sees an installed adapter unless a test installs one."""
     from lib import tts_providers
     root = pathlib.Path(os.environ.get("CLARP_TTS_ADAPTERS_DIR", ""))
     assert custom_tts_adapters.ROOT == root
-    assert root.is_relative_to(tmp_path_factory.getbasetemp())
+    assert root.is_relative_to(pathlib.Path(os.environ["CLARP_TEST_GUARD_DIR"]))
     assert custom_tts_adapters.discover() == []
     assert not [row["id"] for row in tts_providers.status()["providers"] if row["id"].startswith("custom.")]
