@@ -210,7 +210,11 @@ def pytest_configure(config):
                 # The owner's live desktop and terminal: no test reaches the compositor,
                 # X server or terminal multiplexer (hyprctl, xdg-open, tmux, kitty @).
                 "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "XAUTHORITY", "SWAYSOCK",
-                "NIRI_SOCKET", "TMUX", "TMUX_PANE", "KITTY_LISTEN_ON", "KITTY_WINDOW_ID", "I3SOCK"):
+                "NIRI_SOCKET", "TMUX", "TMUX_PANE", "KITTY_LISTEN_ON", "KITTY_WINDOW_ID", "I3SOCK",
+                # Its audio servers, activation tokens, other terminals and agents.
+                "PULSE_SERVER", "PIPEWIRE_REMOTE", "WAYLAND_SOCKET", "XDG_ACTIVATION_TOKEN",
+                "DESKTOP_STARTUP_ID", "WEZTERM_UNIX_SOCKET", "WEZTERM_PANE", "ZELLIJ", "ZELLIJ_SESSION_NAME",
+                "STY", "SSH_AGENT_PID", "GPG_AGENT_INFO", "DBUS_SYSTEM_BUS_ADDRESS"):
         os.environ.pop(var, None)
     _prepend("PATH", str(root / "backend-cli-shims"))
     _prepend("PYTHONPATH", str(site))
