@@ -373,6 +373,8 @@ def _record_google(env):
     def google(*, text, voice, out_path, creds, on_chunk=None, **_kwargs):
         if voice not in google_tts.VOICES:                  # the core's own voice check
             raise google_tts.GoogleTTSError("voice_unavailable")
+        if "google" in env.fail:
+            raise google_tts.GoogleTTSError("google_http_error", "HTTP 503")
         env.builtin.append({"provider": "google", "voice": voice, "text": text})
         pathlib.Path(out_path).write_bytes(b"ID3google")
         return 9
@@ -408,3 +410,19 @@ def test_a_google_preview_of_a_voice_off_the_list_fails_and_never_plays_the_defa
     answer = _preview(env, {"voice_id": requested, "text": "Hello"})
     assert answer["status"] == 500
     assert env.spoken() == []
+
+
+@pytest.mark.parametrize("requested, google_fails", [
+    ("nb-NO-Chirp3-HD-Nobody", False),              # an id off the list
+    ("nb-NO-Chirp3-HD-Aoede", True),                # a valid voice whose synthesis fails
+], ids=["invalid-voice", "provider-failure"])
+def test_a_google_preview_never_falls_back_to_another_provider(env, requested, google_fails):
+    """A preview auditions the requested provider and voice only (FINAL r2), even with a fallback
+    configured that would speak for an ordinary clip: the preview fails truthfully instead."""
+    _record_google(env)
+    if google_fails:
+        env.fail.add("google")
+    env.configure("google", fallback="elevenlabs")
+    answer = _preview(env, {"voice_id": requested, "text": "Hello"})
+    assert answer["status"] == 500
+    assert env.spoken() == []                       # no ElevenLabs (or any other) synthesis

@@ -4412,3 +4412,27 @@ def test_a_google_preview_speaks_the_requested_voice_and_fails_with_fixed_status
         _get(base + "/voice-preview?provider=google&id=nb-NO-Chirp3-HD-Charon")
     assert failed.value.code == 502
     assert asked == [GOOGLE_AOEDE, "nb-NO-Chirp3-HD-Charon"]
+
+
+def test_a_google_voice_preview_is_the_requested_voice_only_even_with_a_fallback(
+        running_server, monkeypatch, tmp_path):
+    """GET /voice-preview and POST /preview agree: the requested google voice or a truthful
+    failure, never the configured fallback provider."""
+    from lib import config, google_tts
+    base, _ctx, _srv = running_server
+    _google_configured(monkeypatch, tmp_path)
+    import dataclasses
+    monkeypatch.setattr(config, "_CACHED", dataclasses.replace(
+        config.load(), tts_fallback="elevenlabs", eleven_api_key="eleven-key"))
+    asked, others = [], []
+
+    def google(*, text, voice, out_path, creds, **_kwargs):
+        asked.append(voice)
+        raise google_tts.GoogleTTSError("google_http_error", "HTTP 503")
+    monkeypatch.setattr(google_tts, "synthesize", google)
+    from lib import eleven_ws
+    monkeypatch.setattr(eleven_ws, "synthesize_streaming", lambda **kw: others.append(kw) or 0)
+    with pytest.raises(urllib.error.HTTPError) as failed:
+        _get(base + f"/voice-preview?provider=google&id={GOOGLE_AOEDE}")
+    assert failed.value.code == 502
+    assert asked == [GOOGLE_AOEDE] and others == []
