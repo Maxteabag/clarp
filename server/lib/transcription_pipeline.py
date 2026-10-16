@@ -106,7 +106,7 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
             call_steps = call_transcription.plan(engines, call_stt["language"]["value"])
         else:
             # No call policy: exactly today's engines and languages (§12.2).
-            call_steps = call_transcription.unchanged_plan(engines, focus, stt)
+            call_steps = call_transcription.unchanged_plan(engines)
         if call_stt["engines"]["source"] == "device":
             # An explicit header names the model asked for, exactly as outside
             # a call: `server-default` or `local` goes to transcribe_model_bytes
@@ -347,7 +347,7 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
     """Run a call-scoped clip through its planned engines in order: the next
     only on failure, an incompatible one skipped, every attempt recorded in
     ``call_stt["report"]``. Returns (text, ends_terminal, duration, engine)."""
-    from .stt_language import bound_language, bound_session
+    from .stt_language import bound_language, bound_session, capturing_handed
     attempts: list[dict] = []
     report = {"language": call_stt["language"], "engines": call_stt["engines"],
               "effective_engine": None, "attempts": attempts, "language_adapted": None,
@@ -360,8 +360,11 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
             attempts.append({"engine": step["engine"], "outcome": "skipped", "reason": step["skip"]})
             continue
         started = time.monotonic()
+        # Each attempt records only what its own engine boundary was handed
+        # (null when none was observed); nothing carries over to a fallback.
+        handed: dict = {}
         try:
-            with bound_session(focus), bound_language(step["language"]):
+            with bound_session(focus), bound_language(step["language"]), capturing_handed() as handed:
                 if step.get("local_default"):
                     if not stt.ready.is_set():
                         raise STTModelLoadingError("whisper model loading")
@@ -375,18 +378,18 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
                     raise STTUnknownModelError(
                         f"transcription model not installed: {step.get('model', step['engine'])}")
         except (STTUnknownModelError, STTModelLoadingError, STTBusyError) as e:
-            attempts.append({"engine": step["engine"], "outcome": "error", "language": step.get("received", step["language"]),
+            attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
                              "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
             raise
         except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error
-            attempts.append({"engine": step["engine"], "outcome": "error", "language": step.get("received", step["language"]),
+            attempts.append({"engine": step["engine"], "outcome": "error", "language": handed.get("language"),
                              "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
             if step is runnable[-1]:
                 raise
             log_exception("sttCallEngineFallback", e, detail=step["engine"])
             continue
-        # The language the engine actually received (§12.1: never claim more).
-        attempts.append({"engine": step["engine"], "outcome": "ok", "language": step.get("received", step["language"]),
+        # The language handed at the engine boundary (§12.1: never claim more).
+        attempts.append({"engine": step["engine"], "outcome": "ok", "language": handed.get("language"),
                          "ms": int((time.monotonic() - started) * 1000)})
         report["effective_engine"] = step["engine"]
         report["language_adapted"] = "first_code" if step["adapted"] else None

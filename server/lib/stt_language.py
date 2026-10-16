@@ -63,6 +63,32 @@ def current_language() -> str | None:
     return _LANGUAGE.get()
 
 
+# The language handed at the Host->engine boundary for one call-transcription
+# attempt (docs/group-calls.md): what the Host passed, not what a provider did
+# with it. An attempt whose boundary never noted it records null.
+_HANDED: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "transcription_language_handed", default=None)
+
+
+@contextlib.contextmanager
+def capturing_handed():
+    """A fresh record for one attempt, reset on exit or exception."""
+    seen: dict = {}
+    token = _HANDED.set(seen)
+    try:
+        yield seen
+    finally:
+        _HANDED.reset(token)
+
+
+def note_handed(language: str | None) -> None:
+    """At an engine boundary: the language handed (``auto`` = no constraint).
+    Only records, and only inside a capture."""
+    seen = _HANDED.get()
+    if seen is not None:
+        seen["language"] = language or "auto"
+
+
 def selected() -> str:
     value = (settings_store.get_text(LANGUAGE_KEY) or "").strip().lower()
     return value if _CODE.match(value) else DEFAULT_LANGUAGE

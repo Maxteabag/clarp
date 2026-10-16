@@ -374,7 +374,11 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
     language = stt_language.current_language() or stt_language.language_for(session)
     if "," in language and provider not in {"google", "elevenlabs"}:
         raise ValueError("agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
-    text, duration = call(language)
+    # The argument handed to the adapter, as the attempt records it: Scribe
+    # drops a set and detects without bound, so it is handed none.
+    handed = None if provider == "elevenlabs" and "," in language else language
+    stt_language.note_handed(handed)
+    text, duration = call(handed)
     from .judgment_sites import is_junk
     text = (text or "").strip()
     if is_junk(text):
