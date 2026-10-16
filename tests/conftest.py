@@ -206,7 +206,11 @@ def pytest_configure(config):
         "CLARP_TEST_BACKEND_CLI_LOG": str(session_log),
     })
     for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
-                "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "GNUPGHOME"):
+                "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "GNUPGHOME",
+                # The owner's live desktop and terminal: no test reaches the compositor,
+                # X server or terminal multiplexer (hyprctl, xdg-open, tmux, kitty @).
+                "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "XAUTHORITY", "SWAYSOCK",
+                "NIRI_SOCKET", "TMUX", "TMUX_PANE", "KITTY_LISTEN_ON", "KITTY_WINDOW_ID", "I3SOCK"):
         os.environ.pop(var, None)
     _prepend("PATH", str(root / "backend-cli-shims"))
     _prepend("PYTHONPATH", str(site))
