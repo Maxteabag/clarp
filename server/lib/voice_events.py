@@ -148,7 +148,14 @@ def clock_offset(sent_at: int | None, received_at: int) -> int | None:
 def record_batch(*, source: str, events: list, client_id: str | None = None,
                  sent_at: int | None = None, received_at: int | None = None,
                  default_session: str | None = None) -> dict:
-    """Store a client batch. Returns {"stored": n, "clock_offset_ms": o}."""
+    """Store a client batch. Returns {"stored": n, "clock_offset_ms": o}.
+
+    A client never writes as the server: a batch that names source "server"
+    (the body is client-controlled) is stored as "other", so client rows
+    cannot impersonate server events such as opening receipts.
+    """
+    if str(source or "").strip().lower() == "server":
+        source = "other"
     received_at = received_at if received_at is not None else now_ms()
     offset = clock_offset(_int(sent_at), received_at)
     stored = 0
