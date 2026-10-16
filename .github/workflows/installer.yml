@@ -35,15 +35,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.9.18"
           enable-cache: true
       - name: Sync locked Python environment
-        run: uv sync --frozen
+        # The dev group carries pytest and its plugins; the contained Linux step runs .venv/bin/python
+        # directly and cannot fetch them later.
+        run: uv sync --frozen --group dev
+      - name: Build the web bundle the installer tests need (with network, before the contained tests)
+        if: runner.os == 'Linux'
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      # Linux: no network, credentials or privilege (scripts/ci_contained.sh). macOS has no network
+      # namespace, so that leg stays uncontained (an explicit residual of the CI containment proposal).
       - name: Cross-platform installer and service tests
         run: >-
-          uv run --frozen --group dev python -m pytest -n 2
+          ${{ runner.os == 'Linux' && 'bash scripts/ci_contained.sh .venv/bin/python' || 'uv run --frozen --group dev python' }} -m pytest -n 2
           tests/integration/test_versioned_installer.py
           tests/unit/test_agent_toolchain_installer.py
           tests/unit/test_service_manager.py
