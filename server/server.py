@@ -5801,6 +5801,8 @@ class Handler(BaseHTTPRequestHandler):
         if data is None:
             return self._json_error(400, "bad json")
         status = (data.get("status") or "").strip()
+        if isinstance(data, dict) and self._is_opening_ack(data):
+            return self._handle_opening_ack(data, status)
         clip_id = data.get("clip_id")
         try:
             clip_id = int(clip_id) if clip_id not in (None, "") else None
@@ -5832,6 +5834,43 @@ class Handler(BaseHTTPRequestHandler):
                 play_event, session=clip_session, trace_id=trace_id or clip_trace,
                 detail={"clip_id": clip_id, "url": url or None, "error": error})
         self._json_ok({"ok": True, "updated": ok})
+
+    def _is_opening_ack(self, data: dict) -> bool:
+        """An opening receipt (docs/agent-rings.md "Opening receipts"): an explicit
+        opening_id, or a clip_id that is exactly an opening id. Every other
+        clip_id keeps the integer path and its 400 for non-integers."""
+        from lib import agent_rings
+        clip = data.get("clip_id")
+        return (data.get("opening_id") not in (None, "")
+                or (isinstance(clip, str) and agent_rings.opening_ring_id(clip) is not None))
+
+    def _handle_opening_ack(self, data: dict, status: str):
+        from lib import agent_rings, group_calls
+        explicit, clip = data.get("opening_id"), data.get("clip_id")
+        if explicit not in (None, ""):
+            if not isinstance(explicit, str) or agent_rings.opening_ring_id(explicit) is None:
+                return self._json_error(400, "bad opening_id")
+            if clip not in (None, "") and clip != explicit:
+                return self._json_error(400, "conflicting clip ids")
+            opening_id = explicit
+        else:
+            opening_id = clip
+        principal = self._calls_principal()
+        if principal is None:
+            return None
+        error = data.get("error")
+        error = str(error).strip() or None if error not in (None, "") else None
+        try:
+            out = agent_rings.record_opening_receipt(
+                principal, opening_id, status=status,
+                attempt=data.get("opening_attempt", 1), error=error)
+        except group_calls.CallError as exc:
+            return self._json_error(exc.status, exc.error)
+        eventlog.emit("client", "clipAck", trace_id=data.get("trace_id") or None,
+                      detail={"opening_id": opening_id, "status": status,
+                              "updated": out["updated"], "class": out["opening"]["class"],
+                              "historical": out["opening"]["historical"]})
+        return self._json_ok(out)
 
     def _handle_message_clips(self):
         from lib.message_audio import retained_events

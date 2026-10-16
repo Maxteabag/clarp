@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import threading
 import time
 import uuid
@@ -430,3 +431,85 @@ def _expire_quietly() -> None:
         expire_due()
     except Exception as exc:  # noqa: BLE001
         log_exception("agentRingExpireFail", exc)
+
+
+# ---- opening receipts (H1, contract 68, feature opening_receipts) ----------------
+#
+# The phone acknowledges an answered ring's opening as
+# ``ring-opening-<ring_id>``. A receipt is a class of what the phone reported
+# (attempted, started, first media-clock progress, terminal), never proof that
+# anything was audible. Receipts are stored as voice-timeline rows; the ring
+# record, the call and every event stay untouched, and a receipt that arrives
+# after the call ended is kept as history only.
+
+OPENING_ID = re.compile(r"ring-opening-(rng_[0-9a-f]{32})")
+OPENING_CLASSES = {
+    "queued": "attempted",
+    "play-start": "started",
+    "play-progress": "progress",
+    "play-ok": "terminal_ok",
+    "play-fail": "terminal_error",
+    "held": "held",
+}
+_receipt_lock = threading.Lock()
+
+
+def opening_ring_id(opening_id: str) -> str | None:
+    """The ring id inside an exact opening id, else None."""
+    match = OPENING_ID.fullmatch(opening_id) if isinstance(opening_id, str) else None
+    return match.group(1) if match else None
+
+
+def record_opening_receipt(principal: str, opening_id: str, *, status: str,
+                           attempt: Any = 1, error: str | None = None) -> dict:
+    """Record one opening receipt for the device that answered the ring.
+
+    Raises CallError: 400 bad status/attempt, 404 unknown opening, 409 ring
+    not answered, 403 not your ring. A repeat of the same (ring, attempt,
+    class) is accepted without a second row.
+    """
+    from . import db, group_calls, voice_events
+    ring_id = opening_ring_id(opening_id)
+    if ring_id is None:
+        raise CallError(400, "bad opening_id")
+    receipt_class = OPENING_CLASSES.get(status)
+    if receipt_class is None:
+        raise CallError(400, "bad status")
+    if attempt is None:
+        attempt = 1
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        raise CallError(400, "bad opening_attempt")
+    with _lock:
+        ring = next((r for r in _load() if r["ring_id"] == ring_id), None)
+    if ring is None:
+        raise CallError(404, "unknown opening")
+    if ring["state"] != "answered":
+        raise CallError(409, "ring not answered")
+    if ring.get("answered_by") != principal:
+        raise CallError(403, "not your ring")
+    call = group_calls.get_call(ring.get("call_id") or "") if ring.get("call_id") else None
+    historical = call is None or call.get("state") != "live"
+    event = "opening_" + receipt_class
+    detail = {"opening_id": opening_id, "ring_id": ring_id, "call_id": ring.get("call_id") or "",
+              "attempt": attempt, "status": status, "class": receipt_class,
+              "historical": historical}
+    if error:
+        detail["error"] = str(error)[:500]
+    with _receipt_lock:
+        con = db.conn()
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            seen = con.execute(
+                "SELECT 1 FROM voice_events WHERE trace_id = ? AND event = ?"
+                " AND json_extract(detail, '$.attempt') = ? LIMIT 1",
+                (ring_id, event, attempt)).fetchone()
+            if seen is None:
+                voice_events.record(event, source="server", session=ring["session"],
+                                    trace_id=ring_id, detail=detail)
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    return {"ok": True, "updated": seen is None,
+            "opening": {"ring_id": ring_id, "call_id": ring.get("call_id") or "", "attempt": attempt,
+                        "class": receipt_class, "historical": historical}}

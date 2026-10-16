@@ -479,6 +479,10 @@ pass both ids on the following `/send`.
 
 Acknowledge playback with `POST /clips/ack` `{"clip_id": …, "status":
 "queued | play-start | play-ok | play-fail", "error": "…", "trace_id": "…"}`.
+A Host with feature `opening_receipts` also takes an answered ring's opening
+line: `clip_id` (or `opening_id`) exactly `ring-opening-<ring_id>`, an optional
+`opening_attempt`, and the extra status `play-progress`; see
+docs/agent-rings.md "Opening receipts".
 `GET /clips/recoverable?session=` returns recent clips a client that was
 suspended may still want to play.
 

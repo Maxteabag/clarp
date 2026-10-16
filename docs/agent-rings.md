@@ -117,6 +117,34 @@ clarp-admin call rings on|off|status      # the owner's switch
 answered, the user has heard the opening line and their reply arrives as the
 next turn, with a `[Group call]` header that says why you called.
 
+## Opening receipts
+
+Feature `opening_receipts` (Host contract 68). The phone acknowledges the
+opening line of a ring it answered on `POST /clips/ack`, with
+`clip_id: "ring-opening-<ring_id>"` (or the same value in `opening_id`) and an
+optional `opening_attempt` (a logical playback attempt, default 1; transport
+retries keep it). Only the device that answered the ring may report it.
+
+| `status` | Receipt class |
+|---|---|
+| `queued` | attempted |
+| `play-start` | started |
+| `play-progress` | progress: the first observed media-clock advance (openings only) |
+| `play-ok` | terminal_ok |
+| `play-fail` | terminal_error (with `error`) |
+| `held` | held |
+
+A receipt says what the phone reported, never that anything was audible.
+Classes are accepted in any order, because the phone may coalesce pending
+acknowledgements. The same ring, attempt and class is recorded once; a repeat
+answers `updated: false`. Receipts are voice-timeline rows (`opening_<class>`,
+`trace_id` = ring id). A receipt that arrives after the call ended is kept as
+history (`historical: true`) and never plays, dispatches or changes the ring or
+the call. Refusals: 400 `bad opening_id`, `conflicting clip ids`,
+`bad opening_attempt`, `bad status`; 401 limited device; 403 `not your ring`;
+404 `unknown opening`; 409 `ring not answered`. Integer clip ids and every
+other string keep their old behaviour.
+
 ## CallKit (VoIP)
 
 A phone that supports CallKit registers its PushKit VoIP token with
