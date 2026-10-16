@@ -184,7 +184,7 @@ same GET), unset by default: `call_languages` (one ISO code or a set of up to
 three, e.g. `no,en`) and `call_engines` (an ordered fallback list, e.g.
 `google:chirp_3,elevenlabs:scribe_v2`). A language set together with an engine
 that takes a single language (anything but Google Chirp and ElevenLabs
-Scribe) is refused when saved.
+Scribe) is refused when saved, and so is a set that only Scribe would get.
 
 A clip is in a call only when `/transcribe` carries `X-Clarp-Call-Id` and
 `X-Transcription-Session`, the call is live, belongs to this device on this
@@ -211,8 +211,9 @@ or empty header falls through to the global engine, as in chat.
 
 With a call policy configured, engines are planned on the real model and what
 it does with a language: `server-default` (and `local`) means the configured
-local model. Google Chirp and ElevenLabs Scribe take a language set; other
-cloud engines take one code and get the first code of a set
+local model. Google Chirp takes a language set; ElevenLabs Scribe takes one
+code, and a set skips it (Scribe would drop the set and detect any language);
+other cloud engines take one code and get the first code of a set
 (`language_adapted: "first_code"`); an English-only local model (catalog
 `["en"]`, e.g. `small.en`) takes `en` only. Multilingual or unknown local
 engines never receive the code, so they are skipped when a call policy is
