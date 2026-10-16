@@ -106,3 +106,70 @@ def test_current_v88_database_gets_context_notification_dedup_table():
         "PRAGMA table_info(oracle_context_notifications)")}
     assert {"thread_id", "owner_principal", "source_kind", "source_id",
             "reference_ts", "stale", "sent_at"} <= columns
+
+
+DAY = 86_400_000
+NOW = 1_792_152_000_000  # 2026-10-16T08:00:00Z
+
+
+def _payload(store, **kwargs):
+    text = store.startup_history(roster={"agents": []}, **kwargs)[0]["content"][0]["text"]
+    return json.loads(text.split("\n", 1)[1])
+
+
+def _epoch_ms(iso):
+    from datetime import datetime
+    moment = datetime.fromisoformat(iso)
+    assert moment.tzinfo is not None
+    return int(moment.timestamp() * 1000)
+
+
+@pytest.mark.parametrize("delta,phrase", [
+    (0, "less than a minute ago"), (59_999, "less than a minute ago"), (60_000, "1 minute ago"),
+    (59 * 60_000, "59 minutes ago"), (2 * 3_600_000 + 5, "2 hours ago"), (DAY, "1 day ago"),
+    (13 * DAY + 3_600_000, "13 days ago"), (-5_000, "less than a minute ago")])
+def test_age_phrase_is_deterministic_for_an_injected_clock(delta, phrase):
+    assert memory.age_phrase(NOW - delta, NOW) == phrase
+
+
+def test_startup_history_states_now_and_when_each_dated_item_happened(tmp_path):
+    agent = agents.create_agent(persona="Jax", voice_id="fixture", session="jax", cwd=str(tmp_path))
+    store = memory.open_thread("phone", "jax", connection_id="one")
+    oracle_delegations.begin(delegation_id="work-1", trace_id="t1", client_msg_id="m1", agent_id=agent,
+                             session="jax", request_text="Check the invoice", owner_principal="phone")
+    db.conn().execute("UPDATE oracle_delegations SET updated_at=? WHERE delegation_id='work-1'", (NOW - 3 * DAY,))
+    store.link_work("work-1")
+    store.save({"revision": 3, "fragments": [
+        {"role": "user", "text": "Legacy line without a time."},
+        {"role": "assistant", "text": "Dated line.", "at": NOW - 2 * 3_600_000}]})
+    payload = _payload(store, now_ms=NOW)
+    assert _epoch_ms(payload["now"]) == NOW
+    legacy, dated = payload["recent_conversation"]
+    assert "at" not in legacy and "age" not in legacy
+    assert _epoch_ms(dated["at"]) == NOW - 2 * 3_600_000 and dated["age"] == "2 hours ago"
+    [work] = payload["work"]
+    assert _epoch_ms(work["updated_at"]) == NOW - 3 * DAY and work["age"] == "3 days ago"
+
+
+def test_dated_history_still_respects_the_startup_budget():
+    store = memory.open_thread("phone", "main", connection_id="one")
+    store.save({"revision": 1, "fragments": [
+        {"role": "user", "text": "line %d " % index + "words " * 60, "at": NOW - index * DAY} for index in range(30)]})
+    text = store.startup_history(roster={"agents": []}, now_ms=NOW)[0]["content"][0]["text"]
+    assert len(text.split("\n", 1)[1].encode()) <= 6500
+    assert "line 0 " in text and '"age":"less than a minute ago"' in text
+
+
+def test_lab_promise_from_an_old_call_is_replayed_with_its_real_age():
+    """Shape of the 2026-10-16 call: a promise made 14 days earlier, in a past call."""
+    store = memory.open_thread("phone", "main", connection_id="one")
+    promise = "Jeg følger med og gir deg beskjed med en gang jeg får svar fra Jax."
+    store.save({"revision": 9, "fragments": [
+        {"role": "user", "text": "Spør Jax om fakturaen.", "provider_session": "call-10-02", "end_ms": 4100,
+         "revision": 9, "at": NOW - 14 * DAY - 9_000},
+        {"role": "assistant", "text": promise, "provider_session": "call-10-02", "end_ms": 6900,
+         "revision": 9, "at": NOW - 14 * DAY}]})
+    payload = _payload(store, now_ms=NOW)
+    replayed = next(row for row in payload["recent_conversation"] if row["text"] == promise)
+    assert replayed["age"] == "14 days ago"
+    assert _epoch_ms(replayed["at"]) == NOW - 14 * DAY and _epoch_ms(payload["now"]) == NOW
