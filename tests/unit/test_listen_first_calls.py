@@ -125,13 +125,22 @@ def _state(ring_id):
 def _queue(ring_id):
     return [dict(r) for r in db.conn().execute(
         "SELECT queue_id, status, claimed_at, client_msg_id, origin, text FROM queued_turns"
-        " WHERE queue_id = ?", (f"call-open:{ring_id}",))]
+        " WHERE queue_id LIKE ? ORDER BY queue_seq", (f"call-open:{ring_id}:%",))]
 
 
 def _admissions(ring_id):
     return [dict(r) for r in db.conn().execute(
-        "SELECT admission_id, origin FROM prompt_admissions WHERE client_admission_id = ?",
-        (f"call-open:{ring_id}",))]
+        "SELECT admission_id, origin, client_admission_id FROM prompt_admissions"
+        " WHERE client_admission_id LIKE ? ORDER BY observed_at", (f"call-open:{ring_id}:%",))]
+
+
+def _aid(ring_id):
+    """The current intent generation's admission id (§11.I: call-open:<ring_id>:<gen>)."""
+    return _state(ring_id)["intent"]["admission_id"]
+
+
+def _dispatch(ring_id):
+    return rings.claim_initiative(_aid(ring_id))
 
 
 def _user_rows():
@@ -342,7 +351,7 @@ def test_each_silence_kind_admits_one_initiative_with_its_header(env, claim, nee
     assert out["opening"]["state"] == "initiative_queued" and out["opening"]["intent"]["state"] == "admitted"
     [row] = _queue(ring["ring_id"])
     assert row["status"] == "queued" and row["origin"] == "automation"
-    assert row["client_msg_id"] == f"call-open:{ring['ring_id']}"
+    assert row["client_msg_id"] == f"call-open:{ring['ring_id']}:1" == _aid(ring["ring_id"])
     assert needle in row["text"] and "Possible water leak at pump 01" in row["text"]
     assert len(_admissions(ring["ring_id"])) == 1
     assert _user_rows() == rows_before                                # never a user row
@@ -469,26 +478,26 @@ def test_A_greeting_after_admission_and_before_the_claim_withdraws_it(env):
     assert out["route"] == "greeting" and out["opening"]["intent"]["state"] == "cancelled"
     [row] = _queue(ring["ring_id"])
     assert row["status"] == "withdrawn"
-    assert rings.claim_initiative(f"call-open:{ring['ring_id']}") is False      # the dispatcher loses
+    assert _dispatch(ring["ring_id"]) is False      # the dispatcher loses
     assert rings.recover_openings() == 0
 
 
 def test_A_greeting_after_the_dispatcher_claim_is_ordinary(env):
     ring, op = _queued(env)
     rings.admit_initiative(ring["ring_id"])
-    assert rings.claim_initiative(f"call-open:{ring['ring_id']}") is True
+    assert _dispatch(ring["ring_id"]) is True
     assert _state(ring["ring_id"])["state"] == "initiative_started"
     out = _greet(op)
     assert out["route"] == "ordinary" and out["opening"]["state"] == "initiative_started"
     assert out["opening"]["greeting"] == "ordinary" and out["opening"]["intent"]["state"] == "started"
     [row] = _queue(ring["ring_id"])
     assert row["status"] == "claimed"                                          # it runs once
-    assert rings.claim_initiative(f"call-open:{ring['ring_id']}") is False
+    assert _dispatch(ring["ring_id"]) is False
 
 
 def test_A_the_dispatcher_claim_before_admission_finds_nothing(env):
     ring, op = _queued(env)
-    assert rings.claim_initiative(f"call-open:{ring['ring_id']}") is False
+    assert _dispatch(ring["ring_id"]) is False
     assert _state(ring["ring_id"])["intent"]["state"] == "intended"
 
 
@@ -536,7 +545,7 @@ def test_A_a_stray_admission_row_is_adopted_without_a_second_insert(env):
     from lib import prompt_admissions
     admission = prompt_admissions.create(
         authenticated_at_admission=True, origin="automation", sender_agent_id="", channel="call",
-        observed_at=db.now_ms(), client_admission_id=f"call-open:{ring['ring_id']}", trace_id="t",
+        observed_at=db.now_ms(), client_admission_id=_aid(ring["ring_id"]), trace_id="t",
         original_text="x")
     prompt_admissions.record(admission, agent_id="a-theo", session="theo-97e5")
     assert rings.admit_initiative(ring["ring_id"]) == "adopted"
@@ -551,7 +560,7 @@ def test_A_recovery_acts_only_on_intended(env, state):
         _greet(op)
     elif state == "started":
         rings.admit_initiative(ring["ring_id"])
-        rings.claim_initiative(f"call-open:{ring['ring_id']}")
+        _dispatch(ring["ring_id"])
     elif state == "greeting":
         _greet(op)
     else:
@@ -574,7 +583,7 @@ def test_A_greeting_admitter_and_dispatcher_in_every_order(env, order):
         elif step == "admitter":
             results[step] = rings.admit_initiative(ring["ring_id"])
         else:
-            results[step] = rings.claim_initiative(f"call-open:{ring['ring_id']}")
+            results[step] = _dispatch(ring["ring_id"])
     final = _state(ring["ring_id"])
     rows = _queue(ring["ring_id"])
     ran = results["dispatcher"] is True
@@ -613,7 +622,7 @@ def test_A_concurrent_greeting_admitter_and_dispatcher_threads(env):
         threads = [threading.Thread(target=run, args=a) for a in (
             ("greeting", lambda: _greet(op)["route"]),
             ("admitter", lambda: rings.admit_initiative(ring["ring_id"])),
-            ("dispatcher", lambda: rings.claim_initiative(f"call-open:{ring['ring_id']}")))]
+            ("dispatcher", lambda: _dispatch(ring["ring_id"])))]
         for t in threads:
             t.start()
         for t in threads:
@@ -634,7 +643,7 @@ def test_retire_in_each_state(env, state):
         if state != "intended":
             rings.admit_initiative(ring["ring_id"])
         if state == "initiative_started":
-            rings.claim_initiative(f"call-open:{ring['ring_id']}")
+            _dispatch(ring["ring_id"])
     else:
         ring, op = _answered()
         if state == "listening":
@@ -744,12 +753,12 @@ def test_no_renewal_after_commit(env):
 def test_opening_audio_is_tagged_and_ordinary_follow_ups_are_not(env):
     ring, op = _queued(env)
     rings.admit_initiative(ring["ring_id"])
-    rings.claim_initiative(f"call-open:{ring['ring_id']}")
+    _dispatch(ring["ring_id"])
     initiative_trace = _state(ring["ring_id"])["intent"]["trace_id"]
     tag = rings.opening_audio(initiative_trace)
     assert tag == {"call_id": op["call_id"], "opening": {
         "ring_id": ring["ring_id"], "token": op["token"], "epoch": 1, "kind": "initiative",
-        "admission_id": f"call-open:{ring['ring_id']}"}}
+        "admission_id": f"call-open:{ring['ring_id']}:1"}}
     assert rings.opening_audio("tr-ordinary") is None
     assert rings.skip_opening_synthesis(initiative_trace) is False
 
@@ -765,7 +774,7 @@ def test_a_greeting_reply_is_tagged_with_its_message_id(env):
 def test_initiative_synthesis_is_skipped_once_superseded_or_retired(env):
     ring, op = _queued(env)
     rings.admit_initiative(ring["ring_id"])
-    rings.claim_initiative(f"call-open:{ring['ring_id']}")
+    _dispatch(ring["ring_id"])
     trace = _state(ring["ring_id"])["intent"]["trace_id"]
     _greet(op, trace_id="tr-after")                         # a greeting arrived after start
     assert rings.skip_opening_synthesis(trace) is True
@@ -821,3 +830,145 @@ def test_the_tts_worker_tags_opening_clips_and_skips_fenced_ones(env, tmp_path, 
     assert "opening" not in plain and "call_id" not in plain
     calls.end(PHONE)
     assert tts_worker._opening_fenced("tr-greet") is True and tts_worker._opening_fenced("tr-other") is False
+
+
+# ---- §11.H: a withdrawal that affects no row proves nothing -----------------------------
+
+def _admitted(env):
+    ring, op = _queued(env)
+    assert rings.admit_initiative(ring["ring_id"]) == "admitted"
+    return ring, op
+
+
+def _greeted_without_start(ring, op):
+    out = _greet(op)
+    final = _state(ring["ring_id"])
+    assert out["route"] == "greeting" and final["state"] == "greeting"
+    assert final["intent"]["state"] == "cancelled"
+    assert rings.recover_openings() == 0 and _dispatch(ring["ring_id"]) is False   # never resurrected
+    return final
+
+
+def test_H_a_stop_between_admit_and_greeting_withdraws_the_held_row(env):
+    ring, op = _admitted(env)
+    turn_queue.set_paused("a-theo", True)                    # a Stop: the row is held, unclaimed
+    assert _queue(ring["ring_id"])[0]["status"] == "queued"
+    _greeted_without_start(ring, op)
+    assert _queue(ring["ring_id"])[0]["status"] == "withdrawn"
+    turn_queue.set_paused("a-theo", False)
+    assert turn_queue.pending("a-theo") == []                # Resume runs nothing
+
+
+def test_H_a_stop_parked_row_is_withdrawn_too(env):
+    ring, op = _admitted(env)
+    db.conn().execute("UPDATE queued_turns SET status='parked' WHERE queue_id=?", (_aid(ring["ring_id"]),))
+    _greeted_without_start(ring, op)
+    assert _queue(ring["ring_id"])[0]["status"] == "withdrawn"
+
+
+def test_H_an_owner_cancelled_row_cancels_the_intent(env):
+    ring, op = _admitted(env)
+    assert turn_queue.remove(_aid(ring["ring_id"])) is True   # DELETE /turn-queue/<id>
+    _greeted_without_start(ring, op)
+    assert _queue(ring["ring_id"]) == []
+
+
+def test_H_a_recovery_cancelled_row_cancels_the_intent(env):
+    ring, op = _admitted(env)
+    assert turn_queue.cancel(_aid(ring["ring_id"])) is True   # what recovery retires with
+    _greeted_without_start(ring, op)
+    assert _queue(ring["ring_id"])[0]["status"] == "cancelled"
+
+
+def test_H_a_deleted_row_cancels_the_intent(env):
+    ring, op = _admitted(env)
+    db.conn().execute("DELETE FROM queued_turns WHERE queue_id=?", (_aid(ring["ring_id"]),))
+    _greeted_without_start(ring, op)
+
+
+@pytest.mark.parametrize("status", ["interrupted", "done", "failed", "ended", "started"])
+def test_H_start_evidence_on_the_row_commits_the_initiative(env, status):
+    ring, op = _admitted(env)
+    db.conn().execute("UPDATE queued_turns SET status=?, claimed_at=1 WHERE queue_id=?",
+                      (status, _aid(ring["ring_id"])))
+    out = _greet(op)
+    assert out["route"] == "ordinary" and out["opening"]["state"] == "initiative_started"
+    assert _state(ring["ring_id"])["intent"]["state"] == "started"
+
+
+def test_H_interrupted_after_start_stays_committed(env):
+    ring, op = _admitted(env)
+    assert _dispatch(ring["ring_id"]) is True
+    turn_queue.mark_started(_aid(ring["ring_id"]))
+    turn_queue.settle_receipt("a-theo", _state(ring["ring_id"])["intent"]["trace_id"], "interrupted")
+    assert _queue(ring["ring_id"])[0]["status"] == "interrupted"
+    out = _greet(op)
+    assert out["route"] == "ordinary" and out["opening"]["state"] == "initiative_started"
+
+
+def test_H_a_row_claimed_by_someone_else_is_ambiguous(env):
+    ring, op = _admitted(env)
+    assert turn_queue.claim(_aid(ring["ring_id"])) is not None   # a manual send claim, not the opening's
+    out = _greet(op)
+    final = _state(ring["ring_id"])
+    assert out["route"] == "ordinary" and out["opening"]["state"] == "unknown"
+    assert final["state"] == "unknown" and final["intent"]["state"] == "unknown"
+    # No initiative, ever: not after the stale claim resets, not on recovery.
+    turn_queue.reset_stale_claims(max_age_ms=0)
+    assert _dispatch(ring["ring_id"]) is False
+    assert _queue(ring["ring_id"])[0]["status"] == "withdrawn"
+    assert rings.recover_openings() == 0
+
+
+def test_H_a_turn_for_the_intent_with_a_queued_row_is_ambiguous(env):
+    ring, op = _admitted(env)
+    db.conn().execute("INSERT INTO turns(agent_id, source, trace_id, started_at) VALUES (?,?,?,?)",
+                      ("a-theo", "pwa", _state(ring["ring_id"])["intent"]["trace_id"], db.now_ms()))
+    out = _greet(op)
+    assert out["opening"]["state"] == "unknown" and _dispatch(ring["ring_id"]) is False
+
+
+def test_H_the_dispatcher_never_runs_an_intent_that_is_not_admitted(env):
+    ring, op = _admitted(env)
+    rings.retire_for_principal(PHONE, "auth_revoked")
+    assert _queue(ring["ring_id"])[0]["status"] == "withdrawn"
+    db.conn().execute("UPDATE queued_turns SET status='queued' WHERE queue_id=?", (_aid(ring["ring_id"]),))
+    assert _dispatch(ring["ring_id"]) is False                 # the intent, not the row, authorizes
+    assert _queue(ring["ring_id"])[0]["status"] == "withdrawn"
+
+
+# ---- §11.I: one admission id per intent generation --------------------------------------
+
+def test_I_speech_withdraws_gen_1_and_abandonment_admits_gen_2(env):
+    ring, op = _admitted(env)
+    first = _aid(ring["ring_id"])
+    assert first == f"call-open:{ring['ring_id']}:1"
+    out = _claim(op, "speech_started")
+    assert out["opening"]["state"] == "speech_latched"
+    out = _claim(op, "speech_abandoned", reason="capture_aborted")
+    second = _aid(ring["ring_id"])
+    assert second == f"call-open:{ring['ring_id']}:2" and out["opening"]["intent"]["gen"] == 2
+    assert rings.admit_initiative(ring["ring_id"]) == "admitted"      # no UNIQUE collision with gen 1
+    assert [r["status"] for r in _queue(ring["ring_id"])] == ["withdrawn", "queued"]
+    assert [a["client_admission_id"] for a in _admissions(ring["ring_id"])] == [first, second]
+    assert rings.claim_initiative(first) is False and rings.claim_initiative(second) is True
+    assert _state(ring["ring_id"])["state"] == "initiative_started"
+
+
+def test_I_a_committed_gen_gets_no_successor(env):
+    ring, op = _admitted(env)
+    assert _dispatch(ring["ring_id"]) is True
+    _refused(lambda: _claim(op, "speech_started"), 409, "already resolved")
+    _refused(lambda: _claim(op, "speech_abandoned", reason="empty_capture"), 409, "already resolved")
+    assert len(_queue(ring["ring_id"])) == 1 and _state(ring["ring_id"])["intent"]["gen"] == 1
+
+
+def test_I_recovery_admits_only_the_current_gen(env):
+    ring, op = _admitted(env)
+    _claim(op, "speech_started")                              # gen 1 withdrawn
+    _claim(op, "speech_abandoned", reason="empty_capture")    # gen 2 intended (admitter held back)
+    assert _state(ring["ring_id"])["intent"]["state"] == "intended"
+    assert rings.recover_openings() == 1
+    statuses = {r["queue_id"]: r["status"] for r in _queue(ring["ring_id"])}
+    assert statuses == {f"call-open:{ring['ring_id']}:1": "withdrawn", f"call-open:{ring['ring_id']}:2": "queued"}
+    assert rings.recover_openings() == 0
