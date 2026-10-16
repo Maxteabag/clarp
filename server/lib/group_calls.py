@@ -102,12 +102,12 @@ def public(call: dict) -> dict:
     out = {key: value for key, value in call.items() if not key.startswith("_")}
     out["participants"] = [{k: v for k, v in p.items() if not k.startswith("_")}
                            for p in call["participants"]]
-    if call.get("state") == "live":
-        view = _transcription_view(call)
-        if view is not None:
-            # How each participant is transcribed in this call, only when a
-            # call policy or an agent override applies (docs/group-calls.md).
-            out["transcription"] = view
+    view = _transcription_view(call)
+    if view is not None:
+        # How each participant is transcribed in this call: only for a
+        # listen-first call or a configured call policy, so a say-path call
+        # stays byte-identical even with agent overrides (docs/group-calls.md).
+        out["transcription"] = view
     out["server_now"] = now_ms()
     return out
 
@@ -115,6 +115,9 @@ def public(call: dict) -> dict:
 def _transcription_view(call: dict) -> dict | None:
     try:
         from . import call_transcription
+        listen_first = (call.get("_ring") or {}).get("opening_mode") == "listen_first"
+        if not listen_first and not call_transcription.policy_configured():
+            return None
         return call_transcription.participants_view(call)
     except Exception as exc:  # noqa: BLE001 - the record never fails on it
         log_exception("groupCallTranscriptionViewFail", exc, f"call={call.get('call_id')}")

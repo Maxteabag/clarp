@@ -195,6 +195,7 @@ def status() -> dict:
         "agent_engines": stt_language.agent_engines(),
         "call_languages": call_transcription.call_languages(),
         "call_engines": ",".join(call_transcription.call_engines()),
+        "call_policy_error": _call_policy_error(engine),
         "turn_taking": strategy,
         "retain_audio": retain_audio(),
         "long_form_model": long_form_model(),
@@ -222,6 +223,16 @@ def status() -> dict:
         ],
         "models": models,
     }
+
+
+def _call_policy_error(engine: str) -> str:
+    """Why the stored call policy can never work with the current engines, or ""."""
+    from . import call_transcription
+    try:
+        call_transcription.validate_settings(None, None, is_valid=lambda e: True, global_engine=engine)
+    except ValueError as exc:
+        return str(exc)
+    return ""
 
 
 def update_settings(data: dict) -> dict:
@@ -280,7 +291,7 @@ def update_settings(data: dict) -> dict:
     from . import call_transcription
     call_languages, call_engines = call_transcription.validate_settings(
         data.get("call_languages"), data.get("call_engines"),
-        is_valid=lambda e: _model_row(e) is not None)
+        is_valid=lambda e: _model_row(e) is not None, global_engine=engine)
     settings_store.set_text(ENGINE_KEY, engine)
     if call_languages is not None:
         settings_store.set_text(call_transcription.CALL_LANGUAGES_KEY, call_languages)
