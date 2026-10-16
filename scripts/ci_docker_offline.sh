@@ -50,19 +50,20 @@ ci_offline_run_args() {
 
 ci_offline_preflight() {
     # $1: image. Proves, BEFORE any Host container starts, that a container of this image on this
-    # network has no way out: no default route (IPv4 or IPv6), a
+    # network has no way out: no default route (IPv4 or IPv6; the kernel's explicit RTF_REJECT
+    # ::/0 rows are not routes out, see scripts/ci_ipv6_routes.py), a
     # zero-packet UDP connect to public resolvers fails with ENETUNREACH, and resolv.conf names
     # only the container's own loopback, where nothing answers. The Host never runs in this probe.
     local -a args
     mapfile -t args < <(ci_offline_run_args)
-    docker run --rm "${args[@]}" --entrypoint python3 "$1" -c '
+    docker run --rm "${args[@]}" --entrypoint python3 "$1" -c "$(<"$(dirname "${BASH_SOURCE[0]}")/ci_ipv6_routes.py")"'
 import errno, os, socket
 assert "lo" in {n for _, n in socket.if_nameindex()}   # the routes and probes below are the proof
 routes = open("/proc/net/route").read().splitlines()[1:]
 assert not [r for r in routes if r.split()[1] == "00000000"], routes          # no IPv4 default route
 if os.path.exists("/proc/net/ipv6_route"):
-    v6 = open("/proc/net/ipv6_route").read().split("\n")
-    assert not [r for r in v6 if r.startswith("0" * 32 + " 00")], v6          # no IPv6 default route
+    v6 = open("/proc/net/ipv6_route").read()
+    assert not usable_ipv6_defaults(v6), v6.splitlines()                      # no IPv6 default route
 for family, address in ((socket.AF_INET, ("1.1.1.1", 53)), (socket.AF_INET6, ("2606:4700:4700::1111", 53))):
     try:
         probe = socket.socket(family, socket.SOCK_DGRAM)

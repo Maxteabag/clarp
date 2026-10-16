@@ -34,6 +34,12 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npx playwright install --with-deps chromium
+      # Recorded before any test container: the engine the internal-network DNS fix depends on, and
+      # what listens on this runner (addresses and ports only; no processes, no environment).
+      - name: Runner diagnostics (Docker engine, listening sockets)
+        run: |
+          echo "docker server version: $(docker version -f '{{.Server.Version}}')"
+          ss -Hltnu
       - name: Container smoke test (offline test containers)
         run: >-
           env -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL
