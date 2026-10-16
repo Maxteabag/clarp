@@ -188,14 +188,15 @@ def status() -> dict:
     selected_row = next((m for m in models if m["id"] == engine), None)
     from .heard_audio import enabled as retain_audio
     from . import call_transcription, stt_language
+    policy = call_transcription.policy_snapshot()
     return {
         "engine": engine,
         "language": stt_language.selected(),
         "agent_languages": stt_language.agent_languages(),
         "agent_engines": stt_language.agent_engines(),
-        "call_languages": call_transcription.call_languages(),
-        "call_engines": ",".join(call_transcription.call_engines()),
-        "call_policy_error": _call_policy_error(engine),
+        "call_languages": policy["languages"],
+        "call_engines": ",".join(policy["engines"]),
+        "call_policy_error": policy["error"],
         "turn_taking": strategy,
         "retain_audio": retain_audio(),
         "long_form_model": long_form_model(),
@@ -223,16 +224,6 @@ def status() -> dict:
         ],
         "models": models,
     }
-
-
-def _call_policy_error(engine: str) -> str:
-    """Why the stored call policy can never work with the current engines, or ""."""
-    from . import call_transcription
-    try:
-        call_transcription.validate_settings(None, None, is_valid=lambda e: True, global_engine=engine)
-    except ValueError as exc:
-        return str(exc)
-    return ""
 
 
 def update_settings(data: dict) -> dict:
@@ -289,14 +280,18 @@ def update_settings(data: dict) -> dict:
     if agent_languages is not None:
         agent_languages = stt_language.merge_agent_languages(agent_languages)
     from . import call_transcription
-    call_languages, call_engines = call_transcription.validate_settings(
-        data.get("call_languages"), data.get("call_engines"),
-        is_valid=lambda e: _model_row(e) is not None, global_engine=engine)
-    settings_store.set_text(ENGINE_KEY, engine)
-    if call_languages is not None:
-        settings_store.set_text(call_transcription.CALL_LANGUAGES_KEY, call_languages)
-    if call_engines is not None:
-        settings_store.set_text(call_transcription.CALL_ENGINES_KEY, call_engines)
+    # The call pair and the global engine it is checked against are checked
+    # and published in one transaction: a reader sees the old triple or the
+    # new one, never one key changed without the other.
+    with settings_store.transaction():
+        call_languages, call_engines = call_transcription.validate_settings(
+            data.get("call_languages"), data.get("call_engines"),
+            is_valid=lambda e: _model_row(e) is not None, global_engine=engine)
+        settings_store.set_text(ENGINE_KEY, engine)
+        if call_languages is not None:
+            settings_store.set_text(call_transcription.CALL_LANGUAGES_KEY, call_languages)
+        if call_engines is not None:
+            settings_store.set_text(call_transcription.CALL_ENGINES_KEY, call_engines)
     if language is not None:
         settings_store.set_text(stt_language.LANGUAGE_KEY, language)
     if agent_languages is not None:
