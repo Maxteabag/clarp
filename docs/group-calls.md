@@ -224,8 +224,8 @@ failure.
 Either way every attempt records, in `stt.attempts` and the `transcribe`
 event, the `language` the Host handed at that engine's boundary: a local
 model (faster-whisper's own language, in process or in its worker; the `-l`
-value whisper.cpp runs with; OpenAI whisper's `language`), a custom adapter (none: the protocol carries no language), or the cloud
-provider adapter (the exact argument; Scribe is handed none for a set). It is
+value whisper.cpp runs with; OpenAI whisper's `language`), a custom adapter
+(none: the protocol carries no language), or the cloud provider adapter (the exact argument; Scribe is handed none for a set). It is
 not what a provider sent on, received or detected. `auto` means no language
 constraint was handed (not a detection). `null`, or no `language` at all (a
 skipped engine), means the boundary was unobserved for that attempt, and only
