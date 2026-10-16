@@ -81,3 +81,76 @@ def test_the_settings_read_back_unset_by_default(host):
     status, body = call(host, "GET", "/server-info", token="qa-host-test")
     assert "call_transcription_policy" in body["capabilities"]["features"]
     assert body["contract"]["features"]["call_transcription_policy"] == 67
+
+
+# ---- L2 on a real Host: the language handed at the engine boundary (recording engines) -----------
+
+@pytest.fixture
+def recording_host(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLARP_QA_RECORDING_STT", "1")          # no paid provider: recorders behind the handoff
+    h = QAHost(tmp_path / "ct-recording-host")
+    try:
+        h.start()
+        with sqlite3.connect(h.root / "state.sqlite") as con:
+            con.execute("INSERT INTO paired_devices(device_id, name, token_hash, scope, created_at)"
+                        " VALUES ('device_qa_phone', 'QA phone', ?, 'full', 1)",
+                        (hashlib.sha256(PHONE.encode()).hexdigest(),))
+        yield h
+    finally:
+        h.stop()
+
+
+def _handoffs(host):
+    path = host.root / "provider" / "stt-handoffs.jsonl"
+    return [] if not path.is_file() else [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def _case(host, tid, settings, control=None):
+    (host.root / "provider").mkdir(exist_ok=True)
+    (host.root / "provider" / "stt-control.json").write_text(json.dumps(control or {}))
+    reset = {"call_languages": "", "call_engines": "", "agent_languages": {"rachel": ""},
+             "agent_engines": {"rachel": ""}}
+    status, out = call(host, "POST", "/transcription-providers", {**reset, **settings}, token="qa-host-test")
+    assert status == 200, out
+    before = len(_handoffs(host))
+    status, started = call(host, "POST", "/calls", {"agents": ["rachel"]})
+    status, body = transcribe(host, tid, {"X-Clarp-Call-Id": started["call"]["call_id"],
+                                          "X-Transcription-Session": "rachel"})
+    return status, body, _handoffs(host)[before:]
+
+
+def _attempts(body):
+    return [(a["engine"], a["outcome"], a.get("language", "<absent>")) for a in body["stt"]["attempts"]]
+
+
+def test_L2_on_the_host_null_auto_observed_and_no_leakage(recording_host):
+    host = recording_host
+    one = {"agent_languages": {"rachel": "no,en"}, "agent_engines": {"rachel": "google:chirp_3"}}
+    status, body, handed = _case(host, "tx-pre", one, {"no_key": ["google"]})
+    assert status == 500 and handed == [] and _attempts(body) == [("google:chirp_3", "error", None)]
+    status, body, handed = _case(host, "tx-post", one, {"fail_after": ["google"]})
+    assert status == 500 and [h["language"] for h in handed] == ["no,en"]
+    assert _attempts(body) == [("google:chirp_3", "error", "no,en")]
+    scribe = {"agent_languages": {"rachel": "no,en"}, "agent_engines": {"rachel": "elevenlabs:scribe_v2"}}
+    status, body, handed = _case(host, "tx-scribe-set", scribe)
+    assert status == 200 and handed == [{"provider": "elevenlabs", "model": "scribe_v2", "language": None}]
+    assert _attempts(body) == [("elevenlabs:scribe_v2", "ok", "auto")]
+    assert body["stt"]["language"] == {"value": "no,en", "source": "agent"}
+    chain = {"agent_languages": {"rachel": "no,en"}, "agent_engines": {"rachel": "google:chirp_3,elevenlabs:scribe_v2"}}
+    status, body, handed = _case(host, "tx-fallback", chain, {"fail_after": ["google"]})
+    assert status == 200 and [h["language"] for h in handed] == ["no,en", None]
+    assert _attempts(body) == [("google:chirp_3", "error", "no,en"), ("elevenlabs:scribe_v2", "ok", "auto")]
+
+
+def test_C3_on_the_host_a_set_skips_scribe_and_nothing_runnable_is_409(recording_host):
+    host = recording_host
+    status, body, handed = _case(host, "tx-c3-skip", {"call_languages": "no,en",
+                                                      "call_engines": "elevenlabs:scribe_v2,google:chirp_3"})
+    assert status == 200 and [(h["provider"], h["language"]) for h in handed] == [("google", "no,en")]
+    assert _attempts(body) == [("elevenlabs:scribe_v2", "skipped", "<absent>"), ("google:chirp_3", "ok", "no,en")]
+    assert body["stt"]["attempts"][0]["reason"] == "language_incompatible"
+    status, body, handed = _case(host, "tx-c3-none", {"call_languages": "no,en", "call_engines": "google:chirp_3",
+                                                      "agent_engines": {"rachel": "elevenlabs:scribe_v2"}})
+    assert status == 409 and body["error"] == "no compatible engine" and handed == []
+    assert body["attempts"] == [{"engine": "elevenlabs:scribe_v2", "outcome": "skipped",
+                                 "reason": "language_incompatible"}]
