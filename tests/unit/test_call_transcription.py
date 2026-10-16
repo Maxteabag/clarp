@@ -236,8 +236,8 @@ def test_the_fallback_chain_is_preserved_and_every_attempt_recorded(env):
 
 
 def test_an_incompatible_engine_is_skipped_and_none_compatible_is_an_explicit_error(env, monkeypatch):
-    _set(call_languages="no", agent_engines={"mike": "faster-whisper:small.en,google:chirp_3"})
     monkeypatch.setattr(stt_providers, "_model_row", lambda engine: {"id": engine})
+    _set(call_languages="no", agent_engines={"mike": "faster-whisper:small.en,google:chirp_3"})
     stt = FakeSTT()
     stt_record = _transcribe(stt, scope=_scope(env)).payload["stt"]
     assert stt_record["attempts"][0] == {"engine": "faster-whisper:small.en", "outcome": "skipped",

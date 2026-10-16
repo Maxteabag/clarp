@@ -187,12 +187,14 @@ def status() -> dict:
     models = cloud_models()
     selected_row = next((m for m in models if m["id"] == engine), None)
     from .heard_audio import enabled as retain_audio
-    from . import stt_language
+    from . import call_transcription, stt_language
     return {
         "engine": engine,
         "language": stt_language.selected(),
         "agent_languages": stt_language.agent_languages(),
         "agent_engines": stt_language.agent_engines(),
+        "call_languages": call_transcription.call_languages(),
+        "call_engines": ",".join(call_transcription.call_engines()),
         "turn_taking": strategy,
         "retain_audio": retain_audio(),
         "long_form_model": long_form_model(),
@@ -275,7 +277,15 @@ def update_settings(data: dict) -> dict:
     agent_languages = data.get("agent_languages")
     if agent_languages is not None:
         agent_languages = stt_language.merge_agent_languages(agent_languages)
+    from . import call_transcription
+    call_languages, call_engines = call_transcription.validate_settings(
+        data.get("call_languages"), data.get("call_engines"),
+        is_valid=lambda e: _model_row(e) is not None)
     settings_store.set_text(ENGINE_KEY, engine)
+    if call_languages is not None:
+        settings_store.set_text(call_transcription.CALL_LANGUAGES_KEY, call_languages)
+    if call_engines is not None:
+        settings_store.set_text(call_transcription.CALL_ENGINES_KEY, call_engines)
     if language is not None:
         settings_store.set_text(stt_language.LANGUAGE_KEY, language)
     if agent_languages is not None:
@@ -344,7 +354,7 @@ def transcribe(model_id: str, audio_bytes: bytes, content_type: str,
 
     from .focus import current_focus_session
     session = stt_language.current_session() or current_focus_session()
-    language = stt_language.language_for(session)
+    language = stt_language.current_language() or stt_language.language_for(session)
     if "," in language and provider not in {"google", "elevenlabs"}:
         raise ValueError("agent language-set recognition requires Google Chirp or ElevenLabs Scribe")
     text, duration = call(language)

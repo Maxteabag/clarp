@@ -44,6 +44,25 @@ def current_session() -> str | None:
     return _SESSION.get()
 
 
+# The exact language a call-scoped clip is sent with (call_transcription),
+# set by the pipeline for one engine call; None means "resolve as today".
+_LANGUAGE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "transcription_language", default=None)
+
+
+@contextlib.contextmanager
+def bound_language(language: str | None):
+    token = _LANGUAGE.set(language or None)
+    try:
+        yield
+    finally:
+        _LANGUAGE.reset(token)
+
+
+def current_language() -> str | None:
+    return _LANGUAGE.get()
+
+
 def selected() -> str:
     value = (settings_store.get_text(LANGUAGE_KEY) or "").strip().lower()
     return value if _CODE.match(value) else DEFAULT_LANGUAGE
