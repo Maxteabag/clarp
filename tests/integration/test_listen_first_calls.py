@@ -259,3 +259,28 @@ def test_a_stop_between_admit_and_greeting_withdraws_the_initiative(host):
     time.sleep(1.0)
     starts = provider(host, "turn/start")
     assert not any("clarp-call-opening" in json.dumps(s) for s in starts)   # the initiative never ran
+
+
+def test_a_real_stop_after_the_answer_retires_the_opening_stopped_after_answer(host):
+    """§11.L: the answer passes only a pause that existed when it arrived."""
+    rid, out = answered(host)
+    op = out["opening"]
+    post(host, "/stop", {"session": "rachel", "reason": "the user pressed Stop"})
+    code, body = refused(host, "/calls/ring/opening", {"token": op["token"], "epoch": 1, "claim": "silence",
+                                                       "request_id": "rq-after-stop", "capture_gen": 1,
+                                                       "at_ms": 1250, "watermark_ms": 1300})
+    assert (code, body["error"], body["reason"]) == (409, "opening retired", "stopped_after_answer")
+    time.sleep(1.0)
+    assert provider(host, "turn/start") == []
+    assert host.request(f"/calls/ring?ring_id={rid}")["ring"]["opening"]["retired"] == "stopped_after_answer"
+
+
+def test_a_stop_before_the_answer_still_lets_exactly_one_opening_run(host):
+    post(host, "/stop", {"session": "rachel", "reason": "earlier Stop"})
+    rid, out = answered(host)
+    claim(host, out["opening"], "silence", "rq-1")
+    wait_for(lambda: provider(host, "turn/start"), what="the opening")
+    host.wait_reply("rachel", "QA reply:")
+    wait_idle(host)
+    assert len(provider(host, "turn/start")) == 1
+    assert host.request("/turn-queue?session=rachel")["paused"] is True    # the pause stands
