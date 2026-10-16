@@ -41,10 +41,11 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 64
+HOST_CONTRACT = 69
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
+    "tts_provider_google",
     "agent_rings",
     "controller_actions",
     "runtime_drain_status",
@@ -359,3 +360,6 @@ FEATURE_CONTRACTS["turn_slot_repair"] = 61
 FEATURE_CONTRACTS["runtime_drain_status"] = 62
 FEATURE_CONTRACTS["controller_actions"] = 63
 FEATURE_CONTRACTS["agent_rings"] = 64
+# 65-68 are reserved by unmerged lanes (artifact_summary_v1, steer_receipts, listen-first calls,
+# opening_receipts); clients gate on the feature, never on the number.
+FEATURE_CONTRACTS["tts_provider_google"] = 69

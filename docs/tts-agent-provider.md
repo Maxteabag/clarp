@@ -81,6 +81,27 @@ contact's id in `[gemini_tts.vertex_voices]`. Vertex voices are created with
 the Voices API (`v1beta1/projects/<p>/locations/global/voices`, OAuth only,
 API keys are refused) and expire a year after last use.
 
+## Google Chirp 3 HD
+
+`lib/google_tts.py` is the built-in `google` provider: one batch Cloud
+Text-to-Speech request per clip, MP3 out. `google_voice` (or a contact's
+`google` voice) is a full Google voice name from a fixed list, today the 30
+Chirp 3 HD voices for `nb-NO` (`nb-NO-Chirp3-HD-Kore`, ...). An agent with no
+Google voice at all speaks with `nb-NO-Chirp3-HD-Kore`; a saved voice that is
+not on the list is refused (`voice_unavailable`) and never replaced, so only
+the configured fallback, if any, speaks instead.
+
+Credentials come from one place: an explicit `[google_tts]` with both
+`credentials` (an `authorized_user` ADC file) and `project`, or, without that
+section, whatever `[google_stt]` uses. An incomplete `[google_tts]` is an
+error and never borrows from `[google_stt]`. `GET /tts/providers` reports the
+`credential_source` and the `error`, never the file or the project.
+
+Clarp's own pauses (`<break time="…"/>`, at most 3 s) become the only SSML
+element; every other character is escaped text. Text over Google's 5,000-byte
+limit is refused, not cut. The installed `custom.google-chirp` adapter, if
+any, is a separate provider with its own stored voices.
+
 ## Delivery
 
 Raw PCM delivery only exists for Cartesia. A clip from any other provider is
@@ -88,3 +109,6 @@ delivered as a chunked MP3 file, which every client plays from its URL;
 clients already choose per clip.
 
 Every clip logs a `tts_worker route` event with `provider` and `delivery`.
+A synthesized clip then logs `tts_worker spoke` with the `provider` and
+`voice` that actually spoke (`fallback_for` names the routed provider when its
+fallback spoke instead).

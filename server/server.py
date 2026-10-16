@@ -1347,6 +1347,11 @@ class Handler(BaseHTTPRequestHandler):
                     synthesize(text=prompt, voice=cfg.gemini_tts_voice(voice_id),
                                out_path=temporary, api_key=cfg.gemini_tts_key(),
                                backend=cfg.gemini_backend, model=cfg.gemini_model)
+                elif provider == "google":
+                    # The requested voice through the shared google backend, never an agent route.
+                    from lib import google_tts
+                    google_tts.synthesize(text=prompt, voice=voice_id, out_path=temporary,
+                                          creds=google_tts.credentials(cfg))
 
                 else:
                     from lib.custom_tts_adapters import preview as custom_preview
@@ -3351,6 +3356,11 @@ class Handler(BaseHTTPRequestHandler):
         provider = (data.get("provider") or "").strip().lower()
         if not session or not voice_id:
             return self._json_error(400, "session and voice_id required")
+        if provider == "google":
+            # Only the built-in google provider is validated: its voices are a fixed allowlist.
+            from lib import google_tts
+            if voice_id not in google_tts.VOICES:
+                return self._json_error(400, "unknown voice")
         agents = load_agents(self.ctx.agents_path)
         if session not in agents:
             return self._json_error(404, "no such agent")
