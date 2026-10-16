@@ -2864,3 +2864,61 @@ def test_ordinary_queued_rows_drain_exactly_as_before_without_the_opening_claim(
     rows = agents_db.conn().execute("SELECT message_id FROM messages WHERE role='user' ORDER BY seq DESC").fetchall()
     assert sorted(r[0] for r in rows) == ["u-plain-1", "u-plain-2"]           # their user rows, as before
     assert calls == []                                                        # never consulted
+
+
+# ---- review L1: a claimed opening that never ran is retried exactly once --------------------
+
+def test_a_spawn_failure_after_the_claim_is_retried_exactly_once(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    calls = {"n": 0}
+    spawn = backends.spawn_turn
+
+    def fails_once(backend, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("the backend did not start")
+        spawn(backend, **kwargs)
+    backends.spawn_turn = fails_once
+    service.recover_queued()
+    assert backends.spawned == []
+    assert agent_rings.opening_state(op["ring_id"])["intent"]["state"] == "started"
+    _td._RECOVERY_BACKOFF.clear(agents_db.get_by_session("mike")["agent_id"])
+    turn_queue.reset_stale_claims(max_age_ms=0)
+    service.recover_queued()
+    assert len(backends.spawned) == 1                          # the one opening finally runs
+    turn_queue.reset_stale_claims(max_age_ms=0)
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+
+
+def test_a_crash_between_the_claim_and_the_spawn_is_retried_exactly_once(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    assert agent_rings.claim_initiative(queue_id) is True     # claimed, then the process died
+    _td.reset_for_tests()
+    turn_queue.reset_stale_claims(max_age_ms=0)
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+
+
+def test_a_retry_after_a_real_start_never_spawns_again(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    service.recover_queued()
+    assert len(backends.spawned) == 1 and turn_queue.status(queue_id) == "started"
+    assert agent_rings.claim_initiative(queue_id) is False
+    turn_queue.reset_stale_claims(max_age_ms=0)
+    service.recover_queued()
+    assert len(backends.spawned) == 1
+
+
+def test_a_retry_rechecks_the_fence(tmp_path, monkeypatch):
+    from lib import agent_rings
+    service, backends, op, queue_id = _call_open_admitted(tmp_path, monkeypatch)
+    assert agent_rings.claim_initiative(queue_id) is True
+    turn_queue.set_paused(agents_db.get_by_session("mike")["agent_id"], True)   # a Stop after the claim
+    assert agent_rings.claim_initiative(queue_id) is False
+    assert agent_rings.opening_state(op["ring_id"])["retired"]["reason"] == "stopped_after_answer"

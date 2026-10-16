@@ -113,7 +113,7 @@ def test_call_settings_are_validated(values, message):
 
 
 def test_a_set_already_stored_blocks_a_later_single_code_engine():
-    _set(call_languages="no,en")
+    _set(engine="google:chirp_3", call_languages="no,en")
     with pytest.raises(ValueError):
         _set(call_engines="cartesia:ink-whisper")
 
@@ -219,7 +219,7 @@ def test_in_call_with_nothing_set_everything_is_global(env):
 # ---- compatibility and the fallback chain ----------------------------------------------------
 
 def test_a_set_never_reaches_a_single_code_engine(env):
-    _set(call_languages="no,en", agent_engines={"mike": "cartesia:ink-whisper"})
+    _set(call_languages="no,en", call_engines="google:chirp_3", agent_engines={"mike": "cartesia:ink-whisper"})
     stt = FakeSTT()
     stt_record = _transcribe(stt, scope=_scope(env)).payload["stt"]
     assert stt.calls == [("cartesia:ink-whisper", "no")]
@@ -237,7 +237,8 @@ def test_the_fallback_chain_is_preserved_and_every_attempt_recorded(env):
 
 def test_an_incompatible_engine_is_skipped_and_none_compatible_is_an_explicit_error(env, monkeypatch):
     monkeypatch.setattr(stt_providers, "_model_row", lambda engine: {"id": engine})
-    _set(call_languages="no", agent_engines={"mike": "faster-whisper:small.en,google:chirp_3"})
+    _set(call_languages="no", call_engines="google:chirp_3",
+         agent_engines={"mike": "faster-whisper:small.en,google:chirp_3"})
     stt = FakeSTT()
     stt_record = _transcribe(stt, scope=_scope(env)).payload["stt"]
     assert stt_record["attempts"][0] == {"engine": "faster-whisper:small.en", "outcome": "skipped",
@@ -246,7 +247,8 @@ def test_an_incompatible_engine_is_skipped_and_none_compatible_is_an_explicit_er
     _set(agent_engines={"mike": "faster-whisper:small.en"})
     stt = FakeSTT()
     out = _transcribe(stt, scope=_scope(env), tid="tx-2")
-    assert out.status == 400 and "no compatible transcription engine" in out.payload["error"]
+    assert out.status == 409 and out.payload["error"] == "no compatible engine"
+    assert out.payload["language"] == "no" and out.payload["engines"] == ["faster-whisper:small.en"]
     assert stt.calls == []
 
 
@@ -279,3 +281,96 @@ def test_the_transcribe_event_carries_the_same_stt_record(env, monkeypatch):
     _transcribe(FakeSTT(), scope=None, tid="tx-plain")
     [event] = [k for a, k in seen if a[1:2] == ("transcribe",)]
     assert "stt" not in event["detail"]
+
+
+
+# ---- review M1: compatibility from the engine's real capability ---------------------------
+
+def test_M1_server_default_is_resolved_and_an_english_only_default_is_skipped_for_no():
+    steps = ct.plan(["server-default"], "no")
+    assert steps == [{"engine": "faster-whisper:small.en", "skip": "language_incompatible"}]
+    assert ct.plan(["server-default"], "en") == [
+        {"engine": "faster-whisper:small.en", "language": "en", "adapted": False, "local_default": True}]
+
+
+def test_M1_a_multilingual_local_engine_never_receives_the_code_so_it_is_skipped():
+    assert ct.plan(["faster-whisper:small"], "no") == [
+        {"engine": "faster-whisper:small", "skip": "language_incompatible"}]
+    assert ct.plan(["faster-whisper:small"], "en")[0]["skip"] == "language_incompatible"
+
+
+def test_M1_a_call_language_the_default_engine_cannot_take_refuses_visibly(env):
+    settings_store.set_text(ct.CALL_LANGUAGES_KEY, "no")         # stored before the rule existed
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 409 and out.payload["error"] == "no compatible engine"
+    assert out.payload["language"] == "no"
+    assert out.payload["attempts"] == [{"engine": "faster-whisper:small.en", "outcome": "skipped",
+                                        "reason": "language_incompatible"}]
+    assert stt.calls == []                                           # never transcribed as English
+
+
+def test_M1_settings_refuse_a_policy_that_can_never_work():
+    with pytest.raises(ValueError) as err:
+        _set(call_languages="no")                                    # only the English-only default left
+    assert "can never" in str(err.value)
+    _set(engine="google:chirp_3", call_languages="no")
+    with pytest.raises(ValueError):
+        _set(engine="local")                                        # the global engine would break it
+    assert stt_providers.status()["call_policy_error"] == ""
+    settings_store.set_text(stt_providers.ENGINE_KEY, "local")      # changed behind the validation
+    assert "no" in stt_providers.status()["call_policy_error"]
+
+
+def test_M1_attempts_report_the_language_the_engine_actually_received(env):
+    _set(call_languages="no,en", call_engines="google:chirp_3", agent_engines={"mike": "cartesia:ink-whisper"})
+    stt_record = _transcribe(FakeSTT(), scope=_scope(env)).payload["stt"]
+    assert stt_record["attempts"][0]["language"] == "no" and stt_record["language_adapted"] == "first_code"
+    _set(agent_engines={"mike": ""})
+    stt_record = _transcribe(FakeSTT(), scope=_scope(env), tid="tx-set").payload["stt"]
+    assert stt_record["attempts"][0]["language"] == "no,en"
+
+
+def test_M1_an_english_default_takes_an_english_call(env):
+    stt = FakeSTT()
+    stt_record = _transcribe(stt, scope=_scope(env)).payload["stt"]
+    assert stt_record["engines"] == {"value": ["faster-whisper:small.en"], "source": "global"}
+    assert stt_record["effective_engine"] == "faster-whisper:small.en"
+    assert stt.calls == [("server-default", "en")]                  # the local engine, told "en"
+
+
+# ---- review N2: outside calls, server-default is exactly 006e9e70 ------------------------------
+
+def test_N2_outside_calls_server_default_while_loading_is_unchanged():
+    """Runs unchanged on 006e9e70 (no call_scope argument)."""
+    stt = FakeSTT()
+    stt.ready.clear()
+    ctx = SimpleNamespace(stt=stt, vocab_prompt=lambda delegated=False: "", default_session="theo-97e5",
+                          herald=None)
+    out = tp.transcribe(ctx, audio_bytes=b"RIFF....", ctype="audio/wav", hands_free=False,
+                        requested_model="server-default", transcription_id="tx-n2", fingerprint="fp-n2",
+                        record_voice=lambda *a, **k: None, spawn_voice_metrics=lambda *a, **k: None,
+                        focus_session=lambda: "theo-97e5")
+    assert out.status == 200 and stt.calls == [("server-default", None)]
+    assert "stt" not in out.payload
+
+
+# ---- review: no group-call mutation drops or resets the transcription view ----------------------
+
+@pytest.mark.parametrize("policy", [True, False])
+def test_every_call_mutation_keeps_the_transcription_view(env, policy):
+    if policy:
+        _set(call_languages="no", call_engines="google:chirp_3", agent_languages={"theo": "pt"})
+    def view():
+        return calls.get_call(env.call["call_id"]).get("transcription", "absent")
+    first = view()
+    if policy:
+        assert first["theo-97e5"]["language"] == {"value": "pt", "source": "agent"}
+        assert first["mike-86db"]["language"]["source"] == "call_policy"
+    else:
+        assert first == "absent"
+    for step in (lambda: calls.change(PHONE, "hold", "mike-86db"), lambda: calls.change(PHONE, "resume", "mike-86db"),
+                 lambda: calls.change(PHONE, "switch", "mike-86db"), lambda: calls.route(PHONE, env.call["call_id"], "theo-97e5"),
+                 lambda: calls.end(PHONE)):
+        step()
+        assert view() == first

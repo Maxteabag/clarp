@@ -1220,3 +1220,120 @@ def test_L7_other_automation_for_the_agent_stays_held(env, tmp_path):
     assert len(backends.spawned) == 1 and "Open the conversation" in backends.spawned[0]["text"]
     assert turn_queue.status("hb-1") == "queued" and turn_queue.status("auto-2") == "queued"
     assert turn_queue.is_paused("a-theo") is True
+
+
+# ---- review L2: the greeting's commit and its route are one decision -----------------------
+
+def _route_greet(op, *, client_msg_id="u-hallo", principal=PHONE):
+    return rings.greeting_routed(principal, token=op["token"], epoch=op["epoch"], client_msg_id=client_msg_id,
+                                 trace_id="tr-greet", session=op["session"], call_id=op["call_id"])
+
+
+def test_L2_a_caller_on_hold_refuses_the_greeting_and_leaves_the_opening_untouched(env):
+    ring, op = _queued(env)
+    rings.admit_initiative(ring["ring_id"])
+    before = _state(ring["ring_id"])
+    calls.change(PHONE, "hold", "theo-97e5")
+    err = _refused(lambda: _route_greet(op), 409, "wrong call")
+    assert err.extra["reason"] == "not_reachable"
+    after = _state(ring["ring_id"])
+    assert (after["state"], after["intent"]) == (before["state"], before["intent"])
+    assert _queue(ring["ring_id"])[0]["status"] == "queued"
+
+
+def test_L2_an_ended_call_refuses_before_the_opening_is_touched(env, monkeypatch):
+    ring, op = _answered()
+    monkeypatch.setattr(rings, "retire_for_call", lambda call_id, reason: 0)   # the retire hook lags
+    calls.end(PHONE)
+    _refused(lambda: _route_greet(op), 409, "call ended")
+    assert _state(ring["ring_id"])["state"] == "pending"
+
+
+def test_L2_a_greeting_then_a_hold_was_routed_to_the_caller(env):
+    ring, op = _answered()
+    out = _route_greet(op)
+    assert out["route"] == "greeting" and out["session"] == "theo-97e5"
+    assert calls.snapshot(PHONE)["call"]["floor"] == "theo-97e5"
+    calls.change(PHONE, "hold", "theo-97e5")                  # afterwards: it was already delivered
+    assert _state(ring["ring_id"])["state"] == "greeting"
+
+
+# ---- review L3 / Q3: the stop generation moves with the pause, even for a failed Stop ------
+
+def test_L3_the_stop_generation_and_the_pause_are_one_transaction(env, monkeypatch):
+    before = turn_queue.stop_generation("a-theo")
+
+    def broken(agent_id):
+        raise RuntimeError("the pause write failed")
+    monkeypatch.setattr(turn_queue, "is_paused", broken)
+    with pytest.raises(RuntimeError):
+        turn_queue.set_paused("a-theo", True)
+    monkeypatch.undo()
+    assert turn_queue.stop_generation("a-theo") == before and turn_queue.is_paused("a-theo") is False
+
+
+@pytest.mark.parametrize("paused_before", [True, False])
+def test_Q3_a_failed_stop_retires_the_opening_and_restores_the_pause(env, tmp_path, monkeypatch, paused_before):
+    from lib import backends, runtime_bridge
+    service, spawner = _service(tmp_path)
+    _held("u-held-q3")
+    if paused_before:
+        _stop()
+    ring, op = _answered()
+    monkeypatch.setattr(backends, "interrupt", lambda backend, agent_id: (_ for _ in ()).throw(
+        RuntimeError("the backend did not answer")))
+    server = object.__new__(runtime_bridge.RuntimeRPCServer)
+    out = server._dispatch_request("begin_stop", {"agent_id": "a-theo", "backend": "codex", "strict": True})
+    assert out["ok"] is False                                  # the Stop failed and was rolled back
+    assert turn_queue.is_paused("a-theo") is paused_before    # the pause is what it was
+    assert turn_queue.status("u-held-q3") == "queued"
+    err = _refused(lambda: _silence(op), 409, "opening retired")
+    assert err.extra["reason"] == "stopped_after_answer"
+    service.recover_queued()
+    assert spawner.spawned == [] and _admissions(ring["ring_id"]) == []
+    assert rings.recover_openings() == 0
+    _refused(lambda: _greet(op), 409, "opening retired")       # the opening path is closed
+    assert calls.route(PHONE, op["call_id"], "theo-97e5")["session"] == "theo-97e5"   # ordinary speech works
+
+
+# ---- review L4: no transcription view on the say path, even with an agent STT override -----
+
+def test_L4_the_say_path_carries_no_transcription_view_with_an_agent_override(env):
+    plain = _say_scenario(env)
+    calls.end(PHONE)
+    db.conn().execute("DELETE FROM messages")
+    env.clock.now += rings.AGENT_INTERVAL_MS
+    settings_store.set_text("transcription.agent_languages", json.dumps({"theo": "no"}))
+    settings_store.set_text("transcription.agent_engines", json.dumps({"theo": "google:chirp_3"}))
+    override = _say_scenario(env)
+    assert "transcription" not in override[1]["call"]
+    assert "transcription" not in calls.snapshot(PHONE)["call"]
+    assert _scrub(plain[1]) == _scrub(override[1])
+    assert _scrub([e for e in plain[2] if e["type"] in ("agent-ring", "group-call")]) == \
+        _scrub([e for e in override[2] if e["type"] in ("agent-ring", "group-call")])
+    assert plain[4] == override[4]
+
+
+def test_L4_a_listen_first_call_shows_the_view_when_an_override_applies(env):
+    settings_store.set_text("transcription.agent_languages", json.dumps({"theo": "no"}))
+    ring, op = _answered()
+    view = calls.snapshot(PHONE)["call"]["transcription"]
+    assert view["theo-97e5"]["language"] == {"value": "no", "source": "agent"}
+
+
+# ---- review L5: the answer and its fence are one transaction -------------------------------
+
+def test_L5_a_failure_while_opening_rolls_the_answer_back(env, monkeypatch):
+    ring = _lf()
+
+    def dies(*args, **kwargs):
+        raise RuntimeError("the Host died while recording the opening")
+    monkeypatch.setattr(rings, "_auth_proof", dies)
+    with pytest.raises(RuntimeError):
+        rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")
+    monkeypatch.undo()
+    monkeypatch.setattr(rings, "now_ms", env.clock)
+    assert rings.get(ring["ring_id"])["state"] == "ringing" and _state(ring["ring_id"]) is None
+    op = rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")["opening"]
+    assert op["state"] == "pending" and op["token"].startswith("opn_")
+    assert _state(ring["ring_id"])["fence"]["stop_generation"] == turn_queue.stop_generation("a-theo")
