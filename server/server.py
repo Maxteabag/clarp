@@ -5845,7 +5845,7 @@ class Handler(BaseHTTPRequestHandler):
                 or (isinstance(clip, str) and agent_rings.opening_ring_id(clip) is not None))
 
     def _handle_opening_ack(self, data: dict, status: str):
-        from lib import agent_rings, group_calls
+        from lib import agent_rings
         explicit, clip = data.get("opening_id"), data.get("clip_id")
         if explicit not in (None, ""):
             if not isinstance(explicit, str) or agent_rings.opening_ring_id(explicit) is None:
@@ -5864,7 +5864,7 @@ class Handler(BaseHTTPRequestHandler):
             out = agent_rings.record_opening_receipt(
                 principal, opening_id, status=status,
                 attempt=data.get("opening_attempt", 1), error=error)
-        except group_calls.CallError as exc:
+        except agent_rings.CallError as exc:
             return self._json_error(exc.status, exc.error)
         eventlog.emit("client", "clipAck", trace_id=data.get("trace_id") or None,
                       detail={"opening_id": opening_id, "status": status,
