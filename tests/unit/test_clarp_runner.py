@@ -28,6 +28,22 @@ from lib import agents as agents_db    # noqa: E402
 from lib.backend.registry import by_id  # noqa: E402
 from lib.protocol import SSEType       # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _fake_clis_are_this_tests_own(fake_backend_cli, tmp_path, monkeypatch):
+    """This module's fake provider CLIs are files it writes under tmp_path:
+    the explicit opt-in of tests/conftest.py's real-CLI guard. Inert
+    ``claude``/``clarp`` stand-ins answer build_cmd's --version probe, which
+    otherwise ran the user's installed CLI."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name in ("claude", "clarp"):
+        inert = bin_dir / name
+        inert.write_text("#!/bin/sh\nexit 0\n")
+        inert.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    fake_backend_cli.dir(tmp_path)
+
 CLAUDE = by_id("claude")
 
 

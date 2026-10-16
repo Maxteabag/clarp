@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+
 import pytest
 
 
@@ -104,6 +108,259 @@ def _no_real_agy_cli(monkeypatch, tmp_path):
     store via CLAUDE_PWA_AGY_HOME."""
     monkeypatch.setenv("CLARP_AGY_BIN", "clarp-test-no-agy")
     monkeypatch.setenv("CLAUDE_PWA_AGY_HOME", str(tmp_path / "no-agy-home"))
+
+
+# ---- real provider CLIs, the network and the real HOME are never reached from a test ----
+#
+# A unit test once ran a real Claude Code turn through a handler that built its
+# own dispatcher on the real backend registry. The guard (tests/
+# backend_cli_guard_core.py) is installed ONCE for the whole session, before
+# any lib import, and never undone: every exec primitive and the socket entry
+# points refuse a provider CLI (by name, through a wrapper, shell or runner, by
+# its real installed path, a copy of it, or under the Clarp toolchains) and any
+# non-loopback address, and RECORD the attempt. Inside a test the test fails
+# at teardown, even when the application swallowed the refusal; outside any
+# test (a retry timer after the last test, a session fixture) the session
+# fails. Child Python processes install the same guard through a
+# ``sitecustomize`` on the session's PYTHONPATH; name shims first on PATH
+# record any other child that resolves a provider CLI by name. HOME, the
+# custom TTS/STT adapter directories and the toolchain mode point at empty
+# session directories. A deterministic fake runs only after the test
+# registered it with ``fake_backend_cli(path)``.
+
+_TESTS_DIR = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(_TESTS_DIR))
+try:
+    import backend_cli_guard_core as _guard_core  # noqa: E402  (stdlib only; shared with child processes)
+finally:
+    del sys.path[0]
+
+BACKEND_CLIS = _guard_core.BACKEND_CLIS
+BackendLaunchBlocked = _guard_core.BackendLaunchBlocked
+BACKEND_CLI_GUARD = _guard_core.GUARD
+AMBIENT_CLI_PATHS = BACKEND_CLI_GUARD.ambient
+_TOOLCHAINS = BACKEND_CLI_GUARD.toolchains
+_REPO = pathlib.Path(__file__).resolve().parents[1]
+_GITCONFIG = ("[user]\n\tname = Clarp Test\n\temail = test@clarp.invalid\n"
+              "[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n")
+
+
+def _write_backend_cli_shims(shims: pathlib.Path) -> None:
+    """Executables named after every provider CLI and escape launcher, first on
+    PATH: a child process that resolves one by name records the attempt and exits 127."""
+    shims.mkdir(exist_ok=True)
+    # Escape launchers too (systemd-run hands a command to the host's user manager):
+    # a test that needs one puts its own fake first on PATH.
+    for name in BACKEND_CLIS | _guard_core.ESCAPE_LAUNCHERS:
+        shim = shims / name
+        shim.write_text(
+            "#!/bin/sh\n"
+            'if [ -n "$CLARP_TEST_BACKEND_CLI_LOG" ]; then\n'
+            f'  echo "child exec {name} $*" >> "$CLARP_TEST_BACKEND_CLI_LOG"\n'
+            "fi\n"
+            f"echo 'test blocked a real {name} launch' >&2\n"
+            "exit 127\n")
+        shim.chmod(0o755)
+
+
+def _prepend(var: str, entry: str) -> None:
+    current = os.environ.get(var, "")
+    if entry not in current.split(os.pathsep):
+        os.environ[var] = entry + (os.pathsep + current if current else "")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "probes_provider_clis: the test exercises provider CLI resolution itself, "
+                   "so the model-catalog warm-up stub stays off")
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    shared = os.environ.get("CLARP_TEST_GUARD_DIR")
+    home, site = None, None
+    if worker and shared and os.path.isdir(shared):
+        # An xdist worker reuses the controller's session directories as they
+        # are: another worker may already be executing the shims.
+        root = pathlib.Path(shared)
+        home, site = root / "home", root / "guard-site"
+    else:
+        root = pathlib.Path(tempfile.mkdtemp(prefix="clarp-test-guard-", dir=_TEMP_ROOT))
+        os.environ["CLARP_TEST_GUARD_DIR"] = str(root)
+        # What the guard recognises as the real installation (read before HOME moves).
+        os.environ.setdefault("CLARP_TEST_REAL_HOME", str(pathlib.Path(os.path.expanduser("~")).resolve()))
+        os.environ.setdefault("CLARP_TEST_REAL_PATH", os.environ.get("PATH", ""))
+        home = root / "home"
+        home.mkdir()
+        (home / ".gitconfig").write_text(_GITCONFIG)
+        for name in ("tts-adapters.d", "stt-adapters.d"):
+            (root / name).mkdir()
+        _write_backend_cli_shims(root / "backend-cli-shims")
+        site = root / "guard-site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(_guard_core.SITECUSTOMIZE.format(
+            tests_dir=str(_TESTS_DIR), fallback_log=str(root / "outside-children.log")))
+    session_log = root / f"outside-{worker or 'main'}-{os.getpid()}.log"
+    os.environ.update({
+        "HOME": str(home),
+        "CLARP_TTS_ADAPTERS_DIR": str(root / "tts-adapters.d"),
+        "CLARP_STT_ADAPTERS_DIR": str(root / "stt-adapters.d"),
+        "CLARP_TOOLCHAIN_MODE": "none",
+        "CLARP_TEST_BACKEND_CLI_LOG": str(session_log),
+    })
+    for var in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+                "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK", "GNUPGHOME",
+                # The owner's live desktop and terminal: no test reaches the compositor,
+                # X server or terminal multiplexer (hyprctl, xdg-open, tmux, kitty @).
+                "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "XAUTHORITY", "SWAYSOCK",
+                "NIRI_SOCKET", "TMUX", "TMUX_PANE", "KITTY_LISTEN_ON", "KITTY_WINDOW_ID", "I3SOCK",
+                # Its audio servers, activation tokens, other terminals and agents.
+                "PULSE_SERVER", "PIPEWIRE_REMOTE", "WAYLAND_SOCKET", "XDG_ACTIVATION_TOKEN",
+                "DESKTOP_STARTUP_ID", "WEZTERM_UNIX_SOCKET", "WEZTERM_PANE", "ZELLIJ", "ZELLIJ_SESSION_NAME",
+                "STY", "SSH_AGENT_PID", "GPG_AGENT_INFO", "DBUS_SYSTEM_BUS_ADDRESS"):
+        os.environ.pop(var, None)
+    _prepend("PATH", str(root / "backend-cli-shims"))
+    _prepend("PYTHONPATH", str(site))
+    _guard_core.install(child=False)
+    BACKEND_CLI_GUARD.log = str(session_log)
+    config._clarp_guard = {"root": root, "session_log": str(session_log), "worker": worker}
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    """Fail the session for an attempt no test owned (after the session fixtures
+    were torn down, which run before this hook)."""
+    state = getattr(session.config, "_clarp_guard", None)
+    if state is None:
+        return
+    for timer in list(BACKEND_CLI_GUARD.timers):
+        timer.cancel()
+    outside = list(BACKEND_CLI_GUARD.outside) + list(BACKEND_CLI_GUARD.attempts)
+    if state["worker"]:
+        if outside:                                  # the controller reports it
+            with open(state["session_log"], "a") as handle:
+                handle.write("".join(entry + "\n" for entry in outside))
+        return
+    for log in sorted(pathlib.Path(state["root"]).glob("outside-*.log")):
+        outside += [line for line in log.read_text().splitlines() if line]
+    state["outside"] = outside
+    if outside:
+        sys.stderr.write("\nreal provider CLI launch or network access attempted outside any test "
+                         "(blocked):\n  " + "\n  ".join(outside) + "\n")
+        if session.exitstatus in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED):
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED   # never mask an interrupt or internal error
+
+
+def pytest_unconfigure(config):
+    """Remove the session's guard directories after a clean session; keep them
+    as evidence when anything was attempted outside a test."""
+    state = getattr(config, "_clarp_guard", None)
+    if state is None or state["worker"] or state.get("outside") or "outside" not in state:
+        return
+
+    def report(function, path, error):
+        error = error[1] if isinstance(error, tuple) else error
+        sys.stderr.write(f"guard session dir cleanup: {function.__name__} {path}: {error!r}\n")
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(state["root"], onexc=report)
+    else:
+        shutil.rmtree(state["root"], onerror=report)
+
+
+def _track_retry_timers() -> None:
+    """The dispatcher's default retry timer never outlives the test that armed it."""
+    turn_dispatch = sys.modules.get("lib.turn_dispatch")
+    if turn_dispatch is None or getattr(turn_dispatch._default_retry_scheduler, "__clarp_guard__", False):
+        return
+
+    def tracked(delay, fn):
+        timer = None
+
+        def run():
+            BACKEND_CLI_GUARD.timers.discard(timer)
+            fn()
+        timer = threading.Timer(delay, run)
+        timer.daemon = True
+        BACKEND_CLI_GUARD.timers.add(timer)
+        timer.start()
+    tracked.__clarp_guard__ = True
+    tracked.__doc__ = turn_dispatch._default_retry_scheduler.__doc__
+    turn_dispatch._default_retry_scheduler = tracked
+
+
+@pytest.fixture(autouse=True)
+def _guard_backend_clis(request, tmp_path):
+    """Attribute every refused launch to this test; fail it at teardown if any
+    was attempted, even when the application swallowed the refusal."""
+    state = request.config._clarp_guard
+    log = tmp_path.parent / f"{tmp_path.name}-backend-cli-guard.log"
+    mp = pytest.MonkeyPatch()
+    mp.setenv("CLARP_TEST_BACKEND_CLI_LOG", str(log))
+    BACKEND_CLI_GUARD.begin(request.node.nodeid, str(log))
+    _track_retry_timers()
+    try:
+        yield BACKEND_CLI_GUARD
+    finally:
+        for timer in list(BACKEND_CLI_GUARD.timers):
+            timer.cancel()
+        BACKEND_CLI_GUARD.timers.clear()
+        mp.undo()
+        attempts = BACKEND_CLI_GUARD.end(state["session_log"])
+    if attempts:
+        pytest.fail("real provider CLI launch or network access attempted (blocked):\n  "
+                    + "\n  ".join(attempts), pytrace=False)
+
+
+@pytest.fixture
+def backend_cli_guard(_guard_backend_clis):
+    """The active guard: ``take()`` acknowledges refusals a test provoked on purpose."""
+    return _guard_backend_clis
+
+
+@pytest.fixture
+def fake_backend_cli(_guard_backend_clis, tmp_path):
+    """Register a deterministic fake CLI this test may run. Only a file inside
+    this test's tmp_path or the repo's tests/ directory, never one the user's
+    PATH or the Clarp toolchains resolve, and never a copy of an installed CLI
+    or a script that names one (checked again each time it is launched)."""
+    roots = (os.path.realpath(tmp_path), os.path.realpath(_REPO / "tests"))
+    guard = _guard_backend_clis
+
+    def register(path):
+        path = pathlib.Path(path)
+        real = os.path.realpath(path)
+        if not path.is_file() or not os.access(path, os.X_OK):
+            raise ValueError(f"not an executable file: {path}")
+        if not any(_guard_core._under(real, root) for root in roots):
+            raise ValueError(f"not a disposable fake (outside tmp_path and tests/): {path}")
+        if real in guard.ambient or _guard_core._under(real, guard.toolchains) or guard.is_ambient_copy(real):
+            raise ValueError(f"an installed provider CLI (or a copy of one), not a fake: {path}")
+        ambient = shutil.which(path.name, path=_guard_core._real_path())
+        if ambient and os.path.realpath(ambient) == real:
+            raise ValueError(f"resolvable on the user's PATH: {path}")
+        guard.allow(real)
+        return path
+
+    def register_dir(path):
+        """Every executable file a test writes under ``path`` (inside its
+        tmp_path or tests/), each still checked when it is launched."""
+        real = os.path.realpath(path)
+        if not any(_guard_core._under(real, root) for root in roots):
+            raise ValueError(f"not a disposable fake directory (outside tmp_path and tests/): {path}")
+        if _guard_core._under(real, guard.toolchains) or any(_guard_core._under(cli, real) for cli in guard.ambient):
+            raise ValueError(f"holds an installed provider CLI: {path}")
+        guard.allow_dir(real)
+        return pathlib.Path(path)
+    register.dir = register_dir
+    return register
+
+
+@pytest.fixture(autouse=True)
+def _model_catalog_never_probes_installed_clis(request, monkeypatch):
+    """The server's cache warm-up builds the model catalog in the background by
+    running each provider CLI it can resolve (``codex debug models``, ``agy
+    models``). Tests resolve none, except the ones that test that resolution."""
+    if request.node.get_closest_marker("probes_provider_clis"):
+        return
+    from lib import provider_capabilities
+    monkeypatch.setattr(provider_capabilities, "_resolve_executable", lambda provider_id: None)
 
 
 @pytest.fixture(autouse=True)
@@ -270,33 +527,6 @@ def _isolated_db(tmp_path, monkeypatch):
             mod.reset_for_tests(log_dir)
         except (ImportError, AttributeError):
             pass
-
-
-@pytest.fixture(autouse=True)
-def _forbid_network(monkeypatch):
-    """Fail fast if a test reaches past loopback.
-
-    Provider usage, voice catalogs, and update checks all talk to the internet
-    in production. A test that gets there by accident is slow, flaky, and
-    leaks the developer's credentials into a fixture; refuse the connection
-    instead so the missing stub is obvious.
-    """
-    import socket
-
-    real_connect = socket.socket.connect
-
-    def guarded_connect(self, address):
-        if self.family == socket.AF_UNIX:
-            return real_connect(self, address)
-        host = address[0] if isinstance(address, tuple) else address
-        if isinstance(host, str) and host not in {
-            "127.0.0.1", "::1", "localhost", "0.0.0.0", "::",
-        } and not host.startswith("127."):
-            raise AssertionError(
-                f"test attempted a network connection to {host!r}")
-        return real_connect(self, address)
-
-    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
 
 
 def _seed_agents_via_db(rows: dict[str, dict]) -> None:

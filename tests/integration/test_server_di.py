@@ -30,6 +30,15 @@ from lib.context import ServerContext, StubSTT  # noqa: E402
 from lib.tts_engine import FakeTTSEngine  # noqa: E402
 
 import importlib.util as _ilu  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _model_catalog_never_probes_installed_clis(monkeypatch):
+    """The server's cache warm-up builds the model catalog in the background,
+    which runs each provider CLI it can resolve (``codex debug models``,
+    ``agy models``). These tests never reach the user's installed CLIs."""
+    from lib import provider_capabilities
+    monkeypatch.setattr(provider_capabilities, "_resolve_executable", lambda provider_id: None)
 _spec = _ilu.spec_from_file_location("claude_pwa_server", _SERVER_DIR / "server.py")
 assert _spec and _spec.loader
 server_module = _ilu.module_from_spec(_spec)

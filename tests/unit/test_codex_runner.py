@@ -27,6 +27,13 @@ from lib.backend.registry import by_id  # noqa: E402
 from lib import agents as agents_db    # noqa: E402
 from lib.protocol import AgentState    # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _fake_clis_are_this_tests_own(fake_backend_cli, tmp_path):
+    """This module's fake provider CLIs are files it writes under tmp_path:
+    the explicit opt-in of tests/conftest.py's real-CLI guard."""
+    fake_backend_cli.dir(tmp_path)
+
 CODEX = by_id("codex")
 
 
