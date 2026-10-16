@@ -1177,7 +1177,7 @@ def test_L5_no_extra_admission_for_late_foreign_reauthenticated_or_duplicate_ans
         again = rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")
         assert again["changed"] is False and again["opening"]["token"] == op["token"]
         _silence(op)
-        _silence(op, rid="rq-again")
+        _refused(lambda: _silence(op, rid="rq-again"), 409, "already resolved")
         assert len(_queue(ring["ring_id"])) == 1 and len(_admissions(ring["ring_id"])) == 1
         return
     # The phone re-paired: a new token for the same device id is another auth generation.
