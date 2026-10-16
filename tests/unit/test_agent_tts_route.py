@@ -23,6 +23,17 @@ from lib import cartesia_tts, config, custom_tts_adapters, db, tts_engine, tts_m
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
+
+@pytest.fixture(autouse=True)
+def _no_real_backend(monkeypatch):
+    """No test here dispatches a turn (rings, herald and preview only speak),
+    and none may ever launch a real provider CLI if one starts to."""
+    from lib import backends
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("a real backend launch from a TTS route test")
+    monkeypatch.setattr(backends, "spawn_turn", refuse)
+
 ADAPTER = """#!/usr/bin/env python3
 import json, pathlib, sys, wave
 request = json.load(sys.stdin)
