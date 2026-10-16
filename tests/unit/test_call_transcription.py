@@ -265,3 +265,17 @@ def test_the_host_advertises_the_feature():
     from lib import server_identity
     assert "call_transcription_policy" in server_identity.FEATURES
     assert server_identity.FEATURE_CONTRACTS["call_transcription_policy"] == 67
+
+
+def test_the_transcribe_event_carries_the_same_stt_record(env, monkeypatch):
+    from lib import eventlog
+    seen = []
+    monkeypatch.setattr(eventlog, "emit", lambda *a, **k: seen.append((a, k)))
+    _set(call_languages="no", call_engines="google:chirp_3")
+    out = _transcribe(FakeSTT(), scope=_scope(env))
+    [event] = [k for a, k in seen if a[1:2] == ("transcribe",)]
+    assert event["detail"]["stt"] == out.payload["stt"]
+    seen.clear()
+    _transcribe(FakeSTT(), scope=None, tid="tx-plain")
+    [event] = [k for a, k in seen if a[1:2] == ("transcribe",)]
+    assert "stt" not in event["detail"]
