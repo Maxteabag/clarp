@@ -222,16 +222,16 @@ reason: "language_incompatible"}`); the rest run in order, the next only on
 failure.
 
 Either way every attempt records, in `stt.attempts` and the `transcribe`
-event, the `language` the Host handed at that engine's boundary: the local
-faster-whisper model (its own language, in process or in its worker), a
-custom adapter (none: the protocol carries no language), or the cloud
+event, the `language` the Host handed at that engine's boundary: a local
+model (faster-whisper's own language, in process or in its worker; the `-l`
+value whisper.cpp runs with; OpenAI whisper's `language`), a custom adapter (none: the protocol carries no language), or the cloud
 provider adapter (the exact argument; Scribe is handed none for a set). It is
 not what a provider sent on, received or detected. `auto` means no language
 constraint was handed (not a detection). `null`, or no `language` at all (a
 skipped engine), means the boundary was unobserved for that attempt, and only
 that: it does not say whether the engine was invoked, and the Host never fills
-it in (an attempt can fail without its boundary noted, and some engines, e.g.
-whisper.cpp, have no recorded boundary).
+it in (an attempt can fail without its boundary noted, and an engine with no
+recorded boundary, such as a disabled or unavailable one, records `null`).
 
 When a call policy is configured and no engine can take the call language,
 the clip is refused before any provider sees it: **409** `{"ok": false, "error": "no compatible engine",
