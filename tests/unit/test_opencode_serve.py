@@ -158,12 +158,13 @@ def _events(sid="ses_new"):
 
 
 @pytest.fixture
-def fake(tmp_path, monkeypatch):
+def fake(tmp_path, monkeypatch, fake_backend_cli):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     binary = bin_dir / "opencode"
     binary.write_text(FAKE)
     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
+    fake_backend_cli(binary)          # this deterministic fake only; nothing else on PATH is allowed
     monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setenv("FAKE_LOG", str(tmp_path / "log.jsonl"))
     monkeypatch.setenv("FAKE_PID", str(tmp_path / "server.pid"))

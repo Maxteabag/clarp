@@ -3,11 +3,30 @@ from __future__ import annotations
 
 import time
 import pathlib
+import urllib.error
 from datetime import datetime, timezone
 
+import pytest
+
 from lib import agents as agents_db
-from lib import dreaming, location, message_store
+from lib import dream_seeds, dreaming, location, message_store
 from lib.protocol import AgentState
+
+
+@pytest.fixture(autouse=True)
+def wikipedia_unreachable(monkeypatch):
+    """The foreign seed asks Wikipedia for a random article and falls back to the
+    offline pool when it cannot. Tests never reach the network: the transport
+    (dream_seeds' urlopen) fails Wikipedia requests deterministically, exactly as
+    an offline Host does, and every other URL goes to the real urlopen."""
+    real_urlopen = dream_seeds.urllib.request.urlopen
+
+    def urlopen(request, *args, **kwargs):
+        url = getattr(request, "full_url", request)
+        if "wikipedia.org" in str(url):
+            raise urllib.error.URLError("wikipedia is unreachable in tests")
+        return real_urlopen(request, *args, **kwargs)
+    monkeypatch.setattr(dream_seeds.urllib.request, "urlopen", urlopen)
 
 
 def _agent(session: str = "domi", *, enabled: bool = True) -> str:

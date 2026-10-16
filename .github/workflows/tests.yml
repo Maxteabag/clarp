@@ -26,7 +26,12 @@ jobs:
       - name: Native audio test dependency
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: uv sync --frozen --group dev
-      - run: npm ci --no-audit --no-fund
+      - name: Prepare JavaScript dependencies and the web bundle (with network, before the contained tests)
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build
+      # The contained steps have no network, so everything they need must exist now: a test that
+      # finds the bundle missing would run an offline npm ci, which deletes node_modules first.
+      - name: Assert the prepared dependencies exist
+        run: test -f static/app/bundle.js && test -x node_modules/.bin/vitest
       # Everything the tests need is installed above, with the network. The tests themselves run with
       # no network (loopback only), no credentials, no privilege, an empty HOME and only their own
       # processes (scripts/ci_contained.sh, which self-checks that before the command starts).
