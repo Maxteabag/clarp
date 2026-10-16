@@ -7,10 +7,16 @@ import sys
 import threading
 import concurrent.futures
 
+import pytest
+
 _SERVER_DIR = pathlib.Path(__file__).resolve().parents[2] / "server"
 sys.path.insert(0, str(_SERVER_DIR))
 
 from lib import provider_capabilities as capabilities  # noqa: E402
+
+# These tests exercise provider CLI resolution itself (with stubbed runners),
+# so the session's model-catalog warm-up stub stays off for them.
+pytestmark = pytest.mark.probes_provider_clis
 
 
 OBSERVED_AT = "2026-08-26T10:00:00Z"

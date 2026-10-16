@@ -4,20 +4,27 @@ set -euo pipefail
 IMAGE="${CLARP_TEST_IMAGE:-clarp:test}"
 NAME="clarp-container-test-$$"
 VOLUME="clarp-container-test-$$"
-PORT="${CLARP_TEST_PORT:-}"
+NETWORK="clarp-container-test-net-$$"
+# shellcheck source=scripts/ci_docker_offline.sh
+. "$(dirname "$0")/ci_docker_offline.sh"
 
 cleanup() {
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker volume rm "$VOLUME" >/dev/null 2>&1 || true
+    ci_offline_cleanup
 }
 trap cleanup EXIT
 
 docker build -t "$IMAGE" .
+# The container never gets a route out: an internal network, proven before the Host first starts.
+ci_offline_create "$NETWORK"
+ci_offline_preflight "$IMAGE"
+mapfile -t OFFLINE < <(ci_offline_run_args)
 docker volume create "$VOLUME" >/dev/null
-docker run -d --name "$NAME" \
-    -p "127.0.0.1:${PORT}:7682" \
+docker run -d --name "$NAME" "${OFFLINE[@]}" \
     -v "$VOLUME:/data" "$IMAGE" >/dev/null
-PORT="$(docker port "$NAME" 7682/tcp | head -1 | sed 's/.*://')"
+ci_offline_forward "$NAME"
+BASE="$CI_OFFLINE_URL"
 
 for _ in $(seq 1 60); do
     status="$(docker inspect "$NAME" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')"
@@ -29,12 +36,13 @@ for _ in $(seq 1 60); do
     sleep 1
 done
 [[ "$(docker inspect "$NAME" --format '{{.State.Health.Status}}')" == healthy ]]
+ci_offline_assert_inside "$NAME"
 
-token="$(python3 scripts/pair_docker_test_client.py "$NAME" "http://127.0.0.1:${PORT}")"
-curl -fsS -H "Authorization: Bearer $token" \
-    "http://127.0.0.1:${PORT}/status" >/dev/null
+token="$(python3 scripts/pair_docker_test_client.py "$NAME" "$BASE")"
+curl -fsS --noproxy '*' -H "Authorization: Bearer $token" \
+    "$BASE/status" >/dev/null
 
-server_info="$(curl -fsS -H "Authorization: Bearer $token" "http://127.0.0.1:${PORT}/server-info")"
+server_info="$(curl -fsS --noproxy '*' -H "Authorization: Bearer $token" "$BASE/server-info")"
 python3 -c '
 import json, sys
 sys.path.insert(0, "tests/contract")
@@ -85,18 +93,20 @@ p=call("checkpoint",p["plan_id"],str(p["revision"]),json.dumps({"progress":"Inst
 assert call("read",p["plan_id"],"notes.md")["revision"]==1
 assert call("complete",p["plan_id"],str(p["revision"]))["completion_verified"] is True
 '
-onboard="$(docker exec "$NAME" clarp-admin onboard --url "http://127.0.0.1:${PORT}")"
+onboard="$(docker exec "$NAME" clarp-admin onboard --url "$BASE")"
 [[ "$onboard" == clarp://pair* ]]
 docker exec "$NAME" sh -lc 'mkdir -p /data/workspace/probe && printf preserved >/data/workspace/probe/marker'
 
 docker rm -f "$NAME" >/dev/null
-docker run -d --name "$NAME" \
-    -p "127.0.0.1:${PORT}:7682" \
+docker run -d --name "$NAME" "${OFFLINE[@]}" \
     -v "$VOLUME:/data" "$IMAGE" >/dev/null
+ci_offline_forward "$NAME"
+BASE="$CI_OFFLINE_URL"
 for _ in $(seq 1 60); do
     [[ "$(docker inspect "$NAME" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == healthy ]] && break
     sleep 1
 done
+ci_offline_assert_inside "$NAME"
 [[ "$(docker exec "$NAME" cat /data/workspace/probe/marker)" == preserved ]]
 [[ "$(docker exec "$NAME" sqlite3 /data/clarp/state.sqlite \
     "select value from settings where key='server_instance_id';")" == "$server_id" ]]
@@ -110,6 +120,7 @@ for _ in $(seq 1 60); do
     [[ "$(docker inspect "$NAME" --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}')" == healthy ]] && break
     sleep 1
 done
+ci_offline_assert_inside "$NAME"
 [[ "$(docker exec "$NAME" cat /data/workspace/probe/marker)" == preserved ]]
 
 echo "docker node integration ok"
