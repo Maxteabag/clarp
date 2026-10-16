@@ -11,16 +11,51 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
+import sys
+import tempfile
 import threading
 from types import SimpleNamespace
 
 import pytest
 
+# Isolate custom TTS adapters BEFORE any lib import: the adapter directory is
+# a sentinel whose adapters only record that they ran. Every test then points
+# custom_tts_adapters.ROOT at its own recording adapters, so no installed
+# (live) adapter can ever run here, not even its `voices` operation.
+_SENTINEL = pathlib.Path(tempfile.mkdtemp(prefix="clarp-tts-sentinel-"))
+_SENTINEL_RAN = _SENTINEL / "ran"
+_PREVIOUS_ADAPTERS_DIR = os.environ.get("CLARP_TTS_ADAPTERS_DIR")
+os.environ["CLARP_TTS_ADAPTERS_DIR"] = str(_SENTINEL)
+for _adapter in ("custom.rec", "custom.alt", "custom.google-chirp"):
+    (_SENTINEL / _adapter).mkdir()
+    (_SENTINEL / _adapter / "adapter").write_text(
+        f"#!/bin/sh\necho {_adapter} >> {_SENTINEL_RAN}\nexit 3\n")
+    (_SENTINEL / _adapter / "adapter").chmod(0o755)
+    (_SENTINEL / _adapter / "manifest.json").write_text(json.dumps({
+        "schema_version": 1, "id": _adapter, "name": _adapter, "description": "sentinel",
+        "executable": "./adapter", "operations": ["voices", "preview", "synthesize"],
+        "audio_format": "audio/wav", "default_voice": "sentinel", "can_fallback": True}))
+
 from lib import agent_rings as rings
 from lib import cartesia_tts, config, custom_tts_adapters, db, tts_engine, tts_mode, tts_worker
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _adapters_isolated_for_this_module():
+    """custom_tts_adapters may have been imported by an earlier module with the
+    live directory: point it at the sentinel for this module either way."""
+    live = custom_tts_adapters.ROOT
+    custom_tts_adapters.ROOT = _SENTINEL
+    yield
+    custom_tts_adapters.ROOT = live
+    if _PREVIOUS_ADAPTERS_DIR is None:
+        os.environ.pop("CLARP_TTS_ADAPTERS_DIR", None)
+    else:
+        os.environ["CLARP_TTS_ADAPTERS_DIR"] = _PREVIOUS_ADAPTERS_DIR
 
 ADAPTER = """#!/usr/bin/env python3
 import json, pathlib, sys, wave
@@ -73,7 +108,9 @@ class Env:
         monkeypatch.setattr(custom_tts_adapters, "ROOT", self.adapters)
         self.rec = _install(self.adapters, "custom.rec")
         self.alt = _install(self.adapters, "custom.alt")
+        assert custom_tts_adapters.ROOT == self.adapters
         self.builtin: list[dict] = []
+        self.fail: set[str] = set()
         self.engine = tts_engine.ElevenLabsEngine(tmp_path / "audio", api_key="engine-key",
                                                   model="engine-model", speed=1.3)
 
@@ -84,6 +121,9 @@ class Env:
                 out = kwargs.get("out_path", args[2] if len(args) > 2 else None)
                 self.builtin.append({"provider": provider, "voice": voice, "text": text,
                                      **{k: kwargs[k] for k in ("api_key", "model", "speed") if k in kwargs}})
+                if provider in self.fail:
+                    from lib.cartesia_tts import CartesiaError
+                    raise CartesiaError(f"{provider} failed (recorded)")
                 pathlib.Path(out).write_bytes(b"ID3mp3")
                 return 6
             return record
@@ -284,3 +324,58 @@ def test_the_sidecar_keeps_its_fields(env):
     clip = env.engine.audio_dir / pathlib.Path(ring["opening_audio_url"]).name
     sidecar = json.loads(clip.with_suffix(".json").read_text()) if clip.with_suffix(".json").exists() else None
     assert sidecar is None or {"voice_id", "session"} <= set(sidecar)
+
+
+# ---- F2: only an effective override changes the route ------------------------------------------
+
+def test_a_same_provider_voice_override_takes_the_agent_route_with_that_voice(env):
+    env.configure("cartesia", {"sander": {"cartesia_voice": "sander-cartesia"}})
+    _ring(env)
+    assert env.spoken() == [("cartesia", "sander-cartesia")]
+
+
+@pytest.mark.parametrize("override", [
+    {"gemini_voice": "Charon"},                       # a voice for a provider not in use
+    {"cartesia_voice": ""},                           # an empty voice
+    {"provider": "cartesia"},                         # the global provider, named again
+])
+def test_an_override_that_changes_nothing_keeps_the_legacy_path(env, override):
+    env.configure("cartesia", {"sander": override})
+    ring = _ring(env)
+    # Today's direct path: Sander has no Cartesia voice, so the built-in ElevenLabs backup.
+    assert ring["opening_audio_url"].startswith("/audio/")
+    assert env.spoken() == [("elevenlabs-direct", "stored-voice")]
+    assert env.builtin[0]["api_key"] == "engine-key"
+
+
+# ---- F1(a): the agent route falls back exactly as the queue does ------------------------------
+
+def test_an_effective_override_without_a_fallback_never_tries_another_provider(env):
+    from lib.context import ServerContext
+    env.configure("cartesia", {"sander": {"cartesia_voice": "sander-cartesia"}})
+    env.fail.add("cartesia")
+    ring = _ring(env)
+    assert ring["opening_audio_url"] == ""                           # a silent opening, truthfully
+    assert _herald(env) == ("synthesis_failed", "")
+    ServerContext.speak_announcement(SimpleNamespace(tts=env.engine), "Sander is ready", "stored-voice",
+                                     session="sander-1")                     # logged, never raised
+    assert env.spoken() == [("cartesia", "sander-cartesia")] * 3        # no second provider, ever
+
+
+def test_an_effective_override_with_a_configured_fallback_uses_exactly_it(env):
+    env.configure("cartesia", {"sander": {"cartesia_voice": "sander-cartesia"}}, fallback="custom.alt")
+    env.fail.add("cartesia")
+    _ring(env)
+    assert env.spoken() == [("cartesia", "sander-cartesia"), ("custom.alt", "rec-default")]
+
+
+def test_without_an_effective_override_the_elevenlabs_backup_is_unchanged(env):
+    cfg = env.configure("cartesia", {"sander": {"gemini_voice": "Charon"}})
+    env.fail.add("cartesia-direct")
+    _ring(env, agent="a-theo")
+    assert env.spoken() == [("cartesia-direct", cfg.cartesia_voice_for("Theo")),
+                            ("elevenlabs-direct", "stored-voice")]
+
+
+def test_no_installed_adapter_outside_the_tests_ever_ran():
+    assert not _SENTINEL_RAN.exists(), _SENTINEL_RAN.read_text()
