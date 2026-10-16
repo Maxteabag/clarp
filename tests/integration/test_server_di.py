@@ -4424,6 +4424,11 @@ def test_a_google_voice_preview_is_the_requested_voice_only_even_with_a_fallback
     import dataclasses
     monkeypatch.setattr(config, "_CACHED", dataclasses.replace(
         config.load(), tts_fallback="elevenlabs", eleven_api_key="eleven-key"))
+    # With a key configured, catalog discovery would fetch the live ElevenLabs voice list; the
+    # fallback stays configured, its voice list is local and deterministic.
+    from lib import elevenlabs_voices
+    monkeypatch.setattr(elevenlabs_voices, "english_voices", lambda *, force=False: [
+        ("local-eleven-voice", "Local", "A deterministic local test voice")])
     asked, others = [], []
 
     def google(*, text, voice, out_path, creds, **_kwargs):
