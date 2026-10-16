@@ -19,6 +19,48 @@ from urllib.parse import urlsplit
 REPO = Path(__file__).resolve().parents[2]
 
 
+def recording_stt(root, stub):
+    """Cloud engines without a paid provider (CLARP_QA_RECORDING_STT=1).
+
+    A cloud model id goes through the production handoff,
+    stt_providers.transcribe, exactly as WhisperSTT routes it; only the
+    provider adapters behind it are replaced by recorders. Each appends the
+    language it was handed to provider/stt-handoffs.jsonl. provider/stt-control.json
+    ({"no_key": [...], "fail_after": [...]}) makes a provider refuse before
+    the handoff (no key) or fail after it. The local default stays the stub.
+    """
+    from lib import cartesia_stt, cartesia_stt_ws, deepgram_stt, eleven_stt, google_stt, stt_providers
+    from lib.stt import STTUnknownModelError
+    log_path = root / 'provider' / 'stt-handoffs.jsonl'
+    control_path = root / 'provider' / 'stt-control.json'
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def control():
+        return json.loads(control_path.read_text()) if control_path.is_file() else {}
+
+    def recorder(provider):
+        def run(**kwargs):
+            with log_path.open('a') as log:
+                log.write(json.dumps({'provider': provider, 'model': kwargs.get('model'),
+                                      'language': kwargs.get('language')}) + '\n')
+            if provider in control().get('fail_after', []):
+                raise RuntimeError(f'{provider} failed after the handoff (QA)')
+            return 'QA cloud transcript', 1.0
+        return run
+    for module, provider in ((eleven_stt, 'elevenlabs'), (google_stt, 'google'),
+                             (deepgram_stt, 'deepgram'), (cartesia_stt, 'cartesia'), (cartesia_stt_ws, 'cartesia')):
+        module.transcribe = recorder(provider)
+    stt_providers._key_for = lambda cfg, provider: (
+        '' if provider in control().get('no_key', []) else 'qa-recording-key')
+
+    class RecordingSTT(type(stub)):
+        def transcribe_model_bytes(self, model_id, audio_bytes, content_type, vocab_prompt, *, wait=0.0):
+            if stt_providers.is_cloud_model(model_id):
+                return stt_providers.transcribe(model_id, audio_bytes, content_type, vocab_prompt)
+            raise STTUnknownModelError(f'transcription model not installed: {model_id}')
+    return RecordingSTT(text=stub.text, ends_terminal=stub.ends_terminal)
+
+
 def main():
     faulthandler.register(signal.SIGUSR1)
     parser = argparse.ArgumentParser()
@@ -81,10 +123,13 @@ def main():
         raise SystemExit('QA state contains an unsupported provider')
     audio = root / 'audio'
     audio.mkdir(exist_ok=True)
+    stt = StubSTT(text='QA voice prompt', ends_terminal=True)
+    if os.environ.get('CLARP_QA_RECORDING_STT') == '1':
+        stt = recording_stt(root, stt)
     ctx = ServerContext(root=root, static=REPO / 'static', audio_dir=audio,
                         agents_path=root / 'agents.json', default_session='rachel',
                         tts=FakeTTSEngine(audio), stream=AudioStream(audio),
-                        stt=StubSTT(text='QA voice prompt', ends_terminal=True),
+                        stt=stt,
                         auth_token=args.token, roster_names=('Rachel', 'Mike'))
     spec = importlib.util.spec_from_file_location('qa_server', REPO / 'server/server.py')
     module = importlib.util.module_from_spec(spec)
@@ -102,6 +147,9 @@ def main():
         '/calls/ring', '/calls/ring/answer', '/calls/ring/opening', '/calls/end',
         # Call-scoped transcription (docs/group-calls.md); the QA STT is a stub.
         '/transcribe', '/calls'}
+    if os.environ.get('CLARP_QA_RECORDING_STT') == '1':
+        # Call policy and agent overrides for the recording engines below.
+        allowed_post |= {'/transcription-providers'}
     for method, allowed in [('GET', allowed_get), ('POST', allowed_post), ('PUT', set()), ('DELETE', set())]:
         original = getattr(module.Handler, 'do_' + method)
         def scoped(self, original=original, allowed=allowed):
