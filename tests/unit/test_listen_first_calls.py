@@ -1328,14 +1328,16 @@ def test_L4_a_listen_first_call_shows_the_view_when_an_override_applies(env):
 
 def test_L5_a_failure_while_opening_rolls_the_answer_back(env, monkeypatch):
     ring = _lf()
+    real, broken = rings._auth_proof, {"on": True}
 
-    def dies(*args, **kwargs):
-        raise RuntimeError("the Host died while recording the opening")
+    def dies(principal):
+        if broken["on"]:
+            raise RuntimeError("the Host died while recording the opening")
+        return real(principal)
     monkeypatch.setattr(rings, "_auth_proof", dies)
     with pytest.raises(RuntimeError):
         rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")
-    monkeypatch.undo()
-    monkeypatch.setattr(rings, "now_ms", env.clock)
+    broken["on"] = False
     assert rings.get(ring["ring_id"])["state"] == "ringing" and _state(ring["ring_id"]) is None
     op = rings.answer(PHONE, ring["ring_id"], opening_mode="listen_first")["opening"]
     assert op["state"] == "pending" and op["token"].startswith("opn_")
