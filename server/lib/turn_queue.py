@@ -461,7 +461,11 @@ def mark_started(queue_id: str) -> None:
             if settled:
                 settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
                                str(settled["outcome"] or ""))
-            if pending_count(str(row["agent_id"])) == 0 and set_paused(str(row["agent_id"]), False):
+            # A listen-first opening passes a pause that existed when the
+            # call was answered (agent_rings); it never ends that pause.
+            if (not queue_id.startswith("call-open:")
+                    and pending_count(str(row["agent_id"])) == 0
+                    and set_paused(str(row["agent_id"]), False)):
                 # Nothing is held any more, so a Stop's pause ends here. Say
                 # which item ended it: a peer message or goal wake can do so.
                 log("queuePauseEndedByDrain",
@@ -722,8 +726,26 @@ def is_paused(agent_id: str) -> bool:
     return bool(row and row["paused"])
 
 
+STOP_GENERATION_KEY = "turn_queue.stop_generation."
+
+
+def stop_generation(agent_id: str) -> int:
+    """How many times this agent's queue was paused by a Stop or cancel: an
+    ordering marker that moves on every Stop, even onto an already paused
+    queue (agent_rings fences a listen-first opening against it)."""
+    row = db.conn().execute("SELECT value FROM settings WHERE key = ?",
+                            (STOP_GENERATION_KEY + agent_id,)).fetchone()
+    return int(row[0]) if row else 0
+
+
 def set_paused(agent_id: str, paused: bool) -> bool:
     if paused:
+        db.conn().execute(
+            """INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)
+               ON CONFLICT(key) DO UPDATE SET
+                   value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
+                   updated_at = excluded.updated_at""",
+            (STOP_GENERATION_KEY + agent_id, db.now_ms()))
         # A Stop (the only pauser) takes back every right the release drain
         # persisted for this agent's waiting work, as it does for work waiting
         # in memory when the runtime restarts: nothing queued before this Stop
