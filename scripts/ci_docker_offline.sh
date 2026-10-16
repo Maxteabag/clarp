@@ -79,6 +79,11 @@ try:
     raise AssertionError("something answers DNS on the container loopback")
 except (ConnectionRefusedError, socket.timeout):
     pass
+try:                                    # resolution of a public name must fail inside (no egress:
+    socket.getaddrinfo("example.com", 443)   # resolv.conf names only the dead container loopback)
+    raise AssertionError("a public name resolves inside the test container")
+except socket.gaierror:
+    pass
 print("ci offline network preflight passed")
 '
 }
@@ -96,14 +101,26 @@ ci_offline_assert_inside() {
     # $1: running container. The same no-egress facts, from inside the running Host's container.
     docker exec "$1" python3 -c '
 import errno, socket
-probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-try:
-    probe.connect(("1.1.1.1", 53))
-    raise AssertionError("route out of the test container")
-except OSError as error:
-    assert error.errno in (errno.ENETUNREACH, errno.EADDRNOTAVAIL), error
+for family, address in ((socket.AF_INET, ("1.1.1.1", 53)), (socket.AF_INET6, ("2606:4700:4700::1111", 53))):
+    try:
+        probe = socket.socket(family, socket.SOCK_DGRAM)
+    except OSError as error:
+        assert family == socket.AF_INET6 and error.errno == errno.EAFNOSUPPORT, error
+        continue
+    try:
+        probe.connect(address)          # sends no packet
+        raise AssertionError(f"route out of the test container to {address[0]}")
+    except OSError as error:
+        assert error.errno in (errno.ENETUNREACH, errno.EADDRNOTAVAIL), (address, error)
+    finally:
+        probe.close()
 servers = [l.split()[1] for l in open("/etc/resolv.conf") if l.startswith("nameserver")]
 assert servers == ["127.0.0.1"], servers
+try:
+    socket.getaddrinfo("example.com", 443)
+    raise AssertionError("a public name resolves inside the test container")
+except socket.gaierror:
+    pass
 '
 }
 
