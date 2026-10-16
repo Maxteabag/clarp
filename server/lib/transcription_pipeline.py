@@ -107,6 +107,13 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
         else:
             # No call policy: exactly today's engines and languages (§12.2).
             call_steps = call_transcription.unchanged_plan(engines, focus, stt)
+        if call_stt["engines"]["source"] == "device":
+            # An explicit header names the model asked for, exactly as outside
+            # a call: `server-default` or `local` goes to transcribe_model_bytes
+            # as sent, never swapped for the local default's own call.
+            for step, named in zip(call_steps, engines):
+                if step.pop("local_default", None):
+                    step["model"] = named
         if not any("skip" not in step for step in call_steps):
             # Fail closed and visibly: never transcribe under another language
             # while the record says the call language applied.
@@ -361,9 +368,12 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
                     text, ends_terminal, dur = stt.transcribe_bytes(audio_bytes, ctype, prompt, wait=10.0)
                 elif callable(model_transcribe):
                     text, ends_terminal, dur = model_transcribe(
-                        step["engine"], audio_bytes, ctype, prompt, wait=10.0)
+                        step.get("model", step["engine"]), audio_bytes, ctype, prompt, wait=10.0)
+                elif step.get("model") == "server-default":
+                    text, ends_terminal, dur = stt.transcribe_bytes(audio_bytes, ctype, prompt, wait=10.0)
                 else:
-                    raise STTUnknownModelError(f"transcription model not installed: {step['engine']}")
+                    raise STTUnknownModelError(
+                        f"transcription model not installed: {step.get('model', step['engine'])}")
         except (STTUnknownModelError, STTModelLoadingError, STTBusyError) as e:
             attempts.append({"engine": step["engine"], "outcome": "error", "language": step.get("received", step["language"]),
                              "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})

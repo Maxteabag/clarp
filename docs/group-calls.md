@@ -203,6 +203,12 @@ Without a call policy (`call_languages` and `call_engines` both unset),
 in-call transcription is unchanged: the same engine chain as chat, nothing
 skipped and no new refusal, with the sources still reported.
 
+An explicit `X-Transcription-Model: server-default` or `local` from a device
+(it is an ordinary header value, and clients may send it) is passed to the
+engine exactly as outside a call: the same `transcribe_model_bytes` call with
+the value as sent, and the same answer, including a refusal. Only an absent
+or empty header falls through to the global engine, as in chat.
+
 With a call policy configured, engines are planned on the real model and what
 it does with a language: `server-default` (and `local`) means the configured
 local model. Google Chirp and ElevenLabs Scribe take a language set; other
