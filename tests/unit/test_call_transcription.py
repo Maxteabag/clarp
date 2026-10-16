@@ -303,10 +303,11 @@ def test_M1_a_call_language_the_default_engine_cannot_take_refuses_visibly(env):
     settings_store.set_text(ct.CALL_LANGUAGES_KEY, "no")         # stored before the rule existed
     stt = FakeSTT()
     out = _transcribe(stt, scope=_scope(env))
-    assert out.status == 409 and out.payload["error"] == "no compatible engine"
+    # The stored policy can never work with the global engine: refused as invalid (R2).
+    assert out.status == 409 and out.payload["error"] == "call policy invalid"
     assert out.payload["language"] == "no"
-    assert out.payload["attempts"] == [{"engine": "faster-whisper:small.en", "outcome": "skipped",
-                                        "reason": "language_incompatible"}]
+    assert "can never work" in out.payload["call_policy_error"]
+    assert out.payload["attempts"] == []
     assert stt.calls == []                                           # never transcribed as English
 
 
@@ -437,3 +438,102 @@ def test_D1_c_with_a_policy_a_local_multilingual_engine_is_still_skipped(env, mo
     assert out.payload["attempts"] == [{"engine": "faster-whisper:small", "outcome": "skipped",
                                         "reason": "language_incompatible"}]
     assert stt.calls == []
+
+
+# ---- R2: one policy snapshot per clip, published at once, refused when invalid ----------------
+
+def _after_resolve(monkeypatch, change):
+    """Change the stored settings once, right after the clip resolved its policy."""
+    real = ct.resolve
+
+    def resolve(*args, **kwargs):
+        out = real(*args, **kwargs)
+        change()
+        monkeypatch.setattr(ct, "resolve", real)
+        return out
+    monkeypatch.setattr(ct, "resolve", resolve)
+
+
+def test_R2_a_policy_set_during_a_request_does_not_apply_to_it(env, monkeypatch):
+    plain = FakeSTT()
+    _transcribe(plain, scope=None, focus="mike-86db", tid="tx-plain")
+    _after_resolve(monkeypatch, lambda: _set(engine="google:chirp_3", call_languages="no",
+                                             call_engines="google:chirp_3"))
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 200
+    assert stt.calls == plain.calls == [("server-default", None)]      # today's chain, nothing bound
+    record = out.payload["stt"]
+    assert record["language"] == {"value": "en", "source": "global"}
+    assert record["engines"] == {"value": ["faster-whisper:small.en"], "source": "global"}
+    assert record["attempts"][0]["language"] == "en"                    # what small.en received
+
+
+def test_R2_a_policy_cleared_during_a_request_still_applies_to_it(env, monkeypatch):
+    _set(call_languages="no,en", call_engines="google:chirp_3")
+    _after_resolve(monkeypatch, lambda: _set(call_languages="", call_engines=""))
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 200
+    assert stt.calls == [("google:chirp_3", "no,en")]                   # the policy's language, as reported
+    record = out.payload["stt"]
+    assert record["language"] == {"value": "no,en", "source": "call_policy"}
+    assert record["engines"] == {"value": ["google:chirp_3"], "source": "call_policy"}
+    assert record["attempts"][0]["language"] == "no,en"
+
+
+def test_R2_a_pair_changed_while_a_clip_resolves_is_never_mixed(env, monkeypatch):
+    _set(call_languages="no", call_engines="google:chirp_3")
+    real = stt_language.engines_for                                      # read between the two keys before R2
+
+    def engines_for(session):
+        monkeypatch.setattr(stt_language, "engines_for", real)
+        settings_store.set_text(ct.CALL_LANGUAGES_KEY, "en")
+        settings_store.set_text(ct.CALL_ENGINES_KEY, "elevenlabs:scribe_v2")
+        return real(session)
+    monkeypatch.setattr(stt_language, "engines_for", engines_for)
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert stt.calls == [("google:chirp_3", "no")]                      # the old pair, whole
+    record = out.payload["stt"]
+    assert record["language"] == {"value": "no", "source": "call_policy"}
+    assert record["engines"] == {"value": ["google:chirp_3"], "source": "call_policy"}
+
+
+def test_R2_the_settings_writer_publishes_the_pair_at_once():
+    seen = []
+    real = settings_store.set_text
+
+    def set_text(key, value, **kwargs):
+        real(key, value, **kwargs)
+        if key == ct.CALL_LANGUAGES_KEY:
+            # Another connection, between the two writes: it must see neither.
+            reader = threading.Thread(target=lambda: seen.append(
+                settings_store.get_many([ct.CALL_LANGUAGES_KEY, ct.CALL_ENGINES_KEY])))
+            reader.start()
+            reader.join()
+    import unittest.mock
+    with unittest.mock.patch.object(settings_store, "set_text", set_text):
+        _set(call_languages="no,en", call_engines="google:chirp_3")
+    assert seen == [{}]
+    assert settings_store.get_many([ct.CALL_LANGUAGES_KEY, ct.CALL_ENGINES_KEY]) == {
+        ct.CALL_LANGUAGES_KEY: "no,en", ct.CALL_ENGINES_KEY: "google:chirp_3"}
+
+
+@pytest.mark.parametrize("languages,engines,message", [
+    ("no,en", "cartesia:ink-whisper", "single language"),               # an impossible pair
+    ("norsk", "google:chirp_3", "ISO"),                                  # an unreadable language
+    ("no", "google:chirp_3,nope:x", "unknown transcription engine"),
+])
+def test_R2_an_invalid_stored_policy_is_refused_before_any_provider(env, languages, engines, message):
+    settings_store.set_text(ct.CALL_LANGUAGES_KEY, languages)            # behind the settings validation
+    settings_store.set_text(ct.CALL_ENGINES_KEY, engines)
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 409 and out.payload["ok"] is False
+    assert out.payload["error"] == "call policy invalid"
+    assert message in out.payload["call_policy_error"]
+    assert out.payload["call_policy_error"] == stt_providers.status()["call_policy_error"]
+    assert out.payload["attempts"] == []
+    assert stt.calls == []                                               # never silently unset or global
+    assert "transcription" not in calls.snapshot(PHONE)["call"]          # the view is unknown, not global
