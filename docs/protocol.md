@@ -478,9 +478,16 @@ transcription and refuses with no transcript: 400 `bad call id`, 404 `unknown
 call`, 403 `not your call` (another device or Host), 409 `call ended` (+
 `call_id`, `reason`), 409 `not a call participant` (+ `session`). A valid one
 answers with `stt`: `{language: {value, source}, engines: {value, source},
-effective_engine, attempts: [{engine, outcome, ms|reason}], language_adapted,
-requested_model}`, sources `agent | call_policy | device | global`. Without
-the header nothing changes. See [group-calls.md](group-calls.md).
+effective_engine, attempts: [{engine, outcome, language, ms|reason}],
+language_adapted, requested_model}`, sources `agent | call_policy | device |
+global`; `attempts[].language` is what that engine actually received. When no
+engine can take the call language the clip is refused, with no provider call:
+409 `{"ok": false, "error": "no compatible engine", "language", "engines",
+"attempts"}` (a multilingual or unknown local model never receives a code, so it
+counts as incompatible). The transcription settings take `call_languages` and
+`call_engines`, refuse a combination that can never work, and read back
+`call_policy_error`. Without the header nothing changes. See
+[group-calls.md](group-calls.md).
 
 **Out:** an `audio` event announces a clip. Pick a source in this order:
 

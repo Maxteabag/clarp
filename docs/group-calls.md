@@ -197,11 +197,27 @@ Per field, independently: the language is the agent's own
 engines are the agent's own (`agent_engines`), else `call_engines`, else the
 device's `X-Transcription-Model`, else the global engine. A device header
 that is not applied is reported (`requested_model.applied: false` with the
-reason), never refused. Engines run in order, the next only on failure; an
-engine that takes one language gets the first code of a set
-(`language_adapted: "first_code"`); one that cannot take the language at all
-is skipped (`skipped: language_incompatible`), and none at all is an explicit
-error. Every attempt is in `stt.attempts` and the `transcribe` event.
+reason), never refused.
+
+Engines are planned on the real model and what it does with a language:
+`server-default` (and `local`) means the configured local model. Google Chirp
+and ElevenLabs Scribe take a language set; other cloud engines take one code
+and get the first code of a set (`language_adapted: "first_code"`); an
+English-only local model (catalog `["en"]`, e.g. `small.en`) takes `en` only.
+A multilingual or unknown local model never receives a code (it auto-detects),
+so it is incompatible with every call language, `en` included: the Host never
+claims a language an engine did not get. An incompatible engine is skipped
+(`{engine, outcome: "skipped", reason: "language_incompatible"}`); the rest run
+in order, the next only on failure. Every attempt records the `language` the
+engine actually received, in `stt.attempts` and the `transcribe` event.
+
+When no engine can take the call language, the clip is refused before any
+provider sees it: **409** `{"ok": false, "error": "no compatible engine",
+"language": "<code(s)>", "engines": ["<real model ids>"], "attempts": [<the
+skips>]}`. Saving settings refuses a policy that can never work (the call
+languages against `call_engines`, or, when those are unset, the resolved
+global engine), including a later change of the global engine; the readback
+adds `call_policy_error` (empty, or why the stored policy can no longer work).
 
 The call record (`GET /calls`, the answer's `call`, route responses) adds
 `transcription: {session: {language: {value, source}, engines: {value,
