@@ -326,10 +326,11 @@ def test_M1_settings_refuse_a_policy_that_can_never_work():
 def test_M1_attempts_report_the_language_the_engine_actually_received(env):
     _set(call_languages="no,en", call_engines="google:chirp_3", agent_engines={"mike": "cartesia:ink-whisper"})
     stt_record = _transcribe(FakeSTT(), scope=_scope(env)).payload["stt"]
-    assert stt_record["attempts"][0]["language"] == "no" and stt_record["language_adapted"] == "first_code"
+    # FakeSTT is no Host->engine boundary, so nothing is observed (L2): null, never a guess.
+    assert stt_record["attempts"][0]["language"] is None and stt_record["language_adapted"] == "first_code"
     _set(agent_engines={"mike": ""})
     stt_record = _transcribe(FakeSTT(), scope=_scope(env), tid="tx-set").payload["stt"]
-    assert stt_record["attempts"][0]["language"] == "no,en"
+    assert stt_record["attempts"][0]["language"] is None                    # not observed (L2)
 
 
 def test_M1_an_english_default_takes_an_english_call(env):
@@ -339,7 +340,7 @@ def test_M1_an_english_default_takes_an_english_call(env):
     assert stt_record["effective_engine"] == "faster-whisper:small.en"
     # No call policy: exactly today's call (nothing bound); the model is English-only.
     assert stt.calls == [("server-default", None)]
-    assert stt_record["attempts"][0]["language"] == "en"
+    assert stt_record["attempts"][0]["language"] is None                    # not observed (L2)
 
 
 # ---- review N2: outside calls, server-default is exactly 006e9e70 ------------------------------
@@ -410,7 +411,7 @@ def test_D1_a_without_a_policy_a_local_multilingual_host_transcribes_as_today(en
     record = out.payload["stt"]
     assert record["language"] == {"value": "en", "source": "global"}
     assert record["engines"] == {"value": ["faster-whisper:small"], "source": "global"}
-    assert record["attempts"][0]["language"] == "auto"                 # it auto-detects; never claim "en"
+    assert record["attempts"][0]["language"] is None                   # not observed (L2); never claim "en"
     assert record["language_adapted"] is None
 
 
@@ -426,7 +427,7 @@ def test_D1_b_without_a_policy_an_agent_override_on_a_local_engine_is_as_today(e
     record = out.payload["stt"]
     assert record["language"] == {"value": "no", "source": "agent"}
     assert record["engines"] == {"value": ["faster-whisper:small.en"], "source": "agent"}
-    assert record["attempts"][0]["language"] == "en"                   # what the English-only model got
+    assert record["attempts"][0]["language"] is None                   # not observed (L2)
 
 
 def test_D1_c_with_a_policy_a_local_multilingual_engine_is_still_skipped(env, monkeypatch):
@@ -466,7 +467,7 @@ def test_R2_a_policy_set_during_a_request_does_not_apply_to_it(env, monkeypatch)
     record = out.payload["stt"]
     assert record["language"] == {"value": "en", "source": "global"}
     assert record["engines"] == {"value": ["faster-whisper:small.en"], "source": "global"}
-    assert record["attempts"][0]["language"] == "en"                    # what small.en received
+    assert record["attempts"][0]["language"] is None                    # not observed (L2)
 
 
 def test_R2_a_policy_cleared_during_a_request_still_applies_to_it(env, monkeypatch):
@@ -479,7 +480,7 @@ def test_R2_a_policy_cleared_during_a_request_still_applies_to_it(env, monkeypat
     record = out.payload["stt"]
     assert record["language"] == {"value": "no,en", "source": "call_policy"}
     assert record["engines"] == {"value": ["google:chirp_3"], "source": "call_policy"}
-    assert record["attempts"][0]["language"] == "no,en"
+    assert record["attempts"][0]["language"] is None                    # not observed (L2)
 
 
 def test_R2_a_pair_changed_while_a_clip_resolves_is_never_mixed(env, monkeypatch):
@@ -646,3 +647,199 @@ def test_C3_pins_single_code_scribe_under_a_policy_and_no_policy_sets(env):
     stt = FakeSTT()
     out = _transcribe(stt, scope=_scope(env), tid="tx-nopolicy")
     assert out.status == 200 and stt.calls == [("elevenlabs:scribe_v2", None)]   # today's chain, unbound
+
+
+# ---- L2: attempts[].language is what the Host handed at the named engine boundary ----------------
+# Recording stand-ins sit BEHIND the production boundaries: a real WhisperSTT with a recording
+# model, the real stt_providers handoff with recording provider adapters, and the real custom
+# adapter handoff with a recording _request. Null means the boundary was not observed.
+
+class RecordingModel:
+    """faster-whisper stand-in: records the language= it is handed."""
+
+    def __init__(self, fail=False):
+        self.languages, self.fail = [], fail
+
+    def transcribe(self, path, language=None, **kwargs):
+        self.languages.append(language)
+        if self.fail:
+            raise RuntimeError("model crashed")
+        return iter([SimpleNamespace(text="hei", no_speech_prob=0.0)]), None
+
+
+def _whisper(model_name="small.en", *, cls=None, fail=False):
+    from lib import stt as stt_mod
+    engine = (cls or stt_mod.WhisperSTT)(model_name)
+    engine._model = RecordingModel(fail)
+    engine.ready.set()
+    engine.load_done.set()
+    return engine
+
+
+def _cloud(monkeypatch, *, fail_after=(), no_key=()):
+    """Recording provider adapters behind the real stt_providers handoff."""
+    from lib import cartesia_stt, deepgram_stt, eleven_stt, google_stt
+    handed = []
+
+    def recorder(provider):
+        def run(**kwargs):
+            handed.append((provider, kwargs["language"]))
+            if provider in fail_after:
+                raise RuntimeError(f"{provider} failed after the handoff")
+            return "hei", 1.0
+        return run
+    for module, provider in ((eleven_stt, "elevenlabs"), (google_stt, "google"),
+                             (deepgram_stt, "deepgram"), (cartesia_stt, "cartesia")):
+        monkeypatch.setattr(module, "transcribe", recorder(provider))
+    monkeypatch.setattr(stt_providers, "_key_for", lambda cfg, provider: "" if provider in no_key else "k")
+    return handed
+
+
+def _attempts(out):
+    return [(a["engine"], a["outcome"], a.get("language")) for a in out.payload["stt"]["attempts"]]
+
+
+def test_L2_local_in_process_records_the_language_handed_to_the_model(env, monkeypatch):
+    engine = _whisper("small.en")
+    out = _transcribe(engine, scope=_scope(env))
+    assert engine._model.languages == ["en"]
+    assert _attempts(out) == [("faster-whisper:small.en", "ok", "en")]
+    _local_default(monkeypatch, "small")
+    engine = _whisper("small")
+    out = _transcribe(engine, scope=_scope(env), tid="tx-multi")
+    assert engine._model.languages == [None]
+    assert _attempts(out) == [("faster-whisper:small", "ok", "auto")]          # no constraint, not detection
+
+
+def test_L2_the_subprocess_worker_and_its_fallback_record_the_engine_language(env):
+    from lib import stt as stt_mod
+    engine = _whisper("small.en", cls=stt_mod.SubprocessWhisperSTT)
+    requests = []
+
+    class Worker:
+        stdin = property(lambda self: self)
+
+        def poll(self):
+            return None
+
+        def write(self, line):
+            request = json.loads(line)
+            requests.append(request)
+            event, box = engine._pending[request["id"]]
+            box["segments"] = [{"text": "hei", "no_speech_prob": 0.0}]
+            event.set()
+
+        def flush(self):
+            pass
+    engine._proc = Worker()
+    out = _transcribe(engine, scope=_scope(env))
+    assert [r["op"] for r in requests] == ["transcribe"] and "language" not in requests[0]  # fixed at load
+    assert _attempts(out) == [("faster-whisper:small.en", "ok", engine.language)] and engine.language == "en"
+    engine._fallback_in_process = True
+    out = _transcribe(engine, scope=_scope(env), tid="tx-fallback")
+    assert engine._model.languages == ["en"]
+    assert _attempts(out) == [("faster-whisper:small.en", "ok", "en")]
+
+
+def test_L2_a_custom_adapter_records_no_constraint(env, monkeypatch):
+    from lib import custom_stt_adapters
+    payloads = []
+    manifest = SimpleNamespace(id="acme", default_model="m1")
+    monkeypatch.setattr(custom_stt_adapters, "get", lambda provider: manifest if provider == "acme" else None)
+    monkeypatch.setattr(custom_stt_adapters, "models", lambda m: [{"id": "acme:m1", "model": "m1"}])
+
+    def request(m, payload):
+        payloads.append(payload)
+        return {"text": "hei"}
+    monkeypatch.setattr(custom_stt_adapters, "_request", request)
+    out = _transcribe(_whisper(), scope=_scope(env), requested_model="acme:m1")
+    assert len(payloads) == 1 and "language" not in payloads[0]
+    assert _attempts(out) == [("acme:m1", "ok", "auto")]
+
+
+@pytest.mark.parametrize("policy,engine,handed", [
+    ({"call_languages": "no", "call_engines": "deepgram:nova-3"}, "deepgram", "no"),
+    ({"call_languages": "no,en", "call_engines": "google:chirp_3"}, "google", "no,en"),      # codes; Google maps tags
+    ({"call_languages": "no", "call_engines": "elevenlabs:scribe_v2"}, "elevenlabs", "no"),  # single-code Scribe
+    ({"call_languages": "no,en", "call_engines": "google:chirp_3", "agent_engines": {"mike": "cartesia:ink-whisper"}},
+     "cartesia", "no"),                                                                      # first code
+])
+def test_L2_cloud_records_the_argument_handed_to_the_adapter(env, monkeypatch, policy, engine, handed):
+    recorded = _cloud(monkeypatch)
+    _set(**policy)
+    out = _transcribe(_whisper(), scope=_scope(env))
+    assert recorded == [(engine, handed)]
+    assert _attempts(out)[-1][2] == handed
+
+
+def test_L2_scribe_without_a_policy_is_handed_no_constraint_for_a_set(env, monkeypatch):
+    recorded = _cloud(monkeypatch)
+    _set(agent_languages={"mike": "no,en"}, agent_engines={"mike": "elevenlabs:scribe_v2"})
+    out = _transcribe(_whisper(), scope=_scope(env))
+    assert recorded == [("elevenlabs", None)]                     # the set was always dropped for Scribe
+    assert _attempts(out) == [("elevenlabs:scribe_v2", "ok", "auto")]
+
+
+def test_L2_a_failure_before_the_boundary_is_null_after_it_observed_and_nothing_leaks(env, monkeypatch):
+    _set(agent_languages={"mike": "no,en"}, agent_engines={"mike": "google:chirp_3,elevenlabs:scribe_v2"})
+    recorded = _cloud(monkeypatch, no_key={"google"})               # refused before the handoff
+    out = _transcribe(_whisper(), scope=_scope(env))
+    assert recorded == [("elevenlabs", None)]
+    assert _attempts(out) == [("google:chirp_3", "error", None), ("elevenlabs:scribe_v2", "ok", "auto")]
+    recorded = _cloud(monkeypatch, fail_after={"google"})           # fails after the handoff
+    out = _transcribe(_whisper(), scope=_scope(env), tid="tx-after")
+    assert recorded == [("google", "no,en"), ("elevenlabs", None)]
+    assert _attempts(out) == [("google:chirp_3", "error", "no,en"), ("elevenlabs:scribe_v2", "ok", "auto")]
+
+
+def test_L2_a_local_failure_before_and_after_the_model(env):
+    engine = _whisper("small.en")
+    engine._model = None                                            # not available: before the boundary
+    out = _transcribe(engine, scope=_scope(env))
+    assert out.status == 500 and _attempts(out) == [("faster-whisper:small.en", "error", None)]
+    engine = _whisper("small.en", fail=True)                        # the model fails after it was handed "en"
+    out = _transcribe(engine, scope=_scope(env), tid="tx-after")
+    assert out.status == 500 and _attempts(out) == [("faster-whisper:small.en", "error", "en")]
+
+
+def test_L2_D1_no_policy_dispatch_is_the_chat_dispatch(env, monkeypatch):
+    _local_default(monkeypatch, "small")
+    chat, call = _whisper("small"), _whisper("small")
+    _transcribe(chat, scope=None, focus="mike-86db", tid="tx-plain")
+    out = _transcribe(call, scope=_scope(env))
+    assert call._model.languages == chat._model.languages == [None]
+    assert _attempts(out) == [("faster-whisper:small", "ok", "auto")]
+    recorded = _cloud(monkeypatch)
+    _set(agent_languages={"mike": "no"}, agent_engines={"mike": "deepgram:nova-3"})
+    _transcribe(_whisper(), scope=None, focus="mike-86db", tid="tx-plain-cloud")
+    out = _transcribe(_whisper(), scope=_scope(env), tid="tx-call-cloud")
+    assert recorded == [("deepgram", "no"), ("deepgram", "no")]     # the same argument as chat
+    assert _attempts(out) == [("deepgram:nova-3", "ok", "no")]
+
+
+def test_L2_captures_are_per_attempt_nested_and_per_thread():
+    with stt_language.capturing_handed() as outer:
+        stt_language.note_handed("no")
+        with pytest.raises(RuntimeError):
+            with stt_language.capturing_handed() as inner:
+                stt_language.note_handed(None)
+                raise RuntimeError("boom")
+        assert inner == {"language": "auto"} and outer == {"language": "no"}
+        with stt_language.capturing_handed() as unobserved:
+            pass
+        assert unobserved == {} and outer == {"language": "no"}
+    stt_language.note_handed("en")                                    # no capture: a no-op
+    barrier, seen = threading.Barrier(2), {}
+
+    def clip(name, language):
+        with stt_language.capturing_handed() as mine:
+            barrier.wait()
+            stt_language.note_handed(language)
+            barrier.wait()
+            seen[name] = dict(mine)
+    threads = [threading.Thread(target=clip, args=("a", "no")), threading.Thread(target=clip, args=("b", "en"))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert seen == {"a": {"language": "no"}, "b": {"language": "en"}}
