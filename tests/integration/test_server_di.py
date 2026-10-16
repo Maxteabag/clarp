@@ -4348,3 +4348,67 @@ def test_an_agent_cannot_delete_itself_from_its_own_turn(running_server):
     assert delete(token) == 403
     assert agents_db.get_by_session("koko") is not None
     assert delete("") == 200          # the user (no turn) still can
+
+
+GOOGLE_AOEDE = "nb-NO-Chirp3-HD-Aoede"
+
+
+def _google_configured(monkeypatch, tmp_path):
+    from lib import config
+    adc = tmp_path / "adc.json"
+    adc.write_text("{}")
+    monkeypatch.setattr(config, "_CACHED", config.Config(
+        tts_provider="cartesia", google_tts_section=True, google_tts_credentials=str(adc),
+        google_tts_project="tts-billing-project"))
+
+
+def _post_status(url, body):
+    try:
+        return _post(url, body)
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+
+
+def test_choosing_a_google_voice_accepts_only_the_allowlist_and_keeps_other_providers(
+        running_server):
+    base, _ctx, _srv = running_server
+    status, body = _post_status(base + "/agent-voice", {
+        "session": "rachel", "voice_id": "nb-NO-Chirp3-HD-Nobody", "provider": "google"})
+    assert (status, json.loads(body)["error"]) == (400, "unknown voice")
+    assert _post_status(base + "/agent-voice", {
+        "session": "rachel", "voice_id": "any-cartesia-id", "provider": "cartesia"})[0] == 200
+    assert _post_status(base + "/agent-voice", {
+        "session": "rachel", "voice_id": GOOGLE_AOEDE, "provider": "google"})[0] == 200
+    from lib import agents
+    stored = json.loads(agents.get_by_session("rachel")["voice_id"])
+    assert stored == {"elevenlabs": "V_RACHEL", "cartesia": "any-cartesia-id", "google": GOOGLE_AOEDE}
+
+
+def test_a_google_preview_speaks_the_requested_voice_and_fails_with_fixed_statuses(
+        running_server, monkeypatch, tmp_path):
+    from lib import google_tts
+    base, _ctx, _srv = running_server
+    asked = []
+
+    def google(*, text, voice, out_path, creds, **_kwargs):
+        asked.append(voice)
+        if voice == "nb-NO-Chirp3-HD-Charon":
+            raise google_tts.GoogleTTSError("google_quota")
+        pathlib.Path(out_path).write_bytes(b"ID3google-preview")
+        return 17
+    monkeypatch.setattr(google_tts, "synthesize", google)
+
+    with pytest.raises(urllib.error.HTTPError) as unconfigured:
+        _get(base + f"/voice-preview?provider=google&id={GOOGLE_AOEDE}")
+    assert unconfigured.value.code == 404 and asked == []
+
+    _google_configured(monkeypatch, tmp_path)
+    status, body = _get(base + f"/voice-preview?provider=google&id={GOOGLE_AOEDE}")
+    assert (status, body) == (200, b"ID3google-preview")
+    with pytest.raises(urllib.error.HTTPError) as off_list:
+        _get(base + "/voice-preview?provider=google&id=nb-NO-Chirp3-HD-Nobody")
+    assert off_list.value.code == 404
+    with pytest.raises(urllib.error.HTTPError) as failed:
+        _get(base + "/voice-preview?provider=google&id=nb-NO-Chirp3-HD-Charon")
+    assert failed.value.code == 502
+    assert asked == [GOOGLE_AOEDE, "nb-NO-Chirp3-HD-Charon"]

@@ -365,3 +365,32 @@ def test_the_adapter_dir_is_the_sessions_own_empty_dir():
     assert root.is_relative_to(pathlib.Path(os.environ["CLARP_TEST_GUARD_DIR"]))
     assert custom_tts_adapters.discover() == []
     assert not [row["id"] for row in tts_providers.status()["providers"] if row["id"].startswith("custom.")]
+
+
+def _record_google(env):
+    from lib import google_tts
+
+    def google(*, text, voice, out_path, creds, on_chunk=None, **_kwargs):
+        env.builtin.append({"provider": "google", "voice": voice, "text": text})
+        pathlib.Path(out_path).write_bytes(b"ID3google")
+        return 9
+    env.monkeypatch.setattr(google_tts, "synthesize", google)
+
+
+def test_a_google_voice_preview_speaks_the_requested_voice_not_the_agents_override(env):
+    """Preview opts out of the agent route (FINAL r2): with google selected, previewing a google
+    voice for an agent whose [tts.agents] entry says cartesia speaks exactly that google voice."""
+    _record_google(env)
+    env.configure("google", {"sander": {"provider": "cartesia", "cartesia_voice": "sander-c"}})
+    answer = _preview(env, {"voice_id": "nb-NO-Chirp3-HD-Aoede", "text": "Hello"})   # session: Sander
+    assert answer["status"] == 200
+    assert env.spoken() == [("google", "nb-NO-Chirp3-HD-Aoede")]
+
+
+def test_an_agents_google_override_never_hijacks_another_providers_preview(env):
+    _record_google(env)
+    env.configure("cartesia", {"sander": {"provider": "google",
+                                          "google_voice": "nb-NO-Chirp3-HD-Kore"}})
+    answer = _preview(env, {"voice_id": "previewed-voice", "text": "Hello"})   # session: Sander
+    assert answer["status"] == 200
+    assert env.spoken() == [("elevenlabs-direct", "previewed-voice")]   # today's global path, no google
