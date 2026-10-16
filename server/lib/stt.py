@@ -400,6 +400,9 @@ class WhisperCppSTT(WhisperSTT):
                 ]
                 if vocab_prompt:
                     command += ["--prompt", vocab_prompt]
+                # whisper.cpp's boundary: the -l value it actually runs with.
+                from .stt_language import note_handed
+                note_handed(command[command.index("-l") + 1])
                 completed = subprocess.run(
                     command, capture_output=True, text=True,
                     timeout=self.PROCESS_TIMEOUT_SEC)
@@ -687,6 +690,9 @@ class OpenAIWhisperSTT:
                 raise STTBusyError("whisper busy")
             t0 = time.time()
             try:
+                # OpenAI whisper's boundary: the language= handed to inference.
+                from .stt_language import note_handed
+                note_handed(self.language)
                 result = self._model.transcribe(
                     path, language=self.language, fp16=False,
                     initial_prompt=vocab_prompt or None,
