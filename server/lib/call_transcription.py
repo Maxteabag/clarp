@@ -213,6 +213,33 @@ def plan(engines: list[str], language: str) -> list[dict]:
     return steps
 
 
+_NO_ATTRIBUTE = object()
+
+
+def unchanged_plan(engines: list[str], session: str, stt=None) -> list[dict]:
+    """Without a call policy, in-call transcription is today's (§12.2): the
+    same engine chain, nothing skipped or bound. Each step only records the
+    language the engine actually receives: a cloud engine today's resolved
+    language for the session; a local engine its own (`stt.language`: "en"
+    for an English-only model) or "auto" when it detects the language."""
+    from . import stt_providers
+    steps = []
+    for named in engines:
+        engine = concrete(named)
+        if stt_providers.is_cloud_model(engine):
+            received = stt_language.language_for(session)
+        else:
+            own = getattr(stt, "language", _NO_ATTRIBUTE) if named in DEFAULT_ALIASES else _NO_ATTRIBUTE
+            if own is _NO_ATTRIBUTE:
+                own = "en" if capability(engine) == "en_only" else None
+            received = own or "auto"
+        step = {"engine": engine, "language": None, "received": received, "adapted": False}
+        if named in DEFAULT_ALIASES:
+            step["local_default"] = True
+        steps.append(step)
+    return steps
+
+
 def policy_configured() -> bool:
     return bool(call_languages() or call_engines())
 

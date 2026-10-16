@@ -91,7 +91,11 @@ def transcribe(ctx, *, audio_bytes: bytes, ctype: str, hands_free: bool,
                     engines = [long_model]
             except Exception as e:  # noqa: BLE001
                 log_exception("sttLongFormRouteFail", e)
-        call_steps = call_transcription.plan(engines, call_stt["language"]["value"])
+        if call_transcription.policy_configured():
+            call_steps = call_transcription.plan(engines, call_stt["language"]["value"])
+        else:
+            # No call policy: exactly today's engines and languages (§12.2).
+            call_steps = call_transcription.unchanged_plan(engines, focus, stt)
         if not any("skip" not in step for step in call_steps):
             # Fail closed and visibly: never transcribe under another language
             # while the record says the call language applied.
@@ -350,18 +354,18 @@ def _run_call_steps(stt, steps: list[dict], call_stt: dict, *, focus: str, audio
                 else:
                     raise STTUnknownModelError(f"transcription model not installed: {step['engine']}")
         except (STTUnknownModelError, STTModelLoadingError, STTBusyError) as e:
-            attempts.append({"engine": step["engine"], "outcome": "error", "language": step["language"],
+            attempts.append({"engine": step["engine"], "outcome": "error", "language": step.get("received", step["language"]),
                              "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
             raise
         except Exception as e:  # noqa: BLE001 - the next engine, or the caller's error
-            attempts.append({"engine": step["engine"], "outcome": "error", "language": step["language"],
+            attempts.append({"engine": step["engine"], "outcome": "error", "language": step.get("received", step["language"]),
                              "ms": int((time.monotonic() - started) * 1000), "reason": str(e)[:200]})
             if step is runnable[-1]:
                 raise
             log_exception("sttCallEngineFallback", e, detail=step["engine"])
             continue
         # The language the engine actually received (§12.1: never claim more).
-        attempts.append({"engine": step["engine"], "outcome": "ok", "language": step["language"],
+        attempts.append({"engine": step["engine"], "outcome": "ok", "language": step.get("received", step["language"]),
                          "ms": int((time.monotonic() - started) * 1000)})
         report["effective_engine"] = step["engine"]
         report["language_adapted"] = "first_code" if step["adapted"] else None
