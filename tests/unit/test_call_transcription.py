@@ -336,7 +336,9 @@ def test_M1_an_english_default_takes_an_english_call(env):
     stt_record = _transcribe(stt, scope=_scope(env)).payload["stt"]
     assert stt_record["engines"] == {"value": ["faster-whisper:small.en"], "source": "global"}
     assert stt_record["effective_engine"] == "faster-whisper:small.en"
-    assert stt.calls == [("server-default", "en")]                  # the local engine, told "en"
+    # No call policy: exactly today's call (nothing bound); the model is English-only.
+    assert stt.calls == [("server-default", None)]
+    assert stt_record["attempts"][0]["language"] == "en"
 
 
 # ---- review N2: outside calls, server-default is exactly 006e9e70 ------------------------------
@@ -382,3 +384,56 @@ def test_the_transcription_view_is_never_stored_or_streamed_and_derives_for_a_li
             assert live["transcription"]["mike-86db"]["language"]["source"] == "call_policy", name
         else:
             assert "transcription" not in live                               # not live: absent
+
+
+
+# ---- delta review D1: without a call policy, in-call transcription is today's ------------------
+
+def _local_default(monkeypatch, model):
+    from lib import config
+    real = config.load
+
+    import dataclasses
+    monkeypatch.setattr(config, "load", lambda *a, **k: dataclasses.replace(real(*a, **k), whisper_model=model))
+
+
+def test_D1_a_without_a_policy_a_local_multilingual_host_transcribes_as_today(env, monkeypatch):
+    """The reviewer's probe with the policy unset: no capability skip, no 409."""
+    _local_default(monkeypatch, "small")
+    plain = FakeSTT()
+    assert _transcribe(plain, scope=None, focus="mike-86db", tid="tx-plain").status == 200
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 200
+    assert stt.calls == plain.calls == [("server-default", None)]       # the same call as chat (006e9e70)
+    record = out.payload["stt"]
+    assert record["language"] == {"value": "en", "source": "global"}
+    assert record["engines"] == {"value": ["faster-whisper:small"], "source": "global"}
+    assert record["attempts"][0]["language"] == "auto"                 # it auto-detects; never claim "en"
+    assert record["language_adapted"] is None
+
+
+def test_D1_b_without_a_policy_an_agent_override_on_a_local_engine_is_as_today(env, monkeypatch):
+    monkeypatch.setattr(stt_providers, "_model_row", lambda engine: {"id": engine})
+    _set(agent_languages={"mike": "no"}, agent_engines={"mike": "faster-whisper:small.en"})
+    plain = FakeSTT()
+    _transcribe(plain, scope=None, focus="mike-86db", tid="tx-plain")
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 200
+    assert stt.calls == plain.calls == [("faster-whisper:small.en", None)]
+    record = out.payload["stt"]
+    assert record["language"] == {"value": "no", "source": "agent"}
+    assert record["engines"] == {"value": ["faster-whisper:small.en"], "source": "agent"}
+    assert record["attempts"][0]["language"] == "en"                   # what the English-only model got
+
+
+def test_D1_c_with_a_policy_a_local_multilingual_engine_is_still_skipped(env, monkeypatch):
+    monkeypatch.setattr(stt_providers, "_model_row", lambda engine: {"id": engine})
+    _set(call_languages="no", call_engines="google:chirp_3", agent_engines={"mike": "faster-whisper:small"})
+    stt = FakeSTT()
+    out = _transcribe(stt, scope=_scope(env))
+    assert out.status == 409 and out.payload["error"] == "no compatible engine"
+    assert out.payload["attempts"] == [{"engine": "faster-whisper:small", "outcome": "skipped",
+                                        "reason": "language_incompatible"}]
+    assert stt.calls == []
