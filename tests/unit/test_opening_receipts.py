@@ -264,3 +264,20 @@ def test_the_feature_is_advertised_at_contract_68():
 def test_voice_event_names_fit():
     assert all(len("opening_" + c) <= 64 for c in rings.OPENING_CLASSES.values())
     assert voice_events  # imported for the row checks above
+
+
+# ---- review F1: a client voice event must not suppress or stand in for a receipt -----
+
+def test_a_client_voice_event_cannot_suppress_the_server_receipt(env):
+    ring = _answered(env)
+    # POST /voice-events (allowed even for limited devices) can store any event name.
+    voice_events.record_batch(source="ios", events=[{"event": "opening_started", "trace_id": ring["ring_id"],
+                                                     "detail": {"attempt": 1}}])
+    status, body = _ack({"clip_id": "ring-opening-" + ring["ring_id"], "status": "play-start"})
+    assert status == 200 and body["updated"] is True
+    sources = [r["source"] for r in db.conn().execute(
+        "SELECT source FROM voice_events WHERE trace_id = ? AND event = 'opening_started' ORDER BY event_id",
+        (ring["ring_id"],)).fetchall()]
+    assert sources.count("server") == 1
+    # The server receipt is then deduplicated against itself only.
+    assert _ack({"clip_id": "ring-opening-" + ring["ring_id"], "status": "play-start"})[1]["updated"] is False
