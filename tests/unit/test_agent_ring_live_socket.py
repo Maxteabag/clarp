@@ -783,3 +783,13 @@ def test_a_recovery_answer_after_the_join_reports_the_grant_consumed(call):
     assert again["live"]["attempt_id"] == call.grant["attempt_id"] and again["changed"] is False
     h.send({"type": "session.close"})
     thread.join(15)
+
+
+def test_an_unjoined_grant_is_retired_when_its_ticket_expires_and_the_join_says_expired(call):
+    call.env.clock.advance(rings.LIVE_JOIN_MS / 1000)
+    rings.get(call.grant["ring_id"])                    # any ring read settles expired grants
+    ring = _ring_of(call.grant)
+    assert ring["_live_phase"] == "retired" and ring["_live_retired_reason"] == "join_expired"
+    assert "_live_snapshot" not in ring and ring["_live_context_digest"]
+    _refused_join(call, _join(call.grant), "live_join_expired")
+    assert call.connects == []
