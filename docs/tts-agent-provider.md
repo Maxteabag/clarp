@@ -112,8 +112,14 @@ fixed code until an operator decides:
 
 - `google_id_collision`: an installed package claims the id `google`;
 - `google_id_unverifiable`: the adapter directory, or a manifest in it, cannot
-  be inspected (a symlinked or unreadable directory, an unreadable, oversized
-  or invalid manifest, or an id that is not a usable string).
+  be inspected (a symlinked or unreadable directory; a symlinked, unreadable,
+  oversized or unparseable manifest, or one that is not a JSON object).
+  Symlinks are never followed, so a symlinked manifest or package blocks
+  even when its target is harmless.
+
+An id counts as `google` exactly when the old Host read it as `google`
+(trimmed, lower case); any other id, a number or an empty id is no
+collision.
 
 While refused, `GET /tts/providers` and the voice catalog show `google` as
 unavailable with that code (Google voices are listed with `current: false`
