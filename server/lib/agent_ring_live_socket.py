@@ -36,6 +36,8 @@ from .log import log, log_exception
 JOIN_WAIT_S = 10.0              # the first frame must come this soon after the upgrade
 CLIENT_IDLE_S = 30.0            # a phone that sends nothing (audio, ping) this long is gone
 OPENING_ACK_S = 10.0            # the provider must take the opening this soon after it was sent
+READY_S = 15.0                  # phone and provider must both be ready this soon after the join, pings or not
+EARLY_AUDIO_MAX = 600           # output deltas held between the opening append and the provider's ACK
 TICK_S = 0.1
 DEVICE_CHECK_TICKS = 10         # a revoked or downgraded device is noticed within a second
 SILENCE = base64.b64encode(bytes(int(24000 * TICK_S) * 2)).decode("ascii")   # 100 ms of PCM16 24 kHz mono
@@ -117,6 +119,8 @@ class LiveSocket:
         self._state = threading.Lock()
         self.client_ready = self.provider_ready = self.opening_sent = self.admitted = self.forwarding = False
         self.opening_sent_at = 0.0
+        self.joined_at = time.monotonic()       # absolute: no frame or ping moves it
+        self.held: list[str] = []               # output of the opening, held until the provider's ACK
         self.reason = ""
 
     # -- identity -------------------------------------------------------------------
@@ -159,6 +163,14 @@ class LiveSocket:
             agent_rings._save(records)
             return True
 
+    def current(self) -> bool:
+        """This call's authority is still live on its ring (a close or fallback retires it there first)."""
+        from . import agent_rings
+        with agent_rings._lock:
+            ring = next((r for r in agent_rings._load() if r.get("_live_call_id") == self.call_id), None)
+        return (ring is not None and ring.get("_live_call_epoch") == self.call_epoch
+                and ring.get("_live_phase") in live.LIVE_PHASES)
+
     def fail(self, code: str, reason: str) -> None:
         """Retire the call's authority first, then tell the phone and stop."""
         if self.closed.is_set():
@@ -200,6 +212,8 @@ class LiveSocket:
         if not self._record(consume):
             return self.fail("live_call_stale", "stale")
         self.opening_sent_at = time.monotonic()
+        # The provider ingests an append only while input audio flows (U-1), so one frame goes first.
+        self.upstream_send({"type": "session.input_audio.append", "audio": SILENCE})
         from .oracle_live_wire import LiveWire
         self.upstream_send(LiveWire("api").context(
             "instructions", "OPENING: say exactly this, once, now: " + self.snapshot["opening_text"]))
@@ -212,6 +226,9 @@ class LiveSocket:
         if not self._record(lambda ring: ring.update(_live_phase="active")):
             return self.fail("live_call_stale", "stale")
         self.downstream({"type": "agent_live.opening_admitted", **self.ids(), "context_digest": self.context_digest})
+        held, self.held = self.held, []
+        for delta in held:
+            self.downstream({"type": "session.output_audio.delta", "delta": delta})
 
     # -- upstream events ------------------------------------------------------------------
     def receive(self, event: dict) -> None:
@@ -224,11 +241,12 @@ class LiveSocket:
         elif kind == "session.instructions.appended":
             self._admit()
         elif kind == "session.output_audio.delta":
-            if isinstance(event.get("delta"), str):
-                self.downstream({"type": "session.output_audio.delta", "delta": event["delta"]})
+            self._output(event.get("delta"))
         elif kind == "session.output_audio.interrupted":
-            self.downstream({"type": "oracle_v2.playback_flush"})
-            self.downstream({"type": "oracle_v2.quiet"})
+            if self.admitted and not self.closed.is_set():
+                self.held = []
+                self.downstream({"type": "oracle_v2.playback_flush"})
+                self.downstream({"type": "oracle_v2.quiet"})
         elif kind == "session.closed":
             log("agentLiveUpstreamClosed", f"call={self.call_id} usage={json.dumps(event.get('usage'))[:300]}")
             self._end_locally("provider_closed")
@@ -237,8 +255,28 @@ class LiveSocket:
             if not self.admitted:
                 self.fail("live_unavailable", "provider_error")
 
+    def _output(self, delta: Any) -> None:
+        """Provider audio reaches the phone only once the opening is admitted, and never after retirement.
+
+        Speech before the opening was even sent is an unadmitted opening: the call fails. Speech between the
+        append and the provider's ACK is the opening itself, held here and sent right after opening_admitted.
+        The pump thread is the only caller of receive(), so _admit and this never interleave."""
+        if not isinstance(delta, str) or self.closed.is_set() or self.stop.is_set():
+            return
+        if self.admitted:
+            self.downstream({"type": "session.output_audio.delta", "delta": delta})
+        elif not self.opening_sent:
+            log("agentLiveEarlyOutput", f"call={self.call_id}")
+            self.fail("live_unavailable", "provider_spoke_before_opening")
+        elif len(self.held) < EARLY_AUDIO_MAX:
+            self.held.append(delta)
+        else:
+            self.fail("live_unavailable", "opening_not_taken")
+
     # -- client frames ----------------------------------------------------------------------
     def client(self, event: dict) -> None:
+        if self.closed.is_set() or self.stop.is_set():
+            return
         kind = event.get("type")
         if kind == "session.input_audio.append":
             audio = _audio(event)
@@ -290,10 +328,18 @@ class LiveSocket:
         while not self.stop.wait(TICK_S):
             ticks += 1
             try:
-                if ticks % DEVICE_CHECK_TICKS == 0 and not live.device_ok(self.principal):
-                    self._end_locally("device_revoked")
+                if ticks % DEVICE_CHECK_TICKS == 0:
+                    if not live.device_ok(self.principal):
+                        self._end_locally("device_revoked")
+                        return
+                    if not self.current():          # retired by a close or fallback whose stop never reached us
+                        self.fail("live_call_stale", "stale")
+                        return
+                if not (self.client_ready and self.provider_ready) and \
+                        time.monotonic() - self.joined_at > READY_S:
+                    self.fail("live_unavailable", "not_ready")
                     return
-                if self.provider_ready and not self.forwarding:
+                if self.client_ready and self.provider_ready and not self.forwarding and not self.closed.is_set():
                     self.upstream_send({"type": "session.input_audio.append", "audio": SILENCE})
                 if self.opening_sent and not self.admitted and \
                         time.monotonic() - self.opening_sent_at > OPENING_ACK_S:
@@ -418,6 +464,8 @@ def serve(handler) -> None:
         session = LiveSocket(handler, principal, ring)
         with live._SESSIONS_LOCK:
             live._SESSIONS[session.call_id] = session
+        if not session.current():              # a close or fallback landed between the join and this registration
+            return session.fail("live_call_stale", "stale")
         key = config.load().openai_key() if live.provider_problem() is None else ""
         if not key:
             return session.fail("live_unavailable", "provider_unusable")
