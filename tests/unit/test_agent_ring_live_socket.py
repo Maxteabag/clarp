@@ -312,12 +312,21 @@ def test_ready_before_the_provider_still_opens_once_after_it(call, monkeypatch):
         slow.send_start(raw)
     slow.send = send
     monkeypatch.setattr(sock, "_connect", lambda key: slow)
+    # Barrier, not a sleep: the session has fully handled client_ready before the provider starts.
+    handled_ready = threading.Event()
+    real_client = sock.LiveSocket.client
+
+    def client(self, event):
+        real_client(self, event)
+        if event.get("type") == "agent_live.client_ready":
+            handled_ready.set()
+    monkeypatch.setattr(sock.LiveSocket, "client", client)
     thread = _serve(h)
     h.send(_join(call.grant))
     _wait(lambda: "agent_live.session" in _types(h))
     h.send(_ready(call.grant))
-    time.sleep(0.2)
-    assert slow.of("session.instructions.append") == []
+    assert handled_ready.wait(15), "the session never handled client_ready"
+    assert slow.of("session.instructions.append") == []       # ready alone does not open
     slow.push({"type": "session.started"})
     _wait(lambda: "agent_live.opening_admitted" in _types(h))
     assert len(slow.of("session.instructions.append")) == 1
