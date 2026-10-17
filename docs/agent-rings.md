@@ -137,6 +137,46 @@ pushed as VoIP:
   CallKit call itself, from the `agent-ring` event, `GET /calls/ring?ring_id=`
   or `expires_at`.
 
+## Agent-live rings (feature `agent_ring_live`)
+
+A ring may instead be held as a live voice call on OpenAI GPT-Live
+(`gpt-live-1`, voice `marin`, public API only; never another model, voice or
+provider, never a silent fallback). The wire is WIRE-v2; the compatibility row
+lists every field and fixed string.
+
+- **Ring.** `POST /calls/ring` with `conversation_mode: "agent_live_v1"` and the
+  producer's `event_context` (CONTEXT-v1: an explicit allowlist with fixed
+  bounds; `opening_text` equals `opening_line`). The Host resolves the
+  operator-approved profile under `<data>/clarp/agent-live/profiles/<profile_id>/`
+  (`profile.json` binds `agent_session`, a `display_name`, the approved
+  `stories` and each file's sha256), and freezes profile texts, event and
+  opening in a snapshot on the ring. Nothing is trimmed: a ring that cannot be
+  built is refused with a fixed `live_*` code. The same event retried with the
+  same content gets the same ring back. Nothing is pre-voiced.
+- **Delivery.** The VoIP push goes only to phones that registered
+  `supported_conversation_modes` with `agent_live_v1`; without one the ring is
+  refused (`live_client_required`). GET, SSE and both pushes name
+  `conversation_mode`; a classic ring has no such field.
+- **Answer.** Only `conversation_mode: "agent_live_v1"` answers a Live ring
+  (any other answer, every older app included, is 409 `live_client_required`
+  and the ring keeps ringing). It hands back the call grant (`alv_` call id,
+  epoch, attempt, owner nonce, one-use join ticket for 60 s) and starts no
+  group call. A classic ring is never upgraded (`live_mode_conflict`).
+- **Socket.** `GET /calls/ring/live` (WebSocket). The first frame
+  `agent_live.join` presents the grant; all of it is checked and the ticket
+  consumed before the upstream opens. Another voice session on the phone is
+  refused, never superseded. When the phone is ready (`agent_live.client_ready`)
+  and the provider started, the opening is appended once and
+  `agent_live.opening_admitted` follows the provider's acknowledgement. Until
+  then the Host sends silence upstream (the provider takes an append only while
+  input audio flows) and refuses phone audio (`audio_not_ready`).
+- **Close and fallback.** `POST /calls/ring/live/close` and the socket's
+  `session.close` retire the call's authority first, then the upstream.
+  `POST /calls/ring/live/fallback` switches to the classic call once, only
+  before the opening was admitted and before user audio went upstream.
+- **No tools.** The Live model has no tools, roster, shell or Oracle memory,
+  and never reads or changes a global Oracle setting.
+
 ## Lock-screen privacy
 
 The ring alert says who is calling ("Theo is calling", body "Incoming
