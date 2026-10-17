@@ -481,7 +481,9 @@ def test_the_host_start_through_the_real_lock_script_rotates_the_generation(root
     host_generation.ensure_instance_generation(backups_dir=locks.ensure_backups_dir())
     before = _generation(locks)
     _stage_with_live_host(root)
-    result = entry(*SERVER)
+    # The CI runner's temporary directory is tmpfs; only this child accepts it (exact match), so
+    # the filesystem refusal tests and the product allowlist are untouched.
+    result = entry(*SERVER, extra_env={"CLARP_RESTORE_ALLOW_FILESYSTEM": "tmpfs"})
     assert result.returncode == 0 and "role=server" in result.stdout, result.stderr
     after = _generation(locks)
     assert after is not None and after != before
