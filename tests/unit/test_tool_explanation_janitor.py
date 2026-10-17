@@ -48,6 +48,19 @@ def wait_for(check, timeout=10.0):
         time.sleep(.01)
 
 
+def advance_after_abandon(clock, ms):
+    """Advance the synthetic clock only once the worker's blocked admission attempt is confirmed
+    abandoned: every job is queued, unowned and not yet available at the frozen clock. A jump made
+    while that attempt is still in flight would let it admit after the jump on a lease it claimed
+    before it (main push CI 39024846048)."""
+    def abandoned():
+        rows = db.conn().execute("SELECT status, owner, available_at FROM tool_explanation_jobs").fetchall()
+        return rows and all(status == "queued" and owner == "" and available_at > clock[0]
+                            for status, owner, available_at in rows)
+    wait_for(abandoned)
+    clock[0] += ms
+
+
 def ready(service, item=ITEM, *, target_agent_id=None):
     def check():
         result = service.request(3, [item], target_agent_id=target_agent_id)["items"][0]
@@ -258,7 +271,7 @@ def test_crashed_worker_recovers_after_both_queue_and_janitor_leases(monkeypatch
         time.sleep(.1)
         assert calls == []
         assert janitors.get_run(orphan["run_id"])["status"] == "running"
-        clock[0] += builtin.DEMAND_RUN_TTL_MS
+        advance_after_abandon(clock, builtin.DEMAND_RUN_TTL_MS)
         assert ready(replacement)["text"] == "List the files."
     assert calls == [1]
     assert janitors.get_run(orphan["run_id"])["status"] == "cancelled"

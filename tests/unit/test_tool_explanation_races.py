@@ -40,6 +40,19 @@ def wait_for(check, timeout=10.0, what="condition"):
         time.sleep(.01)
 
 
+def advance_after_abandon(clock, ms):
+    """Advance the synthetic clock only once the worker's blocked admission attempt is confirmed
+    abandoned: every job is queued, unowned and not yet available at the frozen clock. A jump made
+    while that attempt is still in flight would let it admit after the jump on a lease it claimed
+    before it (main push CI 39024846048)."""
+    def abandoned():
+        rows = db.conn().execute("SELECT status, owner, available_at FROM tool_explanation_jobs").fetchall()
+        return rows and all(status == "queued" and owner == "" and available_at > clock[0]
+                            for status, owner, available_at in rows)
+    wait_for(abandoned, what="the blocked admission attempt to be abandoned")
+    clock[0] += ms
+
+
 def _one(sql, *args):
     return db.conn().execute(sql, args).fetchone()
 
@@ -135,10 +148,10 @@ def test_recovery_survives_a_slow_first_admission_attempt(monkeypatch):
         clock[0] += 60001
         replacement.request(3, [ITEM])
         assert entered.wait(5), "the replacement never claimed the expired lease"
-        # SCHEDULE UNDER TEST (the original test's order): advance the clock while that first
-        # attempt is still in flight, then let it continue.
-        clock[0] += builtin.DEMAND_RUN_TTL_MS
+        # The slow attempt completes (refused: the orphan still owns admission) and is abandoned;
+        # only then does the synthetic clock advance past the orphan's lifetime.
         release.set()
+        advance_after_abandon(clock, builtin.DEMAND_RUN_TTL_MS)
 
         def settled():
             published = _one("SELECT count(*) FROM tool_explanation_cache")[0]
