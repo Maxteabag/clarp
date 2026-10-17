@@ -266,3 +266,33 @@ def test_background_keeps_the_newest_import_and_after_for_a_pending_key(tmp_path
         release.set()
         assert cache.wait_for_background(4)
     assert calls == ["new import", "new after"]
+
+
+def test_a_later_request_without_after_keeps_the_pending_after(tmp_path, monkeypatch):
+    """/log schedules the same (owner, path) without an `after`. Replacing the
+    streamer's pending request must not drop the streamer's reclassify."""
+    import threading
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    busy = tmp_path / "busy.jsonl"
+    busy.write_text("{}\n")
+    path = tmp_path / "shared.jsonl"
+    path.write_text("{}\n")
+    entered, release = threading.Event(), threading.Event()
+    calls: list[str] = []
+
+    def blocking():
+        entered.set()
+        assert release.wait(3)
+
+    cache.schedule_import(busy, blocking, owner="busy")
+    try:
+        assert entered.wait(1)
+        cache.schedule_import(path, lambda: calls.append("streamer import"), owner="a",
+                              after=lambda: calls.append("streamer after"))
+        cache.schedule_import(path, lambda: calls.append("log import"), owner="a")
+    finally:
+        release.set()
+        assert cache.wait_for_background(4)
+    assert calls == ["log import", "streamer after"]
