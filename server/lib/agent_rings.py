@@ -380,7 +380,7 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
         raise CallError(409, live.CALL_STALE)
     now = now_ms()
     ring.update(state="answered", ended_at=now, answered_by=principal,
-                _live_call_id="alv_" + uuid.uuid4().hex, _live_call_epoch=1,
+                _live_call_id="alv_" + uuid.uuid4().hex, _live_call_epoch=1, _live_phase="answered_waiting_join",
                 _live_attempt_id="att_" + uuid.uuid4().hex, _live_owner_nonce=secrets.token_hex(32),
                 _live_join_ticket=secrets.token_hex(32), _live_join_expires_at=now + LIVE_JOIN_MS,
                 _live_request_id=str(request_id or "")[:128], _live_client_nonce=str(client_nonce or "")[:128])
