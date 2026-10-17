@@ -124,8 +124,8 @@ collision.
 
 While refused, `GET /tts/providers` and the voice catalog show `google` as
 unavailable with that code (Google voices are listed with `current: false`
-and `taken_by: null`); `POST /tts/providers`, `POST /agent-voice` and
-`GET /voice-preview` answer 409 `{"error": "<code>"}`; a clip routed to
+and `taken_by: null`); `POST /tts/providers`, `POST /agent-voice`,
+`GET /voice-preview` and `POST /preview` answer 409 `{"error": "<code>"}`; a clip routed to
 Google fails with the code unless an explicit non-Google `[tts] fallback`
 speaks instead (the `providerFallback` event carries the code). Nothing stored
 is rewritten, and the package stays where it is. The event log records a

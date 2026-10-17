@@ -4168,8 +4168,14 @@ class Handler(BaseHTTPRequestHandler):
         session = (data.get("session") or self.ctx.default_session).strip() or self.ctx.default_session
         if not voice_id:
             return self._json_error(400, "voice_id required")
+        from lib.google_tts import GoogleIdCollision
         try:
             path = self.ctx.tts.synthesize_preview(text[:200], voice_id, session=session)
+        except GoogleIdCollision as refused:
+            # Built-in Google refused by a legacy custom "google" adapter: only these two guard
+            # codes become 409 (raised before any voice, credential or clip); the strict preview
+            # route has no fallback, and every other failure keeps its 500.
+            return self._json_error(409, str(refused))
         except Exception as e:
             log_exception("previewSynthFail", e, detail=voice_id)
             return self._json_error(500, str(e))
