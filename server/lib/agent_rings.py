@@ -176,7 +176,16 @@ def current(principal: str | None = None) -> dict | None:
 # all, and a Live ring never falls back to the global alert push. Classic rings are unchanged.
 
 def live_capable(principal: str | None) -> bool:
-    """The principal's VoIP registration says it can run a Live call."""
+    """The principal's VoIP registration says it can run a Live call.
+
+    Read fresh at every use, never cached. An absent registration or one without
+    agent_live_v1 is not capable. LIMIT (explicit, not a no-ring guarantee): the
+    registration is the device's own last word. A phone that registered
+    agent_live_v1 and was then downgraded to an app that cannot run Live stays
+    "capable" here until it registers again, and keeps receiving Live rings,
+    events and VoIP. Only a fresh registration without agent_live_v1, or a
+    forgotten token, removes it. The answer itself is still checked separately
+    (WIRE-v2 decision 4)."""
     return bool(principal) and any(row.get("principal") == principal for row in _live_tokens())
 
 
