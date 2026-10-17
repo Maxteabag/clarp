@@ -610,3 +610,38 @@ def test_a_request_that_is_not_a_websocket_upgrade_gets_one_fixed_refusal(call, 
     sock.serve(h)
     assert h.status == 426 and h.body() == {"error": "live_websocket_required"}
     assert call.connects == [] and oracle_realtime._ACTIVE_PRINCIPALS == {}
+
+
+# ---- the setup deadline: pings do not keep an unready call (and its paid upstream) alive ------
+
+def test_a_phone_that_never_gets_ready_is_failed_at_the_setup_deadline(call, monkeypatch):
+    monkeypatch.setattr(sock, "SETUP_S", 0.4)
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    _wait(lambda: "agent_live.provider_ready" in _types(h))
+    for _ in range(6):                                  # pings alone never count as readiness
+        h.rfile.feed(_masked(0x9, b""))
+        time.sleep(0.1)
+    thread.join(15)
+    assert not thread.is_alive()
+    error = next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")
+    assert error["code"] == "audio_not_ready" and error["call_id"] == call.grant["call_id"]
+    assert call.up.of("session.instructions.append") == [] and call.up.of("session.input_audio.append") == []
+    assert _ring_of(call.grant)["_live_phase"] == "retired" and call.up.closed
+    assert not _ring_of(call.grant).get("_live_opening_consumed")
+
+
+def test_a_provider_that_never_starts_is_failed_at_the_setup_deadline(call, monkeypatch):
+    monkeypatch.setattr(sock, "SETUP_S", 0.4)
+    mute = Upstream()
+    mute.send = lambda raw: mute.sent.append(json.loads(raw))     # never answers session.start
+    monkeypatch.setattr(sock, "_connect", lambda key: mute)
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    _wait(lambda: "agent_live.session" in _types(h))
+    h.send(_ready(call.grant))
+    thread.join(15)
+    assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
+    assert "agent_live.provider_ready" not in _types(h) and _ring_of(call.grant)["_live_phase"] == "retired"
