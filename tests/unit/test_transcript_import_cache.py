@@ -782,16 +782,16 @@ def test_reset_waits_for_a_worker_tail_after_it_cleared_the_global(tmp_path, mon
 
     monkeypatch.setattr(database, "close_local", held_close)
     assert cache.schedule_import(path, lambda: None, owner="a")
-    # From the registry, not _worker: the worker may already have cleared _worker
-    # by now. The reset at the start pruned every earlier thread.
-    (worker,) = cache._threads
-    assert unwinding.wait(3)
-    assert cache._worker is None and worker.is_alive()
     try:
+        # From the registry, not _worker: the worker may already have cleared
+        # _worker by now. The reset at the start pruned every earlier thread.
+        (worker,) = cache._threads
+        assert unwinding.wait(3)
+        assert cache._worker is None and worker.is_alive()
         assert cache.reset_for_tests(deadline_s=0.2) is False     # the tail is waited for
         assert cache._resetting and worker in cache._drain.threads
     finally:
-        release.set()
+        release.set()                       # never leave the worker held, whatever failed
     assert cache.reset_for_tests()
     assert not worker.is_alive()
 
