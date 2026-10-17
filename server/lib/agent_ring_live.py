@@ -23,6 +23,7 @@ import json
 import pathlib
 import re
 import threading
+import time
 from datetime import datetime
 from typing import Any
 
@@ -271,16 +272,23 @@ def _session_for(call_id: str):
 
 
 UPSTREAM_CLOSE_S = 5.0         # how long a fallback waits for the provider session's closure receipt
+FENCE_WAIT_S = 2.0             # how long a retirement waits for an effect already being written
 
 
 def _stop_session(call_id: str, reason: str, wait: float = 0.0) -> bool:
-    """Stop the call's running session. True once its provider session is closed (or there is none);
-    with ``wait`` it waits that long for that receipt."""
+    """Stop the call's running session. True only once its provider session actually closed (or there is
+    none). With ``wait`` the whole stop is bounded by it, measured from before anything is invoked: the
+    session's own stop runs on a worker, so a stuck write or close cannot hold the caller past the bound."""
     session = _session_for(call_id)
     if session is None:
         return True
-    session.retire(reason)
-    return session.upstream_closed.wait(wait) if wait else session.upstream_closed.is_set()
+    if not wait:
+        session.retire(reason)
+        return session.upstream_closed.is_set()
+    deadline = time.monotonic() + wait
+    threading.Thread(target=session.retire, args=(reason,), name="agent-live-stop", daemon=True).start()
+    session.upstream_close_done.wait(max(0.0, deadline - time.monotonic()))
+    return session.upstream_closed.is_set()
 
 
 def _owned(records: list[dict], principal: str, data: Any) -> dict:
@@ -299,6 +307,14 @@ def _owned(records: list[dict], principal: str, data: Any) -> dict:
             or ring.get("_live_attempt_id") != attempt):
         raise CallError(409, OWNER_CONFLICT)
     return ring
+
+
+REQUEST_ID_MAX = 128
+
+
+def _request_id_ok(value: Any) -> bool:
+    """A request id is kept exactly as sent: a non-empty string of at most 128 characters, never cut."""
+    return isinstance(value, str) and 0 < len(value) <= REQUEST_ID_MAX
 
 
 def _epoch(data: dict, key: str) -> int:
@@ -326,12 +342,17 @@ _RETIRED_MAX = 4096
 
 
 def _mark_retired(call_id: Any) -> None:
+    """Mark the retirement, then pass the running session's fence: an effect that already passed its
+    check finishes first, and every later one sees the mark (LiveSocket.effect)."""
     if not isinstance(call_id, str) or not call_id:
         return
     with _RETIRED_LOCK:
         _RETIRED[call_id] = True
         while len(_RETIRED) > _RETIRED_MAX:
             _RETIRED.pop(next(iter(_RETIRED)))
+    session = _session_for(call_id)
+    if session is not None:
+        session.revoke()
 
 
 def retired(call_id: str) -> bool:
@@ -404,15 +425,25 @@ def close(principal: str, data: Any) -> dict:
     an earlier close failed to stop. The audit runs after the stop, best effort.
     The answer carries the ring's own epoch and actual state (classic after a fallback)."""
     from . import agent_rings
-    call_id, stop, save_error = None, False, None
+    call_id, stop, save_error, changed = None, False, None, False
     try:
         with agent_rings._lock:
             records = agent_rings._load()
             ring = _owned(records, principal, data)
             epoch = _epoch(data, "call_epoch")
-            if data.get("reason") not in CLOSE_REASONS or not isinstance(data.get("request_id"), str):
+            request_id = data.get("request_id")
+            if data.get("reason") not in CLOSE_REASONS or not _request_id_ok(request_id):
                 raise CallError(400, REQUEST_INVALID)
-            if epoch != ring["_live_call_epoch"] and ring.get("_live_phase") in LIVE_PHASES:
+            fingerprint = {"request_id": request_id, "call_epoch": epoch, "reason": data["reason"]}
+            receipt = ring.get("_live_close_receipt")
+            if receipt:
+                # Only the exact original close replays its receipt (H4); a changed body under its id is
+                # invalid, and any other request after the close is stale.
+                if receipt.get("request_id") != request_id:
+                    raise CallError(409, CALL_STALE)
+                if receipt != fingerprint:
+                    raise CallError(400, REQUEST_INVALID)
+            elif epoch != ring["_live_call_epoch"]:
                 raise CallError(409, CALL_STALE)
             call_id = ring["_live_call_id"]
             changed = retire(ring, data["reason"])
@@ -422,10 +453,10 @@ def close(principal: str, data: Any) -> dict:
                 # A fallback is between its claim and its classic start: the owner's hangup cancels it.
                 ring["_live_fallback_cancelled"] = True
                 changed = True
-            if changed and not ring.get("_live_close_receipt") and ring.get("_live_phase") == "retired":
-                # The first authorized close fixes what every repeat answers (H4): its epoch, never the request's.
-                ring["_live_close_receipt"] = {"call_epoch": ring["_live_call_epoch"], "reason": data["reason"],
-                                               "request_id": data["request_id"][:128]}
+            if not receipt and ring.get("_live_phase") == "retired":
+                # The first authorized close fixes the one request that may replay it (H4).
+                ring["_live_close_receipt"] = fingerprint
+                changed = True
             if changed:
                 try:
                     agent_rings._save(records)

@@ -142,7 +142,7 @@ def test_a_live_answer_binds_its_exact_request_and_nonce(sander):
              request_id="r" * 129)
     first = answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r" * 128,
                    client_nonce="n" * 128)
-    stored = rings.get(ring["ring_id"])
+    stored = next(r for r in rings._load() if r["ring_id"] == ring["ring_id"])
     assert (stored["_live_request_id"], stored["_live_client_nonce"]) == ("r" * 128, "n" * 128)
     again = answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r" * 128,
                    client_nonce="n" * 128)

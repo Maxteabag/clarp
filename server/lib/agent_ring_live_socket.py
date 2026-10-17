@@ -56,6 +56,14 @@ This is a live phone call with the user, spoken in real time, in Norwegian bokmÃ
 """
 
 
+def _quiet_log(name: str, exc: BaseException, detail: str = "") -> None:
+    """Log a failure; a failure of logging itself never escapes into cleanup."""
+    try:
+        log_exception(name, exc, detail)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class Refused(Exception):
     def __init__(self, code: str, message: str = ""):
         super().__init__(code)
@@ -114,7 +122,11 @@ class LiveSocket:
         self.stop = threading.Event()
         self.closed = threading.Event()
         self.ending = threading.Event()         # this session is retiring its own call: not a stale one
-        self.upstream_closed = threading.Event()  # the receipt: the provider session was told to close and closed
+        self.upstream_closed = threading.Event()  # the receipt: the provider session actually closed
+        self.upstream_close_done = threading.Event()  # the closure attempt settled, closed or failed
+        self.connecting = False                 # a provider connect is in flight: its result is still owned here
+        self._close_started = False
+        self._fence = threading.RLock()         # orders a retirement against every effect (see effect())
         self._write_lock = threading.Lock()
         self._send_lock = threading.Lock()
         self._state = threading.Lock()
@@ -142,13 +154,36 @@ class LiveSocket:
         except OSError:
             self.stop.set()
 
+    def effect(self, act) -> bool:
+        """Run one effect of this call (a frame to the phone, a frame to the provider) only while the call is
+        not retired. The check and the effect happen under the session's fence, and a retirement takes the same
+        fence (live._mark_retired), so an effect that passed its check finishes before the retirement completes
+        and none starts after it. Nothing under the fence takes the ring lock."""
+        with self._fence:
+            if self.stop.is_set() or live.retired(self.call_id):
+                return False
+            act()
+            return True
+
+    def revoke(self) -> None:
+        """Called once the retirement is marked: wait for an effect in flight (bounded, a hung write is not
+        waited on forever) so that the retirement completes after it."""
+        if self._fence.acquire(timeout=live.FENCE_WAIT_S):
+            self._fence.release()
+        else:
+            log("agentLiveFenceWait", f"call={self.call_id} an effect is still writing")
+
     def upstream_send(self, event: dict) -> None:
         # Revocation stops every paid effect at once: no silence, no user audio, no append after a close or
         # fallback retired the call (marked under the ring lock before its save and its stop).
-        if self.upstream is None or self.stop.is_set() or live.retired(self.call_id):
+        upstream = self.upstream
+        if upstream is None:
             return
-        with self._send_lock:
-            self.upstream.send(json.dumps(event))
+
+        def send():
+            with self._send_lock:
+                upstream.send(json.dumps(event))
+        self.effect(send)
 
     # -- authority on the ring record ---------------------------------------------------
     def _record(self, change) -> bool:
@@ -181,7 +216,7 @@ class LiveSocket:
         try:
             self._record(lambda ring: live.retire(ring, reason))
         except Exception as exc:  # noqa: BLE001 - a persistence failure never skips the stop below
-            log_exception("agentLiveRetireSaveFail", exc, f"call={self.call_id}")
+            _quiet_log("agentLiveRetireSaveFail", exc, f"call={self.call_id}")
         finally:
             try:
                 self.downstream({"type": "agent_live.error", **self.ids(), "code": code, "message": code,
@@ -208,29 +243,75 @@ class LiveSocket:
                 pass
 
     def close_upstream(self) -> None:
-        """Tell the provider the session is over and close it, once; sets the closure receipt."""
-        upstream = self.upstream
-        if upstream is None or self.upstream_closed.is_set():
+        """Tell the provider the session is over and close it, once, on a worker of its own: a send or close
+        that hangs never holds the caller. ``upstream_close_done`` says the attempt settled;
+        ``upstream_closed`` (the receipt) only that the provider session actually closed. With no transport
+        yet and a connect in flight, the connect's result settles it (attach_upstream / connect_failed)."""
+        with self._state:
+            if self._close_started:
+                return
+            upstream = self.upstream
+            if upstream is None:
+                if self.connecting:
+                    return
+                self._close_started = True
+            else:
+                self._close_started = True
+        if upstream is None:                    # nothing was ever opened: closed by definition
             self.upstream_closed.set()
+            self.upstream_close_done.set()
             return
+        threading.Thread(target=self._close_transport, args=(upstream,), name="agent-live-close",
+                         daemon=True).start()
+
+    def _close_transport(self, upstream) -> None:
+        closed = False
         try:
-            try:
-                with self._send_lock:
+            # The polite session.close needs the send lock; a send stuck holding it must not keep the transport
+            # open, so after a short wait the transport is closed without it.
+            if self._send_lock.acquire(timeout=1.0):
+                try:
                     upstream.send(json.dumps({"type": "session.close"}))
-            except Exception as exc:  # noqa: BLE001
-                log_exception("agentLiveUpstreamCloseSend", exc, f"call={self.call_id}")
+                except Exception as exc:  # noqa: BLE001 - the close below still runs
+                    _quiet_log("agentLiveUpstreamCloseSend", exc, self.call_id)
+                finally:
+                    self._send_lock.release()
             upstream.close()
-        except Exception as exc:  # noqa: BLE001
-            log_exception("agentLiveUpstreamClose", exc, f"call={self.call_id}")
+            closed = True
+        except Exception as exc:  # noqa: BLE001 - a failed close is no closure
+            _quiet_log("agentLiveUpstreamClose", exc, self.call_id)
         finally:
+            if closed:
+                self.upstream_closed.set()
+            self.upstream_close_done.set()
+
+    def attach_upstream(self, upstream) -> bool:
+        """The connect returned. If the call ended meanwhile the late transport is closed at once, never used."""
+        with self._state:
+            self.connecting = False
+            if not self.closed.is_set():
+                self.upstream = upstream
+                return True
+            self._close_started = True
+        self._close_transport(upstream)
+        return False
+
+    def connect_failed(self) -> None:
+        with self._state:
+            self.connecting = False
+            ended = self.closed.is_set() and not self._close_started
+            if ended:
+                self._close_started = True
+        if ended:                               # nothing opened: the closure is settled
             self.upstream_closed.set()
+            self.upstream_close_done.set()
 
     def _end_locally(self, reason: str) -> None:
         self.ending.set()
         try:
             self._record(lambda ring: live.retire(ring, reason))
         except Exception as exc:  # noqa: BLE001 - a persistence failure never skips the stop below
-            log_exception("agentLiveRetireSaveFail", exc, f"call={self.call_id}")
+            _quiet_log("agentLiveRetireSaveFail", exc, f"call={self.call_id}")
         finally:
             self.retire(reason)
 
@@ -301,7 +382,7 @@ class LiveSocket:
         if not self.admitted:
             log("agentLiveEarlyOutput", f"call={self.call_id} opening_sent={self.opening_sent}")
             return self.fail("live_unavailable", "provider_output_before_ack")
-        self.downstream({"type": "session.output_audio.delta", "delta": delta})
+        self.effect(lambda: self.downstream({"type": "session.output_audio.delta", "delta": delta}))
 
     # -- client frames ----------------------------------------------------------------------
     def client(self, event: dict) -> None:
@@ -502,11 +583,18 @@ def serve(handler) -> None:
         key = config.load().openai_key() if live.provider_problem() is None else ""
         if not key:
             return session.fail("live_unavailable", "provider_unusable")
+        with session._state:
+            if session.closed.is_set():
+                return
+            session.connecting = True
         try:
-            session.upstream = _connect(key)
+            upstream = _connect(key)
         except Exception as exc:  # noqa: BLE001 - admission unknown: tombstone, never retried
+            session.connect_failed()
             log_exception("agentLiveConnectFail", exc, f"call={session.call_id}")
             return session.fail("live_unavailable", "provider_connect_failed")
+        if not session.attach_upstream(upstream):   # the call ended while it connected: closed, never used
+            return
         from .oracle_live_wire import LiveWire
         wire = LiveWire("api")
         session.downstream({"type": "agent_live.session", "protocol": live.PROTOCOL, "host_id": _host_id(),
@@ -524,15 +612,30 @@ def serve(handler) -> None:
         for thread in threads:
             thread.join(timeout=3)
     except Exception as exc:  # noqa: BLE001
-        log_exception("agentLiveServeFail", exc, f"principal={principal}")
+        _quiet_log("agentLiveServeFail", exc, f"principal={principal}")
         if session is not None:
-            session.fail("live_unavailable", "host_error")
+            try:
+                session.fail("live_unavailable", "host_error")
+            except Exception as again:  # noqa: BLE001 - the release below must still run
+                _quiet_log("agentLiveServeFail", again, session.call_id)
     finally:
-        if session is not None:
-            if not session.closed.is_set():
-                session._end_locally("transport_lost")
-            session.close_upstream()
-            with live._SESSIONS_LOCK:
-                if live._SESSIONS.get(session.call_id) is session:
-                    del live._SESSIONS[session.call_id]
-        release_connection(principal, token)
+        # The registry entry and the voice claim are released whatever the cleanup above or here throws.
+        try:
+            if session is not None:
+                try:
+                    if not session.closed.is_set():
+                        session._end_locally("transport_lost")
+                except Exception as exc:  # noqa: BLE001
+                    _quiet_log("agentLiveCleanupFail", exc, session.call_id)
+                try:
+                    session.close_upstream()
+                except Exception as exc:  # noqa: BLE001
+                    _quiet_log("agentLiveCleanupFail", exc, session.call_id)
+        finally:
+            try:
+                if session is not None:
+                    with live._SESSIONS_LOCK:
+                        if live._SESSIONS.get(session.call_id) is session:
+                            del live._SESSIONS[session.call_id]
+            finally:
+                release_connection(principal, token)

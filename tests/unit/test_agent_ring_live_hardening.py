@@ -114,7 +114,7 @@ def test_a_close_whose_audit_fails_still_ends_the_session_and_a_retry_is_ok(call
     assert _close(call.grant)["state"] == "retired"
     thread.join(15)
     assert not thread.is_alive() and h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed
-    assert _close(call.grant, request_id="q2")["ok"] is True
+    assert _close(call.grant)["ok"] is True                   # the same close, retried
 
 
 def test_a_close_whose_save_fails_still_stops_the_session_and_says_so(call, monkeypatch):
@@ -158,7 +158,10 @@ def test_a_close_whose_save_and_logging_both_fail_still_stops_the_session(call, 
 def test_close_answers_the_rings_own_epoch_and_state(call):
     out = _fallback(call.grant)
     assert out["conversation_mode"] == "classic"
-    closed = _close(call.grant, call_epoch=1, request_id="q9")      # an old-epoch close after the fallback
+    with pytest.raises(group_calls.CallError) as exc:               # an old-epoch close after the fallback
+        _close(call.grant, call_epoch=1, request_id="q9")
+    assert (exc.value.status, exc.value.body()["error"]) == (409, "live_call_stale")
+    closed = _close(call.grant, call_epoch=2, request_id="q9")
     assert (closed["call_epoch"], closed["state"]) == (2, "classic")
 
 
@@ -412,7 +415,7 @@ def test_a_client_ready_after_retirement_starts_no_feed_no_opening_and_changes_n
 # ---- M-1 ------------------------------------------------------------------------------------
 
 def _repeat(grant):
-    return rings.answer(PHONE, grant["ring_id"], conversation_mode="agent_live_v1", request_id="r2")
+    return rings.answer(PHONE, grant["ring_id"], conversation_mode="agent_live_v1", request_id="r1")  # the same intent
 
 
 def test_a_repeat_answer_before_the_join_gets_the_same_grant(call):
@@ -480,9 +483,12 @@ def test_a_classic_ring_keeps_voip_or_alert_exactly_as_before(sander, monkeypatc
     assert ("ring", unsent["ring_id"]) in [(kind, p["ring_id"]) for kind, p in sander.pushes]
 
 
-def test_a_repeat_close_answers_the_first_closes_fixed_receipt_whatever_epoch_it_sends(call):
+def test_a_repeat_close_replays_the_first_closes_receipt_only_for_its_exact_request(call):
+    # Replaces the f1666c4d test that let any epoch replay the receipt (forbidden by the review).
     first = _close(call.grant)
-    again = _close(call.grant, call_epoch=7, request_id="q7", reason="transport_lost")
-    assert first == again and first["call_epoch"] == 1 and first["state"] == "retired"
+    assert _close(call.grant) == first and first["call_epoch"] == 1 and first["state"] == "retired"
+    with pytest.raises(group_calls.CallError) as exc:
+        _close(call.grant, call_epoch=7, request_id="q7", reason="transport_lost")
+    assert (exc.value.status, exc.value.body()["error"]) == (409, "live_call_stale")
     assert _ring_of(call.grant)["_live_close_receipt"] == {"call_epoch": 1, "reason": "user_hangup",
                                                          "request_id": "q1"}
