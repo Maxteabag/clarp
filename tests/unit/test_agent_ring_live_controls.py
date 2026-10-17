@@ -392,3 +392,23 @@ def test_a_repeat_answer_with_the_same_request_id_but_another_nonce_is_refused(s
              request_id="r1", client_nonce="c2")
     again = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
     assert again["live"] == first["live"] and again["changed"] is False
+
+
+def test_the_owner_cli_rings_live_for_a_named_agent_and_an_agent_turn_still_rings_only_as_itself(sander):
+    """Producer auth (leak-watch): the owner's full-auth CLI, no agent turn, names --agent rk-sander;
+    the profile binds to that resolved agent. A turn-proven agent cannot ring as another."""
+    from tests.unit.test_agent_ring_live import OPENING, _context
+    server = _server()
+    owner = _Handler({"agent": "rk-sander-0001", "reason": "r", "opening_line": OPENING,
+                      "conversation_mode": "agent_live_v1", "event_context": _context()},
+                     sander, principal="administrator", turn_agent="")
+    server.Handler._handle_calls_ring(owner)
+    assert owner.sent[0][0] == 200 and owner.sent[0][1]["ring"]["agent_id"] == "a-sander"
+    rings.decline(PHONE, owner.sent[0][1]["ring"]["ring_id"])
+    sander.clock.advance(rings.AGENT_INTERVAL_MS / 1000)
+    impostor = _Handler({"agent": "rk-sander-0001", "reason": "r", "opening_line": OPENING,
+                         "conversation_mode": "agent_live_v1",
+                         "event_context": _context(event={**_context()["event"], "id": "lw-x"})},
+                        sander, turn_agent="a-theo")
+    server.Handler._handle_calls_ring(impostor)
+    assert impostor.sent == [(403, {"ok": False, "error": "an agent can only ring as itself"})]
