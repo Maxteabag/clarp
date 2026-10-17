@@ -445,6 +445,8 @@ def serve(handler) -> None:
     if denied:                                  # the same body as every other /calls route guard
         return _http_refusal(handler, 401, denied)
     principal = who.principal
+    if not live.device_ok(principal):                # the administrator token is not a device (fef6043f)
+        return _http_refusal(handler, 403, "live_auth")
     token = claim_session(principal)          # never supersedes another voice session
     if token is None:
         return _http_refusal(handler, 409, "live_owner_conflict")
