@@ -411,6 +411,8 @@ def _join(principal: str, event: Any) -> dict:
             raise Refused("live_owner_conflict")
         if ring.get("_live_join_consumed"):
             raise Refused("live_join_consumed")
+        if ring.get("_live_retired_reason") == "join_expired":
+            raise Refused("live_join_expired")
         if ring.get("_live_phase") != "answered_waiting_join":
             raise Refused("live_call_stale")
         if agent_rings.now_ms() >= ring["_live_join_expires_at"]:
