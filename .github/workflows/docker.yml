@@ -44,6 +44,12 @@ jobs:
         run: >-
           env -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL
           scripts/test_docker_node.sh
+      # Reuses the image the smoke test built; owned disposable volumes and the same offline network.
+      - name: Restore exclusivity against the built image (offline test containers)
+        timeout-minutes: 15
+        run: >-
+          env -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL
+          CLARP_TEST_IMAGE=clarp:test scripts/test_docker_restore_locks.sh
       - name: Browser suite against the built image (offline test container)
         run: >-
           env -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL
