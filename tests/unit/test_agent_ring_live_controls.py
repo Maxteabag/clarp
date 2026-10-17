@@ -51,7 +51,9 @@ def _refused(status, code, fn, *args, **kw):
 
 class Session:
     def __init__(self, grant, order):
+        import threading
         self.order, self.call_id = order, grant["call_id"]
+        self.upstream_closed = threading.Event()        # the provider closure receipt, as LiveSocket sets it
         live._SESSIONS[grant["call_id"]] = self
 
     def retire(self, reason):
@@ -60,6 +62,7 @@ class Session:
         from lib import group_calls
         stored = _ring_of({"call_id": self.call_id})
         self.stops = getattr(self, "stops", 0) + 1
+        self.upstream_closed.set()
         if self.stops == 1:
             self.order.append(("retire", reason, stored["_live_phase"]))
             self.classic_call_at_stop = stored.get("call_id") and group_calls.get_call(stored["call_id"])
