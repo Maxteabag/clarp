@@ -277,3 +277,24 @@ def test_without_a_collision_a_post_preview_failure_keeps_its_previous_status(pr
     assert status == 500                                       # the requested voice itself, never replaced
     assert boundaries["google"] == [AOEDE, "nb-NO-Chirp3-HD-Nobody"]
     assert "providerFallback" not in preview_host["events"]
+
+
+def test_a_legacy_non_google_preview_whose_fallback_is_the_refused_google_is_409(preview_host, boundaries,
+                                                                                 monkeypatch):
+    """Control: a non-Google primary keeps its pre-existing fallback preview path (not the strict Google
+    audition); when that fallback is the refused built-in Google the guard code is the answer."""
+    from lib import config, gemini_tts
+    tried = []
+
+    def failing(**kwargs):
+        tried.append(kwargs.get("voice"))
+        raise gemini_tts.GeminiTTSError("gemini_unavailable")
+    monkeypatch.setattr(gemini_tts, "synthesize", failing)
+    preview_host["config"].write_text('[tts]\nprovider = "gemini"\nfallback = "google"\n\n'
+                                      '[gemini_tts]\nvoice = "Kore"\n')
+    config.reset_cache()
+    status, raw = _preview(preview_host, voice="Kore")
+    assert status == 409 and json.loads(raw) == {"error": COLLISION}
+    assert "providerFallback" in preview_host["events"]         # the failed primary fell back (legacy path)
+    assert boundaries["google"] == [] and not preview_host["sentinel"].exists()
+    assert list(preview_host["audio"].iterdir()) == []
