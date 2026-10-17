@@ -318,3 +318,337 @@ def test_reset_cancels_an_armed_deferred_import(tmp_path, monkeypatch):
     time.sleep(0.6)                                                          # past the window
     assert cache.wait_for_background(2)
     assert calls == [1]
+
+
+# ---- r2 design: deferred newest pair, is_active, and the test-reset protocol (§6) ----
+
+import threading as _threading
+import time as _time
+
+
+def _wait_until(predicate, timeout=3.0):
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        if predicate():
+            return True
+        _time.sleep(0.01)
+    return predicate()
+
+
+def _opened_window(cache, path, owner="a"):
+    """Complete one import so the per-key window is open for the next request."""
+    assert cache.schedule_import(path, lambda: None, owner=owner)
+    assert cache.wait_for_background(3)
+
+
+def test_the_deferred_window_keeps_the_newest_import_and_after(tmp_path, monkeypatch):
+    """L-2: two requests inside an open window; the timer submits the NEWEST pair."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.2)
+    path = tmp_path / "window.jsonl"
+    path.write_text("1\n")
+    _opened_window(cache, path)
+    path.write_text("1\n2\n")
+    _bump_mtime(path)
+    calls: list[str] = []
+    assert cache.schedule_import(path, lambda: calls.append("old import"), owner="a",
+                                 after=lambda: calls.append("old after"))
+    assert cache.schedule_import(path, lambda: calls.append("new import"), owner="a",
+                                 after=lambda: calls.append("new after"))
+    assert _wait_until(lambda: calls == ["new import", "new after"])
+    assert cache.wait_for_background(3)
+    assert calls == ["new import", "new after"]
+
+
+def test_is_active_covers_pending_and_running(tmp_path, monkeypatch):
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "active.jsonl"
+    path.write_text("{}\n")
+    entered, release = _threading.Event(), _threading.Event()
+
+    def blocking():
+        entered.set()
+        assert release.wait(3)
+
+    assert not cache.is_active(path, owner="a")
+    cache.schedule_import(path, blocking, owner="a")
+    try:
+        assert entered.wait(2)
+        assert cache.is_active(path, owner="a")            # running
+    finally:
+        release.set()
+        assert cache.wait_for_background(3)
+    assert not cache.is_active(path, owner="a")
+
+
+def test_a_request_during_reset_is_refused_and_new_work_runs_after(tmp_path, monkeypatch):
+    """§6 (ii): an armed timer's callback has ENTERED (held before _guard). While
+    reset drains, a new same-key request is refused with no pending entry, timer
+    or worker. After reset returns True the old importer never ran; new
+    same-key work submitted then runs exactly once."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.2)
+    path = tmp_path / "k.jsonl"
+    path.write_text("1\n")
+    _opened_window(cache, path)
+    entered, release = _threading.Event(), _threading.Event()
+    original = cache._schedule_deferred
+
+    def held(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "_schedule_deferred", held)
+    path.write_text("1\n2\n")
+    _bump_mtime(path)
+    calls: list[str] = []
+    assert cache.schedule_import(path, lambda: calls.append("old"), owner="a")
+    assert entered.wait(2)
+    result: dict = {}
+    resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
+    resetter.start()
+    try:
+        assert _wait_until(lambda: cache._resetting)
+        assert not cache.schedule_import(path, lambda: calls.append("during"), owner="a")
+        key = f"a\0{path}"
+        assert key not in cache._pending and key not in cache._deferred
+        with pytest.raises(RuntimeError):
+            cache.import_if_changed(path, lambda: calls.append("direct"), owner="a")
+        assert resetter.is_alive()                         # cannot succeed while the callback is held
+    finally:
+        release.set()
+        resetter.join(5)
+    assert result["ok"] is True and calls == []
+    assert cache.schedule_import(path, lambda: calls.append("new"), owner="a")
+    assert cache.wait_for_background(3)
+    assert calls == ["new"]
+
+
+def test_an_import_finishing_during_reset_leaves_no_stale_state(tmp_path, monkeypatch):
+    """§6 (iii): an admitted import of a FIXED key finishes while reset drains.
+    The same per-key lock object is kept meanwhile; afterwards caches, rate state
+    and path locks are empty, the worker thread has really exited, and the SAME
+    unchanged file version imports again for real."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "fixed.jsonl"
+    path.write_text("{}\n")
+    entered, release = _threading.Event(), _threading.Event()
+    calls: list[str] = []
+
+    def blocking():
+        calls.append("first")
+        entered.set()
+        assert release.wait(5)
+
+    cache.schedule_import(path, blocking, owner="a")
+    assert entered.wait(2)
+    key = f"a\0{path}"
+    lock_before = cache._path_locks[key]
+    worker = cache._worker
+    result: dict = {}
+    resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
+    resetter.start()
+    try:
+        assert _wait_until(lambda: cache._resetting)
+        assert resetter.is_alive() and cache._path_locks[key] is lock_before
+    finally:
+        release.set()
+        resetter.join(5)
+    assert result["ok"] is True
+    assert not worker.is_alive()
+    assert key not in cache._imported and key not in cache._last_started and not cache._path_locks
+    assert cache.import_if_changed(path, lambda: calls.append("again"), owner="a")
+    assert calls == ["first", "again"]
+
+
+def test_an_admitted_worker_item_passes_the_fence_and_writes_no_old_epoch_bookkeeping(tmp_path, monkeypatch):
+    """§6 (iv): the worker popped (admitted) its item before the fence closed and
+    enters the import body after it. The import runs to completion (it is not a
+    fresh direct admission), but its old-epoch bookkeeping is SUPPRESSED (P-c).
+    A fresh direct import while fenced is refused. A real direct import admitted
+    before the fence keeps reset draining, so reset succeeds only after both end."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "boundary.jsonl"
+    path.write_text("{}\n")
+    other = tmp_path / "direct.jsonl"
+    other.write_text("{}\n")
+    at_body, go_body = _threading.Event(), _threading.Event()
+    direct_in, direct_go = _threading.Event(), _threading.Event()
+    original = cache._import_admitted
+    calls: list[str] = []
+
+    def held_admitted(path_, importer, owner, epoch):
+        if owner == "a":                                # only the worker's item is held at body entry
+            at_body.set()
+            assert go_body.wait(5)
+        return original(path_, importer, owner, epoch)
+
+    monkeypatch.setattr(cache, "_import_admitted", held_admitted)
+
+    def direct_importer():
+        direct_in.set()
+        assert direct_go.wait(5)
+
+    direct = _threading.Thread(target=lambda: cache.import_if_changed(other, direct_importer, owner="d"))
+    direct.start()
+    assert direct_in.wait(2)                            # admitted direct call in flight
+    cache.schedule_import(path, lambda: calls.append("admitted"), owner="a")
+    assert at_body.wait(2)                              # worker admitted, before the import body
+    result: dict = {}
+    resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
+    resetter.start()
+    try:
+        assert _wait_until(lambda: cache._resetting)
+        with pytest.raises(RuntimeError):
+            cache.import_if_changed(other, lambda: calls.append("fresh"), owner="e")
+        go_body.set()
+        assert _wait_until(lambda: calls == ["admitted"] and cache._running is None)
+        key = f"a\0{path}"
+        assert key not in cache._imported and key not in cache._last_started   # P-c suppressed
+        assert resetter.is_alive()                      # the direct import still runs
+    finally:
+        go_body.set()
+        direct_go.set()
+        direct.join(5)
+        resetter.join(5)
+    assert result["ok"] is True and calls == ["admitted"]
+
+
+def test_a_timed_out_reset_fails_closed_and_a_later_reset_resumes_the_same_drain(tmp_path, monkeypatch):
+    """§6 (v): reset times out on a held importer: False, the fence and drain record
+    stay, admission is refused. After release a later reset continues the SAME
+    epoch and drain record and reopens; one new request runs."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "slow.jsonl"
+    path.write_text("{}\n")
+    entered, release = _threading.Event(), _threading.Event()
+
+    def blocking():
+        entered.set()
+        assert release.wait(5)
+
+    cache.schedule_import(path, blocking, owner="a")
+    assert entered.wait(2)
+    try:
+        assert cache.reset_for_tests(deadline_s=0.2) is False
+        drain = cache._drain
+        assert cache._resetting and drain is not None and cache._running is not None
+        assert cache._reset_owner is None
+        assert not cache.schedule_import(path, lambda: None, owner="b")
+    finally:
+        release.set()
+    assert cache.reset_for_tests() is True
+    assert cache._drain is None and not cache._resetting
+    assert drain.epoch == cache._epoch                     # resumed, not re-bumped
+    calls: list[str] = []
+    assert cache.schedule_import(path, lambda: calls.append("new"), owner="a")
+    assert cache.wait_for_background(3)
+    assert calls == ["new"]
+
+
+def test_a_timer_held_across_two_resets(tmp_path, monkeypatch):
+    """§6 (vi): a timer callback held past reset #1 keeps reset #2 failing closed
+    with the drain record unchanged; after release reset #3 joins the retained
+    handle and reopens."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.2)
+    path = tmp_path / "timer.jsonl"
+    path.write_text("1\n")
+    _opened_window(cache, path)
+    entered, release = _threading.Event(), _threading.Event()
+    original = cache._schedule_deferred
+
+    def held(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cache, "_schedule_deferred", held)
+    path.write_text("1\n2\n")
+    _bump_mtime(path)
+    calls: list[str] = []
+    cache.schedule_import(path, lambda: calls.append("old"), owner="a")
+    assert entered.wait(2)
+    try:
+        assert cache.reset_for_tests(deadline_s=0.2) is False
+        first = cache._drain
+        assert first is not None and len(first.timers) == 1
+        assert cache.reset_for_tests(deadline_s=0.2) is False
+        assert cache._drain is first                       # unchanged record
+    finally:
+        release.set()
+    assert cache.reset_for_tests() is True
+    assert cache._drain is None and calls == []
+    assert cache.schedule_import(path, lambda: calls.append("new"), owner="a")
+    assert cache.wait_for_background(3)
+    assert calls == ["new"]
+
+
+def test_a_concurrent_reset_is_refused_without_touching_the_owner_or_drain(tmp_path, monkeypatch):
+    """§6 (vii): while one reset drains (another thread), a second call returns
+    False at once and never clears the first call's owner token or its record."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "busy.jsonl"
+    path.write_text("{}\n")
+    entered, release = _threading.Event(), _threading.Event()
+
+    def blocking():
+        entered.set()
+        assert release.wait(5)
+
+    cache.schedule_import(path, blocking, owner="a")
+    assert entered.wait(2)
+    result: dict = {}
+    first = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
+    first.start()
+    try:
+        assert _wait_until(lambda: cache._reset_owner is not None)
+        owner_token, drain = cache._reset_owner, cache._drain
+        assert cache.reset_for_tests() is False
+        assert cache._reset_owner is owner_token and cache._drain is drain
+    finally:
+        release.set()
+        first.join(5)
+    assert result["ok"] is True and cache._reset_owner is None
+
+
+def test_reset_waits_for_an_admitted_direct_import(tmp_path):
+    """§6 (viii): reset cannot report quiescence while a direct import runs."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "direct.jsonl"
+    path.write_text("{}\n")
+    entered, release = _threading.Event(), _threading.Event()
+
+    def blocking():
+        entered.set()
+        assert release.wait(5)
+
+    direct = _threading.Thread(target=lambda: cache.import_if_changed(path, blocking, owner="a"))
+    direct.start()
+    assert entered.wait(2)
+    result: dict = {}
+    resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
+    resetter.start()
+    try:
+        assert _wait_until(lambda: cache._resetting)
+        assert resetter.is_alive()
+    finally:
+        release.set()
+        direct.join(5)
+        resetter.join(5)
+    assert result["ok"] is True
