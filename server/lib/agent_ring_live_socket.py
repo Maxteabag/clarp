@@ -412,9 +412,9 @@ def serve(handler) -> None:
     from .oracle_realtime import claim_session
     headers = {k.lower(): v for k, v in handler.headers.items()}
     if not ws.is_websocket_upgrade(headers):
-        return _http_refusal(handler, 426, "websocket_required")
+        return _http_refusal(handler, 426, "live_websocket_required")
     if not headers.get("sec-websocket-key"):
-        return _http_refusal(handler, 400, "websocket_required")
+        return _http_refusal(handler, 426, "live_websocket_required")
     who = principal_of(handler)
     denied = require_full_scope(who, message="Agent-live calls require full-device authentication")
     if denied:
