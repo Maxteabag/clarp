@@ -13,7 +13,7 @@ from lib import db, voice_events  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def fresh_db(tmp_path):
+def fresh_db(_transcript_importer_quiescent, tmp_path):
     db.reset_for_tests(tmp_path / "state.sqlite")
     yield
     db.close_local()

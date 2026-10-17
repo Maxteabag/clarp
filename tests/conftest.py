@@ -68,20 +68,23 @@ def _host_service_command_shims(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def _transcript_importer_quiescent():
-    """Runs before every other per-test autouse fixture (pytest instantiates
-    same-scope autouse fixtures in definition order, and this one is first).
-
-    An earlier test's teardown failed closed with import work still live. Check
-    before any per-test mutation: an admitted old operation may open a
+    """An earlier test's teardown failed closed with import work still live.
+    Checked before any per-test mutation: an admitted old operation may open a
     connection, log or read config AFTER this point, so it must never see this
-    test's environment, DB, log dir or config paths."""
+    test's environment, DB, log dir or config paths.
+
+    Pytest does not order same-scope fixtures by definition, so every per-test
+    fixture that sets environment, log, config or DB state names this one as a
+    dependency (tests/unit/test_conftest_importer_gate.py). Session setup
+    (pytest_configure, the session shims) runs once before the first test,
+    when no earlier test's work can exist."""
     importer = sys.modules.get("lib.transcript_import_cache")
     if importer is not None and importer._resetting and not importer.reset_for_tests():
         pytest.fail("transcript importer from an earlier test is still running; test state not set up")
 
 
 @pytest.fixture(autouse=True)
-def _isolate_host_service_commands(_host_service_command_shims, monkeypatch):
+def _isolate_host_service_commands(_transcript_importer_quiescent, _host_service_command_shims, monkeypatch):
     """Put non-mutating service-manager shims ahead of host commands.
 
     This also protects subprocess-based CLI and TUI tests, which run outside
@@ -135,7 +138,7 @@ def _no_default_host_generation_paths(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_real_agy_cli(monkeypatch, tmp_path):
+def _no_real_agy_cli(_transcript_importer_quiescent, monkeypatch, tmp_path):
     """Never run, or read the state of, the developer's real Antigravity CLI from
     a test; a test that needs agy installs a fake via CLARP_AGY_BIN and its own
     store via CLAUDE_PWA_AGY_HOME."""
@@ -319,7 +322,7 @@ def _track_retry_timers() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _guard_backend_clis(request, tmp_path):
+def _guard_backend_clis(_transcript_importer_quiescent, request, tmp_path):
     """Attribute every refused launch to this test; fail it at teardown if any
     was attempted, even when the application swallowed the refusal."""
     state = request.config._clarp_guard
@@ -397,7 +400,7 @@ def _model_catalog_never_probes_installed_clis(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_agy_skills(monkeypatch, tmp_path):
+def _isolate_agy_skills(_transcript_importer_quiescent, monkeypatch, tmp_path):
     """Skill links for Antigravity default to ~/.gemini/config/skills, which
     tests do not fake via HOME. Point it at a temp path whose parent does not
     exist, so agy linking stays off unless a test turns it on."""
@@ -410,7 +413,7 @@ def _isolate_agy_skills(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_xdg(monkeypatch):
+def _isolate_xdg(_transcript_importer_quiescent, monkeypatch):
     """Clear the XDG base-dir variables for every test.
 
     Clarp honours $XDG_CONFIG_HOME / $XDG_DATA_HOME / $XDG_CACHE_HOME, and most
@@ -425,7 +428,7 @@ def _isolate_xdg(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_db(tmp_path, monkeypatch):
+def _isolated_db(_transcript_importer_quiescent, tmp_path, monkeypatch):
     """Point the DB module at a tmp-path-scoped SQLite file for each test
     and clear the thread-local connection cache.
 
