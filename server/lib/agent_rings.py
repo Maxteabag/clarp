@@ -348,6 +348,16 @@ def answer(principal: str, ring_id: str, conversation_mode: Any = None, *,
         ring = _find(records, ring_id)
         if ring.get("conversation_mode") == live.MODE_LIVE:
             fresh = _answer_live(records, ring, principal, mode, request_id, client_nonce)
+            if not fresh:
+                # The owner's repeat gets the call's actual state, never a grant it can no longer use.
+                phase = ring.get("_live_phase")
+                if phase == "classic":
+                    return {**_answered(ring, group_calls.get_call(ring["call_id"]), changed=False),
+                            "conversation_mode": live.MODE_CLASSIC}
+                if phase in live.LIVE_PHASES and phase != "answered_waiting_join":
+                    raise CallError(409, live.JOIN_CONSUMED)
+                if phase != "answered_waiting_join":
+                    raise CallError(409, live.CALL_STALE)
         elif mode == live.MODE_LIVE:
             raise CallError(409, live.MODE_CONFLICT)
         else:
