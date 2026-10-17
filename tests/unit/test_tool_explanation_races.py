@@ -67,7 +67,7 @@ def test_a_poll_straddling_publication_does_not_requeue_the_published_key(monkey
     assert queue.request(3, prepared, [], 0) == [{"id": "row", "status": "pending"}]
     [claimed] = queue.claim("worker")
     assert claimed[0] == key
-    assert _one("SELECT status, owner FROM tool_explanation_jobs WHERE cache_key=?", key) == ("running", "worker")
+    assert tuple(_one("SELECT status, owner FROM tool_explanation_jobs WHERE cache_key=?", key)) == ("running", "worker")
 
     real_transaction = queue.transaction
     poll_threads, at_lock, proceed = set(), threading.Event(), threading.Event()
