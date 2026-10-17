@@ -374,3 +374,33 @@ def test_a_request_that_is_not_a_websocket_gets_one_426_live_websocket_required(
     sock.serve(h)
     assert (h.status, h.body()) == (426, {"error": "live_websocket_required"})
     assert call.connects == [] and live._SESSIONS == {}
+
+
+# ---- M-2: the Live controls are a paired full-scope device's, never the administrator's -----------
+
+def test_the_administrator_cannot_join_a_live_socket_it_gets_403_live_auth_before_the_upgrade(call):
+    h = Handler(principal="administrator")
+    sock.serve(h)
+    assert (h.status, h.body()) == (403, {"error": "live_auth"})
+    assert call.connects == [] and live._SESSIONS == {} and "administrator" not in oracle_realtime._ACTIVE_PRINCIPALS
+
+
+def test_a_revoked_device_cannot_join_a_live_socket(call, monkeypatch):
+    monkeypatch.setattr(live, "device_ok", lambda principal: False)
+    h = Handler()
+    sock.serve(h)
+    assert (h.status, h.body()) == (403, {"error": "live_auth"}) and call.connects == []
+
+
+@pytest.mark.parametrize("control", ["close", "fallback"])
+def test_the_administrator_cannot_close_or_fall_back_a_live_call(call, control):
+    from tests.unit.test_agent_ring_live_hardening import _owner
+    body = _owner(call.grant, **({"call_epoch": 1, "reason": "user_hangup"} if control == "close"
+                                 else {"expected_epoch": 1, "audio_stopped": True}))
+    _refused(403, "live_auth", getattr(live, control), "administrator", body)
+    assert _ring_of(call.grant)["_live_phase"] == "answered_waiting_join"
+
+
+def test_the_owner_cli_may_still_create_a_live_ring_as_the_administrator(sander):
+    from tests.unit.test_agent_ring_live import _live_ring
+    assert _live_ring()["ring"]["conversation_mode"] == "agent_live_v1"     # ring creation is not a device control
