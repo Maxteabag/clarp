@@ -379,3 +379,13 @@ def test_a_live_ring_that_ends_unanswered_drops_its_snapshot(sander, end):
         rings.expire_due()
     stored = next(r for r in rings._load() if r["ring_id"] == ring["ring_id"])
     assert "_live_snapshot" not in stored and stored["_live_context_digest"] and stored["_live_event_digest"]
+
+
+def test_opening_text_is_compared_after_whitespace_normalisation_and_never_against_a_cut_line(sander):
+    spaced = "  Hei,   dette er\nSandra i kontrollrommet.  Kamera 7 har sett vann ved vanntanken. "
+    assert _live_ring(_context(opening_text=spaced), opening_line=OPENING)["ring"]["opening_line"] == OPENING
+    rings.decline(PHONE, rings.current()["ring_id"])
+    sander.clock.advance(rings.AGENT_INTERVAL_MS)
+    long_line = "o" * 601
+    _refused(400, "live_context_invalid", _live_ring,
+             _context(event={**_context()["event"], "id": "lw-long"}, opening_text="o" * 600), opening_line=long_line)
