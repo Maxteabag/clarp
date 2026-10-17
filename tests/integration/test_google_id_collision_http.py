@@ -191,3 +191,89 @@ def test_listings_carry_only_the_fixed_code_and_the_required_row_shape(host, ada
     assert provider["error"] == COLLISION
     for row in provider["voices"]:
         assert row["current"] is False and row["taken_by"] is None
+
+
+# ---- POST /preview (the web and desktop preview): the two guard codes only become 409 ---------
+
+UNVERIFIABLE = "google_id_unverifiable"
+
+
+@pytest.fixture
+def preview_host(tmp_path, adapters, config_file, boundaries, monkeypatch):
+    """The real engine and handler with a global Google primary and a configured fallback, so a
+    hidden fallback would show; the legacy adapter would leave a sentinel if it were ever run."""
+    from lib import config, tts_worker
+    from lib.tts_engine import ElevenLabsEngine
+    sentinel = tmp_path / "adapter-ran"
+    (adapters / "legacy-google" / "adapter").write_text(f"#!/bin/sh\ntouch '{sentinel}'\nexit 1\n")
+    placeholder = tmp_path / "adc-placeholder.json"
+    config_file.write_text('[tts]\nprovider = "google"\nfallback = "cartesia"\n\n'
+                           f'[google_tts]\ncredentials = "{placeholder}"\nproject = "fixture-project"\n')
+    config.reset_cache()
+    events = []
+    real_emit = tts_worker._emit
+    monkeypatch.setattr(tts_worker, "_emit", lambda *a, **kw: (events.append(a[1] if len(a) > 1 else kw.get("event")),
+                                                                 real_emit(*a, **kw)))
+    audio = tmp_path / "preview-audio"
+    audio.mkdir()
+    ctx = ServerContext(
+        root=tmp_path, static=pathlib.Path(__file__).resolve().parents[2] / "static",
+        audio_dir=audio, agents_path=tmp_path / "agents.json", default_session="claude",
+        tts=ElevenLabsEngine(audio, api_key="fixture-key-never-used"), stream=AudioStream(audio),
+        stt=StubSTT(text="", ends_terminal=True), roster_names=("Mike",))
+    port = _free_port()
+    srv = _server_module.build_server(ctx, port, bind_addr="127.0.0.1")
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(50):
+        try:
+            urllib.request.urlopen(base + "/agents/snapshot", timeout=0.2).read()
+            break
+        except Exception:
+            time.sleep(0.02)
+    yield {"base": base, "audio": audio, "sentinel": sentinel, "events": events, "config": config_file}
+    srv.shutdown()
+    srv.server_close()
+
+
+def _preview(host, voice=AOEDE):
+    return _call(host["base"], "POST", "/preview", {"voice_id": voice, "session": "claude", "text": "Hello"})
+
+
+def _nothing_served(host, boundaries):
+    assert boundaries["google"] == []                            # Google never called
+    assert not host["sentinel"].exists()                         # the legacy adapter never ran
+    assert list(host["audio"].iterdir()) == []                   # no playable clip
+    assert "providerFallback" not in host["events"]              # no hidden fallback
+
+
+def test_a_post_preview_during_a_collision_is_409_with_the_code(preview_host, boundaries):
+    before = preview_host["config"].read_bytes()
+    status, raw = _preview(preview_host)
+    assert status == 409 and json.loads(raw) == {"error": COLLISION}
+    _nothing_served(preview_host, boundaries)
+    assert preview_host["config"].read_bytes() == before
+
+
+def test_a_post_preview_with_an_uninspectable_adapter_dir_is_409_unverifiable(preview_host, boundaries, adapters,
+                                                                              tmp_path, monkeypatch):
+    from lib import custom_tts_adapters
+    link = tmp_path / "linked-adapters"
+    link.symlink_to(adapters, target_is_directory=True)
+    monkeypatch.setattr(custom_tts_adapters, "ROOT", link)
+    status, raw = _preview(preview_host)
+    assert status == 409 and json.loads(raw) == {"error": UNVERIFIABLE}
+    _nothing_served(preview_host, boundaries)
+
+
+def test_without_a_collision_a_post_preview_failure_keeps_its_previous_status(preview_host, boundaries, adapters):
+    for child in (adapters / "legacy-google").iterdir():
+        child.unlink()
+    (adapters / "legacy-google").rmdir()
+    status, raw = _preview(preview_host)
+    assert status == 500 and json.loads(raw) == {"error": "google_quota"}  # an ordinary provider failure
+    assert boundaries["google"] == [AOEDE]
+    status, raw = _preview(preview_host, voice="nb-NO-Chirp3-HD-Nobody")
+    assert status == 500                                       # the requested voice itself, never replaced
+    assert boundaries["google"] == [AOEDE, "nb-NO-Chirp3-HD-Nobody"]
+    assert "providerFallback" not in preview_host["events"]
