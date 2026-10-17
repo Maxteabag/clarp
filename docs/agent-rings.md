@@ -108,6 +108,7 @@ follow-up, not part of this feature.
 ```bash
 clarp-admin call ring --reason "Possible water leak at pump 01" \
   --say "Camera 2 shows a possible water leak at pump 01. Shall I find an available field worker?" --wait
+clarp-admin call ring --agent rk-sander --oracle --context-file /abs/event.json --reason … --say …
 clarp-admin call ring-status [RING_ID]
 clarp-admin call ring-cancel RING_ID
 clarp-admin call rings on|off|status      # the owner's switch

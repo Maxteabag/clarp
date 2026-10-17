@@ -107,6 +107,11 @@ clarp-admin call ring --reason "Possible water leak at pump 01" \
   covers. Rings are rate-limited (one at a time, 60 s per agent, 10 an hour)
   and audited; the owner can turn them off (`clarp-admin call rings off`).
 - `clarp-admin call ring-cancel RING_ID` hangs up before they answer.
+- `--oracle --context-file EVENT.json` holds the call as a live voice
+  conversation (feature `agent_ring_live`). Only for an agent with an
+  operator-approved agent-live profile and a real event's context
+  (CONTEXT-v1); anything else is refused, never downgraded. Never invent the
+  context.
 
 The wire contracts are `docs/group-calls.md` and `docs/agent-rings.md` in the
 Clarp repository.

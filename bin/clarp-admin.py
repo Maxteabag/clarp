@@ -1129,6 +1129,9 @@ def _ring_request(method: str, path: str, body: dict | None = None) -> tuple[int
             return 1, {"error": raw.decode("utf-8", "replace") or f"HTTP {exc.code}"}
 
 
+RING_CONTEXT_BYTES = 32768
+
+
 def cmd_call_ring(args) -> int:
     """An agent calls its owner (docs/agent-rings.md)."""
     command = args.call_command
@@ -1136,6 +1139,23 @@ def cmd_call_ring(args) -> int:
         body = {"reason": args.reason, "opening_line": args.say}
         if args.agent:
             body = {"agent": args.agent, **body}
+        if args.context_file and not args.oracle:
+            print("clarp-admin call ring: --context-file needs --oracle", file=sys.stderr)
+            return 2
+        if args.oracle:
+            # Agent-live ring (CONTEXT-v1): the event context is read here, never by the Host.
+            if not args.context_file:
+                print("clarp-admin call ring: --oracle needs --context-file", file=sys.stderr)
+                return 2
+            try:
+                raw = Path(args.context_file).read_bytes()
+                if len(raw) > RING_CONTEXT_BYTES:
+                    raise ValueError(f"over {RING_CONTEXT_BYTES} bytes")
+                context = json.loads(raw.decode("utf-8"))
+            except (OSError, UnicodeDecodeError, ValueError) as exc:
+                print(f"clarp-admin call ring: cannot use --context-file: {exc}", file=sys.stderr)
+                return 2
+            body.update(conversation_mode="agent_live_v1", event_context=context)
         code, result = _ring_request("POST", "/calls/ring", body)
         ring_id = str((result.get("ring") or {}).get("ring_id") or "")
         if code == 0 and args.wait and ring_id:
@@ -3047,6 +3067,10 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
     ring.add_argument("--say", required=True, help="your opening line, spoken when the user answers")
     ring.add_argument("--agent", default="", help="the calling agent (default: you)")
     ring.add_argument("--wait", action="store_true", help="wait until the call is answered, declined or missed")
+    ring.add_argument("--oracle", action="store_true",
+                      help="hold the call as a live voice conversation (agent_ring_live); needs --context-file")
+    ring.add_argument("--context-file", default="",
+                      help="the event context JSON for --oracle (CONTEXT-v1, at most 32768 bytes)")
     ring.set_defaults(func=cmd_call_ring)
     ring_status = call.add_parser("ring-status", help="the ringing call, or one call by id")
     ring_status.add_argument("ring_id", nargs="?", default="")
