@@ -50,6 +50,13 @@ def _context(**changes):
     return context
 
 
+def _pair(device, scope="full", revoked=False):
+    from lib import db
+    db.conn().execute(
+        "INSERT INTO paired_devices(device_id, name, token_hash, scope, created_at, revoked_at) VALUES (?,?,?,?,?,?)",
+        (device, device, "hash-" + device, scope, db.now_ms(), db.now_ms() if revoked else None))
+
+
 @pytest.fixture
 def sander(env, tmp_path, monkeypatch):
     """rk-sander, its approved profile, a usable provider and one Live-capable phone."""
@@ -67,6 +74,8 @@ def sander(env, tmp_path, monkeypatch):
     monkeypatch.setattr(live, "ROOT", root)
     monkeypatch.setattr(live, "provider_problem", lambda: None)
     rings.register_voip_token(PHONE, "ab" * 32, supported_conversation_modes=["classic", "agent_live_v1"])
+    for device in (PHONE, OTHER_PHONE):
+        _pair(device)
     env.folder = folder
     return env
 
@@ -331,3 +340,12 @@ def test_the_feature_names_and_strings_are_the_v2_ones():
         "live_mode_invalid", "live_context_invalid", "live_context_too_large", "live_context_unavailable",
         "live_client_required", "live_mode_conflict", "live_call_stale", "live_owner_conflict",
         "live_unavailable", "live_fallback_not_allowed"}
+
+
+@pytest.mark.parametrize("who", ["administrator", "device_limited", "device_revoked", "device_unpaired"])
+def test_a_live_answer_must_come_from_a_paired_full_scope_device(sander, who):
+    _pair("device_limited", scope="limited")
+    _pair("device_revoked", revoked=True)
+    ring = _live_ring()["ring"]
+    _refused(403, "live_auth", rings.answer, who, ring["ring_id"], conversation_mode="agent_live_v1")
+    assert rings.get(ring["ring_id"])["state"] == "ringing"
