@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import pathlib
 
+import pytest
+
 from lib import transcript_import_cache
 
 
@@ -605,10 +607,11 @@ def test_a_timer_held_across_two_resets(tmp_path, monkeypatch):
     calls: list[str] = []
     cache.schedule_import(path, lambda: calls.append("old"), owner="a")
     assert entered.wait(2)
+    timer = cache._deferred[f"a\0{path}"][1]               # its callback is held before _guard
     try:
         assert cache.reset_for_tests(deadline_s=0.2) is False
         first = cache._drain
-        assert first is not None and len(first.timers) == 1
+        assert first is not None and timer in first.threads   # the held timer is retained
         assert cache.reset_for_tests(deadline_s=0.2) is False
         assert cache._drain is first                       # unchanged record
     finally:
