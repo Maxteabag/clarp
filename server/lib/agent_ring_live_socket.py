@@ -441,9 +441,9 @@ def serve(handler) -> None:
     if not headers.get("sec-websocket-key"):
         return _http_refusal(handler, 426, "live_websocket_required")
     who = principal_of(handler)
-    denied = require_full_scope(who, message="Agent-live calls require full-device authentication")
-    if denied:
-        return _http_refusal(handler, 401, "live_auth")
+    denied = require_full_scope(who, message="Group calls require full-device authentication")
+    if denied:                                  # the same body as every other /calls route guard
+        return _http_refusal(handler, 401, denied)
     principal = who.principal
     token = claim_session(principal)          # never supersedes another voice session
     if token is None:

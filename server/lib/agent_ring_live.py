@@ -263,9 +263,10 @@ _SESSIONS: dict = {}            # call_id → the running session (registered by
 
 
 def device_ok(principal: str) -> bool:
-    """A paired device still holds full scope and is not revoked (as Oracle voice)."""
+    """A paired device still holds full scope and is not revoked. Any other principal
+    (the administrator token included) is never a device: False."""
     if not principal.startswith("device_"):
-        return True
+        return False
     from . import db
     row = db.conn().execute("SELECT scope,revoked_at FROM paired_devices WHERE device_id=?", (principal,)).fetchone()
     return row is not None and row["revoked_at"] is None and row["scope"] == "full"
