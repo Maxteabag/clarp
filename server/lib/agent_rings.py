@@ -432,19 +432,34 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
     if ring["state"] == "answered":
         if ring["answered_by"] != principal:
             raise CallError(409, live.OWNER_CONFLICT)
+        _live_intent(request_id, client_nonce)
+        # The owner's repeat binds its exact original intent: the same request with the same nonce.
+        if request_id != ring.get("_live_request_id"):
+            raise CallError(409, live.OWNER_CONFLICT)
+        if client_nonce != ring.get("_live_client_nonce"):
+            raise CallError(400, live.REQUEST_INVALID)
         return False
     if ring["state"] != "ringing":
         raise CallError(409, live.CALL_STALE)
+    _live_intent(request_id, client_nonce)
     now = now_ms()
     ring.update(state="answered", ended_at=now, answered_by=principal,
                 _live_call_id="alv_" + uuid.uuid4().hex, _live_call_epoch=1, _live_phase="answered_waiting_join",
                 _live_attempt_id="att_" + uuid.uuid4().hex, _live_owner_nonce=secrets.token_hex(32),
                 _live_join_ticket=secrets.token_hex(32), _live_join_expires_at=now + LIVE_JOIN_MS,
-                _live_request_id=str(request_id or "")[:128], _live_client_nonce=str(client_nonce or "")[:128])
+                _live_request_id=request_id, _live_client_nonce=client_nonce)
     _save(records)
     _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
             "mode": live.MODE_LIVE, "live_call_id": ring["_live_call_id"]})
     return True
+
+
+def _live_intent(request_id: Any, client_nonce: Any) -> None:
+    """A Live answer names its intent exactly: a request id (required) and an optional client nonce, each a
+    non-empty string of at most 128 characters, kept as sent and never cut."""
+    from . import agent_ring_live as live
+    if not live._request_id_ok(request_id) or (client_nonce is not None and not live._request_id_ok(client_nonce)):
+        raise CallError(400, live.REQUEST_INVALID)
 
 
 def _answered_live(ring: dict, *, changed: bool) -> dict:
