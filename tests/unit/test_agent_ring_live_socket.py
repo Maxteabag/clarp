@@ -601,3 +601,12 @@ def test_an_uncertain_admission_keeps_the_opening_consumed_and_refuses_fallback(
                               "owner_nonce": call.grant["owner_nonce"], "request_id": "fb", "audio_stopped": True})
     assert (exc.value.status, exc.value.error) == (409, "live_fallback_not_allowed")
     assert _ring_of(call.grant)["_live_opening_consumed"] is True
+
+
+@pytest.mark.parametrize("drop", ["Upgrade", "Sec-WebSocket-Key"])
+def test_a_request_that_is_not_a_websocket_upgrade_gets_one_fixed_refusal(call, drop):
+    h = Handler()
+    del h.headers[drop]
+    sock.serve(h)
+    assert h.status == 426 and h.body() == {"error": "live_websocket_required"}
+    assert call.connects == [] and oracle_realtime._ACTIVE_PRINCIPALS == {}
