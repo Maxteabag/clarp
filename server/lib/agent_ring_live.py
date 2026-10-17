@@ -338,8 +338,16 @@ def close(principal: str, data: Any) -> dict:
         call_id = ring["_live_call_id"]
         result = {"ok": True, "call_id": call_id, "call_epoch": epoch, "state": "retired"}
     _stop_session(call_id, data["reason"])
-    if not saved:
-        raise CallError(503, UNAVAILABLE)
+    if not saved:                       # the session is stopped; record its retirement once more
+        try:
+            with agent_rings._lock:
+                records = agent_rings._load()
+                stored = next((r for r in records if r.get("_live_call_id") == call_id), None)
+                if stored is not None and retire(stored, data["reason"]):
+                    agent_rings._save(records)
+        except Exception as exc:  # noqa: BLE001
+            log_exception("agentLiveCloseSaveFail", exc, f"call={call_id} again")
+            raise CallError(503, UNAVAILABLE) from None
     if changed:
         _audit_quietly({"outcome": "live_closed", "ring_id": ring["ring_id"], "by": principal,
                         "live_call_id": call_id, "reason": data["reason"]})
