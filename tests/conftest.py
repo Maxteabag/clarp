@@ -453,6 +453,11 @@ def _isolated_db(tmp_path, monkeypatch):
         _config.reset_cache()
     except ImportError:
         pass
+    importer = sys.modules.get("lib.transcript_import_cache")
+    if importer is not None and importer._resetting and not importer.reset_for_tests():
+        # An earlier test's teardown failed closed with import work still live:
+        # never point that work's thread at a fresh DB.
+        pytest.fail("transcript importer from an earlier test is still running; DB not reset")
     for mod_name in ("lib.db",):
         try:
             mod = __import__(mod_name, fromlist=["reset_for_tests"])
@@ -516,9 +521,9 @@ def _isolated_db(tmp_path, monkeypatch):
         pass
     yield
     from lib import transcript_import_cache
-    assert transcript_import_cache.wait_for_background(5), "transcript importer leaked across tests"
-    # Quiescent before the DB reset: admitted imports, direct callers and window
-    # timers have finished; False keeps the fence closed and fails this test.
+    # One deadline for everything (no separate preliminary wait whose failure
+    # would skip it): admitted imports, direct callers and window timers must
+    # have finished before the DB reset; False keeps the fence closed and fails.
     assert transcript_import_cache.reset_for_tests(), "transcript importer not quiescent"
     _revisioned_cache.reset_all()
     for mod_name in ("lib.db",):
