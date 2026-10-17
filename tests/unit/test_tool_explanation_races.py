@@ -4,8 +4,9 @@ Test helpers only (monkeypatched module attributes and threading Events); no pro
 - R2: a poll that read "pending" before the worker published, and writes after, must not put a
   published key back in the queue (no extra job, run, cache or ledger mutation).
 - R1: the crashed-worker recovery scenario with a slow first admission attempt. The synthetic clock
-  may only advance once that blocked attempt is confirmed abandoned; the outcome is read from the
-  owned job, run and cache rows, not inferred from a polling timeout.
+  may only advance once that blocked attempt is confirmed abandoned; the outcome is read once the
+  worker's run is terminal, from the cache it committed with, not inferred from a polling timeout
+  or from separate reads that can straddle the publication (main push CI 39049012553).
 """
 from __future__ import annotations
 
@@ -117,11 +118,15 @@ def test_a_poll_straddling_publication_does_not_requeue_the_published_key(monkey
 # ---- R1: crashed-worker recovery with a slow first admission ------------------------------------
 
 def _settled(session, other_run_id=""):
-    """(published count, the worker's runs) once its batch has settled, else None."""
-    published = _one("SELECT count(*) FROM tool_explanation_cache")[0]
+    """(published count, the worker's runs) once its batch has settled, else None.
+
+    Settled means every run of the worker is terminal. A run's completion commits in the same
+    transaction as the cache row it publishes (the publish guard), so the cache read after it is
+    final; separate reads of cache, runs and jobs could straddle that publication."""
     runs = [r for r in janitors.list_runs(session) if r["run_id"] != other_run_id]
-    running_job = _one("SELECT 1 FROM tool_explanation_jobs WHERE status='running'")
-    return (published, runs) if (published or (runs and not running_job)) else None
+    if not runs or any(r["status"] in ("queued", "running") for r in runs):
+        return None
+    return _one("SELECT count(*) FROM tool_explanation_cache")[0], runs
 
 
 def _seed():
