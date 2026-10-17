@@ -30,6 +30,7 @@ THROTTLE = "rate limit, circuit breaker or log-once memory; losing it on restart
 JOBS = "tracks in-process background threads, subprocesses or sockets that cannot outlive the process"
 ORACLE = "live realtime call and socket registry; sessions die with the process"
 IMPORT = "table filled once at import time and read-only afterwards"
+RESET = "test-reset fence and drain bookkeeping of the process-wide import worker; rebound only by reset_for_tests, admission and the worker"
 
 ALLOWED: dict[tuple[str, str], str] = {
     ("lib/apns.py", "_BG_LAST_BY_SESSION"): THROTTLE,
@@ -135,6 +136,12 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcript_import_cache.py", "_path_locks"): LOCKS,
     ("lib/transcript_import_cache.py", "_pending"): JOBS,
     ("lib/transcript_import_cache.py", "_worker"): JOBS,
+    ("lib/transcript_import_cache.py", "_running"): JOBS,
+    ("lib/transcript_import_cache.py", "_direct_active"): JOBS,
+    ("lib/transcript_import_cache.py", "_epoch"): RESET,
+    ("lib/transcript_import_cache.py", "_resetting"): RESET,
+    ("lib/transcript_import_cache.py", "_reset_owner"): RESET,
+    ("lib/transcript_import_cache.py", "_drain"): RESET,
     ("lib/claude_transcript.py", "_INDEXES"): CACHE,
     ("lib/transcription_models.py", "_activation_attempts"): JOBS,
     ("lib/transcription_models.py", "_activation_completed"): JOBS,

@@ -437,7 +437,8 @@ def classify_completed_turn(*, agent_id: str, session: str, persona: str,
 
 
 def reclassify_recent_suppressed(*, agent_id: str, backend_session_id: str = "",
-                                 now_ms_value: int | None = None
+                                 now_ms_value: int | None = None,
+                                 admit: Callable[[], bool] | None = None,
                                  ) -> list[dict[str, Any]]:
     """Retry recent suppressed user-facing rows after transcript import.
 
@@ -445,7 +446,13 @@ def reclassify_recent_suppressed(*, agent_id: str, backend_session_id: str = "",
     SQLite. When transcript rows later land, retry only rows that were silent
     because content was missing, and only inside a short recency window. Rows
     already notified, non-user-facing origins, and no-op-only turns stay put.
+
+    ``admit`` (the transcript streamer's current-owner check) is asked before
+    the read, after it, and before each row. Rows read while a rebind (even one
+    reusing this backend session) raced the read are discarded, never acted on.
     """
+    if admit is not None and not admit():
+        return []
     now_value = int(now_ms_value or db.now_ms())
     params: list[Any] = [
         agent_id,
@@ -466,8 +473,12 @@ def reclassify_recent_suppressed(*, agent_id: str, backend_session_id: str = "",
              LIMIT 5""",
         tuple(params),
     ).fetchall()
+    if admit is not None and not admit():
+        return []
     flipped: list[dict[str, Any]] = []
     for row in rows:
+        if admit is not None and not admit():
+            break
         notification = classify_completed_turn(
             agent_id=row["agent_id"],
             session=row["session"],

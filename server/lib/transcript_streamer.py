@@ -16,8 +16,11 @@ chatter line.
 from __future__ import annotations
 
 import datetime
+import itertools
 import re
 import threading
+import time
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from . import agents as agents_db
@@ -48,6 +51,22 @@ def _emit(*a, **kw):
         pass
 
 
+# Bind generations come from one process-wide counter that is never reset, so an
+# unbind and rebind (even to the same backend session) always yields a larger one.
+_BIND_GENERATIONS = itertools.count(1)
+
+
+@dataclass(frozen=True)
+class Intent:
+    """The latest transcript change of a bound agent whose post-import step has
+    not run yet. ``resubmits``/``next_at`` pace the reconcile retries."""
+    bsid: str
+    gen: int
+    seq: int
+    resubmits: int = 0
+    next_at: float = 0.0
+
+
 # How often to scan the agents table for new backend_session_id bindings.
 # inotify gives us instant file-modify wakeups; this is just for the
 # bookkeeping of "an agent's backend_session_id just became known."
@@ -72,6 +91,13 @@ class TranscriptStreamer:
         # agent_id → backend_session_id currently bound to a watcher. Used to
         # detect changes (resume, fork) without re-watching every tick.
         self._bound: dict[str, str] = {}
+        # agent_id → its generation at the latest bind (never removed).
+        self._bind_generation: dict[str, int] = {}
+        # agent_id → the latest change still waiting for its post-import step.
+        # Every read-modify-write holds _dirty_lock (never across import or I/O).
+        self._dirty: dict[str, Intent] = {}
+        self._seq: dict[str, int] = {}
+        self._dirty_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -100,6 +126,7 @@ class TranscriptStreamer:
         # Agents that disappeared (soft-deleted): drop their watchers.
         for stale in set(self._bound) - live_ids:
             self._unbind(stale)
+        self._resubmit_unresolved()
         health.mark_success("transcript_streamer")
 
     def _bind(self, agent: dict, backend_session_id: str) -> None:
@@ -129,6 +156,7 @@ class TranscriptStreamer:
             self.pool.remove(agent_id)
             return
         self._bound[agent_id] = backend_session_id
+        self._bind_generation[agent_id] = next(_BIND_GENERATIONS)
         _emit("transcript_streamer", "bind",
               session=agent.get("session"),
               backend_session_id=backend_session_id,
@@ -141,6 +169,8 @@ class TranscriptStreamer:
         self.dispatcher.unwatch(agent_id)
         self.pool.remove(agent_id)
         prev = self._bound.pop(agent_id, None)
+        with self._dirty_lock:
+            self._dirty.pop(agent_id, None)
         _emit("transcript_streamer", "unbind",
               backend_session_id=prev,
               detail={"agent_id": agent_id})
@@ -150,55 +180,131 @@ class TranscriptStreamer:
     def _on_change(self, agent: dict, backend_session_id: str) -> None:
         """Fires once per tick that consumed bytes — including tool_use
         and tool_result lines that don't go through on_text. Drives the
-        client's live-update of the history pane via SSE."""
-        self._import_latest(agent, backend_session_id)
-        if self._stream is None:
-            return
-        try:
-            events.broadcast(self._stream, events.transcript_updated(
-                agent_id=agent["agent_id"],
-                session=agent.get("session"),
-                backend_session_id=backend_session_id,
-            ))
-        except Exception as e:
-            log_exception("transcriptStreamerBroadcastFail", e,
-                          detail=agent.get("agent_id"))
-        try:
-            from . import apns, user_notifications
-            for notification in user_notifications.reclassify_recent_suppressed(
-                agent_id=agent["agent_id"],
-                backend_session_id=backend_session_id,
-            ):
-                events.broadcast(self._stream, events.as_event(
-                    user_notifications.event_payload(notification)))
-                apns.on_user_notification(notification)
-        except Exception as e:
-            log_exception("transcriptStreamerNotificationRetryFail", e,
-                          detail=agent.get("agent_id"))
+        client's live-update of the history pane via SSE.
 
-    def _import_latest(self, agent: dict, backend_session_id: str) -> None:
-        """Keep SQLite's transcript rows current without waiting for /log.
+        Runs on the one inotify thread that voices every agent, so it only
+        broadcasts and queues: the transcript import (it re-reads the whole
+        file) and the notification retry that needs its rows run on the import
+        worker, and the change stays pending until that step has run."""
+        if self._stream is not None:
+            try:
+                events.broadcast(self._stream, events.transcript_updated(
+                    agent_id=agent["agent_id"],
+                    session=agent.get("session"),
+                    backend_session_id=backend_session_id,
+                ))
+            except Exception as e:
+                log_exception("transcriptStreamerBroadcastFail", e,
+                              detail=agent.get("agent_id"))
+        self._submit(agent, self._note_change(agent, backend_session_id))
 
-        Push/badge policy runs server-side, so it cannot rely on a client fetch
-        to import the final assistant prose after DONE.
-        """
+    def _note_change(self, agent: dict, backend_session_id: str) -> Intent:
+        """Record this change as the agent's latest pending one."""
+        agent_id = agent["agent_id"]
+        with self._dirty_lock:
+            seq = self._seq.get(agent_id, 0) + 1
+            self._seq[agent_id] = seq
+            intent = Intent(backend_session_id, self._bind_generation.get(agent_id, 0), seq,
+                            next_at=time.monotonic() + 1.0)
+            self._dirty[agent_id] = intent
+        return intent
+
+    def _submit(self, agent: dict, intent: Intent) -> bool:
+        """Queue the import and its post-import step on the import worker.
+        False when refused; the intent stays pending either way."""
+        agent_id = agent["agent_id"]
         try:
             backend = backends.by_id(agent.get("backend"))
-            latest = backend.find_transcript(backend_session_id)
+            latest = backend.find_transcript(intent.bsid)
             if latest is None:
-                return
+                return False
+
             def import_latest() -> None:
                 transcript_incremental.import_transcript(
                     backend=backend.id, path=latest,
-                    agent_id=agent["agent_id"],
-                    backend_session_id=backend_session_id,
+                    agent_id=agent_id,
+                    backend_session_id=intent.bsid,
                     parse=backend.parse_transcript)
 
-            transcript_import_cache.import_if_changed(
-                latest, import_latest, owner=agent["agent_id"])
+            return transcript_import_cache.schedule_import(
+                latest, import_latest, owner=agent_id,
+                after=lambda: self._after_import(agent_id, intent.bsid, intent.gen, intent.seq))
         except Exception as e:
-            log_exception("transcriptStreamerImportFail", e,
-                          detail=agent.get("agent_id"))
+            log_exception("transcriptStreamerImportFail", e, detail=agent_id)
+            return False
+
+    def _resubmit_unresolved(self) -> None:
+        """Reconcile's retry of pending changes the worker no longer holds
+        (refused, or the import failed), paced 1, 2, 4 … 60 s per intent."""
+        now = time.monotonic()
+        with self._dirty_lock:
+            due = [(agent_id, intent) for agent_id, intent in self._dirty.items()
+                   if self._bound.get(agent_id) == intent.bsid
+                   and self._bind_generation.get(agent_id) == intent.gen
+                   and now >= intent.next_at]
+        for agent_id, intent in due:
+            agent = agents_db.get_by_agent_id(agent_id)
+            if agent is None:
+                continue
+            try:
+                latest = backends.by_id(agent.get("backend")).find_transcript(intent.bsid)
+            except Exception as e:
+                log_exception("transcriptStreamerImportFail", e, detail=agent_id)
+                continue
+            if latest is None or transcript_import_cache.is_active(latest, owner=agent_id):
+                continue
+            self._submit(agent, intent)
+            with self._dirty_lock:
+                if self._dirty.get(agent_id) is intent:
+                    resubmits = intent.resubmits + 1
+                    self._dirty[agent_id] = replace(
+                        intent, resubmits=resubmits, next_at=now + min(60, 2 ** resubmits))
+
+    def _admit(self, agent_id: str, backend_session_id: str, generation: int) -> bool:
+        """Whether the binding a post-import step was queued for is current."""
+        return (not self._stop.is_set()
+                and self._bound.get(agent_id) == backend_session_id
+                and self._bind_generation.get(agent_id) == generation)
+
+    def _after_import(self, agent_id: str, backend_session_id: str,
+                      generation: int, seq: int) -> None:
+        """On the import worker, after the import returned: tell clients the
+        imported rows are there, and retry recently suppressed notifications.
+        Nothing is admitted for a binding that is no longer current; its own
+        pending change is cleared in every case, a newer one never."""
+        try:
+            if not self._admit(agent_id, backend_session_id, generation) or self._stream is None:
+                return
+            try:
+                agent = agents_db.get_by_agent_id(agent_id)
+                events.broadcast(self._stream, events.transcript_updated(
+                    agent_id=agent_id,
+                    session=(agent or {}).get("session"),
+                    backend_session_id=backend_session_id,
+                ))
+            except Exception as e:
+                log_exception("transcriptStreamerBroadcastFail", e, detail=agent_id)
+            try:
+                from . import apns, user_notifications
+                admit = lambda: self._admit(agent_id, backend_session_id, generation)  # noqa: E731
+                for notification in user_notifications.reclassify_recent_suppressed(
+                    agent_id=agent_id,
+                    backend_session_id=backend_session_id,
+                    admit=admit,
+                ):
+                    if not admit():
+                        break
+                    events.broadcast(self._stream, events.as_event(
+                        user_notifications.event_payload(notification)))
+                    apns.on_user_notification(notification)
+            except Exception as e:
+                log_exception("transcriptStreamerNotificationRetryFail", e, detail=agent_id)
+        finally:
+            with self._dirty_lock:
+                current = self._dirty.get(agent_id)
+                if current is not None and (current.bsid, current.gen, current.seq) == (
+                        backend_session_id, generation, seq):
+                    del self._dirty[agent_id]
 
     # ---- text-block → tts_queue ----------------------------------------
 
@@ -290,9 +396,13 @@ class TranscriptStreamer:
         if self._thread:
             self._thread.join(timeout=timeout)
         self.dispatcher.stop(timeout=timeout)
-        # Drop any pool entries to release file handles.
+        # Drop any pool entries to release file handles. Unbinding every agent
+        # (and its pending change) is what keeps a stopped streamer's queued
+        # post-import steps from acting; keep it.
         for agent_id in list(self._bound):
             self._unbind(agent_id)
+        with self._dirty_lock:
+            self._dirty.clear()
 
     def _reconcile_loop(self) -> None:
         # Run one reconcile pass immediately so a server start picks up
