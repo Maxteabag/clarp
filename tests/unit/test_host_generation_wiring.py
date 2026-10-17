@@ -157,6 +157,21 @@ def test_a_failed_replace_refuses_rotation_and_removes_the_temporary(backups, os
     assert _entries(backups) == [hg.TOKEN_NAME]
 
 
+def test_a_failed_directory_sync_after_the_replace_says_the_token_was_replaced(backups, os_patch):
+    _token(backups)
+    real_fsync = os.fsync
+
+    def failing_dir_fsync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(errno.EIO, "injected")
+        return real_fsync(fd)
+    os_patch.setattr(os, "fsync", failing_dir_fsync)
+    with pytest.raises(hg.RotationRefused) as refused:
+        hg.rotate_instance_generation(backups_dir=backups)
+    assert "already replaced" in str(refused.value)
+    assert _valid(backups / hg.TOKEN_NAME) != OLD                  # it was, and says so
+
+
 def test_a_failed_cleanup_is_reported_in_the_refusal_not_swallowed(backups, os_patch):
     def fail(*args, **kwargs):
         raise OSError(errno.EIO, "injected")
@@ -176,33 +191,60 @@ def test_a_failed_cleanup_is_reported_in_the_refusal_not_swallowed(backups, os_p
     lambda: hg.rotate_instance_generation(),
 ])
 def test_the_test_guard_refuses_every_default_generation_path(call):
-    with pytest.raises(AssertionError, match="default host-generation path"):
+    with pytest.raises(pytest.fail.Exception, match="default host-generation path"):
         call()
 
 
-def test_importing_the_module_reads_no_generation_path(tmp_path):
-    """A fresh interpreter imports lib.host_generation under an audit hook: no open or stat of
-    the data root's backups directory or of the kernel boot id happens at import."""
-    data = tmp_path / "import-data"
-    data.mkdir()
+@pytest.mark.parametrize("mode", ["container", "native"])
+def test_importing_the_module_reads_no_generation_path(tmp_path, mode):
+    """A fresh interpreter imports lib.host_generation under an audit hook: no open, listdir or
+    scandir of its data root or of the kernel boot id happens at import (CPython raises no audit
+    event for stat). Both LAYOUT branches: a container data root, and a native one under HOME."""
+    home = tmp_path / "home"
+    home.mkdir()
     probe = f"""
 import json, sys
 sys.path.insert(0, {str(REPO / 'server')!r})
 seen = []
 def hook(event, args):
-    if event in ("open", "os.stat", "os.lstat", "os.listdir", "os.scandir") and args:
+    if event in ("open", "os.listdir", "os.scandir") and args:
         seen.append(str(args[0]))
 sys.addaudithook(hook)
 import lib.host_generation
-print(json.dumps(seen))
+print(json.dumps({{"seen": seen, "data_root": str(lib.host_generation.LAYOUT.data_root)}}))
 """
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path / "home"), "LANG": "C.UTF-8",
-           "CLARP_DEPLOYMENT_MODE": "container", "CLARP_DATA_DIR": str(data)}
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(home), "LANG": "C.UTF-8"}
+    if mode == "container":
+        env.update(CLARP_DEPLOYMENT_MODE="container", CLARP_DATA_DIR=str(tmp_path / "import-data"))
     result = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True,
                             text=True, timeout=60)
     assert result.returncode == 0, result.stderr
-    seen = json.loads(result.stdout.strip().splitlines()[-1])
-    assert not [p for p in seen if p.startswith(str(data)) or "kernel/random/boot_id" in p]
+    report = json.loads(result.stdout.strip().splitlines()[-1])
+    assert report["data_root"].startswith(str(tmp_path))         # the probe never saw a real root
+    assert not [p for p in report["seen"]
+                if p.startswith(report["data_root"]) or "kernel/random/boot_id" in p]
+
+
+# ---- bootstrap never stops a start (design r4 §12 D) -----------------------------------------
+
+def test_an_unexpected_bootstrap_error_is_logged_and_never_raised(os_patch):
+    logged = []
+    os_patch.setattr(hg, "log_exception", lambda event, exc, detail="": logged.append(
+        (event, type(exc).__name__)))
+    assert hg.ensure_instance_generation(backups_dir=object()) is False     # TypeError inside
+    assert logged and logged[-1][1] == "TypeError"
+
+
+def test_an_unresolvable_default_path_is_logged_and_never_raised(os_patch):
+    logged = []
+    os_patch.setattr(hg, "log_exception", lambda event, exc, detail="": logged.append(
+        (event, type(exc).__name__)))
+
+    def broken_layout():
+        raise RuntimeError("no data root")
+    os_patch.setattr(hg, "default_backups_dir", broken_layout)
+    assert hg.ensure_instance_generation() is False
+    assert logged and logged[-1][1] == "RuntimeError"
 
 
 # ---- bootstrap call order --------------------------------------------------------------------

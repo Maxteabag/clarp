@@ -113,7 +113,8 @@ def _no_default_host_generation_paths(monkeypatch):
         return
 
     def refuse(*_args, **_kwargs):
-        raise AssertionError("a test resolved a default host-generation path; inject the path")
+        # pytest.fail raises a BaseException: the bootstrap's own catch-all cannot hide it.
+        pytest.fail("a test resolved a default host-generation path; inject the path")
 
     monkeypatch.setattr(host_generation, "default_backups_dir", refuse)
     monkeypatch.setattr(host_generation, "default_boot_id_path", refuse)
