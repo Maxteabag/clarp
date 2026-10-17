@@ -402,10 +402,13 @@ def test_a_busy_voice_owner_is_refused_before_the_upgrade_and_never_superseded(c
     assert stopped == [] and oracle_realtime._ACTIVE_PRINCIPALS[PHONE] == token and call.connects == []
 
 
-def test_a_limited_device_is_refused_before_the_upgrade(call):
+def test_a_caller_without_validated_full_scope_gets_the_unchanged_calls_auth_body(call):
+    # The shared layer already stops limited devices (403) and bad tokens (401); this route
+    # guard only meets a local caller let through unvalidated, and answers exactly like the
+    # other /calls routes (no live_auth rewrite).
     h = Handler(scope="limited")
     sock.serve(h)
-    assert h.status == 401 and h.body() == {"error": "live_auth"}
+    assert h.status == 401 and h.body() == {"error": "Group calls require full-device authentication"}
 
 
 def test_phone_audio_before_the_opening_was_admitted_is_refused_not_dropped(call):

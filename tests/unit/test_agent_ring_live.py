@@ -410,3 +410,7 @@ def test_a_pinned_profile_file_over_the_snapshot_bound_is_refused_before_reading
     meta["files"]["agents"]["sha256"] = _h.sha256(big).hexdigest()
     (sander.folder / "profile.json").write_text(json.dumps(meta))
     _refused(409, "live_context_unavailable", _live_ring)
+
+
+def test_device_ok_is_false_for_any_non_device_principal():
+    assert live.device_ok("administrator") is False and live.device_ok("") is False
