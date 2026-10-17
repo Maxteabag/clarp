@@ -336,10 +336,11 @@ def test_the_feature_names_and_strings_are_the_v2_ones():
     assert (live.FEATURE, live.MODE_LIVE, live.PROTOCOL) == ("agent_ring_live", "agent_live_v1", 1)
     assert {live.MODE_INVALID, live.CONTEXT_INVALID, live.CONTEXT_TOO_LARGE, live.CONTEXT_UNAVAILABLE,
             live.CLIENT_REQUIRED, live.MODE_CONFLICT, live.CALL_STALE, live.OWNER_CONFLICT, live.UNAVAILABLE,
-            live.FALLBACK_NOT_ALLOWED} == {
+            live.FALLBACK_NOT_ALLOWED, live.AUTH, live.CONTEXT_CONFLICT, live.REQUEST_INVALID} == {
         "live_mode_invalid", "live_context_invalid", "live_context_too_large", "live_context_unavailable",
         "live_client_required", "live_mode_conflict", "live_call_stale", "live_owner_conflict",
-        "live_unavailable", "live_fallback_not_allowed"}
+        "live_unavailable", "live_fallback_not_allowed", "live_auth", "live_context_conflict",
+        "live_request_invalid"}
 
 
 @pytest.mark.parametrize("who", ["administrator", "device_limited", "device_revoked", "device_unpaired"])
