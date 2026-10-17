@@ -54,7 +54,11 @@ class Session:
         import threading
         self.order, self.call_id = order, grant["call_id"]
         self.upstream_closed = threading.Event()        # the provider closure receipt, as LiveSocket sets it
+        self.upstream_close_done = threading.Event()
         live._SESSIONS[grant["call_id"]] = self
+
+    def revoke(self):
+        pass
 
     def retire(self, reason):
         # Authority is already gone on the record when the session hears about it. Like the real
@@ -63,6 +67,7 @@ class Session:
         stored = _ring_of({"call_id": self.call_id})
         self.stops = getattr(self, "stops", 0) + 1
         self.upstream_closed.set()
+        self.upstream_close_done.set()
         if self.stops == 1:
             self.order.append(("retire", reason, stored["_live_phase"]))
             self.classic_call_at_stop = stored.get("call_id") and group_calls.get_call(stored["call_id"])
@@ -84,7 +89,8 @@ def test_close_is_idempotent_and_a_retry_stops_the_session_again(grant):
     order = []
     session = Session(grant, order)
     first = _close(grant)
-    assert _close(grant) == first and _close(grant, request_id="q2", reason="transport_lost") == first
+    assert _close(grant) == first and _close(grant) == first          # the same request, retried, stops again
+    _refused(409, "live_call_stale", _close, grant, request_id="q2", reason="transport_lost")   # another request
     assert order == [("retire", "user_hangup", "retired")] and session.stops == 3
 
 
@@ -164,9 +170,12 @@ def test_the_live_control_routes_answer_with_the_fixed_strings(grant, sander):
     fb = _Handler(_body(grant, expected_epoch=1, audio_stopped=True), sander)
     server.Handler._handle_calls_ring_live_fallback(fb)
     assert fb.sent[0][0] == 200 and fb.sent[0][1]["conversation_mode"] == "classic"
-    close = _Handler(_body(grant, call_epoch=1, reason="user_hangup"), sander)
+    stale = _Handler(_body(grant, call_epoch=1, reason="user_hangup"), sander)
+    server.Handler._handle_calls_ring_live_close(stale)
+    # The fallback moved the call to epoch 2: a close for epoch 1 is stale (H4), never an echo of success.
+    assert stale.sent == [(409, {"ok": False, "error": "live_call_stale"})]
+    close = _Handler(_body(grant, call_epoch=2, reason="user_hangup"), sander)
     server.Handler._handle_calls_ring_live_close(close)
-    # A close after the fallback answers the ring's own epoch and actual state (H4/L-1), not the request's echo.
     assert close.sent == [(200, {"ok": True, "call_id": grant["call_id"], "call_epoch": 2, "state": "classic"})]
 
 
