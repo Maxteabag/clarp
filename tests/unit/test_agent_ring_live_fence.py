@@ -401,6 +401,25 @@ def test_the_administrator_cannot_close_or_fall_back_a_live_call(call, control):
     assert _ring_of(call.grant)["_live_phase"] == "answered_waiting_join"
 
 
-def test_the_owner_cli_may_still_create_a_live_ring_as_the_administrator(sander):
-    from tests.unit.test_agent_ring_live import _live_ring
-    assert _live_ring()["ring"]["conversation_mode"] == "agent_live_v1"     # ring creation is not a device control
+def test_the_owner_cli_may_still_create_a_live_ring_as_the_administrator_and_the_routes_refuse_its_controls(sander):
+    # Over the real routes: POST /calls/ring with the admin token and --agent (no turn) creates the Live ring;
+    # the administrator's close and fallback get 403 live_auth.
+    from tests.unit.test_agent_ring_live import OPENING, _context
+    from tests.unit.test_agent_rings import _Handler, _server
+    server = _server()
+    made = _Handler({"agent": "rk-sander-0001", "reason": "r", "opening_line": OPENING,
+                     "conversation_mode": "agent_live_v1", "event_context": _context()}, sander,
+                    principal="administrator")
+    server.Handler._handle_calls_ring(made)
+    assert made.sent[0][0] == 200 and made.sent[0][1]["ring"]["conversation_mode"] == "agent_live_v1"
+    rid = made.sent[0][1]["ring"]["ring_id"]
+    grant = rings.answer(PHONE, rid, conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")["live"]
+    owner = {"call_id": grant["call_id"], "attempt_id": grant["attempt_id"], "owner_nonce": grant["owner_nonce"],
+             "request_id": "q1"}
+    close = _Handler({**owner, "call_epoch": 1, "reason": "user_hangup"}, sander, principal="administrator")
+    server.Handler._handle_calls_ring_live_close(close)
+    fallback = _Handler({**owner, "expected_epoch": 1, "audio_stopped": True}, sander, principal="administrator")
+    server.Handler._handle_calls_ring_live_fallback(fallback)
+    assert close.sent == [(403, {"ok": False, "error": "live_auth"})]
+    assert fallback.sent == [(403, {"ok": False, "error": "live_auth"})]
+    assert _ring_of(grant)["_live_phase"] == "answered_waiting_join"
