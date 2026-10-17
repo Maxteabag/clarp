@@ -1952,8 +1952,12 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
     def unobtainable(code: int, message: str) -> int:
         """Exclusivity is missing: resolve refuses; a dry-run never blocks or fails on it and
         reports, read-only, what resolve would write."""
+        nonlocal owner
         if not dry_run:
             return refuse(code, message)
+        if owner is not None:                     # never keep a starting Host out for a report
+            os.close(owner)
+            owner = None
         inventory = custom_tts_adapters.collision_inventory()
         fingerprints = sorted(item["fingerprint"] for item in inventory["collisions"])
         print(json.dumps({"exclusivity": f"not obtainable now (exit {code}: {message})",
@@ -1963,6 +1967,7 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
                          indent=2))
         return 0
 
+    owner = None
     if not locks.inherited_lock_fd(locks.USERS_FD, locks.USERS_LOCK):
         return unobtainable(locks.EXIT_LOCKING, "run it as a maintenance command (docker compose run "
                                                 "--rm clarp clarp-admin …): the data-root locks are not held")
@@ -1973,7 +1978,6 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
     if _restore_in_progress(locks):
         return unobtainable(locks.EXIT_IN_USE, "a restore is staged or in progress; start the Host "
                                                "to complete it first")
-    owner = None
     try:
         try:
             owner = os.open(locks.backups_dir() / locks.OWNER_LOCK,
