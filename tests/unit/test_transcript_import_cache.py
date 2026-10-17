@@ -296,3 +296,25 @@ def test_a_later_request_without_after_keeps_the_pending_after(tmp_path, monkeyp
         release.set()
         assert cache.wait_for_background(4)
     assert calls == ["log import", "streamer after"]
+
+
+def test_reset_cancels_an_armed_deferred_import(tmp_path, monkeypatch):
+    """A deferred import whose window timer is still armed must not run after
+    reset_for_tests(): it would submit into the next test's database."""
+    import time
+
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.3)
+    path = tmp_path / "armed.jsonl"
+    path.write_text("1\n")
+    calls: list[int] = []
+    assert cache.schedule_import(path, lambda: calls.append(1), owner="a")
+    assert cache.wait_for_background(2)
+    path.write_text("1\n2\n")
+    _bump_mtime(path)
+    assert cache.schedule_import(path, lambda: calls.append(2), owner="a")   # inside the window: timer armed
+    cache.reset_for_tests()
+    time.sleep(0.6)                                                          # past the window
+    assert cache.wait_for_background(2)
+    assert calls == [1]
