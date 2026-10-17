@@ -300,11 +300,10 @@ def test_a_later_request_without_after_keeps_the_pending_after(tmp_path, monkeyp
 
 def test_reset_cancels_an_armed_deferred_import(tmp_path, monkeypatch):
     """A deferred import whose window timer is still armed must not run after
-    reset_for_tests(): it would submit into the next test's database."""
-    import time
-
+    reset_for_tests(): it would submit into the next test's database. The armed
+    timer object itself is joined (no sleep), so a slow runner cannot mask it."""
     cache = transcript_import_cache
-    cache.reset_for_tests()
+    assert cache.reset_for_tests()
     monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.3)
     path = tmp_path / "armed.jsonl"
     path.write_text("1\n")
@@ -314,10 +313,35 @@ def test_reset_cancels_an_armed_deferred_import(tmp_path, monkeypatch):
     path.write_text("1\n2\n")
     _bump_mtime(path)
     assert cache.schedule_import(path, lambda: calls.append(2), owner="a")   # inside the window: timer armed
-    cache.reset_for_tests()
-    time.sleep(0.6)                                                          # past the window
+    timer = cache._deferred[f"a\0{path}"][1]
+    assert cache.reset_for_tests()
+    timer.join(2)
+    assert not timer.is_alive()
     assert cache.wait_for_background(2)
     assert calls == [1]
+
+
+def test_a_deferred_request_whose_file_vanished_is_not_lost_on_the_timer_thread(tmp_path, monkeypatch):
+    """SR-2: the window timer stats the file outside _guard; a vanished file does
+    not raise on the timer thread (losing the request): the request is still
+    submitted and its import failure is logged by the worker as usual."""
+    import threading
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.2)
+    path = tmp_path / "gone.jsonl"
+    path.write_text("1\n")
+    _opened_window(cache, path)
+    escaped: list = []
+    monkeypatch.setattr(threading, "excepthook", lambda args: escaped.append(args.exc_type))
+    path.write_text("1\n2\n")
+    _bump_mtime(path)
+    assert cache.schedule_import(path, lambda: None, owner="a")
+    timer = cache._deferred[f"a\0{path}"][1]
+    path.unlink()
+    timer.join(2)
+    assert cache.wait_for_background(3)
+    assert escaped == []
 
 
 # ---- r2 design: deferred newest pair, is_active, and the test-reset protocol (§6) ----
