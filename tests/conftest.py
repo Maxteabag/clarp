@@ -517,7 +517,9 @@ def _isolated_db(tmp_path, monkeypatch):
     yield
     from lib import transcript_import_cache
     assert transcript_import_cache.wait_for_background(5), "transcript importer leaked across tests"
-    transcript_import_cache.reset_for_tests()
+    # Quiescent before the DB reset: admitted imports, direct callers and window
+    # timers have finished; False keeps the fence closed and fails this test.
+    assert transcript_import_cache.reset_for_tests(), "transcript importer not quiescent"
     _revisioned_cache.reset_all()
     for mod_name in ("lib.db",):
         try:
