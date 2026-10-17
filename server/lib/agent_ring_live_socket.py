@@ -114,6 +114,7 @@ class LiveSocket:
         self.stop = threading.Event()
         self.closed = threading.Event()
         self.ending = threading.Event()         # this session is retiring its own call: not a stale one
+        self.upstream_closed = threading.Event()  # the receipt: the provider session was told to close and closed
         self._write_lock = threading.Lock()
         self._send_lock = threading.Lock()
         self._state = threading.Lock()
@@ -142,7 +143,9 @@ class LiveSocket:
             self.stop.set()
 
     def upstream_send(self, event: dict) -> None:
-        if self.upstream is None or self.stop.is_set():
+        # Revocation stops every paid effect at once: no silence, no user audio, no append after a close or
+        # fallback retired the call (marked under the ring lock before its save and its stop).
+        if self.upstream is None or self.stop.is_set() or live.retired(self.call_id):
             return
         with self._send_lock:
             self.upstream.send(json.dumps(event))
@@ -175,10 +178,16 @@ class LiveSocket:
         if self.closed.is_set():
             return
         self.ending.set()
-        self._record(lambda ring: live.retire(ring, reason))
-        self.downstream({"type": "agent_live.error", **self.ids(), "code": code, "message": code,
-                         "retryable": False})
-        self.retire(reason)
+        try:
+            self._record(lambda ring: live.retire(ring, reason))
+        except Exception as exc:  # noqa: BLE001 - a persistence failure never skips the stop below
+            log_exception("agentLiveRetireSaveFail", exc, f"call={self.call_id}")
+        finally:
+            try:
+                self.downstream({"type": "agent_live.error", **self.ids(), "code": code, "message": code,
+                                 "retryable": False})
+            finally:
+                self.retire(reason)
 
     def retire(self, reason: str) -> None:
         """Stop this session (its authority is already retired on the record)."""
@@ -187,17 +196,43 @@ class LiveSocket:
                 return
             self.closed.set()
             self.reason = reason
-        self.downstream({"type": "agent_live.closed", **self.ids(), "reason": reason})
         self.stop.set()
+        live._mark_retired(self.call_id)
         try:
-            self.handler.connection.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
+            self.downstream({"type": "agent_live.closed", **self.ids(), "reason": reason})
+        finally:
+            self.close_upstream()
+            try:
+                self.handler.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def close_upstream(self) -> None:
+        """Tell the provider the session is over and close it, once; sets the closure receipt."""
+        upstream = self.upstream
+        if upstream is None or self.upstream_closed.is_set():
+            self.upstream_closed.set()
+            return
+        try:
+            try:
+                with self._send_lock:
+                    upstream.send(json.dumps({"type": "session.close"}))
+            except Exception as exc:  # noqa: BLE001
+                log_exception("agentLiveUpstreamCloseSend", exc, f"call={self.call_id}")
+            upstream.close()
+        except Exception as exc:  # noqa: BLE001
+            log_exception("agentLiveUpstreamClose", exc, f"call={self.call_id}")
+        finally:
+            self.upstream_closed.set()
 
     def _end_locally(self, reason: str) -> None:
         self.ending.set()
-        self._record(lambda ring: live.retire(ring, reason))
-        self.retire(reason)
+        try:
+            self._record(lambda ring: live.retire(ring, reason))
+        except Exception as exc:  # noqa: BLE001 - a persistence failure never skips the stop below
+            log_exception("agentLiveRetireSaveFail", exc, f"call={self.call_id}")
+        finally:
+            self.retire(reason)
 
     # -- the opening --------------------------------------------------------------------
     def _maybe_open(self) -> None:
@@ -496,16 +531,7 @@ def serve(handler) -> None:
         if session is not None:
             if not session.closed.is_set():
                 session._end_locally("transport_lost")
-            try:
-                if session.upstream is not None:
-                    try:
-                        with session._send_lock:
-                            session.upstream.send(json.dumps({"type": "session.close"}))
-                    except Exception as exc:  # noqa: BLE001
-                        log_exception("agentLiveUpstreamCloseSend", exc, f"call={session.call_id}")
-                    session.upstream.close()
-            except Exception as exc:  # noqa: BLE001
-                log_exception("agentLiveUpstreamClose", exc, f"call={session.call_id}")
+            session.close_upstream()
             with live._SESSIONS_LOCK:
                 if live._SESSIONS.get(session.call_id) is session:
                     del live._SESSIONS[session.call_id]
