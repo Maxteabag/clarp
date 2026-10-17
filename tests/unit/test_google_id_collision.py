@@ -270,6 +270,39 @@ def test_a_symlinked_executable_is_fingerprinted_by_its_link_never_followed(root
     assert not [p for p in opened if str(outside) in p]
 
 
+@pytest.mark.parametrize("layout", ["final", "intermediate"])
+@pytest.mark.parametrize("err", ["ELOOP", "ENOTDIR"])
+def test_a_symlinked_component_is_classified_by_lstat_whatever_errno_the_open_gives(root, tmp_path, monkeypatch,
+                                                                                    layout, err):
+    """F3: the open failure's errno never decides; the entry itself, read without following, does."""
+    import errno
+    outside = tmp_path / "outside-bin"
+    outside.mkdir()
+    (outside / "adapter").write_bytes(b"outside bytes")
+    package = _package(root)
+    (package / "adapter").unlink()
+    if layout == "final":
+        (package / "adapter").symlink_to(outside / "adapter")
+        executable, link, text = "./adapter", b"adapter", str(outside / "adapter")
+    else:
+        (package / "bin").symlink_to(outside, target_is_directory=True)
+        executable, link, text = "./bin/adapter", b"bin", str(outside)
+    real_open = os.open
+
+    def failing(path, flags, *args, **kwargs):
+        if kwargs.get("dir_fd") is not None and str(path) == link.decode():
+            raise OSError(getattr(errno, err), os.strerror(getattr(errno, err)))
+        return real_open(path, flags, *args, **kwargs)
+    package_fd = os.open(package, os.O_RDONLY | os.O_DIRECTORY)
+    monkeypatch.setattr(os, "open", failing)
+    try:
+        marker = custom_tts_adapters._executable_marker(package_fd, executable)
+    finally:
+        monkeypatch.setattr(os, "open", real_open)
+        os.close(package_fd)
+    assert marker == [b"symlink", link, text.encode()]
+
+
 # ---- resolution --------------------------------------------------------------------------
 
 def _resolved(monkeypatch, packages, choice="builtin"):
