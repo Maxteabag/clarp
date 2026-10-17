@@ -101,10 +101,15 @@ def request(level, prepared, releases, debounce, *, guard=None):
             # The configuration changed since the reads: no new demand.
             return [{'id':entry['id'],'status':'disabled'} if entry['status']=='pending' else entry for entry in responses]
         # Every pending key gets its job: one read as present may have been
-        # pruned by claim() since, and an expired failure is replaced.
+        # pruned by claim() since, and an expired failure is replaced. A key
+        # whose answer a worker published after the reads above (checked now,
+        # under this lock, with the same unexpired-cache rule) needs no job:
+        # re-queueing it would run and publish it again.
+        locked_now=cache.now_ms()
+        jobs=[p for p in writes if not db.execute('SELECT 1 FROM tool_explanation_cache WHERE cache_key=? AND expires_at>?',(p[0],locked_now)).fetchone()]
         db.executemany("DELETE FROM tool_explanation_jobs WHERE cache_key=? AND status='failed' AND available_at<=?",[(p[0],now) for p in writes])
         db.executemany("INSERT INTO tool_explanation_jobs(cache_key,detail_level,activity_json,status,created_at,available_at) VALUES(?,?,?,'queued',?,?) ON CONFLICT(cache_key) DO NOTHING",
-                       [(p[0],p[1],json.dumps(p[2]),now,now+int(debounce*1000)) for p in writes])
+                       [(p[0],p[1],json.dumps(p[2]),now,now+int(debounce*1000)) for p in jobs])
         db.executemany('INSERT INTO tool_explanation_demands VALUES(?,?,?) ON CONFLICT(cache_key,demand_id) DO UPDATE SET expires_at=excluded.expires_at',
                        [(p[0],p[3],p[4]) for p in writes])
     return responses
