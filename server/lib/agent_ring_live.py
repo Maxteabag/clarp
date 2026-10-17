@@ -48,7 +48,6 @@ CONTEXT_CONFLICT = "live_context_conflict"
 CLIENT_REQUIRED = "live_client_required"
 MODE_CONFLICT = "live_mode_conflict"
 CALL_STALE = "live_call_stale"
-JOIN_CONSUMED = "live_join_consumed"
 OWNER_CONFLICT = "live_owner_conflict"
 UNAVAILABLE = "live_unavailable"
 FALLBACK_NOT_ALLOWED = "live_fallback_not_allowed"
@@ -271,10 +270,17 @@ def _session_for(call_id: str):
         return _SESSIONS.get(call_id)
 
 
-def _stop_session(call_id: str, reason: str) -> None:
+UPSTREAM_CLOSE_S = 5.0         # how long a fallback waits for the provider session's closure receipt
+
+
+def _stop_session(call_id: str, reason: str, wait: float = 0.0) -> bool:
+    """Stop the call's running session. True once its provider session is closed (or there is none);
+    with ``wait`` it waits that long for that receipt."""
     session = _session_for(call_id)
-    if session is not None:
-        session.retire(reason)
+    if session is None:
+        return True
+    session.retire(reason)
+    return session.upstream_closed.wait(wait) if wait else session.upstream_closed.is_set()
 
 
 def _owned(records: list[dict], principal: str, data: Any) -> dict:
@@ -366,6 +372,30 @@ def _retire_saved_again(call_id: str, reason: str) -> bool:
         return False
 
 
+def _ring_by_call(call_id: str) -> dict | None:
+    from . import agent_rings
+    with agent_rings._lock:
+        return next((r for r in agent_rings._load() if r.get("_live_call_id") == call_id), None)
+
+
+def _record_classic(call_id: str, request_id: str, classic_id: str, audio_url: Any) -> bool:
+    """Record a classic call that exists but whose first record failed: the same exact id, once more."""
+    from . import agent_rings
+    try:
+        with agent_rings._lock:
+            records = agent_rings._load()
+            ring = next((r for r in records if r.get("_live_call_id") == call_id), None)
+            if ring is None or ring.get("_live_fallback_request_id") != request_id:
+                return False
+            ring.update(_live_phase="classic", call_id=classic_id, opening_audio_url=audio_url)
+            agent_rings._save(records)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _quietly("agentLiveFallbackRecordFail", _log_exception, "agentLiveFallbackRecordFail", exc,
+                 f"call={call_id} classic={classic_id}")
+        return False
+
+
 def close(principal: str, data: Any) -> dict:
     """The owner hangs up: retire the call's authority first, then stop its session.
 
@@ -387,13 +417,24 @@ def close(principal: str, data: Any) -> dict:
             call_id = ring["_live_call_id"]
             changed = retire(ring, data["reason"])
             stop = ring.get("_live_phase") not in LIVE_PHASES
+            if ring.get("_live_fallback_request_id") and ring.get("_live_phase") == "retired" \
+                    and not ring.get("_live_fallback_cancelled"):
+                # A fallback is between its claim and its classic start: the owner's hangup cancels it.
+                ring["_live_fallback_cancelled"] = True
+                changed = True
+            if changed and not ring.get("_live_close_receipt") and ring.get("_live_phase") == "retired":
+                # The first authorized close fixes what every repeat answers (H4): its epoch, never the request's.
+                ring["_live_close_receipt"] = {"call_epoch": ring["_live_call_epoch"], "reason": data["reason"],
+                                               "request_id": data["request_id"][:128]}
             if changed:
                 try:
                     agent_rings._save(records)
                 except Exception as exc:  # noqa: BLE001 - kept; the stop below runs first
                     save_error = exc
             phase = ring.get("_live_phase")
-            result = {"ok": True, "call_id": call_id, "call_epoch": ring["_live_call_epoch"],
+            receipt = ring.get("_live_close_receipt") or {}
+            result = {"ok": True, "call_id": call_id,
+                      "call_epoch": receipt.get("call_epoch", ring["_live_call_epoch"]),
                       "state": "classic" if phase == "classic" else "retired"}
     finally:
         if stop and call_id:
@@ -454,6 +495,8 @@ def fallback(principal: str, data: Any) -> dict:
             else:
                 if ring.get("_live_fallback_request_id"):   # claimed by a fallback in progress or one that failed
                     raise CallError(409, FALLBACK_NOT_ALLOWED)
+                if (ring.get("_live_close_receipt") or {}).get("reason") == "user_hangup":
+                    raise CallError(409, FALLBACK_NOT_ALLOWED)  # the owner hung up: no classic call after that
                 if epoch != ring["_live_call_epoch"]:
                     raise CallError(409, CALL_STALE)
                 if ring.get("_live_opening_consumed") or ring.get("_live_audio_forwarded"):
@@ -468,14 +511,17 @@ def fallback(principal: str, data: Any) -> dict:
                 except Exception as exc:  # noqa: BLE001 - the stop below runs first; nothing classic follows
                     save_error = exc
     finally:
-        if stop and call_id:
-            _stop_session(call_id, "fallback")
+        receipt = _stop_session(call_id, "fallback", wait=UPSTREAM_CLOSE_S) if stop and call_id else True
     if replay is not None:
         return replay
     if save_error is not None:
         _quietly("agentLiveFallbackSaveFail", _log_exception, "agentLiveFallbackSaveFail", save_error,
                  f"call={call_id}")
         _retire_saved_again(call_id, "fallback")
+        raise CallError(503, UNAVAILABLE)
+    if not receipt:                     # no closure receipt from the provider in time: nothing classic starts
+        _quietly("agentLiveFallbackNoReceipt", _log_exception, "agentLiveFallbackNoReceipt",
+                 TimeoutError("provider session not closed"), f"call={call_id}")
         raise CallError(503, UNAVAILABLE)
     classic_id = None
     try:
@@ -484,8 +530,9 @@ def fallback(principal: str, data: Any) -> dict:
         with agent_rings._lock:
             records = agent_rings._load()
             ring = next(r for r in records if r.get("_live_call_id") == call_id)
-            if ring.get("_live_fallback_request_id") != data["request_id"] or ring.get("_live_phase") != "retired":
-                raise CallError(409, FALLBACK_NOT_ALLOWED)
+            if ring.get("_live_fallback_request_id") != data["request_id"] or ring.get("_live_phase") != "retired" \
+                    or ring.get("_live_fallback_cancelled"):
+                raise CallError(409, FALLBACK_NOT_ALLOWED)       # a close during the voicing cancelled it
             started = group_calls.start(
                 principal, [ring["session"]], request_id=ring["ring_id"], by=ring["session"],
                 ring={"ring_id": ring["ring_id"], "reason": ring["reason"], "opening_line": ring["opening_line"]})
@@ -495,13 +542,16 @@ def fallback(principal: str, data: Any) -> dict:
             agent_rings._save(records)
     except CallError:
         raise
-    except Exception as exc:  # noqa: BLE001 - Live is already retired and stopped; say so, never retry
-        if classic_id is not None:      # started but not recorded: end exactly that call
-            _quietly("agentLiveFallbackOrphanEndFail", lambda: group_calls.end(
-                principal, call_id=classic_id, principal=principal, by="agent-live-fallback"))
+    except Exception as exc:  # noqa: BLE001 - Live is already retired and stopped; never retried
         _quietly("agentLiveFallbackFail", _log_exception, "agentLiveFallbackFail", exc,
                  f"call={call_id} classic={classic_id}")
-        raise CallError(503, UNAVAILABLE) from None
+        if classic_id is None:
+            raise CallError(503, UNAVAILABLE) from None
+        # The classic call exists. Reconcile the ring with that exact id rather than pretend it did not happen.
+        if _record_classic(call_id, data["request_id"], classic_id, audio_url):
+            ring, call = _ring_by_call(call_id), group_calls.get_call(classic_id)
+        else:
+            raise CallError(503, UNAVAILABLE, classic_call_id=classic_id) from None
     _quietly("agentLiveAuditFail", _audit_quietly, {"outcome": "live_fallback", "ring_id": ring["ring_id"],
                                                     "by": principal, "live_call_id": call_id,
                                                     "call_id": classic_id})

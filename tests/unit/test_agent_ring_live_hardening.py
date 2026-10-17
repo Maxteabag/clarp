@@ -248,30 +248,115 @@ def test_a_fallback_whose_claim_save_fails_still_stops_live_and_starts_nothing_c
     assert _ring_of(call.grant)["_live_phase"] == "retired"
 
 
-def test_a_classic_call_whose_id_cannot_be_recorded_is_ended_by_that_exact_id(call, monkeypatch):
-    h, thread = _provider_ready(call)
-    start, end = group_calls.start, group_calls.end
-    made, ended = [], []
+def _classic_record_fails(monkeypatch, times):
+    """group_calls.start succeeds, then the next ``times`` saves fail."""
+    start, made, failures = group_calls.start, [], []
+    save = rings._save
+
+    def broken(records):
+        if len(failures) < times:
+            failures.append(True)
+            raise OSError("disk full")
+        return save(records)
 
     def recorded_start(*args, **kw):
         out = start(*args, **kw)
         made.append(out["call"]["call_id"])
-        monkeypatch.setattr(rings, "_save", broken)                  # the save that records it fails
+        monkeypatch.setattr(rings, "_save", broken)
         return out
+    monkeypatch.setattr(group_calls, "start", recorded_start)
+    return made
+
+
+def test_a_classic_call_whose_first_record_fails_is_reconciled_by_its_exact_id(call, monkeypatch):
+    h, thread = _provider_ready(call)
+    made = _classic_record_fails(monkeypatch, times=1)
+    out = _fallback(call.grant)
+    assert out["conversation_mode"] == "classic" and out["call"]["call_id"] == made[0]
+    assert _ring_of(call.grant)["call_id"] == made[0] and _ring_of(call.grant)["_live_phase"] == "classic"
+    thread.join(15)
+
+
+def test_a_classic_call_that_cannot_be_recorded_is_reported_by_its_exact_id_not_rolled_back(call, monkeypatch):
+    h, thread = _provider_ready(call)
+    made = _classic_record_fails(monkeypatch, times=2)
+    with pytest.raises(group_calls.CallError) as exc:
+        _fallback(call.grant)
+    assert exc.value.status == 503 and exc.value.body()["classic_call_id"] == made[0]
+    assert group_calls.get_call(made[0])["state"] == "live"           # it exists; nothing pretends otherwise
+    thread.join(15)
+
+
+def test_a_close_during_the_fallbacks_voicing_cancels_the_classic_start(call, monkeypatch):
+    h, thread = _provider_ready(call)
+    started = []
+    monkeypatch.setattr(group_calls, "start", lambda *a, **kw: started.append(a))
+    voice = rings._voice
+
+    def voicing_with_a_hangup(*args, **kw):                          # the barrier: close lands mid-TTS
+        _close(call.grant, request_id="hang", call_epoch=2)
+        return voice(*args, **kw)
+    monkeypatch.setattr(rings, "_voice", voicing_with_a_hangup)
+    with pytest.raises(group_calls.CallError) as exc:
+        _fallback(call.grant)
+    assert exc.value.status == 409 and not started
+    assert _ring_of(call.grant)["_live_fallback_cancelled"] is True
+    thread.join(15)
+
+
+def test_fallback_waits_for_the_provider_closure_receipt_before_any_classic(call, monkeypatch):
+    h, thread = _provider_ready(call)
+    session = _session(call)
+    seen = []
+    start = group_calls.start
+
+    def watched(*args, **kw):
+        seen.append(session.upstream_closed.is_set() and call.up.closed)
+        return start(*args, **kw)
+    monkeypatch.setattr(group_calls, "start", watched)
+    _fallback(call.grant)
+    assert seen == [True] and call.up.of("session.close")
+    thread.join(15)
+
+
+def test_no_receipt_in_time_starts_nothing_classic(call, monkeypatch):
+    h, thread = _provider_ready(call)
+    session = _session(call)
+    started = []
+    monkeypatch.setattr(group_calls, "start", lambda *a, **kw: started.append(a))
+    monkeypatch.setattr(live, "UPSTREAM_CLOSE_S", 0.2)
+    monkeypatch.setattr(session, "close_upstream", lambda: None)     # the provider never confirms
+    with pytest.raises(group_calls.CallError) as exc:
+        _fallback(call.grant)
+    assert exc.value.status == 503 and not started
+    session.upstream_closed.set()
+    thread.join(15)
+
+
+def test_revocation_stops_upstream_effects_at_once(call):
+    h, thread = _admitted(call)
+    session = _session(call)
+    with rings._lock:                                                 # retired under the lock, not yet stopped
+        records = rings._load()
+        live.retire(next(r for r in records if r.get("_live_call_id") == call.grant["call_id"]), "user_hangup")
+        rings._save(records)
+    before = len(call.up.sent)
+    session.upstream_send({"type": "session.input_audio.append", "audio": AUDIO})
+    assert len(call.up.sent) == before
+    live._stop_session(call.grant["call_id"], "user_hangup")
+    thread.join(15)
+
+
+def test_a_socket_whose_retirement_save_fails_still_stops(call, monkeypatch):
+    h, thread = _admitted(call)
+    session = _session(call)
 
     def broken(records):
         raise OSError("disk full")
-
-    def watched_end(caller, **kw):
-        ended.append(kw.get("call_id"))
-        return end(caller, **kw)
-    monkeypatch.setattr(group_calls, "start", recorded_start)
-    monkeypatch.setattr(group_calls, "end", watched_end)
-    with pytest.raises(group_calls.CallError) as exc:
-        _fallback(call.grant)
-    assert exc.value.status == 503 and made and ended == made
-    assert group_calls.get_call(made[0])["state"] != "live"
+    monkeypatch.setattr(rings, "_save", broken)
+    h.send({"type": "session.close"})
     thread.join(15)
+    assert session.closed.is_set() and not thread.is_alive() and call.up.closed
 
 
 def test_a_fallback_whose_audit_fails_still_has_stopped_live_and_started_classic(call, monkeypatch):
@@ -335,11 +420,11 @@ def test_a_repeat_answer_before_the_join_gets_the_same_grant(call):
     assert again["changed"] is False and again["live"]["join_ticket"] == call.grant["join_ticket"]
 
 
-def test_a_repeat_answer_after_the_join_never_hands_back_the_used_ticket(call):
+def test_a_repeat_answer_after_the_join_is_the_same_grant_marked_join_consumed(call):
     h, thread = _admitted(call)
-    with pytest.raises(group_calls.CallError) as exc:
-        _repeat(call.grant)
-    assert (exc.value.status, exc.value.body()["error"]) == (409, "live_join_consumed")
+    again = _repeat(call.grant)["live"]
+    assert again["call_id"] == call.grant["call_id"] and again["join_consumed"] is True
+    assert call.grant["join_consumed"] is False
     h.send({"type": "session.close"})
     thread.join(15)
 
@@ -393,3 +478,11 @@ def test_a_classic_ring_keeps_voip_or_alert_exactly_as_before(sander, monkeypatc
     monkeypatch.setattr(rings, "_push_voip", lambda ring: {"sent": 0})
     unsent = classic_ring()["ring"]                                  # VoIP not delivered: the alert, as before
     assert ("ring", unsent["ring_id"]) in [(kind, p["ring_id"]) for kind, p in sander.pushes]
+
+
+def test_a_repeat_close_answers_the_first_closes_fixed_receipt_whatever_epoch_it_sends(call):
+    first = _close(call.grant)
+    again = _close(call.grant, call_epoch=7, request_id="q7", reason="transport_lost")
+    assert first == again and first["call_epoch"] == 1 and first["state"] == "retired"
+    assert _ring_of(call.grant)["_live_close_receipt"] == {"call_epoch": 1, "reason": "user_hangup",
+                                                         "request_id": "q1"}

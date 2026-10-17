@@ -381,10 +381,9 @@ def answer(principal: str, ring_id: str, conversation_mode: Any = None, *,
                 if phase == "classic":
                     return {**_answered(ring, group_calls.get_call(ring["call_id"]), changed=False),
                             "conversation_mode": live.MODE_CLASSIC}
-                if phase in live.LIVE_PHASES and phase != "answered_waiting_join":
-                    raise CallError(409, live.JOIN_CONSUMED)
-                if phase != "answered_waiting_join":
+                if phase not in live.LIVE_PHASES:
                     raise CallError(409, live.CALL_STALE)
+                # A live call answers its same grant; live.join_consumed says whether its ticket is already used.
         elif mode == live.MODE_LIVE:
             raise CallError(409, live.MODE_CONFLICT)
         else:
@@ -450,7 +449,7 @@ def _answered_live(ring: dict, *, changed: bool) -> dict:
                      "context_digest": ring["_live_context_digest"], "provider": live.PROVIDER,
                      "model": live.MODEL, "voice": live.VOICE, "owner_nonce": ring["_live_owner_nonce"],
                      "join_ticket": ring["_live_join_ticket"], "expires_at": ring["_live_join_expires_at"],
-                     "opening_owner": "live"}}
+                     "join_consumed": bool(ring.get("_live_join_consumed")), "opening_owner": "live"}}
 
 
 def _answered(ring: dict, call: dict | None, *, changed: bool) -> dict:
