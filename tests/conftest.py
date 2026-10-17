@@ -102,6 +102,24 @@ def _forbid_live_service_control(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_default_host_generation_paths(monkeypatch):
+    """Never read, create or rotate the Host's real generation token (the live data root's
+    clarp/backups/instance.generation) or read the kernel boot id from a test: every call injects
+    its own paths, and resolving a default one fails the test. Subprocesses are outside this guard;
+    they run against a temporary data root."""
+    try:
+        from lib import host_generation
+    except ImportError:
+        return
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("a test resolved a default host-generation path; inject the path")
+
+    monkeypatch.setattr(host_generation, "default_backups_dir", refuse)
+    monkeypatch.setattr(host_generation, "default_boot_id_path", refuse)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_agy_cli(monkeypatch, tmp_path):
     """Never run, or read the state of, the developer's real Antigravity CLI from
     a test; a test that needs agy installs a fake via CLARP_AGY_BIN and its own

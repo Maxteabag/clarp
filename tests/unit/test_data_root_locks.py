@@ -351,6 +351,143 @@ def test_apply_restores_and_removes_archive_record_and_marker_in_order(root, hel
     assert backup.apply_pending_restore() is False
 
 
+# ---- the instance generation: rotated after every refusal, before the first destructive step ---
+
+def _generation(locks):
+    """This root's instance token (lib.host_generation), read with its injected path."""
+    from lib import host_generation
+    path = locks.backups_dir() / host_generation.TOKEN_NAME
+    return path.read_text() if path.exists() else None
+
+
+def test_apply_rotates_the_generation_after_the_last_refusal_and_before_the_marker(root, held, monkeypatch):
+    from lib import host_generation
+    locks, backup = root["locks"], root["backup"]
+    _allow_this_filesystem(root, monkeypatch)
+    host_generation.ensure_instance_generation(backups_dir=locks.ensure_backups_dir())
+    before = _generation(locks)
+    _stage_with_live_host(root)
+    _set_value(root["database"], "after")
+    order, rotated = [], []
+    real = {"dms": locks.dms_conflict, "rotate": host_generation.rotate_instance_generation,
+            "marker": locks.write_marker, "replace": backup.replace_data_root}
+
+    def recorded(name):
+        def call(*args, **kwargs):
+            order.append(name)
+            result = real[name](*args, **kwargs)
+            if name == "rotate":
+                rotated.append(_generation(locks))
+            return result
+        return call
+    monkeypatch.setattr(locks, "dms_conflict", recorded("dms"))
+    monkeypatch.setattr(host_generation, "rotate_instance_generation", recorded("rotate"))
+    monkeypatch.setattr(locks, "write_marker", recorded("marker"))
+    monkeypatch.setattr(backup, "replace_data_root", recorded("replace"))
+
+    assert backup.apply_pending_restore() is True
+    assert order == ["dms", "rotate", "marker", "replace"]
+    assert _value(root["database"]) == "before"
+    assert rotated[0] != before and rotated[0] is not None
+    assert _generation(locks) == rotated[0]          # the rotated token survives the restore
+
+
+def test_a_restore_refused_before_rotation_keeps_the_generation(root, held, monkeypatch):
+    from lib import host_generation
+    locks, backup = root["locks"], root["backup"]
+    _allow_this_filesystem(root, monkeypatch)
+    host_generation.ensure_instance_generation(backups_dir=locks.ensure_backups_dir())
+    before = _generation(locks)
+    _, pending = _stage_with_live_host(root)
+    with open(pending, "ab") as handle:
+        handle.write(b"tampered")
+    with pytest.raises(locks.RestoreRefused) as refused:
+        backup.apply_pending_restore()
+    assert refused.value.code == locks.EXIT_REFUSED
+    assert _generation(locks) == before
+
+
+def test_a_failed_rotation_refuses_the_restore_with_nothing_deleted(root, held, monkeypatch):
+    from lib import host_generation
+    locks, backup = root["locks"], root["backup"]
+    _allow_this_filesystem(root, monkeypatch)
+    _stage_with_live_host(root)
+    _set_value(root["database"], "after")
+    (root["data"] / "added-after-backup").write_text("kept")
+    replaced = []
+    monkeypatch.setattr(backup, "replace_data_root", lambda pending: replaced.append(pending))
+
+    def refuse(**kwargs):
+        raise host_generation.RotationRefused("instance generation not rotated: injected")
+    monkeypatch.setattr(host_generation, "rotate_instance_generation", refuse)
+    with pytest.raises(locks.RestoreRefused) as refused:
+        backup.apply_pending_restore()
+    assert refused.value.code == locks.EXIT_LOCKING
+    assert "nothing was deleted" in str(refused.value)
+    assert replaced == []
+    assert _value(root["database"]) == "after"
+    assert (root["data"] / "added-after-backup").read_text() == "kept"
+    assert (locks.backups_dir() / locks.PENDING).exists()
+    assert (locks.backups_dir() / locks.SIDECAR).exists()
+    assert not (locks.backups_dir() / locks.MARKER).exists()
+
+
+@pytest.mark.parametrize("crash", ["before_marker", "mid_replace"])
+def test_a_crash_after_rotation_re_applies_and_rotates_again(root, held, monkeypatch, crash):
+    locks, backup = root["locks"], root["backup"]
+    _allow_this_filesystem(root, monkeypatch)
+    _stage_with_live_host(root)
+    _set_value(root["database"], "after")
+    target = (locks, "write_marker") if crash == "before_marker" else (backup, "replace_data_root")
+    original = getattr(*target)
+
+    def crashes(*args, **kwargs):
+        raise OSError("crash")
+    monkeypatch.setattr(*target, crashes)
+    with pytest.raises((locks.RestoreRefused, OSError)):       # the marker write is before the guarded swap
+        backup.apply_pending_restore()
+    first = _generation(locks)
+    assert first is not None
+    monkeypatch.setattr(*target, original)
+    assert backup.apply_pending_restore() is True               # the next start re-applies
+    second = _generation(locks)
+    assert second is not None and second != first
+    assert _value(root["database"]) == "before"
+
+
+def test_marker_recovery_after_a_completed_apply_does_not_rotate(root, held, monkeypatch):
+    locks, backup = root["locks"], root["backup"]
+    _allow_this_filesystem(root, monkeypatch)
+    _stage_with_live_host(root)
+    real_unlink = pathlib.Path.unlink
+
+    def crash_on_marker(self, *args, **kwargs):
+        if self.name == locks.MARKER:
+            raise OSError("crash")
+        return real_unlink(self, *args, **kwargs)
+    monkeypatch.setattr(pathlib.Path, "unlink", crash_on_marker)
+    with pytest.raises(locks.RestoreRefused):
+        backup.apply_pending_restore()
+    monkeypatch.setattr(pathlib.Path, "unlink", real_unlink)
+    rotated = _generation(locks)
+    assert not (locks.backups_dir() / locks.PENDING).exists()
+    assert locks.recover_marker() == "completed"
+    assert _generation(locks) == rotated
+
+
+def test_the_host_start_through_the_real_lock_script_rotates_the_generation(root, entry):
+    from lib import host_generation
+    locks = root["locks"]
+    host_generation.ensure_instance_generation(backups_dir=locks.ensure_backups_dir())
+    before = _generation(locks)
+    _stage_with_live_host(root)
+    result = entry(*SERVER)
+    assert result.returncode == 0 and "role=server" in result.stdout, result.stderr
+    after = _generation(locks)
+    assert after is not None and after != before
+    assert _value(root["database"]) == "before"
+
+
 # ---- marker recovery ---------------------------------------------------------------------------
 
 def test_marker_recovery_tells_a_completed_apply_from_an_interrupted_one(root):
