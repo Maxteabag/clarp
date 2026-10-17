@@ -134,8 +134,21 @@ def _expire(records: list[dict]) -> list[dict]:
     return missed
 
 
+def _expire_live_joins(records: list[dict]) -> bool:
+    """Retire Live grants whose one-use join ticket expired unjoined (their snapshot then goes)."""
+    from . import agent_ring_live as live
+    now, changed = now_ms(), False
+    for ring in records:
+        if (ring.get("_live_phase") == "answered_waiting_join" and not ring.get("_live_join_consumed")
+                and now >= ring.get("_live_join_expires_at", now + 1)):
+            changed = live.retire(ring, "join_expired") or changed
+    return changed
+
+
 def _settle(records: list[dict]) -> list[dict]:
     missed = _expire(records)
+    if _expire_live_joins(records) and not missed:
+        _save(records)
     if missed:
         _save(records)
         for ring in missed:
