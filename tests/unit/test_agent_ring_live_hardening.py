@@ -172,9 +172,11 @@ def test_a_close_whose_saves_both_fail_still_stops_the_session_and_says_so(call,
     save, broke, closer = rings._save, [], threading.get_ident()
 
     def broken(records):
-        # Only the close's own two saves fail: the session's threads (its record of provider_closed after the
-        # asynchronous close) save normally and must not use up the failures.
-        if threading.get_ident() == closer and len(broke) < 2:
+        # The store is down for everyone: the close's own two saves fail, and so does the session's record of
+        # provider_closed after the asynchronous close, which would otherwise persist the retirement first.
+        if threading.get_ident() != closer:
+            raise OSError("disk full")
+        if len(broke) < 2:
             broke.append(True)
             raise OSError("disk full")
         return save(records)

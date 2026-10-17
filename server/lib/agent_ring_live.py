@@ -294,7 +294,9 @@ def _closure_for(call_id: str):
 
 def _stop_session(call_id: str, reason: str, wait: float = 0.0) -> bool:
     """Stop the call's session. True only when it is settled: its provider session actually closed and no
-    effect is still in flight, or it never had a session. A session that already left the registry still
+    effect is still in flight, or this process has no record of a session for it (never had one, or its
+    closure record was evicted: the record keeps the last _CLOSURES_MAX sessions while a ring keeps only its
+    last KEEP_RECORDS, so an evicted one belongs to a ring that is gone as well; not a universal proof). A session that already left the registry still
     answers from its closure record, so an unknown or failed closure is never turned into success. With
     ``wait`` the whole stop is bounded by it, measured from before anything is invoked: the session's own
     stop runs on a worker, so a stuck write or close cannot hold the caller past the bound."""
@@ -306,10 +308,9 @@ def _stop_session(call_id: str, reason: str, wait: float = 0.0) -> bool:
         return session.settled()
     deadline = time.monotonic() + wait
     threading.Thread(target=session.retire, args=(reason,), name="agent-live-stop", daemon=True).start()
-    while time.monotonic() < deadline and not session.settled():
-        session.upstream_close_done.wait(min(0.05, max(0.0, deadline - time.monotonic())))
-        if session.upstream_close_done.is_set() and not session.upstream_closed.is_set():
-            break                       # the close failed: it will not become a closure by waiting
+    # One bounded wait for the closure attempt to settle. Once it has, the answer is known now: settled, or a
+    # failed close or an effect still stuck, which is refused at once (no retry, no spinning to the deadline).
+    session.upstream_close_done.wait(max(0.0, deadline - time.monotonic()))
     return session.settled()
 
 
@@ -380,7 +381,10 @@ def _mark_retired(call_id: Any) -> None:
             _RETIRED.pop(next(iter(_RETIRED)))
     session = _session_for(call_id)
     if session is not None:
-        session.revoke()
+        try:
+            session.revoke()            # fails closed itself; never lets an exception skip the caller's stop
+        except Exception as exc:  # noqa: BLE001
+            _quietly("agentLiveRevokeFail", _log_exception, "agentLiveRevokeFail", exc, call_id)
 
 
 def retired(call_id: str) -> bool:
