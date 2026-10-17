@@ -1815,6 +1815,10 @@ def _with_google_resolution(text: str, fingerprints: list[str]) -> str:
             skipping = head == f"[tts.{GOOGLE_RESOLUTION}]"
             if skipping:
                 continue
+        elif skipping and not head:
+            # A blank or comment line ends the old table, so comments prefacing the next table stay;
+            # anything left over fails the verification and the original is put back.
+            skipping = False
         if not skipping:
             kept.append(line)
     while kept and not kept[-1].strip():
@@ -1829,8 +1833,12 @@ def _without_google_resolution(parsed: dict) -> dict:
 
 
 def _read_nofollow(path: Path) -> bytes:
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    """A regular file owned by this user, opened without following a symlink or blocking on a FIFO."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
     try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            raise OSError(f"{path.name} is not a regular file owned by this user")
         chunks = []
         while True:
             chunk = os.read(fd, 1 << 16)
@@ -2026,17 +2034,33 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
             f"{CONFIG_FILE.name}.google-resolution-backup-{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}")
         _write_new_file(backup, raw)
         _fsync_directory(backup.parent)
-        _replace_atomically(CONFIG_FILE, new_text.encode("utf-8"))
+        durable = True
+        try:
+            _replace_atomically(CONFIG_FILE, new_text.encode("utf-8"))
+        except OSError as exc:
+            # Possibly after os.replace (the directory fsync): never leave it unverified.
+            durable = False
+            print(f"clarp: google-collision: writing reported {type(exc).__name__}; verifying",
+                  file=sys.stderr)
         try:
             after = tomllib.loads(_read_nofollow(CONFIG_FILE).decode("utf-8"))
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             after = None
         if (after is None or after.get("tts", {}).get(GOOGLE_RESOLUTION) != expected
                 or _without_google_resolution(after) != _without_google_resolution(before)):
-            _replace_atomically(CONFIG_FILE, raw)
+            try:
+                _replace_atomically(CONFIG_FILE, raw)
+            except OSError as exc:
+                return refuse(locks.EXIT_REFUSED, f"verification failed and putting the original back "
+                                                  f"reported {type(exc).__name__}; restore it from "
+                                                  f"{backup.name}")
             return refuse(locks.EXIT_REFUSED, f"verification failed; the original config was put back "
                                               f"(backup kept: {backup.name})")
-        print(json.dumps({"ok": True, "resolution": expected, "backup": backup.name}, indent=2))
+        if not durable:
+            print(f"clarp: google-collision: written and verified; durability not confirmed "
+                  f"(backup kept: {backup.name})", file=sys.stderr)
+        print(json.dumps({"ok": True, "durable": durable, "resolution": expected, "backup": backup.name},
+                         indent=2))
         return 0
     finally:
         if owner is not None:

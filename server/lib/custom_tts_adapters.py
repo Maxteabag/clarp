@@ -247,15 +247,21 @@ def _executable_marker(package_fd: int, executable: Any) -> list[bytes]:
                 return [b"other"]
             fds.append(fd)
         final_fd = fds[-1]
-        if not stat.S_ISREG(os.fstat(final_fd).st_mode):
+        info = os.fstat(final_fd)
+        if not stat.S_ISREG(info.st_mode):
             return [b"other"]
-        chunks = []
+        # Streamed into a content hash (bounded memory); a size change mid-read is not inspectable.
+        import hashlib
+        content, size = hashlib.sha256(), 0
         while True:
             chunk = os.read(final_fd, 1024 * 1024)
             if not chunk:
                 break
-            chunks.append(chunk)
-        return [b"exec", b"".join(chunks)]
+            content.update(chunk)
+            size += len(chunk)
+        if size != info.st_size:
+            return [b"other"]
+        return [b"exec", size.to_bytes(8, "big"), content.digest()]
     finally:
         for fd in fds:
             os.close(fd)

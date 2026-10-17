@@ -115,7 +115,8 @@ fixed code until an operator decides:
   be inspected (a symlinked or unreadable directory; a symlinked, unreadable,
   oversized or unparseable manifest, or one that is not a JSON object).
   Symlinks are never followed, so a symlinked manifest or package blocks
-  even when its target is harmless.
+  even when its target is harmless, and so does any symlink directly in
+  the adapter directory (it could be a package).
 
 An id counts as `google` exactly when the old Host read it as `google`
 (trimmed, lower case); any other id, a number or an empty id is no
