@@ -768,16 +768,16 @@ def test_reset_waits_for_a_worker_tail_after_it_cleared_the_global(tmp_path, mon
     path = tmp_path / "unwind.jsonl"
     path.write_text("{}\n")
     unwinding, release = _threading.Event(), _threading.Event()
-    worker_closes: list[int] = []
     original_close = database.close_local
 
     def held_close():
-        # 1: per-item close, 2: idle close, 3: the outer finally after _worker = None.
-        if _threading.current_thread().name == "transcript-import":
-            worker_closes.append(1)
-            if len(worker_closes) == 3:
-                unwinding.set()
-                assert release.wait(5)
+        # Hold only a close the worker reaches AFTER it cleared _worker (its outer
+        # finally), identified by that state rather than by a call count: the
+        # per-item and idle-branch closes both run while _worker is this thread.
+        me = _threading.current_thread()
+        if me.name == "transcript-import" and cache._worker is not me and not unwinding.is_set():
+            unwinding.set()
+            assert release.wait(5)
         return original_close()
 
     monkeypatch.setattr(database, "close_local", held_close)
