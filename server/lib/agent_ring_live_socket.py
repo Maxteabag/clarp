@@ -362,6 +362,8 @@ class LiveSocket:
         with self._state:
             if not (self.client_ready and self.provider_ready) or self.opening_sent or self.closed.is_set():
                 return
+            # The ACK deadline starts with the opening: set before opening_sent, which the tick reads unlocked.
+            self.opening_sent_at = time.monotonic()
             self.opening_sent = True
 
         def consume(ring):
