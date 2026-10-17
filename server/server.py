@@ -4459,11 +4459,13 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_calls_ring(self):
         return self._calls_ring_run(lambda rings, _p, data: rings.ring(
             caller_agent_id=self._turn_caller(), agent=str(data.get("agent") or ""),
-            reason=str(data.get("reason") or ""), opening_line=str(data.get("opening_line") or "")))
+            reason=str(data.get("reason") or ""), opening_line=str(data.get("opening_line") or ""),
+            conversation_mode=data.get("conversation_mode"), event_context=data.get("event_context")))
 
     def _handle_calls_ring_answer(self):
         return self._calls_ring_run(lambda rings, principal, data: rings.answer(
-            principal, str(data.get("ring_id") or "")))
+            principal, str(data.get("ring_id") or ""), conversation_mode=data.get("conversation_mode"),
+            request_id=data.get("request_id"), client_nonce=data.get("client_nonce")))
 
     def _handle_calls_ring_decline(self):
         return self._calls_ring_run(lambda rings, principal, data: rings.decline(
@@ -4475,7 +4477,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_calls_ring_voip_token(self):
         return self._calls_ring_run(lambda rings, principal, data: rings.register_voip_token(
-            principal, str(data.get("token") or ""), environment=str(data.get("environment") or "")))
+            principal, str(data.get("token") or ""), environment=str(data.get("environment") or ""),
+            supported_conversation_modes=data.get("supported_conversation_modes")))
 
     def _handle_calls_ring_settings_get(self):
         return self._calls_ring_run(lambda rings, _p, _d: {

@@ -1269,6 +1269,8 @@ def agent_ring_payload(ring: dict, kind: str, *, avatar_url: str | None = None,
         "expires_at": ring.get("expires_at"),
         "notification_id": agent_ring_collapse_id(ring),
     }
+    if ring.get("conversation_mode"):           # an agent-live ring only; classic is unchanged
+        payload["conversation_mode"] = str(ring["conversation_mode"])
     if server_instance_id:
         payload["server_instance_id"] = server_instance_id
     if avatar_url:
@@ -1339,6 +1341,8 @@ def agent_ring_voip_payload(ring: dict, *, server_instance_id: str = "") -> dict
         "reason": str(ring.get("reason") or ""),
         "expires_at": ring.get("expires_at"),
     }
+    if ring.get("conversation_mode"):           # an agent-live ring only; classic is unchanged
+        payload["conversation_mode"] = str(ring["conversation_mode"])
     if server_instance_id:
         payload["server_instance_id"] = server_instance_id
     return payload
