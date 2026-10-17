@@ -675,3 +675,56 @@ def test_a_client_ready_after_retirement_starts_nothing(call):
     assert call.up.of("session.instructions.append") == [] and call.up.of("session.input_audio.append") == []
     assert not _ring_of(call.grant).get("_live_opening_consumed")
     assert "agent_live.opening_admitted" not in _types(h)
+
+
+# ---- drain-review re-review findings (H-1 residue, H-2 a/c, L-2) -------------------------------
+
+def test_model_audio_before_the_opening_was_even_sent_is_dropped_not_delivered(call, monkeypatch):
+    eager = Upstream()
+    real_send = eager.send
+    early = base64.b64encode(b"\x07\x00" * 480).decode()
+
+    def send(raw):
+        real_send(raw)
+        if json.loads(raw)["type"] == "session.start":
+            eager.push({"type": "session.output_audio.delta", "delta": early})       # speaks before any opening
+        elif json.loads(raw)["type"] == "session.instructions.append":
+            eager.push({"type": "session.output_audio.delta", "delta": AUDIO})
+    eager.send = send
+    monkeypatch.setattr(sock, "_connect", lambda key: eager)
+    h, thread = _admitted(call)
+    _wait(lambda: "session.output_audio.delta" in _types(h))
+    time.sleep(0.2)
+    deltas = [f["delta"] for f in h.wfile.frames() if f["type"] == "session.output_audio.delta"]
+    assert deltas == [AUDIO]
+    h.send({"type": "session.close"})
+    thread.join(15)
+
+
+def test_the_instructions_tell_the_model_to_stay_silent_until_the_opening():
+    from tests.unit.test_agent_ring_live import _context
+    snapshot = {"profile": {"display_name": "Sandra"}, "texts": {}, "event_context": _context()}
+    text = sock.instructions(snapshot)
+    assert "Say nothing until you are given the opening line" in text
+
+
+def test_a_session_whose_record_was_retired_elsewhere_stops_itself(call):
+    h, thread = _admitted(call)
+    with rings._lock:                                  # authority retired without telling the session
+        records = rings._load()
+        ring = next(r for r in records if r.get("_live_call_id") == call.grant["call_id"])
+        live.retire(ring, "elsewhere")
+        rings._save(records)
+    thread.join(15)
+    assert not thread.is_alive() and h.wfile.frames()[-1]["type"] == "agent_live.closed"
+    assert call.up.closed
+
+
+@pytest.mark.parametrize("change", [{"protocol": True}, {"call_epoch": True}])
+def test_a_join_with_a_boolean_for_a_number_is_refused(call, change):
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant, **change))
+    thread.join(15)
+    assert [f["code"] for f in h.wfile.frames()] == ["live_call_stale"]
+    assert call.connects == []

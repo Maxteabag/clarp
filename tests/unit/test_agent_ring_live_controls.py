@@ -271,3 +271,25 @@ def test_every_live_http_route_refuses_in_the_ring_routes_ok_false_envelope(gran
         handler = _Handler(body, sander, turn_agent=turn_agent)
         getattr(server.Handler, route)(handler)
         assert handler.sent == [(status, {"ok": False, "error": code})], route
+
+
+# ---- drain-review re-review findings (H-2a, M-1) ------------------------------------------------
+
+def test_a_retried_close_still_stops_a_session_that_outlived_the_first_close(grant):
+    _close(grant)                                         # retired while no session was registered yet
+    order = []
+    Session(grant, order)                                 # … the socket registers late (join window)
+    assert _close(grant)["state"] == "retired"
+    assert [entry[:2] for entry in order] == [("retire", "user_hangup")]
+
+
+def test_a_repeat_live_answer_after_fallback_returns_the_classic_state(grant):
+    out = _fallback(grant)
+    again = rings.answer(PHONE, grant["ring_id"], conversation_mode="agent_live_v1", request_id="r1")
+    assert again["conversation_mode"] == "classic" and again["changed"] is False
+    assert again["call"]["call_id"] == out["call"]["call_id"] and "live" not in again
+
+
+def test_a_repeat_live_answer_after_close_is_stale(grant):
+    _close(grant)
+    _refused(409, "live_call_stale", rings.answer, PHONE, grant["ring_id"], conversation_mode="agent_live_v1")
