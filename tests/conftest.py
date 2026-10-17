@@ -73,11 +73,14 @@ def _transcript_importer_quiescent():
     connection, log or read config AFTER this point, so it must never see this
     test's environment, DB, log dir or config paths.
 
-    Pytest does not order same-scope fixtures by definition, so every per-test
-    fixture that sets environment, log, config or DB state names this one as a
-    dependency (tests/unit/test_conftest_importer_gate.py). Session setup
-    (pytest_configure, the session shims) runs once before the first test,
-    when no earlier test's work can exist."""
+    Pytest does not order same-scope fixtures by definition, so every
+    conftest-level per-test fixture that sets environment, log, config or DB
+    state, and the module-level DB fixtures (test_scheduler, test_voice_events),
+    name this one as a dependency (tests/unit/test_conftest_importer_gate.py).
+    Other module-level autouse fixtures are not wired: pytest sets up autouse
+    fixtures along the node chain, conftest ones before a module's. Session
+    setup (pytest_configure, the session shims) runs once before the first
+    test, when no earlier test's work can exist."""
     importer = sys.modules.get("lib.transcript_import_cache")
     if importer is not None and importer._resetting and not importer.reset_for_tests():
         pytest.fail("transcript importer from an earlier test is still running; test state not set up")
