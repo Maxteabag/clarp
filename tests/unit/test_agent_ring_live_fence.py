@@ -150,7 +150,7 @@ def test_a_live_answer_binds_its_exact_request_and_nonce(sander):
     _refused(400, "live_request_invalid", answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1",
              request_id="r" * 128, client_nonce="other")
     _refused(409, "live_owner_conflict", answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1",
-             request_id="another-request")
+             request_id="another-request", client_nonce="n" * 128)
 
 
 # ---- one fence orders a retirement and every effect ---------------------------------------------

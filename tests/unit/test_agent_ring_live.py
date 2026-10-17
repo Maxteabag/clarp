@@ -313,8 +313,8 @@ def test_a_live_answer_hands_back_the_v2_grant_and_starts_no_group_call(sander):
 
 def test_a_live_answer_is_idempotent_for_its_owner_and_refused_to_anyone_else(sander):
     ring = _live_ring()["ring"]
-    first = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="req-1")
-    again = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="req-1")
+    first = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="req-1", client_nonce="n-req-1")
+    again = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="req-1", client_nonce="n-req-1")
     assert again["changed"] is False and again["live"] == first["live"]
     _refused(409, "live_owner_conflict", rings.answer, OTHER_PHONE, ring["ring_id"], conversation_mode="agent_live_v1")
     assert len([e for e in sander.stream.of("agent-ring") if e["state"] == "answered"]) == 1

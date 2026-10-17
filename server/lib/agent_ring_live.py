@@ -275,20 +275,42 @@ UPSTREAM_CLOSE_S = 5.0         # how long a fallback waits for the provider sess
 FENCE_WAIT_S = 2.0             # how long a retirement waits for an effect already being written
 
 
+_CLOSURES_LOCK = threading.Lock()
+_CLOSURES: dict = {}            # call_id → its session, kept after the registry drops it (bounded)
+_CLOSURES_MAX = 1024
+
+
+def _remember_closure(session) -> None:
+    with _CLOSURES_LOCK:
+        _CLOSURES[session.call_id] = session
+        while len(_CLOSURES) > _CLOSURES_MAX:
+            _CLOSURES.pop(next(iter(_CLOSURES)))
+
+
+def _closure_for(call_id: str):
+    with _CLOSURES_LOCK:
+        return _CLOSURES.get(call_id)
+
+
 def _stop_session(call_id: str, reason: str, wait: float = 0.0) -> bool:
-    """Stop the call's running session. True only once its provider session actually closed (or there is
-    none). With ``wait`` the whole stop is bounded by it, measured from before anything is invoked: the
-    session's own stop runs on a worker, so a stuck write or close cannot hold the caller past the bound."""
-    session = _session_for(call_id)
+    """Stop the call's session. True only when it is settled: its provider session actually closed and no
+    effect is still in flight, or it never had a session. A session that already left the registry still
+    answers from its closure record, so an unknown or failed closure is never turned into success. With
+    ``wait`` the whole stop is bounded by it, measured from before anything is invoked: the session's own
+    stop runs on a worker, so a stuck write or close cannot hold the caller past the bound."""
+    session = _session_for(call_id) or _closure_for(call_id)
     if session is None:
-        return True
+        return True                     # this call never had a socket session: nothing was opened
     if not wait:
         session.retire(reason)
-        return session.upstream_closed.is_set()
+        return session.settled()
     deadline = time.monotonic() + wait
     threading.Thread(target=session.retire, args=(reason,), name="agent-live-stop", daemon=True).start()
-    session.upstream_close_done.wait(max(0.0, deadline - time.monotonic()))
-    return session.upstream_closed.is_set()
+    while time.monotonic() < deadline and not session.settled():
+        session.upstream_close_done.wait(min(0.05, max(0.0, deadline - time.monotonic())))
+        if session.upstream_close_done.is_set() and not session.upstream_closed.is_set():
+            break                       # the close failed: it will not become a closure by waiting
+    return session.settled()
 
 
 def _owned(records: list[dict], principal: str, data: Any) -> dict:
@@ -313,8 +335,14 @@ REQUEST_ID_MAX = 128
 
 
 def _request_id_ok(value: Any) -> bool:
-    """A request id is kept exactly as sent: a non-empty string of at most 128 characters, never cut."""
-    return isinstance(value, str) and 0 < len(value) <= REQUEST_ID_MAX
+    """A request id or nonce is kept exactly as sent: a string of 1 to 128 UTF-8 bytes, never cut."""
+    if not isinstance(value, str):
+        return False
+    try:
+        size = len(value.encode("utf-8"))
+    except UnicodeEncodeError:
+        return False
+    return 0 < size <= REQUEST_ID_MAX
 
 
 def _epoch(data: dict, key: str) -> int:
@@ -594,3 +622,5 @@ def reset_for_tests() -> None:
         _SESSIONS.clear()
     with _RETIRED_LOCK:
         _RETIRED.clear()
+    with _CLOSURES_LOCK:
+        _CLOSURES.clear()
