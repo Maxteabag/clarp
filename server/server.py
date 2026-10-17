@@ -6611,6 +6611,9 @@ if __name__ == "__main__":
     # terminals): a no-op unless fds 8/9 are exactly the lock files.
     from lib.data_root_locks import seal_inherited_lock_fds
     seal_inherited_lock_fds()
+    # The instance generation token, before this process opens the state database.
+    from lib.host_generation import ensure_instance_generation
+    ensure_instance_generation()
     from lib.herald import HeraldManager
     from lib import reconcile
     # Boot-time reconciliation (INV1-INV3, lib.reconcile): a server killed

@@ -324,6 +324,15 @@ def apply_staged_restore() -> bool:
         raise RestoreRefused(EXIT_IN_USE, "restore refused: the database is open elsewhere"
                                           if conflict else "restore refused: database use "
                                           "could not be verified")
+    # A fresh instance generation (lib.host_generation) before the first destructive step: every
+    # opening fenced before this restore then mismatches. clarp/backups is never archived or
+    # replaced, so the old token cannot come back with the restored data.
+    from . import host_generation
+    try:
+        host_generation.rotate_instance_generation(backups_dir=backups_dir())
+    except host_generation.RotationRefused as exc:
+        raise RestoreRefused(EXIT_LOCKING, f"restore refused: {exc}; nothing was deleted and the "
+                                           "staged archive is kept") from exc
     write_marker()
     try:
         instance_backup.replace_data_root(pending)
