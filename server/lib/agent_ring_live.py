@@ -445,7 +445,19 @@ def fallback(principal: str, data: Any) -> dict:
                 ring.get("_live_fallback_request_id") != data["request_id"]:
             raise CallError(409, FALLBACK_NOT_ALLOWED)
         ring.update(_live_phase="classic", call_id=call["call_id"], opening_audio_url=audio_url)
-        agent_rings._save(records)
+        try:
+            agent_rings._save(records)
+        except Exception as exc:  # noqa: BLE001 - F7: compensate by the original id, never pretend rollback
+            log_exception("agentLiveFallbackFinalSaveFail", exc, f"call={call_id} classic={call['call_id']}")
+            save_failed = True
+        else:
+            save_failed = False
+    if save_failed:
+        try:
+            group_calls.end(principal, call_id=call["call_id"])   # exactly the call this request started
+        except Exception as exc:  # noqa: BLE001
+            log_exception("agentLiveFallbackCompensateFail", exc, f"classic={call['call_id']}")
+        raise CallError(503, UNAVAILABLE)                          # Live stays revoked; same request resumes
     _audit_quietly({"outcome": "live_fallback", "ring_id": ring["ring_id"], "by": principal,
                     "live_call_id": call_id, "call_id": call["call_id"]})
     return {**agent_rings._answered(ring, call, changed=True), "conversation_mode": MODE_CLASSIC}
