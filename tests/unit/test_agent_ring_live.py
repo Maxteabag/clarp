@@ -295,11 +295,12 @@ def test_a_live_answer_hands_back_the_v2_grant_and_starts_no_group_call(sander):
     grant = out["live"]
     assert set(grant) == {"protocol", "host_id", "ring_id", "agent_id", "call_id", "call_epoch", "attempt_id",
                           "context_digest", "provider", "model", "voice", "owner_nonce", "join_ticket",
-                          "expires_at", "opening_owner"}
+                          "expires_at", "join_consumed", "opening_owner"}
     assert grant["protocol"] == 1 and grant["call_id"].startswith("alv_") and grant["call_epoch"] == 1
     assert (grant["provider"], grant["model"], grant["voice"], grant["opening_owner"]) == \
         ("openai", "gpt-live-1", "marin", "live")
     assert grant["ring_id"] == ring["ring_id"] and grant["agent_id"] == "a-sander"
+    assert grant["join_consumed"] is False
     assert len(grant["owner_nonce"]) == 64 and len(grant["join_ticket"]) == 64
     assert grant["owner_nonce"] != grant["join_ticket"]
     assert grant["context_digest"] == hashlib.sha256(live.canonical(live.snapshot_of(ring["ring_id"]))).hexdigest()
