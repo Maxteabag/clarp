@@ -247,8 +247,8 @@ def test_a_retired_close_answers_its_own_receipt_and_never_echoes_another_epoch(
     assert first["call_epoch"] == 1
     assert _close(grant) == first
     _refused(409, "live_call_stale", _close, grant, request_id="q2")   # only the original request replays
-    _refused(409, "live_call_stale", _close, grant, call_epoch=2)
-    _refused(409, "live_call_stale", _close, grant, call_epoch=7)
+    _refused(400, "live_request_invalid", _close, grant, call_epoch=2)  # the same request id, another body
+    _refused(409, "live_call_stale", _close, grant, request_id="q3", call_epoch=7)
 
 
 def test_close_after_the_fallback_is_stale(grant):

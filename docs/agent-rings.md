@@ -163,8 +163,10 @@ lists every field and fixed string.
   and the ring keeps ringing). It hands back the call grant (`alv_` call id,
   epoch, attempt, owner nonce, one-use join ticket for 60 s) and starts no
   group call. A classic ring is never upgraded (`live_mode_conflict`). The
-  owner's repeat answer returns the real state: the same grant while Live holds,
-  the classic payload after the fallback, `live_call_stale` once retired.
+  owner's repeat of the original answer request returns the real state: the same
+  grant while Live holds (with `join_consumed: true` once the ticket was used; a
+  client never opens another socket from it), the classic payload after the
+  fallback, `live_call_stale` once retired or for any other answer request.
 - **Socket.** `GET /calls/ring/live` (WebSocket). The first frame
   `agent_live.join` presents the grant; all of it is checked and the ticket
   consumed before the upstream opens. Another voice session on the phone is

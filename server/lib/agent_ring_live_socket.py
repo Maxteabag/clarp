@@ -392,8 +392,9 @@ def _join(principal: str, event: Any) -> dict:
     if not principal.startswith("device_") or not live.device_ok(principal):
         raise Refused("live_auth")
     if not isinstance(event, dict) or event.get("type") != "agent_live.join" or \
-            any(key not in event for key in JOIN_KEYS):
-        raise Refused("live_owner_conflict")
+            any(key not in event for key in JOIN_KEYS) or \
+            type(event["protocol"]) is not int or type(event["call_epoch"]) is not int:
+        raise Refused("live_owner_conflict")              # a malformed join shape or type
     with agent_rings._lock:
         records = agent_rings._load()
         ring = next((r for r in records if r.get("_live_call_id") == event["call_id"]), None)
@@ -401,8 +402,7 @@ def _join(principal: str, event: Any) -> dict:
                 or not hmac.compare_digest(str(ring.get("_live_owner_nonce") or ""), event["owner_nonce"])
                 or event["attempt_id"] != ring.get("_live_attempt_id")):
             raise Refused("live_owner_conflict")
-        if (type(event["protocol"]) is not int or type(event["call_epoch"]) is not int
-                or event["protocol"] != live.PROTOCOL or event["host_id"] != _host_id()
+        if (event["protocol"] != live.PROTOCOL or event["host_id"] != _host_id()
                 or event["ring_id"] != ring["ring_id"] or event["call_epoch"] != ring.get("_live_call_epoch")
                 or event["context_digest"] != ring.get("_live_context_digest")):
             raise Refused("live_call_stale")

@@ -391,14 +391,16 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
     if not principal.startswith("device_") or not live.device_ok(principal):
         raise CallError(403, live.AUTH)
     # The request identity is validated, never truncated (ROOT M1).
-    for value in (request_id, client_nonce):
-        if not isinstance(value, str) or not 1 <= len(value) <= 128:
+    for value in (request_id, client_nonce):              # 1-128 UTF-8 bytes, never truncated
+        if not isinstance(value, str) or not 1 <= len(value.encode("utf-8")) <= 128:
             raise CallError(400, live.REQUEST_INVALID)
     if ring["state"] == "answered":
         if ring["answered_by"] != principal:
             raise CallError(409, live.OWNER_CONFLICT)
-        if request_id == ring.get("_live_request_id") and client_nonce != ring.get("_live_client_nonce"):
-            raise CallError(400, live.REQUEST_INVALID)          # the same request with another intent
+        if request_id != ring.get("_live_request_id"):
+            raise CallError(409, live.CALL_STALE)                 # another answer request: no new attempt
+        if client_nonce != ring.get("_live_client_nonce"):
+            raise CallError(400, live.REQUEST_INVALID)            # the same request with another intent
         if ring.get("_live_phase") == "classic":
             return "classic"
         if ring.get("_live_phase") not in live.LIVE_PHASES:
@@ -428,7 +430,9 @@ def _answered_live(ring: dict, *, changed: bool) -> dict:
                      "call_epoch": ring["_live_call_epoch"], "attempt_id": ring["_live_attempt_id"],
                      "context_digest": ring["_live_context_digest"], "provider": live.PROVIDER,
                      "model": live.MODEL, "voice": live.VOICE, "owner_nonce": ring["_live_owner_nonce"],
-                     "join_ticket": ring["_live_join_ticket"], "expires_at": ring["_live_join_expires_at"],
+                     "join_ticket": ring["_live_join_ticket"],
+                     "join_consumed": bool(ring.get("_live_join_consumed")),   # true: the ticket is spent
+                     "expires_at": ring["_live_join_expires_at"],
                      "opening_owner": "live"}}
 
 

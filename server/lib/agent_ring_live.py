@@ -321,48 +321,43 @@ def retire(ring: dict, reason: str) -> bool:
 def close(principal: str, data: Any) -> dict:
     """The owner hangs up: retire the call's authority first, then stop its session.
 
-    The close binds the call's exact epoch. Retirement makes that epoch terminal
-    (it is not bumped; only the classic fallback bumps it) and stores a receipt;
-    a repeated close of the same epoch answers that receipt, any other epoch, or a
-    close after the fallback, is stale. Stopping the session never depends on the
-    audit write, and a record that cannot be saved still stops the session before
-    its error is reported."""
+    The accepted close is fingerprinted (request_id, call_epoch, reason) and its
+    immutable receipt saved; an exact replay returns that saved receipt (also
+    after a later fallback), the same request_id with another body is 400
+    live_request_invalid, and any other close of an ended call or with another
+    epoch is 409 live_call_stale. Stopping the session never depends on the audit
+    write; a failed save still stops the session before its error is reported."""
     from . import agent_rings
-    changed, failure = False, None
+    changed, failure, stale = False, None, False
     with agent_rings._lock:
         records = agent_rings._load()
         ring = _owned(records, principal, data)
         epoch = _epoch(data, "call_epoch")
-        if data.get("reason") not in CLOSE_REASONS or not isinstance(data.get("request_id"), str):
+        if data.get("reason") not in CLOSE_REASONS or not isinstance(data.get("request_id"), str) \
+                or not 1 <= len(data["request_id"].encode("utf-8")) <= 128:
             raise CallError(400, REQUEST_INVALID)
-        phase = ring.get("_live_phase")
-        result = {"ok": True, "call_id": ring["_live_call_id"], "call_epoch": ring["_live_call_epoch"],
-                  "state": "retired"}
         receipt = ring.get("_live_close_receipt") or {}
-        if epoch != ring["_live_call_epoch"] or phase in ("classic", "falling_back"):
-            stale = True                              # Live already ended another way: never a receipt
-        elif phase == "retired":
-            stale = receipt.get("request_id") != data["request_id"]   # replay only the original close
+        if receipt and receipt.get("request_id") == data["request_id"]:
+            if (receipt.get("call_epoch"), receipt.get("reason")) != (epoch, data["reason"]):
+                raise CallError(400, REQUEST_INVALID)             # the same close request, another intent
+            result = dict(receipt["result"])                       # the saved receipt, never input fields
+        elif epoch != ring["_live_call_epoch"] or ring.get("_live_phase") not in LIVE_PHASES:
+            stale = True                                           # ended another way, or another epoch
         else:
-            stale = False
-        if stale:
-            pass
-        elif retire(ring, data["reason"]):
+            result = {"ok": True, "call_id": ring["_live_call_id"], "call_epoch": epoch, "state": "retired"}
+            retire(ring, data["reason"])
             changed = True
             ring["_live_close_receipt"] = {"request_id": data["request_id"], "reason": data["reason"],
-                                           "call_epoch": ring["_live_call_epoch"]}
+                                           "call_epoch": epoch, "result": result}
             try:
                 agent_rings._save(records)
             except Exception as exc:  # noqa: BLE001 - reported below, after the session is stopped
                 failure = exc
             else:
-                try:
-                    agent_rings._audit({"outcome": "live_closed", "ring_id": ring["ring_id"], "by": principal,
-                                        "live_call_id": ring["_live_call_id"], "reason": data["reason"]})
-                except Exception as exc:  # noqa: BLE001 - diagnostics never block the stop
-                    log_exception("agentLiveCloseAuditFail", exc, f"call={ring['_live_call_id']}")
+                _audit_quietly({"outcome": "live_closed", "ring_id": ring["ring_id"], "by": principal,
+                                "live_call_id": ring["_live_call_id"], "reason": data["reason"]})
     if changed or ring.get("_live_phase") not in LIVE_PHASES:
-        # Also on a retried or stale close of an ended call: a session that outlived it
+        # Also on a replayed or stale close of an ended call: a session that outlived it
         # (registered late, or its stop was lost) is stopped now. A no-op when none runs.
         _stop_session(ring["_live_call_id"], data["reason"])
     if failure is not None:
