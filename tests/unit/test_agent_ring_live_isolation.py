@@ -18,7 +18,7 @@ from tests.unit.test_agent_rings import _ring, env  # noqa: F401 - env is a fixt
 @pytest.fixture
 def live_id(sander):
     ring = _live_ring()["ring"]
-    return rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1")["live"]["call_id"]
+    return rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")["live"]["call_id"]
 
 
 @pytest.fixture(params=[False, True], ids=["no-group-call", "group-call-live"])

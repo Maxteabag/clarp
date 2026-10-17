@@ -188,7 +188,7 @@ def call(sander, monkeypatch):
         live.reset_for_tests()
     reset()
     ring = _live_ring()["ring"]
-    grant = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1")["live"]
+    grant = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")["live"]
     up = Upstream()
     connects = []
     monkeypatch.setattr(sock, "_connect", lambda key: connects.append(key) or up)
@@ -540,23 +540,27 @@ def test_the_silence_feed_stops_on_hangup(call):
     assert len(call.up.of("session.input_audio.append")) == count
 
 
-def test_output_before_the_ack_is_held_and_delivered_after_it(call, monkeypatch):
+def test_model_audio_before_the_opening_ack_fails_the_call_visibly(call, monkeypatch):
     early = Upstream(take_opening=False)
     real_send = early.send
 
     def send(raw):
         real_send(raw)
         if json.loads(raw)["type"] == "session.instructions.append":
-            early.push({"type": "session.output_audio.delta", "delta": AUDIO})      # audio first …
-            early.push({"type": "session.instructions.appended"})                    # … then the receipt
+            early.push({"type": "session.output_audio.delta", "delta": AUDIO})      # audio before the receipt
+            early.push({"type": "session.instructions.appended"})
     early.send = send
     monkeypatch.setattr(sock, "_connect", lambda key: early)
-    h, thread = _admitted(call)
-    _wait(lambda: "session.output_audio.delta" in _types(h))
-    kinds = _types(h)
-    assert kinds.index("agent_live.opening_admitted") < kinds.index("session.output_audio.delta")
-    h.send({"type": "session.close"})
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    _wait(lambda: "agent_live.provider_ready" in _types(h))
+    h.send(_ready(call.grant))
     thread.join(15)
+    assert "session.output_audio.delta" not in _types(h) and "agent_live.opening_admitted" not in _types(h)
+    error = next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")
+    assert error["code"] == "live_unavailable" and error["retryable"] is False
+    assert _ring_of(call.grant)["_live_phase"] == "retired" and _ring_of(call.grant)["_live_opening_consumed"]
 
 
 def test_output_before_the_ack_beyond_its_bound_fails_visibly(call, monkeypatch):
@@ -679,26 +683,23 @@ def test_a_client_ready_after_retirement_starts_nothing(call):
 
 # ---- drain-review re-review findings (H-1 residue, H-2 a/c, L-2) -------------------------------
 
-def test_model_audio_before_the_opening_was_even_sent_is_dropped_not_delivered(call, monkeypatch):
+def test_model_audio_before_the_opening_was_even_sent_fails_the_call_visibly(call, monkeypatch):
     eager = Upstream()
     real_send = eager.send
-    early = base64.b64encode(b"\x07\x00" * 480).decode()
 
     def send(raw):
         real_send(raw)
         if json.loads(raw)["type"] == "session.start":
-            eager.push({"type": "session.output_audio.delta", "delta": early})       # speaks before any opening
-        elif json.loads(raw)["type"] == "session.instructions.append":
-            eager.push({"type": "session.output_audio.delta", "delta": AUDIO})
+            eager.push({"type": "session.output_audio.delta", "delta": AUDIO})     # an unadmitted opening
     eager.send = send
     monkeypatch.setattr(sock, "_connect", lambda key: eager)
-    h, thread = _admitted(call)
-    _wait(lambda: "session.output_audio.delta" in _types(h))
-    time.sleep(0.2)
-    deltas = [f["delta"] for f in h.wfile.frames() if f["type"] == "session.output_audio.delta"]
-    assert deltas == [AUDIO]
-    h.send({"type": "session.close"})
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
     thread.join(15)
+    assert "session.output_audio.delta" not in _types(h)
+    assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
+    assert not _ring_of(call.grant).get("_live_opening_consumed")       # nothing consumed: fallback stays open
 
 
 def test_the_instructions_tell_the_model_to_stay_silent_until_the_opening():
@@ -728,3 +729,30 @@ def test_a_join_with_a_boolean_for_a_number_is_refused(call, change):
     thread.join(15)
     assert [f["code"] for f in h.wfile.frames()] == ["live_call_stale"]
     assert call.connects == []
+
+
+def test_a_hangup_during_the_paid_connect_never_leaves_the_session_running(call, monkeypatch):
+    entered, release, up = threading.Event(), threading.Event(), Upstream()
+
+    def slow_connect(key):
+        entered.set()
+        assert release.wait(5)
+        return up
+    monkeypatch.setattr(sock, "_connect", slow_connect)
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    assert entered.wait(5)
+    live.close(PHONE, {"call_id": call.grant["call_id"], "call_epoch": 1, "attempt_id": call.grant["attempt_id"],
+                       "owner_nonce": call.grant["owner_nonce"], "request_id": "q", "reason": "user_hangup"})
+    release.set()                                         # the connector returns after the hangup
+    thread.join(15)
+    assert not thread.is_alive() and up.closed and up.of("session.start") == []
+
+
+def test_a_join_from_a_non_device_principal_is_refused_with_live_auth(call):
+    h = Handler(principal="administrator")
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    thread.join(15)
+    assert [f["code"] for f in h.wfile.frames()] == ["live_auth"] and call.connects == []
