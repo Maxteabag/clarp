@@ -37,7 +37,6 @@ JOIN_WAIT_S = 10.0              # the first frame must come this soon after the 
 CLIENT_IDLE_S = 30.0            # a phone that sends nothing (audio, ping) this long is gone
 OPENING_ACK_S = 10.0            # the provider must take the opening this soon after it was sent
 READY_S = 15.0                  # phone and provider must both be ready this soon after the join, pings or not
-EARLY_AUDIO_MAX = 600           # output deltas held between the opening append and the provider's ACK
 TICK_S = 0.1
 DEVICE_CHECK_TICKS = 10         # a revoked or downgraded device is noticed within a second
 SILENCE = base64.b64encode(bytes(int(24000 * TICK_S) * 2)).decode("ascii")   # 100 ms of PCM16 24 kHz mono
@@ -121,7 +120,6 @@ class LiveSocket:
         self.client_ready = self.provider_ready = self.opening_sent = self.admitted = self.forwarding = False
         self.opening_sent_at = 0.0
         self.joined_at = time.monotonic()       # absolute: no frame or ping moves it
-        self.held: list[str] = []               # output of the opening, held until the provider's ACK
         self.reason = ""
 
     # -- identity -------------------------------------------------------------------
@@ -229,9 +227,6 @@ class LiveSocket:
         if not self._record(lambda ring: ring.update(_live_phase="active")):
             return self.fail("live_call_stale", "stale")
         self.downstream({"type": "agent_live.opening_admitted", **self.ids(), "context_digest": self.context_digest})
-        held, self.held = self.held, []
-        for delta in held:
-            self.downstream({"type": "session.output_audio.delta", "delta": delta})
 
     # -- upstream events ------------------------------------------------------------------
     def receive(self, event: dict) -> None:
@@ -247,7 +242,6 @@ class LiveSocket:
             self._output(event.get("delta"))
         elif kind == "session.output_audio.interrupted":
             if self.admitted and not self.closed.is_set():
-                self.held = []
                 self.downstream({"type": "oracle_v2.playback_flush"})
                 self.downstream({"type": "oracle_v2.quiet"})
         elif kind == "session.closed":
@@ -259,22 +253,20 @@ class LiveSocket:
                 self.fail("live_unavailable", "provider_error")
 
     def _output(self, delta: Any) -> None:
-        """Provider audio reaches the phone only once the opening is admitted, and never after retirement.
+        """Provider audio reaches the phone only after the opening was admitted and while the call is current.
 
-        Speech before the opening was even sent is an unadmitted opening: the call fails. Speech between the
-        append and the provider's ACK is the opening itself, held here and sent right after opening_admitted.
-        The pump thread is the only caller of receive(), so _admit and this never interleave."""
-        if not isinstance(delta, str) or self.closed.is_set() or self.stop.is_set():
+        Any provider output before the provider acknowledged the opening is a violation of the admitted-opening
+        rule: the call fails terminally (live_unavailable) and nothing of it reaches the phone. Once a close or
+        fallback has retired the call (marked in memory under the ring lock, before its save and its stop),
+        output is dropped even though this session has not been told to stop yet."""
+        if not isinstance(delta, str) or self.closed.is_set() or self.stop.is_set() or self.ending.is_set():
             return
-        if self.admitted:
-            self.downstream({"type": "session.output_audio.delta", "delta": delta})
-        elif not self.opening_sent:
-            log("agentLiveEarlyOutput", f"call={self.call_id}")
-            self.fail("live_unavailable", "provider_spoke_before_opening")
-        elif len(self.held) < EARLY_AUDIO_MAX:
-            self.held.append(delta)
-        else:
-            self.fail("live_unavailable", "opening_not_taken")
+        if live.retired(self.call_id):
+            return
+        if not self.admitted:
+            log("agentLiveEarlyOutput", f"call={self.call_id} opening_sent={self.opening_sent}")
+            return self.fail("live_unavailable", "provider_output_before_ack")
+        self.downstream({"type": "session.output_audio.delta", "delta": delta})
 
     # -- client frames ----------------------------------------------------------------------
     def client(self, event: dict) -> None:

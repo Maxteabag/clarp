@@ -303,54 +303,110 @@ def _epoch(data: dict, key: str) -> int:
 
 
 def retire(ring: dict, reason: str) -> bool:
-    """Retire a Live call's authority on its record (caller saves). True if it changed."""
+    """Retire a Live call's authority on its record (caller saves). True if it changed.
+
+    The retirement is also marked in memory at once (callers hold agent_rings._lock), so
+    the running session drops provider output from this moment, before any save or stop."""
     if ring.get("_live_phase") not in LIVE_PHASES:
         return False
     ring.update(_live_phase="retired", _live_retired_reason=reason)
+    _mark_retired(ring.get("_live_call_id"))
     return True
+
+
+_RETIRED_LOCK = threading.Lock()
+_RETIRED: dict = {}             # call_id → True, the retirements of this process (bounded)
+_RETIRED_MAX = 4096
+
+
+def _mark_retired(call_id: Any) -> None:
+    if not isinstance(call_id, str) or not call_id:
+        return
+    with _RETIRED_LOCK:
+        _RETIRED[call_id] = True
+        while len(_RETIRED) > _RETIRED_MAX:
+            _RETIRED.pop(next(iter(_RETIRED)))
+
+
+def retired(call_id: str) -> bool:
+    """This process retired the call's authority (cheap; checked per provider frame)."""
+    with _RETIRED_LOCK:
+        return call_id in _RETIRED
+
+
+def _log_exception(name: str, exc: BaseException, detail: str = "") -> None:
+    from .log import log_exception
+    log_exception(name, exc, detail)
+
+
+def _quietly(name: str, fn, *args) -> None:
+    """Best-effort work after a stop (audit, logging): its own failure never escapes."""
+    try:
+        fn(*args)
+    except Exception:  # noqa: BLE001 - nothing to report it with if logging itself fails
+        try:
+            from .log import log_exception
+            import sys
+            log_exception(name, sys.exc_info()[1])
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _retire_saved_again(call_id: str, reason: str) -> bool:
+    """After a failed save and the stop: record the retirement once more. True when it held."""
+    from . import agent_rings
+    try:
+        with agent_rings._lock:
+            records = agent_rings._load()
+            stored = next((r for r in records if r.get("_live_call_id") == call_id), None)
+            if stored is not None and retire(stored, reason):
+                agent_rings._save(records)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def close(principal: str, data: Any) -> dict:
     """The owner hangs up: retire the call's authority first, then stop its session.
 
-    The stop happens whenever the call is no longer live on its record, so a
-    retried close still ends a session an earlier close failed to stop, and the
-    audit runs only after the stop, best effort: it can never skip it.
-    Idempotent: a retired (or fallen-back) call answers the same result again."""
+    The stop runs in a finally once the call is retired (now or already), so neither
+    a failed save nor logging can skip it, and a retried close still ends a session
+    an earlier close failed to stop. The audit runs after the stop, best effort.
+    The answer carries the ring's own epoch and actual state (classic after a fallback)."""
     from . import agent_rings
-    from .log import log_exception
-    with agent_rings._lock:
-        records = agent_rings._load()
-        ring = _owned(records, principal, data)
-        epoch = _epoch(data, "call_epoch")
-        if data.get("reason") not in CLOSE_REASONS or not isinstance(data.get("request_id"), str):
-            raise CallError(400, REQUEST_INVALID)
-        if epoch != ring["_live_call_epoch"] and ring.get("_live_phase") in LIVE_PHASES:
-            raise CallError(409, CALL_STALE)
-        changed = retire(ring, data["reason"])
-        saved = True
-        if changed:
-            try:
-                agent_rings._save(records)
-            except Exception as exc:  # noqa: BLE001 - the session still stops below
-                log_exception("agentLiveCloseSaveFail", exc, f"call={ring['_live_call_id']}")
-                saved = False
-        call_id = ring["_live_call_id"]
-        result = {"ok": True, "call_id": call_id, "call_epoch": epoch, "state": "retired"}
-    _stop_session(call_id, data["reason"])
-    if not saved:                       # the session is stopped; record its retirement once more
-        try:
-            with agent_rings._lock:
-                records = agent_rings._load()
-                stored = next((r for r in records if r.get("_live_call_id") == call_id), None)
-                if stored is not None and retire(stored, data["reason"]):
+    call_id, stop, save_error = None, False, None
+    try:
+        with agent_rings._lock:
+            records = agent_rings._load()
+            ring = _owned(records, principal, data)
+            epoch = _epoch(data, "call_epoch")
+            if data.get("reason") not in CLOSE_REASONS or not isinstance(data.get("request_id"), str):
+                raise CallError(400, REQUEST_INVALID)
+            if epoch != ring["_live_call_epoch"] and ring.get("_live_phase") in LIVE_PHASES:
+                raise CallError(409, CALL_STALE)
+            call_id = ring["_live_call_id"]
+            changed = retire(ring, data["reason"])
+            stop = ring.get("_live_phase") not in LIVE_PHASES
+            if changed:
+                try:
                     agent_rings._save(records)
-        except Exception as exc:  # noqa: BLE001
-            log_exception("agentLiveCloseSaveFail", exc, f"call={call_id} again")
-            raise CallError(503, UNAVAILABLE) from None
+                except Exception as exc:  # noqa: BLE001 - kept; the stop below runs first
+                    save_error = exc
+            phase = ring.get("_live_phase")
+            result = {"ok": True, "call_id": call_id, "call_epoch": ring["_live_call_epoch"],
+                      "state": "classic" if phase == "classic" else "retired"}
+    finally:
+        if stop and call_id:
+            _stop_session(call_id, data["reason"])
+    if save_error is not None:
+        _quietly("agentLiveCloseSaveFail", _log_exception, "agentLiveCloseSaveFail", save_error,
+                 f"call={call_id}")
+        if not _retire_saved_again(call_id, data["reason"]):
+            raise CallError(503, UNAVAILABLE)
     if changed:
-        _audit_quietly({"outcome": "live_closed", "ring_id": ring["ring_id"], "by": principal,
-                        "live_call_id": call_id, "reason": data["reason"]})
+        _quietly("agentLiveAuditFail", _audit_quietly, {"outcome": "live_closed", "ring_id": ring["ring_id"],
+                                                        "by": principal, "live_call_id": call_id,
+                                                        "reason": data["reason"]})
     return result
 
 
@@ -371,42 +427,57 @@ def fallback(principal: str, data: Any) -> dict:
     Allowed once, only before the Live opening was admitted and before any user
     audio went upstream, and only with the phone's word that its Live audio has
     stopped. In this order (WIRE-v2 §10): under the lock, claim it and retire
-    Live with an epoch bump and save; outside the lock, stop the Live session;
-    then voice and start the classic call and record it; the audit last, best
-    effort. A failure after the stop leaves Live retired and no classic call,
-    which is the truth, and never two audio paths."""
+    Live with an epoch bump and save; then, in a finally that a failed save
+    cannot skip, stop the Live session; then voice and start the classic call
+    and record its exact id; the audit last, best effort. A failed claim save
+    stops Live and starts nothing classic. A classic call whose id cannot be
+    recorded is ended by that exact id, so no unrecorded audio path is left.
+    A failure after the stop leaves Live retired and no classic call."""
     from . import agent_rings, group_calls
     from . import agents as agents_db
-    from .log import log_exception
-    with agent_rings._lock:
-        records = agent_rings._load()
-        ring = _owned(records, principal, data)
-        epoch = _epoch(data, "expected_epoch")
-        if data.get("audio_stopped") is not True or not isinstance(data.get("request_id"), str) \
-                or not data["request_id"]:
-            raise CallError(400, REQUEST_INVALID)
-        call_id = ring["_live_call_id"]
-        if ring.get("_live_phase") == "classic":
-            if data["request_id"] != ring.get("_live_fallback_request_id"):
-                raise CallError(409, FALLBACK_NOT_ALLOWED)
-            replay = {**agent_rings._answered(ring, group_calls.get_call(ring["call_id"]), changed=False),
-                      "conversation_mode": MODE_CLASSIC}
-        else:
-            replay = None
-            if ring.get("_live_fallback_request_id"):       # claimed by a fallback in progress or one that failed
-                raise CallError(409, FALLBACK_NOT_ALLOWED)
-            if epoch != ring["_live_call_epoch"]:
-                raise CallError(409, CALL_STALE)
-            if ring.get("_live_opening_consumed") or ring.get("_live_audio_forwarded"):
-                raise CallError(409, FALLBACK_NOT_ALLOWED)
-            if not retire(ring, "fallback") and ring.get("_live_phase") != "retired":
-                raise CallError(409, FALLBACK_NOT_ALLOWED)
-            ring.update(_live_retired_reason="fallback", _live_call_epoch=epoch + 1,
-                        _live_fallback_request_id=data["request_id"])
-            agent_rings._save(records)          # a failure here raises with Live untouched and still running
-    _stop_session(call_id, "fallback")          # before anything classic, and on a replay too
+    call_id, stop, replay, save_error = None, False, None, None
+    try:
+        with agent_rings._lock:
+            records = agent_rings._load()
+            ring = _owned(records, principal, data)
+            epoch = _epoch(data, "expected_epoch")
+            if data.get("audio_stopped") is not True or not isinstance(data.get("request_id"), str) \
+                    or not data["request_id"]:
+                raise CallError(400, REQUEST_INVALID)
+            call_id = ring["_live_call_id"]
+            if ring.get("_live_phase") == "classic":
+                stop = True
+                if data["request_id"] != ring.get("_live_fallback_request_id"):
+                    raise CallError(409, FALLBACK_NOT_ALLOWED)
+                replay = {**agent_rings._answered(ring, group_calls.get_call(ring["call_id"]), changed=False),
+                          "conversation_mode": MODE_CLASSIC}
+            else:
+                if ring.get("_live_fallback_request_id"):   # claimed by a fallback in progress or one that failed
+                    raise CallError(409, FALLBACK_NOT_ALLOWED)
+                if epoch != ring["_live_call_epoch"]:
+                    raise CallError(409, CALL_STALE)
+                if ring.get("_live_opening_consumed") or ring.get("_live_audio_forwarded"):
+                    raise CallError(409, FALLBACK_NOT_ALLOWED)
+                if not retire(ring, "fallback") and ring.get("_live_phase") != "retired":
+                    raise CallError(409, FALLBACK_NOT_ALLOWED)
+                stop = True
+                ring.update(_live_retired_reason="fallback", _live_call_epoch=epoch + 1,
+                            _live_fallback_request_id=data["request_id"])
+                try:
+                    agent_rings._save(records)
+                except Exception as exc:  # noqa: BLE001 - the stop below runs first; nothing classic follows
+                    save_error = exc
+    finally:
+        if stop and call_id:
+            _stop_session(call_id, "fallback")
     if replay is not None:
         return replay
+    if save_error is not None:
+        _quietly("agentLiveFallbackSaveFail", _log_exception, "agentLiveFallbackSaveFail", save_error,
+                 f"call={call_id}")
+        _retire_saved_again(call_id, "fallback")
+        raise CallError(503, UNAVAILABLE)
+    classic_id = None
     try:
         agent = agents_db.get_by_agent_id(ring["agent_id"]) or {"session": ring["session"]}
         audio_url = ring.get("opening_audio_url") or agent_rings._voice(ring["opening_line"], agent)
@@ -419,18 +490,26 @@ def fallback(principal: str, data: Any) -> dict:
                 principal, [ring["session"]], request_id=ring["ring_id"], by=ring["session"],
                 ring={"ring_id": ring["ring_id"], "reason": ring["reason"], "opening_line": ring["opening_line"]})
             call = started["call"]
-            ring.update(_live_phase="classic", call_id=call["call_id"], opening_audio_url=audio_url)
+            classic_id = call["call_id"]
+            ring.update(_live_phase="classic", call_id=classic_id, opening_audio_url=audio_url)
             agent_rings._save(records)
     except CallError:
         raise
     except Exception as exc:  # noqa: BLE001 - Live is already retired and stopped; say so, never retry
-        log_exception("agentLiveFallbackFail", exc, f"call={call_id}")
+        if classic_id is not None:      # started but not recorded: end exactly that call
+            _quietly("agentLiveFallbackOrphanEndFail", lambda: group_calls.end(
+                principal, call_id=classic_id, principal=principal, by="agent-live-fallback"))
+        _quietly("agentLiveFallbackFail", _log_exception, "agentLiveFallbackFail", exc,
+                 f"call={call_id} classic={classic_id}")
         raise CallError(503, UNAVAILABLE) from None
-    _audit_quietly({"outcome": "live_fallback", "ring_id": ring["ring_id"], "by": principal,
-                    "live_call_id": call_id, "call_id": call["call_id"]})
+    _quietly("agentLiveAuditFail", _audit_quietly, {"outcome": "live_fallback", "ring_id": ring["ring_id"],
+                                                    "by": principal, "live_call_id": call_id,
+                                                    "call_id": classic_id})
     return {**agent_rings._answered(ring, call, changed=True), "conversation_mode": MODE_CLASSIC}
 
 
 def reset_for_tests() -> None:
     with _SESSIONS_LOCK:
         _SESSIONS.clear()
+    with _RETIRED_LOCK:
+        _RETIRED.clear()
