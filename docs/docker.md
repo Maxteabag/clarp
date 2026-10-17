@@ -147,6 +147,15 @@ it starts):
   78 (the archive or its staging record is not acceptable).
 - On a filesystem where locking is unsupported, the Host still starts, with a
   warning that the one-Host guarantee is unavailable; only a restore is refused.
+- An interrupted restore (the archive and `restore.applying` both still in
+  `/data/clarp/backups`) is completed by the next Host start. Until then
+  maintenance commands refuse with 76. If that volume's filesystem refuses
+  locking (77), recover with every container on the volume stopped: move the
+  volume to supported storage and start the Host, which re-applies the restore;
+  or deliberately delete `restore.pending.tar.gz`, `restore.pending.owner` and
+  `restore.applying`, accepting the partly replaced volume.
+- The Host command takes no extra arguments; with extra arguments the
+  entrypoint refuses (64) instead of starting a server without the Host's locks.
 
 The locks only see Clarp processes started by this image's entrypoint. These
 are unsupported while a restore is staged or applied, and nothing can detect

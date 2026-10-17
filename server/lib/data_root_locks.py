@@ -336,7 +336,15 @@ def _main(argv: list[str]) -> int:
             fd, name = {"owner": (OWNER_FD, OWNER_LOCK), "users": (USERS_FD, USERS_LOCK)}[argv[1]]
             require_held(fd, name)
         elif command == "apply":
-            apply_staged_restore()
+            import sqlite3
+            import tarfile
+            import zlib
+            try:
+                apply_staged_restore()
+            except (tarfile.TarError, EOFError, zlib.error, sqlite3.DatabaseError, ValueError) as exc:
+                raise RestoreRefused(EXIT_REFUSED, f"restore refused: unreadable archive: {exc}") from exc
+            except OSError as exc:
+                raise RestoreRefused(EXIT_LOCKING, f"restore refused: I/O on the data root: {exc}") from exc
         elif command == "recover-marker":
             state = recover_marker()
             if state == "interrupted":

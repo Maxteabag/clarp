@@ -27,16 +27,30 @@ clarp_lock_warn() {
 }
 
 clarp_data_root_locks() {
+    if [ "${1:-}" = "python3" ] && [ "${2:-}" = "/opt/clarp/server.py" ] && [ "$#" -ne 2 ]; then
+        # Never a quiet second path: anything else would start a server without the Host's locks.
+        echo "clarp: the Host command takes no extra arguments (exit 64)" >&2
+        exit 64
+    fi
     CLARP_BACKUPS_DIR="$CLARP_DATA_DIR/clarp/backups"
     clarp_locks=held
     if ! clarp_locks_py prepare; then
+        clarp_locks=unavailable
+    fi
+    if [ "$clarp_locks" = held ] && ! ( : 8>>"$CLARP_BACKUPS_DIR/host-owner.lock" \
+            9>>"$CLARP_BACKUPS_DIR/data-root-users.lock" ) 2>/dev/null; then
+        # A failing `exec` redirection would end this shell; probe the opens in a subshell first.
         clarp_locks=unavailable
     fi
     if [ "$clarp_locks" = held ]; then
         # Append mode: never truncates, and the descriptions stay with this shell and its
         # direct children. Python validates them by identity before anything trusts them.
         exec 8>>"$CLARP_BACKUPS_DIR/host-owner.lock" 9>>"$CLARP_BACKUPS_DIR/data-root-users.lock"
-        clarp_locks_py validate-fds || clarp_locks=unavailable
+        if ! clarp_locks_py validate-fds; then
+            # Not the lock files (e.g. a symlinked path): never keep or pass on such an fd.
+            exec 8>&- 9>&-
+            clarp_locks=unavailable
+        fi
     fi
     clarp_pending=0
     [ -f "$CLARP_BACKUPS_DIR/restore.pending.tar.gz" ] && clarp_pending=1
