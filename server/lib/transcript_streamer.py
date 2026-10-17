@@ -136,12 +136,15 @@ class TranscriptStreamer:
             # Transcript file doesn't exist yet — try again next reconcile.
             return
         self._unbind(agent_id)
+        # The generation is fixed now and carried by this watcher's callbacks, so
+        # a change it reports after a later rebind is recognised as stale.
+        generation = next(_BIND_GENERATIONS)
         # New watcher: skip whatever's already in the file. Agents
         # mid-conversation shouldn't replay history.
         watcher = TranscriptWatcher(
             path,
             on_text=lambda text, line_ts, a=agent: self._on_text(a, text, line_ts=line_ts),
-            on_change=lambda a=agent, cs=backend_session_id: self._on_change(a, cs),
+            on_change=lambda a=agent, cs=backend_session_id, g=generation: self._on_change(a, cs, g),
             start_at_end=True,
             backend_session_id=backend_session_id,
             persist_offset=True,
@@ -155,8 +158,10 @@ class TranscriptStreamer:
                           detail=str(path))
             self.pool.remove(agent_id)
             return
-        self._bound[agent_id] = backend_session_id
-        self._bind_generation[agent_id] = next(_BIND_GENERATIONS)
+        with self._dirty_lock:
+            # Published together under the lock that records pending changes.
+            self._bound[agent_id] = backend_session_id
+            self._bind_generation[agent_id] = generation
         _emit("transcript_streamer", "bind",
               session=agent.get("session"),
               backend_session_id=backend_session_id,
@@ -168,8 +173,8 @@ class TranscriptStreamer:
             return
         self.dispatcher.unwatch(agent_id)
         self.pool.remove(agent_id)
-        prev = self._bound.pop(agent_id, None)
         with self._dirty_lock:
+            prev = self._bound.pop(agent_id, None)
             self._dirty.pop(agent_id, None)
         _emit("transcript_streamer", "unbind",
               backend_session_id=prev,
@@ -177,7 +182,7 @@ class TranscriptStreamer:
 
     # ---- transcript change → SSE -------------------------------------
 
-    def _on_change(self, agent: dict, backend_session_id: str) -> None:
+    def _on_change(self, agent: dict, backend_session_id: str, generation: int) -> None:
         """Fires once per tick that consumed bytes — including tool_use
         and tool_result lines that don't go through on_text. Drives the
         client's live-update of the history pane via SSE.
@@ -185,7 +190,11 @@ class TranscriptStreamer:
         Runs on the one inotify thread that voices every agent, so it only
         broadcasts and queues: the transcript import (it re-reads the whole
         file) and the notification retry that needs its rows run on the import
-        worker, and the change stays pending until that step has run."""
+        worker, and the change stays pending until that step has run. A change
+        reported by a watcher of an earlier binding is ignored."""
+        intent = self._note_change(agent, backend_session_id, generation)
+        if intent is None:
+            return
         if self._stream is not None:
             try:
                 events.broadcast(self._stream, events.transcript_updated(
@@ -196,16 +205,20 @@ class TranscriptStreamer:
             except Exception as e:
                 log_exception("transcriptStreamerBroadcastFail", e,
                               detail=agent.get("agent_id"))
-        self._submit(agent, self._note_change(agent, backend_session_id))
+        self._submit(agent, intent)
 
-    def _note_change(self, agent: dict, backend_session_id: str) -> Intent:
-        """Record this change as the agent's latest pending one."""
+    def _note_change(self, agent: dict, backend_session_id: str, generation: int) -> Intent | None:
+        """Record this change as the agent's latest pending one, only if the
+        watcher's (backend session, generation) is still the current binding;
+        None (nothing recorded) for a stale watcher or a stopped streamer."""
         agent_id = agent["agent_id"]
         with self._dirty_lock:
+            if (self._stop.is_set() or self._bound.get(agent_id) != backend_session_id
+                    or self._bind_generation.get(agent_id) != generation):
+                return None
             seq = self._seq.get(agent_id, 0) + 1
             self._seq[agent_id] = seq
-            intent = Intent(backend_session_id, self._bind_generation.get(agent_id, 0), seq,
-                            next_at=time.monotonic() + 1.0)
+            intent = Intent(backend_session_id, generation, seq, next_at=time.monotonic() + 1.0)
             self._dirty[agent_id] = intent
         return intent
 
