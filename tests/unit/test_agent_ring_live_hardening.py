@@ -61,17 +61,31 @@ def test_provider_speech_before_the_opening_was_sent_never_reaches_the_phone_and
     assert not call.up.of("session.instructions.append")
 
 
-def test_the_openings_audio_before_the_providers_ack_is_held_until_opening_admitted(call):
+def test_provider_output_after_the_opening_was_sent_but_before_its_ack_is_terminal(call):
     call.up.take_opening = False
     h, thread = _provider_ready(call)
     h.send(_ready(call.grant))
     _wait(lambda: call.up.of("session.instructions.append"))
     call.up.push(DELTA)                                   # the provider speaks before it acknowledges the append
     call.up.push({"type": "session.instructions.appended"})
-    _wait(lambda: DELTA in h.wfile.frames())
-    types = _types(h)
-    assert types.index("agent_live.opening_admitted") < types.index("session.output_audio.delta")
-    h.send({"type": "session.close"})
+    thread.join(15)
+    assert DELTA not in h.wfile.frames() and "agent_live.opening_admitted" not in _types(h)
+    assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
+    assert _ring_of(call.grant)["_live_retired_reason"] == "provider_output_before_ack"
+
+
+def test_output_in_the_window_between_a_saved_retirement_and_its_stop_never_reaches_the_phone(call, monkeypatch):
+    h, thread = _admitted(call)
+    session = _session(call)
+    stop = live._stop_session
+    monkeypatch.setattr(live, "_stop_session", lambda call_id, reason: None)     # the stop has not arrived yet
+    _close(call.grant)
+    assert _ring_of(call.grant)["_live_phase"] == "retired"
+    before = len(h.wfile.frames())
+    session.receive(DELTA)                     # whether or not tick's own currency check got there first
+    assert DELTA not in h.wfile.frames()[before:]
+    monkeypatch.setattr(live, "_stop_session", stop)
+    live._stop_session(call.grant["call_id"], "user_hangup")
     thread.join(15)
 
 
@@ -118,6 +132,34 @@ def test_a_close_whose_save_fails_still_stops_the_session_and_says_so(call, monk
     thread.join(15)
     assert broke and session.closed.is_set() and not thread.is_alive() and call.up.closed
     assert _ring_of(call.grant)["_live_phase"] == "retired"
+
+
+def test_a_close_whose_save_and_logging_both_fail_still_stops_the_session(call, monkeypatch):
+    from lib import log as logmod
+    h, thread = _admitted(call)
+    session = _session(call)
+    save, broke = rings._save, []
+
+    def broken(records):
+        if not broke:
+            broke.append(True)
+            raise OSError("disk full")
+        return save(records)
+
+    def no_logging(*args, **kw):
+        raise RuntimeError("log sink down")
+    monkeypatch.setattr(rings, "_save", broken)
+    monkeypatch.setattr(logmod, "log_exception", no_logging)
+    _close(call.grant)
+    thread.join(15)
+    assert session.closed.is_set() and not thread.is_alive() and call.up.closed
+
+
+def test_close_answers_the_rings_own_epoch_and_state(call):
+    out = _fallback(call.grant)
+    assert out["conversation_mode"] == "classic"
+    closed = _close(call.grant, call_epoch=1, request_id="q9")      # an old-epoch close after the fallback
+    assert (closed["call_epoch"], closed["state"]) == (2, "classic")
 
 
 def test_a_close_whose_saves_both_fail_still_stops_the_session_and_says_so(call, monkeypatch):
@@ -183,6 +225,53 @@ def test_a_fallback_whose_classic_start_fails_leaves_live_retired_and_no_classic
     with pytest.raises(group_calls.CallError) as again:              # never retried into two audio paths
         _fallback(call.grant, expected_epoch=2, request_id="q2")
     assert again.value.status == 409
+
+
+def test_a_fallback_whose_claim_save_fails_still_stops_live_and_starts_nothing_classic(call, monkeypatch):
+    h, thread = _provider_ready(call)
+    session = _session(call)
+    started = []
+    monkeypatch.setattr(group_calls, "start", lambda *a, **kw: started.append(a))
+    save, broke = rings._save, []
+
+    def broken(records):
+        if not broke:
+            broke.append(True)
+            raise OSError("disk full")
+        return save(records)
+    monkeypatch.setattr(rings, "_save", broken)
+    with pytest.raises(group_calls.CallError) as exc:
+        _fallback(call.grant)
+    assert exc.value.status == 503 and not started
+    thread.join(15)
+    assert session.closed.is_set() and call.up.closed
+    assert _ring_of(call.grant)["_live_phase"] == "retired"
+
+
+def test_a_classic_call_whose_id_cannot_be_recorded_is_ended_by_that_exact_id(call, monkeypatch):
+    h, thread = _provider_ready(call)
+    start, end = group_calls.start, group_calls.end
+    made, ended = [], []
+
+    def recorded_start(*args, **kw):
+        out = start(*args, **kw)
+        made.append(out["call"]["call_id"])
+        monkeypatch.setattr(rings, "_save", broken)                  # the save that records it fails
+        return out
+
+    def broken(records):
+        raise OSError("disk full")
+
+    def watched_end(caller, **kw):
+        ended.append(kw.get("call_id"))
+        return end(caller, **kw)
+    monkeypatch.setattr(group_calls, "start", recorded_start)
+    monkeypatch.setattr(group_calls, "end", watched_end)
+    with pytest.raises(group_calls.CallError) as exc:
+        _fallback(call.grant)
+    assert exc.value.status == 503 and made and ended == made
+    assert group_calls.get_call(made[0])["state"] != "live"
+    thread.join(15)
 
 
 def test_a_fallback_whose_audit_fails_still_has_stopped_live_and_started_classic(call, monkeypatch):
