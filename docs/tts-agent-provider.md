@@ -136,8 +136,11 @@ refused clip as `googleIdCollision`.
 --resolve-builtin [--dry-run]` writes `[tts.google_resolution]` (choice
 `builtin`, bound to the colliding packages' fingerprints) with the Host
 stopped and the data root held exclusively, as a restore is; any change to
-those packages makes the resolution void again. In native mode the command
-refuses: stop the services and paste the reported table yourself.
+those packages makes the resolution void again. `--dry-run` never blocks and
+writes nothing: it prints the packages, the table and whether exclusive access
+is obtainable now (or which exit code, 75, 76 or 77, would refuse it). In
+native mode the command refuses: stop the services and paste the reported
+table yourself.
 
 A `tts-adapters.d` that is itself a symlink (for example one managed by
 dotfiles) or not a directory is never followed, so it blocks built-in Google

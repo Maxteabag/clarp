@@ -1941,16 +1941,30 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
         print(f"clarp: google-collision: {message} (exit {code})", file=sys.stderr)
         return code
 
+    def unobtainable(code: int, message: str) -> int:
+        """Exclusivity is missing: resolve refuses; a dry-run never blocks or fails on it and
+        reports, read-only, what resolve would write."""
+        if not dry_run:
+            return refuse(code, message)
+        inventory = custom_tts_adapters.collision_inventory()
+        fingerprints = sorted(item["fingerprint"] for item in inventory["collisions"])
+        print(json.dumps({"exclusivity": f"not obtainable now (exit {code}: {message})",
+                          "inventory": inventory,
+                          "resolution_table": (_google_resolution_table(fingerprints)
+                                               if inventory["complete"] and fingerprints else "")},
+                         indent=2))
+        return 0
+
     if not locks.inherited_lock_fd(locks.USERS_FD, locks.USERS_LOCK):
-        return refuse(locks.EXIT_LOCKING, "run it as a maintenance command (docker compose run --rm "
-                                          "clarp clarp-admin …): the data-root locks are not held")
+        return unobtainable(locks.EXIT_LOCKING, "run it as a maintenance command (docker compose run "
+                                                "--rm clarp clarp-admin …): the data-root locks are not held")
     try:
         locks.check_filesystem(LAYOUT.data_root)
     except locks.RestoreRefused as refused:
-        return refuse(refused.code, str(refused))
+        return unobtainable(refused.code, str(refused))
     if _restore_in_progress(locks):
-        return refuse(locks.EXIT_IN_USE, "a restore is staged or in progress; start the Host to "
-                                         "complete it first")
+        return unobtainable(locks.EXIT_IN_USE, "a restore is staged or in progress; start the Host "
+                                               "to complete it first")
     owner = None
     try:
         try:
@@ -1958,28 +1972,22 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
                             os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
             # Lock the inode the path names, never a swapped one.
             if not locks.inherited_lock_fd(owner, locks.OWNER_LOCK):
-                return refuse(locks.EXIT_LOCKING, "the owner lock is not the expected regular file")
+                return unobtainable(locks.EXIT_LOCKING, "the owner lock is not the expected regular file")
             fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            if dry_run:
-                print(json.dumps({"exclusivity": "not obtainable now (exit 75: a Host owns the volume)"}))
-                return 0
-            return refuse(locks.EXIT_OWNED, "a Host owns the data root; stop it first")
+            return unobtainable(locks.EXIT_OWNED, "a Host owns the data root; stop it first")
         except OSError as exc:
-            return refuse(locks.EXIT_LOCKING, f"the owner lock cannot be taken: {type(exc).__name__}")
+            return unobtainable(locks.EXIT_LOCKING, f"the owner lock cannot be taken: {type(exc).__name__}")
         try:
             # Not atomic (flock(2)): on failure the shared lock may already be gone, so nothing
             # more is done and the command exits.
             fcntl.flock(locks.USERS_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            if dry_run:
-                print(json.dumps({"exclusivity": "not obtainable now (exit 76: the data root is in use)"}))
-                return 0
-            return refuse(locks.EXIT_IN_USE, "another Clarp process uses the data root")
+            return unobtainable(locks.EXIT_IN_USE, "another Clarp process uses the data root")
         except OSError as exc:
-            return refuse(locks.EXIT_LOCKING, f"the users lock cannot be taken: {type(exc).__name__}")
+            return unobtainable(locks.EXIT_LOCKING, f"the users lock cannot be taken: {type(exc).__name__}")
         if _restore_in_progress(locks):
-            return refuse(locks.EXIT_IN_USE, "a restore is staged or in progress")
+            return unobtainable(locks.EXIT_IN_USE, "a restore is staged or in progress")
         inventory = custom_tts_adapters.collision_inventory()
         if not inventory["complete"]:
             return refuse(locks.EXIT_REFUSED, "the adapter inventory cannot be fully inspected; "
@@ -2011,7 +2019,7 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
         expected = {"choice": "builtin", "packages": fingerprints}
         new_text = _with_google_resolution(raw.decode("utf-8"), fingerprints)
         if dry_run:
-            print(json.dumps({"exclusivity": "obtainable", "resolution": expected,
+            print(json.dumps({"exclusivity": "obtainable", "inventory": inventory, "resolution": expected,
                               "resolution_table": _google_resolution_table(fingerprints)}, indent=2))
             return 0
         backup = CONFIG_FILE.with_name(
