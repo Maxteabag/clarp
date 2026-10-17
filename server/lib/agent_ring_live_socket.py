@@ -588,7 +588,10 @@ def serve(handler) -> None:
     who = principal_of(handler)
     denied = require_full_scope(who, message="Agent-live calls require full-device authentication")
     if denied:
-        return _http_refusal(handler, 401, "live_auth")
+        # The shared full-scope refusal, unchanged and as the Oracle v2 socket sends it; live_auth is only for
+        # what this route itself decides (a revoked device at join).
+        from .oracle_realtime import _send_http_error
+        return _send_http_error(handler, 401, denied)
     principal = who.principal
     token = claim_session(principal)          # never supersedes another voice session
     if token is None:
