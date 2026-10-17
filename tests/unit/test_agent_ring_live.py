@@ -114,7 +114,7 @@ def test_an_explicit_classic_ring_and_answer_are_classic(env):
 
 def test_a_classic_ring_is_never_upgraded_on_answer(env):
     ring = _ring()["ring"]
-    _refused(409, "live_mode_conflict", rings.answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1")
+    _refused(409, "live_mode_conflict", rings.answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
     assert rings.get(ring["ring_id"])["state"] == "ringing"
 
 
@@ -312,10 +312,10 @@ def test_a_live_answer_hands_back_the_v2_grant_and_starts_no_group_call(sander):
 
 def test_a_live_answer_is_idempotent_for_its_owner_and_refused_to_anyone_else(sander):
     ring = _live_ring()["ring"]
-    first = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="req-1")
-    again = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="req-1")
+    first = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="req-1", client_nonce="c1")
+    again = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="req-1", client_nonce="c1")
     assert again["changed"] is False and again["live"] == first["live"]
-    _refused(409, "live_owner_conflict", rings.answer, OTHER_PHONE, ring["ring_id"], conversation_mode="agent_live_v1")
+    _refused(409, "live_owner_conflict", rings.answer, OTHER_PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
     assert len([e for e in sander.stream.of("agent-ring") if e["state"] == "answered"]) == 1
 
 
@@ -329,7 +329,7 @@ def test_an_old_or_classic_answer_to_a_live_ring_is_refused_and_it_keeps_ringing
 def test_a_live_answer_after_the_ring_ended_is_stale(sander):
     ring = _live_ring()["ring"]
     rings.decline(PHONE, ring["ring_id"])
-    _refused(409, "live_call_stale", rings.answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1")
+    _refused(409, "live_call_stale", rings.answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
 
 
 def test_the_feature_names_and_strings_are_the_v2_ones():
@@ -347,7 +347,7 @@ def test_a_live_answer_must_come_from_a_paired_full_scope_device(sander, who):
     _pair("device_limited", scope="limited")
     _pair("device_revoked", revoked=True)
     ring = _live_ring()["ring"]
-    _refused(403, "live_auth", rings.answer, who, ring["ring_id"], conversation_mode="agent_live_v1")
+    _refused(403, "live_auth", rings.answer, who, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
     assert rings.get(ring["ring_id"])["state"] == "ringing"
 
 

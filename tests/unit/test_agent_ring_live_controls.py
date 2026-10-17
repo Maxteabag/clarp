@@ -21,7 +21,7 @@ from tests.unit.test_agent_rings import _Handler, _server, env  # noqa: F401 - e
 def grant(sander):
     live.reset_for_tests()
     ring = _live_ring()["ring"]
-    return rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1")["live"]
+    return rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")["live"]
 
 
 def _body(grant, **kw):
@@ -287,14 +287,14 @@ def test_a_retried_close_still_stops_a_session_that_outlived_the_first_close(gra
 
 def test_a_repeat_live_answer_after_fallback_returns_the_classic_state(grant):
     out = _fallback(grant)
-    again = rings.answer(PHONE, grant["ring_id"], conversation_mode="agent_live_v1", request_id="r1")
+    again = rings.answer(PHONE, grant["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
     assert again["conversation_mode"] == "classic" and again["changed"] is False
     assert again["call"]["call_id"] == out["call"]["call_id"] and "live" not in again
 
 
 def test_a_repeat_live_answer_after_close_is_stale(grant):
     _close(grant)
-    _refused(409, "live_call_stale", rings.answer, PHONE, grant["ring_id"], conversation_mode="agent_live_v1")
+    _refused(409, "live_call_stale", rings.answer, PHONE, grant["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
 
 
 # ---- H-3: the ordered fallback transition (design H2-FALLBACK-TRANSITION-DESIGN.md) --------------
@@ -351,3 +351,42 @@ def test_a_live_session_that_will_not_stop_blocks_the_classic_start(grant, monke
     monkeypatch.setattr(calls, "start", lambda *a, **k: started.append(1))
     _refused(503, "live_unavailable", _fallback, grant)
     assert started == [] and _ring_of(grant)["_live_phase"] == "falling_back"
+
+
+# ---- ROOT dispositions: M1 request validation, M2 device-only controls, L1 receipt replay ----------
+
+def test_a_close_while_the_fallback_is_pending_is_stale(grant, monkeypatch):
+    monkeypatch.setattr(calls, "start", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")))
+    _refused(503, "live_unavailable", _fallback, grant)
+    _refused(409, "live_call_stale", _close, grant, call_epoch=2)
+
+
+@pytest.mark.parametrize("fn", ["close", "fallback"])
+def test_live_controls_from_a_non_device_principal_are_refused_with_live_auth(grant, fn):
+    _refused(403, "live_auth", _close if fn == "close" else _fallback, grant, who="administrator")
+
+
+def test_a_retired_close_replays_only_for_its_original_request(grant):
+    first = _close(grant, request_id="q1")
+    assert _close(grant, request_id="q1") == first
+    _refused(409, "live_call_stale", _close, grant, request_id="q2")
+
+
+@pytest.mark.parametrize("change", [{"request_id": 7}, {"request_id": ""}, {"request_id": "x" * 129},
+                                    {"client_nonce": None}, {"client_nonce": "y" * 129}])
+def test_a_live_answer_validates_its_request_identity(sander, change):
+    from tests.unit.test_agent_ring_live import _live_ring
+    ring = _live_ring()["ring"]
+    kw = {"request_id": "r1", "client_nonce": "c1", **change}
+    _refused(400, "live_request_invalid", rings.answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1", **kw)
+    assert rings.get(ring["ring_id"])["state"] == "ringing"
+
+
+def test_a_repeat_answer_with_the_same_request_id_but_another_nonce_is_refused(sander):
+    from tests.unit.test_agent_ring_live import _live_ring
+    ring = _live_ring()["ring"]
+    first = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
+    _refused(400, "live_request_invalid", rings.answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1",
+             request_id="r1", client_nonce="c2")
+    again = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="c1")
+    assert again["live"] == first["live"] and again["changed"] is False
