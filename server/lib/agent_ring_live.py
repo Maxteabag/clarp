@@ -51,6 +51,7 @@ CALL_STALE = "live_call_stale"
 OWNER_CONFLICT = "live_owner_conflict"
 UNAVAILABLE = "live_unavailable"
 FALLBACK_NOT_ALLOWED = "live_fallback_not_allowed"
+AUTH = "live_auth"
 
 # Profiles live under the Host's data root; tests point this elsewhere.
 ROOT = LAYOUT.data_root / "clarp" / "agent-live"
