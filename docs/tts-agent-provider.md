@@ -120,7 +120,9 @@ fixed code until an operator decides:
 
 An id counts as `google` exactly when the old Host read it as `google`
 (trimmed, lower case); any other id, a number or an empty id is no
-collision.
+collision. A manifest whose id is `google` counts even if its
+`schema_version` is not 1, although the old Host never loaded such a
+package: this over-blocks on purpose and is never repaired automatically.
 
 While refused, `GET /tts/providers` and the voice catalog show `google` as
 unavailable with that code (Google voices are listed with `current: false`
