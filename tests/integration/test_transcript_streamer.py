@@ -296,3 +296,50 @@ def test_streamer_does_not_walk_projects_for_an_unbound_agent_every_tick(streame
     assert streamer.pool.has(agent_id)
     assert time.monotonic() - started < 2.0
     claude_transcript.reset_transcript_index()
+
+
+def test_a_held_import_for_one_agent_does_not_delay_another_agents_speech(streamer_env, monkeypatch):
+    """One inotify thread serves every Claude agent. A slow transcript import
+    for agent A (a large, busy transcript) must not hold agent B's <speak>
+    block out of the TTS queue: Jonas's replies waited ~96 s on 17.10."""
+    import threading
+    from lib import transcript_incremental
+
+    streamer, tmp_path = streamer_env
+    agent_a, tx_a = _build_agent_with_transcript(
+        tmp_path, persona="Arnold", session="arnold", backend_session_id="cs-a")
+    agent_b, tx_b = _build_agent_with_transcript(
+        tmp_path, persona="Jonas", session="jonas", backend_session_id="cs-b")
+
+    entered = threading.Event()
+    release = threading.Event()
+    original = transcript_incremental.import_transcript
+
+    def import_transcript(*args, **kwargs):
+        if kwargs.get("agent_id") == agent_a:
+            entered.set()
+            release.wait(timeout=10.0)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(transcript_incremental, "import_transcript", import_transcript)
+
+    def b_rows():
+        from lib import db
+        return db.conn().execute(
+            "SELECT queue_id FROM tts_queue WHERE agent_id = ?", (agent_b,)).fetchall()
+
+    streamer.start()
+    try:
+        assert _wait_for(lambda: streamer.pool.has(agent_a) and streamer.pool.has(agent_b),
+                         timeout=2.0)
+        # A tool line: no speech, but its tick runs agent A's import.
+        _append(tx_a, {"type": "assistant",
+                       "message": {"content": [{"type": "tool_use", "name": "Bash"}]}})
+        assert entered.wait(timeout=2.0), "agent A's import never started"
+
+        _append(tx_b, _assistant_text("Ja, vent litt"))
+        assert _wait_for(b_rows, timeout=2.0), (
+            "agent B's speech waited for agent A's import")
+        assert not release.is_set()
+    finally:
+        release.set()
