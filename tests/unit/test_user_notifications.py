@@ -645,3 +645,64 @@ def test_a_follow_up_turn_on_the_same_desktop_message_does_not_push(monkeypatch)
     notification = _classify(aid, now + 2)
 
     assert notification["push"] is False
+
+
+def _suppressed_then_final(monkeypatch, *, session="adm"):
+    """One suppressed completion whose final prose lands afterwards."""
+    monkeypatch.setattr(user_notifications, "SETTLE_TIMEOUT_S", 0)
+    aid = _agent(persona="Ada", session=session)
+    now = db.now_ms()
+    backend = f"bs-{session}"
+    message_store.record_user_message(agent_id=aid, backend_session_id=backend,
+                                      client_msg_id=f"u-{session}-{now}", text="Ship it", origin="user")
+    done_ts = now + 1000
+    initial = user_notifications.classify_completed_turn(
+        agent_id=aid, session=session, persona="Ada", backend_session_id=backend, done_ts=done_ts)
+    assert initial["notify"] is False
+    db.conn().execute(
+        """INSERT INTO messages (message_id, agent_id, backend_session_id, seq, role, text,
+               tools_json, updated_at, origin) VALUES (?, ?, ?, ?, 'assistant', ?, '[]', ?, 'user')""",
+        (f"final-{session}", aid, backend, 2, "Shipped in build 7.", done_ts + 500))
+    return aid, backend, done_ts
+
+
+def test_reclassify_without_admit_is_unchanged(monkeypatch):
+    aid, backend, done_ts = _suppressed_then_final(monkeypatch, session="adm0")
+    flipped = user_notifications.reclassify_recent_suppressed(
+        agent_id=aid, backend_session_id=backend, now_ms_value=done_ts + 1000)
+    assert [n["source_message_id"] for n in flipped] == ["final-adm0"]
+
+
+def test_reclassify_admits_nothing_once_the_owner_is_no_longer_current(monkeypatch):
+    """E3: admit() False before the SELECT → no row work at all."""
+    aid, backend, done_ts = _suppressed_then_final(monkeypatch, session="adm1")
+    flipped = user_notifications.reclassify_recent_suppressed(
+        agent_id=aid, backend_session_id=backend, now_ms_value=done_ts + 1000, admit=lambda: False)
+    assert flipped == []
+
+
+def test_reclassify_discards_a_select_that_raced_a_rebind(monkeypatch):
+    """E3 checkpoint 3: admit() true before the SELECT but false after it (a
+    rebind reusing the bsid raced the SELECT) → the rows read are discarded,
+    never classified."""
+    aid, backend, done_ts = _suppressed_then_final(monkeypatch, session="adm2")
+    answers = iter([True, False])
+    classified: list = []
+    original = user_notifications.classify_completed_turn
+    monkeypatch.setattr(user_notifications, "classify_completed_turn",
+                        lambda **kw: classified.append(kw) or original(**kw))
+    flipped = user_notifications.reclassify_recent_suppressed(
+        agent_id=aid, backend_session_id=backend, now_ms_value=done_ts + 1000,
+        admit=lambda: next(answers))
+    assert flipped == [] and classified == []
+
+
+def test_reclassify_checks_admit_before_each_selected_row(monkeypatch):
+    """E3 checkpoint 4: admit() is consulted before the row's classify, so a
+    rebind after the SELECT check but before the row stops it."""
+    aid, backend, done_ts = _suppressed_then_final(monkeypatch, session="adm3")
+    answers = iter([True, True, False])
+    flipped = user_notifications.reclassify_recent_suppressed(
+        agent_id=aid, backend_session_id=backend, now_ms_value=done_ts + 1000,
+        admit=lambda: next(answers))
+    assert flipped == []
