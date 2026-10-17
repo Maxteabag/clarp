@@ -583,3 +583,49 @@ def test_an_old_watchers_change_after_a_different_bsid_rebind_records_nothing(st
     assert current.bsid == "cs-after" and len(submitted) == 1
     old_cb()
     assert streamer._dirty[agent_id] is current and len(submitted) == 1
+
+
+def test_a_new_watchers_first_change_before_watch_returns_is_kept(streamer_env, monkeypatch):
+    """S-1 boundary: the dispatcher ticks every pooled watcher (its startup tick,
+    the polling loop), so the new watcher can report a change as soon as it is in
+    the pool, before dispatcher.watch() returns. The binding is published first,
+    so that first change is recorded and submitted, not rejected and lost."""
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-first")
+    submitted = _recording_submissions(monkeypatch)
+    real_add = streamer.pool.add
+
+    def add_then_tick(aid, watcher):
+        real_add(aid, watcher)
+        watcher.on_change()                      # the watcher's actual callback
+
+    monkeypatch.setattr(streamer.pool, "add", add_then_tick)
+    streamer.reconcile_once()
+    intent = streamer._dirty[agent_id]
+    assert intent.bsid == "cs-first" and intent.gen == streamer._bind_generation[agent_id]
+    assert len(submitted) == 1
+
+
+def test_a_failed_watch_unwinds_the_published_binding(streamer_env, monkeypatch):
+    """S-1 boundary: when dispatcher.watch() fails after the binding was
+    published (and a change already recorded against it), the bind unwinds
+    completely: not bound, no generation, no pending change, no watcher."""
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-nowatch")
+    _recording_submissions(monkeypatch)
+    real_add = streamer.pool.add
+
+    def add_then_tick(aid, watcher):
+        real_add(aid, watcher)
+        watcher.on_change()
+
+    def refuse(aid, path):
+        raise OSError("inotify watch limit")
+
+    monkeypatch.setattr(streamer.pool, "add", add_then_tick)
+    monkeypatch.setattr(streamer.dispatcher, "watch", refuse)
+    streamer.reconcile_once()
+    assert agent_id not in streamer._bound
+    assert agent_id not in streamer._bind_generation
+    assert agent_id not in streamer._dirty
+    assert not streamer.pool.has(agent_id)
