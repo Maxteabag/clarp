@@ -466,12 +466,13 @@ def test_a_newer_change_during_a_running_callback_keeps_its_pending_intent(strea
         return []
 
     monkeypatch.setattr(user_notifications, "reclassify_recent_suppressed", blocking)
-    old = streamer._note_change(agent, "cs-race")
+    gen = streamer._bind_generation[agent_id]
+    old = streamer._note_change(agent, "cs-race", gen)
     runner = threading.Thread(target=lambda: streamer._after_import(agent_id, old.bsid, old.gen, old.seq))
     runner.start()
     try:
         assert inside.wait(2)
-        newer = streamer._note_change(agent, "cs-race")
+        newer = streamer._note_change(agent, "cs-race", gen)
         assert newer.seq > old.seq
     finally:
         release.set()
@@ -494,7 +495,7 @@ def test_a_callback_effect_failure_clears_only_its_own_intent(streamer_env, monk
         raise RuntimeError("effect failed")
 
     monkeypatch.setattr(user_notifications, "reclassify_recent_suppressed", boom)
-    intent = streamer._note_change(agent, "cs-fail")
+    intent = streamer._note_change(agent, "cs-fail", streamer._bind_generation[agent_id])
     streamer._after_import(agent_id, intent.bsid, intent.gen, intent.seq)
     assert agent_id not in streamer._dirty
 
@@ -519,7 +520,7 @@ def test_an_unresolved_intent_is_resubmitted_on_the_backoff_schedule(streamer_en
     monkeypatch.setattr(transcript_import_cache, "schedule_import", refused)
     monkeypatch.setattr(transcript_import_cache, "is_active", lambda *a, **kw: False)
 
-    streamer._on_change(agent, "cs-cap")                          # first submission, refused
+    streamer._on_change(agent, "cs-cap", streamer._bind_generation[agent_id])   # refused
     assert len(submissions) == 1 and agent_id in streamer._dirty
     seen = []
     for t in (0.5, 1.0, 2.9, 3.0, 6.9, 7.0, 15.0, 31.0, 63.0, 122.9, 123.0):
@@ -530,3 +531,55 @@ def test_an_unresolved_intent_is_resubmitted_on_the_backoff_schedule(streamer_en
             seen.append(t)
     assert seen == [1.0, 3.0, 7.0, 15.0, 31.0, 63.0, 123.0]
     assert agent_id in streamer._dirty                            # never dropped while bound
+
+
+def _recording_submissions(monkeypatch):
+    from lib import transcript_import_cache
+    submitted: list[str] = []
+
+    def record(path, importer, *, owner="", after=None):
+        submitted.append(str(path))
+        return True
+
+    monkeypatch.setattr(transcript_import_cache, "schedule_import", record)
+    return submitted
+
+
+def test_an_old_watchers_change_after_a_same_bsid_rebind_records_nothing(streamer_env, monkeypatch):
+    """S-1: the OLD watcher's own on_change, resumed after an unbind and a rebind
+    to the SAME backend session, is not stamped with the new generation: it
+    records no pending change and submits nothing; the new binding's pending
+    change is untouched."""
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-keep")
+    streamer.reconcile_once()
+    old_cb = streamer.pool.watcher_for(agent_id).on_change
+    submitted = _recording_submissions(monkeypatch)
+    streamer._unbind(agent_id)
+    streamer.reconcile_once()
+    new_cb = streamer.pool.watcher_for(agent_id).on_change
+    new_cb()
+    current = streamer._dirty[agent_id]
+    assert current.gen == streamer._bind_generation[agent_id] and len(submitted) == 1
+    old_cb()
+    assert streamer._dirty[agent_id] is current and len(submitted) == 1
+
+
+def test_an_old_watchers_change_after_a_different_bsid_rebind_records_nothing(streamer_env, monkeypatch):
+    """S-1: a stale callback for the previous backend session cannot overwrite the
+    new binding's pending change (which reconcile would then reject)."""
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-before")
+    streamer.reconcile_once()
+    old_cb = streamer.pool.watcher_for(agent_id).on_change
+    submitted = _recording_submissions(monkeypatch)
+    agents_db.bind_backend_session(agent_id, "cs-after")
+    (tmp_path / ".claude" / "projects" / "test-project" / "cs-after.jsonl").touch()
+    streamer.reconcile_once()
+    assert streamer._bound[agent_id] == "cs-after"
+    new_cb = streamer.pool.watcher_for(agent_id).on_change
+    new_cb()
+    current = streamer._dirty[agent_id]
+    assert current.bsid == "cs-after" and len(submitted) == 1
+    old_cb()
+    assert streamer._dirty[agent_id] is current and len(submitted) == 1
