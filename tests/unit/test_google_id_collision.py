@@ -814,3 +814,29 @@ def test_a_large_executable_is_fingerprinted_in_bounded_reads(root, monkeypatch)
     before = _fingerprint(root)
     (package / "adapter").write_bytes(b"\0" * (3 * 1024 * 1024 - 1) + b"\1")
     assert _fingerprint(root) != before                       # the content is still bound
+
+
+def test_a_dry_run_releases_the_owner_lock_before_its_read_only_report(operator, monkeypatch, capsys):
+    """Owner EX taken, users conversion refused (76): the report must not keep a starting Host out."""
+    other = os.open(operator["users"], os.O_WRONLY | os.O_APPEND)
+    fcntl.flock(other, fcntl.LOCK_SH)
+    real_inventory = custom_tts_adapters.collision_inventory
+    owner_free = []
+
+    def probing(*args, **kwargs):
+        probe = os.open(operator["owner"], os.O_WRONLY | os.O_APPEND)
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            owner_free.append(True)
+        except BlockingIOError:
+            owner_free.append(False)
+        finally:
+            os.close(probe)
+        return real_inventory(*args, **kwargs)
+    monkeypatch.setattr(custom_tts_adapters, "collision_inventory", probing)
+    try:
+        report = _dry_run(operator, capsys)
+    finally:
+        os.close(other)
+    assert "exit 76" in report["exclusivity"]
+    assert owner_free == [True]
