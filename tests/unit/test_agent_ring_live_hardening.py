@@ -290,3 +290,17 @@ def test_the_ring_poll_shows_a_live_ring_only_to_a_live_capable_phone(sander):
     assert rings.current(PHONE)["ring_id"] == ring["ring_id"]
     assert rings.current(OTHER_PHONE) is None and rings.current("administrator") is None
     assert not rings.event_visible(ring, OTHER_PHONE) and rings.event_visible(ring, PHONE)
+
+
+def test_a_classic_ring_keeps_voip_or_alert_exactly_as_before(sander, monkeypatch):
+    from tests.unit.test_agent_rings import _ring as classic_ring
+    sander.pushes.clear()
+    voip = []
+    monkeypatch.setattr(rings, "_push_voip", lambda ring: voip.append(ring["ring_id"]) or {"sent": 1})
+    sent = classic_ring()["ring"]                                    # VoIP delivered: no duplicate alert
+    assert voip == [sent["ring_id"]] and not [p for p in sander.pushes if p[1]["ring_id"] == sent["ring_id"]]
+    rings.decline(PHONE, sent["ring_id"])
+    sander.clock.advance(rings.AGENT_INTERVAL_MS / 1000 + 1)
+    monkeypatch.setattr(rings, "_push_voip", lambda ring: {"sent": 0})
+    unsent = classic_ring()["ring"]                                  # VoIP not delivered: the alert, as before
+    assert ("ring", unsent["ring_id"]) in [(kind, p["ring_id"]) for kind, p in sander.pushes]
