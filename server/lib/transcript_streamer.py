@@ -15,6 +15,7 @@ chatter line.
 """
 from __future__ import annotations
 
+import datetime
 import re
 import threading
 from typing import Callable
@@ -24,6 +25,7 @@ from . import backends, events
 from . import health
 from . import transcript_import_cache, transcript_incremental
 from . import tts_queue
+from .clock import now_ms
 from .log import log_exception
 from .protocol import TurnSource
 from .transcript_watcher import (
@@ -111,11 +113,12 @@ class TranscriptStreamer:
         # mid-conversation shouldn't replay history.
         watcher = TranscriptWatcher(
             path,
-            on_text=lambda text, a=agent: self._on_text(a, text),
+            on_text=lambda text, line_ts, a=agent: self._on_text(a, text, line_ts=line_ts),
             on_change=lambda a=agent, cs=backend_session_id: self._on_change(a, cs),
             start_at_end=True,
             backend_session_id=backend_session_id,
             persist_offset=True,
+            pass_line_timestamp=True,
         )
         self.pool.add(agent_id, watcher)
         try:
@@ -199,7 +202,7 @@ class TranscriptStreamer:
 
     # ---- text-block → tts_queue ----------------------------------------
 
-    def _on_text(self, agent: dict, text: str) -> None:
+    def _on_text(self, agent: dict, text: str, *, line_ts: str | None = None) -> None:
         """Called by the watcher when a new assistant text block lands.
         Extract <speak>...</speak> regions and enqueue each one as its
         own TTS clip. Untagged text is silent — it still streams to the
@@ -237,6 +240,7 @@ class TranscriptStreamer:
         voice_id = a.get("voice_id") or ""
         session = a.get("session") or ""
         trace_id = agents_db.get_trace(agent_id)
+        timing = _read_timing(line_ts)
 
         for chunk, first_chunk in spoken:
             # Persona prefix when this isn't the focused agent (same rule
@@ -259,7 +263,12 @@ class TranscriptStreamer:
                 _emit("transcript_streamer", "enqueue",
                       session=session,
                       detail={"queue_id": qid, "agent_id": agent_id,
-                              "chars": len(chunk), "tagged": True})
+                              "chars": len(chunk), "tagged": True,
+                              # The trace is the agent's marker when the block
+                              # is READ, not proof of the turn that wrote it.
+                              "selected_trace": trace_id,
+                              "trace_source": "read_time_marker",
+                              **timing})
             except Exception as e:
                 log_exception("transcriptStreamerEnqueueFail", e,
                               detail=str(agent_id))
@@ -299,6 +308,27 @@ class TranscriptStreamer:
             except Exception as e:
                 health.mark_error("transcript_streamer", e)
                 log_exception("transcriptStreamerReconcileFail", e)
+
+
+def _read_timing(line_ts: str | None) -> dict:
+    """How late a block was read, from the producer's own line timestamp.
+
+    Diagnostics only. A missing, unparseable or future timestamp is an unknown
+    clock (``ts_status`` absent/invalid/future), never a lag, and nothing here
+    decides which turn a block belongs to."""
+    if line_ts is None:
+        return {"line_ts": None, "read_lag_ms": None, "ts_status": "absent"}
+    try:
+        stamp = datetime.datetime.fromisoformat(line_ts.replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            raise ValueError("naive timestamp")
+        written_ms = int(stamp.timestamp() * 1000)
+    except (ValueError, OverflowError):
+        return {"line_ts": None, "read_lag_ms": None, "ts_status": "invalid"}
+    lag = now_ms() - written_ms
+    if lag < 0:
+        return {"line_ts": line_ts, "read_lag_ms": None, "ts_status": "future"}
+    return {"line_ts": line_ts, "read_lag_ms": lag, "ts_status": "ok"}
 
 
 def _live_backend_sessions() -> dict[str, str]:
