@@ -665,6 +665,8 @@ class Handler(BaseHTTPRequestHandler):
         "/calls/ring/cancel": "_handle_calls_ring_cancel",
         "/calls/ring/settings": "_handle_calls_ring_settings_post",
         "/calls/ring/voip-token": "_handle_calls_ring_voip_token",
+        "/calls/ring/live/close": "_handle_calls_ring_live_close",
+        "/calls/ring/live/fallback": "_handle_calls_ring_live_fallback",
         "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
         "/oracle/v2/calls/close": "_handle_oracle_live_call_close",
         "/oracle/v2/calls/control": "_handle_oracle_live_call_control",
@@ -4466,6 +4468,15 @@ class Handler(BaseHTTPRequestHandler):
         return self._calls_ring_run(lambda rings, principal, data: rings.answer(
             principal, str(data.get("ring_id") or ""), conversation_mode=data.get("conversation_mode"),
             request_id=data.get("request_id"), client_nonce=data.get("client_nonce")))
+
+    # Agent-live rings (WIRE-v2): the owner's controls of a Live-answered ring.
+    def _handle_calls_ring_live_close(self):
+        from lib import agent_ring_live
+        return self._calls_ring_run(lambda _r, principal, data: agent_ring_live.close(principal, data))
+
+    def _handle_calls_ring_live_fallback(self):
+        from lib import agent_ring_live
+        return self._calls_ring_run(lambda _r, principal, data: agent_ring_live.fallback(principal, data))
 
     def _handle_calls_ring_decline(self):
         return self._calls_ring_run(lambda rings, principal, data: rings.decline(
