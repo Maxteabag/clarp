@@ -361,6 +361,8 @@ def test_watcher_records_claimed_byte_offset_in_db(tmp_path, monkeypatch):
 def test_watcher_can_hand_over_each_lines_own_timestamp(tmp_path):
     """The streamer reports how late it read a block (P3). The timestamp is the
     producer's, passed as written; the watcher neither parses nor trusts it."""
+    from lib.transcript_watcher import TranscriptWatcher
+
     tx = tmp_path / "t.jsonl"
     tx.touch()
     received: list[tuple[str, object]] = []
@@ -377,6 +379,8 @@ def test_a_non_object_json_line_does_not_discard_the_next_line(tmp_path):
     """Behaviour change (P3, 2d3ee12d): a valid JSON line that is not an object is
     skipped. Before, `entry.get` raised inside the tick and the following lines
     read in that tick were never voiced."""
+    from lib.transcript_watcher import TranscriptWatcher
+
     tx = tmp_path / "t.jsonl"
     tx.touch()
     received: list[str] = []
