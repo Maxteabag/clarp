@@ -449,3 +449,21 @@ def test_an_exact_pre_fallback_close_replays_its_receipt_after_the_fallback(gran
     assert _close(grant, request_id="q1") == first                    # its saved Live-retirement receipt only
     _refused(409, "live_call_stale", _close, grant, request_id="q9")
     _refused(409, "live_call_stale", _close, grant, request_id="q9", call_epoch=2)
+
+
+def test_a_classic_call_whose_final_save_fails_is_ended_by_its_id_and_the_request_resumes_once(grant, monkeypatch):
+    real_save, saves = rings._save, []
+
+    def save(records):
+        saves.append(1)
+        if len(saves) == 2:                                   # T1 saves; T5 (the final save) fails
+            raise OSError("db locked")
+        return real_save(records)
+    monkeypatch.setattr(rings, "_save", save)
+    _refused(503, "live_unavailable", _fallback, grant)
+    assert calls.snapshot(PHONE)["call"] is None              # the started classic call was ended by id
+    ring = _ring_of(grant)
+    assert ring["_live_phase"] == "falling_back" and not ring["call_id"]
+    monkeypatch.setattr(rings, "_save", real_save)
+    out = _fallback(grant)                                    # the same request resumes: one fresh call
+    assert out["conversation_mode"] == "classic" and calls.snapshot(PHONE)["call"]["call_id"] == out["call"]["call_id"]
