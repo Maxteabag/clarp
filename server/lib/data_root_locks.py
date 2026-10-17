@@ -291,6 +291,17 @@ def recover_marker() -> str:
     return "completed"
 
 
+def _apply_errors() -> tuple[type[BaseException], ...]:
+    import sqlite3
+    import tarfile
+    import zlib
+    return (tarfile.TarError, EOFError, zlib.error, sqlite3.DatabaseError, ValueError, OSError)
+
+
+# The failures `apply` maps to an exit code (78; OSError 77), before and after the marker.
+_APPLY_ERRORS = _apply_errors()
+
+
 def apply_staged_restore() -> bool:
     """The server-CMD apply, entered only after the entrypoint shell took owner EX (fd 8) and users
     EX (fd 9). Every refusal happens before the marker and before any deletion; the pending
@@ -314,13 +325,22 @@ def apply_staged_restore() -> bool:
                                           if conflict else "restore refused: database use "
                                           "could not be verified")
     write_marker()
-    instance_backup.replace_data_root(pending)
-    directory = backups_dir()
-    pending.unlink()
-    _fsync_dir(directory)
-    remove_sidecar()
-    (directory / MARKER).unlink()
-    _fsync_dir(directory)
+    try:
+        instance_backup.replace_data_root(pending)
+        directory = backups_dir()
+        pending.unlink()
+        _fsync_dir(directory)
+        remove_sidecar()
+        (directory / MARKER).unlink()
+        _fsync_dir(directory)
+    except _APPLY_ERRORS as exc:
+        # Past the marker the data root is being replaced: never "refused" or "unchanged". The
+        # marker (and the archive, unless its removal already succeeded) stay for the next start.
+        kept = "the marker and staged archive are kept" if pending.exists() else "the marker is kept"
+        raise RestoreRefused(
+            EXIT_LOCKING if isinstance(exc, OSError) else EXIT_REFUSED,
+            f"restore interrupted, incomplete: the data root may be partially replaced; {kept}; "
+            f"start the Host to complete it: {exc}") from exc
     return True
 
 
@@ -336,15 +356,12 @@ def _main(argv: list[str]) -> int:
             fd, name = {"owner": (OWNER_FD, OWNER_LOCK), "users": (USERS_FD, USERS_LOCK)}[argv[1]]
             require_held(fd, name)
         elif command == "apply":
-            import sqlite3
-            import tarfile
-            import zlib
             try:
                 apply_staged_restore()
-            except (tarfile.TarError, EOFError, zlib.error, sqlite3.DatabaseError, ValueError) as exc:
-                raise RestoreRefused(EXIT_REFUSED, f"restore refused: unreadable archive: {exc}") from exc
             except OSError as exc:
                 raise RestoreRefused(EXIT_LOCKING, f"restore refused: I/O on the data root: {exc}") from exc
+            except _APPLY_ERRORS as exc:
+                raise RestoreRefused(EXIT_REFUSED, f"restore refused: unreadable archive: {exc}") from exc
         elif command == "recover-marker":
             state = recover_marker()
             if state == "interrupted":
