@@ -23,6 +23,7 @@ import json
 import pathlib
 import re
 import threading
+import time
 from datetime import datetime
 from typing import Any
 
@@ -253,6 +254,7 @@ def snapshot_of(ring_id: str) -> dict | None:
 REQUEST_INVALID = "live_request_invalid"
 CLOSE_REASONS = ("user_hangup", "audio_not_ready", "transport_lost")
 LIVE_PHASES = ("answered_waiting_join", "connecting", "ready", "active")
+FALLBACK_STOP_WAIT_S = 3.0      # the Live session must confirm its stop this soon before classic starts
 _SESSIONS_LOCK = threading.Lock()
 _SESSIONS: dict = {}            # call_id → the running session (registered by the socket)
 
@@ -360,44 +362,91 @@ def fallback(principal: str, data: Any) -> dict:
     Allowed once, only while the Live opening is not consumed (consumed the moment
     its instruction append is attempted, so never after an uncertain admission)
     and before any user audio went upstream, and only with the phone's word that
-    its Live audio has stopped. The CAS retires Live (authority first), bumps the epoch and starts
-    the ordinary group call with its own opening for the same ring."""
+    its Live audio has stopped. Ordered (H2-FALLBACK-TRANSITION-DESIGN.md):
+    T1 under the ring lock: verify, retire Live, bump the epoch (Live authority is
+    gone from here) and save; T2 stop the Live session and confirm it stopped;
+    T3 voice the classic opening; T4 start the classic group call (idempotent on
+    the ring id); T5 under the lock: mark it classic. No network work happens under
+    the ring lock. A failure after T1 answers 503 live_unavailable and leaves the
+    record falling_back: Live stays revoked, nothing classic runs twice, and the
+    same request_id resumes at T2."""
     from . import agent_rings, group_calls
     from . import agents as agents_db
-    with agent_rings._lock:
+    with agent_rings._lock:                                            # T1
         records = agent_rings._load()
         ring = _owned(records, principal, data)
         epoch = _epoch(data, "expected_epoch")
         if data.get("audio_stopped") is not True or not isinstance(data.get("request_id"), str) \
                 or not data["request_id"]:
             raise CallError(400, REQUEST_INVALID)
-        if ring.get("_live_phase") == "classic":
+        phase = ring.get("_live_phase")
+        if phase in ("classic", "falling_back"):
             if data["request_id"] != ring.get("_live_fallback_request_id"):
                 raise CallError(409, FALLBACK_NOT_ALLOWED)
+        else:
+            if epoch != ring["_live_call_epoch"]:
+                raise CallError(409, CALL_STALE)
+            if ring.get("_live_opening_consumed") or ring.get("_live_audio_forwarded"):
+                raise CallError(409, FALLBACK_NOT_ALLOWED)
+            if phase not in LIVE_PHASES and phase != "retired":
+                raise CallError(409, FALLBACK_NOT_ALLOWED)
+            retire(ring, "fallback")
+            ring.update(_live_phase="falling_back", _live_call_epoch=epoch + 1,
+                        _live_fallback_request_id=data["request_id"])
+            agent_rings._save(records)
+            _audit_quietly({"outcome": "live_fallback_started", "ring_id": ring["ring_id"], "by": principal,
+                            "live_call_id": ring["_live_call_id"]})
+        if phase == "classic":
             out = agent_rings._answered(ring, group_calls.get_call(ring["call_id"]), changed=False)
-            return {**out, "conversation_mode": MODE_CLASSIC}
-        if epoch != ring["_live_call_epoch"]:
-            raise CallError(409, CALL_STALE)
-        if ring.get("_live_opening_consumed") or ring.get("_live_audio_forwarded"):
-            raise CallError(409, FALLBACK_NOT_ALLOWED)
-        was_live = retire(ring, "fallback")
-        if not was_live and ring.get("_live_phase") != "retired":
-            raise CallError(409, FALLBACK_NOT_ALLOWED)
-        agent = agents_db.get_by_agent_id(ring["agent_id"]) or {"session": ring["session"]}
-        if not ring.get("opening_audio_url"):
-            ring["opening_audio_url"] = agent_rings._voice(ring["opening_line"], agent)
+            call_id = ring["_live_call_id"]
+        else:
+            out = None
+        snapshot = dict(ring)
+    if out is not None:                                                # an earlier fallback, repeated
+        _stop_session(call_id, "fallback")
+        return {**out, "conversation_mode": MODE_CLASSIC}
+    call_id = snapshot["_live_call_id"]
+    _stop_session(call_id, "fallback")                                 # T2
+    deadline = time.monotonic() + FALLBACK_STOP_WAIT_S
+    while _session_for(call_id) is not None:
+        if time.monotonic() >= deadline:
+            log_exception("agentLiveFallbackStopTimeout", RuntimeError("Live session did not stop"),
+                          f"call={call_id}")
+            raise CallError(503, UNAVAILABLE)
+        time.sleep(0.02)
+    audio_url = snapshot.get("opening_audio_url") or ""
+    if not audio_url:                                                  # T3 (never fatal)
+        agent = agents_db.get_by_agent_id(snapshot["agent_id"]) or {"session": snapshot["session"]}
+        audio_url = agent_rings._voice(snapshot["opening_line"], agent)
+    try:                                                               # T4
         started = group_calls.start(
-            principal, [ring["session"]], request_id=ring["ring_id"], by=ring["session"],
-            ring={"ring_id": ring["ring_id"], "reason": ring["reason"], "opening_line": ring["opening_line"]})
-        call = started["call"]
-        ring.update(_live_phase="classic", _live_call_epoch=epoch + 1, call_id=call["call_id"],
-                    _live_fallback_request_id=data["request_id"])
+            principal, [snapshot["session"]], request_id=snapshot["ring_id"], by=snapshot["session"],
+            ring={"ring_id": snapshot["ring_id"], "reason": snapshot["reason"],
+                  "opening_line": snapshot["opening_line"]})
+    except Exception as exc:  # noqa: BLE001 - truthful 503; the same request resumes here
+        log_exception("agentLiveFallbackStartFail", exc, f"call={call_id}")
+        raise CallError(503, UNAVAILABLE) from None
+    call = started["call"]
+    with agent_rings._lock:                                            # T5
+        records = agent_rings._load()
+        ring = next(r for r in records if r.get("_live_call_id") == call_id)
+        if ring.get("_live_phase") != "falling_back" or \
+                ring.get("_live_fallback_request_id") != data["request_id"]:
+            raise CallError(409, FALLBACK_NOT_ALLOWED)
+        ring.update(_live_phase="classic", call_id=call["call_id"], opening_audio_url=audio_url)
         agent_rings._save(records)
-        agent_rings._audit({"outcome": "live_fallback", "ring_id": ring["ring_id"], "by": principal,
-                            "live_call_id": ring["_live_call_id"], "call_id": call["call_id"]})
-    if was_live:
-        _stop_session(ring["_live_call_id"], "fallback")
+    _audit_quietly({"outcome": "live_fallback", "ring_id": ring["ring_id"], "by": principal,
+                    "live_call_id": call_id, "call_id": call["call_id"]})
     return {**agent_rings._answered(ring, call, changed=True), "conversation_mode": MODE_CLASSIC}
+
+
+def _audit_quietly(entry: dict) -> None:
+    """The audit trail is diagnostics: it never blocks or undoes a transition."""
+    from . import agent_rings
+    try:
+        agent_rings._audit(entry)
+    except Exception as exc:  # noqa: BLE001
+        log_exception("agentLiveAuditFail", exc, str(entry.get("outcome")))
 
 
 def reset_for_tests() -> None:
