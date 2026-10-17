@@ -266,6 +266,14 @@ def device_ok(principal: str) -> bool:
     return row is not None and row["revoked_at"] is None and row["scope"] == "full"
 
 
+def require_device(principal: str) -> None:
+    """The Live call's controls (join, close, fallback) are a paired full-scope device's (M-2). The
+    administrator token, or a revoked or limited device, gets 403 live_auth; creating a ring is not a control
+    and stays open to the owner CLI."""
+    if not isinstance(principal, str) or not principal.startswith("device_") or not device_ok(principal):
+        raise CallError(403, AUTH)
+
+
 def _session_for(call_id: str):
     with _SESSIONS_LOCK:
         return _SESSIONS.get(call_id)
@@ -457,6 +465,7 @@ def close(principal: str, data: Any) -> dict:
     an earlier close failed to stop. The audit runs after the stop, best effort.
     The answer carries the ring's own epoch and actual state (classic after a fallback)."""
     from . import agent_rings
+    require_device(principal)
     call_id, stop, save_error, changed = None, False, None, False
     try:
         with agent_rings._lock:
@@ -539,6 +548,7 @@ def fallback(principal: str, data: Any) -> dict:
     A failure after the stop leaves Live retired and no classic call."""
     from . import agent_rings, group_calls
     from . import agents as agents_db
+    require_device(principal)
     call_id, stop, replay, save_error = None, False, None, None
     try:
         with agent_rings._lock:
