@@ -251,3 +251,23 @@ def test_close_after_the_fallback_is_stale(grant):
     _fallback(grant)
     _refused(409, "live_call_stale", _close, grant)
     _refused(409, "live_call_stale", _close, grant, call_epoch=2)
+
+
+def test_every_live_http_route_refuses_in_the_ring_routes_ok_false_envelope(grant, sander):
+    """Frozen per route: {"ok": false, "error": "<fixed code>"} (the existing _calls_ring_run wrapper)."""
+    from tests.unit.test_agent_ring_live import OPENING
+    server = _server()
+    cases = [
+        ("_handle_calls_ring", {"reason": "r", "opening_line": OPENING, "conversation_mode": "agent_live_v2"},
+         400, "live_mode_invalid", "a-sander"),
+        ("_handle_calls_ring_answer", {"ring_id": grant["ring_id"]}, 409, "live_client_required", ""),
+        ("_handle_calls_ring_voip_token", {"token": "ab" * 32, "supported_conversation_modes": ["x"]},
+         400, "live_mode_invalid", ""),
+        ("_handle_calls_ring_live_close", _body(grant, call_epoch=9, reason="user_hangup"), 409, "live_call_stale", ""),
+        ("_handle_calls_ring_live_fallback", _body(grant, expected_epoch=1, audio_stopped=False),
+         400, "live_request_invalid", ""),
+    ]
+    for route, body, status, code, turn_agent in cases:
+        handler = _Handler(body, sander, turn_agent=turn_agent)
+        getattr(server.Handler, route)(handler)
+        assert handler.sent == [(status, {"ok": False, "error": code})], route
