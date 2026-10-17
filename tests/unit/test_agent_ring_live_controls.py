@@ -417,3 +417,35 @@ def test_the_owner_cli_rings_live_for_a_named_agent_and_an_agent_turn_still_ring
 def test_a_boolean_epoch_on_the_http_controls_is_invalid(grant):
     _refused(400, "live_request_invalid", _close, grant, call_epoch=True)
     _refused(400, "live_request_invalid", _fallback, grant, expected_epoch=True)
+
+
+# ---- WIRE-v2-REVIEW-DISPOSITIONS fef6043f -------------------------------------------------------
+
+def test_a_different_answer_request_against_an_answered_live_ring_is_stale(grant):
+    _refused(409, "live_call_stale", rings.answer, PHONE, grant["ring_id"], conversation_mode="agent_live_v1",
+             request_id="r2", client_nonce="c2")
+
+
+def test_answer_identity_bounds_are_utf8_bytes(sander):
+    from tests.unit.test_agent_ring_live import _live_ring
+    ring = _live_ring()["ring"]
+    _refused(400, "live_request_invalid", rings.answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1",
+             request_id="ø" * 65, client_nonce="c1")                    # 65 chars = 130 UTF-8 bytes
+    out = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="ø" * 64,
+                       client_nonce="c1")
+    assert out["changed"] is True
+
+
+def test_the_close_receipt_is_the_saved_one_and_a_reused_request_id_with_another_body_is_invalid(grant):
+    first = _close(grant, request_id="q1", reason="user_hangup")
+    assert first == {"ok": True, "call_id": grant["call_id"], "call_epoch": 1, "state": "retired"}
+    assert _close(grant, request_id="q1", reason="user_hangup") == first
+    _refused(400, "live_request_invalid", _close, grant, request_id="q1", reason="transport_lost")
+
+
+def test_an_exact_pre_fallback_close_replays_its_receipt_after_the_fallback(grant):
+    first = _close(grant, request_id="q1")
+    _fallback(grant)
+    assert _close(grant, request_id="q1") == first                    # its saved Live-retirement receipt only
+    _refused(409, "live_call_stale", _close, grant, request_id="q9")
+    _refused(409, "live_call_stale", _close, grant, request_id="q9", call_epoch=2)
