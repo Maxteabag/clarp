@@ -840,3 +840,14 @@ def test_a_dry_run_releases_the_owner_lock_before_its_read_only_report(operator,
         os.close(other)
     assert "exit 76" in report["exclusivity"]
     assert owner_free == [True]
+
+
+@pytest.mark.parametrize("schema", [2, 0, "1", None])
+def test_a_google_manifest_with_another_schema_version_still_collides(root, monkeypatch, schema):
+    """Decision (a): Host 64 loaded only schema_version 1, but a manifest whose id normalizes to
+    "google" is a collision whatever its schema (conservative over-block, never treated as absent)."""
+    _cfg(monkeypatch)
+    _package(root, manifest={**LEGACY, "schema_version": schema})
+    inventory = _state(root)
+    assert inventory["complete"] is True and len(inventory["collisions"]) == 1
+    assert google_tts.collision_code() == COLLISION
