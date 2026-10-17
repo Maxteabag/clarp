@@ -9,7 +9,7 @@ from lib import agents, db, scheduler
 
 
 @pytest.fixture(autouse=True)
-def _isolated_db(tmp_path: pathlib.Path):
+def _isolated_db(_transcript_importer_quiescent, tmp_path: pathlib.Path):
     db.reset_for_tests(tmp_path / "test_state.sqlite")
     yield
     db.reset_for_tests(None)
