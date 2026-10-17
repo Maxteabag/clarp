@@ -111,6 +111,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/group_calls.py", "_context"): "the event stream bound once by the server composition root",
     ("lib/agent_ring_live.py", "_SESSIONS"): JOBS,
     ("lib/agent_ring_live.py", "_RETIRED"): JOBS,          # retirements of the running sessions; bounded
+    ("lib/agent_ring_live.py", "_CLOSURES"): JOBS,         # closure state of ended sessions; bounded
     ("lib/agent_rings.py", "_context"): "the event stream and TTS engine bound by the server composition root",
     ("lib/oracle_live_stable.py", "_CLOSING"): ORACLE,
     ("lib/oracle_live_stable.py", "_STOP_HOOKS"): ORACLE,
