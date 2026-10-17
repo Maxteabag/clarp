@@ -488,9 +488,12 @@ def _announce(ring: dict, kind: str) -> dict:
             delivery["voip"] = _push_voip(ring) or {}
         except Exception as exc:  # noqa: BLE001
             log_exception("agentRingVoipFail", exc, f"ring={ring['ring_id']}")
-    live_ring = kind == "ring" and bool(ring.get("conversation_mode"))
-    if live_ring:
-        pass        # H6: a Live ring is VoIP to capable phones only; it never falls back to the global alert
+    from .agent_ring_live import MODE_LIVE
+    if ring.get("conversation_mode") == MODE_LIVE:
+        # H6: the global alert reaches every phone, also those that cannot run Live. A Live ring is
+        # announced by VoIP to capable phones only, for its first ring and for every later state
+        # (answered, declined, missed, cancelled): no global alert, ever.
+        pass
     elif not (delivery.get("voip") or {}).get("sent"):
         try:
             delivery.update(_push(ring, kind) or {})
