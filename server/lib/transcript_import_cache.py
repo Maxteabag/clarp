@@ -112,11 +112,11 @@ def import_if_changed(path: pathlib.Path, importer: Callable[[], None],
 @dataclass(frozen=True)
 class DrainRecord:
     """What a test reset waits for: kept across a timed-out reset until a later
-    reset finds it all finished. ``worker`` is the Thread object itself, because
-    the worker clears the module global before its thread has exited."""
+    reset finds it all finished. ``threads`` are the Thread objects themselves,
+    from the registry: a worker clears the module global, and a timer removes its
+    _deferred entry, before its thread has exited."""
     epoch: int
-    timers: tuple
-    worker: threading.Thread | None
+    threads: tuple
 
 
 # Test reset state (tests/conftest.py). The fence refuses new work while a reset
@@ -127,6 +127,13 @@ _reset_owner: object | None = None
 _drain: DrainRecord | None = None
 _direct_active = 0
 _running: tuple[str, int] | None = None
+# Every worker and window-timer Thread this module started, registered under
+# _guard in the same section that starts it. A thread never removes itself (it
+# cannot report having fully exited); dead entries are pruned when a thread is
+# started and when a reset clears. Its size is the live tracked threads plus
+# those that died since the last prune: no history accumulates, but it is not a
+# cap on live timers or unwinding threads.
+_threads: set[threading.Thread] = set()
 
 
 def reset_for_tests(deadline_s: float = 5.0) -> bool:
@@ -143,24 +150,23 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
         if not _resetting:
             _resetting = True
             _epoch += 1
-            timers = tuple(entry[1] for entry in _deferred.values())
-            for timer in timers:
-                timer.cancel()
-            _drain = DrainRecord(_epoch, timers, _worker)
+            for entry in _deferred.values():
+                entry[1].cancel()
+            # Under the fence nothing new starts, so the live registry is every
+            # thread this reset has to outlive: armed timers, the worker, and
+            # any worker or timer callback still unwinding off the globals.
+            _drain = DrainRecord(_epoch, tuple(t for t in _threads if t.is_alive()))
             _deferred.clear()
             _pending.clear()
         drain = _drain
     try:
         end = time.monotonic() + deadline_s
-        for timer in drain.timers:
-            timer.join(max(0.0, end - time.monotonic()))
-        if drain.worker is not None:
-            drain.worker.join(max(0.0, end - time.monotonic()))
+        for thread in drain.threads:
+            thread.join(max(0.0, end - time.monotonic()))
         with _cond:
             while _direct_active and (remaining := end - time.monotonic()) > 0:
                 _cond.wait(remaining)
-            quiet = (all(not timer.is_alive() for timer in drain.timers)
-                     and (drain.worker is None or not drain.worker.is_alive())
+            quiet = (all(not thread.is_alive() for thread in drain.threads)
                      and (_worker is None or not _worker.is_alive())
                      and _running is None and _direct_active == 0)
             if quiet:
@@ -169,6 +175,7 @@ def reset_for_tests(deadline_s: float = 5.0) -> bool:
                 _last_started.clear()
                 _deferred.clear()
                 _pending.clear()
+                _threads.difference_update([t for t in _threads if not t.is_alive()])
                 _drain = None
                 _resetting = False
                 return True
@@ -203,11 +210,29 @@ def _queued_after(key: str):
     return queued[0][3] if queued else None
 
 
-def _ensure_worker() -> None:
+def _start_tracked(thread: threading.Thread) -> bool:
+    """Under _guard: register and start ``thread`` in this one section, so a
+    reset never snapshots a registered thread that has not started. False, with
+    nothing registered, when the thread could not start."""
+    _threads.difference_update([t for t in _threads if not t.is_alive()])
+    _threads.add(thread)
+    try:
+        thread.start()
+    except RuntimeError:
+        _threads.discard(thread)
+        return False
+    return True
+
+
+def _ensure_worker() -> bool:
+    """Under _guard. False when no worker runs and a new one could not start."""
     global _worker
     if _worker is None:
-        _worker = threading.Thread(target=_drain_background, name='transcript-import', daemon=True)
-        _worker.start()
+        worker = threading.Thread(target=_drain_background, name='transcript-import', daemon=True)
+        if not _start_tracked(worker):
+            return False
+        _worker = worker
+    return True
 
 
 def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: str = '',
@@ -218,7 +243,7 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
     import. False when refused (queue full, or a test reset in progress)."""
     key = f'{owner}\0{path}'
     signature = _signature(path)
-    full = False
+    full = start_failed = False
     with _guard:
         if _resetting:
             return False
@@ -238,15 +263,24 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
                 timer = threading.Timer(wait, _schedule_deferred)
                 timer.args = (key, _epoch, timer)
                 timer.daemon = True
-                _deferred[key] = (request, timer, _epoch)
-                timer.start()
-            return True
-        if key not in _pending and len(_pending) >= _BACKGROUND_LIMIT:
+                if not _start_tracked(timer):
+                    start_failed = True
+                else:
+                    _deferred[key] = (request, timer, _epoch)
+            if not start_failed:
+                return True
+        elif key not in _pending and len(_pending) >= _BACKGROUND_LIMIT:
             # The next request/watcher can retry; never create unbounded threads.
             full = True
         else:
             _pending[key] = (request, _epoch)
-            _ensure_worker()
+            if not _ensure_worker():
+                del _pending[key]           # no worker owns it: refuse instead
+                start_failed = True
+    if start_failed:
+        from .log import log
+        log("transcriptImportThreadStartFail", f"owner={owner}")
+        return False
     if full:
         if after is not None:
             from .log import log
@@ -258,7 +292,7 @@ def schedule_import(path: pathlib.Path, importer: Callable[[], None], *, owner: 
 def _schedule_deferred(key: str, epoch: int, token: threading.Timer) -> None:
     """The window closed: admit the newest request, unless a test reset began
     since this timer was armed (a stale timer touches nothing)."""
-    full_owner = None
+    full_owner = failed_owner = None
     with _guard:
         entry = _deferred.get(key)
         if _resetting or epoch != _epoch or entry is None or entry[1] is not token:
@@ -287,7 +321,12 @@ def _schedule_deferred(key: str, epoch: int, token: threading.Timer) -> None:
             if after is None and key in _pending:
                 request = (path, importer, owner, _pending[key][0][3])
             _pending[key] = (request, _epoch)
-            _ensure_worker()
+            if not _ensure_worker():
+                del _pending[key]
+                failed_owner = owner
+    if failed_owner is not None:
+        from .log import log
+        log("transcriptImportThreadStartFail", f"owner={failed_owner}")
     if full_owner is not None:
         from .log import log
         log("transcriptImportQueueFull", f"owner={full_owner}")

@@ -716,7 +716,7 @@ def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeyp
     resetter.start()
     try:
         assert _wait_until(lambda: cache._resetting)
-        assert resetter.is_alive() and cache._drain.worker is worker
+        assert resetter.is_alive() and worker in cache._drain.threads
     finally:
         release.set()
         resetter.join(5)
