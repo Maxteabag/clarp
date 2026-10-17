@@ -247,6 +247,9 @@ def ring(*, caller_agent_id: str = "", agent: str = "", reason: str = "", openin
             if not opening:
                 raise CallError(400, "opening_line required")
             if mode == live.MODE_LIVE:
+                # Live compares whitespace-normalised texts and never accepts a cut line.
+                if len(" ".join(str(opening_line or "").split())) > OPENING_CHARS:
+                    raise CallError(400, live.CONTEXT_INVALID)
                 context = live.validate_context(event_context, opening)
                 event_key = f"{context['source']}:{context['event']['id']}"
                 replay = next((r for r in reversed(records) if r["agent_id"] == who["agent_id"]
