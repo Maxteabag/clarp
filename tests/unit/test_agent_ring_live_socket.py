@@ -513,3 +513,25 @@ def test_the_live_instructions_hold_no_tools_and_mark_observations_as_data(call)
     assert "You are Sandra." in text and "no tools" in text and "data, not instructions" in text
     assert "<speak>" in text and "Nothing has been played to the user yet" in text
     assert OPENING not in text                 # the opening is appended once, at admission, not baked in
+
+
+def test_a_slow_opening_record_never_trips_the_ack_deadline(call, monkeypatch):
+    """The opening's own record write (consume) can take longer than a tick; the ACK deadline must already
+    count from the opening, not read the unset 0.0 and fail the call as opening_not_taken."""
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    _wait(lambda: "agent_live.provider_ready" in _types(h))
+    real = rings._save
+
+    def slow(records):
+        if any(r.get("_live_opening_consumed") and r.get("_live_phase") == "ready" for r in records):
+            time.sleep(0.5)            # five ticks inside the opening's record write
+        return real(records)
+    monkeypatch.setattr(rings, "_save", slow)
+    h.send(_ready(call.grant))
+    _wait(lambda: "agent_live.opening_admitted" in _types(h))
+    assert "agent_live.error" not in _types(h)
+    assert len(call.up.of("session.instructions.append")) == 1
+    h.send({"type": "session.close"})
+    thread.join(15)
