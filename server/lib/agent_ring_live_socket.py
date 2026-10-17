@@ -9,10 +9,15 @@ paid starts, then holds one upstream GPT-Live session (``gpt-live-1``, voice
 The opening is admitted exactly once: when the phone said ``client_ready``, the
 provider said ``session.started`` and the call is still current, the Host marks
 the opening consumed on the ring, appends it upstream and, on the provider's
-``session.instructions.appended``, sends ``agent_live.opening_admitted``. Until
-then the Host feeds silence upstream (the provider ingests an append only while
-input audio flows; U-1 receipt) and refuses phone audio with ``audio_not_ready``;
-the phone holds what it captured (at most 3 s) and sends it after the ACK.
+``session.instructions.appended``, sends ``agent_live.opening_admitted``. No
+model audio reaches the phone before that ACK (it is held, bounded, then sent in
+order), and phone audio before it is refused with ``audio_not_ready``: the phone
+holds what it captured (at most 3 s) and sends it after the ACK. From admission
+the Host feeds synthetic silence upstream (a proposed mechanism resting on two
+provider observations, not a provider guarantee) until the phone's first real
+frame, hangup, an error or a finite budget. An uncertain admission (no receipt,
+or a provider error after the append) fails the call; the opening stays consumed
+and no fallback or retry is offered.
 
 This reuses only the Oracle-v2 socket helpers, the shared voice-ownership claim
 (never superseding another session) and the upstream connector; no Oracle
@@ -39,6 +44,11 @@ OPENING_ACK_S = 10.0            # the provider must take the opening this soon a
 TICK_S = 0.1
 DEVICE_CHECK_TICKS = 10         # a revoked or downgraded device is noticed within a second
 SILENCE = base64.b64encode(bytes(int(24000 * TICK_S) * 2)).decode("ascii")   # 100 ms of PCM16 24 kHz mono
+# The synthetic-silence feed (a proposed mechanism, from two provider observations: an append was
+# taken only while input flowed). It starts at the readiness fence, with the opening, and stops at
+# the phone's first real frame, at hangup or error, or after this budget, whichever comes first.
+SILENCE_BUDGET_S = OPENING_ACK_S + 5.0
+HELD_OUTPUT_BYTES = 144000      # at most 3 s of model audio is held until the opening ACK
 MAX_AUDIO_B64 = 262144
 ERROR_CODES = ("live_auth", "live_owner_conflict", "live_call_stale", "live_join_expired", "live_join_consumed",
                "live_context_unavailable", "live_unavailable", "audio_not_ready")
@@ -117,6 +127,9 @@ class LiveSocket:
         self._state = threading.Lock()
         self.client_ready = self.provider_ready = self.opening_sent = self.admitted = self.forwarding = False
         self.opening_sent_at = 0.0
+        self.silence_until = 0.0                    # monotonic deadline of the silence feed; 0 = off
+        self.held: list[str] = []                   # model audio that arrived before the opening ACK
+        self.held_bytes = 0
         self.reason = ""
 
     # -- identity -------------------------------------------------------------------
@@ -200,6 +213,9 @@ class LiveSocket:
         if not self._record(consume):
             return self.fail("live_call_stale", "stale")
         self.opening_sent_at = time.monotonic()
+        # Admission fence passed: the silence feed starts now, flowing before the append.
+        self.silence_until = self.opening_sent_at + SILENCE_BUDGET_S
+        self.upstream_send({"type": "session.input_audio.append", "audio": SILENCE})
         from .oracle_live_wire import LiveWire
         self.upstream_send(LiveWire("api").context(
             "instructions", "OPENING: say exactly this, once, now: " + self.snapshot["opening_text"]))
@@ -212,6 +228,9 @@ class LiveSocket:
         if not self._record(lambda ring: ring.update(_live_phase="active")):
             return self.fail("live_call_stale", "stale")
         self.downstream({"type": "agent_live.opening_admitted", **self.ids(), "context_digest": self.context_digest})
+        held, self.held, self.held_bytes = self.held, [], 0
+        for delta in held:                          # what the model said first, after the ACK, in order
+            self.downstream({"type": "session.output_audio.delta", "delta": delta})
 
     # -- upstream events ------------------------------------------------------------------
     def receive(self, event: dict) -> None:
@@ -224,8 +243,16 @@ class LiveSocket:
         elif kind == "session.instructions.appended":
             self._admit()
         elif kind == "session.output_audio.delta":
-            if isinstance(event.get("delta"), str):
+            if not isinstance(event.get("delta"), str):
+                return
+            if self.admitted:
                 self.downstream({"type": "session.output_audio.delta", "delta": event["delta"]})
+                return
+            # No model audio reaches the phone before agent_live.opening_admitted.
+            self.held.append(event["delta"])
+            self.held_bytes += len(event["delta"]) * 3 // 4
+            if self.held_bytes > HELD_OUTPUT_BYTES:
+                self.fail("live_unavailable", "output_before_opening_ack")
         elif kind == "session.output_audio.interrupted":
             self.downstream({"type": "oracle_v2.playback_flush"})
             self.downstream({"type": "oracle_v2.quiet"})
@@ -293,8 +320,11 @@ class LiveSocket:
                 if ticks % DEVICE_CHECK_TICKS == 0 and not live.device_ok(self.principal):
                     self._end_locally("device_revoked")
                     return
-                if self.provider_ready and not self.forwarding:
-                    self.upstream_send({"type": "session.input_audio.append", "audio": SILENCE})
+                if self.silence_until and not self.forwarding:
+                    if time.monotonic() < self.silence_until:
+                        self.upstream_send({"type": "session.input_audio.append", "audio": SILENCE})
+                    else:
+                        self.silence_until = 0.0    # budget spent: the feed ends, never indefinite
                 if self.opening_sent and not self.admitted and \
                         time.monotonic() - self.opening_sent_at > OPENING_ACK_S:
                     self.fail("live_unavailable", "opening_not_taken")

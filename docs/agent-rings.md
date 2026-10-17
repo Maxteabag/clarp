@@ -168,9 +168,12 @@ lists every field and fixed string.
   consumed before the upstream opens. Another voice session on the phone is
   refused, never superseded. When the phone is ready (`agent_live.client_ready`)
   and the provider started, the opening is appended once and
-  `agent_live.opening_admitted` follows the provider's acknowledgement. Until
-  then the Host sends silence upstream (the provider takes an append only while
-  input audio flows) and refuses phone audio (`audio_not_ready`).
+  `agent_live.opening_admitted` follows the provider's acknowledgement; no model
+  audio reaches the phone before it. Phone audio before it is refused
+  (`audio_not_ready`). From admission the Host sends synthetic silence upstream
+  (a proposed mechanism from two provider observations) until the first real
+  phone frame, hangup, an error or a 15 s budget. An uncertain admission fails
+  the call with `live_unavailable`; the opening stays consumed, so no fallback.
 - **Close and fallback.** `POST /calls/ring/live/close` and the socket's
   `session.close` retire the call's authority first, then the upstream.
   `POST /calls/ring/live/fallback` switches to the classic call once, only
