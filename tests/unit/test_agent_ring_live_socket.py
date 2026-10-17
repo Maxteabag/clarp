@@ -646,3 +646,17 @@ def test_a_provider_that_never_starts_is_failed_at_the_setup_deadline(call, monk
     thread.join(15)
     assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
     assert "agent_live.provider_ready" not in _types(h) and _ring_of(call.grant)["_live_phase"] == "retired"
+
+
+def test_no_provider_frame_reaches_the_phone_after_retirement(call):
+    h, thread = _admitted(call)
+    live.close(PHONE, {"call_id": call.grant["call_id"], "call_epoch": 1, "attempt_id": call.grant["attempt_id"],
+                       "owner_nonce": call.grant["owner_nonce"], "request_id": "q", "reason": "user_hangup"})
+    thread.join(15)
+    before = len(h.wfile.frames())
+    session_frames = [f["type"] for f in h.wfile.frames()]
+    assert session_frames[-1] == "agent_live.closed"
+    call.up.push({"type": "session.output_audio.delta", "delta": AUDIO})
+    call.up.push({"type": "session.instructions.appended"})
+    time.sleep(0.3)
+    assert len(h.wfile.frames()) == before
