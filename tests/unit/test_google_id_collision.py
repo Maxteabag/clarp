@@ -680,3 +680,47 @@ def test_resolve_replaces_a_stale_resolution_table_in_place(operator):
     after = tomllib.loads(operator["config"].read_text())
     assert after["tts"]["google_resolution"]["packages"] != ["stale"]
     assert operator["config"].read_text().count("[tts.google_resolution]") == 1
+
+
+# ---- V-4(v): a dry-run never blocks; it reports exclusivity, the inventory and the table ------
+
+def _dry_run(operator, capsys):
+    before = operator["config"].read_bytes()
+    assert admin.cmd_tts(_args(resolve_builtin=True, dry_run=True)) == 0
+    assert operator["config"].read_bytes() == before
+    assert not list(operator["config"].parent.glob("config.toml.google-resolution-backup-*"))
+    return json.loads(capsys.readouterr().out)
+
+
+def test_a_dry_run_while_a_host_owns_the_volume_reports_75_with_the_table(operator, capsys):
+    owner = os.open(operator["owner"], os.O_WRONLY | os.O_APPEND)
+    fcntl.flock(owner, fcntl.LOCK_EX)
+    try:
+        report = _dry_run(operator, capsys)
+    finally:
+        os.close(owner)
+    assert "exit 75" in report["exclusivity"]
+    assert "[tts.google_resolution]" in report["resolution_table"] and report["inventory"]["collisions"]
+
+
+def test_a_dry_run_while_a_restore_is_staged_reports_76_with_the_table(operator, capsys):
+    (operator["backups"] / "restore.pending.tar.gz").write_bytes(b"x")
+    report = _dry_run(operator, capsys)
+    assert "exit 76" in report["exclusivity"] and "[tts.google_resolution]" in report["resolution_table"]
+
+
+def test_a_dry_run_without_the_inherited_users_lock_reports_77_with_the_table(operator, monkeypatch, tmp_path, capsys):
+    from lib import data_root_locks
+    stray = os.open(tmp_path / "stray", os.O_WRONLY | os.O_CREAT, 0o600)
+    monkeypatch.setattr(data_root_locks, "USERS_FD", stray)
+    try:
+        report = _dry_run(operator, capsys)
+    finally:
+        os.close(stray)
+    assert "exit 77" in report["exclusivity"] and "[tts.google_resolution]" in report["resolution_table"]
+
+
+def test_an_obtainable_dry_run_reports_the_inventory_and_the_table(operator, capsys):
+    report = _dry_run(operator, capsys)
+    assert report["exclusivity"] == "obtainable"
+    assert report["inventory"]["collisions"] and "[tts.google_resolution]" in report["resolution_table"]
