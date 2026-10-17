@@ -204,13 +204,14 @@ def ensure_instance_generation(*, backups_dir: pathlib.Path | None = None,
                                uid: int | None = None) -> bool:
     """Make the instance token exist and be valid. True when it does; never repairs one.
 
-    The only creator. Call it explicitly, outside any SQLite transaction.
+    The only creator. Call it explicitly, outside any SQLite transaction. It never raises: a
+    failure leaves the token unprovable and the Host starts without it (design r4 §12 D).
     """
-    backups_dir = default_backups_dir() if backups_dir is None else backups_dir
-    uid = os.geteuid() if uid is None else uid
     dir_fd = None
     tmp = None
     try:
+        backups_dir = default_backups_dir() if backups_dir is None else backups_dir
+        uid = os.geteuid() if uid is None else uid
         _make_dir(backups_dir)
         dir_fd = _open_dir(backups_dir, uid)
         try:
@@ -242,6 +243,9 @@ def ensure_instance_generation(*, backups_dir: pathlib.Path | None = None,
     except OSError as exc:
         log_exception("hostGenerationBootstrapFailed", exc)
         return False
+    except Exception as exc:
+        log_exception("hostGenerationBootstrapFailed", exc, "unexpected")
+        return False
     finally:
         if tmp is not None and dir_fd is not None:
             try:
@@ -265,6 +269,7 @@ def rotate_instance_generation(*, backups_dir: pathlib.Path | None = None,
     uid = os.geteuid() if uid is None else uid
     dir_fd = None
     tmp = None
+    replaced = False
     try:
         dir_fd = _open_dir(backups_dir, uid)
         token = str(uuid.uuid4())
@@ -278,10 +283,14 @@ def rotate_instance_generation(*, backups_dir: pathlib.Path | None = None,
             os.close(fd)
         os.replace(tmp, TOKEN_NAME, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
         tmp = None
+        replaced = True
         os.fsync(dir_fd)
         return token
     except (OSError, _Invalid) as exc:
         message = f"instance generation not rotated: {_reason(exc)}"
+        if replaced:
+            message = (f"instance generation rotation not durable: {_reason(exc)}; the token was "
+                       "already replaced")
         if tmp is not None and dir_fd is not None:
             try:
                 os.unlink(tmp, dir_fd=dir_fd)

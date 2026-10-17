@@ -36,6 +36,7 @@ import subprocess
 import sys
 import time
 
+from . import host_generation
 from .deployment import LAYOUT
 
 OWNER_FD, USERS_FD = 8, 9
@@ -327,7 +328,6 @@ def apply_staged_restore() -> bool:
     # A fresh instance generation (lib.host_generation) before the first destructive step: every
     # opening fenced before this restore then mismatches. clarp/backups is never archived or
     # replaced, so the old token cannot come back with the restored data.
-    from . import host_generation
     try:
         host_generation.rotate_instance_generation(backups_dir=backups_dir())
     except host_generation.RotationRefused as exc:
