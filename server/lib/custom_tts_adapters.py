@@ -261,30 +261,29 @@ def _executable_marker(package_fd: int, executable: Any) -> list[bytes]:
             os.close(fd)
 
 
-def _classify_manifest(raw: bytes) -> tuple[str, dict | None]:
+def _classify_manifest(raw: bytes) -> tuple[str, dict | None, str]:
+    """The bytes parsed and the id normalized exactly as Host 64 did in load_manifest, so a value
+    that was never "google" there (a number, an empty id, ...) is no collision; only bytes that
+    cannot be inspected are uncertain."""
     if len(raw) > MAX_RESPONSE_BYTES:
-        return "oversize", None
+        return "oversize", None, ""
     try:
-        data = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        return "parse_error", None
+        data = json.loads(raw)
+    except (ValueError, TypeError, RecursionError):
+        return "parse_error", None, ""
     if not isinstance(data, dict):
-        return "not_object", None
-    if "id" not in data:
-        return "id_absent", data
-    value = data["id"]
-    if not isinstance(value, str) or not value.strip():
-        return "id_invalid", data
-    return "id_ok", data
+        return "not_object", None, ""
+    adapter_id = str(data.get("id") or "").strip().lower()
+    return ("id_ok" if adapter_id else "id_absent"), data, adapter_id
 
 
 def collision_inventory(root: Path | None = None) -> dict[str, Any]:
     """Every candidate manifest under the adapter root, classified without following anything.
 
     `complete` is False when anything could not be inspected (an unreadable, symlinked or non-dir
-    root, an unreadable, symlinked, oversize, unparseable or non-object manifest, or an id present
-    but not a usable string): built-in Google is then unverifiable. `collisions` lists the packages
-    whose id is "google", each with a fingerprint of its relative path, manifest bytes and
+    root, or an unreadable, symlinked, oversize, unparseable or non-object manifest): built-in
+    Google is then unverifiable. `collisions` lists the packages whose id, normalized as Host 64
+    did, is "google", each with a fingerprint of its relative path, manifest bytes and
     executable. Paths here are for the operator report only, never for clients."""
     root = ROOT if root is None else root
     out: dict[str, Any] = {"root_category": "", "complete": False, "candidates": [], "collisions": []}
@@ -364,11 +363,11 @@ def _classify_candidate(out: dict[str, Any], package_fd: int, label: str, manife
     except OSError:
         out["candidates"].append({"relpath": relpath, "category": "read_error"})
         return False
-    category, data = _classify_manifest(raw)
+    category, data, adapter_id = _classify_manifest(raw)
     out["candidates"].append({"relpath": relpath, "category": category})
-    if category in ("oversize", "parse_error", "not_object", "id_invalid"):
+    if category in ("oversize", "parse_error", "not_object"):
         return False
-    if category == "id_ok" and data["id"].strip().lower() == COLLISION_ID:
+    if adapter_id == COLLISION_ID:
         parts = [b"clarp-google-collision-v1", relpath.encode("utf-8", "surrogateescape"), raw,
                  *_executable_marker(package_fd, data.get("executable"))]
         out["collisions"].append({
