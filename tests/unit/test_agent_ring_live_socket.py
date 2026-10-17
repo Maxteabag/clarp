@@ -660,3 +660,18 @@ def test_no_provider_frame_reaches_the_phone_after_retirement(call):
     call.up.push({"type": "session.instructions.appended"})
     time.sleep(0.3)
     assert len(h.wfile.frames()) == before
+
+
+def test_a_client_ready_after_retirement_starts_nothing(call):
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    _wait(lambda: "agent_live.provider_ready" in _types(h))
+    live.close(PHONE, {"call_id": call.grant["call_id"], "call_epoch": 1, "attempt_id": call.grant["attempt_id"],
+                       "owner_nonce": call.grant["owner_nonce"], "request_id": "q", "reason": "user_hangup"})
+    thread.join(15)
+    h.send(_ready(call.grant))                          # too late: the call's authority is gone
+    time.sleep(0.3)
+    assert call.up.of("session.instructions.append") == [] and call.up.of("session.input_audio.append") == []
+    assert not _ring_of(call.grant).get("_live_opening_consumed")
+    assert "agent_live.opening_admitted" not in _types(h)
