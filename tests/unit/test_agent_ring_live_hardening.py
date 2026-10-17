@@ -168,17 +168,20 @@ def test_close_answers_the_rings_own_epoch_and_state(call):
 def test_a_close_whose_saves_both_fail_still_stops_the_session_and_says_so(call, monkeypatch):
     h, thread = _admitted(call)
     session = _session(call)
-    save, broke = rings._save, []
+    import threading
+    save, broke, closer = rings._save, [], threading.get_ident()
 
     def broken(records):
-        if len(broke) < 2:
+        # Only the close's own two saves fail: the session's threads (its record of provider_closed after the
+        # asynchronous close) save normally and must not use up the failures.
+        if threading.get_ident() == closer and len(broke) < 2:
             broke.append(True)
             raise OSError("disk full")
         return save(records)
     monkeypatch.setattr(rings, "_save", broken)
     with pytest.raises(group_calls.CallError) as exc:
         _close(call.grant)
-    assert exc.value.status == 503
+    assert exc.value.status == 503 and len(broke) == 2
     thread.join(15)
     assert session.closed.is_set() and not thread.is_alive() and call.up.closed
 
@@ -187,6 +190,8 @@ def test_a_session_retired_on_its_record_whose_stop_never_arrived_ends_itself(ca
     h, thread = _admitted(call)
     with live._SESSIONS_LOCK:                                       # the close's stop cannot find it
         session = live._SESSIONS.pop(call.grant["call_id"])
+    with live._CLOSURES_LOCK:
+        live._CLOSURES.pop(call.grant["call_id"])
     _close(call.grant)
     thread.join(15)
     assert session.closed.is_set() and not thread.is_alive()
@@ -415,7 +420,7 @@ def test_a_client_ready_after_retirement_starts_no_feed_no_opening_and_changes_n
 # ---- M-1 ------------------------------------------------------------------------------------
 
 def _repeat(grant):
-    return rings.answer(PHONE, grant["ring_id"], conversation_mode="agent_live_v1", request_id="r1")  # the same intent
+    return rings.answer(PHONE, grant["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="n-r1")  # the same intent
 
 
 def test_a_repeat_answer_before_the_join_gets_the_same_grant(call):
