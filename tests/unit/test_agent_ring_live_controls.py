@@ -295,3 +295,59 @@ def test_a_repeat_live_answer_after_fallback_returns_the_classic_state(grant):
 def test_a_repeat_live_answer_after_close_is_stale(grant):
     _close(grant)
     _refused(409, "live_call_stale", rings.answer, PHONE, grant["ring_id"], conversation_mode="agent_live_v1")
+
+
+# ---- H-3: the ordered fallback transition (design H2-FALLBACK-TRANSITION-DESIGN.md) --------------
+
+class StubbornSession(Session):
+    """A session whose stop never completes (it stays registered)."""
+
+    def retire(self, reason):
+        self.order.append(("retire", reason, _ring_of({"call_id": self.call_id})["_live_phase"]))
+
+
+def test_fallback_stops_live_and_revokes_its_epoch_before_the_classic_call_starts(grant, monkeypatch):
+    order = []
+    Session(grant, order)
+    real_start = calls.start
+
+    def start(*args, **kwargs):
+        ring = _ring_of(grant)
+        order.append(("start", ring["_live_phase"], ring["_live_call_epoch"], grant["call_id"] in live._SESSIONS))
+        return real_start(*args, **kwargs)
+    monkeypatch.setattr(calls, "start", start)
+    out = _fallback(grant)
+    assert order == [("retire", "fallback", "falling_back"), ("start", "falling_back", 2, False)]
+    assert out["conversation_mode"] == "classic" and _ring_of(grant)["_live_phase"] == "classic"
+
+
+def test_fallback_completes_and_stops_live_even_when_the_audit_write_fails(grant, monkeypatch):
+    order = []
+    Session(grant, order)
+    monkeypatch.setattr(rings, "_audit", lambda entry: (_ for _ in ()).throw(OSError("audit disk full")))
+    assert _fallback(grant)["conversation_mode"] == "classic"
+    assert [entry[:2] for entry in order] == [("retire", "fallback")]
+
+
+def test_a_failed_classic_start_leaves_live_revoked_and_the_same_request_resumes_once(grant, monkeypatch):
+    real_start = calls.start
+    monkeypatch.setattr(calls, "start", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("tts router down")))
+    _refused(503, "live_unavailable", _fallback, grant)
+    ring = _ring_of(grant)
+    assert ring["_live_phase"] == "falling_back" and ring["_live_call_epoch"] == 2 and not ring["call_id"]
+    _refused(409, "live_call_stale", _close, grant)                              # Live authority is gone
+    _refused(409, "live_fallback_not_allowed", _fallback, grant, request_id="other")
+    monkeypatch.setattr(calls, "start", real_start)
+    out = _fallback(grant)                                                        # same request_id resumes
+    assert out["conversation_mode"] == "classic" and out["changed"] is True
+    assert _fallback(grant)["changed"] is False and _fallback(grant)["call"]["call_id"] == out["call"]["call_id"]
+
+
+def test_a_live_session_that_will_not_stop_blocks_the_classic_start(grant, monkeypatch):
+    monkeypatch.setattr(live, "FALLBACK_STOP_WAIT_S", 0.2)
+    order = []
+    StubbornSession(grant, order)
+    started = []
+    monkeypatch.setattr(calls, "start", lambda *a, **k: started.append(1))
+    _refused(503, "live_unavailable", _fallback, grant)
+    assert started == [] and _ring_of(grant)["_live_phase"] == "falling_back"
