@@ -367,17 +367,23 @@ def answer(principal: str, ring_id: str, conversation_mode: Any = None, *,
             _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
                     "call_id": call["call_id"]})
     if ring.get("conversation_mode") == live.MODE_LIVE:
-        if fresh:
+        if fresh == "classic":
+            out = _answered(ring, group_calls.get_call(ring["call_id"]), changed=False)
+            return {**out, "conversation_mode": live.MODE_CLASSIC}
+        if fresh == "fresh":
             _announce(ring, "answered")
-        return _answered_live(ring, changed=fresh)
+        return _answered_live(ring, changed=fresh == "fresh")
     _announce(ring, "answered")
     return _answered(ring, call, changed=True)
 
 
 def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | None,
-                 request_id: Any, client_nonce: Any) -> bool:
-    """The Live branch of answer (under _lock): one grant per ring, first owner
-    wins. True when this request answered it, False for the owner's repeat."""
+                 request_id: Any, client_nonce: Any) -> str:
+    """The Live branch of answer (under _lock): one grant per ring, first owner wins.
+
+    Returns "fresh" when this request answered it, "repeat" for the owner's repeat
+    while Live still holds, "classic" after the one fallback. A retired Live call
+    is stale. Idempotency binds the principal (a phone's device id), not request_id."""
     from . import agent_ring_live as live
     if mode != live.MODE_LIVE:
         raise CallError(409, live.CLIENT_REQUIRED)
@@ -387,7 +393,11 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
     if ring["state"] == "answered":
         if ring["answered_by"] != principal:
             raise CallError(409, live.OWNER_CONFLICT)
-        return False
+        if ring.get("_live_phase") == "classic":
+            return "classic"
+        if ring.get("_live_phase") not in live.LIVE_PHASES:
+            raise CallError(409, live.CALL_STALE)
+        return "repeat"
     if ring["state"] != "ringing":
         raise CallError(409, live.CALL_STALE)
     now = now_ms()
@@ -399,7 +409,7 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
     _save(records)
     _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
             "mode": live.MODE_LIVE, "live_call_id": ring["_live_call_id"]})
-    return True
+    return "fresh"
 
 
 def _answered_live(ring: dict, *, changed: bool) -> dict:

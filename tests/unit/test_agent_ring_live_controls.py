@@ -55,8 +55,10 @@ class Session:
         live._SESSIONS[grant["call_id"]] = self
 
     def retire(self, reason):
-        # Authority is already gone on the record when the session hears about it.
+        # Authority is already gone on the record when the session hears about it. Like the real
+        # socket, a stopped session leaves the registry (serve() unregisters it on its way out).
         self.order.append(("retire", reason, _ring_of({"call_id": self.call_id})["_live_phase"]))
+        live._SESSIONS.pop(self.call_id, None)
 
 
 # ---- close --------------------------------------------------------------------------

@@ -1148,7 +1148,8 @@ def cmd_call_ring(args) -> int:
                 print("clarp-admin call ring: --oracle needs --context-file", file=sys.stderr)
                 return 2
             try:
-                raw = Path(args.context_file).read_bytes()
+                with open(args.context_file, "rb") as handle:     # never read more than the bound
+                    raw = handle.read(RING_CONTEXT_BYTES + 1)
                 if len(raw) > RING_CONTEXT_BYTES:
                     raise ValueError(f"over {RING_CONTEXT_BYTES} bytes")
                 context = json.loads(raw.decode("utf-8"))

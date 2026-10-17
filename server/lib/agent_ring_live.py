@@ -345,7 +345,9 @@ def close(principal: str, data: Any) -> dict:
                                         "live_call_id": ring["_live_call_id"], "reason": data["reason"]})
                 except Exception as exc:  # noqa: BLE001 - diagnostics never block the stop
                     log_exception("agentLiveCloseAuditFail", exc, f"call={ring['_live_call_id']}")
-    if changed:
+    if changed or ring.get("_live_phase") == "retired":
+        # Also on a retried close of a retired call: a session that outlived the first close
+        # (registered late, or its stop was lost) is stopped now. A no-op when none runs.
         _stop_session(ring["_live_call_id"], data["reason"])
     if failure is not None:
         raise failure
