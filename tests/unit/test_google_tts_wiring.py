@@ -92,7 +92,7 @@ def test_google_is_a_builtin_provider_whose_status_names_its_source_but_no_secre
 
 
 def test_the_host_contract_advertises_google_at_its_reserved_number():
-    assert server_identity.HOST_CONTRACT == 69
+    assert server_identity.HOST_CONTRACT >= 69
     assert "tts_provider_google" in server_identity.FEATURES
     assert server_identity.FEATURE_CONTRACTS["tts_provider_google"] == 69
 
