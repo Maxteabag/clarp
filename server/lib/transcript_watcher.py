@@ -53,9 +53,13 @@ class TranscriptWatcher:
                  start_at_end: bool = False,
                  backend_session_id: str | None = None,
                  persist_offset: bool = False,
-                 on_change: Callable[[], None] | None = None):
+                 on_change: Callable[[], None] | None = None,
+                 pass_line_timestamp: bool = False):
         self.path = pathlib.Path(path)
         self.on_text = on_text
+        # When set, on_text(text, line_ts) also gets the line's own "timestamp"
+        # as written (or None). Diagnostics only: it is the producer's clock.
+        self.pass_line_timestamp = pass_line_timestamp
         self.on_change = on_change       # fires once per tick that consumed bytes,
                                           # regardless of what JSON type they were
         self.byte_offset = start_offset
@@ -120,8 +124,12 @@ class TranscriptWatcher:
 
         emitted = 0
         for raw in complete:
-            for text in _texts_in_line(raw):
-                self.on_text(text)
+            texts, line_ts = _texts_and_timestamp(raw)
+            for text in texts:
+                if self.pass_line_timestamp:
+                    self.on_text(text, line_ts)
+                else:
+                    self.on_text(text)
                 emitted += 1
         # Fire the generic change callback ONCE per tick that consumed
         # bytes — used by the history-update SSE broadcast so the client
@@ -158,17 +166,30 @@ class TranscriptWatcher:
 # ---- JSONL parsing helpers ---------------------------------------------
 
 
+def _texts_and_timestamp(raw: bytes) -> tuple[list[str], str | None]:
+    """Every assistant text block in one JSONL line, with the line's own
+    ``timestamp`` string when it has one."""
+    line = raw.strip()
+    if not line:
+        return [], None
+    try:
+        entry = json.loads(line)
+    except json.JSONDecodeError:
+        return [], None
+    if not isinstance(entry, dict):
+        return [], None
+    stamp = entry.get("timestamp")
+    return list(_texts_in_entry(entry)), stamp if isinstance(stamp, str) else None
+
+
 def _texts_in_line(raw: bytes) -> Iterable[str]:
     """Yield every assistant text block in one JSONL line. Skips thinking
     blocks, tool_use blocks, user entries, malformed JSON, and empty
     strings."""
-    line = raw.strip()
-    if not line:
-        return
-    try:
-        entry = json.loads(line)
-    except json.JSONDecodeError:
-        return
+    yield from _texts_and_timestamp(raw)[0]
+
+
+def _texts_in_entry(entry: dict) -> Iterable[str]:
     if entry.get("type") != "assistant":
         return
     msg = entry.get("message") or {}
