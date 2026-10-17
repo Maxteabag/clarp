@@ -158,13 +158,40 @@ def get(ring_id: str) -> dict | None:
         return public(ring) if ring else None
 
 
-def current() -> dict | None:
-    """The ring that is ringing now, or None."""
+def current(principal: str | None = None) -> dict | None:
+    """The ring that is ringing now, or None. With ``principal``, only a ring that client may see (H6)."""
+    capable = live_capable(principal) if principal is not None else True
     with _lock:
         records = _load()
         _settle(records)
-        ring = next((r for r in reversed(records) if r["state"] == "ringing"), None)
+        ring = next((r for r in reversed(records) if r["state"] == "ringing" and _visible(r, capable)), None)
         return public(ring) if ring else None
+
+
+# ---- who may see a Live ring (H6) -----------------------------------------------------
+#
+# A Live ring reaches only a client whose device registration advertises agent_live_v1:
+# its SSE event, its GET projection and its VoIP push. An older phone (2818) would report
+# any agent-ring event to CallKit as an incoming call, so it must never see a Live ring at
+# all, and a Live ring never falls back to the global alert push. Classic rings are unchanged.
+
+def live_capable(principal: str | None) -> bool:
+    """The principal's VoIP registration says it can run a Live call."""
+    return bool(principal) and any(row.get("principal") == principal for row in _live_tokens())
+
+
+def _visible(ring: dict, capable: bool) -> bool:
+    from .agent_ring_live import MODE_LIVE
+    return capable or ring.get("conversation_mode") != MODE_LIVE
+
+
+def event_visible(event: dict, principal: str | None) -> bool:
+    """Whether one SSE event, or one public ring record (no "type"), may go to this client."""
+    from .agent_ring_live import MODE_LIVE
+    from .protocol import SSEType
+    if event.get("type", SSEType.AGENT_RING) != SSEType.AGENT_RING or event.get("conversation_mode") != MODE_LIVE:
+        return True
+    return live_capable(principal)
 
 
 # ---- ringing -----------------------------------------------------------------
@@ -461,7 +488,10 @@ def _announce(ring: dict, kind: str) -> dict:
             delivery["voip"] = _push_voip(ring) or {}
         except Exception as exc:  # noqa: BLE001
             log_exception("agentRingVoipFail", exc, f"ring={ring['ring_id']}")
-    if not (delivery.get("voip") or {}).get("sent"):
+    live_ring = kind == "ring" and bool(ring.get("conversation_mode"))
+    if live_ring:
+        pass        # H6: a Live ring is VoIP to capable phones only; it never falls back to the global alert
+    elif not (delivery.get("voip") or {}).get("sent"):
         try:
             delivery.update(_push(ring, kind) or {})
         except Exception as exc:  # noqa: BLE001

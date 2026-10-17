@@ -2993,6 +2993,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         q = self.ctx.stream.subscribe(live=self._live_subscription())
+        from lib import agent_rings
+        from lib.http_utils import principal_of
+        try:
+            sse_principal = principal_of(self).principal
+        except Exception:  # noqa: BLE001 - unknown client: it sees no Live ring
+            sse_principal = None
         try:
             self.wfile.write(b": connected\n\n")
             self.wfile.flush()
@@ -3000,6 +3006,8 @@ class Handler(BaseHTTPRequestHandler):
             while True:
                 page = self.ctx.stream.recent(cursor)
                 for ev in page:
+                    if not agent_rings.event_visible(ev, sse_principal):
+                        continue
                     event_id = ev.get("event_id")
                     if event_id:
                         self.wfile.write(f"id: {event_id}\n".encode())
@@ -3030,6 +3038,8 @@ class Handler(BaseHTTPRequestHandler):
                         ev = json.loads(payload)
                     except json.JSONDecodeError:
                         ev = {}
+                    if not agent_rings.event_visible(ev, sse_principal):
+                        continue
                     event_id = ev.get("event_id")
                     if event_id:
                         self.wfile.write(f"id: {event_id}\n".encode())
@@ -4451,9 +4461,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(exc.status, exc.body())
 
     def _handle_calls_ring_get(self):
-        def work(rings, _principal, _data):
+        def work(rings, principal, _data):
             ring_id = (self._query().get("ring_id") or [""])[0]
-            ring = rings.get(ring_id) if ring_id else rings.current()
+            ring = rings.get(ring_id) if ring_id else rings.current(principal)
+            if ring is not None and not rings.event_visible(ring, principal) and \
+                    ring.get("answered_by") != principal:
+                ring = None                     # a Live ring is invisible to a phone that cannot run it (H6)
             if ring_id and ring is None:
                 raise rings.CallError(404, "unknown call")
             return {"ring": ring, "settings": rings.settings()}
