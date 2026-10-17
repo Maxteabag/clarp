@@ -145,6 +145,10 @@ it starts):
   with 75 (another Host owns this volume), 76 (the volume is in use, or a
   restore elsewhere is still running), 77 (locking is unsupported here) or
   78 (the archive or its staging record is not acceptable).
+- A failure once the apply has begun (`restore.applying` written) is not a
+  refusal: it is reported as interrupted and incomplete, with the same exit
+  codes, and the volume may be partially replaced. The marker stays, so it is
+  recovered as below.
 - On a filesystem where locking is unsupported, the Host still starts, with a
   warning that the one-Host guarantee is unavailable; only a restore is refused.
 - An interrupted restore (the archive and `restore.applying` both still in
