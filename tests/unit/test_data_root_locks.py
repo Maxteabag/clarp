@@ -387,6 +387,7 @@ def entry(root, tmp_path):
         return subprocess.run(["sh", "-c", script, "entry", *command], env={**env, **(extra_env or {})},
                               capture_output=True, text=True, timeout=60)
     run.bin_dir = bin_dir
+    run.env = env
     return run
 
 
@@ -395,8 +396,43 @@ SERVER = ("python3", "/opt/clarp/server.py")
 
 def test_the_host_start_is_identified_exactly(entry):
     assert "role=server" in entry(*SERVER).stdout
-    assert "role=maintenance" in entry(*SERVER, "--extra").stdout
     assert "role=maintenance" in entry("clarp-admin", "doctor").stdout
+    extra = entry(*SERVER, "--extra")                   # never a quiet server without the Host locks
+    assert extra.returncode == 64 and "role=" not in extra.stdout
+
+
+def test_a_symlinked_lock_path_leaves_no_open_lock_fd_behind(root, entry, tmp_path):
+    locks = root["locks"]
+    directory = locks.ensure_backups_dir()
+    target = tmp_path / "elsewhere"
+    target.write_text("keep")
+    (directory / locks.USERS_LOCK).symlink_to(target)
+    script = f'. "{LOCK_SCRIPT}"; clarp_data_root_locks "$@"; ls /proc/$$/fd; echo "role=$CLARP_ENTRYPOINT_ROLE"'
+    result = subprocess.run(["sh", "-c", script, "entry", *SERVER], env=entry.env,
+                            capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0 and "role=server" in result.stdout
+    assert "single-Host guarantee is unavailable" in result.stderr
+    listed = set(result.stdout.split())
+    assert "8" not in listed and "9" not in listed
+    assert target.read_text() == "keep"
+
+
+def test_a_lock_file_that_cannot_be_opened_is_a_locking_error_not_a_crash(root, entry):
+    locks = root["locks"]
+    (locks.ensure_backups_dir() / locks.OWNER_LOCK).mkdir()            # an open for append fails
+    result = entry(*SERVER)
+    assert result.returncode == 0 and "role=server" in result.stdout
+    assert "single-Host guarantee is unavailable" in result.stderr
+
+
+def test_an_unreadable_staged_archive_refuses_with_78_not_a_traceback(root, held, monkeypatch):
+    locks = root["locks"]
+    _allow_this_filesystem(root, monkeypatch)
+    pending = locks.ensure_backups_dir() / locks.PENDING
+    pending.write_bytes(b"not a tar archive")
+    locks.write_sidecar(pending, {"host_owner_held": True})            # bound to these exact bytes
+    assert locks._main(["apply"]) == locks.EXIT_REFUSED
+    assert pending.exists() and not (locks.backups_dir() / locks.MARKER).exists()
 
 
 def test_a_second_host_on_a_live_root_refuses_with_75(root, entry):
