@@ -753,3 +753,154 @@ def test_a_popped_item_is_never_invisible_to_is_active_before_it_runs(tmp_path, 
     assert started.wait(3)
     assert cache.wait_for_background(3)
     assert gaps == []
+
+
+# ---- S-2: thread-lifetime registry ----
+
+def test_reset_waits_for_a_worker_tail_after_it_cleared_the_global(tmp_path, monkeypatch):
+    """S-2 (a): the worker cleared _worker and is still unwinding (its outer
+    finally closes the connection). Reset must still wait for that thread object:
+    it is in the registry even though the global no longer names it."""
+    from lib import db as database
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "unwind.jsonl"
+    path.write_text("{}\n")
+    unwinding, release = _threading.Event(), _threading.Event()
+    worker_closes: list[int] = []
+    original_close = database.close_local
+
+    def held_close():
+        # 1: per-item close, 2: idle close, 3: the outer finally after _worker = None.
+        if _threading.current_thread().name == "transcript-import":
+            worker_closes.append(1)
+            if len(worker_closes) == 3:
+                unwinding.set()
+                assert release.wait(5)
+        return original_close()
+
+    monkeypatch.setattr(database, "close_local", held_close)
+    assert cache.schedule_import(path, lambda: None, owner="a")
+    worker = cache._worker
+    assert unwinding.wait(3)
+    assert cache._worker is None and worker.is_alive()
+    try:
+        assert cache.reset_for_tests(deadline_s=0.2) is False     # the tail is waited for
+        assert cache._resetting and worker in cache._drain.threads
+    finally:
+        release.set()
+    assert cache.reset_for_tests()
+    assert not worker.is_alive()
+
+
+def test_reset_waits_for_a_timer_callback_after_it_removed_its_entry(tmp_path, monkeypatch):
+    """S-2 (b): a window timer removed its own _deferred entry, found the queue
+    full and is logging that outside _guard. Reset must wait for the timer thread
+    although no _deferred entry names it any more."""
+    from lib import log as log_module
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.2)
+    path = tmp_path / "full.jsonl"
+    path.write_text("1\n")
+    _opened_window(cache, path)
+    logging, release = _threading.Event(), _threading.Event()
+    real_log = log_module.log
+
+    def held_log(event, *args, **kwargs):
+        if event == "transcriptImportQueueFull":
+            logging.set()
+            assert release.wait(5)
+        return real_log(event, *args, **kwargs)
+
+    monkeypatch.setattr(log_module, "log", held_log)
+    path.write_text("1\n2\n")
+    _bump_mtime(path)
+    assert cache.schedule_import(path, lambda: None, owner="a", after=lambda: None)
+    timer = cache._deferred[f"a\0{path}"][1]
+    monkeypatch.setattr(cache, "_BACKGROUND_LIMIT", 0)          # the window closes onto a full queue
+    assert logging.wait(3)
+    assert f"a\0{path}" not in cache._deferred and timer.is_alive()
+    try:
+        assert cache.reset_for_tests(deadline_s=0.2) is False
+        assert timer in cache._drain.threads
+    finally:
+        release.set()
+    assert cache.reset_for_tests()
+    assert not timer.is_alive()
+
+
+def test_the_registry_prunes_finished_threads_instead_of_keeping_history(tmp_path, monkeypatch):
+    """S-2 (c): pruning keeps the registry from growing with completed history:
+    after each of several sequential worker lifetimes it holds only the latest
+    (dead) worker, never the earlier ones. This is not a bound on live threads."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    seen: list = []
+    for n in range(5):
+        path = tmp_path / f"seq-{n}.jsonl"
+        path.write_text("{}\n")
+        assert cache.schedule_import(path, lambda: None, owner="a")
+        worker = cache._worker
+        assert cache.wait_for_background(3)
+        worker.join(3)
+        assert worker not in seen
+        seen.append(worker)
+        assert cache._threads == {worker}
+
+
+def _threading_with(**overrides):
+    import types
+    return types.SimpleNamespace(**{**vars(_threading), **overrides})
+
+
+def test_a_worker_that_fails_to_start_leaves_no_live_worker_or_pending_owner(tmp_path, monkeypatch):
+    """S-2: Thread.start() can fail (no threads left). The request is refused
+    and nothing claims a live worker: no _worker, no pending entry, nothing in
+    the registry, so a later request starts a worker normally."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+
+    class NoStart(_threading.Thread):
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    path = tmp_path / "nostart.jsonl"
+    path.write_text("{}\n")
+    monkeypatch.setattr(cache, "threading", _threading_with(Thread=NoStart))
+    assert cache.schedule_import(path, lambda: None, owner="a") is False
+    assert cache._worker is None and not cache._pending and not cache._threads
+    monkeypatch.setattr(cache, "threading", _threading)
+    calls: list[int] = []
+    assert cache.schedule_import(path, lambda: calls.append(1), owner="a")
+    assert cache.wait_for_background(3) and calls == [1]
+
+
+def test_a_window_timer_that_fails_to_start_is_not_left_armed(tmp_path, monkeypatch):
+    """S-2: a timer that cannot start is refused, not left in _deferred or the
+    registry (where it would block every later request and every reset)."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.2)
+    path = tmp_path / "notimer.jsonl"
+    path.write_text("1\n")
+    _opened_window(cache, path)
+
+    made: list = []
+
+    class NoStart(_threading.Timer):
+        def start(self):
+            made.append(self)
+            raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(cache, "threading", _threading_with(Timer=NoStart))
+    path.write_text("1\n2\n")
+    _bump_mtime(path)
+    assert cache.schedule_import(path, lambda: None, owner="a") is False
+    assert f"a\0{path}" not in cache._deferred
+    assert len(made) == 1 and made[0] not in cache._threads
+    monkeypatch.setattr(cache, "threading", _threading)
+    assert cache.reset_for_tests()
