@@ -6,7 +6,8 @@
 # resolv.conf (scripts/ci_docker_offline.sh), proven offline before the first one starts. Only
 # synthetic data: disposable volumes this run creates, archives made from them, probe files.
 #
-# K1 the Host's locks are held for the life of its stack and seen from another container
+# K1 the Host's locks are held for the life of its stack and seen from another container; exactly
+#    the entrypoint shell (inheritable) and the sealed server and runtime (close-on-exec) hold them
 # K2 a second Host on a live volume exits 75
 # K3 a maintenance command beside a live Host holds only the shared lock
 # K4 a restore stages only while a lock-aware Host lives; without one it exits 78, archive unchanged
@@ -15,6 +16,7 @@
 # K6 a PTY login shell of the Host (/server-terminal) holds no lock file
 # K7 synthetic marker states, the files an interrupted apply leaves (not a real crash): marker and
 #    archive make maintenance refuse (76) and the Host start re-apply; a marker alone is recovered
+# K8 the Host command with an extra argument exits 64 (never a server without the Host's locks)
 #
 # Names are unique to this run and every resource carries its label. A name is recorded only after
 # its create succeeded, and cleanup removes only recorded resources whose label still matches.
@@ -131,11 +133,12 @@ probe() {  # $1 volume, $2 python source run as the image user with the volume a
     remove_container "$NEW"
 }
 
-# State of the test root as one line: the probe file, and each restore file's sha256 or "absent".
+# State of the test root as one line: the probe file, and each restore file's sha256@mtime_ns or
+# "absent" (the DB is not compared: maintenance runs open it by design).
 STATE_PY='
 import hashlib, pathlib
 b = pathlib.Path("/data/clarp/backups")
-def h(p): return hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else "absent"
+def h(p): return f"{hashlib.sha256(p.read_bytes()).hexdigest()}@{p.stat().st_mtime_ns}" if p.exists() else "absent"
 m = pathlib.Path("/data/workspace/probe/marker")
 print("STATE", m.read_text() if m.exists() else "absent",
       h(b / "restore.pending.tar.gz"), h(b / "restore.pending.owner"), h(b / "restore.applying"))
@@ -178,22 +181,29 @@ print("K1 cross-container: owner EX held, users SH held")
 timeout 60 docker exec "$A" python3 -c '
 import glob, os
 want = {"/data/clarp/backups/host-owner.lock", "/data/clarp/backups/data-root-users.lock"}
-holders = {}
-for fd in glob.glob("/proc/[0-9]*/fd/*"):
+O_CLOEXEC = 0o2000000
+roles = {"clarp-entrypoint": "entrypoint", "/opt/clarp/server.py": "server", "/opt/clarp/runtime.py": "runtime"}
+held = {}                                   # role -> {target: close-on-exec}
+for link in glob.glob("/proc/[0-9]*/fd/*"):
     try:
-        target = os.readlink(fd)
+        target = os.readlink(link)
     except OSError:
         continue
-    if target in want:
-        pid = fd.split("/")[2]
-        cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode()
-        holders.setdefault(pid, [cmd, set()])[1].add(target)
-assert holders, "no process holds the lock files"
-shells = [p for p, (cmd, held) in holders.items() if "clarp-entrypoint" in cmd and held == want]
-assert shells, holders
-for pid, (cmd, held) in holders.items():
-    assert any(k in cmd for k in ("clarp-entrypoint", "/opt/clarp/server.py", "/opt/clarp/runtime.py")), (pid, cmd)
-print("K1 holders:", sorted(cmd for cmd, _ in holders.values()))
+    if target not in want:
+        continue
+    _, _, pid, _, fd = link.split("/")
+    cmd = open(f"/proc/{pid}/cmdline", "rb").read().replace(b"\0", b" ").decode()
+    role = next((r for k, r in roles.items() if k in cmd), None)
+    assert role is not None, ("an unexpected process holds a lock file", pid, cmd, target)
+    assert role not in held or target not in held[role], ("two processes share a role", role, cmd)
+    flags = next(int(l.split()[1], 8) for l in open(f"/proc/{pid}/fdinfo/{fd}") if l.startswith("flags:"))
+    held.setdefault(role, {})[target] = bool(flags & O_CLOEXEC)
+assert set(held) == {"entrypoint", "server", "runtime"}, held
+for role, files in held.items():
+    assert set(files) == want, (role, files)
+    sealed = set(files.values())
+    assert sealed == ({False} if role == "entrypoint" else {True}), (role, files)
+print("K1 holders: entrypoint (inheritable), server and runtime (close-on-exec)")
 '
 
 # ---- K2 ----
@@ -211,6 +221,12 @@ run_to_exit "$NEW"
 grep -qF data-root-users.lock "$OUT/$NEW.log" || fail "K3 maintenance does not hold the users lock"
 ! grep -qF host-owner.lock "$OUT/$NEW.log" || fail "K3 maintenance holds the owner lock"
 remove_container "$NEW"
+
+# ---- K8 ----
+phase "K8 extended Host command refused"
+new_container host-extra -v "$V1:/data" "$IMAGE" python3 /opt/clarp/server.py --extra
+expect_exit "$NEW" 64 "the Host command takes no extra arguments"
+wait_healthy "$A"
 
 # ---- K4 ----
 phase "K4 staging needs a live Host"
@@ -233,7 +249,8 @@ new_container maint-hold -v "$V1:/data" "$IMAGE" sleep 300
 M="$NEW"
 timeout 60 docker start "$M" >/dev/null
 held=""
-for _ in $(seq 1 30); do
+deadline=$((SECONDS + 60))
+while (( SECONDS < deadline )); do
     probe "$V1" '
 import fcntl, os
 users = os.open("/data/clarp/backups/data-root-users.lock", os.O_RDONLY)
@@ -245,7 +262,7 @@ except BlockingIOError:
     if grep -qx HELD "$PROBE_LOG"; then held=1; break; fi
     sleep 1
 done
-[[ -n "$held" ]] || fail "K5 holder never took the users lock"
+[[ -n "$held" ]] || fail "K5 holder did not take the users lock within 60s"
 new_container host-a2 -v "$V1:/data" "$IMAGE"
 expect_exit "$NEW" 76 "restore refused: the data root is in use"
 state "$V1"; [[ "$STATE" == "$staged" ]] || fail "K5 refusal changed the test root or the staged archive: $STATE"
