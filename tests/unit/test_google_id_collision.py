@@ -129,16 +129,55 @@ def test_an_unreadable_root_is_unverifiable(root, monkeypatch):
     ({k: v for k, v in LEGACY.items() if k != "id"}, None),
     ({**LEGACY, "id": "google"}, COLLISION),
     ({**LEGACY, "id": " Google "}, COLLISION),
-    ({**LEGACY, "id": 123}, UNVERIFIABLE),
-    ({**LEGACY, "id": ""}, UNVERIFIABLE),
+    ({**LEGACY, "id": 123}, None),
+    ({**LEGACY, "id": ""}, None),
     ("{not json", UNVERIFIABLE),
     ("[1, 2]", UNVERIFIABLE),
 ], ids=["other-id", "already-reserved-id", "id-absent", "google", "mixed-case-google",
-        "non-string-id", "empty-id", "parse-error", "not-an-object"])
+        "numeric-id-is-a-known-other-id", "empty-id-is-idless", "parse-error", "not-an-object"])
 def test_each_manifest_is_classified(root, monkeypatch, manifest, expected):
     _cfg(monkeypatch)
     _package(root, manifest=manifest)
     assert google_tts.collision_code() == expected
+
+
+def _host64_id(data):
+    """Host 64's own id normalization, verbatim from 006e9e70 server/lib/custom_tts_adapters.py:105
+    (load_manifest), the oracle for which ids collide."""
+    return str(data.get("id") or "").strip().lower()
+
+
+@pytest.mark.parametrize("value", [
+    "google", " Google ", "GOOGLE\n", "\u00a0google\t", "goog le", "google2", "custom.google-chirp",
+    123, 0, 1.5, True, False, None, "", "   ", [], ["google"], {}, {"id": "google"},
+], ids=["google", "trimmed", "upper-newline", "nbsp-tab", "inner-space", "suffix", "custom-chirp",
+        "int", "zero", "float", "true", "false", "null", "empty", "blank", "empty-list", "list-google",
+        "empty-object", "object-google"])
+def test_the_collision_decision_equals_host64_normalization(root, monkeypatch, value):
+    _cfg(monkeypatch)
+    manifest = {**LEGACY, "id": value}
+    package = _package(root, manifest=manifest)
+    inventory = _state(root)
+    assert inventory["complete"] is True                      # a parsed value is never uncertainty
+    expected = _host64_id(manifest)
+    assert bool(inventory["collisions"]) == (expected == "google")
+    assert google_tts.collision_code() == (COLLISION if expected == "google" else None)
+    if custom_tts_adapters.ID_RE.fullmatch(expected):         # the real loader agrees on the same bytes
+        assert custom_tts_adapters.load_manifest(package, reserved_ids=frozenset()).id == expected
+
+
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+def test_a_manifest_host64_could_parse_in_another_unicode_encoding_still_collides(root, monkeypatch, encoding):
+    _cfg(monkeypatch)
+    package = _package(root)
+    (package / "manifest.json").write_bytes(json.dumps(LEGACY).encode(encoding))
+    assert google_tts.collision_code() == COLLISION
+
+
+def test_a_deeply_nested_manifest_is_unverifiable_not_a_crash(root, monkeypatch):
+    _cfg(monkeypatch)
+    _package(root, manifest="[" * 100000)
+    assert google_tts.collision_code() == UNVERIFIABLE
 
 
 def test_an_oversize_manifest_is_unverifiable(root, monkeypatch):
