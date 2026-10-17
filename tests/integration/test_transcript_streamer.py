@@ -384,3 +384,32 @@ def test_enqueue_event_reports_read_lag_and_the_trace_it_chose(streamer_env, mon
     else:
         assert detail["read_lag_ms"] is None
     assert "Ja, vent litt" not in json.dumps(detail)
+
+
+def test_a_queued_reclassify_for_a_rebound_or_stopped_owner_does_nothing(streamer_env, monkeypatch):
+    """The reclassify runs later on the import worker. By then the agent may
+    have been rebound to another backend session or the streamer stopped; a
+    stale callback must not reclassify or push for it."""
+    from lib import user_notifications
+
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-old")
+    streamer._stream = _FakeStream()
+    calls: list[tuple] = []
+    monkeypatch.setattr(user_notifications, "reclassify_recent_suppressed",
+                        lambda **kw: calls.append((kw["agent_id"], kw["backend_session_id"])) or [])
+
+    streamer.reconcile_once()
+    assert streamer.pool.has(agent_id)
+    current = streamer._bind_generation[agent_id]
+
+    streamer._after_import(agent_id, "cs-old", current)
+    assert calls == [(agent_id, "cs-old")]
+
+    streamer._after_import(agent_id, "cs-old", current - 1)      # an older binding's callback
+    streamer._after_import(agent_id, "cs-other", current)       # another backend session
+    assert calls == [(agent_id, "cs-old")]
+
+    streamer.stop(timeout=2.0)
+    streamer._after_import(agent_id, "cs-old", current)
+    assert calls == [(agent_id, "cs-old")]
