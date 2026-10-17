@@ -412,3 +412,8 @@ def test_the_owner_cli_rings_live_for_a_named_agent_and_an_agent_turn_still_ring
                         sander, turn_agent="a-theo")
     server.Handler._handle_calls_ring(impostor)
     assert impostor.sent == [(403, {"ok": False, "error": "an agent can only ring as itself"})]
+
+
+def test_a_boolean_epoch_on_the_http_controls_is_invalid(grant):
+    _refused(400, "live_request_invalid", _close, grant, call_epoch=True)
+    _refused(400, "live_request_invalid", _fallback, grant, expected_epoch=True)
