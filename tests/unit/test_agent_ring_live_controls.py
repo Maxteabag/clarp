@@ -217,3 +217,37 @@ def test_a_retired_or_fallen_back_live_call_drops_its_snapshot(grant, end):
     assert "_live_snapshot" in _ring_of(grant)
     (_close if end == "close" else _fallback)(grant)
     assert "_live_snapshot" not in _ring_of(grant) and _ring_of(grant)["_live_context_digest"]
+
+
+# ---- H3/H4: close always stops the session, and binds the exact epoch -----------------------------
+
+def test_close_stops_the_session_even_when_the_audit_write_fails(grant, monkeypatch):
+    order = []
+    Session(grant, order)
+    monkeypatch.setattr(rings, "_audit", lambda entry: (_ for _ in ()).throw(OSError("audit disk full")))
+    out = _close(grant)
+    assert out["state"] == "retired" and order == [("retire", "user_hangup", "retired")]
+    assert _ring_of(grant)["_live_phase"] == "retired"
+
+
+def test_close_stops_the_session_and_reports_the_error_when_the_record_cannot_be_saved(grant, monkeypatch):
+    order = []
+    Session(grant, order)
+    monkeypatch.setattr(rings, "_save", lambda records: (_ for _ in ()).throw(OSError("db locked")))
+    with pytest.raises(OSError, match="db locked"):
+        _close(grant)
+    assert [entry[:2] for entry in order] == [("retire", "user_hangup")]
+
+
+def test_a_retired_close_answers_its_own_receipt_and_never_echoes_another_epoch(grant):
+    first = _close(grant)
+    assert first["call_epoch"] == 1
+    assert _close(grant) == first and _close(grant, request_id="q2") == first
+    _refused(409, "live_call_stale", _close, grant, call_epoch=2)
+    _refused(409, "live_call_stale", _close, grant, call_epoch=7)
+
+
+def test_close_after_the_fallback_is_stale(grant):
+    _fallback(grant)
+    _refused(409, "live_call_stale", _close, grant)
+    _refused(409, "live_call_stale", _close, grant, call_epoch=2)
