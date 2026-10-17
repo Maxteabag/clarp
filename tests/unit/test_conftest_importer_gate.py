@@ -16,12 +16,15 @@ import signal
 import subprocess
 import sys
 import textwrap
+import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GATE = "_transcript_importer_quiescent"
-# Below the suite's per-test --timeout=60 (pyproject addopts), so this bound, not
-# pytest-timeout, ends a stuck child and its cleanup below still runs.
+# Below the suite's per-test --timeout=60 (pyproject addopts): the child's 40 s
+# plus the bounded reap end before pytest-timeout would, and the cleanup below
+# runs in either case.
 INNER_TIMEOUT_S = 40
+REAP_TIMEOUT_S = 5
 # Per-test fixtures that set environment, log, config or DB state.
 MUTATORS = ("_isolate_host_service_commands", "_no_real_agy_cli", "_guard_backend_clis",
             "_isolate_agy_skills", "_isolate_xdg", "_isolated_db")
@@ -66,22 +69,29 @@ def _inner_session(tmp_path, *, refuse: bool) -> tuple[subprocess.CompletedProce
         env.pop(key, None)
     argv = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "-rA", "-n", "0",
             "--rootdir", str(suite), "--basetemp", str(tmp_path / "inner-tmp"), str(suite)]
-    # The child and everything it starts get their own process group, which is
-    # killed whenever this helper leaves without a normal exit (timeout, or a
-    # pytest-timeout or KeyboardInterrupt raised into communicate()), and always
-    # reaped: nothing it owns outlives the test.
-    child = subprocess.Popen(argv, cwd=suite, env=env, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, text=True, start_new_session=True)
+    # The child leads its own process group. Its exit is awaited WITHOUT reaping
+    # it (WNOWAIT), so until the reap below its pid, and with it the group id,
+    # cannot be reused: the group is killed while it is still ours, on every
+    # exit (normal, the 40 s limit, or pytest-timeout raised into the wait), and
+    # only then is the leader reaped, within a bounded wait. Output goes to files,
+    # so no pipe can stall the child. Descendants that left the group with their
+    # own setsid are outside this cleanup; the sandbox bounds those.
+    out_path, err_path = tmp_path / "inner-stdout.txt", tmp_path / "inner-stderr.txt"
+    with open(out_path, "w") as out_f, open(err_path, "w") as err_f:
+        child = subprocess.Popen(argv, cwd=suite, env=env, stdout=out_f, stderr=err_f,
+                                 start_new_session=True)
     try:
-        stdout, stderr = child.communicate(timeout=INNER_TIMEOUT_S)
+        deadline = time.monotonic() + INNER_TIMEOUT_S
+        while os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+            assert time.monotonic() < deadline, f"inner pytest still running after {INNER_TIMEOUT_S} s"
+            time.sleep(0.05)
     finally:
         try:
-            os.killpg(child.pid, signal.SIGKILL)    # the group outlives a child that exited
+            os.killpg(child.pid, signal.SIGKILL)    # the leader is unreaped: the group is still ours
         except ProcessLookupError:
             pass
-        if child.returncode is None:
-            child.communicate()
-    done = subprocess.CompletedProcess(argv, child.returncode, stdout, stderr)
+        child.wait(timeout=REAP_TIMEOUT_S)
+    done = subprocess.CompletedProcess(argv, child.returncode, out_path.read_text(), err_path.read_text())
     setups = record.read_text().split() if record.exists() else []
     return done, setups
 
@@ -89,10 +99,10 @@ def _inner_session(tmp_path, *, refuse: bool) -> tuple[subprocess.CompletedProce
 def test_a_refused_recovery_sets_up_no_per_test_state(tmp_path):
     done, setups = _inner_session(tmp_path, refuse=True)
     out = done.stdout + done.stderr
-    assert "transcript importer from an earlier test is still running" in out, out
-    assert "1 error" in out, out
-    assert GATE in setups, setups
-    assert [name for name in MUTATORS if name in setups] == [], setups
+    assert "transcript importer from an earlier test is still running" in out, out   # the refusal
+    assert GATE in setups, setups                                                      # the gate ran
+    assert [name for name in MUTATORS if name in setups] == [], setups                 # the invariant
+    assert done.returncode == 1 and "1 error" in out, out                              # exact status
 
 
 def test_without_a_retained_importer_every_mutator_is_set_up_after_the_gate(tmp_path):
@@ -100,6 +110,6 @@ def test_without_a_retained_importer_every_mutator_is_set_up_after_the_gate(tmp_
     each one after the gate even though the gate was moved last."""
     done, setups = _inner_session(tmp_path, refuse=False)
     out = done.stdout + done.stderr
-    assert "1 passed" in out, out
+    assert done.returncode == 0 and "1 passed" in out, out
     assert all(name in setups for name in MUTATORS), setups
     assert all(setups.index(GATE) < setups.index(name) for name in MUTATORS), setups
