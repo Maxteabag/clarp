@@ -372,6 +372,9 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
     from . import agent_ring_live as live
     if mode != live.MODE_LIVE:
         raise CallError(409, live.CLIENT_REQUIRED)
+    # The grant binds a paired, full-scope device: its principal is the device identity.
+    if not principal.startswith("device_") or not live.device_ok(principal):
+        raise CallError(403, live.AUTH)
     if ring["state"] == "answered":
         if ring["answered_by"] != principal:
             raise CallError(409, live.OWNER_CONFLICT)
