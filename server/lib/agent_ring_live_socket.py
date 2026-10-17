@@ -593,6 +593,10 @@ def serve(handler) -> None:
         from .oracle_realtime import _send_http_error
         return _send_http_error(handler, 401, denied)
     principal = who.principal
+    try:
+        live.require_device(principal)        # M-2: the administrator or a revoked device never joins
+    except live.CallError:
+        return _http_refusal(handler, 403, "live_auth")
     token = claim_session(principal)          # never supersedes another voice session
     if token is None:
         return _http_refusal(handler, 409, "live_owner_conflict")
