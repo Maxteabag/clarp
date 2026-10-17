@@ -693,10 +693,17 @@ def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeyp
     closing, release = _threading.Event(), _threading.Event()
     original_close = database.close_local
 
+    worker_closes: list[int] = []
+
     def held_close():
+        # Hold only the IDLE close: the worker's first close is the per-item one
+        # after the import (where _worker is set in every version); the second is
+        # the idle branch's, which must run before _worker is cleared.
         if _threading.current_thread().name == "transcript-import":
-            closing.set()
-            assert release.wait(5)
+            worker_closes.append(1)
+            if len(worker_closes) == 2:
+                closing.set()
+                assert release.wait(5)
         return original_close()
 
     monkeypatch.setattr(database, "close_local", held_close)
@@ -714,3 +721,35 @@ def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeyp
         release.set()
         resetter.join(5)
     assert result["ok"] is True and not worker.is_alive()
+
+
+def test_a_popped_item_is_never_invisible_to_is_active_before_it_runs(tmp_path, monkeypatch):
+    """r7/ADD-1 (R-1): the worker pops _pending and installs _running in the SAME
+    _guard section. Every time the worker releases _guard before the importer
+    starts, the request is still in _pending or _running, so reconcile can never
+    read is_active() False and resubmit a request that is about to run."""
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    path = tmp_path / "gap.jsonl"
+    path.write_text("{}\n")
+    key = f"a\0{path}"
+    started = _threading.Event()
+    gaps: list[str] = []
+    real = cache._guard
+
+    class CheckedGuard:
+        def __enter__(self):
+            return real.__enter__()
+
+        def __exit__(self, *exc):
+            if _threading.current_thread().name == "transcript-import" and not started.is_set():
+                running = cache._running
+                if not (key in cache._pending or (running is not None and running[0] == key)):
+                    gaps.append("released with the request in neither _pending nor _running")
+            return real.__exit__(*exc)
+
+    monkeypatch.setattr(cache, "_guard", CheckedGuard())
+    assert cache.schedule_import(path, started.set, owner="a")
+    assert started.wait(3)
+    assert cache.wait_for_background(3)
+    assert gaps == []
