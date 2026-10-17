@@ -537,8 +537,9 @@ def _audit_quietly(entry: dict) -> None:
 def fallback(principal: str, data: Any) -> dict:
     """The one explicit switch of a Live-answered ring to the classic call.
 
-    Allowed once, only before the Live opening was admitted and before any user
-    audio went upstream, and only with the phone's word that its Live audio has
+    Allowed once, only before the Live opening was consumed (append attempted,
+    including an uncertain admission) and before any user audio went upstream,
+    never merely until the provider's ACK, and only with the phone's word that its Live audio has
     stopped. In this order (WIRE-v2 §10): under the lock, claim it and retire
     Live with an epoch bump and save; then, in a finally that a failed save
     cannot skip, stop the Live session; then voice and start the classic call
