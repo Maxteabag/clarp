@@ -389,3 +389,13 @@ def test_opening_text_is_compared_after_whitespace_normalisation_and_never_again
     long_line = "o" * 601
     _refused(400, "live_context_invalid", _live_ring,
              _context(event={**_context()["event"], "id": "lw-long"}, opening_text="o" * 600), opening_line=long_line)
+
+
+def test_live_capability_counts_only_for_a_paired_full_scope_device_token(sander):
+    # A shared or non-device registration never receives a Live push nor admits a Live ring.
+    rings.register_voip_token(PHONE, "")
+    rings.register_voip_token("administrator", "ef" * 32, supported_conversation_modes=["agent_live_v1"])
+    _pair("device_revoked", revoked=True)
+    rings.register_voip_token("device_revoked", "aa" * 32, supported_conversation_modes=["agent_live_v1"])
+    assert rings._live_tokens() == []
+    _refused(409, "live_client_required", _live_ring)
