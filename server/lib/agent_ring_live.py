@@ -182,8 +182,11 @@ def _pinned_text(folder: pathlib.Path, pin: Any) -> tuple[str, str]:
         raise CallError(409, CONTEXT_UNAVAILABLE)
     if not _FILE_NAME.fullmatch(pin["file"]) or not _SHA256.fullmatch(pin["sha256"]):
         raise CallError(409, CONTEXT_UNAVAILABLE)
+    path = folder / pin["file"]
     try:
-        raw = (folder / pin["file"]).read_bytes()
+        if not path.resolve().is_relative_to(folder.resolve()):    # no symlink out of the profile
+            raise CallError(409, CONTEXT_UNAVAILABLE)
+        raw = path.read_bytes()
     except OSError:
         raise CallError(409, CONTEXT_UNAVAILABLE) from None
     if hashlib.sha256(raw).hexdigest() != pin["sha256"]:
