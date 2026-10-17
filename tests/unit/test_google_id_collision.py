@@ -851,3 +851,13 @@ def test_a_google_manifest_with_another_schema_version_still_collides(root, monk
     inventory = _state(root)
     assert inventory["complete"] is True and len(inventory["collisions"]) == 1
     assert google_tts.collision_code() == COLLISION
+
+
+def test_the_guard_is_advertised_as_its_own_feature_at_contract_70():
+    """Rule B (booked by the ledger): a new flag, never a re-pointed tts_provider_google."""
+    from lib import server_identity
+    assert server_identity.HOST_CONTRACT == 70
+    assert "tts_google_id_guard" in server_identity.FEATURES
+    assert server_identity.FEATURE_CONTRACTS["tts_google_id_guard"] == 70
+    assert server_identity.FEATURE_CONTRACTS["tts_provider_google"] == 69
+    assert server_identity.MIN_IOS_CONTRACT == 1
