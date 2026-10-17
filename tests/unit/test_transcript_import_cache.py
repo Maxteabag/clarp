@@ -782,7 +782,9 @@ def test_reset_waits_for_a_worker_tail_after_it_cleared_the_global(tmp_path, mon
 
     monkeypatch.setattr(database, "close_local", held_close)
     assert cache.schedule_import(path, lambda: None, owner="a")
-    worker = cache._worker
+    # From the registry, not _worker: the worker may already have cleared _worker
+    # by now. The reset at the start pruned every earlier thread.
+    (worker,) = cache._threads
     assert unwinding.wait(3)
     assert cache._worker is None and worker.is_alive()
     try:
@@ -843,7 +845,7 @@ def test_the_registry_prunes_finished_threads_instead_of_keeping_history(tmp_pat
         path = tmp_path / f"seq-{n}.jsonl"
         path.write_text("{}\n")
         assert cache.schedule_import(path, lambda: None, owner="a")
-        worker = cache._worker
+        (worker,) = cache._threads          # started in schedule's section; dead ones pruned there
         assert cache.wait_for_background(3)
         worker.join(3)
         assert worker not in seen
