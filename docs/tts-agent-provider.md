@@ -105,7 +105,8 @@ any, is a separate provider with its own stored voices.
 ### An old custom adapter whose id is `google`
 
 Before the built-in provider existed, a custom adapter could use the id
-`google`. Such a package no longer loads, and every stored `google` (in
+`google`. Hosts from contract 70 advertise this guard as the feature
+`tts_google_id_guard`. Such a package no longer loads, and every stored `google` (in
 `[tts]`, in `[tts.agents.*]` and in contact voices) would otherwise silently
 mean the built-in provider. Instead the Host refuses built-in Google with a
 fixed code until an operator decides:
