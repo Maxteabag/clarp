@@ -724,13 +724,17 @@ def test_a_session_whose_record_was_retired_elsewhere_stops_itself(call):
     assert call.up.closed
 
 
-@pytest.mark.parametrize("change", [{"protocol": True}, {"call_epoch": True}])
-def test_a_join_with_a_boolean_for_a_number_is_refused(call, change):
+@pytest.mark.parametrize("change,code", [
+    ({"protocol": True}, "live_owner_conflict"), ({"call_epoch": True}, "live_owner_conflict"),
+    ({"call_epoch": 1.0}, "live_owner_conflict"), ({"protocol": "1"}, "live_owner_conflict"),
+    ({"protocol": 2}, "live_call_stale"), ({"call_epoch": 3}, "live_call_stale"),
+])
+def test_a_join_with_a_malformed_number_is_an_owner_conflict_and_a_wrong_value_is_stale(call, change, code):
     h = Handler()
     thread = _serve(h)
     h.send(_join(call.grant, **change))
     thread.join(15)
-    assert [f["code"] for f in h.wfile.frames()] == ["live_call_stale"]
+    assert [f["code"] for f in h.wfile.frames()] == [code]
     assert call.connects == []
 
 
@@ -759,3 +763,13 @@ def test_a_join_from_a_non_device_principal_is_refused_with_live_auth(call):
     h.send(_join(call.grant))
     thread.join(15)
     assert [f["code"] for f in h.wfile.frames()] == ["live_auth"] and call.connects == []
+
+
+def test_a_recovery_answer_after_the_join_reports_the_grant_consumed(call):
+    h, thread = _admitted(call)
+    again = rings.answer(PHONE, call.grant["ring_id"], conversation_mode="agent_live_v1", request_id="r1",
+                         client_nonce="c1")
+    assert again["live"]["join_consumed"] is True and again["live"]["join_ticket"] == call.grant["join_ticket"]
+    assert again["live"]["attempt_id"] == call.grant["attempt_id"] and again["changed"] is False
+    h.send({"type": "session.close"})
+    thread.join(15)

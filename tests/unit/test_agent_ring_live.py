@@ -295,7 +295,8 @@ def test_a_live_answer_hands_back_the_v2_grant_and_starts_no_group_call(sander):
     grant = out["live"]
     assert set(grant) == {"protocol", "host_id", "ring_id", "agent_id", "call_id", "call_epoch", "attempt_id",
                           "context_digest", "provider", "model", "voice", "owner_nonce", "join_ticket",
-                          "expires_at", "opening_owner"}
+                          "join_consumed", "expires_at", "opening_owner"}
+    assert grant["join_consumed"] is False
     assert grant["protocol"] == 1 and grant["call_id"].startswith("alv_") and grant["call_epoch"] == 1
     assert (grant["provider"], grant["model"], grant["voice"], grant["opening_owner"]) == \
         ("openai", "gpt-live-1", "marin", "live")
