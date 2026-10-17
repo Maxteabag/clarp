@@ -28,6 +28,7 @@ from typing import Any
 
 from .deployment import LAYOUT
 from .group_calls import CallError
+from .log import log_exception
 
 FEATURE = "agent_ring_live"
 MODE_CLASSIC = "classic"
@@ -312,24 +313,42 @@ def retire(ring: dict, reason: str) -> bool:
 def close(principal: str, data: Any) -> dict:
     """The owner hangs up: retire the call's authority first, then stop its session.
 
-    Idempotent: a retired (or fallen-back) call answers the same result again."""
+    The close binds the call's exact epoch. Retirement makes that epoch terminal
+    (it is not bumped; only the classic fallback bumps it) and stores a receipt;
+    a repeated close of the same epoch answers that receipt, any other epoch, or a
+    close after the fallback, is stale. Stopping the session never depends on the
+    audit write, and a record that cannot be saved still stops the session before
+    its error is reported."""
     from . import agent_rings
+    changed, failure = False, None
     with agent_rings._lock:
         records = agent_rings._load()
         ring = _owned(records, principal, data)
         epoch = _epoch(data, "call_epoch")
         if data.get("reason") not in CLOSE_REASONS or not isinstance(data.get("request_id"), str):
             raise CallError(400, REQUEST_INVALID)
-        if epoch != ring["_live_call_epoch"] and ring.get("_live_phase") in LIVE_PHASES:
+        if epoch != ring["_live_call_epoch"] or ring.get("_live_phase") == "classic":
             raise CallError(409, CALL_STALE)
-        changed = retire(ring, data["reason"])
-        if changed:
-            agent_rings._save(records)
-            agent_rings._audit({"outcome": "live_closed", "ring_id": ring["ring_id"], "by": principal,
-                                "live_call_id": ring["_live_call_id"], "reason": data["reason"]})
-        result = {"ok": True, "call_id": ring["_live_call_id"], "call_epoch": epoch, "state": "retired"}
+        result = {"ok": True, "call_id": ring["_live_call_id"], "call_epoch": ring["_live_call_epoch"],
+                  "state": "retired"}
+        if retire(ring, data["reason"]):
+            changed = True
+            ring["_live_close_receipt"] = {"request_id": data["request_id"], "reason": data["reason"],
+                                           "call_epoch": ring["_live_call_epoch"]}
+            try:
+                agent_rings._save(records)
+            except Exception as exc:  # noqa: BLE001 - reported below, after the session is stopped
+                failure = exc
+            else:
+                try:
+                    agent_rings._audit({"outcome": "live_closed", "ring_id": ring["ring_id"], "by": principal,
+                                        "live_call_id": ring["_live_call_id"], "reason": data["reason"]})
+                except Exception as exc:  # noqa: BLE001 - diagnostics never block the stop
+                    log_exception("agentLiveCloseAuditFail", exc, f"call={ring['_live_call_id']}")
     if changed:
         _stop_session(ring["_live_call_id"], data["reason"])
+    if failure is not None:
+        raise failure
     return result
 
 
