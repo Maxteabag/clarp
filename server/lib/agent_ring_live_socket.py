@@ -588,10 +588,10 @@ def serve(handler) -> None:
     who = principal_of(handler)
     denied = require_full_scope(who, message="Agent-live calls require full-device authentication")
     if denied:
-        # The shared full-scope refusal, unchanged and as the Oracle v2 socket sends it; live_auth is only for
-        # what this route itself decides (a revoked device at join).
-        from .oracle_realtime import _send_http_error
-        return _send_http_error(handler, 401, denied)
+        # The shared layer already answered every unauthenticated (401 unauthorized) and limited-scope
+        # (403 full device access required, /calls is full-only) request unchanged before this route. What
+        # reaches here without validated full scope is a local caller: the route's own 401 live_auth.
+        return _http_refusal(handler, 401, "live_auth")
     principal = who.principal
     try:
         live.require_device(principal)        # M-2: the administrator or a revoked device never joins
