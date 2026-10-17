@@ -61,9 +61,14 @@ RECEIVE_TIMEOUT_SECONDS = 10.0     # one socket operation
 MAX_BREAK_MS = 3_000
 CHUNK_BYTES = 64 * 1024
 
+# A legacy custom adapter (valid at Host contract 64) claims the id "google", or an installed adapter
+# cannot be identified: built-in Google is refused until an operator resolves it (collision_code).
+ID_COLLISION = "google_id_collision"
+ID_UNVERIFIABLE = "google_id_unverifiable"
 # Reported by the voice catalog for a provider that cannot speak.
 CATALOG_ERROR_CODES = (
-    "google_credentials_missing", "google_project_missing", "google_auth_failed", "google_quota")
+    "google_credentials_missing", "google_project_missing", "google_auth_failed", "google_quota",
+    ID_COLLISION, ID_UNVERIFIABLE)
 ERROR_CODES = CATALOG_ERROR_CODES + (
     "voice_unavailable", "text_too_long", "google_timeout", "google_request_failed",
     "google_http_error", "google_bad_response", "google_audio_too_large", "google_empty_audio")
@@ -80,6 +85,42 @@ class GoogleTTSError(RuntimeError):
         assert code in ERROR_CODES, code
         self.code = code
         super().__init__(f"{code}: {detail}" if detail else code)
+
+
+class GoogleIdCollision(GoogleTTSError):
+    """Built-in Google is refused: its str is the bare code, never a path or a package name."""
+
+    def __init__(self, code: str):
+        assert code in (ID_COLLISION, ID_UNVERIFIABLE), code
+        super().__init__(code)
+
+
+def collision_code(cfg=None) -> str | None:
+    """ID_UNVERIFIABLE when the adapter inventory cannot be fully inspected, ID_COLLISION when a
+    package claims the id "google" and no operator resolution bound to exactly those packages exists,
+    else None (built-in Google as usual). Read fresh at every call; it never writes."""
+    from .custom_tts_adapters import collision_inventory
+    inventory = collision_inventory()
+    if not inventory["complete"]:
+        return ID_UNVERIFIABLE
+    if not inventory["collisions"]:
+        return None
+    if cfg is None:
+        from .config import load
+        cfg = load()
+    resolution = getattr(cfg, "tts_google_resolution", None) or {}
+    packages = resolution.get("packages")
+    if (resolution.get("choice") == "builtin" and isinstance(packages, list)
+            and all(isinstance(item, str) for item in packages)
+            and sorted(packages) == sorted(item["fingerprint"] for item in inventory["collisions"])):
+        return None
+    return ID_COLLISION
+
+
+def refuse_if_collision(cfg=None) -> None:
+    code = collision_code(cfg)
+    if code:
+        raise GoogleIdCollision(code)
 
 
 @dataclass(frozen=True)
@@ -214,6 +255,7 @@ def synthesize(*, text: str, voice: str, out_path: pathlib.Path, creds: Credenti
                token=google_stt.access_token) -> int:
     """Write the clip's MP3 to `out_path` and return its size. The file appears only when the
     whole clip arrived; `on_chunk(index, bytes)` then sees it in order."""
+    refuse_if_collision()
     deadline = time.monotonic() + TIME_BUDGET_SECONDS
     if creds.error:
         raise GoogleTTSError(creds.error)

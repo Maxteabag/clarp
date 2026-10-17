@@ -174,6 +174,209 @@ def discover(*, reserved_ids: set[str] | frozenset[str] = frozenset()) -> list[A
     return manifests
 
 
+# Collision inventory: whether an installed package claims the id "google", which the built-in
+# Google provider reserved at Host contract 69 (a valid custom id at 64). A safety classification for
+# lib.google_tts.collision_code only; discover() and inventory() above are unchanged. Nothing is
+# followed: the root and every entry are inspected with lstat/O_NOFOLLOW, never through a symlink.
+COLLISION_ID = "google"
+_NOFOLLOW_DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _collision_digest(parts) -> str:
+    """sha256 over length-prefixed parts, so no two different splits can collide."""
+    import hashlib
+    digest = hashlib.sha256()
+    for part in parts:
+        digest.update(len(part).to_bytes(8, "big"))
+        digest.update(part)
+    return digest.hexdigest()
+
+
+def _read_bounded_at(dir_fd: int, name: str) -> bytes:
+    """A regular file's bytes, opened without following; at most MAX_RESPONSE_BYTES + 1."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"not a regular file: {name}")
+        chunks, remaining = [], MAX_RESPONSE_BYTES + 1
+        while remaining > 0:
+            chunk = os.read(fd, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _executable_marker(package_fd: int, executable: Any) -> list[bytes]:
+    """The manifest's executable as fingerprint parts, walked one component at a time from the
+    package dir without following anything: a symlinked component is recorded by its link text,
+    an absent one as noexec, anything else as other; only a regular file reached without
+    following contributes its bytes."""
+    if executable is None:
+        return [b"noexec"]
+    if not isinstance(executable, str) or not executable.strip():
+        return [b"other"]
+    path = Path(executable.strip())
+    parts = [part for part in path.parts if part not in ("", ".")]
+    if path.is_absolute() or not parts or ".." in parts:
+        return [b"other"]
+    fds = [os.dup(package_fd)]
+    try:
+        for index, part in enumerate(parts):
+            final = index == len(parts) - 1
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+            if not final:
+                flags |= os.O_DIRECTORY
+            try:
+                fd = os.open(part, flags, dir_fd=fds[-1])
+            except OSError:
+                # Never decide by errno (ELOOP and ENOTDIR both occur for a symlink): look at the
+                # entry itself without following it.
+                try:
+                    entry = os.stat(part, dir_fd=fds[-1], follow_symlinks=False)
+                except FileNotFoundError:
+                    return [b"noexec"]
+                except OSError:
+                    return [b"other"]
+                if stat.S_ISLNK(entry.st_mode):
+                    return [b"symlink", "/".join(parts[:index + 1]).encode(),
+                            os.readlink(part, dir_fd=fds[-1]).encode("utf-8", "surrogateescape")]
+                return [b"other"]
+            fds.append(fd)
+        final_fd = fds[-1]
+        if not stat.S_ISREG(os.fstat(final_fd).st_mode):
+            return [b"other"]
+        chunks = []
+        while True:
+            chunk = os.read(final_fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return [b"exec", b"".join(chunks)]
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
+def _classify_manifest(raw: bytes) -> tuple[str, dict | None]:
+    if len(raw) > MAX_RESPONSE_BYTES:
+        return "oversize", None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return "parse_error", None
+    if not isinstance(data, dict):
+        return "not_object", None
+    if "id" not in data:
+        return "id_absent", data
+    value = data["id"]
+    if not isinstance(value, str) or not value.strip():
+        return "id_invalid", data
+    return "id_ok", data
+
+
+def collision_inventory(root: Path | None = None) -> dict[str, Any]:
+    """Every candidate manifest under the adapter root, classified without following anything.
+
+    `complete` is False when anything could not be inspected (an unreadable, symlinked or non-dir
+    root, an unreadable, symlinked, oversize, unparseable or non-object manifest, or an id present
+    but not a usable string): built-in Google is then unverifiable. `collisions` lists the packages
+    whose id is "google", each with a fingerprint of its relative path, manifest bytes and
+    executable. Paths here are for the operator report only, never for clients."""
+    root = ROOT if root is None else root
+    out: dict[str, Any] = {"root_category": "", "complete": False, "candidates": [], "collisions": []}
+    try:
+        root_stat = os.lstat(root)
+    except FileNotFoundError:
+        out.update(root_category="absent", complete=True)
+        return out
+    except OSError:
+        out["root_category"] = "unreadable"
+        return out
+    if stat.S_ISLNK(root_stat.st_mode):
+        out["root_category"] = "symlink"
+        try:
+            out["root_link"] = os.readlink(root)
+        except OSError:
+            pass
+        return out
+    if not stat.S_ISDIR(root_stat.st_mode):
+        out["root_category"] = "not_dir"
+        return out
+    try:
+        root_fd = os.open(root, _NOFOLLOW_DIR)
+    except OSError:
+        out["root_category"] = "unreadable"
+        return out
+    complete = True
+    try:
+        try:
+            names = sorted(os.listdir(root_fd))
+        except OSError:
+            out["root_category"] = "unreadable"
+            return out
+        out["root_category"] = "dir"
+        for name in names:
+            try:
+                entry = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+            except OSError:
+                out["candidates"].append({"relpath": name, "category": "read_error"})
+                complete = False
+                continue
+            if stat.S_ISLNK(entry.st_mode):
+                # Could be a package dir or a manifest; it is never followed, so it is unknown.
+                out["candidates"].append({"relpath": name, "category": "read_error"})
+                complete = False
+                continue
+            if stat.S_ISDIR(entry.st_mode):
+                try:
+                    package_fd = os.open(name, _NOFOLLOW_DIR, dir_fd=root_fd)
+                except OSError:
+                    out["candidates"].append({"relpath": name, "category": "read_error"})
+                    complete = False
+                    continue
+                try:
+                    try:
+                        os.stat("manifest.json", dir_fd=package_fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue                    # a folder without a manifest is not a candidate
+                    except OSError:
+                        pass
+                    complete &= _classify_candidate(out, package_fd, name, "manifest.json", f"{name}/manifest.json")
+                finally:
+                    os.close(package_fd)
+            elif name.endswith(".json"):
+                complete &= _classify_candidate(out, root_fd, name, name, name)
+    finally:
+        os.close(root_fd)
+    out["complete"] = complete
+    return out
+
+
+def _classify_candidate(out: dict[str, Any], package_fd: int, label: str, manifest_name: str,
+                  relpath: str) -> bool:
+    """Classify one candidate into `out`; returns whether it was fully inspectable."""
+    try:
+        raw = _read_bounded_at(package_fd, manifest_name)
+    except OSError:
+        out["candidates"].append({"relpath": relpath, "category": "read_error"})
+        return False
+    category, data = _classify_manifest(raw)
+    out["candidates"].append({"relpath": relpath, "category": category})
+    if category in ("oversize", "parse_error", "not_object", "id_invalid"):
+        return False
+    if category == "id_ok" and data["id"].strip().lower() == COLLISION_ID:
+        parts = [b"clarp-google-collision-v1", relpath.encode("utf-8", "surrogateescape"), raw,
+                 *_executable_marker(package_fd, data.get("executable"))]
+        out["collisions"].append({
+            "relpath": relpath, "name": str(data.get("name") or "")[:80],
+            "version": str(data.get("version") or "")[:40], "fingerprint": _collision_digest(parts)})
+    return True
+
+
 def inventory(*, reserved_ids: set[str] | frozenset[str] = frozenset()) -> list[dict[str, Any]]:
     """Return every installed package, including damaged manifests."""
     if not ROOT.is_dir() or ROOT.is_symlink():

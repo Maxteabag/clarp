@@ -182,9 +182,13 @@ def catalog(agents: dict, current_session: str = "") -> dict:
     for row in voices["gemini"]:
         row["current"] = row["id"] == current_gemini
     from . import google_tts
+    google_row = next((row for row in status["providers"] if row["id"] == "google"), {})
+    google_blocked = google_row.get("error") in (google_tts.ID_COLLISION, google_tts.ID_UNVERIFIABLE)
+    # While a legacy custom "google" adapter makes the stored "google" values ambiguous, no agent's
+    # value is read: the rows keep the required shape with current false and taken_by null.
     voices["google"] = _rows("google", [
         (voice_id, voice_id.rsplit("-", 1)[1], "") for voice_id in google_tts.VOICES],
-        agents, current_session)
+        {} if google_blocked else agents, current_session)
     for row in voices["google"]:
         row["language"] = google_tts.language_code(row["id"])   # display only
     try:

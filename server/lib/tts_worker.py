@@ -111,7 +111,14 @@ def synth_one(*,
                 if (clip_route.provider != CARTESIA
                         and getattr(active_delivery, "name", "") == "raw-pcm"):
                     active_delivery = ChunkedFileDelivery(broker=broker)
-                if not _route_has_voice(voice_config, row, agent, clip_route):
+                refusal = _google_collision_refusal(voice_config, clip_route)
+                if refusal:
+                    # Built-in Google is refused and no explicit fallback can speak: fail with the
+                    # fixed code before any Google voice is interpreted (never noVoice, never retried).
+                    _emit("tts_worker", "googleIdCollision", context=_event_context(row, agent),
+                          level="warn", detail={"provider": clip_route.provider, "code": refusal})
+                    result = _PwaStreamResult(False, error=refusal)
+                elif not _route_has_voice(voice_config, row, agent, clip_route):
                     # Nothing can speak this: fail before a clip is announced,
                     # or the phone waits for audio that never comes.
                     result = _PwaStreamResult(
@@ -121,16 +128,17 @@ def synth_one(*,
                     _emit("tts_worker", "noVoice", context=_event_context(row, agent),
                           detail={"provider": clip_route.provider})
                     return True
-                _emit("tts_worker", "route",
-                      context=_event_context(row, agent),
-                      detail={"provider": clip_route.provider,
-                              "delivery": getattr(active_delivery, "name", "")})
-                result = _synth_pwa_via_delivery(
-                    row, agent, audio_dir,
-                    delivery=active_delivery,
-                    stream=stream, herald=herald,
-                    clip_route=clip_route,
-                )
+                else:
+                    _emit("tts_worker", "route",
+                          context=_event_context(row, agent),
+                          detail={"provider": clip_route.provider,
+                                  "delivery": getattr(active_delivery, "name", "")})
+                    result = _synth_pwa_via_delivery(
+                        row, agent, audio_dir,
+                        delivery=active_delivery,
+                        stream=stream, herald=herald,
+                        clip_route=clip_route,
+                    )
         else:
             result = _PwaStreamResult(
                 False, error="no registered agent for queued utterance")
@@ -222,6 +230,16 @@ def _google_voice(raw_voice: str | None, route_voice: str | None) -> str:
     if raw_voice and raw_voice.strip() in google_tts.VOICES:
         return raw_voice.strip()
     return google_tts.DEFAULT_VOICE
+
+
+def _google_collision_refusal(cfg, clip_route) -> str | None:
+    """The fixed code when this clip routes to built-in Google while a legacy custom "google"
+    adapter blocks it AND no explicit non-google fallback is configured; else None. With such a
+    fallback the clip proceeds: run(GOOGLE) refuses first and the existing loop speaks the fallback."""
+    if clip_route.provider != GOOGLE or clip_route.fallback:
+        return None
+    from . import google_tts
+    return google_tts.collision_code(cfg)
 
 
 def _route_has_voice(cfg, row: dict, agent: dict | None, clip_route) -> bool:
@@ -347,6 +365,9 @@ def _synthesize(*, cfg, row: dict, agent: dict,
                 trace_id=trace_id)
         if selected == GOOGLE:
             from . import google_tts
+            # First: a legacy custom "google" adapter refuses built-in Google before any voice is
+            # interpreted or credentials are built (raises GoogleIdCollision, str = the bare code).
+            google_tts.refuse_if_collision(cfg)
             google_voice = _google_voice(raw_voice, clip_route.voice if provider == GOOGLE else None)
             spoke["voice"] = google_voice
             return google_tts.synthesize(
@@ -484,6 +505,10 @@ def _publish_tts_error(stream: Any | None, row: dict,
             "google_credentials_missing": "Voice unavailable: Google Chirp 3 HD is not configured.",
             "google_project_missing": "Voice unavailable: Google Chirp 3 HD is not configured.",
             "voice_unavailable": "Voice unavailable: this Google Chirp 3 HD voice is not available.",
+            "google_id_collision": ("Voice unavailable: an old custom adapter also uses the id "
+                                    "google; an operator must resolve it."),
+            "google_id_unverifiable": ("Voice unavailable: an installed custom adapter cannot be "
+                                       "identified; an operator must check it."),
         }.get(google_code, "Voice synthesis failed.")
     elif "quota" in low or "401" in low:
         message = "Voice paused: ElevenLabs quota exceeded."

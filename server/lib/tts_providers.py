@@ -28,6 +28,9 @@ CATALOG = (
      "allows_custom_voice": False, "custom": False},
 )
 VALID_IDS = frozenset(item["id"] for item in CATALOG)
+# The fixed error a legacy custom package with id "google" shows (no path, no name).
+LEGACY_GOOGLE_ERROR = ("legacy custom adapter id 'google' conflicts with built-in Google; "
+                       "operator resolution required (clarp-admin tts google-collision --report)")
 
 
 def definitions() -> tuple[dict, ...]:
@@ -59,6 +62,7 @@ def status() -> dict:
     from . import google_tts
     cfg = load()
     google = google_tts.credentials(cfg).status()
+    blocked = google_tts.collision_code(cfg)
     rows = []
     for definition in definitions():
         provider = definition["id"]
@@ -71,9 +75,14 @@ def status() -> dict:
             bool(definition.get("installed", True))
         )
         if provider == "google":
-            # Which source would sign in and why it cannot, never the file or project.
+            # Which source would sign in and why it cannot, never the file or project. A collision
+            # with a legacy custom adapter blocks it with a fixed code before any credential matters.
             definition = dict(definition, credential_source=google["credential_source"],
-                              error=google["error"])
+                              error=blocked or google["error"])
+            available = available and not blocked
+        elif (definition.get("custom") and str(definition.get("id", "")).startswith("invalid.")
+                and str(definition.get("error", "")).endswith("reserved adapter id: google")):
+            definition = dict(definition, error=LEGACY_GOOGLE_ERROR)
         rows.append(dict(
             definition, available=(
                 bool(definition.get("available", True))

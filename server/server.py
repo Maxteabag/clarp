@@ -1295,6 +1295,12 @@ class Handler(BaseHTTPRequestHandler):
         query = self._query()
         provider = (query.get("provider", [""])[0] or "").strip().lower()
         voice_id = (query.get("id", [""])[0] or "").strip()
+        if provider == "google":
+            # First, before the catalog, any cached preview, credentials or voice interpretation.
+            from lib.google_tts import collision_code
+            code = collision_code()
+            if code:
+                return self._json_error(409, code)
         body = catalog(load_agents(self.ctx.agents_path))
         provider_row = next((row for row in body["providers"]
                              if row["id"] == provider), None)
@@ -2509,6 +2515,11 @@ class Handler(BaseHTTPRequestHandler):
         provider = str(data.get("provider") or "").strip().lower()
         fallback = str(data.get("fallback") or "none").strip().lower()
         voice = str(data.get("voice") or "").strip()
+        if "google" in (provider, fallback):
+            from lib.google_tts import collision_code
+            code = collision_code()
+            if code:
+                return self._json_error(409, code)
         allowed = valid_ids()
         rows = {row["id"]: row for row in status()["providers"]}
         if (provider not in allowed or fallback not in allowed
@@ -3358,7 +3369,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json_error(400, "session and voice_id required")
         if provider == "google":
             # Only the built-in google provider is validated: its voices are a fixed allowlist.
+            # A legacy custom "google" adapter refuses it first, before the allowlist.
             from lib import google_tts
+            code = google_tts.collision_code()
+            if code:
+                return self._json_error(409, code)
             if voice_id not in google_tts.VOICES:
                 return self._json_error(400, "unknown voice")
         agents = load_agents(self.ctx.agents_path)

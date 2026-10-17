@@ -401,6 +401,9 @@ class Config:
     # Per-agent overrides from [tts.agents.<name or session>]: provider and
     # <provider>_voice (see lib.tts_mode). Keys lowercased.
     tts_agent_overrides: dict[str, dict] = field(default_factory=dict)
+    # [tts.google_resolution]: an operator's explicit "built-in" resolution of a legacy custom adapter
+    # whose id is "google" (lib.google_tts.collision_code), bound to the colliding packages' fingerprints.
+    tts_google_resolution: dict = field(default_factory=dict)
     gemini_api_key: str = ""             # [gemini_tts] api_key or env GEMINI_API_KEY
     gemini_model: str = "gemini-3.8-flash-tts"
     gemini_voice: str = "Kore"
@@ -929,6 +932,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
             for k, v in entry.items() if str(v).strip()}
         for name, entry in (tts.get("agents") or {}).items()
         if isinstance(entry, dict)}
+    google_resolution = tts.get("google_resolution")
+    tts_google_resolution = dict(google_resolution) if isinstance(google_resolution, dict) else {}
     cartesia_voices = cartesia.get("voices")
     _CACHED = Config(
         _config_path     = str(path),
@@ -952,6 +957,7 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         tts_provider    = provider,
         tts_fallback    = fallback,
         tts_agent_overrides = tts_agent_overrides,
+        tts_google_resolution = tts_google_resolution,
         gemini_api_key  = str(gemini.get("api_key", "")),
         gemini_model    = str(gemini.get("model", "gemini-3.8-flash-tts")).strip() or "gemini-3.8-flash-tts",
         gemini_voice    = str(gemini.get("voice", "Kore")).strip() or "Kore",
