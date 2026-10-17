@@ -363,3 +363,14 @@ def test_a_closed_upstream_with_a_stuck_effect_is_refused_at_once_without_spinni
         release.set()
         effect.join(5)
         thread.join(15)
+
+
+# ---- the socket route's one refusal for a request that is not a websocket ------------------------
+
+@pytest.mark.parametrize("drop", ["Upgrade", "Sec-WebSocket-Key"])
+def test_a_request_that_is_not_a_websocket_gets_one_426_live_websocket_required(call, drop):
+    h = Handler()
+    del h.headers[drop]
+    sock.serve(h)
+    assert (h.status, h.body()) == (426, {"error": "live_websocket_required"})
+    assert call.connects == [] and live._SESSIONS == {}
