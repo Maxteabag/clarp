@@ -565,3 +565,79 @@ def test_selecting_google_from_the_cli_is_refused_while_blocked(operator):
     with pytest.raises(SystemExit) as refused:
         admin.cmd_tts(argparse.Namespace(tts_command="use", provider="google", fallback="none", voice=""))
     assert COLLISION in str(refused.value)
+
+
+# ---- review precision notes P-1..P-4 (v3 addendum 3) -----------------------------------------
+
+@pytest.mark.parametrize("kind", ["symlink", "not_dir"])
+def test_the_report_names_the_filesystem_remedy_for_a_root_resolve_cannot_lift(operator, tmp_path, monkeypatch,
+                                                                               capsys, kind):
+    link = tmp_path / "odd-root"
+    if kind == "symlink":
+        link.symlink_to(operator["backups"], target_is_directory=True)
+    else:
+        link.write_text("")
+    monkeypatch.setattr(custom_tts_adapters, "ROOT", link)
+    assert admin.cmd_tts(_args(report=True)) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["state"] == UNVERIFIABLE and report["resolution_table"] == ""
+    assert "real directory" in report["remedy"] and str(link) not in report["remedy"]
+
+
+def test_resolve_refuses_an_owner_lock_path_swapped_after_it_was_opened(operator, monkeypatch, tmp_path):
+    from lib import data_root_locks
+    real_open = os.open
+
+    def swapping(path, *args, **kwargs):
+        fd = real_open(path, *args, **kwargs)
+        if str(path).endswith(data_root_locks.OWNER_LOCK):
+            replacement = tmp_path / "replacement.lock"
+            replacement.touch(mode=0o600)
+            os.replace(replacement, path)                     # the path now names another inode
+        return fd
+    monkeypatch.setattr(os, "open", swapping)
+    before = operator["config"].read_bytes()
+    assert admin.cmd_tts(_args(resolve_builtin=True)) == 77
+    assert operator["config"].read_bytes() == before
+    assert not list(operator["config"].parent.glob("config.toml.google-resolution-backup-*"))
+
+
+def test_resolve_refuses_a_symlinked_config_without_following_it(operator, tmp_path):
+    real = tmp_path / "real-config.toml"
+    real.write_bytes(operator["config"].read_bytes())
+    operator["config"].unlink()
+    operator["config"].symlink_to(real)
+    before = real.read_bytes()
+    assert admin.cmd_tts(_args(resolve_builtin=True)) == 78
+    assert operator["config"].is_symlink() and real.read_bytes() == before
+    assert not list(tmp_path.glob("config.toml.google-resolution-backup-*"))
+
+
+@pytest.mark.parametrize("definition", [
+    'google_resolution.choice = "builtin"\ngoogle_resolution.packages = []\n',
+    'google_resolution = { choice = "builtin", packages = [] }\n',
+], ids=["dotted_keys", "inline_table"])
+def test_resolve_refuses_a_resolution_not_defined_as_its_own_table(operator, definition):
+    text = operator["config"].read_text().replace('fallback = "none"\n', 'fallback = "none"\n' + definition, 1)
+    operator["config"].write_text(text)
+    before = operator["config"].read_bytes()
+    assert admin.cmd_tts(_args(resolve_builtin=True)) == 78
+    assert operator["config"].read_bytes() == before
+    assert not list(operator["config"].parent.glob("config.toml.google-resolution-backup-*"))
+
+
+def test_resolve_refuses_a_resolution_with_a_sub_table(operator):
+    with operator["config"].open("a") as handle:
+        handle.write('\n[tts.google_resolution.extra]\nnote = "x"\n')
+    before = operator["config"].read_bytes()
+    assert admin.cmd_tts(_args(resolve_builtin=True)) == 78
+    assert operator["config"].read_bytes() == before
+
+
+def test_resolve_replaces_a_stale_resolution_table_in_place(operator):
+    with operator["config"].open("a") as handle:
+        handle.write('\n[tts.google_resolution]\nchoice = "builtin"\npackages = ["stale"]\n')
+    assert admin.cmd_tts(_args(resolve_builtin=True)) == 0
+    after = tomllib.loads(operator["config"].read_text())
+    assert after["tts"]["google_resolution"]["packages"] != ["stale"]
+    assert operator["config"].read_text().count("[tts.google_resolution]") == 1
