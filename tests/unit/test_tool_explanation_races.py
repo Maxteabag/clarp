@@ -81,11 +81,14 @@ def test_a_poll_straddling_publication_does_not_requeue_the_published_key(monkey
         with real_transaction() as connection:
             yield connection
     monkeypatch.setattr(queue, "transaction", gated)
-    reply = {}
+    reply, raised = {}, []
 
     def poll():
         poll_threads.add(threading.get_ident())
-        reply["value"] = queue.request(3, prepared, [], 0)
+        try:
+            reply["value"] = queue.request(3, prepared, [], 0)
+        except BaseException as error:   # reported as itself below (e.g. a foreign-key failure)
+            raised.append(error)
     thread = threading.Thread(target=poll)
     thread.start()
     assert at_lock.wait(5), "the poll did not reach its write transaction"
@@ -93,18 +96,21 @@ def test_a_poll_straddling_publication_does_not_requeue_the_published_key(monkey
     assert queue.complete("worker", [(key, {"status": "ready", "text": "List the files.", "source": "llm"})], 60)
     published = _one("SELECT explanation, created_at, expires_at FROM tool_explanation_cache WHERE cache_key=?", key)
     assert published is not None and _one("SELECT 1 FROM tool_explanation_jobs WHERE cache_key=?", key) is None
+    # Publication deletes the job, and the demands with it (ON DELETE CASCADE).
+    assert _one("SELECT count(*) FROM tool_explanation_demands WHERE cache_key=?", key)[0] == 0
     proceed.set()
     thread.join(5)
     assert not thread.is_alive()
+    assert raised == [], f"the straddling poll raised: {raised!r}"
 
     # Reply semantics: the poll answers what it read before publication.
     assert reply["value"] == [{"id": "row", "status": "pending"}]
     # The invariant: no job came back for the published key, so nothing can run again ...
     assert _one("SELECT count(*) FROM tool_explanation_jobs WHERE cache_key=?", key)[0] == 0
     assert queue.claim("next-worker") == []
-    # ... and the published answer is untouched; the viewer's demand bookkeeping is kept.
+    # ... the published answer is untouched, and no demand was re-added for a key without a job.
     assert _one("SELECT explanation, created_at, expires_at FROM tool_explanation_cache WHERE cache_key=?", key) == published
-    assert _one("SELECT 1 FROM tool_explanation_demands WHERE cache_key=? AND demand_id='view'", key) is not None
+    assert _one("SELECT count(*) FROM tool_explanation_demands WHERE cache_key=?", key)[0] == 0
     assert queue.request(3, prepared, [], 0)[0]["status"] == "ready"
 
 
