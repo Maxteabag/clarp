@@ -757,3 +757,60 @@ def test_an_obtainable_dry_run_reports_the_inventory_and_the_table(operator, cap
     report = _dry_run(operator, capsys)
     assert report["exclusivity"] == "obtainable"
     assert report["inventory"]["collisions"] and "[tts.google_resolution]" in report["resolution_table"]
+
+
+# ---- source review LOW findings F-2, F-3, F-4, F-6 ---------------------------------------------
+
+def test_reading_the_config_never_blocks_on_a_fifo_and_requires_a_regular_file(tmp_path):
+    fifo = tmp_path / "config.toml"
+    os.mkfifo(fifo, 0o600)
+    with pytest.raises(OSError):
+        admin._read_nofollow(fifo)                            # returns at once instead of blocking
+
+
+def test_resolve_keeps_comments_that_preface_the_next_table(operator):
+    with operator["config"].open("a") as handle:
+        handle.write('\n[tts.google_resolution]\nchoice = "builtin"\npackages = ["stale"]\n\n'
+                     '# the operator explains the next table\n[audio]\ndelivery = "auto"\n')
+    assert admin.cmd_tts(_args(resolve_builtin=True)) == 0
+    text = operator["config"].read_text()
+    assert "# the operator explains the next table\n[audio]" in text
+    assert tomllib.loads(text)["audio"] == {"delivery": "auto"}
+
+
+def test_a_durability_failure_after_the_replace_still_verifies_and_reports_it(operator, monkeypatch, capsys):
+    real_fsync_directory = admin._fsync_directory
+    calls = []
+
+    def failing_second(path):
+        calls.append(path)
+        if len(calls) == 2:                                   # the directory fsync after os.replace
+            raise OSError(5, "I/O error")
+        return real_fsync_directory(path)
+    monkeypatch.setattr(admin, "_fsync_directory", failing_second)
+    assert admin.cmd_tts(_args(resolve_builtin=True)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is True and out["durable"] is False and out["backup"]
+    assert tomllib.loads(operator["config"].read_text())["tts"]["google_resolution"]["choice"] == "builtin"
+
+
+def test_a_large_executable_is_fingerprinted_in_bounded_reads(root, monkeypatch):
+    package = _package(root, executable=b"\0" * (3 * 1024 * 1024))
+    real_read = os.read
+    sizes = []
+
+    def recording(fd, size):
+        sizes.append(size)
+        return real_read(fd, size)
+    package_fd = os.open(package, os.O_RDONLY | os.O_DIRECTORY)
+    monkeypatch.setattr(os, "read", recording)
+    try:
+        marker = custom_tts_adapters._executable_marker(package_fd, "./adapter")
+    finally:
+        monkeypatch.setattr(os, "read", real_read)
+        os.close(package_fd)
+    assert marker[0] == b"exec" and sum(len(part) for part in marker) < 1024
+    assert max(sizes) <= 1024 * 1024
+    before = _fingerprint(root)
+    (package / "adapter").write_bytes(b"\0" * (3 * 1024 * 1024 - 1) + b"\1")
+    assert _fingerprint(root) != before                       # the content is still bound
