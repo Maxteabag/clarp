@@ -388,28 +388,145 @@ def test_enqueue_event_reports_read_lag_and_the_trace_it_chose(streamer_env, mon
 
 def test_a_queued_reclassify_for_a_rebound_or_stopped_owner_does_nothing(streamer_env, monkeypatch):
     """The reclassify runs later on the import worker. By then the agent may
-    have been rebound to another backend session or the streamer stopped; a
-    stale callback must not reclassify or push for it."""
+    have been rebound (to another backend session OR the same one, under a new
+    generation) or the streamer stopped; a stale callback must not reclassify."""
     from lib import user_notifications
 
     streamer, tmp_path = streamer_env
     agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-old")
     streamer._stream = _FakeStream()
     calls: list[tuple] = []
-    monkeypatch.setattr(user_notifications, "reclassify_recent_suppressed",
-                        lambda **kw: calls.append((kw["agent_id"], kw["backend_session_id"])) or [])
+
+    def recorder(**kw):
+        if kw["admit"]():
+            calls.append((kw["agent_id"], kw["backend_session_id"]))
+        return []
+
+    monkeypatch.setattr(user_notifications, "reclassify_recent_suppressed", recorder)
 
     streamer.reconcile_once()
     assert streamer.pool.has(agent_id)
     current = streamer._bind_generation[agent_id]
 
-    streamer._after_import(agent_id, "cs-old", current)
+    streamer._after_import(agent_id, "cs-old", current, 1)
     assert calls == [(agent_id, "cs-old")]
 
-    streamer._after_import(agent_id, "cs-old", current - 1)      # an older binding's callback
-    streamer._after_import(agent_id, "cs-other", current)       # another backend session
+    streamer._after_import(agent_id, "cs-old", current - 1, 1)   # an older binding's callback
+    streamer._after_import(agent_id, "cs-other", current, 1)     # another backend session
+    assert calls == [(agent_id, "cs-old")]
+
+    streamer._unbind(agent_id)                                    # same bsid, new generation
+    streamer.reconcile_once()
+    assert streamer._bind_generation[agent_id] > current
+    streamer._after_import(agent_id, "cs-old", current, 1)
     assert calls == [(agent_id, "cs-old")]
 
     streamer.stop(timeout=2.0)
-    streamer._after_import(agent_id, "cs-old", current)
+    streamer._after_import(agent_id, "cs-old", streamer._bind_generation[agent_id], 1)
     assert calls == [(agent_id, "cs-old")]
+
+
+def test_bind_generations_only_increase_across_unbind_stop_and_new_streamers(streamer_env):
+    """G-a: one process-wide counter, never popped or reset. G-b: stop() unbinds all."""
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-same")
+    streamer.reconcile_once()
+    first = streamer._bind_generation[agent_id]
+    streamer._unbind(agent_id)
+    assert streamer._bind_generation[agent_id] == first          # not popped
+    streamer.reconcile_once()
+    second = streamer._bind_generation[agent_id]
+    assert second > first
+    streamer.stop(timeout=2.0)
+    assert streamer._bound == {} and streamer._dirty == {}
+    other = TranscriptStreamer(reconcile_interval_sec=0.1)
+    try:
+        other.reconcile_once()
+        assert other._bind_generation[agent_id] > second
+    finally:
+        other.stop(timeout=2.0)
+
+
+def test_a_newer_change_during_a_running_callback_keeps_its_pending_intent(streamer_env, monkeypatch):
+    """E2-b: the callback clears only its own (bsid, gen, seq). A newer change
+    noted while the callback runs must stay pending."""
+    import threading
+    from lib import user_notifications
+
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-race")
+    streamer._stream = _FakeStream()
+    streamer.reconcile_once()
+    agent = agents_db.get_by_agent_id(agent_id)
+    inside, release = threading.Event(), threading.Event()
+
+    def blocking(**kw):
+        inside.set()
+        assert release.wait(5)
+        return []
+
+    monkeypatch.setattr(user_notifications, "reclassify_recent_suppressed", blocking)
+    old = streamer._note_change(agent, "cs-race")
+    runner = threading.Thread(target=lambda: streamer._after_import(agent_id, old.bsid, old.gen, old.seq))
+    runner.start()
+    try:
+        assert inside.wait(2)
+        newer = streamer._note_change(agent, "cs-race")
+        assert newer.seq > old.seq
+    finally:
+        release.set()
+        runner.join(5)
+    assert streamer._dirty[agent_id].seq == newer.seq
+
+
+def test_a_callback_effect_failure_clears_only_its_own_intent(streamer_env, monkeypatch):
+    """§4: an exception in the callback's effects is logged; its own intent is
+    cleared (no effect retry loop); the import is not retried."""
+    from lib import user_notifications
+
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-fail")
+    streamer._stream = _FakeStream()
+    streamer.reconcile_once()
+    agent = agents_db.get_by_agent_id(agent_id)
+
+    def boom(**kw):
+        raise RuntimeError("effect failed")
+
+    monkeypatch.setattr(user_notifications, "reclassify_recent_suppressed", boom)
+    intent = streamer._note_change(agent, "cs-fail")
+    streamer._after_import(agent_id, intent.bsid, intent.gen, intent.seq)
+    assert agent_id not in streamer._dirty
+
+
+def test_an_unresolved_intent_is_resubmitted_on_the_backoff_schedule(streamer_env, monkeypatch):
+    """§3: a refused (or failed) submission leaves the intent dirty; the existing
+    reconcile resubmits it at about 1, 3, 7, 15, 31, 63 s, then every 60 s."""
+    from lib import transcript_import_cache, transcript_streamer
+
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path, backend_session_id="cs-cap")
+    streamer.reconcile_once()
+    agent = agents_db.get_by_agent_id(agent_id)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(transcript_streamer.time, "monotonic", lambda: clock["now"])
+    submissions: list[float] = []
+
+    def refused(*args, **kwargs):
+        submissions.append(clock["now"])
+        return False
+
+    monkeypatch.setattr(transcript_import_cache, "schedule_import", refused)
+    monkeypatch.setattr(transcript_import_cache, "is_active", lambda *a, **kw: False)
+
+    streamer._on_change(agent, "cs-cap")                          # first submission, refused
+    assert len(submissions) == 1 and agent_id in streamer._dirty
+    seen = []
+    for t in (0.5, 1.0, 2.9, 3.0, 6.9, 7.0, 15.0, 31.0, 63.0, 122.9, 123.0):
+        clock["now"] = 1000.0 + t
+        before = len(submissions)
+        streamer.reconcile_once()
+        if len(submissions) > before:
+            seen.append(t)
+    assert seen == [1.0, 3.0, 7.0, 15.0, 31.0, 63.0, 123.0]
+    assert agent_id in streamer._dirty                            # never dropped while bound
