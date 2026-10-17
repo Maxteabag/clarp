@@ -177,7 +177,11 @@ lists every field and fixed string.
 - **Close and fallback.** `POST /calls/ring/live/close` and the socket's
   `session.close` retire the call's authority first, then the upstream.
   `POST /calls/ring/live/fallback` switches to the classic call once, only
-  before the opening was admitted and before user audio went upstream.
+  while the opening is not yet consumed (no instruction append attempted, so
+  never after an uncertain admission) and no user audio went upstream.
+- **Deadlines.** A joined call must reach admission (phone ready and provider
+  ready) within 15 s, else it fails (`audio_not_ready` or `live_unavailable`);
+  pings do not extend it. The provider must acknowledge the opening within 10 s.
 - **No tools.** The Live model has no tools, roster, shell or Oracle memory,
   and never reads or changes a global Oracle setting.
 

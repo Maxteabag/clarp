@@ -41,6 +41,7 @@ from .log import log, log_exception
 JOIN_WAIT_S = 10.0              # the first frame must come this soon after the upgrade
 CLIENT_IDLE_S = 30.0            # a phone that sends nothing (audio, ping) this long is gone
 OPENING_ACK_S = 10.0            # the provider must take the opening this soon after it was sent
+SETUP_S = 15.0                  # a joined call must reach admission (phone ready, provider ready) this soon
 TICK_S = 0.1
 DEVICE_CHECK_TICKS = 10         # a revoked or downgraded device is noticed within a second
 SILENCE = base64.b64encode(bytes(int(24000 * TICK_S) * 2)).decode("ascii")   # 100 ms of PCM16 24 kHz mono
@@ -127,6 +128,7 @@ class LiveSocket:
         self._state = threading.Lock()
         self.client_ready = self.provider_ready = self.opening_sent = self.admitted = self.forwarding = False
         self.opening_sent_at = 0.0
+        self.joined_at = time.monotonic()           # the setup deadline counts from the join
         self.silence_until = 0.0                    # monotonic deadline of the silence feed; 0 = off
         self.held: list[str] = []                   # model audio that arrived before the opening ACK
         self.held_bytes = 0
@@ -325,6 +327,14 @@ class LiveSocket:
                         self.upstream_send({"type": "session.input_audio.append", "audio": SILENCE})
                     else:
                         self.silence_until = 0.0    # budget spent: the feed ends, never indefinite
+                if not self.opening_sent and time.monotonic() - self.joined_at > SETUP_S:
+                    # Pings keep the socket open but never count as readiness: an unready call
+                    # (and its paid upstream session) ends here, before any opening is consumed.
+                    if self.provider_ready:
+                        self.fail("audio_not_ready", "client_not_ready")
+                    else:
+                        self.fail("live_unavailable", "provider_not_ready")
+                    return
                 if self.opening_sent and not self.admitted and \
                         time.monotonic() - self.opening_sent_at > OPENING_ACK_S:
                     self.fail("live_unavailable", "opening_not_taken")
