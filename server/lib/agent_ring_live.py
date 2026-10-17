@@ -18,9 +18,11 @@ ring record (internal, never on the wire).
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import pathlib
 import re
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -233,3 +235,136 @@ def snapshot_of(ring_id: str) -> dict | None:
     with agent_rings._lock:
         ring = next((r for r in agent_rings._load() if r["ring_id"] == ring_id), None)
     return json.loads(canonical(ring["_live_snapshot"])) if ring and ring.get("_live_snapshot") else None
+
+
+# ---- owner controls: close and fallback (WIRE-v2 SCHEMA) ---------------------------
+#
+# A Live call's state lives on its ring record (internal ``_live_*`` fields):
+# ``_live_phase`` is answered_waiting_join → connecting → ready → active, then
+# retired, or classic after the one fallback. Authority is always retired on the
+# record first; only then is the running session (if any) told to stop, so a
+# late frame or callback can never act for a retired or successor call.
+
+REQUEST_INVALID = "live_request_invalid"
+CLOSE_REASONS = ("user_hangup", "audio_not_ready", "transport_lost")
+LIVE_PHASES = ("answered_waiting_join", "connecting", "ready", "active")
+_SESSIONS_LOCK = threading.Lock()
+_SESSIONS: dict = {}            # call_id → the running session (registered by the socket)
+
+
+def _session_for(call_id: str):
+    with _SESSIONS_LOCK:
+        return _SESSIONS.get(call_id)
+
+
+def _stop_session(call_id: str, reason: str) -> None:
+    session = _session_for(call_id)
+    if session is not None:
+        session.retire(reason)
+
+
+def _owned(records: list[dict], principal: str, data: Any) -> dict:
+    """The Live ring this owner's request is about (under agent_rings._lock).
+
+    Any mismatch of call, owner, nonce or attempt is the same 409 so that a
+    stranger learns nothing about another call."""
+    if not isinstance(data, dict):
+        raise CallError(400, REQUEST_INVALID)
+    call_id, nonce, attempt = data.get("call_id"), data.get("owner_nonce"), data.get("attempt_id")
+    if not all(isinstance(v, str) and v for v in (call_id, nonce, attempt)):
+        raise CallError(400, REQUEST_INVALID)
+    ring = next((r for r in records if r.get("_live_call_id") == call_id), None)
+    if (ring is None or ring.get("answered_by") != principal
+            or not hmac.compare_digest(str(ring.get("_live_owner_nonce") or ""), nonce)
+            or ring.get("_live_attempt_id") != attempt):
+        raise CallError(409, OWNER_CONFLICT)
+    return ring
+
+
+def _epoch(data: dict, key: str) -> int:
+    value = data.get(key)
+    if type(value) is not int or value < 1:
+        raise CallError(400, REQUEST_INVALID)
+    return value
+
+
+def retire(ring: dict, reason: str) -> bool:
+    """Retire a Live call's authority on its record (caller saves). True if it changed."""
+    if ring.get("_live_phase") not in LIVE_PHASES:
+        return False
+    ring.update(_live_phase="retired", _live_retired_reason=reason)
+    return True
+
+
+def close(principal: str, data: Any) -> dict:
+    """The owner hangs up: retire the call's authority first, then stop its session.
+
+    Idempotent: a retired (or fallen-back) call answers the same result again."""
+    from . import agent_rings
+    with agent_rings._lock:
+        records = agent_rings._load()
+        ring = _owned(records, principal, data)
+        epoch = _epoch(data, "call_epoch")
+        if data.get("reason") not in CLOSE_REASONS or not isinstance(data.get("request_id"), str):
+            raise CallError(400, REQUEST_INVALID)
+        if epoch != ring["_live_call_epoch"] and ring.get("_live_phase") in LIVE_PHASES:
+            raise CallError(409, CALL_STALE)
+        changed = retire(ring, data["reason"])
+        if changed:
+            agent_rings._save(records)
+            agent_rings._audit({"outcome": "live_closed", "ring_id": ring["ring_id"], "by": principal,
+                                "live_call_id": ring["_live_call_id"], "reason": data["reason"]})
+        result = {"ok": True, "call_id": ring["_live_call_id"], "call_epoch": epoch, "state": "retired"}
+    if changed:
+        _stop_session(ring["_live_call_id"], data["reason"])
+    return result
+
+
+def fallback(principal: str, data: Any) -> dict:
+    """The one explicit switch of a Live-answered ring to the classic call.
+
+    Allowed once, only before the Live opening was admitted and before any user
+    audio went upstream, and only with the phone's word that its Live audio has
+    stopped. The CAS retires Live (authority first), bumps the epoch and starts
+    the ordinary group call with its own opening for the same ring."""
+    from . import agent_rings, group_calls
+    from . import agents as agents_db
+    with agent_rings._lock:
+        records = agent_rings._load()
+        ring = _owned(records, principal, data)
+        epoch = _epoch(data, "expected_epoch")
+        if data.get("audio_stopped") is not True or not isinstance(data.get("request_id"), str) \
+                or not data["request_id"]:
+            raise CallError(400, REQUEST_INVALID)
+        if ring.get("_live_phase") == "classic":
+            if data["request_id"] != ring.get("_live_fallback_request_id"):
+                raise CallError(409, FALLBACK_NOT_ALLOWED)
+            out = agent_rings._answered(ring, group_calls.get_call(ring["call_id"]), changed=False)
+            return {**out, "conversation_mode": MODE_CLASSIC}
+        if epoch != ring["_live_call_epoch"]:
+            raise CallError(409, CALL_STALE)
+        if ring.get("_live_opening_consumed") or ring.get("_live_audio_forwarded"):
+            raise CallError(409, FALLBACK_NOT_ALLOWED)
+        was_live = retire(ring, "fallback")
+        if not was_live and ring.get("_live_phase") != "retired":
+            raise CallError(409, FALLBACK_NOT_ALLOWED)
+        agent = agents_db.get_by_agent_id(ring["agent_id"]) or {"session": ring["session"]}
+        if not ring.get("opening_audio_url"):
+            ring["opening_audio_url"] = agent_rings._voice(ring["opening_line"], agent)
+        started = group_calls.start(
+            principal, [ring["session"]], request_id=ring["ring_id"], by=ring["session"],
+            ring={"ring_id": ring["ring_id"], "reason": ring["reason"], "opening_line": ring["opening_line"]})
+        call = started["call"]
+        ring.update(_live_phase="classic", _live_call_epoch=epoch + 1, call_id=call["call_id"],
+                    _live_fallback_request_id=data["request_id"])
+        agent_rings._save(records)
+        agent_rings._audit({"outcome": "live_fallback", "ring_id": ring["ring_id"], "by": principal,
+                            "live_call_id": ring["_live_call_id"], "call_id": call["call_id"]})
+    if was_live:
+        _stop_session(ring["_live_call_id"], "fallback")
+    return {**agent_rings._answered(ring, call, changed=True), "conversation_mode": MODE_CLASSIC}
+
+
+def reset_for_tests() -> None:
+    with _SESSIONS_LOCK:
+        _SESSIONS.clear()

@@ -109,6 +109,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/oracle_handoffs.py", "_TIMERS"): "phase-deadline timers of live handoffs; recover() rebuilds them from the durable records after a restart",
     ("lib/oracle_handoffs.py", "_context"): "the stream and herald bound once by the server composition root",
     ("lib/group_calls.py", "_context"): "the event stream bound once by the server composition root",
+    ("lib/agent_ring_live.py", "_SESSIONS"): JOBS,
     ("lib/agent_rings.py", "_context"): "the event stream and TTS engine bound by the server composition root",
     ("lib/oracle_live_stable.py", "_CLOSING"): ORACLE,
     ("lib/oracle_live_stable.py", "_STOP_HOOKS"): ORACLE,
