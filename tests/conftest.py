@@ -67,6 +67,20 @@ def _host_service_command_shims(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _transcript_importer_quiescent():
+    """Runs before every other per-test autouse fixture (pytest instantiates
+    same-scope autouse fixtures in definition order, and this one is first).
+
+    An earlier test's teardown failed closed with import work still live. Check
+    before any per-test mutation: an admitted old operation may open a
+    connection, log or read config AFTER this point, so it must never see this
+    test's environment, DB, log dir or config paths."""
+    importer = sys.modules.get("lib.transcript_import_cache")
+    if importer is not None and importer._resetting and not importer.reset_for_tests():
+        pytest.fail("transcript importer from an earlier test is still running; test state not set up")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_host_service_commands(_host_service_command_shims, monkeypatch):
     """Put non-mutating service-manager shims ahead of host commands.
 
@@ -453,11 +467,6 @@ def _isolated_db(tmp_path, monkeypatch):
         _config.reset_cache()
     except ImportError:
         pass
-    importer = sys.modules.get("lib.transcript_import_cache")
-    if importer is not None and importer._resetting and not importer.reset_for_tests():
-        # An earlier test's teardown failed closed with import work still live:
-        # never point that work's thread at a fresh DB.
-        pytest.fail("transcript importer from an earlier test is still running; DB not reset")
     for mod_name in ("lib.db",):
         try:
             mod = __import__(mod_name, fromlist=["reset_for_tests"])
