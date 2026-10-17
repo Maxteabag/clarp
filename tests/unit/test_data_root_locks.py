@@ -425,14 +425,27 @@ def test_a_lock_file_that_cannot_be_opened_is_a_locking_error_not_a_crash(root, 
     assert "single-Host guarantee is unavailable" in result.stderr
 
 
-def test_an_unreadable_staged_archive_refuses_with_78_not_a_traceback(root, held, monkeypatch):
-    locks = root["locks"]
+def test_apply_failures_say_refused_only_before_the_marker(root, held, monkeypatch, capsys):
+    locks, backup = root["locks"], root["backup"]
     _allow_this_filesystem(root, monkeypatch)
     pending = locks.ensure_backups_dir() / locks.PENDING
     pending.write_bytes(b"not a tar archive")
     locks.write_sidecar(pending, {"host_owner_held": True})            # bound to these exact bytes
-    assert locks._main(["apply"]) == locks.EXIT_REFUSED
+    assert locks._main(["apply"]) == locks.EXIT_REFUSED                 # 78, not a traceback
     assert pending.exists() and not (locks.backups_dir() / locks.MARKER).exists()
+    assert "restore refused" in capsys.readouterr().err
+
+    # Past the marker the root is being replaced: never "refused", never "unchanged".
+    _stage_with_live_host(root)
+
+    def fails_mid_replace(_pending):
+        raise OSError("disk went away")
+    monkeypatch.setattr(backup, "replace_data_root", fails_mid_replace)
+    assert locks._main(["apply"]) == locks.EXIT_LOCKING                 # exit semantics kept
+    err = capsys.readouterr().err
+    assert "refused" not in err
+    assert "interrupted" in err and "incomplete" in err and "partially replaced" in err
+    assert (locks.backups_dir() / locks.MARKER).exists() and pending.exists()   # both kept
 
 
 def test_a_second_host_on_a_live_root_refuses_with_75(root, entry):
