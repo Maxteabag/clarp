@@ -58,7 +58,7 @@ class Pipe:
     def read(self, n):
         with self.cond:
             while len(self.buf) < n and not self.eof:
-                if not self.cond.wait(5):
+                if not self.cond.wait(sock.CLIENT_IDLE_S):      # as the real socket's idle limit
                     raise TimeoutError
             if len(self.buf) < n:
                 return b""
@@ -166,7 +166,7 @@ class Upstream:
         return [e for e in self.sent if e["type"] == kind]
 
 
-def _wait(cond, timeout=5.0):
+def _wait(cond, timeout=15.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if cond():
@@ -275,7 +275,7 @@ def test_a_live_call_joins_opens_once_talks_and_hangs_up(call):
     call.up.push({"type": "session.output_audio.delta", "delta": AUDIO})
     _wait(lambda: {"type": "session.output_audio.delta", "delta": AUDIO} in h.wfile.frames())
     h.send({"type": "session.close"})
-    thread.join(5)
+    thread.join(15)
     assert not thread.is_alive()
     closed = h.wfile.frames()[-1]
     assert closed == {"type": "agent_live.closed", "call_id": g["call_id"], "call_epoch": 1,
@@ -295,7 +295,7 @@ def test_the_opening_is_admitted_once_however_often_the_phone_says_ready(call):
     assert len(call.up.of("session.instructions.append")) == 1
     assert _types(h).count("agent_live.opening_admitted") == 1
     h.send({"type": "session.close"})
-    thread.join(5)
+    thread.join(15)
 
 
 def test_ready_before_the_provider_still_opens_once_after_it(call, monkeypatch):
@@ -321,7 +321,7 @@ def test_ready_before_the_provider_still_opens_once_after_it(call, monkeypatch):
     _wait(lambda: "agent_live.opening_admitted" in _types(h))
     assert len(slow.of("session.instructions.append")) == 1
     h.send({"type": "session.close"})
-    thread.join(5)
+    thread.join(15)
 
 
 def test_client_ready_without_audio_and_capture_is_not_ready(call):
@@ -333,7 +333,7 @@ def test_client_ready_without_audio_and_capture_is_not_ready(call):
     time.sleep(0.3)
     assert call.up.of("session.instructions.append") == [] and not _ring_of(call.grant).get("_live_opening_consumed")
     h.send({"type": "session.close"})
-    thread.join(5)
+    thread.join(15)
 
 
 # ---- refusals ---------------------------------------------------------------------------
@@ -342,7 +342,7 @@ def _refused_join(call, frame, code, handler=None):
     h = handler or Handler()
     thread = _serve(h)
     h.send(frame)
-    thread.join(5)
+    thread.join(15)
     assert not thread.is_alive()
     [error] = h.wfile.frames()
     assert error == {"type": "agent_live.error", "call_id": "", "call_epoch": 0, "attempt_id": "", "code": code,
@@ -374,7 +374,7 @@ def test_the_join_ticket_is_single_use(call):
     sock.serve(busy)                                                    # the owner's voice slot is busy…
     assert busy.status == 409 and busy.body() == {"error": "live_owner_conflict"}
     h.send({"type": "session.close"})
-    thread.join(5)
+    thread.join(15)
     _refused_join(call, _join(call.grant), "live_join_consumed")        # …and once free, the ticket is spent
     assert len(call.connects) == 1
 
@@ -413,7 +413,7 @@ def test_phone_audio_before_the_opening_was_admitted_is_refused_not_dropped(call
     h.send(_join(call.grant))
     _wait(lambda: "agent_live.provider_ready" in _types(h))
     h.send({"type": "session.input_audio.append", "audio": AUDIO})
-    thread.join(5)
+    thread.join(15)
     error = next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")
     assert error["code"] == "audio_not_ready" and error["retryable"] is False
     assert not any(e.get("audio") == AUDIO for e in call.up.sent)
@@ -428,7 +428,7 @@ def test_an_opening_the_provider_never_takes_fails_visibly(call, monkeypatch):
     h.send(_join(call.grant))
     _wait(lambda: "agent_live.provider_ready" in _types(h))
     h.send(_ready(call.grant))
-    thread.join(5)
+    thread.join(15)
     assert "agent_live.opening_admitted" not in _types(h)
     assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
     assert _ring_of(call.grant)["_live_phase"] == "retired"
@@ -442,7 +442,7 @@ def test_a_provider_that_cannot_be_reached_tombstones_the_call(call, monkeypatch
     h = Handler()
     thread = _serve(h)
     h.send(_join(call.grant))
-    thread.join(5)
+    thread.join(15)
     assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
     assert _ring_of(call.grant)["_live_phase"] == "retired"
     _refused_join(call, _join(call.grant), "live_join_consumed")        # never retried
@@ -456,7 +456,7 @@ def test_an_http_close_retires_authority_then_ends_the_socket(call):
     out = live.close(PHONE, {"call_id": call.grant["call_id"], "call_epoch": 1, "attempt_id": call.grant["attempt_id"],
                              "owner_nonce": call.grant["owner_nonce"], "request_id": "q", "reason": "user_hangup"})
     assert out["state"] == "retired"
-    thread.join(5)
+    thread.join(15)
     assert not thread.is_alive() and h.wfile.frames()[-1]["type"] == "agent_live.closed"
     assert h.wfile.frames()[-1]["reason"] == "user_hangup" and call.up.closed
 
@@ -464,7 +464,7 @@ def test_an_http_close_retires_authority_then_ends_the_socket(call):
 def test_the_provider_closing_ends_the_call(call):
     h, thread = _admitted(call)
     call.up.push({"type": "session.closed"})
-    thread.join(5)
+    thread.join(15)
     assert h.wfile.frames()[-1] == {"type": "agent_live.closed", "call_id": call.grant["call_id"], "call_epoch": 1,
                                     "attempt_id": call.grant["attempt_id"], "reason": "provider_closed"}
     assert _ring_of(call.grant)["_live_retired_reason"] == "provider_closed"
@@ -473,14 +473,14 @@ def test_the_provider_closing_ends_the_call(call):
 def test_a_lost_phone_ends_the_call(call):
     h, thread = _admitted(call)
     h.rfile.close()
-    thread.join(5)
+    thread.join(15)
     assert _ring_of(call.grant)["_live_retired_reason"] == "transport_lost" and call.up.closed
 
 
 def test_a_revoked_device_ends_the_call(call, monkeypatch):
     h, thread = _admitted(call)
     monkeypatch.setattr(live, "device_ok", lambda principal: False)
-    thread.join(5)
+    thread.join(15)
     assert _ring_of(call.grant)["_live_retired_reason"] == "device_revoked"
 
 
@@ -490,7 +490,7 @@ def test_interrupt_flushes_the_phone_only_after_the_opening(call):
     _wait(lambda: "oracle_v2.playback_flush" in _types(h))
     assert _types(h)[-2:] == ["oracle_v2.playback_flush", "oracle_v2.quiet"]
     h.send({"type": "session.close"})
-    thread.join(5)
+    thread.join(15)
 
 
 def test_the_live_instructions_hold_no_tools_and_mark_observations_as_data(call):

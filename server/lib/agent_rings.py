@@ -67,6 +67,12 @@ def _load() -> list[dict]:
 
 
 def _save(records: list[dict]) -> None:
+    for record in records:
+        # A Live ring's frozen context is needed only until its Live call can no
+        # longer start or run; the digest stays for the event's idempotency.
+        if "_live_snapshot" in record and (record["state"] in ("declined", "missed", "cancelled")
+                                           or record.get("_live_phase") in ("retired", "classic")):
+            del record["_live_snapshot"]
     settings_store.set_text(KEY, json.dumps(records[-KEEP_RECORDS:], ensure_ascii=False,
                                             separators=(",", ":")))
 
