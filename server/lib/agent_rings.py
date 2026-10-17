@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import secrets
 import threading
 import time
 import uuid
@@ -41,6 +42,7 @@ KEEP_RECORDS = 50
 KEEP_AUDIT = 200
 REASON_CHARS = 200
 OPENING_CHARS = 600
+LIVE_JOIN_MS = 60 * 1000          # a Live answer's one-use join ticket lives this long
 FINAL = frozenset({"answered", "declined", "missed", "cancelled"})
 
 _lock = threading.RLock()
@@ -213,15 +215,24 @@ def _voice(text: str, agent: dict) -> str:
     return f"/audio/{pathlib.Path(str(path)).name}"
 
 
-def ring(*, caller_agent_id: str = "", agent: str = "", reason: str = "", opening_line: str = "") -> dict:
-    """Ring the owner's phone on behalf of an agent."""
+def ring(*, caller_agent_id: str = "", agent: str = "", reason: str = "", opening_line: str = "",
+         conversation_mode: Any = None, event_context: Any = None) -> dict:
+    """Ring the owner's phone on behalf of an agent.
+
+    ``conversation_mode: agent_live_v1`` (feature agent_ring_live) asks for a
+    Live ring: its ``event_context`` is validated and frozen with the ring in a
+    snapshot, and a ring that cannot be built is refused, never downgraded. A
+    producer retry of the same event gets the same ring back."""
+    from . import agent_ring_live as live
     reason = " ".join(str(reason or "").split())[:REASON_CHARS]
     opening = " ".join(str(opening_line or "").split())[:OPENING_CHARS]
+    snapshot = replay = None
     with _lock:
         records = _load()
         _settle(records)
         who = {"session": "", "persona": "", "agent_id": caller_agent_id or ""}
         try:
+            mode = live.mode_of(conversation_mode)
             caller = _caller(caller_agent_id, agent)
             who = {"session": str(caller["session"]), "persona": str(caller["persona"]),
                    "agent_id": str(caller["agent_id"])}
@@ -229,16 +240,39 @@ def ring(*, caller_agent_id: str = "", agent: str = "", reason: str = "", openin
                 raise CallError(400, "reason required")
             if not opening:
                 raise CallError(400, "opening_line required")
-            _admit(caller, records)
+            if mode == live.MODE_LIVE:
+                context = live.validate_context(event_context, opening)
+                event_key = f"{context['source']}:{context['event']['id']}"
+                replay = next((r for r in reversed(records) if r["agent_id"] == who["agent_id"]
+                               and r.get("_live_event_key") == event_key), None)
+                if replay is not None and replay["_live_event_digest"] != live.digest(context):
+                    raise CallError(409, live.CONTEXT_CONFLICT)
+            elif event_context is not None:
+                raise CallError(400, live.CONTEXT_INVALID)
+            if replay is None:
+                _admit(caller, records)
+                if mode == live.MODE_LIVE:
+                    if not _live_tokens():
+                        raise CallError(409, live.CLIENT_REQUIRED)
+                    snapshot = live.build_snapshot(caller, context)
         except CallError as exc:
             _audit({"outcome": "refused", "error": exc.error, **who, "reason": reason})
             raise
+        if replay is not None:
+            return {"ok": True, "ring": public(replay), "changed": False,
+                    "summary": "This event already rang the user; no second call."}
         now = now_ms()
         record = {
             "ring_id": "rng_" + uuid.uuid4().hex, **who, "reason": reason, "opening_line": opening,
-            "opening_audio_url": _voice(opening, caller), "state": "ringing", "created_at": now,
-            "expires_at": now + RING_TIMEOUT_MS, "ended_at": None, "answered_by": "", "call_id": "",
+            # A Live ring's opening is spoken by the Live model; nothing is pre-voiced for it.
+            "opening_audio_url": "" if snapshot else _voice(opening, caller), "state": "ringing",
+            "created_at": now, "expires_at": now + RING_TIMEOUT_MS, "ended_at": None, "answered_by": "",
+            "call_id": "",
         }
+        if snapshot:
+            record.update(conversation_mode=live.MODE_LIVE, _live_snapshot=snapshot,
+                          _live_context_digest=live.digest(snapshot), _live_event_key=event_key,
+                          _live_event_digest=live.digest(context))
         records.append(record)
         _save(records)
         _audit({"outcome": "ringing", "ring_id": record["ring_id"], **who, "reason": reason})
@@ -289,30 +323,85 @@ def cancel(caller_agent_id: str, ring_id: str) -> dict:
     return _end(ring_id, "cancelled", by=caller_agent_id or "owner", allowed=own)
 
 
-def answer(principal: str, ring_id: str) -> dict:
-    """Answer: start a group call with the agent and hand back its opening."""
+def answer(principal: str, ring_id: str, conversation_mode: Any = None, *,
+           request_id: Any = None, client_nonce: Any = None) -> dict:
+    """Answer: start a group call with the agent and hand back its opening.
+
+    A Live ring is answered only by a phone that asks for ``agent_live_v1``; it
+    starts no group call and hands back the Live call grant instead. Neither
+    kind of ring changes kind on answer (WIRE-v2 decision 5)."""
+    from . import agent_ring_live as live
     from . import group_calls
+    mode = live.mode_of(conversation_mode, default=None)
     with _lock:
         records = _load()
         _settle(records)
         ring = _find(records, ring_id)
-        if ring["state"] == "answered":
-            if ring["answered_by"] != principal:
-                raise CallError(409, "the call was answered elsewhere")
-            call = group_calls.get_call(ring["call_id"])
-            return _answered(ring, call, changed=False)
-        if ring["state"] != "ringing":
-            raise CallError(409, "the call is over", ring=public(ring))
-        started = group_calls.start(
-            principal, [ring["session"]], request_id=ring["ring_id"], by=ring["session"],
-            ring={"ring_id": ring["ring_id"], "reason": ring["reason"], "opening_line": ring["opening_line"]})
-        call = started["call"]
-        ring.update(state="answered", ended_at=now_ms(), answered_by=principal, call_id=call["call_id"])
-        _save(records)
-        _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
-                "call_id": call["call_id"]})
+        if ring.get("conversation_mode") == live.MODE_LIVE:
+            fresh = _answer_live(records, ring, principal, mode, request_id, client_nonce)
+        elif mode == live.MODE_LIVE:
+            raise CallError(409, live.MODE_CONFLICT)
+        else:
+            if ring["state"] == "answered":
+                if ring["answered_by"] != principal:
+                    raise CallError(409, "the call was answered elsewhere")
+                call = group_calls.get_call(ring["call_id"])
+                return _answered(ring, call, changed=False)
+            if ring["state"] != "ringing":
+                raise CallError(409, "the call is over", ring=public(ring))
+            started = group_calls.start(
+                principal, [ring["session"]], request_id=ring["ring_id"], by=ring["session"],
+                ring={"ring_id": ring["ring_id"], "reason": ring["reason"], "opening_line": ring["opening_line"]})
+            call = started["call"]
+            ring.update(state="answered", ended_at=now_ms(), answered_by=principal, call_id=call["call_id"])
+            _save(records)
+            _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
+                    "call_id": call["call_id"]})
+    if ring.get("conversation_mode") == live.MODE_LIVE:
+        if fresh:
+            _announce(ring, "answered")
+        return _answered_live(ring, changed=fresh)
     _announce(ring, "answered")
     return _answered(ring, call, changed=True)
+
+
+def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | None,
+                 request_id: Any, client_nonce: Any) -> bool:
+    """The Live branch of answer (under _lock): one grant per ring, first owner
+    wins. True when this request answered it, False for the owner's repeat."""
+    from . import agent_ring_live as live
+    if mode != live.MODE_LIVE:
+        raise CallError(409, live.CLIENT_REQUIRED)
+    if ring["state"] == "answered":
+        if ring["answered_by"] != principal:
+            raise CallError(409, live.OWNER_CONFLICT)
+        return False
+    if ring["state"] != "ringing":
+        raise CallError(409, live.CALL_STALE)
+    now = now_ms()
+    ring.update(state="answered", ended_at=now, answered_by=principal,
+                _live_call_id="alv_" + uuid.uuid4().hex, _live_call_epoch=1,
+                _live_attempt_id="att_" + uuid.uuid4().hex, _live_owner_nonce=secrets.token_hex(32),
+                _live_join_ticket=secrets.token_hex(32), _live_join_expires_at=now + LIVE_JOIN_MS,
+                _live_request_id=str(request_id or "")[:128], _live_client_nonce=str(client_nonce or "")[:128])
+    _save(records)
+    _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
+            "mode": live.MODE_LIVE, "live_call_id": ring["_live_call_id"]})
+    return True
+
+
+def _answered_live(ring: dict, *, changed: bool) -> dict:
+    """The Live answer of WIRE-v2: no group call, no opening; the call grant."""
+    from . import agent_ring_live as live
+    from .group_calls import _host_id
+    return {"ok": True, "ring": public(ring), "changed": changed, "conversation_mode": live.MODE_LIVE,
+            "live": {"protocol": live.PROTOCOL, "host_id": _host_id(), "ring_id": ring["ring_id"],
+                     "agent_id": ring["agent_id"], "call_id": ring["_live_call_id"],
+                     "call_epoch": ring["_live_call_epoch"], "attempt_id": ring["_live_attempt_id"],
+                     "context_digest": ring["_live_context_digest"], "provider": live.PROVIDER,
+                     "model": live.MODEL, "voice": live.VOICE, "owner_nonce": ring["_live_owner_nonce"],
+                     "join_ticket": ring["_live_join_ticket"], "expires_at": ring["_live_join_expires_at"],
+                     "opening_owner": "live"}}
 
 
 def _answered(ring: dict, call: dict | None, *, changed: bool) -> dict:
@@ -338,7 +427,7 @@ def _announce(ring: dict, kind: str) -> dict:
         try:
             wire = public(ring)
             events.broadcast(stream, events.agent_ring(
-                **{key: wire.get(key) for key in events.FIELDS[events.SSEType.AGENT_RING]}))
+                **{key: wire[key] for key in events.FIELDS[events.SSEType.AGENT_RING] if key in wire}))
         except Exception as exc:  # noqa: BLE001
             log_exception("agentRingEmitFail", exc, f"ring={ring['ring_id']}")
     delivery: dict = {}
@@ -384,18 +473,30 @@ def _hex_token(token: str) -> bool:
     return 32 <= len(token) <= 200 and all(c in "0123456789abcdef" for c in token)
 
 
-def register_voip_token(principal: str, token: str, *, environment: str = "production") -> dict:
-    """The phone's PushKit VoIP token, one per principal. "" forgets it."""
+def register_voip_token(principal: str, token: str, *, environment: str = "production",
+                        supported_conversation_modes: Any = None) -> dict:
+    """The phone's PushKit VoIP token, one per principal. "" forgets it.
+
+    ``supported_conversation_modes`` (absent: classic only) says which ring
+    modes this phone can run; it is a delivery hint, never a credential, and an
+    answer is still checked on its own (WIRE-v2 decision 4)."""
+    from . import agent_ring_live as live
     token = str(token or "").strip().lower()
     environment = "sandbox" if str(environment or "").lower() == "sandbox" else "production"
     if token and not _hex_token(token):
         raise CallError(400, "token must be hex")
+    modes = supported_conversation_modes
+    if modes is not None and (not isinstance(modes, list) or len(modes) > len(live.MODES)
+                              or any(not isinstance(m, str) or m not in live.MODES for m in modes)):
+        raise CallError(400, live.MODE_INVALID)
     with _lock:
         raw = settings_store.get(VOIP_KEY)
         rows = {r["principal"]: r for r in (json.loads(raw) if raw else [])}
         if token:
             rows[principal] = {"principal": principal, "token": token, "environment": environment,
                                "updated_at": now_ms()}
+            if modes:
+                rows[principal]["supported_conversation_modes"] = list(dict.fromkeys(modes))
         else:
             rows.pop(principal, None)
         settings_store.set_text(VOIP_KEY, json.dumps(list(rows.values()), separators=(",", ":")))
@@ -408,9 +509,16 @@ def voip_tokens() -> list[dict]:
     return json.loads(raw) if raw else []
 
 
+def _live_tokens() -> list[dict]:
+    """The VoIP registrations of phones that said they can run a Live call."""
+    from .agent_ring_live import MODE_LIVE
+    return [row for row in voip_tokens() if MODE_LIVE in (row.get("supported_conversation_modes") or ())]
+
+
 def _push_voip(ring: dict) -> dict:
     from . import apns
-    return apns.send_agent_ring_voip(ring, voip_tokens())
+    tokens = _live_tokens() if ring.get("conversation_mode") else voip_tokens()
+    return apns.send_agent_ring_voip(ring, tokens)
 
 
 def _push(ring: dict, kind: str) -> dict:
