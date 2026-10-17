@@ -116,6 +116,14 @@ def test_a_poll_straddling_publication_does_not_requeue_the_published_key(monkey
 
 # ---- R1: crashed-worker recovery with a slow first admission ------------------------------------
 
+def _settled(session, other_run_id=""):
+    """(published count, the worker's runs) once its batch has settled, else None."""
+    published = _one("SELECT count(*) FROM tool_explanation_cache")[0]
+    runs = [r for r in janitors.list_runs(session) if r["run_id"] != other_run_id]
+    running_job = _one("SELECT 1 FROM tool_explanation_jobs WHERE status='running'")
+    return (published, runs) if (published or (runs and not running_job)) else None
+
+
 def _seed():
     return tool_explanations.janitor_builtins.ensure_builtins(cwd="/tmp", initial={"tool-explainer": {}})["tool-explainer"]
 
@@ -159,15 +167,56 @@ def test_recovery_survives_a_slow_first_admission_attempt(monkeypatch):
         release.set()
         advance_after_abandon(clock, builtin.DEMAND_RUN_TTL_MS)
 
-        def settled():
-            published = _one("SELECT count(*) FROM tool_explanation_cache")[0]
-            runs = [r for r in janitors.list_runs(config["session"]) if r["run_id"] != orphan["run_id"]]
-            running_job = _one("SELECT 1 FROM tool_explanation_jobs WHERE status='running'")
-            return (published, runs) if (published or (runs and not running_job)) else None
-        published, runs = wait_for(settled, what="the replacement's batch to settle")
+        published, runs = wait_for(lambda: _settled(config["session"], orphan["run_id"]),
+                                   what="the replacement's batch to settle")
         assert published == 1, ("the batch was not published: its admission straddled the clock advance, so its "
                                 f"queue lease had already expired (runs: {[(r['run_id'], r['status']) for r in runs]})")
         assert [r["status"] for r in runs] == ["completed"]
         assert _one("SELECT count(*) FROM tool_explanation_jobs WHERE status IN ('queued','running')")[0] == 0
     assert calls == [1]
     assert janitors.get_run(orphan["run_id"])["status"] == "cancelled"
+
+
+# ---- the settle check itself: a publication between its reads ------------------------------------
+
+def test_the_settle_check_is_not_fooled_by_a_publication_between_its_reads(monkeypatch):
+    """Main push CI 39049012553 (attempt 1): the worker published while the settle check was
+    reading, so it saw no cache row and a running run (read before) and no running job (read
+    after), and took that for a settled failure. Here the worker is held at publication and
+    released exactly between the check's run read and its later reads."""
+    config = _seed()
+    queue = tool_explanations.durable_queue
+    clock = [db.now_ms()]
+    monkeypatch.setattr(db, "now_ms", lambda: clock[0])
+    monkeypatch.setattr(queue.cache, "now_ms", lambda: clock[0])
+    real_complete, at_publish, publish = queue.complete, threading.Event(), threading.Event()
+
+    def held_complete(*args, **kwargs):
+        at_publish.set()
+        assert publish.wait(5), "the test never released the publication"
+        return real_complete(*args, **kwargs)
+    monkeypatch.setattr(queue, "complete", held_complete)
+    with tool_explanations.ToolExplanations(translate=translate, debounce=0) as worker:
+        worker.request(3, [ITEM])
+        assert at_publish.wait(5), "the worker never reached publication"
+        # Held at publication: the run is admitted, the job owned, nothing published.
+        [run] = janitors.list_runs(config["session"])
+        assert run["status"] == "running"
+        assert _one("SELECT status FROM tool_explanation_jobs")[0] == "running"
+        assert _one("SELECT count(*) FROM tool_explanation_cache")[0] == 0
+
+        real_list_runs = janitors.list_runs
+
+        def runs_then_publish(*args, **kwargs):
+            runs = real_list_runs(*args, **kwargs)
+            publish.set()                                   # the worker commits now ...
+            wait_for(lambda: _one("SELECT 1 FROM tool_explanation_jobs") is None,
+                     what="the publication to commit")      # ... before the check reads on
+            return runs
+        monkeypatch.setattr(janitors, "list_runs", runs_then_publish)
+        straddled = _settled(config["session"])
+        monkeypatch.setattr(janitors, "list_runs", real_list_runs)
+        assert straddled is None or straddled[0] == 1, \
+            f"a publication between the reads was taken for a settled failure: {straddled!r}"
+        published, runs = wait_for(lambda: _settled(config["session"]), what="the batch to settle")
+        assert published == 1 and [r["status"] for r in runs] == ["completed"]
