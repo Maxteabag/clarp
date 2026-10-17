@@ -179,3 +179,34 @@ def test_the_ring_and_answer_routes_carry_the_live_fields(sander):
     assert reg.sent[0][0] == 200
     assert {r["principal"]: r for r in rings.voip_tokens()}[OTHER_PHONE]["supported_conversation_modes"] == \
         ["agent_live_v1"]
+
+
+# ---- the producer CLI (CONTEXT-v1) -----------------------------------------------------
+
+def test_the_cli_sends_a_live_ring_with_the_context_it_read_itself(monkeypatch, tmp_path, capsys):
+    import json as _json
+
+    from tests.unit.test_agent_ring_live import _context
+    from tests.unit.test_agent_rings import _admin
+    admin = _admin()
+    sent = []
+    monkeypatch.setattr(admin, "api_request", lambda method, path, body=None, **kw: sent.append((method, path, body))
+                        or {"ok": True, "ring": {"ring_id": "rng_1", "state": "ringing"}})
+    run = lambda argv: admin.parser().parse_args(argv).func(admin.parser().parse_args(argv))  # noqa: E731
+    path = tmp_path / "event.json"
+    path.write_text(_json.dumps(_context()), encoding="utf-8")
+    assert run(["call", "ring", "--agent", "rk-sander", "--oracle", "--context-file", str(path),
+                "--reason", "Vann ved vanntanken", "--say", "Hei."]) == 0
+    assert sent == [("POST", "/calls/ring", {"agent": "rk-sander", "reason": "Vann ved vanntanken",
+                                             "opening_line": "Hei.", "conversation_mode": "agent_live_v1",
+                                             "event_context": _context()})]
+    sent.clear()
+    big = tmp_path / "big.json"
+    big.write_text(_json.dumps({"x": "y" * 40000}), encoding="utf-8")
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    for argv in (["--oracle"], ["--context-file", str(path)], ["--oracle", "--context-file", str(big)],
+                 ["--oracle", "--context-file", str(bad)], ["--oracle", "--context-file", str(tmp_path / "none")]):
+        assert run(["call", "ring", "--reason", "r", "--say", "s", *argv]) == 2
+    assert sent == []
+    capsys.readouterr()
