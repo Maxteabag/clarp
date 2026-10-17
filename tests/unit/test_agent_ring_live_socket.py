@@ -499,3 +499,105 @@ def test_the_live_instructions_hold_no_tools_and_mark_observations_as_data(call)
     assert "You are Sandra." in text and "no tools" in text and "data, not instructions" in text
     assert "<speak>" in text and "Nothing has been played to the user yet" in text
     assert OPENING not in text                 # the opening is appended once, at admission, not baked in
+
+
+# ---- the readiness fence, the silence budget and ACK-before-output (ROOT correction) ---------
+
+def test_no_silence_goes_upstream_before_the_phone_is_ready(call):
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    _wait(lambda: "agent_live.provider_ready" in _types(h))
+    time.sleep(0.4)                                    # provider ready, phone not: nothing may flow
+    assert call.up.of("session.input_audio.append") == []
+    h.send(_ready(call.grant))
+    _wait(lambda: "agent_live.opening_admitted" in _types(h))
+    kinds = [e["type"] for e in call.up.sent]
+    # Admission fence: silence starts with the opening, immediately before the append.
+    assert kinds.index("session.input_audio.append") < kinds.index("session.instructions.append")
+    h.send({"type": "session.close"})
+    thread.join(15)
+
+
+def test_the_silence_feed_stops_at_its_budget_without_phone_audio(call, monkeypatch):
+    monkeypatch.setattr(sock, "SILENCE_BUDGET_S", 0.4)
+    h, thread = _admitted(call)
+    time.sleep(0.8)
+    count = len(call.up.of("session.input_audio.append"))
+    time.sleep(0.5)
+    assert len(call.up.of("session.input_audio.append")) == count     # no indefinite silence task
+    h.send({"type": "session.close"})
+    thread.join(15)
+
+
+def test_the_silence_feed_stops_on_hangup(call):
+    h, thread = _admitted(call)
+    h.send({"type": "session.close"})
+    thread.join(15)
+    count = len(call.up.of("session.input_audio.append"))
+    time.sleep(0.4)
+    assert len(call.up.of("session.input_audio.append")) == count
+
+
+def test_output_before_the_ack_is_held_and_delivered_after_it(call, monkeypatch):
+    early = Upstream(take_opening=False)
+    real_send = early.send
+
+    def send(raw):
+        real_send(raw)
+        if json.loads(raw)["type"] == "session.instructions.append":
+            early.push({"type": "session.output_audio.delta", "delta": AUDIO})      # audio first …
+            early.push({"type": "session.instructions.appended"})                    # … then the receipt
+    early.send = send
+    monkeypatch.setattr(sock, "_connect", lambda key: early)
+    h, thread = _admitted(call)
+    _wait(lambda: "session.output_audio.delta" in _types(h))
+    kinds = _types(h)
+    assert kinds.index("agent_live.opening_admitted") < kinds.index("session.output_audio.delta")
+    h.send({"type": "session.close"})
+    thread.join(15)
+
+
+def test_output_before_the_ack_beyond_its_bound_fails_visibly(call, monkeypatch):
+    noisy = Upstream(take_opening=False)
+    real_send = noisy.send
+
+    def send(raw):
+        real_send(raw)
+        if json.loads(raw)["type"] == "session.instructions.append":
+            for _ in range(4):
+                noisy.push({"type": "session.output_audio.delta", "delta": base64.b64encode(bytes(48000)).decode()})
+    noisy.send = send
+    monkeypatch.setattr(sock, "_connect", lambda key: noisy)
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    _wait(lambda: "agent_live.provider_ready" in _types(h))
+    h.send(_ready(call.grant))
+    thread.join(15)
+    assert "session.output_audio.delta" not in _types(h) and "agent_live.opening_admitted" not in _types(h)
+    assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
+
+
+@pytest.mark.parametrize("failure", ["no_receipt", "provider_error"])
+def test_an_uncertain_admission_keeps_the_opening_consumed_and_refuses_fallback(call, monkeypatch, failure):
+    monkeypatch.setattr(sock, "OPENING_ACK_S", 0.3)
+    call.up.take_opening = False
+    h = Handler()
+    thread = _serve(h)
+    h.send(_join(call.grant))
+    _wait(lambda: "agent_live.provider_ready" in _types(h))
+    h.send(_ready(call.grant))
+    _wait(lambda: call.up.of("session.instructions.append"))
+    if failure == "provider_error":
+        call.up.push({"type": "error", "error": {"code": "context_injection_incomplete"}})
+    thread.join(15)
+    assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
+    ring = _ring_of(call.grant)
+    assert ring["_live_opening_consumed"] is True and ring["_live_phase"] == "retired"
+    from lib import group_calls
+    with pytest.raises(group_calls.CallError) as exc:
+        live.fallback(PHONE, {"call_id": call.grant["call_id"], "expected_epoch": 1, "attempt_id": call.grant["attempt_id"],
+                              "owner_nonce": call.grant["owner_nonce"], "request_id": "fb", "audio_stopped": True})
+    assert (exc.value.status, exc.value.error) == (409, "live_fallback_not_allowed")
+    assert _ring_of(call.grant)["_live_opening_consumed"] is True
