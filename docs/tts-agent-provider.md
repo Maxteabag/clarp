@@ -102,6 +102,37 @@ element; every other character is escaped text. Text over Google's 5,000-byte
 limit is refused, not cut. The installed `custom.google-chirp` adapter, if
 any, is a separate provider with its own stored voices.
 
+### An old custom adapter whose id is `google`
+
+Before the built-in provider existed, a custom adapter could use the id
+`google`. Such a package no longer loads, and every stored `google` (in
+`[tts]`, in `[tts.agents.*]` and in contact voices) would otherwise silently
+mean the built-in provider. Instead the Host refuses built-in Google with a
+fixed code until an operator decides:
+
+- `google_id_collision`: an installed package claims the id `google`;
+- `google_id_unverifiable`: the adapter directory, or a manifest in it, cannot
+  be inspected (a symlinked or unreadable directory, an unreadable, oversized
+  or invalid manifest, or an id that is not a usable string).
+
+While refused, `GET /tts/providers` and the voice catalog show `google` as
+unavailable with that code (Google voices are listed with `current: false`
+and `taken_by: null`); `POST /tts/providers`, `POST /agent-voice` and
+`GET /voice-preview` answer 409 `{"error": "<code>"}`; a clip routed to
+Google fails with the code unless an explicit non-Google `[tts] fallback`
+speaks instead (the `providerFallback` event carries the code). Nothing stored
+is rewritten, and the package stays where it is. The event log records a
+refused clip as `googleIdCollision`.
+
+`clarp-admin tts google-collision --report` lists the packages, every stored
+`google` use and the exact table that would resolve it. In a container,
+`docker compose run --rm clarp clarp-admin tts google-collision
+--resolve-builtin [--dry-run]` writes `[tts.google_resolution]` (choice
+`builtin`, bound to the colliding packages' fingerprints) with the Host
+stopped and the data root held exclusively, as a restore is; any change to
+those packages makes the resolution void again. In native mode the command
+refuses: stop the services and paste the reported table yourself.
+
 ## Delivery
 
 Raw PCM delivery only exists for Cartesia. A clip from any other provider is

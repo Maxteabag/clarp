@@ -676,6 +676,7 @@ def _execute_setup(backend: str, transcription: str, bind: str | None,
                 raise SystemExit(f"unsupported TTS provider: {tts_provider}")
             if tts_fallback not in valid_tts:
                 raise SystemExit(f"unsupported TTS fallback: {tts_fallback}")
+            _refuse_blocked_google(tts_provider, tts_fallback)
             set_toml_value(CONFIG_FILE, "tts", "provider", tts_provider)
             set_toml_value(CONFIG_FILE, "tts", "fallback", tts_fallback)
             if tts_provider != "cartesia":
@@ -1785,12 +1786,239 @@ def cmd_network(args) -> int:
     return 0
 
 
+def _refuse_blocked_google(provider: str, fallback: str) -> None:
+    """Selecting built-in Google is refused while a legacy custom "google" adapter blocks it."""
+    if "google" not in (provider, fallback):
+        return
+    from lib.google_tts import collision_code
+    code = collision_code()
+    if code:
+        raise SystemExit(f"{code}: built-in Google is unavailable until an operator resolves it; "
+                         "run clarp-admin tts google-collision --report")
+
+
+GOOGLE_RESOLUTION = "google_resolution"
+
+
+def _google_resolution_table(fingerprints: list[str]) -> str:
+    packages = ", ".join(json.dumps(item) for item in fingerprints)
+    return f'[tts.{GOOGLE_RESOLUTION}]\nchoice = "builtin"\npackages = [{packages}]\n'
+
+
+def _with_google_resolution(text: str, fingerprints: list[str]) -> str:
+    """The config text with ONLY the [tts.google_resolution] table replaced (or appended)."""
+    kept, skipping = [], False
+    for line in text.splitlines():
+        head = line.split("#", 1)[0].strip()
+        if head.startswith("["):
+            skipping = head == f"[tts.{GOOGLE_RESOLUTION}]"
+            if skipping:
+                continue
+        if not skipping:
+            kept.append(line)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    return "\n".join(kept) + "\n\n" + _google_resolution_table(fingerprints)
+
+
+def _without_google_resolution(parsed: dict) -> dict:
+    copy = json.loads(json.dumps(parsed, default=str))
+    copy.get("tts", {}).pop(GOOGLE_RESOLUTION, None)
+    return copy
+
+
+def _read_nofollow(path: Path) -> bytes:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+    finally:
+        os.close(fd)
+
+
+def _fsync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _write_new_file(path: Path, data: bytes) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _replace_atomically(path: Path, data: bytes) -> None:
+    """A unique O_EXCL temp beside `path`, fsync, rename over it, directory fsync."""
+    temporary = path.with_name(f".{path.name}.google-resolution-{os.getpid()}-{secrets.token_hex(6)}")
+    try:
+        _write_new_file(temporary, data)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    _fsync_directory(path.parent)
+
+
+def _google_uses(cfg) -> list[dict]:
+    """Every stored "google" use: global, per agent, and agent voice maps (read only)."""
+    from lib import google_tts
+    from lib.voice import voice_map
+    uses = []
+    if cfg.tts_provider == "google":
+        uses.append({"key": "tts.provider", "value": "google"})
+    if cfg.tts_fallback == "google":
+        uses.append({"key": "tts.fallback", "value": "google"})
+    for name, entry in sorted(cfg.tts_agent_overrides.items()):
+        if entry.get("provider") == "google":
+            uses.append({"key": f"tts.agents.{name}.provider", "value": "google"})
+        if entry.get("google_voice"):
+            uses.append({"key": f"tts.agents.{name}.google_voice", "value": entry["google_voice"],
+                         "on_allowlist": entry["google_voice"] in google_tts.VOICES})
+    try:
+        from lib import agents as agents_db
+        for agent in agents_db.list_agents():
+            value = voice_map(str(agent.get("voice_id") or "")).get("google")
+            if value:
+                uses.append({"key": f"agent.{agent.get('persona') or agent.get('agent_id')}.voice.google",
+                             "value": value, "on_allowlist": value in google_tts.VOICES})
+    except Exception as exc:  # the report still lists everything else
+        uses.append({"key": "agent voice maps", "error": f"not read: {type(exc).__name__}"})
+    return uses
+
+
+def _restore_in_progress(locks) -> bool:
+    directory = locks.backups_dir()
+    return any((directory / name).exists() for name in (locks.PENDING, locks.SIDECAR, locks.MARKER))
+
+
+def _tts_google_collision(args) -> int:
+    """`tts google-collision --report | --resolve-builtin [--dry-run]` (design: google-id collision v3)."""
+    from lib import config as config_module, custom_tts_adapters, deployment, google_tts
+    if args.report:
+        config_module.reset_cache()
+        cfg = config_module.load()
+        inventory = custom_tts_adapters.collision_inventory()
+        fingerprints = sorted(item["fingerprint"] for item in inventory["collisions"])
+        print(json.dumps({
+            "state": google_tts.collision_code(cfg), "inventory": inventory,
+            "resolution": cfg.tts_google_resolution, "uses": _google_uses(cfg),
+            "resolution_table": (_google_resolution_table(fingerprints)
+                                 if inventory["complete"] and fingerprints else ""),
+        }, indent=2))
+        return 0
+    if deployment.deployment_mode() != "container":
+        print("clarp: native mode has no data-root lock, so a resolution cannot be written safely; "
+              "run clarp-admin tts google-collision --report, stop the services and paste its "
+              "resolution_table into config.toml yourself", file=sys.stderr)
+        return 2
+    return _resolve_google_builtin(dry_run=args.dry_run)
+
+
+def _resolve_google_builtin(*, dry_run: bool) -> int:
+    """Write [tts.google_resolution] only with exclusive ownership of the container data root,
+    proven by the existing data-root locks (owner EX, then the inherited users fd SH -> EX)."""
+    from lib import custom_tts_adapters, data_root_locks as locks
+    from lib.deployment import LAYOUT
+
+    def refuse(code: int, message: str) -> int:
+        print(f"clarp: google-collision: {message} (exit {code})", file=sys.stderr)
+        return code
+
+    if not locks.inherited_lock_fd(locks.USERS_FD, locks.USERS_LOCK):
+        return refuse(locks.EXIT_LOCKING, "run it as a maintenance command (docker compose run --rm "
+                                          "clarp clarp-admin …): the data-root locks are not held")
+    try:
+        locks.check_filesystem(LAYOUT.data_root)
+    except locks.RestoreRefused as refused:
+        return refuse(refused.code, str(refused))
+    if _restore_in_progress(locks):
+        return refuse(locks.EXIT_IN_USE, "a restore is staged or in progress; start the Host to "
+                                         "complete it first")
+    owner = None
+    try:
+        try:
+            owner = os.open(locks.backups_dir() / locks.OWNER_LOCK,
+                            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if dry_run:
+                print(json.dumps({"exclusivity": "not obtainable now (exit 75: a Host owns the volume)"}))
+                return 0
+            return refuse(locks.EXIT_OWNED, "a Host owns the data root; stop it first")
+        except OSError as exc:
+            return refuse(locks.EXIT_LOCKING, f"the owner lock cannot be taken: {type(exc).__name__}")
+        try:
+            # Not atomic (flock(2)): on failure the shared lock may already be gone, so nothing
+            # more is done and the command exits.
+            fcntl.flock(locks.USERS_FD, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if dry_run:
+                print(json.dumps({"exclusivity": "not obtainable now (exit 76: the data root is in use)"}))
+                return 0
+            return refuse(locks.EXIT_IN_USE, "another Clarp process uses the data root")
+        except OSError as exc:
+            return refuse(locks.EXIT_LOCKING, f"the users lock cannot be taken: {type(exc).__name__}")
+        if _restore_in_progress(locks):
+            return refuse(locks.EXIT_IN_USE, "a restore is staged or in progress")
+        inventory = custom_tts_adapters.collision_inventory()
+        if not inventory["complete"]:
+            return refuse(locks.EXIT_REFUSED, "the adapter inventory cannot be fully inspected; "
+                                              "see --report")
+        fingerprints = sorted(item["fingerprint"] for item in inventory["collisions"])
+        if not fingerprints:
+            return refuse(locks.EXIT_REFUSED, "no colliding package; nothing to resolve")
+        raw = _read_nofollow(CONFIG_FILE)
+        try:
+            before = tomllib.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+            return refuse(locks.EXIT_REFUSED, "config.toml cannot be parsed; nothing was written")
+        expected = {"choice": "builtin", "packages": fingerprints}
+        new_text = _with_google_resolution(raw.decode("utf-8"), fingerprints)
+        if dry_run:
+            print(json.dumps({"exclusivity": "obtainable", "resolution": expected,
+                              "resolution_table": _google_resolution_table(fingerprints)}, indent=2))
+            return 0
+        backup = CONFIG_FILE.with_name(
+            f"{CONFIG_FILE.name}.google-resolution-backup-{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}")
+        _write_new_file(backup, raw)
+        _fsync_directory(backup.parent)
+        _replace_atomically(CONFIG_FILE, new_text.encode("utf-8"))
+        try:
+            after = tomllib.loads(_read_nofollow(CONFIG_FILE).decode("utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            after = None
+        if (after is None or after.get("tts", {}).get(GOOGLE_RESOLUTION) != expected
+                or _without_google_resolution(after) != _without_google_resolution(before)):
+            _replace_atomically(CONFIG_FILE, raw)
+            return refuse(locks.EXIT_REFUSED, f"verification failed; the original config was put back "
+                                              f"(backup kept: {backup.name})")
+        print(json.dumps({"ok": True, "resolution": expected, "backup": backup.name}, indent=2))
+        return 0
+    finally:
+        if owner is not None:
+            os.close(owner)
+
+
 def cmd_tts(args) -> int:
     server_root = SHARE
     if not (server_root / "lib").is_dir():
         server_root = REPO / "server"
     sys.path.insert(0, str(server_root))
     from lib import tts_providers
+    if args.tts_command == "google-collision":
+        return _tts_google_collision(args)
     if args.tts_command == "adapters":
         from lib import custom_tts_adapters
         reserved = tts_providers.VALID_IDS
@@ -1842,6 +2070,7 @@ def cmd_tts(args) -> int:
 
     provider = args.provider
     fallback = args.fallback
+    _refuse_blocked_google(provider, fallback)
     allowed = tts_providers.valid_ids()
     if provider not in allowed:
         raise SystemExit(f"unsupported TTS provider: {provider}")
@@ -2831,6 +3060,12 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
         "provider", choices=("cartesia", "elevenlabs", "deepgram"))
     tts_configure.add_argument("--stdin", action="store_true")
     tts_configure.set_defaults(func=cmd_tts)
+    collision = tts.add_parser("google-collision")
+    collision_mode = collision.add_mutually_exclusive_group(required=True)
+    collision_mode.add_argument("--report", action="store_true")
+    collision_mode.add_argument("--resolve-builtin", action="store_true")
+    collision.add_argument("--dry-run", action="store_true")
+    collision.set_defaults(func=cmd_tts)
     adapters = tts.add_parser("adapters").add_subparsers(
         dest="adapter_command", required=True)
     adapters.add_parser("list").set_defaults(func=cmd_tts)
