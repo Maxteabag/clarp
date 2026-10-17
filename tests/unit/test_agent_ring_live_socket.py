@@ -187,7 +187,7 @@ def call(sander, monkeypatch):
         live.reset_for_tests()
     reset()
     ring = _live_ring()["ring"]
-    grant = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1")["live"]
+    grant = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="n-r1")["live"]
     up = Upstream()
     connects = []
     monkeypatch.setattr(sock, "_connect", lambda key: connects.append(key) or up)

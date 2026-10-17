@@ -38,6 +38,7 @@ CLIENT_IDLE_S = 30.0            # a phone that sends nothing (audio, ping) this 
 OPENING_ACK_S = 10.0            # the provider must take the opening this soon after it was sent
 READY_S = 15.0                  # phone and provider must both be ready this soon after the join, pings or not
 TICK_S = 0.1
+POLITE_CLOSE_S = 1.0            # the polite session.close (lock and send) before the transport is shut anyway
 DEVICE_CHECK_TICKS = 10         # a revoked or downgraded device is noticed within a second
 SILENCE = base64.b64encode(bytes(int(24000 * TICK_S) * 2)).decode("ascii")   # 100 ms of PCM16 24 kHz mono
 MAX_AUDIO_B64 = 262144
@@ -127,6 +128,7 @@ class LiveSocket:
         self.connecting = False                 # a provider connect is in flight: its result is still owned here
         self._close_started = False
         self._fence = threading.RLock()         # orders a retirement against every effect (see effect())
+        self.fence_stuck = threading.Event()    # a retirement could not pass an effect in flight: unsettled
         self._write_lock = threading.Lock()
         self._send_lock = threading.Lock()
         self._state = threading.Lock()
@@ -165,13 +167,35 @@ class LiveSocket:
             act()
             return True
 
-    def revoke(self) -> None:
-        """Called once the retirement is marked: wait for an effect in flight (bounded, a hung write is not
-        waited on forever) so that the retirement completes after it."""
+    def revoke(self) -> bool:
+        """Called once the retirement is marked: wait for an effect in flight so that the retirement completes
+        after it. If it cannot within FENCE_WAIT_S it fails closed: the session stops, both transports are
+        forced shut, and the session counts as unsettled (no clean stop, so no classic fallback) until the
+        stuck effect actually returns."""
         if self._fence.acquire(timeout=live.FENCE_WAIT_S):
             self._fence.release()
-        else:
-            log("agentLiveFenceWait", f"call={self.call_id} an effect is still writing")
+            return True
+        log("agentLiveFenceStuck", f"call={self.call_id} an effect is still writing; forcing both transports shut")
+        self.fence_stuck.set()
+        self.stop.set()
+        try:
+            self.handler.connection.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            self.close_upstream()
+        except Exception as exc:  # noqa: BLE001
+            _quiet_log("agentLiveFenceForceClose", exc, self.call_id)
+
+        def settle():
+            with self._fence:                   # the stuck effect returned
+                self.fence_stuck.clear()
+        threading.Thread(target=settle, name="agent-live-fence-settle", daemon=True).start()
+        return False
+
+    def settled(self) -> bool:
+        """The stop is clean: the provider session actually closed and no effect is still in flight."""
+        return self.upstream_closed.is_set() and not self.fence_stuck.is_set()
 
     def upstream_send(self, event: dict) -> None:
         # Revocation stops every paid effect at once: no silence, no user audio, no append after a close or
@@ -266,16 +290,22 @@ class LiveSocket:
 
     def _close_transport(self, upstream) -> None:
         closed = False
-        try:
-            # The polite session.close needs the send lock; a send stuck holding it must not keep the transport
-            # open, so after a short wait the transport is closed without it.
-            if self._send_lock.acquire(timeout=1.0):
+
+        def polite():
+            if self._send_lock.acquire(timeout=POLITE_CLOSE_S):
                 try:
                     upstream.send(json.dumps({"type": "session.close"}))
-                except Exception as exc:  # noqa: BLE001 - the close below still runs
+                except Exception as exc:  # noqa: BLE001
                     _quiet_log("agentLiveUpstreamCloseSend", exc, self.call_id)
                 finally:
                     self._send_lock.release()
+        try:
+            # The polite session.close runs on its own and gets POLITE_CLOSE_S in all (lock and send); after
+            # that the transport is shut whether or not the goodbye went out, so a hung send never keeps the
+            # paid session open.
+            goodbye = threading.Thread(target=polite, name="agent-live-goodbye", daemon=True)
+            goodbye.start()
+            goodbye.join(POLITE_CLOSE_S)
             upstream.close()
             closed = True
         except Exception as exc:  # noqa: BLE001 - a failed close is no closure
@@ -578,6 +608,7 @@ def serve(handler) -> None:
         session = LiveSocket(handler, principal, ring)
         with live._SESSIONS_LOCK:
             live._SESSIONS[session.call_id] = session
+        live._remember_closure(session)          # outlives the registry: its closure stays answerable
         if not session.current():              # a close or fallback landed between the join and this registration
             return session.fail("live_call_stale", "stale")
         key = config.load().openai_key() if live.provider_problem() is None else ""

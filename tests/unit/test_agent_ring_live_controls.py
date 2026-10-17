@@ -21,7 +21,7 @@ from tests.unit.test_agent_rings import _Handler, _server, env  # noqa: F401 - e
 def grant(sander):
     live.reset_for_tests()
     ring = _live_ring()["ring"]
-    return rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1")["live"]
+    return rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="r1", client_nonce="n-r1")["live"]
 
 
 def _body(grant, **kw):
@@ -59,6 +59,9 @@ class Session:
 
     def revoke(self):
         pass
+
+    def settled(self):
+        return self.upstream_closed.is_set()
 
     def retire(self, reason):
         # Authority is already gone on the record when the session hears about it. Like the real

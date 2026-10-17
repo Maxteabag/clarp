@@ -455,10 +455,10 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
 
 
 def _live_intent(request_id: Any, client_nonce: Any) -> None:
-    """A Live answer names its intent exactly: a request id (required) and an optional client nonce, each a
-    non-empty string of at most 128 characters, kept as sent and never cut."""
+    """A Live answer names its intent exactly: a request id and a client nonce, both required, each 1 to 128
+    UTF-8 bytes, kept as sent and never cut."""
     from . import agent_ring_live as live
-    if not live._request_id_ok(request_id) or (client_nonce is not None and not live._request_id_ok(client_nonce)):
+    if not live._request_id_ok(request_id) or not live._request_id_ok(client_nonce):
         raise CallError(400, live.REQUEST_INVALID)
 
 
