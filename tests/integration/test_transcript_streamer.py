@@ -343,3 +343,44 @@ def test_a_held_import_for_one_agent_does_not_delay_another_agents_speech(stream
         assert not release.is_set()
     finally:
         release.set()
+
+
+@pytest.mark.parametrize("line_ts, status", [
+    ("{recent}", "ok"),
+    ("{future}", "future"),
+    ("yesterday-ish", "invalid"),
+    (None, "absent"),
+])
+def test_enqueue_event_reports_read_lag_and_the_trace_it_chose(streamer_env, monkeypatch,
+                                                                line_ts, status):
+    """P3: the enqueue event says when the block was written, how late it was
+    read and which trace the read-time marker gave it. A future, invalid or
+    missing timestamp is an unknown clock, never a lag; no text in the event."""
+    import datetime
+    from lib import transcript_streamer
+
+    streamer, tmp_path = streamer_env
+    agent_id, _tx = _build_agent_with_transcript(tmp_path)
+    events: list[tuple] = []
+    monkeypatch.setattr(transcript_streamer, "_emit", lambda *a, **kw: events.append((a, kw)))
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    stamp = {
+        "{recent}": (now - datetime.timedelta(seconds=2)).isoformat().replace("+00:00", "Z"),
+        "{future}": (now + datetime.timedelta(seconds=60)).isoformat().replace("+00:00", "Z"),
+    }.get(line_ts, line_ts)
+    streamer._on_text(agents_db.get_by_agent_id(agent_id), "<speak>Ja, vent litt</speak>",
+                      line_ts=stamp)
+
+    enqueues = [kw["detail"] for a, kw in events if a[:2] == ("transcript_streamer", "enqueue")]
+    assert len(enqueues) == 1
+    detail = enqueues[0]
+    assert detail["ts_status"] == status
+    assert detail["selected_trace"] == "trace-1"
+    assert detail["trace_source"] == "read_time_marker"
+    if status == "ok":
+        assert detail["line_ts"] == stamp
+        assert 2000 <= detail["read_lag_ms"] < 60_000
+    else:
+        assert detail["read_lag_ms"] is None
+    assert "Ja, vent litt" not in json.dumps(detail)

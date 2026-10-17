@@ -356,3 +356,18 @@ def test_watcher_records_claimed_byte_offset_in_db(tmp_path, monkeypatch):
     ).fetchone()
     assert row is not None
     assert row["position"] == tx.stat().st_size
+
+
+def test_watcher_can_hand_over_each_lines_own_timestamp(tmp_path):
+    """The streamer reports how late it read a block (P3). The timestamp is the
+    producer's, passed as written; the watcher neither parses nor trusts it."""
+    tx = tmp_path / "t.jsonl"
+    tx.touch()
+    received: list[tuple[str, object]] = []
+    w = TranscriptWatcher(tx, on_text=lambda text, line_ts: received.append((text, line_ts)),
+                          pass_line_timestamp=True)
+    stamped = _assistant_text("first")
+    stamped["timestamp"] = "2026-10-17T12:21:39.425Z"
+    _append(tx, stamped, _assistant_text("second"))
+    w.tick()
+    assert received == [("first", "2026-10-17T12:21:39.425Z"), ("second", None)]
