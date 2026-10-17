@@ -310,8 +310,13 @@ def _drain_background():
             with _guard:
                 idle = not _pending
                 if not idle:
+                    # Pop and install _running in ONE section: is_active() never
+                    # sees a popped item as gone before it runs.
                     key = next(iter(_pending))
                     (path, importer, owner, after), item_epoch = _pending.pop(key)
+                    if _resetting or item_epoch != _epoch:
+                        continue                    # invalidated by a test reset
+                    _running = (key, item_epoch)
             if idle:
                 # Close this thread's DB connection BEFORE clearing _worker, so a
                 # reset that later finds _worker None knows the thread holds no
@@ -322,10 +327,6 @@ def _drain_background():
                         _worker = None
                         return
                 continue
-            with _guard:
-                if _resetting or item_epoch != _epoch:
-                    continue                        # invalidated by a test reset
-                _running = (key, item_epoch)
             started = time.monotonic()
             try:
                 try:
