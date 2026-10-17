@@ -371,3 +371,18 @@ def test_watcher_can_hand_over_each_lines_own_timestamp(tmp_path):
     _append(tx, stamped, _assistant_text("second"))
     w.tick()
     assert received == [("first", "2026-10-17T12:21:39.425Z"), ("second", None)]
+
+
+def test_a_non_object_json_line_does_not_discard_the_next_line(tmp_path):
+    """Behaviour change (P3, 2d3ee12d): a valid JSON line that is not an object is
+    skipped. Before, `entry.get` raised inside the tick and the following lines
+    read in that tick were never voiced."""
+    tx = tmp_path / "t.jsonl"
+    tx.touch()
+    received: list[str] = []
+    w = TranscriptWatcher(tx, on_text=received.append)
+    with tx.open("a") as f:
+        f.write("[1, 2]\n")
+        f.write(json.dumps(_assistant_text("after the list")) + "\n")
+    w.tick()
+    assert received == ["after the list"]
