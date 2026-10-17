@@ -77,7 +77,8 @@ def test_close_is_idempotent_and_never_touches_the_session_twice(grant):
     order = []
     Session(grant, order)
     first = _close(grant)
-    assert _close(grant) == first and _close(grant, request_id="q2", reason="transport_lost") == first
+    assert _close(grant) == first                                   # the original request replays
+    _refused(409, "live_call_stale", _close, grant, request_id="q2", reason="transport_lost")
     assert len(order) == 1
 
 
@@ -244,7 +245,8 @@ def test_close_stops_the_session_and_reports_the_error_when_the_record_cannot_be
 def test_a_retired_close_answers_its_own_receipt_and_never_echoes_another_epoch(grant):
     first = _close(grant)
     assert first["call_epoch"] == 1
-    assert _close(grant) == first and _close(grant, request_id="q2") == first
+    assert _close(grant) == first
+    _refused(409, "live_call_stale", _close, grant, request_id="q2")   # only the original request replays
     _refused(409, "live_call_stale", _close, grant, call_epoch=2)
     _refused(409, "live_call_stale", _close, grant, call_epoch=7)
 

@@ -399,3 +399,13 @@ def test_live_capability_counts_only_for_a_paired_full_scope_device_token(sander
     rings.register_voip_token("device_revoked", "aa" * 32, supported_conversation_modes=["agent_live_v1"])
     assert rings._live_tokens() == []
     _refused(409, "live_client_required", _live_ring)
+
+
+def test_a_pinned_profile_file_over_the_snapshot_bound_is_refused_before_reading(sander):
+    import hashlib as _h
+    big = b"x" * (live.SNAPSHOT_BYTES + 1)
+    (sander.folder / "AGENTS.md").write_bytes(big)
+    meta = json.loads((sander.folder / "profile.json").read_text())
+    meta["files"]["agents"]["sha256"] = _h.sha256(big).hexdigest()
+    (sander.folder / "profile.json").write_text(json.dumps(meta))
+    _refused(409, "live_context_unavailable", _live_ring)

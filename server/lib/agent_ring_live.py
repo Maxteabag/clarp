@@ -188,7 +188,10 @@ def _pinned_text(folder: pathlib.Path, pin: Any) -> tuple[str, str]:
     try:
         if not path.resolve().is_relative_to(folder.resolve()):    # no symlink out of the profile
             raise CallError(409, CONTEXT_UNAVAILABLE)
-        raw = path.read_bytes()
+        if path.stat().st_size > SNAPSHOT_BYTES:                   # bounded before anything is read
+            raise CallError(409, CONTEXT_UNAVAILABLE)
+        with path.open("rb") as handle:
+            raw = handle.read(SNAPSHOT_BYTES + 1)
     except OSError:
         raise CallError(409, CONTEXT_UNAVAILABLE) from None
     if hashlib.sha256(raw).hexdigest() != pin["sha256"]:
@@ -284,6 +287,8 @@ def _owned(records: list[dict], principal: str, data: Any) -> dict:
 
     Any mismatch of call, owner, nonce or attempt is the same 409 so that a
     stranger learns nothing about another call."""
+    if not principal.startswith("device_") or not device_ok(principal):
+        raise CallError(403, AUTH)                    # only a paired full-scope device owns Live
     if not isinstance(data, dict):
         raise CallError(400, REQUEST_INVALID)
     call_id, nonce, attempt = data.get("call_id"), data.get("owner_nonce"), data.get("attempt_id")
@@ -329,11 +334,19 @@ def close(principal: str, data: Any) -> dict:
         epoch = _epoch(data, "call_epoch")
         if data.get("reason") not in CLOSE_REASONS or not isinstance(data.get("request_id"), str):
             raise CallError(400, REQUEST_INVALID)
-        if epoch != ring["_live_call_epoch"] or ring.get("_live_phase") == "classic":
-            raise CallError(409, CALL_STALE)
+        phase = ring.get("_live_phase")
         result = {"ok": True, "call_id": ring["_live_call_id"], "call_epoch": ring["_live_call_epoch"],
                   "state": "retired"}
-        if retire(ring, data["reason"]):
+        receipt = ring.get("_live_close_receipt") or {}
+        if epoch != ring["_live_call_epoch"] or phase in ("classic", "falling_back"):
+            stale = True                              # Live already ended another way: never a receipt
+        elif phase == "retired":
+            stale = receipt.get("request_id") != data["request_id"]   # replay only the original close
+        else:
+            stale = False
+        if stale:
+            pass
+        elif retire(ring, data["reason"]):
             changed = True
             ring["_live_close_receipt"] = {"request_id": data["request_id"], "reason": data["reason"],
                                            "call_epoch": ring["_live_call_epoch"]}
@@ -347,12 +360,14 @@ def close(principal: str, data: Any) -> dict:
                                         "live_call_id": ring["_live_call_id"], "reason": data["reason"]})
                 except Exception as exc:  # noqa: BLE001 - diagnostics never block the stop
                     log_exception("agentLiveCloseAuditFail", exc, f"call={ring['_live_call_id']}")
-    if changed or ring.get("_live_phase") == "retired":
-        # Also on a retried close of a retired call: a session that outlived the first close
+    if changed or ring.get("_live_phase") not in LIVE_PHASES:
+        # Also on a retried or stale close of an ended call: a session that outlived it
         # (registered late, or its stop was lost) is stopped now. A no-op when none runs.
         _stop_session(ring["_live_call_id"], data["reason"])
     if failure is not None:
         raise failure
+    if stale:
+        raise CallError(409, CALL_STALE)
     return result
 
 
