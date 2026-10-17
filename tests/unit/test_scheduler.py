@@ -12,6 +12,9 @@ from lib import agents, db, scheduler
 def _isolated_db(_transcript_importer_quiescent, tmp_path: pathlib.Path):
     db.reset_for_tests(tmp_path / "test_state.sqlite")
     yield
+    # This override shadows conftest's, so it drains the importer itself.
+    from lib import transcript_import_cache
+    assert transcript_import_cache.reset_for_tests(), "transcript importer not quiescent"
     db.reset_for_tests(None)
 
 
