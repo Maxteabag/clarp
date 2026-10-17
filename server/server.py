@@ -546,6 +546,7 @@ class Handler(BaseHTTPRequestHandler):
         "/calls": "_handle_calls_get",
         "/calls/ring": "_handle_calls_ring_get",
         "/calls/ring/settings": "_handle_calls_ring_settings_get",
+        "/calls/ring/live": "_handle_calls_ring_live_socket",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
         "/oracle/v2": "_handle_oracle_v2",
@@ -4469,7 +4470,11 @@ class Handler(BaseHTTPRequestHandler):
             principal, str(data.get("ring_id") or ""), conversation_mode=data.get("conversation_mode"),
             request_id=data.get("request_id"), client_nonce=data.get("client_nonce")))
 
-    # Agent-live rings (WIRE-v2): the owner's controls of a Live-answered ring.
+    # Agent-live rings (WIRE-v2): the Live call's socket and its owner's controls.
+    def _handle_calls_ring_live_socket(self):
+        from lib.agent_ring_live_socket import serve
+        return serve(self)
+
     def _handle_calls_ring_live_close(self):
         from lib import agent_ring_live
         return self._calls_ring_run(lambda _r, principal, data: agent_ring_live.close(principal, data))

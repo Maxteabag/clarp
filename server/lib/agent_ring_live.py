@@ -252,6 +252,15 @@ _SESSIONS_LOCK = threading.Lock()
 _SESSIONS: dict = {}            # call_id → the running session (registered by the socket)
 
 
+def device_ok(principal: str) -> bool:
+    """A paired device still holds full scope and is not revoked (as Oracle voice)."""
+    if not principal.startswith("device_"):
+        return True
+    from . import db
+    row = db.conn().execute("SELECT scope,revoked_at FROM paired_devices WHERE device_id=?", (principal,)).fetchone()
+    return row is not None and row["revoked_at"] is None and row["scope"] == "full"
+
+
 def _session_for(call_id: str):
     with _SESSIONS_LOCK:
         return _SESSIONS.get(call_id)
