@@ -263,11 +263,23 @@ def _schedule_deferred(key: str, epoch: int, token: threading.Timer) -> None:
         entry = _deferred.get(key)
         if _resetting or epoch != _epoch or entry is None or entry[1] is not token:
             return
+        path = entry[0][0]                  # fixed per key; newer requests share it
+    # Stat outside _guard: file I/O must not stall every caller, and a vanished
+    # file must not raise here after the request left _deferred (it would be
+    # lost); unknown means submit, and the worker logs the import failure.
+    try:
+        signature = _signature(path)
+    except OSError:
+        signature = None
+    with _guard:
+        entry = _deferred.get(key)
+        if _resetting or epoch != _epoch or entry is None or entry[1] is not token:
+            return
         request = entry[0]
         del _deferred[key]
         _last_started.pop(key, None)
         path, importer, owner, after = request
-        if after is None and _imported.get(key) == _signature(path):
+        if after is None and signature is not None and _imported.get(key) == signature:
             return
         if key not in _pending and len(_pending) >= _BACKGROUND_LIMIT:
             full_owner = owner if after is not None else None
