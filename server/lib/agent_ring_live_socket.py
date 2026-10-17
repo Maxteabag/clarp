@@ -114,6 +114,7 @@ class LiveSocket:
         self.upstream = None
         self.stop = threading.Event()
         self.closed = threading.Event()
+        self.ending = threading.Event()         # this session is retiring its own call: not a stale one
         self._write_lock = threading.Lock()
         self._send_lock = threading.Lock()
         self._state = threading.Lock()
@@ -175,6 +176,7 @@ class LiveSocket:
         """Retire the call's authority first, then tell the phone and stop."""
         if self.closed.is_set():
             return
+        self.ending.set()
         self._record(lambda ring: live.retire(ring, reason))
         self.downstream({"type": "agent_live.error", **self.ids(), "code": code, "message": code,
                          "retryable": False})
@@ -195,6 +197,7 @@ class LiveSocket:
             pass
 
     def _end_locally(self, reason: str) -> None:
+        self.ending.set()
         self._record(lambda ring: live.retire(ring, reason))
         self.retire(reason)
 
@@ -332,8 +335,11 @@ class LiveSocket:
                     if not live.device_ok(self.principal):
                         self._end_locally("device_revoked")
                         return
-                    if not self.current():          # retired by a close or fallback whose stop never reached us
-                        self.fail("live_call_stale", "stale")
+                    if not self.ending.is_set() and not self.current():
+                        # Retired by a close or fallback: its own stop normally follows at once; only one that
+                        # never arrives (a failed or lost stop) ends the session here.
+                        if not self.closed.wait(1.0) and not self.ending.is_set():
+                            self.fail("live_call_stale", "stale")
                         return
                 if not (self.client_ready and self.provider_ready) and \
                         time.monotonic() - self.joined_at > READY_S:
