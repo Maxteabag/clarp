@@ -296,11 +296,21 @@ def _drain_background():
     try:
         while True:
             with _guard:
-                if not _pending:
-                    _worker = None
-                    return
-                key = next(iter(_pending))
-                (path, importer, owner, after), item_epoch = _pending.pop(key)
+                idle = not _pending
+                if not idle:
+                    key = next(iter(_pending))
+                    (path, importer, owner, after), item_epoch = _pending.pop(key)
+            if idle:
+                # Close this thread's DB connection BEFORE clearing _worker, so a
+                # reset that later finds _worker None knows the thread holds no
+                # connection any more; new work queued meanwhile keeps it running.
+                db.close_local()
+                with _guard:
+                    if not _pending:
+                        _worker = None
+                        return
+                continue
+            with _guard:
                 if _resetting or item_epoch != _epoch:
                     continue                        # invalidated by a test reset
                 _running = (key, item_epoch)
