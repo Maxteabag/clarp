@@ -137,6 +137,7 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcript_import_cache.py", "_pending"): JOBS,
     ("lib/transcript_import_cache.py", "_worker"): JOBS,
     ("lib/transcript_import_cache.py", "_running"): JOBS,
+    ("lib/transcript_import_cache.py", "_threads"): JOBS,
     ("lib/transcript_import_cache.py", "_direct_active"): JOBS,
     ("lib/transcript_import_cache.py", "_epoch"): RESET,
     ("lib/transcript_import_cache.py", "_resetting"): RESET,
