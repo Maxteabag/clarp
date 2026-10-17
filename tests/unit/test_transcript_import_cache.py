@@ -708,18 +708,19 @@ def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeyp
 
     monkeypatch.setattr(database, "close_local", held_close)
     cache.schedule_import(path, lambda: None, owner="a")
-    assert closing.wait(2)
-    worker = cache._worker
-    assert worker is not None                         # not cleared before the close returns
     result: dict = {}
     resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
-    resetter.start()
     try:
+        assert closing.wait(2)
+        worker = cache._worker
+        assert worker is not None                     # not cleared before the close returns
+        resetter.start()
         assert _wait_until(lambda: cache._resetting)
         assert resetter.is_alive() and worker in cache._drain.threads
     finally:
-        release.set()
-        resetter.join(5)
+        release.set()                                 # never leave the worker held
+        if resetter.ident is not None:
+            resetter.join(5)
     assert result["ok"] is True and not worker.is_alive()
 
 
@@ -822,13 +823,13 @@ def test_reset_waits_for_a_timer_callback_after_it_removed_its_entry(tmp_path, m
     assert cache.schedule_import(path, lambda: None, owner="a", after=lambda: None)
     timer = cache._deferred[f"a\0{path}"][1]
     monkeypatch.setattr(cache, "_BACKGROUND_LIMIT", 0)          # the window closes onto a full queue
-    assert logging.wait(3)
-    assert f"a\0{path}" not in cache._deferred and timer.is_alive()
     try:
+        assert logging.wait(3)
+        assert f"a\0{path}" not in cache._deferred and timer.is_alive()
         assert cache.reset_for_tests(deadline_s=0.2) is False
         assert timer in cache._drain.threads
     finally:
-        release.set()
+        release.set()                                           # never leave the timer held
     assert cache.reset_for_tests()
     assert not timer.is_alive()
 
