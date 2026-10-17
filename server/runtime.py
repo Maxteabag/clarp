@@ -31,6 +31,9 @@ def main() -> int:
     # terminals): a no-op unless fds 8/9 are exactly the lock files.
     from lib.data_root_locks import seal_inherited_lock_fds
     seal_inherited_lock_fds()
+    # The instance generation token, before this process opens the state database.
+    from lib.host_generation import ensure_instance_generation
+    ensure_instance_generation()
     ctx = ServerContext.production(connect_runtime=False).with_(
         stream=RuntimeEventStream())
     paths = RuntimePaths.from_home(pathlib.Path.home())

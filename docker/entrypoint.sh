@@ -45,6 +45,12 @@ if not os.access(root, os.W_OK):
 from lib.deployment import LAYOUT
 LAYOUT.create_container_directories()
 
+# This data root's instance generation token (lib.host_generation): created once if absent,
+# never repaired or rotated here (a restore applied above already rotated it), and before
+# anything opens the state database.
+from lib.host_generation import ensure_instance_generation
+ensure_instance_generation()
+
 # A staged restore was already applied (or refused) by clarp_data_root_locks above, with the
 # data-root locks held and before any server or hook process opened SQLite.
 

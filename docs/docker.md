@@ -160,6 +160,12 @@ it starts):
   `restore.applying`, accepting the partly replaced volume.
 - The Host command takes no extra arguments; with extra arguments the
   entrypoint refuses (64) instead of starting a server without the Host's locks.
+- `/data/clarp/backups/instance.generation` is this volume's instance
+  generation: a random token every Clarp start creates once if it is absent
+  (0600, owned by the container user) and never repairs. Every applied restore
+  replaces it before anything is deleted; if it cannot be replaced, the restore
+  is refused (77) and nothing changes. Never copy it between volumes or edit it.
+  Deleting it is safe but makes the next start create a new one.
 
 The locks only see Clarp processes started by this image's entrypoint. These
 are unsupported while a restore is staged or applied, and nothing can detect
