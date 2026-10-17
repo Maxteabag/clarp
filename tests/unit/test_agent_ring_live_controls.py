@@ -55,8 +55,14 @@ class Session:
         live._SESSIONS[grant["call_id"]] = self
 
     def retire(self, reason):
-        # Authority is already gone on the record when the session hears about it.
-        self.order.append(("retire", reason, _ring_of({"call_id": self.call_id})["_live_phase"]))
+        # Authority is already gone on the record when the session hears about it. Like the real
+        # LiveSocket.retire, only the first stop acts; later ones (a retried close) are no-ops.
+        from lib import group_calls
+        stored = _ring_of({"call_id": self.call_id})
+        self.stops = getattr(self, "stops", 0) + 1
+        if self.stops == 1:
+            self.order.append(("retire", reason, stored["_live_phase"]))
+            self.classic_call_at_stop = stored.get("call_id") and group_calls.get_call(stored["call_id"])
 
 
 # ---- close --------------------------------------------------------------------------
@@ -71,12 +77,12 @@ def test_close_retires_authority_first_then_the_session(grant):
     assert grant["owner_nonce"] not in str(out)
 
 
-def test_close_is_idempotent_and_never_touches_the_session_twice(grant):
+def test_close_is_idempotent_and_a_retry_stops_the_session_again(grant):
     order = []
-    Session(grant, order)
+    session = Session(grant, order)
     first = _close(grant)
     assert _close(grant) == first and _close(grant, request_id="q2", reason="transport_lost") == first
-    assert len(order) == 1
+    assert order == [("retire", "user_hangup", "retired")] and session.stops == 3
 
 
 @pytest.mark.parametrize("change", [{"owner_nonce": "f" * 64}, {"attempt_id": "att_other"}, {"call_id": "alv_nope"}])
@@ -104,7 +110,7 @@ def test_close_with_a_bad_body_is_invalid(grant, change):
 
 def test_fallback_before_the_opening_starts_the_classic_call_once(grant, sander):
     order = []
-    Session(grant, order)
+    session = Session(grant, order)
     out = _fallback(grant)
     assert out["conversation_mode"] == "classic" and out["changed"] is True
     assert out["call"]["call_id"] and not out["call"]["call_id"].startswith("alv_")
@@ -112,7 +118,9 @@ def test_fallback_before_the_opening_starts_the_classic_call_once(grant, sander)
     assert out["ring"]["ring_id"] == grant["ring_id"]
     stored = _ring_of(grant)
     assert stored["_live_phase"] == "classic" and stored["_live_call_epoch"] == 2
-    assert order == [("retire", "fallback", "classic")]          # authority had already moved on
+    # Live was retired on the record and stopped BEFORE any classic call existed (WIRE-v2 §10).
+    assert order == [("retire", "fallback", "retired")]
+    assert not session.classic_call_at_stop
     again = _fallback(grant)                                      # the same request: the same call, no second
     assert again["changed"] is False and again["call"]["call_id"] == out["call"]["call_id"]
     _refused(409, "live_fallback_not_allowed", _fallback, grant, request_id="q2")
