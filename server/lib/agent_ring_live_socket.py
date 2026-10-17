@@ -9,12 +9,14 @@ paid starts, then holds one upstream GPT-Live session (``gpt-live-1``, voice
 The opening is admitted exactly once: when the phone said ``client_ready``, the
 provider said ``session.started`` and the call is still current, the Host marks
 the opening consumed on the ring, appends it upstream and, on the provider's
-``session.instructions.appended``, sends ``agent_live.opening_admitted``. No
-model audio reaches the phone before that ACK (it is held, bounded, then sent in
-order), and phone audio before it is refused with ``audio_not_ready``: the phone
-holds what it captured (at most 3 s) and sends it after the ACK. From admission
-the Host feeds synthetic silence upstream (a proposed mechanism resting on two
-provider observations, not a provider guarantee) until the phone's first real
+``session.instructions.appended``, sends ``agent_live.opening_admitted`` (an
+admission receipt, not proof anything was heard). Model audio before that ACK
+is an unadmitted opening: the call fails visibly with ``live_unavailable`` and
+nothing of it reaches the phone. Phone audio before it is refused with
+``audio_not_ready``: the phone holds what it captured (at most 3 s) and sends
+it after the ACK. From admission the Host feeds synthetic silence upstream (a
+proposed mechanism resting on two provider observations, not a provider
+guarantee) until the phone's first real
 frame, hangup, an error or a finite budget. An uncertain admission (no receipt,
 or a provider error after the append) fails the call; the opening stays consumed
 and no fallback or retry is offered.
@@ -49,7 +51,6 @@ SILENCE = base64.b64encode(bytes(int(24000 * TICK_S) * 2)).decode("ascii")   # 1
 # taken only while input flowed). It starts at the readiness fence, with the opening, and stops at
 # the phone's first real frame, at hangup or error, or after this budget, whichever comes first.
 SILENCE_BUDGET_S = OPENING_ACK_S + 5.0
-HELD_OUTPUT_BYTES = 144000      # at most 3 s of model audio is held until the opening ACK
 MAX_AUDIO_B64 = 262144
 ERROR_CODES = ("live_auth", "live_owner_conflict", "live_call_stale", "live_join_expired", "live_join_consumed",
                "live_context_unavailable", "live_unavailable", "audio_not_ready")
@@ -131,9 +132,6 @@ class LiveSocket:
         self.opening_sent_at = 0.0
         self.joined_at = time.monotonic()           # the setup deadline counts from the join
         self.silence_until = 0.0                    # monotonic deadline of the silence feed; 0 = off
-        self.held: list[str] = []                   # model audio that arrived before the opening ACK
-        self.held_bytes = 0
-        self.dropped_early = 0                      # model audio before the opening was sent (dropped)
         self.reason = ""
 
     # -- identity -------------------------------------------------------------------
@@ -240,9 +238,6 @@ class LiveSocket:
         if not self._record(lambda ring: ring.update(_live_phase="active")):
             return self.fail("live_call_stale", "stale")
         self.downstream({"type": "agent_live.opening_admitted", **self.ids(), "context_digest": self.context_digest})
-        held, self.held, self.held_bytes = self.held, [], 0
-        for delta in held:                          # what the model said first, after the ACK, in order
-            self.downstream({"type": "session.output_audio.delta", "delta": delta})
 
     # -- upstream events ------------------------------------------------------------------
     def receive(self, event: dict) -> None:
@@ -257,20 +252,16 @@ class LiveSocket:
         elif kind == "session.output_audio.delta":
             if not isinstance(event.get("delta"), str):
                 return
-            if self.admitted:
+            with self._state:                       # serialized with admission, retirement and close
+                deliver = self.admitted and not self.closed.is_set()
+            if deliver:
                 self.downstream({"type": "session.output_audio.delta", "delta": event["delta"]})
                 return
-            if not self.opening_sent:
-                # Speech before the opening was even sent is not the opening: never delivered.
-                self.dropped_early += 1
-                if self.dropped_early == 1:
-                    log("agentLiveEarlyOutputDropped", f"call={self.call_id}")
+            if self.closed.is_set():
                 return
-            # No model audio reaches the phone before agent_live.opening_admitted.
-            self.held.append(event["delta"])
-            self.held_bytes += len(event["delta"]) * 3 // 4
-            if self.held_bytes > HELD_OUTPUT_BYTES:
-                self.fail("live_unavailable", "output_before_opening_ack")
+            # Model audio before agent_live.opening_admitted is an unadmitted opening (ROOT H1):
+            # the call fails visibly, nothing of it reaches the phone.
+            self.fail("live_unavailable", "output_before_opening_ack")
         elif kind == "session.output_audio.interrupted":
             self.downstream({"type": "oracle_v2.playback_flush"})
             self.downstream({"type": "oracle_v2.quiet"})
@@ -398,6 +389,8 @@ def _join(principal: str, event: Any) -> dict:
     accepted again, whatever happens to the session it opened."""
     from . import agent_rings
     from .group_calls import _host_id
+    if not principal.startswith("device_") or not live.device_ok(principal):
+        raise Refused("live_auth")
     if not isinstance(event, dict) or event.get("type") != "agent_live.join" or \
             any(key not in event for key in JOIN_KEYS):
         raise Refused("live_owner_conflict")
@@ -488,6 +481,10 @@ def serve(handler) -> None:
         except Exception as exc:  # noqa: BLE001 - admission unknown: tombstone, never retried
             log_exception("agentLiveConnectFail", exc, f"call={session.call_id}")
             return session.fail("live_unavailable", "provider_connect_failed")
+        if session.closed.is_set() or not session._current():
+            # A hangup or fallback landed while the paid connect was in flight: the new upstream
+            # is closed at once (finally below) and nothing is started on it.
+            return session.retire(session.reason or "retired")
         from .oracle_live_wire import LiveWire
         wire = LiveWire("api")
         session.downstream({"type": "agent_live.session", "protocol": live.PROTOCOL, "host_id": _host_id(),

@@ -390,9 +390,15 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
     # The grant binds a paired, full-scope device: its principal is the device identity.
     if not principal.startswith("device_") or not live.device_ok(principal):
         raise CallError(403, live.AUTH)
+    # The request identity is validated, never truncated (ROOT M1).
+    for value in (request_id, client_nonce):
+        if not isinstance(value, str) or not 1 <= len(value) <= 128:
+            raise CallError(400, live.REQUEST_INVALID)
     if ring["state"] == "answered":
         if ring["answered_by"] != principal:
             raise CallError(409, live.OWNER_CONFLICT)
+        if request_id == ring.get("_live_request_id") and client_nonce != ring.get("_live_client_nonce"):
+            raise CallError(400, live.REQUEST_INVALID)          # the same request with another intent
         if ring.get("_live_phase") == "classic":
             return "classic"
         if ring.get("_live_phase") not in live.LIVE_PHASES:
@@ -405,7 +411,7 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
                 _live_call_id="alv_" + uuid.uuid4().hex, _live_call_epoch=1, _live_phase="answered_waiting_join",
                 _live_attempt_id="att_" + uuid.uuid4().hex, _live_owner_nonce=secrets.token_hex(32),
                 _live_join_ticket=secrets.token_hex(32), _live_join_expires_at=now + LIVE_JOIN_MS,
-                _live_request_id=str(request_id or "")[:128], _live_client_nonce=str(client_nonce or "")[:128])
+                _live_request_id=request_id, _live_client_nonce=client_nonce)
     _save(records)
     _audit({"outcome": "answered", "ring_id": ring["ring_id"], "session": ring["session"], "by": principal,
             "mode": live.MODE_LIVE, "live_call_id": ring["_live_call_id"]})
