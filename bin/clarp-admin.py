@@ -11,6 +11,7 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import stat
 import sqlite3
 import subprocess
 import sys
@@ -1916,6 +1917,10 @@ def _tts_google_collision(args) -> int:
             "resolution": cfg.tts_google_resolution, "uses": _google_uses(cfg),
             "resolution_table": (_google_resolution_table(fingerprints)
                                  if inventory["complete"] and fingerprints else ""),
+            "remedy": ("the adapter directory is a symlink or not a directory, so it cannot be "
+                       "inspected and --resolve-builtin cannot lift the block: replace it with a real "
+                       "directory or remove it" if inventory["root_category"] in ("symlink", "not_dir")
+                       else ""),
         }, indent=2))
         return 0
     if deployment.deployment_mode() != "container":
@@ -1951,6 +1956,9 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
         try:
             owner = os.open(locks.backups_dir() / locks.OWNER_LOCK,
                             os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            # Lock the inode the path names, never a swapped one.
+            if not locks.inherited_lock_fd(owner, locks.OWNER_LOCK):
+                return refuse(locks.EXIT_LOCKING, "the owner lock is not the expected regular file")
             fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             if dry_run:
@@ -1979,11 +1987,27 @@ def _resolve_google_builtin(*, dry_run: bool) -> int:
         fingerprints = sorted(item["fingerprint"] for item in inventory["collisions"])
         if not fingerprints:
             return refuse(locks.EXIT_REFUSED, "no colliding package; nothing to resolve")
-        raw = _read_nofollow(CONFIG_FILE)
+        try:
+            info = os.lstat(CONFIG_FILE)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                return refuse(locks.EXIT_REFUSED, "config.toml is not a regular file owned by this "
+                                                  "user; nothing was written")
+            raw = _read_nofollow(CONFIG_FILE)
+        except OSError as exc:
+            return refuse(locks.EXIT_REFUSED, f"config.toml cannot be read: {type(exc).__name__}")
         try:
             before = tomllib.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, tomllib.TOMLDecodeError):
             return refuse(locks.EXIT_REFUSED, "config.toml cannot be parsed; nothing was written")
+        # Only a single plain [tts.google_resolution] table can be replaced line by line; a resolution
+        # given as dotted keys, an inline table or with sub-tables is refused before any write.
+        heads = [line.split("#", 1)[0].strip() for line in raw.decode("utf-8").splitlines()]
+        exact = heads.count(f"[tts.{GOOGLE_RESOLUTION}]")
+        nested = any(head.startswith((f"[tts.{GOOGLE_RESOLUTION}.", f"[[tts.{GOOGLE_RESOLUTION}"))
+                     for head in heads)
+        if nested or exact > 1 or (GOOGLE_RESOLUTION in before.get("tts", {}) and exact == 0):
+            return refuse(locks.EXIT_REFUSED, f"config.toml defines [tts.{GOOGLE_RESOLUTION}] other than as "
+                                              "one plain table; edit it by hand (see --report)")
         expected = {"choice": "builtin", "packages": fingerprints}
         new_text = _with_google_resolution(raw.decode("utf-8"), fingerprints)
         if dry_run:

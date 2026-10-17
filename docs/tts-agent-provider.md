@@ -133,6 +133,13 @@ stopped and the data root held exclusively, as a restore is; any change to
 those packages makes the resolution void again. In native mode the command
 refuses: stop the services and paste the reported table yourself.
 
+A `tts-adapters.d` that is itself a symlink (for example one managed by
+dotfiles) or not a directory is never followed, so it blocks built-in Google
+with `google_id_unverifiable` even when no package claims `google`, and
+`--resolve-builtin` cannot lift that. Replace it with a real directory or
+remove it. Only the last path component is checked; a symlinked parent
+directory is followed as usual.
+
 ## Delivery
 
 Raw PCM delivery only exists for Cartesia. A clip from any other provider is
