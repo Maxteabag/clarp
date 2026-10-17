@@ -69,3 +69,12 @@ def test_agent_rings_arrive_with_host_contract_64():
     assert server_identity.HOST_CONTRACT >= 64
     text = (ROOT / "docs" / "agent-rings.md").read_text()
     assert "contract 64" in text
+
+
+def test_agent_ring_live_is_advertised_with_the_number_of_its_row():
+    """The flag's map value is its introduction number (booked at the landing), the
+    row that documents it; clients gate on the flag and live.protocol, never on it."""
+    assert "agent_ring_live" in server_identity.FEATURES
+    text = (ROOT / "docs" / "compatibility.md").read_text()
+    [row] = re.findall(r"^\|\s*(\d+)\s*\|\s*\d+\s*\|[^|]*\|\s*Agent-live rings[^\n]*feature `agent_ring_live`", text, re.M)
+    assert server_identity.FEATURE_CONTRACTS["agent_ring_live"] == int(row) <= server_identity.HOST_CONTRACT
