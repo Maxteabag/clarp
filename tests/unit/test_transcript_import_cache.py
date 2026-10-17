@@ -618,7 +618,9 @@ def test_a_concurrent_reset_is_refused_without_touching_the_owner_or_drain(tmp_p
     try:
         assert _wait_until(lambda: cache._reset_owner is not None)
         owner_token, drain = cache._reset_owner, cache._drain
-        assert cache.reset_for_tests() is False
+        assert cache.reset_for_tests() is False                 # R2 refused
+        assert cache._reset_owner is owner_token and cache._drain is drain
+        assert cache.reset_for_tests() is False                 # R3 refused too, R1 still owns
         assert cache._reset_owner is owner_token and cache._drain is drain
     finally:
         release.set()
