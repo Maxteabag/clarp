@@ -37,10 +37,14 @@ class QAHost:
             previous.unlink()
         self.log_path = self.root.parent / f'{self.root.name}.log'
         self.log = self.log_path.open('a')
-        self.process = subprocess.Popen(
-            [sys.executable, str(ROOT / 'tests/qa/host.py'), '--state-dir', str(self.root),
-             *self.extra_args],
-            stdout=self.log, stderr=subprocess.STDOUT)
+        try:
+            self.process = subprocess.Popen(
+                [sys.executable, str(ROOT / 'tests/qa/host.py'), '--state-dir', str(self.root),
+                 *self.extra_args],
+                stdout=self.log, stderr=subprocess.STDOUT)
+        except BaseException:
+            self.log.close()                # no child was started: only the log to release
+            raise
         try:
             deadline = time.monotonic() + ready_timeout_s
             while not previous.exists():
@@ -63,7 +67,10 @@ class QAHost:
             try:
                 self.stop()
             except Exception as exc:  # noqa: BLE001 - never replace the original failure
-                print(f'QA host cleanup after a failed start also failed: {exc!r}', file=sys.stderr)
+                try:
+                    print(f'QA host cleanup after a failed start also failed: {exc!r}', file=sys.stderr)
+                except Exception:  # noqa: BLE001 - nothing left to report through; the
+                    pass           # original failure below still wins
             raise
 
     def _dump_stacks(self):
@@ -83,7 +90,7 @@ class QAHost:
         try:
             with open(self.log_path, 'rb') as f:
                 f.seek(max(0, f.seek(0, os.SEEK_END) - LOG_TAIL_BYTES))
-                text = f.read().decode('utf-8', 'replace')
+                text = f.read(LOG_TAIL_BYTES).decode('utf-8', 'replace')   # never more, even if it grows
         except OSError as exc:
             return f'\n(host log unreadable: {exc!r})'
         lines = _SECRET.sub('<redacted>', text).splitlines()[-LOG_TAIL_LINES:]
