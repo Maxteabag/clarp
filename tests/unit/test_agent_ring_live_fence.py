@@ -282,3 +282,84 @@ def test_a_live_answer_intent_is_one_to_128_utf8_bytes_and_required(sander, fiel
 def test_a_close_request_id_is_at_most_128_utf8_bytes(call):
     _refused(400, "live_request_invalid", _close, call.grant, request_id="æ" * 65)
     _close(call.grant, request_id="æ" * 64)
+
+
+# ---- review of e5a26be0 ------------------------------------------------------------------------
+
+def _stuck_effect(call, session):
+    in_write, release = threading.Event(), threading.Event()
+    downstream = session.downstream
+
+    def stuck(event):
+        if event.get("type") == "session.output_audio.delta" and not release.is_set():
+            in_write.set()
+            release.wait(10)
+        downstream(event)
+    session.downstream = stuck
+    effect = threading.Thread(target=session.receive, args=(DELTA,), daemon=True)
+    effect.start()
+    assert in_write.wait(5)
+    return effect, release
+
+
+def test_a_stuck_fence_with_a_throwing_log_still_shuts_both_transports_and_forbids_classic(call, monkeypatch):
+    monkeypatch.setattr(live, "FENCE_WAIT_S", 0.3)
+    h, thread = _admitted(call)
+    session = _session(call)
+    effect, release = _stuck_effect(call, session)
+
+    def broken_log(*a, **kw):
+        raise OSError("stderr gone")
+    monkeypatch.setattr(sock, "log", broken_log)
+    raised = []
+    closer = threading.Thread(target=lambda: _call_quietly(raised, _close, call.grant), daemon=True)
+    try:
+        closer.start()
+        closer.join(5)
+        assert not closer.is_alive() and raised == []          # the close itself never fails on a log
+        _wait(lambda: call.up.closed, 5)
+        assert session.stop.is_set() and session.fence_stuck.is_set()
+        assert live._stop_session(call.grant["call_id"], "fallback", wait=0.3) is False
+    finally:
+        release.set()
+        effect.join(5)
+        thread.join(15)
+
+
+def _call_quietly(raised, fn, *args):
+    try:
+        fn(*args)
+    except Exception as exc:  # noqa: BLE001
+        raised.append(exc)
+
+
+class _CountingEvent(threading.Event):
+    def __init__(self, source):
+        super().__init__()
+        self.waits = 0
+        if source.is_set():
+            self.set()
+
+    def wait(self, timeout=None):
+        self.waits += 1
+        return super().wait(timeout)
+
+
+def test_a_closed_upstream_with_a_stuck_effect_is_refused_at_once_without_spinning(call, monkeypatch):
+    monkeypatch.setattr(live, "FENCE_WAIT_S", 0.3)
+    h, thread = _admitted(call)
+    session = _session(call)
+    effect, release = _stuck_effect(call, session)
+    try:
+        live._mark_retired(call.grant["call_id"])         # fence times out: forced close, effect still stuck
+        _wait(lambda: session.upstream_close_done.is_set(), 5)
+        assert session.upstream_closed.is_set() and session.fence_stuck.is_set()
+        session.upstream_close_done = _CountingEvent(session.upstream_close_done)
+        t0 = time.monotonic()
+        assert live._stop_session(call.grant["call_id"], "fallback", wait=2.0) is False
+        assert time.monotonic() - t0 < 0.5                 # refused at once, not after spinning to the deadline
+        assert session.upstream_close_done.waits <= 2
+    finally:
+        release.set()
+        effect.join(5)
+        thread.join(15)
