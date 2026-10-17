@@ -401,10 +401,15 @@ def test_a_busy_voice_owner_is_refused_before_the_upgrade_and_never_superseded(c
     assert stopped == [] and oracle_realtime._ACTIVE_PRINCIPALS[PHONE] == token and call.connects == []
 
 
-def test_a_limited_device_is_refused_before_the_upgrade(call):
+def test_a_limited_device_is_refused_before_the_upgrade_with_the_shared_body(call):
+    # The shared full-scope refusal passes through unchanged (as the Oracle v2 socket answers it), never
+    # rewritten to live_auth: live_auth is only where this route itself decides.
     h = Handler(scope="limited")
     sock.serve(h)
-    assert h.status == 401 and h.body() == {"error": "live_auth"}
+    data = bytes(h.wfile.data)
+    body = data[data.find(b"\r\n\r\n") + 4:].decode()
+    assert h.status == 401 and body == "Agent-live calls require full-device authentication"
+    assert "live_auth" not in body and call.connects == [] and live._SESSIONS == {}
 
 
 def test_phone_audio_before_the_opening_was_admitted_is_refused_not_dropped(call):
