@@ -18,6 +18,24 @@
 #    archive make maintenance refuse (76) and the Host start re-apply; a marker alone is recovered
 # K8 the Host command with an extra argument exits 64 (never a server without the Host's locks)
 #
+# The instance generation token (/data/clarp/backups/instance.generation, lib.host_generation), read
+# only by probe containers (no entrypoint, no bootstrap) or by an exec into a Host this run started:
+# G1  the first Host start creates it: a regular 0600 file of the image user, one link, a canonical UUID
+# G2  the entrypoint shell, the server and the runtime all run as that uid (the same-uid invariant)
+# G3  a refused second Host, a maintenance command and an extended Host command leave it unchanged
+# G4  an ordinary restart (nothing staged) keeps it
+# G5  a backup archive carries nothing under clarp/backups, so a restore can never bring a token back
+# G6  a refused stage (78) and a refused apply (76) leave it unchanged
+# G7  a tampered staged archive is refused inside the apply (78) before rotation: unchanged; the staged
+#     archive's exact bytes and mtime are then restored, so K5 proceeds as before
+# G8  the exclusive restore rotates it, and the new one survives the swap
+# G9  the K7a re-apply of an interrupted restore (synthetic marker state) rotates it again
+# G10 K7b marker recovery is not a restore and leaves it unchanged
+# G11 a group-writable clarp/backups never stops the Host: no token, exactly three bootstrap refusals
+#     in the logs (entrypoint, server, runtime); once fixed, the next start creates it
+# Not observable here: the bootstrap's order against the seal and the first database open, and the
+# rotation's order inside the apply (both proven by the unit tests); no real crash.
+#
 # Names are unique to this run and every resource carries its label. A name is recorded only after
 # its create succeeded, and cleanup removes only recorded resources whose label still matches.
 # Any unexpected result stops the run (set -e); nothing is retried.
@@ -148,6 +166,44 @@ state() {  # $1 volume; sets STATE
     STATE="$(grep '^STATE ' "$PROBE_LOG")"
 }
 
+# The token as one line: TOKEN <sha256>@<inode> <mode> <uid> <links> <canonical 0|1> <regular 0|1>,
+# or "TOKEN absent". Probes run python3 directly, so they never bootstrap one.
+TOKEN_PY='
+import hashlib, os, stat, uuid
+p = "/data/clarp/backups/instance.generation"
+try:
+    st = os.lstat(p)
+except FileNotFoundError:
+    print("TOKEN absent")
+    raise SystemExit(0)
+regular = stat.S_ISREG(st.st_mode)
+raw = open(p, "rb").read() if regular else b""
+text = raw.decode("ascii", "replace")
+try:
+    canonical = int(text.endswith("\n") and str(uuid.UUID(text[:-1])) == text[:-1])
+except ValueError:
+    canonical = 0
+print("TOKEN", f"{hashlib.sha256(raw).hexdigest()}@{st.st_ino}", oct(stat.S_IMODE(st.st_mode)),
+      st.st_uid, st.st_nlink, canonical, int(regular))
+'
+token() {  # $1 volume; sets TOKEN
+    probe "$1" "$TOKEN_PY" >/dev/null
+    TOKEN="$(grep '^TOKEN ' "$PROBE_LOG")"
+}
+host_token() {  # $1 a running Host this run started; sets TOKEN
+    TOKEN="$(timeout 60 docker exec "$1" python3 -c "$TOKEN_PY" | grep '^TOKEN ')"
+}
+token_valid() {  # $1 a TOKEN line: regular, 0600, image uid, one link, canonical
+    local _t _id mode uid links canonical regular
+    read -r _t _id mode uid links canonical regular <<<"$1"
+    [[ "$mode" == 0o600 && "$uid" == 10001 && "$links" == 1 && "$canonical" == 1 && "$regular" == 1 ]]
+}
+token_sha() {  # $1 a TOKEN line: its content sha256
+    local _t id
+    read -r _t id _ <<<"$1"
+    echo "${id%%@*}"
+}
+
 # ---- preflight: image, tokens, offline network (before any Host container) ----
 phase "preflight"
 [[ -z "${ACTIONS_RUNTIME_TOKEN:-}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]] \
@@ -206,6 +262,45 @@ for role, files in held.items():
 print("K1 holders: entrypoint (inheritable), server and runtime (close-on-exec)")
 '
 
+# ---- G1 / G2 ----
+phase "G1 the first start created the instance generation"
+host_token "$A"; T1="$TOKEN"
+token_valid "$T1" || fail "G1 token: $T1"
+echo "G1 token valid (0600, uid 10001, one link, canonical)"
+phase "G2 entrypoint, server and runtime run as the token owner"
+timeout 60 docker exec "$A" python3 -c '
+import glob, os
+token_uid = os.lstat("/data/clarp/backups/instance.generation").st_uid
+found = {}
+for status in glob.glob("/proc/[0-9]*/status"):
+    pid = int(status.split("/")[2])
+    if pid == os.getpid():
+        continue
+    try:
+        argv = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+        uids = next(line.split()[1:] for line in open(status) if line.startswith("Uid:"))
+    except (OSError, StopIteration):
+        continue
+    argv = [a.decode() for a in argv if a]
+    if not argv:
+        continue
+    role = None
+    if os.path.basename(argv[0]) in ("sh", "dash", "bash") and "/usr/local/bin/clarp-entrypoint" in argv[1:2]:
+        role = "entrypoint"
+    elif "python" in os.path.basename(argv[0]) and argv[1:] == ["/opt/clarp/server.py"]:
+        role = "server"
+    elif "python" in os.path.basename(argv[0]) and argv[1:] == ["/opt/clarp/runtime.py"]:
+        role = "runtime"
+    if role is None:
+        continue
+    assert role not in found, ("two processes for one role", role, argv)
+    found[role] = {int(u) for u in uids}
+assert set(found) == {"entrypoint", "server", "runtime"}, found
+for role, uids in found.items():
+    assert uids == {token_uid} == {10001}, (role, uids, token_uid)
+print("G2 entrypoint, server and runtime run as uid", token_uid, "= the token owner")
+'
+
 # ---- K2 ----
 phase "K2 second Host refused"
 new_container host-b -v "$V1:/data" "$IMAGE"
@@ -228,10 +323,25 @@ new_container host-extra -v "$V1:/data" "$IMAGE" python3 /opt/clarp/server.py --
 expect_exit "$NEW" 64 "the Host command takes no extra arguments"
 wait_healthy "$A"
 
+# ---- G3 / G4 ----
+phase "G3 refused and maintenance entrypoints left the token unchanged"
+host_token "$A"; [[ "$TOKEN" == "$T1" ]] || fail "G3 token changed: $TOKEN"
+phase "G4 an ordinary restart keeps the token"
+stop_host "$A"
+start_host host-a-restart "$V1"; A="$HOST"
+host_token "$A"; [[ "$TOKEN" == "$T1" ]] || fail "G4 token changed across an ordinary restart: $TOKEN"
+
 # ---- K4 ----
 phase "K4 staging needs a live Host"
 backup="$(timeout 120 docker exec "$A" clarp-admin backup create | tail -1)"
 [[ "$backup" == /data/clarp/backups/clarp-*.tar.gz ]] || fail "K4 backup path: $backup"
+probe "$V1" "
+import tarfile
+names = tarfile.open('$backup', 'r:gz').getnames()
+inside = [n for n in names if n.lstrip('./').startswith('clarp/backups')]
+assert not inside, inside
+print('G5 archive members exclude clarp/backups:', len(names))
+" >/dev/null
 timeout 60 docker exec "$A" sh -c 'printf changed >/data/workspace/probe/marker'
 timeout 120 docker exec "$A" clarp-admin backup restore "$backup" >/dev/null
 state "$V1"; staged="$STATE"
@@ -242,6 +352,7 @@ stop_host "$A"
 new_container maint-stage -v "$V1:/data" "$IMAGE" clarp-admin backup restore "$backup"
 expect_exit "$NEW" 78 "restore can only be staged inside the running Host"
 state "$V1"; [[ "$STATE" == "$staged" ]] || fail "K4 refusal changed the test root or the staged archive: $STATE"
+token "$V1"; [[ "$TOKEN" == "$T1" ]] || fail "G6 the refused stage changed the token: $TOKEN"
 
 # ---- K5 ----
 phase "K5 apply only with exclusive ownership"
@@ -266,11 +377,48 @@ done
 new_container host-a2 -v "$V1:/data" "$IMAGE"
 expect_exit "$NEW" 76 "restore refused: the data root is in use"
 state "$V1"; [[ "$STATE" == "$staged" ]] || fail "K5 refusal changed the test root or the staged archive: $STATE"
+token "$V1"; [[ "$TOKEN" == "$T1" ]] || fail "G6 the refused apply changed the token: $TOKEN"
 timeout 60 docker stop "$M" >/dev/null
 remove_container "$M"
+
+# ---- G7 (after K5's refusal checks; K5's apply below sees the staged archive byte- and mtime-exact) ----
+phase "G7 a tampered staged archive is refused inside the apply, before rotation"
+probe "$V1" '
+import os, shutil
+pending = "/data/clarp/backups/restore.pending.tar.gz"
+keep = "/data/workspace/probe/"
+shutil.copyfile(pending, keep + "pending.copy")
+st = os.stat(pending)
+open(keep + "pending.times", "w").write(f"{st.st_atime_ns} {st.st_mtime_ns}")
+with open(pending, "ab") as handle:
+    handle.write(b"tampered")
+print("G7 staged archive tampered (a copy kept)")
+' >/dev/null
+new_container host-g7 -v "$V1:/data" "$IMAGE"
+expect_exit "$NEW" 78 "the staged archive does not match its staging record"
+token "$V1"; [[ "$TOKEN" == "$T1" ]] || fail "G7 the refused apply rotated the token: $TOKEN"
+probe "$V1" '
+import os, shutil
+pending = "/data/clarp/backups/restore.pending.tar.gz"
+keep = "/data/workspace/probe/"
+shutil.copyfile(keep + "pending.copy", pending)
+atime, mtime = map(int, open(keep + "pending.times").read().split())
+os.utime(pending, ns=(atime, mtime))
+os.remove(keep + "pending.copy")
+os.remove(keep + "pending.times")
+print("G7 staged archive restored from the copy")
+' >/dev/null
+state "$V1"; [[ "$STATE" == "$staged" ]] || fail "G7 the staged archive or its record is not exactly as staged: $STATE"
+
 start_host host-a3 "$V1"; A3="$HOST"
 [[ "$(timeout 60 docker exec "$A3" python3 -c "$STATE_PY")" == "STATE original absent absent absent" ]] \
     || fail "K5 apply did not restore the snapshot and clear the restore files"
+
+# ---- G8 ----
+phase "G8 the exclusive restore rotated the token, which survived the swap"
+host_token "$A3"; T2="$TOKEN"
+token_valid "$T2" || fail "G8 token: $T2"
+[[ "$(token_sha "$T2")" != "$(token_sha "$T1")" ]] || fail "G8 the restore did not rotate the token"
 
 # ---- K6 ----
 phase "K6 PTY shell holds no lock file"
@@ -361,6 +509,10 @@ state "$V1"; [[ "$STATE" == "$before" ]] || fail "K7a maintenance changed the te
 start_host host-a4 "$V1"; A4="$HOST"
 [[ "$(timeout 60 docker exec "$A4" python3 -c "$STATE_PY")" == "STATE k7base absent absent absent" ]] \
     || fail "K7a the Host start did not re-apply"
+host_token "$A4"; T3="$TOKEN"
+token_valid "$T3" || fail "G9 token: $T3"
+[[ "$(token_sha "$T3")" != "$(token_sha "$T2")" ]] || fail "G9 the re-applied restore did not rotate the token"
+echo "G9 the re-applied restore rotated the token again"
 stop_host "$A4"
 
 phase "K7b marker alone: recovered as completed"
@@ -374,7 +526,44 @@ print("K7b synthetic marker and leftover record written, no archive")
 start_host host-a5 "$V1"; A5="$HOST"
 [[ "$(timeout 60 docker exec "$A5" python3 -c "$STATE_PY")" == "STATE k7base absent absent absent" ]] \
     || fail "K7b the Host start did not recover the marker"
+host_token "$A5"; [[ "$TOKEN" == "$T3" ]] || fail "G10 marker recovery changed the token: $TOKEN"
+echo "G10 marker recovery left the token unchanged"
 stop_host "$A5"
+
+# ---- G11 (a second owned volume) ----
+phase "G11 a group-writable clarp/backups never stops the Host"
+new_volume v2; V2="$VOL"
+probe "$V2" '
+import os
+os.makedirs("/data/clarp/backups", exist_ok=True)
+os.chmod("/data/clarp/backups", 0o770)
+print("G11 clarp/backups is group-writable")
+' >/dev/null
+start_host host-g11 "$V2"; G11="$HOST"
+G11_LINE=' hostGenerationInvalid backups is group or world writable$'
+refusals=0
+deadline=$((SECONDS + 60))
+while (( SECONDS < deadline )); do
+    refusals="$(timeout 30 docker logs "$G11" 2>&1 | grep -c -- "$G11_LINE" || true)"
+    (( refusals >= 3 )) && break
+    sleep 1
+done
+(( refusals >= 3 )) || fail "G11 expected three bootstrap refusals within 60s, saw $refusals"
+sleep 5
+refusals="$(timeout 30 docker logs "$G11" 2>&1 | grep -c -- "$G11_LINE" || true)"
+[[ "$refusals" == 3 ]] || fail "G11 expected exactly three bootstrap refusals, saw $refusals"
+host_token "$G11"; [[ "$TOKEN" == "TOKEN absent" ]] || fail "G11 a token exists despite the refusal: $TOKEN"
+echo "G11 healthy without a token; three refusals (entrypoint, server, runtime)"
+stop_host "$G11"
+probe "$V2" '
+import os
+os.chmod("/data/clarp/backups", 0o700)
+print("G11 clarp/backups fixed")
+' >/dev/null
+start_host host-g11-fixed "$V2"; G11="$HOST"
+host_token "$G11"; token_valid "$TOKEN" || fail "G11 the fixed start did not create a valid token: $TOKEN"
+echo "G11 the next start created the token"
+stop_host "$G11"
 
 phase "done in ${SECONDS}s"
 echo "docker restore exclusivity ok"
