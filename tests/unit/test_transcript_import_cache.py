@@ -652,3 +652,39 @@ def test_reset_waits_for_an_admitted_direct_import(tmp_path):
         direct.join(5)
         resetter.join(5)
     assert result["ok"] is True
+
+
+def test_reset_waits_for_a_worker_still_closing_its_connection(tmp_path, monkeypatch):
+    """§6 (f): the worker finished its item and is closing its DB connection.
+    It still owns _worker until that close returns, so reset waits for the thread
+    instead of reading a cleared global as 'exited'."""
+    from lib import db as database
+    cache = transcript_import_cache
+    assert cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "tail.jsonl"
+    path.write_text("{}\n")
+    closing, release = _threading.Event(), _threading.Event()
+    original_close = database.close_local
+
+    def held_close():
+        if _threading.current_thread().name == "transcript-import":
+            closing.set()
+            assert release.wait(5)
+        return original_close()
+
+    monkeypatch.setattr(database, "close_local", held_close)
+    cache.schedule_import(path, lambda: None, owner="a")
+    assert closing.wait(2)
+    worker = cache._worker
+    assert worker is not None                         # not cleared before the close returns
+    result: dict = {}
+    resetter = _threading.Thread(target=lambda: result.setdefault("ok", cache.reset_for_tests()))
+    resetter.start()
+    try:
+        assert _wait_until(lambda: cache._resetting)
+        assert resetter.is_alive() and cache._drain.worker is worker
+    finally:
+        release.set()
+        resetter.join(5)
+    assert result["ok"] is True and not worker.is_alive()
