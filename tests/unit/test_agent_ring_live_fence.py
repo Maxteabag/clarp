@@ -197,3 +197,88 @@ def test_serve_releases_its_registry_and_claim_when_cleanup_throws(call, monkeyp
     thread.join(15)
     assert not thread.is_alive()
     assert live._SESSIONS == {} and PHONE not in oracle_realtime._ACTIVE_PRINCIPALS
+
+
+# ---- review of cedd3038 ------------------------------------------------------------------------
+
+def test_a_hung_polite_session_close_send_never_keeps_the_provider_transport_open(call, monkeypatch):
+    hang = threading.Event()
+    send = call.up.send
+
+    def stuck_send(raw):
+        if '"session.close"' in raw:
+            hang.wait(30)                                 # the polite goodbye never goes out
+        return send(raw)
+    call.up.send = stuck_send
+    monkeypatch.setattr(live, "UPSTREAM_CLOSE_S", 3.0)
+    h, thread = _provider_ready(call)
+    t0 = time.monotonic()
+    try:
+        out = _fallback(call.grant)                       # the transport is force-closed: a real closure
+        assert time.monotonic() - t0 < 3 and call.up.closed and out["conversation_mode"] == "classic"
+    finally:
+        hang.set()
+        thread.join(15)
+
+
+def test_a_retirement_that_cannot_pass_a_stuck_effect_fails_closed(call, monkeypatch):
+    monkeypatch.setattr(live, "FENCE_WAIT_S", 0.3)
+    h, thread = _admitted(call)
+    session = _session(call)
+    in_write, release, order = threading.Event(), threading.Event(), []
+    downstream = session.downstream
+
+    def stuck_downstream(event):
+        delta = event.get("type") == "session.output_audio.delta"
+        if delta and not release.is_set():
+            in_write.set()
+            release.wait(10)                              # still writing long after FENCE_WAIT_S
+        downstream(event)
+        if delta:
+            order.append("frame")
+    session.downstream = stuck_downstream
+    effect = threading.Thread(target=session.receive, args=(DELTA,), daemon=True)
+    effect.start()
+    assert in_write.wait(5)
+    try:
+        assert live._stop_session(call.grant["call_id"], "fallback", wait=0.6) is False   # never a clean stop
+        assert call.up.closed and session.stop.is_set()                                   # transport forced shut
+        assert session.fence_stuck.is_set()
+    finally:
+        release.set()
+        effect.join(5)
+    _wait(lambda: not session.fence_stuck.is_set(), 5)
+    assert live._stop_session(call.grant["call_id"], "fallback", wait=1.0) is True        # settled now
+    thread.join(15)
+
+
+def test_an_unconfirmed_closure_survives_the_registry_and_a_fallback_starts_nothing_classic(call, monkeypatch):
+    def broken():
+        raise OSError("close failed")
+    call.up.close = broken
+    monkeypatch.setattr(live, "UPSTREAM_CLOSE_S", 0.5)
+    started = _no_classic(call, monkeypatch)
+    h, thread = _provider_ready(call)
+    h.rfile.close()                                       # the phone is gone: the socket retires and ends
+    thread.join(15)
+    assert live._session_for(call.grant["call_id"]) is None
+    _refused(503, "live_unavailable", _fallback, call.grant)
+    assert started == []
+
+
+@pytest.mark.parametrize("field,value", [("request_id", "æ" * 65), ("client_nonce", "ø" * 65),
+                                         ("client_nonce", None), ("request_id", "")])
+def test_a_live_answer_intent_is_one_to_128_utf8_bytes_and_required(sander, field, value):
+    from tests.unit.test_agent_ring_live import _live_ring
+    ring = _live_ring()["ring"]
+    intent = {"request_id": "r1", "client_nonce": "n1", field: value}
+    _refused(400, "live_request_invalid", rings.answer, PHONE, ring["ring_id"], conversation_mode="agent_live_v1",
+             **intent)
+    ok = rings.answer(PHONE, ring["ring_id"], conversation_mode="agent_live_v1", request_id="æ" * 64,
+                      client_nonce="ø" * 64)                 # exactly 128 bytes each
+    assert ok["changed"] is True
+
+
+def test_a_close_request_id_is_at_most_128_utf8_bytes(call):
+    _refused(400, "live_request_invalid", _close, call.grant, request_id="æ" * 65)
+    _close(call.grant, request_id="æ" * 64)
