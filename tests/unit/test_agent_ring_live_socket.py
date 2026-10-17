@@ -757,7 +757,9 @@ def test_a_hangup_during_the_paid_connect_never_leaves_the_session_running(call,
     assert not thread.is_alive() and up.closed and up.of("session.start") == []
 
 
-def test_a_non_device_principal_is_refused_403_live_auth_before_the_upgrade(call):
+def test_a_non_device_principal_is_refused_403_live_auth_before_the_upgrade(call, monkeypatch):
+    # The fixture treats every principal as a healthy device; this test needs the real rule.
+    monkeypatch.setattr(live, "device_ok", lambda principal: principal.startswith("device_"))
     h = Handler(principal="administrator")
     sock.serve(h)                                       # refused at the route: no upgrade, no frame
     assert h.status == 403 and h.body() == {"error": "live_auth"}
