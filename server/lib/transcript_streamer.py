@@ -150,18 +150,29 @@ class TranscriptStreamer:
             persist_offset=True,
             pass_line_timestamp=True,
         )
+        with self._dirty_lock:
+            # Published together under the lock that records pending changes,
+            # BEFORE the watcher can tick: the dispatcher ticks every pooled
+            # watcher (startup tick, polling loop), so its first change may
+            # arrive before dispatcher.watch() returns and must not be rejected.
+            self._bound[agent_id] = backend_session_id
+            self._bind_generation[agent_id] = generation
         self.pool.add(agent_id, watcher)
         try:
             self.dispatcher.watch(agent_id, path)
         except OSError as e:
+            self.pool.remove(agent_id)
+            with self._dirty_lock:
+                # Unwind only this bind's publication and whatever it recorded.
+                if self._bind_generation.get(agent_id) == generation:
+                    self._bound.pop(agent_id, None)
+                    self._bind_generation.pop(agent_id, None)
+                intent = self._dirty.get(agent_id)
+                if intent is not None and intent.gen == generation:
+                    del self._dirty[agent_id]
             log_exception("transcriptStreamerWatchFail", e,
                           detail=str(path))
-            self.pool.remove(agent_id)
             return
-        with self._dirty_lock:
-            # Published together under the lock that records pending changes.
-            self._bound[agent_id] = backend_session_id
-            self._bind_generation[agent_id] = generation
         _emit("transcript_streamer", "bind",
               session=agent.get("session"),
               backend_session_id=backend_session_id,
