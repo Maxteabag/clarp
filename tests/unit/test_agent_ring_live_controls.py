@@ -163,7 +163,8 @@ def test_the_live_control_routes_answer_with_the_fixed_strings(grant, sander):
     assert fb.sent[0][0] == 200 and fb.sent[0][1]["conversation_mode"] == "classic"
     close = _Handler(_body(grant, call_epoch=1, reason="user_hangup"), sander)
     server.Handler._handle_calls_ring_live_close(close)
-    assert close.sent == [(200, {"ok": True, "call_id": grant["call_id"], "call_epoch": 1, "state": "retired"})]
+    # A close after the fallback answers the ring's own epoch and actual state (H4/L-1), not the request's echo.
+    assert close.sent == [(200, {"ok": True, "call_id": grant["call_id"], "call_epoch": 2, "state": "classic"})]
 
 
 def test_the_ring_and_answer_routes_carry_the_live_fields(sander):
