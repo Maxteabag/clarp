@@ -349,3 +349,33 @@ def test_a_live_answer_must_come_from_a_paired_full_scope_device(sander, who):
     ring = _live_ring()["ring"]
     _refused(403, "live_auth", rings.answer, who, ring["ring_id"], conversation_mode="agent_live_v1")
     assert rings.get(ring["ring_id"])["state"] == "ringing"
+
+
+def test_the_provider_check_refuses_a_host_without_an_openai_key(monkeypatch):
+    class Cfg:
+        def openai_key(self):
+            return ""
+    from lib import config
+    monkeypatch.setattr(config, "load", lambda: Cfg())
+    assert live.provider_problem()
+
+
+def test_a_profile_file_symlinked_out_of_its_profile_is_refused(sander, tmp_path):
+    outside = _write(tmp_path / "elsewhere" / "AGENTS.md", FILES["agents"][1])
+    (sander.folder / "AGENTS.md").unlink()
+    (sander.folder / "AGENTS.md").symlink_to(outside)
+    _refused(409, "live_context_unavailable", _live_ring)
+
+
+@pytest.mark.parametrize("end", ["decline", "cancel", "miss"])
+def test_a_live_ring_that_ends_unanswered_drops_its_snapshot(sander, end):
+    ring = _live_ring()["ring"]
+    if end == "decline":
+        rings.decline(PHONE, ring["ring_id"])
+    elif end == "cancel":
+        rings.cancel("a-sander", ring["ring_id"])
+    else:
+        sander.clock.advance(rings.RING_TIMEOUT_MS / 1000 + 1)
+        rings.expire_due()
+    stored = next(r for r in rings._load() if r["ring_id"] == ring["ring_id"])
+    assert "_live_snapshot" not in stored and stored["_live_context_digest"] and stored["_live_event_digest"]

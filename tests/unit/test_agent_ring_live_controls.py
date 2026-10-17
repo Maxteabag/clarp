@@ -210,3 +210,10 @@ def test_the_cli_sends_a_live_ring_with_the_context_it_read_itself(monkeypatch, 
         assert run(["call", "ring", "--reason", "r", "--say", "s", *argv]) == 2
     assert sent == []
     capsys.readouterr()
+
+
+@pytest.mark.parametrize("end", ["close", "fallback"])
+def test_a_retired_or_fallen_back_live_call_drops_its_snapshot(grant, end):
+    assert "_live_snapshot" in _ring_of(grant)
+    (_close if end == "close" else _fallback)(grant)
+    assert "_live_snapshot" not in _ring_of(grant) and _ring_of(grant)["_live_context_digest"]
