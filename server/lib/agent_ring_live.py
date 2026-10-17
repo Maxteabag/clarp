@@ -336,9 +336,10 @@ def close(principal: str, data: Any) -> dict:
 def fallback(principal: str, data: Any) -> dict:
     """The one explicit switch of a Live-answered ring to the classic call.
 
-    Allowed once, only before the Live opening was admitted and before any user
-    audio went upstream, and only with the phone's word that its Live audio has
-    stopped. The CAS retires Live (authority first), bumps the epoch and starts
+    Allowed once, only while the Live opening is not consumed (consumed the moment
+    its instruction append is attempted, so never after an uncertain admission)
+    and before any user audio went upstream, and only with the phone's word that
+    its Live audio has stopped. The CAS retires Live (authority first), bumps the epoch and starts
     the ordinary group call with its own opening for the same ring."""
     from . import agent_rings, group_calls
     from . import agents as agents_db

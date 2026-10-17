@@ -86,12 +86,13 @@ class Out:
         body = data[end + 4:] if data.startswith(b"HTTP/1.1 101") else b""
         out, i = [], 0
         while i + 2 <= len(body):
-            n, i = body[i + 1] & 0x7F, i + 2
+            opcode, n, i = body[i] & 0x0F, body[i + 1] & 0x7F, i + 2
             if n == 126:
                 n, i = struct.unpack("!H", body[i:i + 2])[0], i + 2
             elif n == 127:
                 n, i = struct.unpack("!Q", body[i:i + 8])[0], i + 8
-            out.append(json.loads(body[i:i + n]))
+            if opcode == 0x1:                           # text frames carry the JSON; pongs are skipped
+                out.append(json.loads(body[i:i + n]))
             i += n
         return out
 
