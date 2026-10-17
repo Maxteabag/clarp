@@ -170,3 +170,22 @@ def test_a_phone_that_drops_live_on_an_open_stream_stops_getting_live_events(run
         assert [e["ring_id"] for e in _until(response, "rng_classic_2")] == ["rng_classic_2"]
     finally:
         client.close()
+
+
+# ---- explicit limit: a stale registration is trusted until the phone registers again ----
+
+def test_a_stale_live_registration_after_a_downgrade_is_still_trusted_an_explicit_limit(running_server):
+    """NOT a no-ring guarantee. The Host cannot know that a phone which registered agent_live_v1 was
+    downgraded: until it registers again it still gets the Live ring. Only a fresh registration without
+    agent_live_v1 (or a forgotten token) stops it. This test pins the limit so it is never mistaken
+    for isolation."""
+    base, ctx, srv = running_server
+    _, new, _ = _devices(srv, ctx)
+    _store("rng_stale", live=True)
+    # "Downgraded" app that has not registered again: nothing on the Host changed.
+    assert _get(base, new["token"])[1]["ring"]["ring_id"] == "rng_stale"
+    assert agent_rings.live_capable(new["device_id"]) is True
+    # The only removal is its own fresh registration (or a forgotten token).
+    agent_rings.register_voip_token(new["device_id"], "")
+    assert agent_rings.live_capable(new["device_id"]) is False
+    assert _get(base, new["token"])[1]["ring"] is None
