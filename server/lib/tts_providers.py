@@ -115,6 +115,9 @@ def synthesize(
         manifest, text=text, voice=voice, out_path=out_path, on_chunk=on_chunk)
 
 
+MP3_BIT_RATE = 128_000
+
+
 def _wav_to_mp3(source: Path, destination: Path) -> None:
     import av
     from av.audio.resampler import AudioResampler
@@ -124,6 +127,9 @@ def _wav_to_mp3(source: Path, destination: Path) -> None:
             input_stream = input_container.streams.audio[0]
             output_stream = output_container.add_stream("mp3", rate=24_000)
             output_stream.layout = "mono"
+            # Without an explicit rate the encoder wrote 32 kbit/s, audibly thin for a custom voice that
+            # came in as lossless WAV (Chirp 3 HD Kore over a call, Peter 17 Oct).
+            output_stream.bit_rate = MP3_BIT_RATE
             resampler = AudioResampler(
                 format="fltp", layout="mono", rate=24_000)
             for frame in input_container.decode(input_stream):
