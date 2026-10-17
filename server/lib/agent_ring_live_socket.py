@@ -65,6 +65,14 @@ def _quiet_log(name: str, exc: BaseException, detail: str = "") -> None:
         pass
 
 
+def _quiet_note(name: str, detail: str) -> None:
+    """A diagnostic line that never throws (stderr may be gone)."""
+    try:
+        log(name, detail)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class Refused(Exception):
     def __init__(self, code: str, message: str = ""):
         super().__init__(code)
@@ -175,17 +183,18 @@ class LiveSocket:
         if self._fence.acquire(timeout=live.FENCE_WAIT_S):
             self._fence.release()
             return True
-        log("agentLiveFenceStuck", f"call={self.call_id} an effect is still writing; forcing both transports shut")
+        # Fail closed first: the flags and both transports, then (never throwing) the diagnostic.
         self.fence_stuck.set()
         self.stop.set()
         try:
             self.handler.connection.shutdown(socket.SHUT_RDWR)
-        except OSError:
+        except Exception:  # noqa: BLE001 - a dead connection is already shut
             pass
         try:
             self.close_upstream()
         except Exception as exc:  # noqa: BLE001
             _quiet_log("agentLiveFenceForceClose", exc, self.call_id)
+        _quiet_note("agentLiveFenceStuck", f"call={self.call_id} an effect is still writing; both transports forced shut")
 
         def settle():
             with self._fence:                   # the stuck effect returned
@@ -256,7 +265,10 @@ class LiveSocket:
             self.closed.set()
             self.reason = reason
         self.stop.set()
-        live._mark_retired(self.call_id)
+        try:
+            live._mark_retired(self.call_id)
+        except Exception as exc:  # noqa: BLE001 - the stop below must still run
+            _quiet_log("agentLiveMarkRetiredFail", exc, self.call_id)
         try:
             self.downstream({"type": "agent_live.closed", **self.ids(), "reason": reason})
         finally:
