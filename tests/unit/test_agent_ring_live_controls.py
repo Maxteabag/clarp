@@ -114,7 +114,7 @@ def test_fallback_before_the_opening_starts_the_classic_call_once(grant, sander)
     assert out["ring"]["ring_id"] == grant["ring_id"]
     stored = _ring_of(grant)
     assert stored["_live_phase"] == "classic" and stored["_live_call_epoch"] == 2
-    assert order == [("retire", "fallback", "classic")]          # authority had already moved on
+    assert order == [("retire", "fallback", "falling_back")]     # stopped before anything classic exists
     again = _fallback(grant)                                      # the same request: the same call, no second
     assert again["changed"] is False and again["call"]["call_id"] == out["call"]["call_id"]
     _refused(409, "live_fallback_not_allowed", _fallback, grant, request_id="q2")
