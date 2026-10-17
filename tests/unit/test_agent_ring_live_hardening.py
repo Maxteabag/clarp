@@ -267,3 +267,26 @@ def test_a_repeat_answer_after_fallback_is_the_classic_call(call):
     again = _repeat(call.grant)
     assert again["conversation_mode"] == "classic" and again["changed"] is False and "live" not in again
     assert again["call"]["call_id"] == out["call"]["call_id"]
+
+
+# ---- H6: delivery of a Live ring --------------------------------------------------------------
+
+def test_a_live_ring_never_falls_back_to_the_global_alert_while_classic_still_does(sander):
+    from tests.unit.test_agent_ring_live import _live_ring as live_ring
+    from tests.unit.test_agent_rings import _ring as classic_ring
+    sander.pushes.clear()                                            # the env's VoIP stub sends nothing
+    ring = live_ring()["ring"]
+    assert not [kind for kind, pushed in sander.pushes if pushed["ring_id"] == ring["ring_id"]]
+    rings.decline(PHONE, ring["ring_id"])
+    classic = classic_ring()["ring"]
+    assert ("ring", classic["ring_id"]) in [(kind, pushed["ring_id"]) for kind, pushed in sander.pushes]
+
+
+def test_the_ring_poll_shows_a_live_ring_only_to_a_live_capable_phone(sander):
+    from tests.unit.test_agent_ring_live import OTHER_PHONE
+    from tests.unit.test_agent_ring_live import _live_ring as live_ring
+    rings.register_voip_token(OTHER_PHONE, "cd" * 32)                # an older phone: classic only
+    ring = live_ring()["ring"]
+    assert rings.current(PHONE)["ring_id"] == ring["ring_id"]
+    assert rings.current(OTHER_PHONE) is None and rings.current("administrator") is None
+    assert not rings.event_visible(ring, OTHER_PHONE) and rings.event_visible(ring, PHONE)
