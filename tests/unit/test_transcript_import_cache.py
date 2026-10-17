@@ -189,3 +189,80 @@ def test_background_imports_of_a_growing_file_are_coalesced_with_a_trailing_impo
         time.sleep(0.05)
     transcript_import_cache.wait_for_background(2)
     assert imported == [1, 5]        # one trailing import sees the latest file
+
+
+def test_background_after_runs_once_the_import_has_completed(tmp_path, monkeypatch):
+    """The streamer's reclassify runs as an import's `after`: only after the
+    import returned, in order, on the import worker (not the inotify thread)."""
+    import threading
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "after.jsonl"
+    path.write_text("{}\n")
+    order: list[str] = []
+    assert cache.schedule_import(path, lambda: order.append("import"), owner="a",
+                                 after=lambda: order.append(threading.current_thread().name))
+    assert cache.wait_for_background(3)
+    assert order == ["import", "transcript-import"]
+
+
+def test_background_after_runs_when_the_version_is_already_imported(tmp_path, monkeypatch):
+    """/log usually imports first. Today the reclassify still runs on every
+    transcript change, so `after` must not be skipped as 'already current'."""
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "current.jsonl"
+    path.write_text("{}\n")
+    assert cache.import_if_changed(path, lambda: None, owner="a")      # /log's import
+    calls: list[str] = []
+    assert cache.schedule_import(path, lambda: calls.append("import"), owner="a",
+                                 after=lambda: calls.append("after"))
+    assert cache.wait_for_background(3)
+    assert calls == ["after"]
+
+
+def test_background_after_never_runs_after_a_failed_import(tmp_path, monkeypatch):
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    path = tmp_path / "fails.jsonl"
+    path.write_text("{}\n")
+    calls: list[str] = []
+
+    def failed():
+        raise OSError("offline fixture failure")
+
+    cache.schedule_import(path, failed, owner="a", after=lambda: calls.append("after"))
+    assert cache.wait_for_background(3)
+    assert calls == []
+
+
+def test_background_keeps_the_newest_import_and_after_for_a_pending_key(tmp_path, monkeypatch):
+    import threading
+    cache = transcript_import_cache
+    cache.reset_for_tests()
+    monkeypatch.setattr(cache, "_BACKGROUND_MIN_INTERVAL", 0.0)
+    busy = tmp_path / "busy.jsonl"
+    busy.write_text("{}\n")
+    path = tmp_path / "pending.jsonl"
+    path.write_text("{}\n")
+    entered, release = threading.Event(), threading.Event()
+    calls: list[str] = []
+
+    def blocking():
+        entered.set()
+        assert release.wait(3)
+
+    cache.schedule_import(busy, blocking, owner="busy")
+    try:
+        assert entered.wait(1)
+        cache.schedule_import(path, lambda: calls.append("old import"), owner="a",
+                              after=lambda: calls.append("old after"))
+        cache.schedule_import(path, lambda: calls.append("new import"), owner="a",
+                              after=lambda: calls.append("new after"))
+    finally:
+        release.set()
+        assert cache.wait_for_background(4)
+    assert calls == ["new import", "new after"]
