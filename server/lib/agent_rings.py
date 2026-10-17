@@ -522,9 +522,12 @@ def voip_tokens() -> list[dict]:
 
 
 def _live_tokens() -> list[dict]:
-    """The VoIP registrations of phones that said they can run a Live call."""
-    from .agent_ring_live import MODE_LIVE
-    return [row for row in voip_tokens() if MODE_LIVE in (row.get("supported_conversation_modes") or ())]
+    """The VoIP registrations of phones that said they can run a Live call: only a paired,
+    full-scope device's own token counts (a Live answer must come from such a device)."""
+    from .agent_ring_live import MODE_LIVE, device_ok
+    return [row for row in voip_tokens()
+            if MODE_LIVE in (row.get("supported_conversation_modes") or ())
+            and str(row.get("principal") or "").startswith("device_") and device_ok(row["principal"])]
 
 
 def _push_voip(ring: dict) -> dict:
