@@ -4,8 +4,9 @@ Test helpers only (monkeypatched module attributes and threading Events); no pro
 - R2: a poll that read "pending" before the worker published, and writes after, must not put a
   published key back in the queue (no extra job, run, cache or ledger mutation).
 - R1: the crashed-worker recovery scenario with a slow first admission attempt. The synthetic clock
-  may only advance once that blocked attempt is confirmed abandoned; the outcome is read from the
-  owned job, run and cache rows, not inferred from a polling timeout.
+  may only advance once that blocked attempt is confirmed abandoned; the outcome is read once the
+  replacement's run is terminal, then from the cache it committed with, not inferred from a polling
+  timeout or from separate snapshots that can straddle publication.
 """
 from __future__ import annotations
 
@@ -160,11 +161,15 @@ def test_recovery_survives_a_slow_first_admission_attempt(monkeypatch):
         advance_after_abandon(clock, builtin.DEMAND_RUN_TTL_MS)
 
         def settled():
-            published = _one("SELECT count(*) FROM tool_explanation_cache")[0]
+            # Settled means the replacement's run is terminal. Its completion commits in the same
+            # transaction as the cache row (the publish guard), so the cache read after it is final.
+            # Reading cache, runs and jobs as three separate snapshots raced publication (main push
+            # CI 39049012553): a stale "0 published, run running" was taken for a settled failure.
             runs = [r for r in janitors.list_runs(config["session"]) if r["run_id"] != orphan["run_id"]]
-            running_job = _one("SELECT 1 FROM tool_explanation_jobs WHERE status='running'")
-            return (published, runs) if (published or (runs and not running_job)) else None
-        published, runs = wait_for(settled, what="the replacement's batch to settle")
+            if not runs or any(r["status"] in ("queued", "running") for r in runs):
+                return None
+            return _one("SELECT count(*) FROM tool_explanation_cache")[0], runs
+        published, runs = wait_for(settled, what="the replacement's run to finish")
         assert published == 1, ("the batch was not published: its admission straddled the clock advance, so its "
                                 f"queue lease had already expired (runs: {[(r['run_id'], r['status']) for r in runs]})")
         assert [r["status"] for r in runs] == ["completed"]
