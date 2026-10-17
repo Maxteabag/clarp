@@ -20,6 +20,9 @@ def _stream(base, token):
     client.request("GET", "/events", headers={"Authorization": "Bearer " + token, "X-Clarp-Transport": "relay"})
     response = client.getresponse()
     assert response.status == 200
+    # Barrier: the server writes ": connected" only after it subscribed this client to the stream.
+    while response.fp.readline().strip() != b": connected":
+        pass
     return client, response
 
 
