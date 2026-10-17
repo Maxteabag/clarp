@@ -757,12 +757,11 @@ def test_a_hangup_during_the_paid_connect_never_leaves_the_session_running(call,
     assert not thread.is_alive() and up.closed and up.of("session.start") == []
 
 
-def test_a_join_from_a_non_device_principal_is_refused_with_live_auth(call):
+def test_a_non_device_principal_is_refused_403_live_auth_before_the_upgrade(call):
     h = Handler(principal="administrator")
-    thread = _serve(h)
-    h.send(_join(call.grant))
-    thread.join(15)
-    assert [f["code"] for f in h.wfile.frames()] == ["live_auth"] and call.connects == []
+    sock.serve(h)                                       # refused at the route: no upgrade, no frame
+    assert h.status == 403 and h.body() == {"error": "live_auth"}
+    assert call.connects == [] and oracle_realtime._ACTIVE_PRINCIPALS == {}
 
 
 def test_a_recovery_answer_after_the_join_reports_the_grant_consumed(call):
