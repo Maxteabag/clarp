@@ -33,7 +33,7 @@ import threading
 import time
 from .log import log
 from . import backends, db
-from . import janitor_builtins, janitor_store, judgment_sites, judgments, model_fallbacks
+from . import janitor_builtins, janitor_store, janitors, judgment_sites, judgments, model_fallbacks
 from . import tool_explanation_commands as commands
 from . import tool_explanation_learning as learning
 from . import tool_explanation_mappings as mappings
@@ -502,8 +502,10 @@ class ToolExplanations:
                               "status": "ready" if outcome == "ready" else "failed", "item_count": len(batch)}
                     if outcome != "ready":
                         result["reason"] = reason
+                    guard_entered = []
 
                     def publish(connection):
+                        guard_entered.append(True)
                         if not janitor_builtins.complete_run(
                                 run["run_id"], outcome="completed" if outcome == "ready" else "failed",
                                 result=result, error="" if outcome == "ready" else reason, connection=connection):
@@ -517,6 +519,17 @@ class ToolExplanations:
                 if not published:
                     for entry in batch:
                         self._ledger.quieted(entry[0], now, consume=True)
+                if not published and not guard_entered:
+                    # The batch lost its queue lease before publication (the guard never ran), so its
+                    # admitted run would otherwise stay active until its lifetime ends and block the
+                    # next admission. Close exactly that run; complete_run's own transaction never
+                    # rewrites a terminal run or touches another one. The model call is not recovered.
+                    try:
+                        janitor_builtins.complete_run(
+                            run["run_id"], outcome="cancelled", error="lease_lost",
+                            result={"summary": "Explanation lost its queue lease before publication"})
+                    except janitors.JanitorError as error:
+                        log("toolExplanationsLeaseLostClose", f"run={run['run_id']} not closed: {error}")
                 # Only published selections count as evidence. Evidence can at
                 # most propose a mapping; it never changes an explanation.
                 for item in items if published else ():
