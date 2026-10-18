@@ -211,19 +211,20 @@ under 3 s, both deliberately not built before the demo:
 
 ## A phone that switches rings off for itself
 
-`POST /calls/ring/device` `{"receive_rings": false, "push_token": "<this phone's APNs alert token>"}` switches
-agent rings off for the calling phone only (feature `agent_ring_device_optout`; `{"receive_rings": true}` switches
-them back on; `GET /calls/ring/device` reads the state). Both answer `{"ok": true, "receive_rings": bool,
-"push_token_bound": bool, "alerts_suppressed": bool, "state": "on"|"off"|"partial"}`; `partial` must be shown as incomplete, never as off. Only a paired, full-scope, non-revoked device sets its own state (403
-`ring_device_required` otherwise); any other body is 400 `ring_device_invalid`.
+`POST /calls/ring/device` `{"receive_rings": false}` switches agent rings off for the calling phone only (feature
+`agent_ring_device_optout`; `{"receive_rings": true}` switches them back on; `GET /calls/ring/device` reads the state).
+Both answer `{"ok": true, "receive_rings": bool, "alerts_suppressed": bool, "state": "on"|"off"|"partial"}`. Only a
+paired, full-scope, non-revoked device sets its own state (403 `ring_device_required` otherwise); any other body is
+400 `ring_device_invalid`.
 
-A phone with rings off gets no agent ring of any kind, classic or Live: no VoIP push, no `agent-ring` SSE event,
-no ring from `GET /calls/ring`, and, when it named its alert token, no ring alert push for any state. The Host keys
-APNs alert tokens by session, not by device, so without a `push_token` that phone's ring alerts still go out
-(`push_token_bound: false`). Default is on; with no phone switched off delivery is unchanged. The token is the
-phone's own word: a paired full-scope device could name another phone's alert token and silence that phone's ring
-alerts, nothing else.
-A token already bound to another phone is refused with 409 `ring_device_token_conflict`, never moved; switching off
-again without a token keeps the earlier binding. A Live ring is admitted only for a capable phone that still receives
-rings (else 409 `live_client_required`, nothing stored). The ring a phone answered stays its own: its later
-`agent-ring` events still reach it while rings are off.
+A phone with rings off gets no agent ring of any kind, classic or Live: no VoIP push, no `agent-ring` SSE event, no
+ring from `GET /calls/ring`, and no ring alert push on the alert tokens it owns. The ring it answered stays its own.
+A Live ring is admitted only for a capable phone that still receives rings (else 409 `live_client_required`).
+
+Alert tokens are owned by the device that registered them: `POST /devices` binds a token to the authenticated paired,
+full-scope device (never a body field or the session) and refuses with 409 `device_token_owned_elsewhere` a token that
+another device owns. Legacy tokens registered before this are unbound and still get ring alerts, so rings-off reads
+`partial` while any live unbound token remains: show it as pending, never as off. A revoked device keeps its
+provenance and gets no ring alerts; a re-paired phone with a new device id cannot take the old id's token until an
+explicit owner release is designed. Provenance means token possession by an authenticated device, not proof of the
+physical phone.

@@ -3202,6 +3202,13 @@ class Handler(BaseHTTPRequestHandler):
         if not token:
             return self._json_error(400, "token required")
         from lib import apns
+        from lib.agent_ring_live import device_ok
+        from lib.http_utils import principal_of
+        # Provenance: only the AUTHENTICATED paired, full-scope, non-revoked device owns what it registers
+        # (never a body field or the client-supplied session); every other registrant leaves it unbound.
+        who = principal_of(self)
+        owner = who.principal if (who.authenticated and who.principal.startswith("device_")
+                                  and who.device_scope != "limited" and device_ok(who.principal)) else ""
         try:
             apns.register_token(
                 token,
@@ -3210,7 +3217,11 @@ class Handler(BaseHTTPRequestHandler):
                 platform=(data.get("platform") or "ios").strip() or "ios",
                 base_url=(data.get("base_url") or "").strip(),
                 push_grant=str(data.get("push_grant") or ""),
+                owner=owner,
             )
+        except apns.TokenOwnedElsewhere:
+            log("deviceTokenOwnerConflict", f"registrant={owner or who.principal or '-'} token={token[:12]}…")
+            return self._json(409, {"ok": False, "error": "device_token_owned_elsewhere"})
         except Exception as e:  # noqa: BLE001
             log_exception("deviceRegisterFail", e)
             return self._json_error(500, "register failed")
