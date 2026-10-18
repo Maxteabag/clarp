@@ -661,7 +661,10 @@ def device_state(principal: str) -> dict:
         from . import apns
         live = {str(t["token"]).lower() for t in apns.active_tokens()}
         bound = any(token in live for token in row["push_tokens"])
-    return {"ok": True, "receive_rings": row is None, "push_token_bound": bound}
+    # "partial": rings are off but this phone's ring alerts still go out (no live bound token): never a full OFF.
+    state = "on" if row is None else ("off" if bound else "partial")
+    return {"ok": True, "receive_rings": row is None, "push_token_bound": bound,
+            "alerts_suppressed": row is not None and bound, "state": state}
 
 
 def _ring_device(principal: str) -> None:
