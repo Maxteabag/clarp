@@ -117,15 +117,37 @@ def _push_grant(raw: str) -> str:
     return value if _PUSH_GRANT.match(value) else ""
 
 
+class TokenOwnedElsewhere(Exception):
+    """POST /devices: this alert token belongs to another paired device. Nothing was written."""
+
+
+def _ensure_owner_column(database) -> None:
+    """``device_tokens.owner``: the authenticated device that registered the token ('' = unbound).
+
+    Added lazily and idempotently, without a schema version, until the migration number is allocated
+    in the ledger (Nadia); the column is additive and defaults to unbound, so legacy rows stay unbound."""
+    columns = {row[1] for row in database.execute("PRAGMA table_info(device_tokens)")}
+    if "owner" not in columns:
+        database.execute("ALTER TABLE device_tokens ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
+
+
 def register_token(token: str, session: str | None = None,
                     environment: str | None = None,
                     platform: str = "ios", base_url: str = "",
-                    push_grant: str = "") -> None:
+                    push_grant: str = "", owner: str = "") -> None:
     """Upsert a device token. Re-registering clears any prior disabled flag.
 
-    A reinstall can leave multiple live APNs tokens for the same app/session.
-    Keep only the newest active token for a session+platform so one completed
-    turn does not fan out duplicate pushes to the same physical device class.
+    ``owner`` is the AUTHENTICATED paired, full-scope, non-revoked device that registers the token
+    (POST /devices derives it from the request's credential, never from the body or the session); ""
+    for every other registrant. Provenance is token possession by an authenticated device, not proof of
+    which physical phone holds it.
+
+    - A token owned by another device is refused (TokenOwnedElsewhere) before any write: never stolen,
+      and a non-device registrant never overwrites an owned row.
+    - A device's rotation retires only that device's other active rows on the same platform and
+      environment; another phone's rows are never touched, even under the same client-supplied session.
+    - A non-device registration keeps the legacy retirement (same session+platform, same push grant),
+      limited to unbound rows: legacy rows are preserved, never guessed into an owner or mass-disabled.
     """
     from . import db
     token = (token or "").strip()
@@ -136,50 +158,79 @@ def register_token(token: str, session: str | None = None,
     platform_key = (platform or "ios").strip() or "ios"
     base_url_key = _device_base_url(base_url)
     grant_key = _push_grant(push_grant)
+    owner_key = (owner or "").strip()
     now = db.now_ms()
     database = db.conn()
-    if session_key:
+    _ensure_owner_column(database)
+    database.execute("BEGIN IMMEDIATE")
+    try:
+        row = database.execute("SELECT owner FROM device_tokens WHERE token = ?", (token,)).fetchone()
+        bound = (row["owner"] if row is not None else "") or ""
+        if bound and bound != owner_key:
+            raise TokenOwnedElsewhere(bound)
+        if owner_key:
+            database.execute(
+                """UPDATE device_tokens
+                      SET disabled_at = ?
+                    WHERE owner = ?
+                      AND platform = ?
+                      AND environment = ?
+                      AND token != ?
+                      AND disabled_at IS NULL""",
+                (now, owner_key, platform_key, env, token),
+            )
+        else:
+            if session_key:
+                database.execute(
+                    """UPDATE device_tokens
+                          SET disabled_at = ?
+                        WHERE session = ?
+                          AND platform = ?
+                          AND token != ?
+                          AND owner = ''
+                          AND disabled_at IS NULL""",
+                    (now, session_key, platform_key, token),
+                )
+            # An app that sends no grant (older build, or attestation unavailable)
+            # keeps any grant this token already has.
+            if grant_key:
+                # A grant follows the phone, not the token: after iOS rotates the
+                # token, the old row would push to the same phone a second time.
+                database.execute(
+                    """UPDATE device_tokens
+                          SET disabled_at = ?
+                        WHERE push_grant = ?
+                          AND token != ?
+                          AND owner = ''
+                          AND disabled_at IS NULL""",
+                    (now, grant_key, token),
+                )
         database.execute(
-            """UPDATE device_tokens
-                  SET disabled_at = ?
-                WHERE session = ?
-                  AND platform = ?
-                  AND token != ?
-                  AND disabled_at IS NULL""",
-            (now, session_key, platform_key, token),
+            """INSERT INTO device_tokens
+                    (token, session, platform, environment, base_url, push_grant,
+                     created_at, updated_at, owner)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(token) DO UPDATE SET
+                    session     = excluded.session,
+                    platform    = excluded.platform,
+                    environment = excluded.environment,
+                    base_url    = CASE WHEN excluded.base_url != ''
+                                       THEN excluded.base_url
+                                       ELSE device_tokens.base_url END,
+                    push_grant  = CASE WHEN excluded.push_grant != ''
+                                       THEN excluded.push_grant
+                                       ELSE device_tokens.push_grant END,
+                    owner       = CASE WHEN device_tokens.owner != ''
+                                       THEN device_tokens.owner
+                                       ELSE excluded.owner END,
+                    updated_at  = excluded.updated_at,
+                    disabled_at = NULL""",
+            (token, session_key, platform_key, env, base_url_key, grant_key, now, now, owner_key),
         )
-    # An app that sends no grant (older build, or attestation unavailable)
-    # keeps any grant this token already has.
-    if grant_key:
-        # A grant follows the phone, not the token: after iOS rotates the
-        # token, the old row would push to the same phone a second time.
-        database.execute(
-            """UPDATE device_tokens
-                  SET disabled_at = ?
-                WHERE push_grant = ?
-                  AND token != ?
-                  AND disabled_at IS NULL""",
-            (now, grant_key, token),
-        )
-    database.execute(
-        """INSERT INTO device_tokens
-                (token, session, platform, environment, base_url, push_grant,
-                 created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(token) DO UPDATE SET
-                session     = excluded.session,
-                platform    = excluded.platform,
-                environment = excluded.environment,
-                base_url    = CASE WHEN excluded.base_url != ''
-                                   THEN excluded.base_url
-                                   ELSE device_tokens.base_url END,
-                push_grant  = CASE WHEN excluded.push_grant != ''
-                                   THEN excluded.push_grant
-                                   ELSE device_tokens.push_grant END,
-                updated_at  = excluded.updated_at,
-                disabled_at = NULL""",
-        (token, session_key, platform_key, env, base_url_key, grant_key, now, now),
-    )
+        database.execute("COMMIT")
+    except BaseException:
+        database.execute("ROLLBACK")
+        raise
 
 
 def active_tokens() -> list[dict]:
@@ -1280,15 +1331,33 @@ def agent_ring_payload(ring: dict, kind: str, *, avatar_url: str | None = None,
     return payload
 
 
-def ring_alert_tokens(exclude_tokens=None) -> list[dict]:
-    """The live alert tokens a ring alert goes to: all, less the phones that switched rings off."""
-    tokens = active_tokens()
-    if exclude_tokens:
-        tokens = [row for row in tokens if str(row["token"]).lower() not in exclude_tokens]
+def owned_active_tokens() -> list[dict]:
+    """Every live alert token with its owner ('' = unbound)."""
+    from . import db
+    database = db.conn()
+    _ensure_owner_column(database)
+    rows = database.execute(
+        "SELECT token, session, environment, base_url, push_grant, owner FROM device_tokens "
+        "WHERE disabled_at IS NULL"
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def ring_alert_tokens(exclude_owners=None) -> list[dict]:
+    """The live alert tokens a ring alert goes to: every live token, less those owned by a phone that
+    switched agent rings off, and less those owned by a revoked or no longer full-scope device (its
+    provenance is kept, its delivery stops). Unbound legacy tokens still get ring alerts."""
+    from . import agent_ring_live
+    tokens = []
+    for row in owned_active_tokens():
+        owner = row.get("owner") or ""
+        if owner and (owner in (exclude_owners or ()) or not agent_ring_live.device_ok(owner)):
+            continue
+        tokens.append({key: row[key] for key in ("token", "session", "environment", "base_url", "push_grant")})
     return tokens
 
 
-def send_agent_ring(ring: dict, kind: str, exclude_tokens=None) -> dict:
+def send_agent_ring(ring: dict, kind: str, exclude_owners=None) -> dict:
     """Push one ring state to every live token. Never raises.
 
     Unlike replies and decisions, a ring ignores desktop presence: an agent
@@ -1300,7 +1369,7 @@ def send_agent_ring(ring: dict, kind: str, exclude_tokens=None) -> dict:
     if not cfg.apns_enabled():
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
     from . import agent_rings
-    tokens = ring_alert_tokens(exclude_tokens)
+    tokens = ring_alert_tokens(exclude_owners)
     show_reason = agent_rings.settings()["show_reason"]
     sent = failed = disabled = 0
     collapse = agent_ring_collapse_id(ring)
