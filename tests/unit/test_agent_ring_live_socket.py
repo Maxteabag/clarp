@@ -345,8 +345,10 @@ def _refused_join(call, frame, code, handler=None):
     thread.join(15)
     assert not thread.is_alive()
     [error] = h.wfile.frames()
-    assert error == {"type": "agent_live.error", "call_id": "", "call_epoch": 0, "attempt_id": "", "code": code,
-                     "message": code, "retryable": False}
+    # A refusal before the join echoes the frame's own claim as unverified correlation (ROOT B, 18 Oct).
+    claim = ({k: frame[k] for k in ("call_id", "call_epoch", "attempt_id")} if frame.get("type") == "agent_live.join"
+             else {"call_id": "", "call_epoch": 0, "attempt_id": ""})
+    assert error == {"type": "agent_live.error", **claim, "code": code, "message": code, "retryable": False}
     return h
 
 

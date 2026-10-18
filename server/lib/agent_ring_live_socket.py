@@ -44,6 +44,7 @@ SILENCE = base64.b64encode(bytes(int(24000 * TICK_S) * 2)).decode("ascii")   # 1
 MAX_AUDIO_B64 = 262144
 ERROR_CODES = ("live_auth", "live_owner_conflict", "live_call_stale", "live_join_expired", "live_join_consumed",
                "live_context_unavailable", "live_unavailable", "audio_not_ready")
+UNBOUND_IDS = {"call_id": "", "call_epoch": 0, "attempt_id": ""}   # a refusal bound to no claimed call
 JOIN_KEYS = ("protocol", "host_id", "ring_id", "call_id", "call_epoch", "attempt_id", "context_digest",
              "owner_nonce", "join_ticket")
 OVERLAY = """
@@ -534,6 +535,24 @@ class LiveSocket:
                 self.client(event)
 
 
+def _strict_int(value: Any) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _claimed_ids(event: Any) -> dict:
+    """The identity this socket's own first join frame claimed, echoed on a refusal before the join is accepted.
+
+    Unverified correlation only: it is never looked up and grants nothing. Only a well-typed claim in an
+    agent_live.join frame is echoed (a
+    call_id and attempt_id of 1 to 128 UTF-8 bytes, a non-negative integer call_epoch that is not a bool);
+    anything missing or malformed gets the unbound refusal, never a fabricated match."""
+    if isinstance(event, dict) and event.get("type") == "agent_live.join":
+        call_id, epoch, attempt_id = event.get("call_id"), event.get("call_epoch"), event.get("attempt_id")
+        if live._request_id_ok(call_id) and live._request_id_ok(attempt_id) and _strict_int(epoch):
+            return {"call_id": call_id, "call_epoch": epoch, "attempt_id": attempt_id}
+    return dict(UNBOUND_IDS)
+
+
 def _join(principal: str, event: Any) -> dict:
     """Check an agent_live.join against the Live answer and consume its ticket.
 
@@ -551,6 +570,8 @@ def _join(principal: str, event: Any) -> dict:
                 or not hmac.compare_digest(str(ring.get("_live_owner_nonce") or ""), event["owner_nonce"])
                 or event["attempt_id"] != ring.get("_live_attempt_id")):
             raise Refused("live_owner_conflict")
+        if not _strict_int(event["protocol"]) or not _strict_int(event["call_epoch"]):
+            raise Refused("live_owner_conflict")    # a bool or a string is not 1: a malformed join, not a stale one
         if (event["protocol"] != live.PROTOCOL or event["host_id"] != _host_id()
                 or event["ring_id"] != ring["ring_id"] or event["call_epoch"] != ring.get("_live_call_epoch")
                 or event["context_digest"] != ring.get("_live_context_digest")):
@@ -611,6 +632,7 @@ def serve(handler) -> None:
             frame = ws.read_frame(handler.rfile)
         except (OSError, TimeoutError):
             frame = None
+        event = None
         try:
             if frame is None or frame[0] != ws.OP_TEXT:
                 raise Refused("live_join_expired")
@@ -621,7 +643,7 @@ def serve(handler) -> None:
             ring = _join(principal, event)
         except Refused as refusal:
             handler.wfile.write(ws.text_frame(json.dumps(
-                {"type": "agent_live.error", "call_id": "", "call_epoch": 0, "attempt_id": "",
+                {"type": "agent_live.error", **_claimed_ids(event),
                  "code": refusal.code, "message": refusal.message, "retryable": False})))
             return
         session = LiveSocket(handler, principal, ring)
