@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 120  # PROVISIONAL (device_tokens.owner): renumbered by the ledger before merge
+_SCHEMA_VERSION = 120  # PROVISIONAL (device_tokens.principal): renumbered by the ledger before merge
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -368,7 +368,7 @@ CREATE TABLE device_tokens (
     disabled_at INTEGER,
     base_url TEXT NOT NULL DEFAULT '',
     push_grant TEXT NOT NULL DEFAULT '',
-    owner TEXT NOT NULL DEFAULT ''
+    principal TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX idx_device_tokens_active ON device_tokens(updated_at) WHERE disabled_at IS NULL;
 
