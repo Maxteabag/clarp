@@ -556,8 +556,7 @@ def fallback(principal: str, data: Any) -> dict:
             records = agent_rings._load()
             ring = _owned(records, principal, data)
             epoch = _epoch(data, "expected_epoch")
-            if data.get("audio_stopped") is not True or not isinstance(data.get("request_id"), str) \
-                    or not data["request_id"]:
+            if data.get("audio_stopped") is not True or not _request_id_ok(data.get("request_id")):
                 raise CallError(400, REQUEST_INVALID)
             call_id = ring["_live_call_id"]
             if ring.get("_live_phase") == "classic":
