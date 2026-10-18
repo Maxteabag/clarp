@@ -904,11 +904,11 @@ def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
     """The still-live streamed row of this reply's own turn that it completes.
 
     Kept rows of several turns can coexist, so only a row of the reply's turn
-    qualifies; a reply whose turn is unknown takes only an untraced row. A text
-    match in another turn is never taken. Exact text wins over a prefix; among
-    equals the oldest."""
+    qualifies. A reply whose turn is unknown takes none: a missing trace is
+    missing identity, not proof of a shared turn. A text match in another turn
+    is never taken. Exact text wins over a prefix; among equals the oldest."""
     visible = _strip_voice_markup(text)
-    if not visible:
+    if not visible or not trace:
         return ""
     exact = prefix = elsewhere = ""
     for row in database.execute(
@@ -1410,8 +1410,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     # still matches its durable copy (markup stripped); raw startswith missed it.
     live_replace_revision = 0
     # A leftover live row goes only when a reply of ITS OWN turn landed in
-    # this batch (a reply of unknown turn: only an untraced row); another
-    # turn's kept row waits for its own reply.
+    # this batch; another turn's kept row waits for its own reply, and a reply
+    # of unknown turn clears nothing.
     for live in database.execute(
         """SELECT message_id, text, trace_id FROM messages
             WHERE agent_id = ? AND backend_session_id = ?
@@ -1423,7 +1423,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if not live_text:
             continue
         live_trace = live["trace_id"] or ""
-        if any(trace == live_trace and _related(final, live_text)
+        if any(trace and trace == live_trace and _related(final, live_text)
                for trace, final in batch_finals):
             live_replace_revision = max(live_replace_revision, _next_revision(database))
             latest_revision = max(latest_revision, live_replace_revision)
