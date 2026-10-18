@@ -100,7 +100,7 @@ def test_a_missing_identity_or_an_unreadable_first_frame_gets_the_unbound_refusa
 def test_one_socket_never_sees_another_sockets_claim(call):
     first = {"call_id": "alv_first", "call_epoch": 3, "attempt_id": "att_first"}
     second = {"call_id": "alv_second", "call_epoch": 4, "attempt_id": "att_second"}
-    a, b = Handler(), Handler()
+    a, b = Handler(), Handler(principal=OTHER_PHONE)   # two phones: one voice slot each
     ta, tb = _serve(a), _serve(b)
     a.send(_join(call.grant, **first))
     b.send(_join(call.grant, **second))
