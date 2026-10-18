@@ -318,3 +318,25 @@ def test_an_untraced_live_row_is_not_claimed_by_a_reply_of_unknown_turn(host):
         (agent_id,)).fetchall()}
     assert rows[untraced["id"]] == ("Done.", f"live:{untraced['id']}")   # not adopted
     assert [text for id_, (text, _) in rows.items() if id_ != untraced["id"]] == ["Done."]
+
+
+def test_two_untraced_prefix_related_rows_survive_a_reply_of_unknown_turn(host):
+    """Empty trace == empty trace is no identity: neither legacy row is
+    adopted or cleared by a reply of unknown turn, across repeated imports
+    (no client row anywhere)."""
+    agent_id = host.agent_id
+    ids = {}
+    for trace, text, key in (("trace-a", "Done.", "m1"), ("trace-b", "Done. The tests pass.", "m2")):
+        _start(agent_id, trace)
+        row = message_store.upsert_live_assistant_message(
+            agent_id=agent_id, backend_session_id=BACKEND_SESSION, trace_id="", text=text,
+            item_key=key)
+        ids[row["id"]] = text
+        _finish(agent_id, trace)
+    batch = [{"role": "user", "text": "an unrelated prompt", "timestamp": "2020-01-01T00:00:00Z"},
+             {"role": "assistant", "text": "Done. The tests pass.", "timestamp": "2020-01-01T00:00:10Z"}]
+    for _ in range(2):
+        _import(agent_id, batch)
+        owners = _owners(agent_id)
+        for id_, text in ids.items():
+            assert owners[id_][0] == text
