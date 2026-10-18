@@ -127,7 +127,7 @@ def register_token(token: str, session: str | None = None,
                     push_grant: str = "", owner: str = "") -> None:
     """Upsert a device token. Re-registering clears any prior disabled flag.
 
-    ``owner`` is the AUTHENTICATED paired, full-scope, non-revoked device that registers the token
+    ``owner`` (column ``device_tokens.principal``) is the AUTHENTICATED paired, full-scope, non-revoked device that registers the token
     (POST /devices derives it from the request's credential, never from the body or the session); ""
     for every other registrant. Provenance is token possession by an authenticated device, not proof of
     which physical phone holds it.
@@ -153,15 +153,15 @@ def register_token(token: str, session: str | None = None,
     database = db.conn()
     database.execute("BEGIN IMMEDIATE")
     try:
-        row = database.execute("SELECT owner FROM device_tokens WHERE token = ?", (token,)).fetchone()
-        bound = (row["owner"] if row is not None else "") or ""
+        row = database.execute("SELECT principal FROM device_tokens WHERE token = ?", (token,)).fetchone()
+        bound = (row["principal"] if row is not None else "") or ""
         if bound and bound != owner_key:
             raise TokenOwnedElsewhere(bound)
         if owner_key:
             database.execute(
                 """UPDATE device_tokens
                       SET disabled_at = ?
-                    WHERE owner = ?
+                    WHERE principal = ?
                       AND platform = ?
                       AND environment = ?
                       AND token != ?
@@ -176,7 +176,7 @@ def register_token(token: str, session: str | None = None,
                         WHERE session = ?
                           AND platform = ?
                           AND token != ?
-                          AND owner = ''
+                          AND principal = ''
                           AND disabled_at IS NULL""",
                     (now, session_key, platform_key, token),
                 )
@@ -190,14 +190,14 @@ def register_token(token: str, session: str | None = None,
                           SET disabled_at = ?
                         WHERE push_grant = ?
                           AND token != ?
-                          AND owner = ''
+                          AND principal = ''
                           AND disabled_at IS NULL""",
                     (now, grant_key, token),
                 )
         database.execute(
             """INSERT INTO device_tokens
                     (token, session, platform, environment, base_url, push_grant,
-                     created_at, updated_at, owner)
+                     created_at, updated_at, principal)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(token) DO UPDATE SET
                     session     = excluded.session,
@@ -209,9 +209,9 @@ def register_token(token: str, session: str | None = None,
                     push_grant  = CASE WHEN excluded.push_grant != ''
                                        THEN excluded.push_grant
                                        ELSE device_tokens.push_grant END,
-                    owner       = CASE WHEN device_tokens.owner != ''
-                                       THEN device_tokens.owner
-                                       ELSE excluded.owner END,
+                    principal   = CASE WHEN device_tokens.principal != ''
+                                       THEN device_tokens.principal
+                                       ELSE excluded.principal END,
                     updated_at  = excluded.updated_at,
                     disabled_at = NULL""",
             (token, session_key, platform_key, env, base_url_key, grant_key, now, now, owner_key),
@@ -1325,7 +1325,7 @@ def owned_active_tokens() -> list[dict]:
     from . import db
     database = db.conn()
     rows = database.execute(
-        "SELECT token, session, environment, base_url, push_grant, owner FROM device_tokens "
+        "SELECT token, session, environment, base_url, push_grant, principal AS owner FROM device_tokens "
         "WHERE disabled_at IS NULL"
     ).fetchall()
     return [dict(r) for r in rows]
