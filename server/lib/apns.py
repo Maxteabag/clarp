@@ -117,6 +117,9 @@ def _push_grant(raw: str) -> str:
     return value if _PUSH_GRANT.match(value) else ""
 
 
+OWNED_PLATFORMS = frozenset({"ios"})   # platforms whose device registration binds an APNs token
+
+
 class InvalidDeviceToken(ValueError):
     """POST /devices: a device-bound alert token must be an APNs hex token (64-200 hex digits)."""
 
@@ -153,6 +156,10 @@ def register_token(token: str, session: str | None = None,
     base_url_key = _device_base_url(base_url)
     grant_key = _push_grant(push_grant)
     owner_key = (owner or "").strip()
+    if platform_key not in OWNED_PLATFORMS:
+        # Only an APNs registration from the iOS app binds a token to its device; any other platform
+        # (desktop, web) keeps the legacy, unbound registration and is never refused for its token format.
+        owner_key = ""
     if owner_key and not (64 <= len(token) <= 200 and all(c in "0123456789abcdef" for c in token)):
         # Only a device binds ownership, and only to a real APNs token; other registrants keep the legacy
         # acceptance of any non-empty token (it binds nothing).
