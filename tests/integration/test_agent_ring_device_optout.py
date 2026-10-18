@@ -73,13 +73,13 @@ def test_post_devices_binds_to_the_authenticated_phone_and_refuses_another_phone
     assert _register(base, camera["token"], "a1" * 32)[0] == 200
     assert _register(base, other["token"], "b2" * 32)[0] == 200           # same client session "koko"
     owners = {r["token"]: (r["owner"], r["disabled_at"]) for r in
-              db.conn().execute("SELECT token, owner, disabled_at FROM device_tokens")}
+              db.conn().execute("SELECT token, principal AS owner, disabled_at FROM device_tokens")}
     assert owners["a1" * 32] == (camera["device_id"], None) and owners["b2" * 32] == (other["device_id"], None)
     for token in (other["token"], "local-administrator"):
         assert _register(base, token, "a1" * 32) == (409, {"ok": False, "error": "device_token_owned_elsewhere"})
     assert apns.owned_active_tokens() and owners == {
         r["token"]: (r["owner"], r["disabled_at"]) for r in
-        db.conn().execute("SELECT token, owner, disabled_at FROM device_tokens")}
+        db.conn().execute("SELECT token, principal AS owner, disabled_at FROM device_tokens")}
 
 
 def test_the_administrator_cannot_switch_rings_and_a_malformed_body_is_refused(running_server):
