@@ -236,3 +236,20 @@ def test_the_ring_a_phone_answered_stays_visible_to_it_after_rings_off_or_droppi
     assert rings.event_visible(_event(state="ended", answered_by=PHONE, conversation_mode="agent_live_v1"), PHONE)
     assert not rings.event_visible(_event(state="answered", answered_by=OTHER_PHONE), PHONE)
     assert not rings.event_visible(_event(state="ringing"), PHONE)
+
+
+def test_the_owner_migration_keeps_legacy_tokens_unbound_and_is_idempotent(tmp_path):
+    from lib import db_migrations, db_schema
+    path = tmp_path / "old.sqlite"
+    db.reset_for_tests(path)
+    c = db.conn()
+    c.execute("ALTER TABLE device_tokens DROP COLUMN owner")       # a database from before the migration
+    c.execute("INSERT INTO device_tokens(token, session, created_at, updated_at) VALUES ('ab', 's', 1, 1)")
+    c.execute("PRAGMA user_version = 117")
+    c.commit()
+    db.reset_for_tests(path)
+    c = db.conn()
+    assert c.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
+    assert dict(c.execute("SELECT token, owner, disabled_at FROM device_tokens").fetchone()) == \
+        {"token": "ab", "owner": "", "disabled_at": None}
+    assert db_migrations._migrate_to_v120(c) is None              # guarded: a rerun is a no-op
