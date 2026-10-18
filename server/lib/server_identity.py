@@ -41,10 +41,11 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 71  # PROVISIONAL (agent_ring_live): Nadia books the number at the ready landing
+HOST_CONTRACT = 72  # PROVISIONAL (agent_ring_device_optout over agent_ring_live 71): Nadia books the numbers at the ready landing
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
+    "agent_ring_device_optout",
     "agent_ring_live",
     "tts_google_id_guard",
     "tts_provider_google",
@@ -367,3 +368,4 @@ FEATURE_CONTRACTS["agent_rings"] = 64
 FEATURE_CONTRACTS["tts_provider_google"] = 69
 FEATURE_CONTRACTS["tts_google_id_guard"] = 70
 FEATURE_CONTRACTS["agent_ring_live"] = 71  # PROVISIONAL: booked at the ready landing, else the next free number
+FEATURE_CONTRACTS["agent_ring_device_optout"] = 72  # PROVISIONAL: booked at the ready landing, else the next free number

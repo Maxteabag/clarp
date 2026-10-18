@@ -34,6 +34,7 @@ KEY = "agent_ring.records"
 AUDIT_KEY = "agent_ring.audit"
 ENABLED_KEY = "agent_ring.enabled"
 VOIP_KEY = "agent_ring.voip_tokens"
+DEVICE_KEY = "agent_ring.device_prefs"   # phones that switched agent rings off for themselves
 RING_TIMEOUT_MS = 45 * 1000
 AGENT_INTERVAL_MS = 60 * 1000
 HOUR_MS = 60 * 60 * 1000
@@ -160,6 +161,8 @@ def get(ring_id: str) -> dict | None:
 
 def current(principal: str | None = None) -> dict | None:
     """The ring that is ringing now, or None. With ``principal``, only a ring that client may see (H6)."""
+    if principal is not None and not receives_rings(principal):
+        return None                     # this phone switched agent rings off for itself
     capable = live_capable(principal) if principal is not None else True
     with _lock:
         records = _load()
@@ -198,7 +201,11 @@ def event_visible(event: dict, principal: str | None) -> bool:
     """Whether one SSE event, or one public ring record (no "type"), may go to this client."""
     from .agent_ring_live import MODE_LIVE
     from .protocol import SSEType
-    if event.get("type", SSEType.AGENT_RING) != SSEType.AGENT_RING or event.get("conversation_mode") != MODE_LIVE:
+    if event.get("type", SSEType.AGENT_RING) != SSEType.AGENT_RING:
+        return True
+    if principal is not None and not receives_rings(principal):
+        return False                    # this phone switched agent rings off for itself
+    if event.get("conversation_mode") != MODE_LIVE:
         return True
     return live_capable(principal)
 
@@ -596,12 +603,89 @@ def _live_tokens() -> list[dict]:
 def _push_voip(ring: dict) -> dict:
     from . import apns
     tokens = _live_tokens() if ring.get("conversation_mode") else voip_tokens()
+    off = {row["principal"] for row in device_prefs()}
+    if off:
+        tokens = [row for row in tokens if row.get("principal") not in off]
     return apns.send_agent_ring_voip(ring, tokens)
 
 
 def _push(ring: dict, kind: str) -> dict:
     from . import apns
+    excluded = {token for row in device_prefs() for token in row.get("push_tokens", ())}
+    if excluded:
+        return apns.send_agent_ring(ring, kind, exclude_tokens=excluded)
     return apns.send_agent_ring(ring, kind)
+
+
+# ---- a phone that switched agent rings off for itself --------------------------------
+#
+# Peter, 18 Oct: the phone that films a demo must not ring while another phone does. A phone
+# switches rings off for itself only (its own authenticated, paired, full-scope device id); the
+# Host then leaves it out of every agent ring: VoIP, ring alert push, agent-ring SSE event and
+# the GET /calls/ring poll. Default is on, and with no phone switched off delivery is unchanged.
+#
+# The ring alert push goes to APNs alert tokens, which the Host keys by session, not by device,
+# so it cannot tell which alert token is this phone's. The phone names its own alert token
+# ("push_token") when it switches off; without one, its ring alerts still go out (VoIP, SSE and
+# the poll are filtered regardless) and the answer says push_token_bound: false. LIMIT: the token
+# is the phone's own word, like its VoIP registration; a paired full-scope device could name
+# another phone's alert token and thereby silence that phone's ring alerts, never anything else.
+
+_DEVICE_FIELDS = {"receive_rings", "push_token"}
+
+
+def device_prefs() -> list[dict]:
+    """The phones that switched agent rings off, read fresh at every use."""
+    raw = settings_store.get(DEVICE_KEY)
+    return json.loads(raw) if raw else []
+
+
+def receives_rings(principal: str | None) -> bool:
+    return not principal or all(row.get("principal") != principal for row in device_prefs())
+
+
+def device_state(principal: str) -> dict:
+    row = next((r for r in device_prefs() if r.get("principal") == principal), None)
+    return {"ok": True, "receive_rings": row is None, "push_token_bound": bool(row and row.get("push_tokens"))}
+
+
+def _ring_device(principal: str) -> None:
+    from . import agent_ring_live as live
+    if not isinstance(principal, str) or not principal.startswith("device_") or not live.device_ok(principal):
+        raise CallError(403, "ring_device_required")
+
+
+def set_receive_rings(principal: str, data: Any) -> dict:
+    """POST /calls/ring/device: this phone switches agent rings on or off for itself."""
+    _ring_device(principal)
+    if not isinstance(data, dict) or set(data) - _DEVICE_FIELDS or not isinstance(data.get("receive_rings"), bool):
+        raise CallError(400, "ring_device_invalid")
+    token = data.get("push_token")
+    if token is not None:
+        if not isinstance(token, str) or not _hex_token(token.strip().lower()):
+            raise CallError(400, "ring_device_invalid")
+        token = token.strip().lower()
+    with _lock:
+        rows = {r["principal"]: r for r in device_prefs()}
+        if data["receive_rings"]:
+            rows.pop(principal, None)
+        else:
+            row = {"principal": principal, "push_tokens": [], "updated_at": now_ms()}
+            if token:
+                row["push_tokens"] = [token]
+                for other in rows.values():          # one alert token belongs to one phone
+                    other["push_tokens"] = [t for t in other.get("push_tokens", ()) if t != token]
+            rows[principal] = row
+        settings_store.set_text(DEVICE_KEY, json.dumps(list(rows.values()), separators=(",", ":")))
+    log("agentRingDevice", f"principal={principal} receive_rings={int(data['receive_rings'])} "
+                           f"push_token={int(bool(token))}")
+    return device_state(principal)
+
+
+def get_device_state(principal: str) -> dict:
+    """GET /calls/ring/device: whether this phone receives agent rings."""
+    _ring_device(principal)
+    return device_state(principal)
 
 
 def _schedule_expiry(ring: dict) -> None:
