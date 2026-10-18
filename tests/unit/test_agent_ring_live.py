@@ -129,6 +129,20 @@ def test_an_unknown_mode_is_refused_on_ring_and_answer(sander, mode):
     _refused(400, "live_mode_invalid", rings.answer, PHONE, ring["ring_id"], conversation_mode=mode)
 
 
+@pytest.mark.parametrize("opening_mode, refused", [("listen_first", True), ("say", False), (None, False)])
+def test_a_live_ring_takes_no_listen_first_opening(sander, opening_mode, refused):
+    """D1 (ROOT): a Live ring's opening is the Live model's, so listen_first on a Live ring is the
+    existing 400 live_mode_invalid and stores nothing; say, or no opening_mode, rings Live as before."""
+    kw = {} if opening_mode is None else {"opening_mode": opening_mode}
+    if refused:
+        _refused(400, "live_mode_invalid", _live_ring, **kw)
+        assert rings.current() is None
+    else:
+        ring = _live_ring(**kw)["ring"]
+        assert ring["conversation_mode"] == "agent_live_v1"
+        assert "opening_mode" not in ring
+
+
 # ---- a Live ring ------------------------------------------------------------------
 
 def test_a_live_ring_names_its_mode_everywhere_and_shows_nothing_else(sander):
