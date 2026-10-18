@@ -856,7 +856,7 @@ def test_a_google_manifest_with_another_schema_version_still_collides(root, monk
 def test_the_guard_is_advertised_as_its_own_feature_at_contract_70():
     """Rule B (booked by the ledger): a new flag, never a re-pointed tts_provider_google."""
     from lib import server_identity
-    assert server_identity.HOST_CONTRACT == 70
+    assert server_identity.HOST_CONTRACT >= 70    # introduced at 70; later contracts stack on top
     assert "tts_google_id_guard" in server_identity.FEATURES
     assert server_identity.FEATURE_CONTRACTS["tts_google_id_guard"] == 70
     assert server_identity.FEATURE_CONTRACTS["tts_provider_google"] == 69
