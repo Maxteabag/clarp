@@ -936,14 +936,11 @@ def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
 
 def _diagnose(event: str, detail: str) -> None:
     """A diagnostic line that can never fail the import it describes."""
-    from .log import log, log_exception
     try:
+        from .log import log
         log(event, detail)
-    except Exception as exc:  # noqa: BLE001 - observability must not fail an import
-        try:
-            log_exception(event + "LogFail", exc)
-        except Exception:  # noqa: BLE001 - nothing left to report it with
-            pass
+    except Exception:  # noqa: BLE001 - an optional diagnostic must not fail the import
+        pass
 
 
 def _related(a: str, b: str) -> bool:
