@@ -181,3 +181,101 @@ def test_a_chain_of_turns_keeps_every_finished_reply_until_one_late_batch_import
         agent_id=agent_id, backend_session_id=BACKEND_SESSION, source_file="/x/t.jsonl",
         turns=turns)
     assert [(text, id_) for id_, text in _log(host)] == expected
+
+
+# ---- identity: a kept reply is adopted only by its own turn's transcript reply ----
+
+def _prompt(agent_id, trace, text):
+    """What /send records: the turn and the durable client row naming its trace."""
+    _start(agent_id, trace)
+    message_store.record_user_message(
+        agent_id=agent_id, backend_session_id=BACKEND_SESSION,
+        client_msg_id="c-" + trace, text=text, trace_id=trace)
+
+
+def _reply(agent_id, trace, text, end=TurnEvent.PROCESS_EXITED_OK):
+    row = _stream(agent_id, trace, text, "msg_" + trace)
+    message_store.mark_live_message_final(
+        agent_id=agent_id, backend_session_id=BACKEND_SESSION, trace_id=trace,
+        item_key="msg_" + trace)
+    _finish(agent_id, trace, end)
+    return row["id"]
+
+
+def _import(agent_id, turns):
+    message_store.store_transcript_turns(
+        agent_id=agent_id, backend_session_id=BACKEND_SESSION, source_file="/x/t.jsonl",
+        turns=turns)
+
+
+def _owners(agent_id):
+    return {r["message_id"]: (r["text"], r["trace_id"]) for r in agents_db.conn().execute(
+        "SELECT message_id, text, trace_id FROM messages WHERE agent_id = ? AND role = 'assistant'",
+        (agent_id,)).fetchall()}
+
+
+def _two_kept_turns(agent_id, text_a, text_b):
+    _prompt(agent_id, "trace-a", "first prompt")
+    a = _reply(agent_id, "trace-a", text_a, TurnEvent.STOP_REQUESTED)
+    _prompt(agent_id, "trace-b", "second prompt")
+    b = _reply(agent_id, "trace-b", text_b)
+    return a, b
+
+
+_ONLY_B = [{"role": "user", "text": "first prompt", "timestamp": "2026-10-18T09:30:00Z"},
+           {"role": "user", "text": "second prompt", "timestamp": "2026-10-18T09:31:00Z"}]
+
+
+def test_a_final_marked_reply_of_an_interrupted_turn_is_kept_when_the_next_turn_streams(host):
+    """The user already saw that completed provider message; it stays."""
+    agent_id = host.agent_id
+    a, b = _two_kept_turns(agent_id, "Stopped here.", "Next answer.")
+    assert _log(host) == [(a, "Stopped here."), (b, "Next answer.")]
+
+
+@pytest.mark.parametrize("text_a, text_b", [
+    ("Done.", "Done. The tests pass."),      # the later reply extends the earlier one
+    ("Done. The tests pass.", "Done."),      # the earlier reply extends the later one
+    ("Done.", "Done."),                      # exact duplicates
+])
+def test_an_import_without_the_earlier_reply_never_moves_identity_across_turns(host, text_a, text_b):
+    agent_id = host.agent_id
+    a, b = _two_kept_turns(agent_id, text_a, text_b)
+    batch = _ONLY_B + [{"role": "assistant", "text": text_b, "timestamp": "2026-10-18T09:31:10Z"}]
+    for _ in range(2):                       # a repeated import changes nothing
+        _import(agent_id, batch)
+        owners = _owners(agent_id)
+        assert owners[a] == (text_a, "trace-a")
+        assert owners[b] == (text_b, "trace-b")
+        assert len(owners) == 2
+        assert _log(host) == [(a, text_a), (b, text_b)]
+
+
+def test_a_late_earlier_reply_appended_after_the_later_one_loses_nothing(host):
+    """Appended after B's prompt, a late copy of A's reply reads as B's turn.
+    Its identity is ambiguous, so neither kept row is taken or deleted."""
+    agent_id = host.agent_id
+    a, b = _two_kept_turns(agent_id, "Done.", "Done. The tests pass.")
+    batch = _ONLY_B + [{"role": "assistant", "text": "Done. The tests pass.",
+                        "timestamp": "2026-10-18T09:31:10Z"}]
+    _import(agent_id, batch)
+    _import(agent_id, batch + [{"role": "assistant", "text": "Done.",
+                                "timestamp": "2026-10-18T09:31:20Z"}])
+    owners = _owners(agent_id)
+    assert owners[a] == ("Done.", "trace-a")
+    assert owners[b] == ("Done. The tests pass.", "trace-b")
+
+
+def test_prefix_sharing_replies_imported_complete_and_in_order_keep_their_own_ids(host):
+    agent_id = host.agent_id
+    _prompt(agent_id, "trace-a", "first prompt")
+    a = _reply(agent_id, "trace-a", "Done.")
+    _prompt(agent_id, "trace-b", "second prompt")
+    b = _reply(agent_id, "trace-b", "Done. The tests pass.")
+    _import(agent_id, [
+        {"role": "user", "text": "first prompt", "timestamp": "2026-10-18T09:30:00Z"},
+        {"role": "assistant", "text": "Done.", "timestamp": "2026-10-18T09:30:10Z"},
+        {"role": "user", "text": "second prompt", "timestamp": "2026-10-18T09:31:00Z"},
+        {"role": "assistant", "text": "Done. The tests pass.", "timestamp": "2026-10-18T09:31:10Z"}])
+    owners = _owners(agent_id)
+    assert owners == {a: ("Done.", "trace-a"), b: ("Done. The tests pass.", "trace-b")}
