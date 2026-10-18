@@ -546,6 +546,7 @@ class Handler(BaseHTTPRequestHandler):
         "/calls": "_handle_calls_get",
         "/calls/ring": "_handle_calls_ring_get",
         "/calls/ring/settings": "_handle_calls_ring_settings_get",
+        "/calls/ring/device": "_handle_calls_ring_device_get",
         "/calls/ring/live": "_handle_calls_ring_live_socket",
         "/oracle/delegations": "_handle_oracle_delegations_get",
         "/oracle/realtime": "_handle_oracle_realtime",
@@ -666,6 +667,7 @@ class Handler(BaseHTTPRequestHandler):
         "/calls/ring/cancel": "_handle_calls_ring_cancel",
         "/calls/ring/settings": "_handle_calls_ring_settings_post",
         "/calls/ring/voip-token": "_handle_calls_ring_voip_token",
+        "/calls/ring/device": "_handle_calls_ring_device",
         "/calls/ring/live/close": "_handle_calls_ring_live_close",
         "/calls/ring/live/fallback": "_handle_calls_ring_live_fallback",
         "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
@@ -4508,6 +4510,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._calls_ring_run(lambda rings, principal, data: rings.register_voip_token(
             principal, str(data.get("token") or ""), environment=str(data.get("environment") or ""),
             supported_conversation_modes=data.get("supported_conversation_modes")))
+
+    def _handle_calls_ring_device(self):
+        """POST /calls/ring/device {"receive_rings": bool, "push_token"?: "<this phone's APNs alert token>"}:
+        this phone switches agent rings on or off for itself (docs/agent-rings.md)."""
+        return self._calls_ring_run(lambda rings, principal, data: rings.set_receive_rings(principal, data))
+
+    def _handle_calls_ring_device_get(self):
+        return self._calls_ring_run(lambda rings, principal, _d: rings.get_device_state(principal), body=False)
 
     def _handle_calls_ring_settings_get(self):
         return self._calls_ring_run(lambda rings, _p, _d: {
