@@ -65,6 +65,7 @@ def test_pre_release_databases_are_refused(tmp_path):
 def _shape_as_v61(con: sqlite3.Connection) -> None:
     """Rebuild the pre-v62 shape on top of a current database."""
     con.executescript("""
+        ALTER TABLE device_tokens DROP COLUMN principal;
         DROP INDEX idx_task_plans_recovery;
         DROP TABLE task_goal_documents;
         ALTER TABLE task_plans DROP COLUMN history_json;
@@ -440,3 +441,22 @@ def test_v95_adds_background_job_inspection_columns(tmp_path):
         "SELECT status, note FROM background_job_events").fetchone()) == ("", "")
     assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
     db._migrate(upgraded)
+
+
+def test_v120_migrates_device_token_provenance_from_117_and_a_rerun_is_a_no_op(tmp_path):
+    """PROVISIONAL v120: device_tokens.principal, '' (unbound) for every legacy row; no backfill."""
+    from lib import db_migrations, db_schema
+    path = tmp_path / "v117.sqlite"
+    db.reset_for_tests(path)
+    con = db.conn()
+    con.execute("ALTER TABLE device_tokens DROP COLUMN principal")
+    con.execute("INSERT INTO device_tokens(token, session, created_at, updated_at) VALUES ('ab', 's', 1, 1)")
+    con.execute("PRAGMA user_version = 117")
+    con.commit()
+    db.reset_for_tests(path)
+    con = db.conn()
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
+    assert con.execute("SELECT principal FROM device_tokens WHERE token='ab'").fetchone()[0] == ""
+    db_migrations._migrate_to_v120(con)
+    assert [r[1] for r in con.execute("PRAGMA table_info(device_tokens)")].count("principal") == 1
+
