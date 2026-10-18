@@ -14,6 +14,7 @@ ones, as served from /static/avatars).
 """
 import argparse
 import copy
+import hashlib
 import json
 import pathlib
 import queue
@@ -139,8 +140,26 @@ PUBLIC_FIELDS = ("target_at", "url", "thumbnail_url", "mime_type", "file_name", 
                  "deletions", "diff", "path_label", "artifact_ids", "asset_id", "asset_ids",
                  "root", "relative_path", "provider", "run_id", "run_url", "workflow_name",
                  "current_step", "conclusion", "total_steps", "completed_steps", "podcast",
-                 "read_only", "connect_origins", "answer_schema")
+                 "read_only", "connect_origins")
+# Fields the Host keeps in `payload` only (`_public` never copies them up): a
+# fixture may name them at the top level, but no representation shows them
+# there (Host dfc489bb, tests/fixtures/summary-v1/).
+PAYLOAD_ONLY = ("answer_schema", "plan_id")
 UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
+# The summary-v1 artifact list (feature artifact_summary_v1), off until
+# /__control/artifact-summary turns it on. Its `hash_pending` and
+# `digest_pending` artifacts' markers have no hash (the Host over its hash
+# budget); `wrong_sha` ones a hash their content does not have; `corrupt`
+# counts the next item reads of an artifact that answer altered content;
+# `item_delay` slows GET /artifacts/<id>; `refuse` advertises the feature
+# but answers the list as an old Host (400); `item_ignores_flat` makes
+# GET /artifacts/<id> ignore representation=flat-v1 (an older item route);
+# `lone_surrogate` ids hold content with a lone surrogate (see `stored`);
+# `unknown_hash` ones carry a
+# content hash of a kind the client cannot check (not `c1:`).
+artifact_summary = {"on": False, "hash_pending": [], "digest_pending": [], "wrong_sha": [], "corrupt": {}, "item_delay": 0.0}
+# /server-info's server_id; /__control/server-id changes it (another Host).
+server_id = "fake-host-1"
 CLOSE = object()
 # Live items (docs/live-items.md): off until /__control/live turns the
 # feature on. The recorded streams in contract/live/ are replayed as `live`
@@ -288,17 +307,28 @@ def append_form_events(artifact_id, data):
 def represent(artifact, representation):
     """An artifact as the Host answers it: flat-v1 without `payload`, the
     default with it (the top-level fields again)."""
+    top = {k: v for k, v in artifact.items() if k != "payload" and k not in PAYLOAD_ONLY}
     if representation == "flat-v1":
-        return {k: v for k, v in artifact.items() if k != "payload"}
+        return top
     if "payload" in artifact:
+        return {**top, "payload": artifact["payload"]}
+    return {**top, "payload": {k: v for k, v in artifact.items() if k in PUBLIC_FIELDS + PAYLOAD_ONLY}}
+
+
+def stored(artifact):
+    """The artifact as the Host's database holds it: `lone_surrogate` ids
+    have content no UTF-8 can carry (written directly as a JSON escape; the
+    create route refuses it: canonical fixture v2-01)."""
+    if artifact.get("artifact_id") not in artifact_summary.get("lone_surrogate", []):
         return artifact
-    return {**artifact, "payload": {k: v for k, v in artifact.items() if k in PUBLIC_FIELDS}}
+    bad = "bad \ud800 text"
+    return {**artifact, "content": bad, **({"payload": {**artifact["payload"], "content": bad}} if "payload" in artifact else {})}
 
 
 def listed_artifacts(limit):
     if not host_order:
-        return list(artifacts)
-    rows = [a for a in artifacts if a.get("type") not in UNLISTED_TYPES]
+        return [stored(a) for a in artifacts]
+    rows = [stored(a) for a in artifacts if a.get("type") not in UNLISTED_TYPES]
     rows.sort(key=lambda a: (a.get("updated_at") or 0, a.get("artifact_id", "")), reverse=True)
     return rows[:limit]
 
@@ -390,6 +420,39 @@ def run_stream(spec):
                              "status": job["status"], "job": dict(job)}
             if job is not None:
                 broadcast(event)
+
+
+def summary_row(artifact):
+    """An artifact as a summary-v1 list has it: an html_form without its
+    content, a plan without its goal history, each with its marker."""
+    row = copy.deepcopy(artifact)
+    artifact_id = row.get("artifact_id", "")
+    if row.get("type") == "html_form" and "content" in row:
+        try:
+            data = row.pop("content").encode("utf-8")
+        except UnicodeEncodeError:
+            data = None     # a lone surrogate: pending, as the Host (canonical v2-01)
+        marker = {"reason": "summary", "version": row.get("version"), "updated_at": row.get("updated_at", 0)}
+        if data is None or artifact_id in artifact_summary["hash_pending"]:
+            marker.update({"bytes": None, "size_unknown": True, "sha256": None, "hash_pending": True})
+        elif artifact_id in artifact_summary.get("unknown_hash", []):
+            # Not a hash of this content either: a client must not check it.
+            marker.update({"bytes": len(data), "sha256": "c9:" + hashlib.sha256(data + b"x").hexdigest()})
+        else:
+            sha = hashlib.sha256(data + (b"x" if artifact_id in artifact_summary["wrong_sha"] else b"")).hexdigest()
+            marker.update({"bytes": len(data), "sha256": "c1:" + sha})
+        row["content_omitted"] = marker
+    goal = (row.get("plan") or {}).get("goal") if isinstance(row.get("plan"), dict) else None
+    if isinstance(goal, dict) and "history" in goal:
+        history = goal.pop("history")
+        # As the Host: opaque to clients, who only compare it.
+        canonical = json.dumps(history, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8", "surrogatepass")
+        digest = None if artifact_id in artifact_summary["digest_pending"] else "h1:" + hashlib.sha256(canonical).hexdigest()
+        goal["history_omitted"] = {"reason": "summary", "count": len(history),
+                                   "last_at": history[-1].get("at") if history else None, "digest": digest}
+        if digest is None:
+            goal["history_omitted"]["digest_pending"] = True
+    return row
 
 
 def record(entry):
@@ -865,8 +928,13 @@ class Handler(BaseHTTPRequestHandler):
             features.append("html_form_events")
             if turn_summaries:
                 features.append("log_turn_summary")
-            info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": "fake-host-1",
+            info = {"name": "Fake Host", "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
+            if artifact_summary["on"]:
+                features.append("artifact_summary_v1")
+                # contract.features names the contract a feature landed in;
+                # these are test numbers, the real one is booked at landing.
+                info["contract"] = {"host": 999, "min_ios": 1, "features": {"artifact_summary_v1": 990}}
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
             if snapshot_delay[1] > 0:
@@ -936,19 +1004,36 @@ class Handler(BaseHTTPRequestHandler):
             if artifacts_delay:
                 time.sleep(artifacts_delay)
             representation = query.get("representation", "")
+            if representation == "summary-v1":
+                if not artifact_summary["on"] or artifact_summary.get("refuse"):
+                    return self.reply(400, {"error": "unsupported artifact representation"})
+                with state_lock:
+                    rows = [summary_row(represent(a, "flat-v1")) for a in listed_artifacts(int(query.get("limit", "100")))]
+                    return self.reply(200, {"artifacts": rows})
             if representation not in ("", "flat-v1") or (representation and not flat_supported):
                 return self.reply(400, {"error": "unsupported artifact representation"})
             with state_lock:
                 rows = [represent(a, representation) for a in listed_artifacts(int(query.get("limit", "100")))]
                 return self.reply(200, {"artifacts": rows})
         if url.path.startswith("/artifacts/") and url.path.count("/") == 2:
-            # One artifact in full: the Host ignores `representation` here.
+            # One artifact: a Host with summary lists honours exactly
+            # representation=flat-v1 (only the duplicate `payload` left out);
+            # an older item route (or `item_ignores_flat`) ignores it and
+            # answers in full, as does any other value.
             artifact_id = unquote(url.path.split("/")[2])
+            flat_item = (query.get("representation") == "flat-v1" and artifact_summary["on"]
+                         and not artifact_summary.get("item_ignores_flat"))
+            if artifact_summary["item_delay"]:
+                time.sleep(artifact_summary["item_delay"])
             with state_lock:
                 found = next((a for a in artifacts if a.get("artifact_id") == artifact_id), None)
                 if found is None:
                     return self.reply(404, {"error": "artifact not found"})
-                return self.reply(200, {"artifact": represent(found, "")})
+                item = copy.deepcopy(represent(stored(found), "flat-v1" if flat_item else ""))
+                if artifact_summary["corrupt"].get(artifact_id, 0) > 0:
+                    artifact_summary["corrupt"][artifact_id] -= 1
+                    item["content"] = item.get("content", "") + "<!-- altered -->"
+            return self.reply(200, {"artifact": item})
         if url.path.startswith("/artifacts/") and url.path.endswith("/events"):
             artifact_id = url.path.split("/")[2]
             with state_lock:
@@ -1146,6 +1231,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(500, {"error": "upload refused"})
             return self.reply(200, {"path": f"/srv/uploads/{name}", "name": name})
         body = json.loads(raw or b"{}")
+        if url.path == "/__control/artifact-summary":
+            # Test control: the summary-v1 list and its markers (see
+            # `artifact_summary`); the keys given replace the current ones.
+            with state_lock:
+                artifact_summary.update(body)
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/server-id":
+            # Test control: this Host answers as another instance.
+            global server_id
+            server_id = body["server_id"]
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/fail":
             # Test control: the next `count` GETs to `path` answer `status`.
             failures[body["path"]] = [int(body.get("status", 504)), int(body.get("count", 1))]
@@ -1455,6 +1551,16 @@ class Handler(BaseHTTPRequestHandler):
                 ids = gone + [a.get("artifact_id", "") for a in artifacts]
             announce(ids, body.get("session", ""))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/canonical-summary":
+            # Test control: the artifacts become the canonical summary-v1
+            # snapshot's rows (tests/fixtures/summary-v1, Host dfc489bb), as
+            # its default list serves them (payload included), and summary
+            # lists come on; every representation is derived from them.
+            source = REPO / "desktop-rs" / "tests" / "fixtures" / "summary-v1" / "01-artifacts-default.body"
+            with state_lock:
+                artifacts = json.loads(source.read_bytes())["artifacts"]
+                artifact_summary["on"] = True
+            return self.reply(200, {"ok": True, "count": len(artifacts)})
         if url.path == "/__control/representation":
             # Test control: false makes /artifacts refuse flat-v1 (400), as
             # a Host that knows no such representation.
@@ -1548,6 +1654,15 @@ class Handler(BaseHTTPRequestHandler):
                         artifact["updated_at"] = now_ms
                 settled = [a.get("artifact_id", "") for a in artifacts if a.get("session") == body.get("session")]
             announce(settled, body.get("session", ""))
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/artifact-quiet-update":
+            # Test control: change one artifact's fields in place (a later
+            # updated_at) without announcing it: only a list shows it.
+            with state_lock:
+                for artifact in artifacts:
+                    if artifact.get("artifact_id") == body.get("id"):
+                        artifact.update(body.get("set", {}))
+                        artifact["updated_at"] = artifact.get("updated_at", 0) + 1
             return self.reply(200, {"ok": True})
         if url.path == "/__control/artifact-update":
             # Test control: change one artifact's fields in place (a later

@@ -1064,6 +1064,40 @@ fn https_sources(artifact: &Value) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The most goal history entries the plan viewer lists.
+const HISTORY_SHOWN: usize = 50;
+
+/// A goal's history under the plan's steps, newest first: what happened to
+/// it (created, woken, checked, paused...) and when. A summary list leaves
+/// it out; the viewer has it read and says so meanwhile.
+fn goal_history(app: &App, id: &str, plan: &Value) -> Vec<String> {
+    let Some(goal) = plan.get("goal").filter(|g| g.is_object()) else { return Vec::new() };
+    let mut lines = vec![String::new(), "## Goal history".to_owned(), String::new()];
+    let Some(history) = goal.get("history").and_then(Value::as_array) else {
+        if goal.get("history_omitted").is_none() {
+            return Vec::new();
+        }
+        lines.push(match app.engine.borrow().artifact_hydration(id) {
+            clarp_engine::Hydration::Failed(why) => format!("*Not loaded: {why}*"),
+            _ => "*Loading…*".to_owned(),
+        });
+        return lines;
+    };
+    if history.is_empty() {
+        return Vec::new();
+    }
+    for entry in history.iter().rev().take(HISTORY_SHOWN) {
+        let at = entry.get("at").and_then(Value::as_i64).and_then(chrono::DateTime::from_timestamp_millis);
+        let when = at.map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_default();
+        let kind = text(entry, "kind").replace('_', " ");
+        lines.push(format!("- {}", [when, kind].into_iter().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ")));
+    }
+    if history.len() > HISTORY_SHOWN {
+        lines.push(format!("- *{} earlier*", history.len() - HISTORY_SHOWN));
+    }
+    lines
+}
+
 /// The report viewer's model for an artifact without a report body:
 /// what its card stands for, in full.
 pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
@@ -1094,7 +1128,8 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
                 let state = if detail.is_empty() { state.to_owned() } else { format!("{state} · *{}*", cell(detail)) };
                 rows.push(format!("| {indent}{mark} {} | {state} |", cell(text(&i, "title"))));
             }
-            let lines = rows;
+            let mut lines = rows;
+            lines.extend(goal_history(app, id, plan));
             (summary, lines.join("\n"))
         }
         "research" => {
@@ -1757,6 +1792,12 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
     }
     let Some(artifact) = artifact(app, id) else { return };
     *app.artifact_cursor.borrow_mut() = id.to_owned();
+    // A summary list left the form's body out: it opens once it is read.
+    if text(&artifact, "type") == "html_form" && !clarp_core::artifact_summary::complete(&artifact) {
+        await_whole(app, id, Then::Open);
+        app.refresh(&[Change::Updates]);
+        return;
+    }
     let network = network_grant(&artifact);
     match text(&artifact, "type").as_str() {
         // A form, and a report with pictures or layout, open in the
@@ -1880,6 +1921,10 @@ fn opens_in_browser(artifact: &Value) -> bool {
     if let Some(rich) = RICH.with(|r| r.borrow().get(&key).copied()) {
         return rich;
     }
+    // Not read yet (a summary row): decided when it opens, not cached.
+    if artifact.get("content").is_none() {
+        return false;
+    }
     let rich = rich_html(artifact.get("content").and_then(Value::as_str).unwrap_or_default());
     RICH.with(|r| r.borrow_mut().insert(key, rich));
     rich
@@ -1891,6 +1936,11 @@ fn opens_in_browser(artifact: &Value) -> bool {
 pub fn open_in_browser(app: &App, id: &str) -> bool {
     let Some(artifact) = artifact(app, id) else { return false };
     let kind = text(&artifact, "type");
+    if kind == "html_form" && !clarp_core::artifact_summary::complete(&artifact) {
+        await_whole(app, id, Then::Browser);
+        app.refresh(&[Change::Updates]);
+        return true;
+    }
     let content = artifact.get("content").and_then(Value::as_str).unwrap_or_default();
     let html = match kind.as_str() {
         "html_form" => true,
@@ -1946,6 +1996,61 @@ pub fn open_in_browser_here(app: &App, window: &AppWindow) -> bool {
     match on_screen(app).into_iter().rev().find(html) {
         Some(id) => open_in_browser(app, &id),
         None => false,
+    }
+}
+
+/// What to do with a card once its body is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Then {
+    Open,
+    Browser,
+}
+
+thread_local! {
+    /// The card waiting for its body (a summary row's form or report).
+    static AWAITING: std::cell::RefCell<Option<(String, Then)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Asks for the card's left-out body; it opens when it is in.
+fn await_whole(app: &App, id: &str, then: Then) {
+    let state = app.engine.borrow_mut().need_artifact(id);
+    if let Some((previous, _)) = AWAITING.with(|a| a.borrow_mut().replace((id.to_owned(), then))).filter(|(p, _)| p != id) {
+        app.engine.borrow_mut().release_artifact(&previous);
+        app.engine.borrow_mut().set_artifact_status(&previous, "");
+    }
+    if matches!(state, clarp_engine::Hydration::Loading | clarp_engine::Hydration::Omitted) {
+        app.engine.borrow_mut().set_artifact_status(id, "Loading…");
+    }
+}
+
+/// After the engine's changes: the card waiting for its body opens once it
+/// is in, or says why it cannot.
+pub fn settle_hydration(app: &App) {
+    use clarp_engine::Hydration;
+    let Some((id, then)) = AWAITING.with(|a| a.borrow().clone()) else { return };
+    let state = app.engine.borrow().artifact_hydration(&id);
+    if matches!(state, Hydration::Loading | Hydration::Omitted) {
+        return;
+    }
+    AWAITING.with(|a| a.borrow_mut().take());
+    app.engine.borrow_mut().release_artifact(&id);
+    match state {
+        Hydration::Ready => {
+            app.engine.borrow_mut().set_artifact_status(&id, "");
+            // Opened after this refresh, as a key press would.
+            slint::Timer::single_shot(Duration::ZERO, move || {
+                let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
+                match then {
+                    Then::Open => open(&app, &window, &id),
+                    Then::Browser => {
+                        open_in_browser(&app, &id);
+                    }
+                }
+            });
+        }
+        Hydration::Failed(why) => app.engine.borrow_mut().set_artifact_status(&id, &format!("Not loaded: {why}")),
+        // Deleted: the engine took its card away and said so.
+        Hydration::Gone | Hydration::Unknown | Hydration::Loading | Hydration::Omitted => {}
     }
 }
 
@@ -2184,6 +2289,34 @@ mod tests {
         }
         assert!(is_report(&flat[0]) && !is_report(&flat[1]));
         assert_eq!(network_grant(&flat[0]), serde_json::json!(["https://api.example"]));
+    }
+
+    /// The Host's rule (server/lib/html_forms.py): an html_form is a report
+    /// exactly when `read_only` is true; the flag is flattened, so every
+    /// representation carries it. The canonical snapshot's forms (empty
+    /// `answer_schema` in the payload, no `read_only`) are forms on the Host,
+    /// and the desktop reads them so in every shape.
+    #[test]
+    fn html_forms_are_reports_exactly_when_the_host_says_read_only() {
+        let fixture = |name: &str| -> Value {
+            let path = format!("{}/../tests/fixtures/summary-v1/{name}", env!("CARGO_MANIFEST_DIR"));
+            serde_json::from_slice(&std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).unwrap()
+        };
+        let mut seen = 0;
+        for list in ["01-artifacts-flat-v1.body", "01-artifacts-default.body", "01-artifacts-summary-v1.body"] {
+            for row in fixture(list)["artifacts"].as_array().unwrap().iter().filter(|r| r["type"] == "html_form") {
+                let host = row.get("read_only").or_else(|| row["payload"].get("read_only")) == Some(&Value::Bool(true));
+                assert_eq!(is_report(row), host, "{list}: {}", row["title"]);
+                assert_eq!(artifact_item(row).label, if host { "REPORT" } else { "FORM" }, "{list}: {}", row["title"]);
+                seen += 1;
+            }
+        }
+        for shape in ["default", "flat-v1", "bogus"] {
+            assert!(!is_report(&fixture(&format!("04-item-html_form_report-{shape}.body"))["artifact"]), "{shape}");
+        }
+        assert_eq!(seen, 18, "six forms in each of three lists");
+        // A read-only report keeps its flag at the top level in flat-v1.
+        assert!(is_report(&serde_json::json!({"type": "html_form", "read_only": true})));
     }
 
     #[test]

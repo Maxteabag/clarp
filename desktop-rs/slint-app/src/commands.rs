@@ -1063,7 +1063,10 @@ fn apply_setting(app: &App, window: &AppWindow, action: &str) {
 // ---- dialogs -----------------------------------------------------------------
 
 pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
-    *app.overlay.borrow_mut() = name.to_owned();
+    let previous = std::mem::replace(&mut *app.overlay.borrow_mut(), name.to_owned());
+    if previous == "report" && name != "report" {
+        app.engine.borrow_mut().set_artifact_in_view(None);
+    }
     window.set_overlay(name.into());
     show_hints(app, window);
 }
@@ -1073,6 +1076,9 @@ pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
 pub fn close_overlay(app: &App, window: &AppWindow) {
     let closed = std::mem::take(&mut *app.overlay.borrow_mut());
     window.set_overlay("".into());
+    if closed == "report" {
+        app.engine.borrow_mut().set_artifact_in_view(None);
+    }
     if closed == crate::help_view::OVERLAY && crate::help_view::give_back(app, window) {
         show_hints(app, window);
         return;
