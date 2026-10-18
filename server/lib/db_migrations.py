@@ -180,9 +180,8 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 117:
             _migrate_to_v117(con)
 
-        # TENTATIVE 118 (ledger, Nadia): the lowest free number above main 117, on the condition that this lands
-        # before steer_receipts and the LF family, which then move up to 119 and 120. Nadia confirms or renumbers
-        # before CI and merge; never skip a number.
+        # 118, confirmed by the ledger (Nadia) as the next number above main 117; steer_receipts and the LF family
+        # move up behind it. If main's schema changes before this merges, stop and renumber; never skip a number.
         if version < 118:
             _migrate_to_v118(con)
 
@@ -913,7 +912,7 @@ def _migrate_to_v117(con: sqlite3.Connection) -> None:
 
 
 def _migrate_to_v118(con: sqlite3.Connection) -> None:
-    """TENTATIVE number (ledger). ``device_tokens.principal``: the authenticated paired device that registered an
+    """Ledger-confirmed v118. ``device_tokens.principal``: the authenticated paired device that registered an
     alert token ('' = unbound). Additive with an unbound default, so legacy rows stay unbound and older
     code ignores the column; guarded, so a rerun is a no-op."""
     columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 118  # TENTATIVE: lowest free above main 117 if this lands before steer and LF; Nadia books it (device_tokens.principal)
+_SCHEMA_VERSION = 118  # ledger-confirmed next above main 117 (device_tokens.principal); stop and renumber if main's schema moves first
 
 
 # The schema below is the complete current shape. It is applied in one step to
