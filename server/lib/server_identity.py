@@ -50,6 +50,8 @@ FEATURES: tuple[str, ...] = (
     "agent_ring_live",
     "tts_google_id_guard",
     "tts_provider_google",
+    "call_transcription_policy",
+    "agent_ring_listen_first",
     "agent_rings",
     "controller_actions",
     "runtime_drain_status",
@@ -371,3 +373,9 @@ FEATURE_CONTRACTS["tts_provider_google"] = 69
 FEATURE_CONTRACTS["tts_google_id_guard"] = 70
 FEATURE_CONTRACTS["agent_ring_live"] = 71  # PROVISIONAL: booked at the ready landing, else the next free number
 FEATURE_CONTRACTS["agent_ring_device_optout"] = 72  # PROVISIONAL: booked at the ready landing, else the next free number
+# TEMPORARY UNBOOKED SOURCE PLACEHOLDERS (fresh-base composition only, not a landing): 67 is not
+# booked for listen-first, and the reserved 65-68 block does not make it an historical introduction (ROOT). The real number N is booked at landing (rule B) and replaces both
+# values, HOST_CONTRACT and the DRAFT section of docs/compatibility.md in one commit. Until then
+# this must not merge or reach CI.
+FEATURE_CONTRACTS["agent_ring_listen_first"] = 67
+FEATURE_CONTRACTS["call_transcription_policy"] = 67

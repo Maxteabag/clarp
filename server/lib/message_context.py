@@ -67,6 +67,10 @@ TEAM_CONTEXT_OPEN = "--- Clarp team context ---"
 TEAM_CONTEXT_CLOSE = "--- End Clarp team context ---"
 FALLBACK_CONTEXT_OPEN = "--- Clarp fallback context ---"
 FALLBACK_CONTEXT_CLOSE = "--- End Clarp fallback context ---"
+# The whole input of a listen-first initiative turn (group_calls.opening_header):
+# imported, it is skipped, never a user row.
+CALL_OPENING_OPEN = "<clarp-call-opening>"
+CALL_OPENING_CLOSE = "</clarp-call-opening>"
 # Clarp's record of a conversation the backend lost, opening its continuation.
 RESTORED_CONTEXT_OPEN = "--- Clarp restored conversation ---"
 RESTORED_CONTEXT_CLOSE = "--- End Clarp restored conversation ---"

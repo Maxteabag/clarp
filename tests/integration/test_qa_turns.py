@@ -14,8 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class QAHost:
-    def __init__(self, root):
+    def __init__(self, root, extra_args=()):
         self.root = root
+        self.extra_args = tuple(extra_args)
         self.process = None
 
     def start(self):
@@ -24,7 +25,8 @@ class QAHost:
             previous.unlink()
         self.log = (self.root.parent / f'{self.root.name}.log').open('a')
         self.process = subprocess.Popen(
-            [sys.executable, str(ROOT / 'tests/qa/host.py'), '--state-dir', str(self.root)],
+            [sys.executable, str(ROOT / 'tests/qa/host.py'), '--state-dir', str(self.root),
+             *self.extra_args],
             stdout=self.log, stderr=subprocess.STDOUT)
         for _ in range(100):
             if previous.exists():

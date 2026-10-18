@@ -138,4 +138,12 @@ def revoke(device_id: str) -> bool:
             WHERE device_id = ? AND revoked_at IS NULL""",
         (db.now_ms(), device_id.strip()),
     )
+    if result.rowcount == 1:
+        # A listen-first opening answered on this device loses its authority.
+        try:
+            from . import agent_rings
+            agent_rings.retire_for_principal(device_id.strip(), "auth_revoked")
+        except Exception as exc:  # noqa: BLE001 - the revoke stands
+            from .log import log_exception
+            log_exception("devicePairingOpeningRetireFail", exc, device_id.strip())
     return result.rowcount == 1
