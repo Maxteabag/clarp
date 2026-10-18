@@ -315,3 +315,13 @@ def test_a_device_binds_only_a_real_apns_token_and_writes_nothing_otherwise(sand
         apns.register_token(token, owner=PHONE)
     assert _rows() == before
     apns.register_token("abc123", session="s")                  # an unbound registrant: legacy acceptance kept
+
+
+def test_distinct_non_hex_tokens_that_differ_only_in_case_keep_their_own_identity(sander):
+    apns.register_token("AbG-token", session="one")
+    apns.register_token("abg-token", session="two")              # a different opaque token: no conflict
+    rows = _rows()
+    assert rows["AbG-token"]["disabled_at"] is None and rows["abg-token"]["disabled_at"] is None
+    apns.register_token(T_PHONE, owner=PHONE)                    # hex collision still sees case variants
+    with pytest.raises(apns.TokenOwnedElsewhere):
+        apns.register_token(T_PHONE.upper(), owner=OTHER_PHONE)
