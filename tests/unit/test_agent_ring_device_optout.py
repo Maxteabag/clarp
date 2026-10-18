@@ -253,3 +253,12 @@ def test_the_owner_migration_keeps_legacy_tokens_unbound_and_is_idempotent(tmp_p
     assert dict(c.execute("SELECT token, principal AS owner, disabled_at FROM device_tokens").fetchone()) == \
         {"token": "ab", "owner": "", "disabled_at": None}
     assert db_migrations._migrate_to_v120(c) is None              # guarded: a rerun is a no-op
+
+
+def test_a_fresh_database_has_the_principal_column_and_the_current_version(tmp_path):
+    from lib import db_schema
+    db.reset_for_tests(tmp_path / "fresh.sqlite")
+    c = db.conn()
+    assert c.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
+    columns = {row[1]: row for row in c.execute("PRAGMA table_info(device_tokens)")}
+    assert "principal" in columns and "owner" not in columns and columns["principal"][4] == "''"
