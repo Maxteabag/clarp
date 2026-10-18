@@ -44,11 +44,11 @@ def _phones(srv, ctx):
 def test_a_phone_switches_its_own_rings_off_and_on_over_http(running_server):
     base, ctx, srv = running_server
     camera, other = _phones(srv, ctx)
-    assert _call(base, camera["token"], "GET") == (200, {"ok": True, "receive_rings": True, "push_token_bound": False})
+    assert _call(base, camera["token"], "GET") == (200, {"ok": True, "receive_rings": True, "push_token_bound": False, "alerts_suppressed": False, "state": "on"})
     from lib import apns
     apns.register_token("a1" * 32, session="camera")
     assert _call(base, camera["token"], "POST", {"receive_rings": False, "push_token": "a1" * 32}) == \
-        (200, {"ok": True, "receive_rings": False, "push_token_bound": True})
+        (200, {"ok": True, "receive_rings": False, "push_token_bound": True, "alerts_suppressed": True, "state": "off"})
     assert _call(base, other["token"], "GET")[1]["receive_rings"] is True
     assert _call(base, camera["token"], "POST", {"receive_rings": True})[1]["receive_rings"] is True
 
