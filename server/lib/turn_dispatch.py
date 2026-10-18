@@ -376,6 +376,9 @@ class _TurnSpec:
     # (``queue_id``) in place: a cancel ends that exact row, and lifting
     # the fence queues it again.
     taken_over: bool = False
+    # The agent's state generation read just before this turn set its live trace (call-open end:
+    # hook prompt admissions after it refuse the end's visible write). In memory only.
+    s_open: int | None = None
 
 
 def _pause_exempt_on_arrival(command: "DispatchCommand", effective) -> bool:
@@ -547,6 +550,60 @@ def _default_retry_scheduler(delay: float, fn: Callable[[], None]) -> None:
     timer = threading.Timer(delay, fn)
     timer.daemon = True
     timer.start()
+
+
+OPENING_NOT_CONFIRMED = "The call opening could not be confirmed and will not be sent again"
+OPENING_WITHDRAWN = "The call opening was withdrawn before it was sent"
+
+
+class _AdmissionRefused:
+    """What a spawn attempt reports when the final call-open check refused the launch before the
+    spawn flag (L2 r4). The refusal has already settled the turn: "cancelled" wrote the withdrawn
+    receipt and finished it; "unknown" ended it visibly interrupted. A caller must neither mark
+    it spawned nor read it as superseded (409, D2 release, unlaunched receipt).
+
+    It is neither True nor False. A caller compares it by identity before any truth test, and
+    bool() raises, so a caller that was never taught about it fails loudly instead of reading a
+    refused opening as launched or superseded."""
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        raise TypeError("compare _ADMISSION_REFUSED by identity, not truth")
+
+    def __repr__(self) -> str:
+        return "_ADMISSION_REFUSED"
+
+
+_ADMISSION_REFUSED = _AdmissionRefused()
+
+
+def _is_call_opening(spec) -> bool:
+    """A listen-first initiative (agent_rings): its own turn, never a user row.
+    Identified by its Host-issued admission, not the client-suppliable id."""
+    queue_id = str(getattr(spec, "queue_id", "") or getattr(spec, "client_msg_id", "") or "")
+    if not queue_id.startswith("call-open:"):
+        return False
+    from . import agent_rings
+    # Only positive evidence (a non-call prompt admission) makes it someone's
+    # own message; otherwise the opening's gate decides.
+    return not agent_rings.is_foreign_message(str(getattr(spec, "prompt_admission_id", "") or ""))
+
+
+def _mark_backend_invoked(exc: BaseException) -> None:
+    """The launch had already handed the turn to the backend when ``exc``
+    escaped: no longer evidence that nothing was sent (agent_rings, D2)."""
+    try:
+        exc.clarp_backend_invoked = True
+    except Exception:  # noqa: BLE001 - an exception that takes no attributes
+        pass
+
+
+def _backend_invoked(exc: BaseException | None) -> bool:
+    while exc is not None:
+        if getattr(exc, "clarp_backend_invoked", False):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
 
 
 def _with_team_context(text: str, *, digest: str = "", protocol: str = "") -> str:
@@ -983,6 +1040,13 @@ class TurnDispatchService:
         barrier that parked them died with the previous process)."""
         if not _SLOTS.first_rehydration():
             return
+        try:
+            # A listen-first claim left by an earlier process: a process
+            # boundary is never proof of what it sent, whatever its age.
+            from . import agent_rings
+            agent_rings.resolve_stale_claims(None)
+        except Exception as exc:  # noqa: BLE001 - recovery must still run
+            log_exception("callOpenBootResolveFail", exc)
 
         def live(agent_id: str, trace_id: str) -> bool:
             agent = agents_db.get_by_agent_id(agent_id)
@@ -1007,7 +1071,9 @@ class TurnDispatchService:
     def _recover_queued_locked(self) -> int:
         from . import task_goal_recovery
         self._rehydrate_once()
-        turn_queue.reset_stale_claims()
+        from . import agent_rings
+        examined = agent_rings.resolve_stale_claims(db.now_ms() - 30_000)
+        turn_queue.reset_stale_claims(exclude=examined)
         recovered = 0
         deferred = False
         # Agents whose head row is backing off or failed in this pass: their
@@ -1498,6 +1564,10 @@ class TurnDispatchService:
                 session=session, backend=backend, queued=True,
                 queue_depth=queue_state["count"],
                 queue_revision=queue_state["revision"])
+        if not self._call_opening_claimed(spec):
+            # A listen-first initiative that a greeting withdrew: never runs.
+            self._finish_turn(spec)
+            return DispatchResult(session=session, backend=backend)
         if queue_if_busy:
             # Idle queue request: it starts immediately, so admit its visible
             # user row now. Recovery may find the row already present.
@@ -1519,15 +1589,33 @@ class TurnDispatchService:
             turn_id = turn_lifecycle.open_turn(
                 agent_id=agent_id, source="pwa", trace_id=trace_id,
                 synthesize_audio=synthesize_audio)
-            # This turn owns the agent's live trace.
+            # This turn owns the agent's live trace. A call opening first records its admission
+            # mark (s_open); ordinary turns keep None and read no generation.
+            if _is_call_opening(spec):
+                spec = replace(spec, s_open=turn_lifecycle.state_generation(agent_id))
             agents_db.set_trace_for_session(session, trace_id)
             try:
-                if not self._spawn_attempt(spec, attempt=1):
+                spawned = self._spawn_attempt(spec, attempt=1)
+                if spawned is _ADMISSION_REFUSED:
+                    # The final call-open check refused it and settled the turn: never spawned,
+                    # and not superseded either (its receipt stands).
+                    return DispatchResult(session=session, backend=backend)
+                if not spawned:
                     raise DispatchError(409, "turn superseded before spawn")
             except JanitorDispatchError:
                 self._discard_fenced_janitor(spec)
                 raise
             except DispatchError as exc:
+                if _is_call_opening(spec) and _backend_invoked(exc):
+                    # The opening's one launch reached the backend and then failed: the same
+                    # fenced end as any post-launch failure, never an "unlaunched" turn.
+                    self._end_launched_opening(spec, error_classify.RUNNER_EXIT, str(exc), 1)
+                    try:
+                        turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id)
+                    except Exception as close_error:  # noqa: BLE001
+                        log_exception("callOpenTurnCloseFail", close_error, detail=spec.session)
+                    raise
+                self._release_unsent_opening(spec, exc)
                 if not self._has_live_turn(spec):
                     self._abandon_unlaunched(spec, turn_id, exc)
                 if isinstance(exc, GoalWakeDispatchError) and exc.permanent:
@@ -1550,12 +1638,37 @@ class TurnDispatchService:
             # with an open turn row and no process. Codex is steerable, so
             # every later send for the agent was "steered" into that phantom
             # and vanished. Give the slot and the turn back before failing.
+            self._release_unsent_opening(spec, e)
             self._abandon_unlaunched(spec, turn_id, e)
             raise
         # Once the backend has accepted the turn, a bookkeeping failure must
         # never free its ownership or permit a duplicate launch.
         self._mark_spawned(spec)
         return DispatchResult(session=session, backend=backend)
+
+    def _end_launched_opening(self, spec: _TurnSpec, category: str, message: str | None,
+                              attempt: int) -> None:
+        """F1: a listen-first initiative is launched at most once. Its turn failed after the
+        backend had it, or in a state that cannot prove otherwise: no retry, redelivery or
+        resume. Its opening becomes ``unknown`` and the turn ends visibly interrupted."""
+        try:
+            from . import agent_rings
+            agent_rings.resolve_launch_failure(spec.queue_id or spec.client_msg_id, spec.trace_id)
+        except Exception as exc:  # noqa: BLE001 - the turn still ends visibly
+            log_exception("callOpenLaunchFailureResolveFail", exc, detail=spec.session)
+        self._mark_interrupted(spec, category, message, attempts=attempt, call_opening=True)
+
+    def _release_unsent_opening(self, spec: _TurnSpec, error: BaseException | None) -> None:
+        """A listen-first initiative whose launch failed before the backend
+        was invoked goes back to its normal first claim (agent_rings D2); a
+        failure after that point stays claimed and becomes unknown."""
+        if not spec.queue_id or _backend_invoked(error) or not _is_call_opening(spec):
+            return
+        try:
+            from . import agent_rings
+            agent_rings.release_unsent(spec.queue_id, spec.trace_id)
+        except Exception as exc:  # noqa: BLE001 - an unreleased claim resolves to unknown
+            log_exception("callOpenReleaseFail", exc, detail=spec.session)
 
     def _abandon_unlaunched(self, spec: _TurnSpec, turn_id: int, error: BaseException) -> None:
         """A turn that was admitted and claimed but never reached the backend."""
@@ -1604,6 +1717,10 @@ class TurnDispatchService:
 
     def dispatch_queued(self, queue_id: str) -> DispatchResult:
         """Explicitly send one durable item while leaving the queue paused."""
+        if turn_queue.status(queue_id) == "unknown":
+            # Sending a listen-first opening whose launch cannot be known
+            # would be a replay (docs/agent-rings.md "Claimed once").
+            raise DispatchError(409, "opening launch unknown")
         runtime = getattr(self.ctx, "runtime_client", None)
         if runtime is not None:
             try:
@@ -1852,8 +1969,20 @@ class TurnDispatchService:
             f"agent={spec.agent_id} killed={killed or '∅'} "
             f"new={spec.trace_id or '∅'} — busy, preempting and resuming")
 
+    def _call_opening_claimed(self, spec: _TurnSpec) -> bool:
+        """The dispatcher's claim of a listen-first initiative before it runs
+        (agent_rings.claim_initiative): the queued row becomes claimed and the
+        opening's intent started in one transaction, or the initiative was
+        withdrawn by a greeting and must not run. Other turns pass."""
+        if not _is_call_opening(spec):
+            return True
+        from . import agent_rings
+        return agent_rings.claim_initiative(spec.queue_id or spec.client_msg_id)
+
     def _steer_if_supported(self, spec: _TurnSpec) -> bool:
         """Append a follow-up to an active steerable turn without replacing it."""
+        if _is_call_opening(spec):
+            return False                    # an opening is its own turn, never a steer
         with _TURN_LOCK:
             active_trace = _INFLIGHT.get(spec.agent_id, "")
             busy = bool(active_trace)
@@ -1999,6 +2128,7 @@ class TurnDispatchService:
                 f"agent={agent_id} trace={spec.trace_id} — a process is live; "
                 f"slot kept")
             return
+        self._release_unsent_opening(spec, error)
         retry = replace(spec, handoff_failures=spec.handoff_failures + 1)
         with _TURN_LOCK:
             if not _SLOTS.owns(agent_id, spec.trace_id):
@@ -2145,6 +2275,11 @@ class TurnDispatchService:
                 _SLOTS.release(agent_id, next_spec.trace_id)
                 self.retry_scheduler(1.0, self.recover_queued)
             return
+        if not self._call_opening_claimed(next_spec):
+            self._finish_turn(next_spec)
+            return
+        if _is_call_opening(next_spec):         # its admission mark, before its live trace
+            next_spec = replace(next_spec, s_open=turn_lifecycle.state_generation(agent_id))
         agents_db.set_trace_for_session(next_spec.session, next_spec.trace_id)
         try:
             if next_spec.queue_id:
@@ -2156,7 +2291,11 @@ class TurnDispatchService:
                 trace_id=next_spec.trace_id,
                 synthesize_audio=next_spec.synthesize_audio)
             phase["value"] = "spawning"
-            if not self._spawn_attempt(next_spec, attempt=1):
+            spawned = self._spawn_attempt(next_spec, attempt=1)
+            if spawned is _ADMISSION_REFUSED:
+                return                  # settled by the final call-open check; never spawned
+            if not spawned:
+                self._release_unsent_opening(next_spec, None)
                 return
             phase["value"] = "launched"
             if next_spec.park_id:
@@ -2175,6 +2314,15 @@ class TurnDispatchService:
                 _SLOTS.release(agent_id, next_spec.trace_id)
                 self.retry_scheduler(1.0, self.recover_queued)
         except DispatchError as e:
+            if next_spec.queue_id and _is_call_opening(next_spec) and _backend_invoked(e):
+                # The opening's one launch reached the backend and then failed: the same
+                # fenced end as any post-launch failure, never requeued as unsent.
+                self._end_launched_opening(next_spec, error_classify.RUNNER_EXIT, str(e), 1)
+                try:
+                    turn_lifecycle.close_turns_for_trace(next_spec.agent_id, next_spec.trace_id)
+                except Exception as close_error:  # noqa: BLE001
+                    log_exception("callOpenTurnCloseFail", close_error, detail=next_spec.session)
+                return
             if not next_spec.queue_id:
                 # Legacy automatic terminal queue is memory-only; preserve its
                 # existing behavior and continue to the next waiting spec.
@@ -2260,6 +2408,9 @@ class TurnDispatchService:
         """Durably admit the user row. With `deferred`, the transcript
         wake-up is appended there for the caller to broadcast after COMMIT
         instead of fanning out while a write transaction is open."""
+        if _is_call_opening(spec):
+            # A listen-first initiative is the agent's own opening: no user row.
+            return True
         try:
             appended = agents_db.record_user_message(
                 agent_id=spec.agent_id,
@@ -2312,12 +2463,15 @@ class TurnDispatchService:
             log_exception("sendPreStampSessionFail", e, detail=session)
             raise DispatchError(500, "could not bind backend session") from e
 
-    def _spawn_attempt(self, spec: _TurnSpec, *, attempt: int) -> bool:
-        """Reject a stale attempt; AGY rechecks around state/Popen itself."""
+    def _spawn_attempt(self, spec: _TurnSpec, *, attempt: int) -> "bool | _AdmissionRefused":
+        """Reject a stale attempt; AGY rechecks around state/Popen itself. False: superseded
+        before spawn. _ADMISSION_REFUSED: the final call-open check refused and settled it.
+        True: spawned, parked by the account coordinator, or ended by a later attempt's own
+        failure handling."""
         with _launching(spec.agent_id, spec.trace_id):
             return self._spawn_attempt_owned(spec, attempt=attempt)
 
-    def _spawn_attempt_owned(self, spec: _TurnSpec, *, attempt: int) -> bool:
+    def _spawn_attempt_owned(self, spec: _TurnSpec, *, attempt: int) -> "bool | _AdmissionRefused":
         with _TURN_LOCK:
             if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
                 log("spawnAbandoned",
@@ -2329,14 +2483,24 @@ class TurnDispatchService:
                 with _TURN_LOCK:
                     if _INFLIGHT.get(spec.agent_id) != spec.trace_id:
                         return False
-                self._spawn_attempt_claimed(spec, attempt=attempt)
+                outcome = self._spawn_attempt_claimed(spec, attempt=attempt)
         else:
-            self._spawn_attempt_claimed(spec, attempt=attempt)
-        return True
+            outcome = self._spawn_attempt_claimed(spec, attempt=attempt)
+        return _ADMISSION_REFUSED if outcome is _ADMISSION_REFUSED else True
 
     def _resume_after_account_switch(self, spec, attempt, state):
         if (_INFLIGHT.get(spec.agent_id) != spec.trace_id
                 or self._superseded(spec)):
+            return
+        if _is_call_opening(spec) and (attempt != 1 or state.get("spawn_started") is not None):
+            # Only an attempt-1 initiative parked before its spawn flag was ever set (the flag
+            # is set immediately before the backend is invoked, in this same state) is proven
+            # unsent and makes its one first launch below; anything else stays unknown.
+            self._end_launched_opening(spec, error_classify.INTERRUPTED,
+                                       "listen-first opening not resumed after an account switch",
+                                       attempt)
+            return
+        if _is_call_opening(spec) and not self._admit_opening_launch(spec, attempt):
             return
         bsid = state.get("backend_session_id") or spec.backend_session_id
         transcript = backends.by_id(spec.backend).resume_target(
@@ -2356,13 +2520,52 @@ class TurnDispatchService:
             ) if interrupted and transcript is not None else "",
         )
         try:
-            if self._spawn_attempt(resume_spec, attempt=attempt):
+            spawned = self._spawn_attempt(resume_spec, attempt=attempt)
+            if spawned is not _ADMISSION_REFUSED and spawned:
                 self._mark_spawned(resume_spec)
         except JanitorDispatchError:
             self._discard_fenced_janitor(resume_spec)
         except DispatchError as exc:
-            self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
-                                   str(exc), attempts=attempt)
+            if _is_call_opening(resume_spec) and _backend_invoked(exc):
+                self._end_launched_opening(resume_spec, error_classify.RUNNER_EXIT, str(exc),
+                                           attempt)
+            else:
+                self._mark_interrupted(resume_spec, error_classify.RUNNER_EXIT,
+                                       str(exc), attempts=attempt)
+
+    def _admit_opening_launch(self, spec: _TurnSpec, attempt: int) -> bool:
+        """L2: an initiative is admitted again before it runs (agent_rings.authorize_parked_launch):
+        when a parked first launch resumes, and as the final check before the spawn flag on every
+        launch path. True only for "launch". A breached fence cancels it unsent (no spawn, not a
+        failure); an unprovable identity or state never launches and ends unknown, visibly
+        interrupted."""
+        try:
+            from . import agent_rings
+            verdict = agent_rings.authorize_parked_launch(spec.queue_id or spec.client_msg_id,
+                                                          spec.trace_id)
+        except Exception as exc:  # noqa: BLE001 - unproven: never a launch
+            log_exception("callOpenParkedAdmitFail", exc, detail=spec.session)
+            verdict = "unknown"
+        if verdict == "launch":
+            return True
+        if verdict == "cancelled":
+            try:
+                # The UNLAUNCHED receipt in the opening's own words: there is no saved user
+                # message and it must never be retried. Not back-dated: no user row anchors it,
+                # and this slot still owns the agent, so it also replaces the park's wait state.
+                turn_lifecycle.transition(
+                    spec.agent_id, TurnEvent.UNLAUNCHED,
+                    {"trace_id": spec.trace_id, "dispatch_not_started": True,
+                     "message": OPENING_WITHDRAWN}, force=True)
+                turn_lifecycle.close_turns_for_trace(spec.agent_id, spec.trace_id)
+            except Exception as exc:  # noqa: BLE001
+                log_exception("callOpenParkedCancelCloseFail", exc, detail=spec.session)
+            self._finish_turn(spec)
+            return False
+        self._end_launched_opening(spec, error_classify.INTERRUPTED,
+                                   "listen-first opening admission could not be proven after an "
+                                   "account switch", attempt)
+        return False
 
     def _pause_for_account(self, spec: _TurnSpec) -> None:
         with _TURN_LOCK:
@@ -2374,10 +2577,11 @@ class TurnDispatchService:
                  "account_recovery": "waiting",
                  "message": f"Waiting for a {spec.backend} account with available usage"}))
 
-    def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> None:
+    def _spawn_attempt_claimed(self, spec: _TurnSpec, *, attempt: int) -> "_AdmissionRefused | None":
         """Spawn one attempt of a turn. Attempt 1 surfaces spawn failures as
         a DispatchError (so /send returns 500); later attempts run from a
-        timer thread and just mark the agent INTERRUPTED on failure."""
+        timer thread and just mark the agent INTERRUPTED on failure.
+        _ADMISSION_REFUSED only when the final call-open check refused it."""
         from . import task_goal_recovery, task_plans
         if spec.origin == "heartbeat" and task_plans.recovery_owns_agent(spec.agent_id):
             raise DispatchError(409, "Durable goal owns continuation")
@@ -2451,62 +2655,74 @@ class TurnDispatchService:
                 action()
                 return True
         try:
-            prompt = _with_team_context(
-                _with_delivery_context(
-                    spec.recovery_text or spec.text, unheard_audio=spec.unheard_audio),
-                digest=spec.team_digest, protocol=spec.team_protocol)
-            if spec.recovery_text:
-                # The outer envelope is filtered by the native transcript
-                # importer, including when team/delivery context is present.
-                prompt = f"<clarp-account-recovery>\n{prompt}\n</clarp-account-recovery>"
-            _validate_janitor_target(
-                agents_db.get_by_agent_id(spec.agent_id) or {},
-                spec.janitor_run_id, spec.trace_id)
-            state["spawn_started"] = True
-            handle = self.backends.spawn_turn(
-                spec.backend,
-                text=prompt,
-                cwd=spec.cwd,
-                backend_session_id=spec.backend_session_id,
-                is_new_session=spec.is_new_session,
-                session=spec.session,
-                agent_id=spec.agent_id,
-                on_session_init=on_init,
-                on_result=on_result,
-                on_error=on_error,
-                trace_id=spec.trace_id,
-                stream=self.ctx.stream,
-                voice_preamble=spec.synthesize_audio,
-                synthesize_audio=spec.synthesize_audio,
-                model=spec.model,
-                effort=spec.effort,
-                run_if_owned=run_if_owned,
-            )
-            state["handle"] = handle
-            team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
-            if account_attempt is not None:
-                account_attempt.handle = handle
-        except JanitorDispatchError:
-            raise
-        except FileNotFoundError as e:
-            if attempt == 1:
-                log("backendMissing", str(e))
-                raise DispatchError(500, str(e)) from e
-            log_exception("retrySpawnMissing", e, detail=spec.session)
-            self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
-                                   attempts=attempt)
-        except Exception as e:
-            if attempt == 1:
-                log_exception("backendSpawnFail", e, detail=spec.session)
-                raise DispatchError(500, f"{spec.backend} spawn failed: {e}") from e
-            log_exception("retrySpawnFail", e, detail=spec.session)
-            self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
-                                   attempts=attempt)
+            try:
+                prompt = _with_team_context(
+                    _with_delivery_context(
+                        spec.recovery_text or spec.text, unheard_audio=spec.unheard_audio),
+                    digest=spec.team_digest, protocol=spec.team_protocol)
+                if spec.recovery_text:
+                    # The outer envelope is filtered by the native transcript
+                    # importer, including when team/delivery context is present.
+                    prompt = f"<clarp-account-recovery>\n{prompt}\n</clarp-account-recovery>"
+                _validate_janitor_target(
+                    agents_db.get_by_agent_id(spec.agent_id) or {},
+                    spec.janitor_run_id, spec.trace_id)
+                if _is_call_opening(spec) and not self._admit_opening_launch(spec, attempt):
+                    # L2 r3: the final call-open fence re-check, immediately before the flag on
+                    # every launch path. A breach here is proven unsent (withdrawn, cancelled);
+                    # an unprovable identity ends unknown. This NARROWS, it does not close, the
+                    # window: a write after this check and before the provider handoff still
+                    # launches once. The flag below is possibly-sent bookkeeping, not delivery.
+                    return _ADMISSION_REFUSED
+                state["spawn_started"] = True
+                handle = self.backends.spawn_turn(
+                    spec.backend,
+                    text=prompt,
+                    cwd=spec.cwd,
+                    backend_session_id=spec.backend_session_id,
+                    is_new_session=spec.is_new_session,
+                    session=spec.session,
+                    agent_id=spec.agent_id,
+                    on_session_init=on_init,
+                    on_result=on_result,
+                    on_error=on_error,
+                    trace_id=spec.trace_id,
+                    stream=self.ctx.stream,
+                    voice_preamble=spec.synthesize_audio,
+                    synthesize_audio=spec.synthesize_audio,
+                    model=spec.model,
+                    effort=spec.effort,
+                    run_if_owned=run_if_owned,
+                )
+                state["handle"] = handle
+                team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
+                if account_attempt is not None:
+                    account_attempt.handle = handle
+            except JanitorDispatchError:
+                raise
+            except FileNotFoundError as e:
+                if attempt == 1:
+                    log("backendMissing", str(e))
+                    raise DispatchError(500, str(e)) from e
+                log_exception("retrySpawnMissing", e, detail=spec.session)
+                self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
+                                       attempts=attempt)
+            except Exception as e:
+                if attempt == 1:
+                    log_exception("backendSpawnFail", e, detail=spec.session)
+                    raise DispatchError(500, f"{spec.backend} spawn failed: {e}") from e
+                log_exception("retrySpawnFail", e, detail=spec.session)
+                self._mark_interrupted(spec, error_classify.CONNECTION, str(e),
+                                       attempts=attempt)
 
-        finally:
-            state["spawn_ready"].set()
-            if account_attempt is not None:
-                account_attempt.spawned.set()
+            finally:
+                state["spawn_ready"].set()
+                if account_attempt is not None:
+                    account_attempt.spawned.set()
+        except BaseException as exc:
+            if state.get("spawn_started"):
+                _mark_backend_invoked(exc)
+            raise
 
     def _attempt_callbacks(self, spec: _TurnSpec, attempt: int, state: dict):
         agent_id = spec.agent_id
@@ -2657,6 +2873,13 @@ class TurnDispatchService:
                 f"superseded by a newer turn; ignoring its outcome")
             return
         msg = (message or "")[:300]
+        if _is_call_opening(spec):
+            # Every failure here came back through this attempt's on_result/on_error, which
+            # only spawn_turn receives (the only callers): after spawn_started. A listen-first
+            # initiative is launched at most once, so it is never retried, redelivered,
+            # recovered or resumed on another account (no second automatic opening).
+            self._end_launched_opening(spec, category, message, attempt)
+            return
         backend = backends.by_id(spec.backend)
         if category == error_classify.USAGE_LIMIT and not spec.recovery_attempted:
             try:
@@ -2765,7 +2988,8 @@ class TurnDispatchService:
 
     def _mark_interrupted(self, spec: _TurnSpec, category: str,
                           message: str | None, *, attempts: int,
-                          quota_confirmed: bool | None = None) -> None:
+                          quota_confirmed: bool | None = None,
+                          call_opening: bool = False) -> None:
         human = {
             error_classify.CONNECTION: "Connection lost — retries exhausted",
             error_classify.TRANSIENT: "API unavailable (overloaded / rate limited)",
@@ -2805,17 +3029,27 @@ class TurnDispatchService:
         if limit_event:
             state_detail["provider_limit_event_id"] = limit_event[
                 "provider_limit_event_id"]
-        turn_lifecycle.try_transition(
-            spec.agent_id, TurnEvent.PROCESS_EXITED_FAILED, state_detail)
-        # Interruptions surface as agent state and the turnInterrupted event;
-        # they are not spoken aloud (hearing raw failure text was jarring).
-        eventlog.emit("server", "turnInterrupted", context=spec.context,
-                      detail={"reason": category, "attempts": attempts,
-                              "err": (message or "")[:300]})
-        log("turnInterrupted",
-            f"agent={spec.agent_id} reason={category} attempts={attempts} "
-            f"trace={spec.trace_id or '∅'} err={provider[:300]!r}")
-        if category != error_classify.INTERRUPTED:
+        if call_opening:
+            # The Host's own initiative, not a user's message: nothing was saved to resend.
+            state_detail["summary"] = OPENING_NOT_CONFIRMED
+            state_detail["trace_id"] = spec.trace_id
+            written = self._end_opening_state(spec, state_detail)
+        else:
+            turn_lifecycle.try_transition(
+                spec.agent_id, TurnEvent.PROCESS_EXITED_FAILED, state_detail)
+            written = True
+        if written:
+            # Interruptions surface as agent state and the turnInterrupted event;
+            # they are not spoken aloud (hearing raw failure text was jarring).
+            # A call opening's refused end shows neither.
+            eventlog.emit("server", "turnInterrupted", context=spec.context,
+                          detail={"reason": category, "attempts": attempts,
+                                  "err": (message or "")[:300]})
+            log("turnInterrupted",
+                f"agent={spec.agent_id} reason={category} attempts={attempts} "
+                f"trace={spec.trace_id or '∅'} err={provider[:300]!r}")
+        if category != error_classify.INTERRUPTED and not call_opening:
+            # A call opening has no user message to put the failure under.
             _TURN_LOCK.defer(lambda: self._record_failure_row(spec, human, provider))
         from . import oracle_delegations
         oracle_delegations.fail_for_trace(
@@ -2823,6 +3057,49 @@ class TurnDispatchService:
         # Terminal: a killed/interrupted turn still drains anything queued
         # behind it (e.g. an explicit stop, then your next message runs).
         self._finish_turn(spec)
+
+    def _end_opening_state(self, spec: _TurnSpec, state_detail: dict) -> bool:
+        """The visible end of a call opening, written only while nothing newer touched the
+        agent. A0 (its newest state row) is read FIRST, outside any transaction, then the slot
+        ownership; the write itself re-checks, in one transaction, that A0 is still the newest
+        row, the live trace is the opening's, its turn is unsettled and no hook prompt
+        admission landed after ``spec.s_open`` (turn_lifecycle's conditional transition). A
+        first dispatch that never ran leaves the agent SPAWNED, where only
+        CALL_OPENING_UNCONFIRMED is legal. Returns whether the end was written.
+
+        Accepted limits: a Claude opening that reached its own hook prompt ends refused
+        (no OPENING_NOT_CONFIRMED and no turnInterrupted); the opening stays durably unknown
+        with no retry, and a later IDLE from the reconciler is not that receipt. Interactive
+        sessions admitted before s_open are unsupported; after a dispatcher restart no end is
+        written here (no spec survives); the protection is one-sided (a later ordinary writer
+        may still replace it); the turn's settlement is not atomic with the state row."""
+        anchor = turn_lifecycle.state_generation(spec.agent_id)
+        with _TURN_LOCK:
+            owned = _SLOTS.owns(spec.agent_id, spec.trace_id)
+        if not owned:
+            log("callOpenEndSuperseded",
+                f"agent={spec.agent_id} trace={spec.trace_id or '∅'} — "
+                "ownership lost; its interrupted state is not written")
+            return False
+        event = (TurnEvent.CALL_OPENING_UNCONFIRMED
+                 if turn_lifecycle.current_kind(spec.agent_id) == AgentState.SPAWNED
+                 else TurnEvent.PROCESS_EXITED_FAILED)
+        try:
+            turn_lifecycle.transition(spec.agent_id, event, state_detail,
+                                      expect_trace=spec.trace_id, anchor=anchor,
+                                      s_open=spec.s_open)
+        except turn_lifecycle.TransitionNotWritten as refused:
+            name = {"write_busy": "callOpenEndWriteBusy",
+                    "write_lost": "callOpenEndWriteLost"}.get(refused.reason, "callOpenEndRefused")
+            log(name, f"agent={spec.agent_id} trace={spec.trace_id or '∅'} "
+                      f"reason={refused.reason} — its interrupted state is not written")
+            return False
+        except turn_lifecycle.IllegalTransition as illegal:
+            log("callOpenEndRefused",
+                f"agent={spec.agent_id} trace={spec.trace_id or '∅'} reason=illegal "
+                f"from={illegal.from_state or 'none'} — its interrupted state is not written")
+            return False
+        return True
 
     def _record_failure_row(self, spec: _TurnSpec, human: str, provider: str) -> None:
         """Put the failure in the chat, under the message that caused it.

@@ -22,7 +22,7 @@ from .clock import iso_from_ms as _iso_from_ms, now_ms
 from .db import conn
 from . import dreaming, heartbeat, origins, team_leader, team_store
 from .voice_markup import strip_hidden_blocks
-from .message_context import _strip_voice_markup, strip_injected_context
+from .message_context import CALL_OPENING_OPEN, _strip_voice_markup, strip_injected_context
 
 
 def _facade():
@@ -1170,6 +1170,12 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         sender_agent_id = ""
         msg_id = str(turn.get("id") or _message_id(
             agent_id, backend_session_id, source_file, seq))
+        if role == "user" and text.lstrip().startswith(CALL_OPENING_OPEN):
+            # A listen-first initiative's input (docs/agent-rings.md): the
+            # agent opens the call; it is never a user row.
+            removed = _delete_slot(database, agent_id, backend_session_id, source_file, seq)
+            skipped_slot_removed = skipped_slot_removed or removed > 0
+            continue
         if role == "user":
             text = strip_injected_context(text)
             if heartbeat.should_skip_heartbeat_prompt(text):

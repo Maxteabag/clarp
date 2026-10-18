@@ -21,6 +21,7 @@ OUTCOME_BY_EVENT = {
     "reconcile_repair": "interrupted", "agent_deleted": "interrupted",
     "process_exited_failed": "failed", "turn_failed_unclassified": "failed",
     "unlaunched": "failed",
+    "call_opening_unconfirmed": "failed",
 }
 OUTCOME_BY_KIND = {"done": "completed", "interrupted": "interrupted", "stopped": "interrupted"}
 UNFINISHED = frozenset({"running", "recorded", "pending", "in_progress"})
