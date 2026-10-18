@@ -281,3 +281,22 @@ def test_prefix_sharing_replies_imported_complete_and_in_order_keep_their_own_id
         {"role": "assistant", "text": "Done. The tests pass.", "timestamp": "2026-10-18T09:31:10Z"}])
     owners = _owners(agent_id)
     assert owners == {a: ("Done.", "trace-a"), b: ("Done. The tests pass.", "trace-b")}
+
+
+def test_a_reply_whose_turn_is_unknown_takes_and_clears_no_traced_row(host):
+    """No client row names the reply's turn and its time lies outside every
+    turn window: its identity is unavailable. Kept rows of other turns are
+    neither adopted nor deleted, whatever the text match; the reply gets a
+    durable row of its own."""
+    agent_id = host.agent_id
+    _prompt(agent_id, "trace-a", "first prompt")
+    a = _reply(agent_id, "trace-a", "Done.", TurnEvent.STOP_REQUESTED)
+    _prompt(agent_id, "trace-b", "second prompt")
+    b = _reply(agent_id, "trace-b", "Done. The tests pass.")
+    batch = [{"role": "user", "text": "an unrelated prompt", "timestamp": "2020-01-01T00:00:00Z"},
+             {"role": "assistant", "text": "Done. The tests pass.", "timestamp": "2020-01-01T00:00:10Z"}]
+    for _ in range(2):
+        _import(agent_id, batch)
+        owners = _owners(agent_id)
+        assert owners[a] == ("Done.", "trace-a")
+        assert owners[b] == ("Done. The tests pass.", "trace-b")
