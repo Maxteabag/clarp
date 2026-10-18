@@ -142,3 +142,42 @@ def test_a_stale_trace_writes_nothing_and_clears_nothing(host):
     # Not the agent's open turn: the ownership fence refuses the write.
     assert _stream(agent_id, "trace-old", "late delta", "msg_x") is None
     assert _log(host) == [(a["id"], "Still streaming")]
+
+
+def test_a_chain_of_turns_keeps_every_finished_reply_until_one_late_batch_import(host):
+    """Several queued turns each finish before a single late import (as when
+    the import lags under load): every reply stays, each under its own id,
+    including a turn's earlier finished message, and the batch import adopts
+    them all in place."""
+    agent_id = host.agent_id
+    replies = {}
+    for n, trace in enumerate(["trace-1", "trace-2", "trace-3"]):
+        _start(agent_id, trace)
+        if n == 0:
+            note = _stream(agent_id, trace, "Checking the outline first.", "msg_1a")
+            message_store.mark_live_message_final(
+                agent_id=agent_id, backend_session_id=BACKEND_SESSION, trace_id=trace,
+                item_key="msg_1a")
+            replies["Checking the outline first."] = note["id"]
+        text = f"Reply {n + 1} is done."
+        row = _stream(agent_id, trace, text, f"msg_{n + 1}")
+        message_store.mark_live_message_final(
+            agent_id=agent_id, backend_session_id=BACKEND_SESSION, trace_id=trace,
+            item_key=f"msg_{n + 1}")
+        _finish(agent_id, trace)
+        replies[text] = row["id"]
+    expected = list(replies.items())
+    assert [(text, id_) for id_, text in _log(host)] == expected
+    turns = []
+    for n in range(3):
+        turns.append({"role": "user", "text": f"prompt {n + 1}",
+                      "timestamp": f"2026-10-18T09:3{n}:00Z"})
+        if n == 0:
+            turns.append({"role": "assistant", "text": "Checking the outline first.",
+                          "timestamp": "2026-10-18T09:30:05Z"})
+        turns.append({"role": "assistant", "text": f"Reply {n + 1} is done.",
+                      "timestamp": f"2026-10-18T09:3{n}:10Z"})
+    message_store.store_transcript_turns(
+        agent_id=agent_id, backend_session_id=BACKEND_SESSION, source_file="/x/t.jsonl",
+        turns=turns)
+    assert [(text, id_) for id_, text in _log(host)] == expected
