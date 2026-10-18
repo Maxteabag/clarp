@@ -262,3 +262,47 @@ def test_a_fresh_database_has_the_principal_column_and_the_current_version(tmp_p
     assert c.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
     columns = {row[1]: row for row in c.execute("PRAGMA table_info(device_tokens)")}
     assert "principal" in columns and "owner" not in columns and columns["principal"][4] == "''"
+
+
+# ---- token identity and transaction ownership (review of 5be1473b) -------------------------
+
+def _raw(token, principal=""):
+    db.conn().execute("INSERT INTO device_tokens(token, session, created_at, updated_at, principal) "
+                      "VALUES (?, 's', 1, 1, ?)", (token, principal))
+
+
+def test_another_phone_cannot_bypass_the_owner_with_an_uppercase_variant(sander):
+    apns.register_token(T_PHONE, owner=PHONE)
+    before = _rows()
+    with pytest.raises(apns.TokenOwnedElsewhere):
+        apns.register_token(T_PHONE.upper(), owner=OTHER_PHONE)
+    with pytest.raises(apns.TokenOwnedElsewhere):
+        apns.register_token(T_PHONE.upper())                     # a non-device registrant either
+    assert _rows() == before
+
+
+def test_the_same_phone_registering_a_case_variant_is_idempotent(sander):
+    apns.register_token(T_PHONE, owner=PHONE)
+    apns.register_token(T_PHONE.upper(), owner=PHONE)
+    assert [t for t, r in _rows().items() if r["disabled_at"] is None] == [T_PHONE]
+    assert _rows()[T_PHONE]["owner"] == PHONE
+
+
+def test_a_legacy_case_duplicate_stays_unresolved_never_merged_or_claimed(sander):
+    _raw(T_PHONE.upper())                                        # legacy, stored before canonical case
+    apns.register_token(T_PHONE, owner=PHONE)
+    rows = _rows()
+    assert rows[T_PHONE.upper()] == {"token": T_PHONE.upper(), "owner": "", "disabled_at": None}
+    assert rows[T_PHONE]["owner"] == PHONE
+    assert rings.set_receive_rings(PHONE, {"receive_rings": False})["state"] == "partial"
+
+
+def test_inside_a_callers_transaction_registration_never_commits_or_rolls_back_for_it(sander):
+    c = db.conn()
+    c.execute("BEGIN")
+    apns.register_token(T_PHONE, owner=PHONE)
+    with pytest.raises(apns.TokenOwnedElsewhere):
+        apns.register_token(T_PHONE, owner=OTHER_PHONE)
+    assert c.in_transaction                                      # the caller still owns its transaction
+    c.execute("ROLLBACK")
+    assert T_PHONE not in _rows()

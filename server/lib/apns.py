@@ -140,7 +140,7 @@ def register_token(token: str, session: str | None = None,
       limited to unbound rows: legacy rows are preserved, never guessed into an owner or mass-disabled.
     """
     from . import db
-    token = (token or "").strip()
+    token = canonical_token(token)
     if not token:
         raise ValueError("empty device token")
     env = (environment or "").strip().lower() or "production"
@@ -151,13 +151,25 @@ def register_token(token: str, session: str | None = None,
     owner_key = (owner or "").strip()
     now = db.now_ms()
     database = db.conn()
-    database.execute("BEGIN IMMEDIATE")
+    # Own the transaction only when none is open; inside a caller's transaction, a savepoint, so this never
+    # commits or rolls back what the caller owns.
+    nested = database.in_transaction
+    database.execute("SAVEPOINT register_token" if nested else "BEGIN IMMEDIATE")
     try:
-        row = database.execute("SELECT principal FROM device_tokens WHERE token = ?", (token,)).fetchone()
-        bound = (row["principal"] if row is not None else "") or ""
-        if bound and bound != owner_key:
-            raise TokenOwnedElsewhere(bound)
+        # Token identity is case-insensitive for APNs hex: every stored case variant counts. Any variant bound
+        # to another principal (or any bound variant, for a non-device registrant) is refused before a write.
+        variants = database.execute(
+            "SELECT token, principal FROM device_tokens WHERE lower(token) = lower(?)", (token,)).fetchall()
+        if any((v["principal"] or "") and v["principal"] != owner_key for v in variants):
+            raise TokenOwnedElsewhere(next(v["principal"] for v in variants if v["principal"]))
         if owner_key:
+            # The same owner's own other-case rows of this token: retire them (same phone, same token).
+            # Unbound legacy case variants stay as they are: ambiguous, never merged or claimed.
+            database.execute(
+                """UPDATE device_tokens SET disabled_at = ?
+                    WHERE lower(token) = lower(?) AND token != ? AND principal = ? AND disabled_at IS NULL""",
+                (now, token, token, owner_key),
+            )
             database.execute(
                 """UPDATE device_tokens
                       SET disabled_at = ?
@@ -216,10 +228,21 @@ def register_token(token: str, session: str | None = None,
                     disabled_at = NULL""",
             (token, session_key, platform_key, env, base_url_key, grant_key, now, now, owner_key),
         )
-        database.execute("COMMIT")
+        database.execute("RELEASE register_token" if nested else "COMMIT")
     except BaseException:
-        database.execute("ROLLBACK")
+        if nested:
+            database.execute("ROLLBACK TO register_token")
+            database.execute("RELEASE register_token")
+        else:
+            database.execute("ROLLBACK")
         raise
+
+
+def canonical_token(token) -> str:
+    """One identity per APNs token: a hex token is stored lowercase (APNs treats case as the same token);
+    anything else (other platforms) is kept exactly, only trimmed."""
+    value = str(token or "").strip()
+    return value.lower() if value and all(c in "0123456789abcdefABCDEF" for c in value) else value
 
 
 def active_tokens() -> list[dict]:
