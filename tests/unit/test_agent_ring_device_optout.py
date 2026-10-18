@@ -48,7 +48,7 @@ def _event(**extra):
 
 def test_every_phone_receives_rings_by_default(sander):
     assert rings.receives_rings(PHONE) and rings.receives_rings(OTHER_PHONE)
-    assert rings.device_state(PHONE) == {"ok": True, "receive_rings": True, "push_token_bound": False}
+    assert rings.device_state(PHONE) == {"ok": True, "receive_rings": True, "push_token_bound": False, "alerts_suppressed": False, "state": "on"}
 
 
 def test_a_phone_that_switched_rings_off_gets_no_voip_for_a_classic_or_a_live_ring(senders):
@@ -92,7 +92,7 @@ def test_a_phone_that_switched_rings_off_sees_no_ring_event_and_no_ring_in_the_p
 def test_switching_rings_on_again_restores_every_path(senders):
     rings.set_receive_rings(PHONE, {"receive_rings": False, "push_token": ALERT_PHONE})
     assert rings.set_receive_rings(PHONE, {"receive_rings": True}) == \
-        {"ok": True, "receive_rings": True, "push_token_bound": False}
+        {"ok": True, "receive_rings": True, "push_token_bound": False, "alerts_suppressed": False, "state": "on"}
     _ring()
     assert senders["voip"] == [sorted([PHONE, OTHER_PHONE])]
     assert senders["alert"] == [] or all(excluded == [] for _, excluded in senders["alert"])
@@ -149,7 +149,7 @@ def test_a_rotated_alert_token_is_reported_unbound_never_as_complete(sander):
     rings.set_receive_rings(PHONE, {"receive_rings": False, "push_token": ALERT_PHONE})
     assert rings.device_state(PHONE)["push_token_bound"] is True
     _bind_alert(ALERT_OTHER, session="phone")          # iOS rotated the token: the old row is disabled
-    assert rings.device_state(PHONE) == {"ok": True, "receive_rings": False, "push_token_bound": False}
+    assert rings.device_state(PHONE) == {"ok": True, "receive_rings": False, "push_token_bound": False, "alerts_suppressed": False, "state": "partial"}
 
 
 def test_a_token_already_bound_to_another_phone_is_refused_never_taken(sander):
