@@ -653,6 +653,9 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
     the transcript turn of each returned row. A checkpoint that fails to
     write is logged and dropped; it never fails the import.
     """
+    # Pure text normalization can dominate a large transcript import; do it
+    # before taking SQLite's single writer lock, once per assistant message.
+    visible_replies = _visible_replies(turns)
     database = _facade().conn()
     for locked in (False, True):
         writer = _ImportWriter(database, locked=locked)
@@ -661,7 +664,8 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                 writer, agent_id=agent_id,
                 backend_session_id=backend_session_id,
                 source_file=source_file, turns=turns,
-                capture_at=capture_at, captured=captured, out_seqs=out_seqs)
+                capture_at=capture_at, captured=captured, out_seqs=out_seqs,
+                visible_replies=visible_replies)
             if on_stored is not None:
                 _write_checkpoint(writer, database, on_stored, captured)
             writer.commit()
@@ -677,6 +681,12 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                 database.execute("ROLLBACK")
             raise
     raise AssertionError("the locked import pass cannot need a write")
+
+
+def _visible_replies(turns: list[dict[str, Any]]) -> list[str]:
+    """Each turn's assistant text with voice markup stripped ('' otherwise)."""
+    return [_strip_voice_markup(turn.get("text")) if turn.get("role") == "assistant" else ""
+            for turn in turns]
 
 
 def _write_checkpoint(writer, database, on_stored, captured) -> None:
@@ -717,6 +727,7 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
     The incremental import's store. Production never calls it: the shadow
     (lib.transcript_incremental) only plans it with ``plan_transcript_tail``;
     the equivalence tests apply it to prove it matches the full import."""
+    visible_replies = _visible_replies(turns)
     database = _facade().conn()
     writer = _ImportWriter(database, locked=True)
     try:
@@ -724,7 +735,8 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
             start_seq=start_seq, carry=carry,
-            capture_at=capture_at, captured=captured)
+            capture_at=capture_at, captured=captured,
+            visible_replies=visible_replies)
         writer.commit()
         return out
     except Exception:
@@ -803,6 +815,7 @@ def plan_transcript_tail(*, agent_id: str, backend_session_id: str,
 
     Returns the rows it would hold (``out``), the ids it would delete or
     update, the clock it started from and the carried state at its end."""
+    visible_replies = _visible_replies(turns)
     database = _facade().conn()
     writer = _PlanWriter(database)
     end_state: dict[str, Any] = {}
@@ -811,7 +824,8 @@ def plan_transcript_tail(*, agent_id: str, backend_session_id: str,
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
             start_seq=start_seq, carry=carry,
-            capture_at=start_seq + len(turns), captured=end_state)
+            capture_at=start_seq + len(turns), captured=end_state,
+            visible_replies=visible_replies)
         return {"out": out, "deleted": writer.deleted, "updated": writer.updated,
                 "revision_floor": writer.revision_floor, "end_state": end_state}
     finally:
@@ -885,11 +899,18 @@ class _FinalRows:
         return self._rows
 
 
-def _live_matches(database, agent_id: str, backend_session_id: str, visible: str,
-                  exclude: set[str]) -> tuple[list, list]:
-    """Still-live streamed rows whose text equals ``visible`` and those whose
-    text is a prefix-relative of it (either direction), oldest first."""
-    exact, prefix = [], []
+def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
+                   *, exclude: set[str], trace: str) -> str:
+    """The still-live streamed row of this reply's own turn that it completes.
+
+    Kept rows of several turns can coexist, so only a row of the reply's turn
+    qualifies; a reply whose turn is unknown takes only an untraced row. A text
+    match in another turn is never taken. Exact text wins over a prefix; among
+    equals the oldest."""
+    visible = _strip_voice_markup(text)
+    if not visible:
+        return ""
+    exact = prefix = elsewhere = ""
     for row in database.execute(
             """SELECT message_id, text, trace_id FROM messages
                 WHERE agent_id=? AND backend_session_id=? AND role='assistant'
@@ -899,59 +920,23 @@ def _live_matches(database, agent_id: str, backend_session_id: str, visible: str
         if row["message_id"] in exclude:
             continue
         streamed = _strip_voice_markup(row["text"])
-        if streamed == visible:
-            exact.append(row)
-        elif streamed and (visible.startswith(streamed) or streamed.startswith(visible)):
-            prefix.append(row)
-    return exact, prefix
-
-
-def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
-                   *, exclude: set[str], trace: str) -> str:
-    """The still-live streamed row of this reply's own turn that it completes.
-
-    Kept rows of several turns can coexist, so a text match alone could hand
-    one turn's row to another turn's reply. With the reply's turn known only
-    that turn's rows qualify. Without it, a match is taken only when every
-    candidate at the best level (exact text, else prefix) belongs to one turn;
-    otherwise nothing is adopted. Exact text wins over a prefix; among equals
-    the oldest."""
-    visible = _strip_voice_markup(text)
-    if not visible:
-        return ""
-    for rows in _live_matches(database, agent_id, backend_session_id, visible, exclude):
-        if trace:
-            rows = [row for row in rows if (row["trace_id"] or "") == trace]
-        elif len({row["trace_id"] or "" for row in rows}) > 1:
-            return ""
-        if rows:
-            return str(rows[0]["message_id"])
-    return ""
-
-
-def _live_traces_by_text(database, agent_id: str,
-                         backend_session_id: str) -> list[tuple[str, str]]:
-    return [(row["trace_id"] or "", _strip_voice_markup(row["text"]))
-            for row in database.execute(
-                """SELECT text, trace_id FROM messages
-                    WHERE agent_id=? AND backend_session_id=? AND role='assistant'
-                      AND source_file LIKE 'live:%'""",
-                (agent_id, backend_session_id)).fetchall()]
+        if not _related(visible, streamed):
+            continue
+        if (row["trace_id"] or "") != trace:
+            elsewhere = elsewhere or str(row["message_id"])
+        elif streamed == visible:
+            exact = exact or str(row["message_id"])
+        else:
+            prefix = prefix or str(row["message_id"])
+    if not (exact or prefix) and elsewhere:
+        from .log import log
+        log("transcriptLiveTwinOtherTurn",
+            f"agent={agent_id} trace={trace or '-'} kept={elsewhere}")
+    return exact or prefix
 
 
 def _related(a: str, b: str) -> bool:
     return bool(a and b) and (a.startswith(b) or b.startswith(a))
-
-
-def _owns_leftover(trace: str, final: str, live_trace: str, live_text: str,
-                   live_traces: list[tuple[str, str]]) -> bool:
-    """Whether this batch reply (of turn ``trace``, '' if unknown) is the
-    durable copy of a leftover live row of turn ``live_trace``."""
-    if not _related(final, live_text):
-        return False
-    if trace:
-        return trace == live_trace
-    return len({t for t, text in live_traces if _related(final, text)}) <= 1
 
 
 def _final_twins(final_rows: _FinalRows, *, text: str, timestamp: Any,
@@ -998,6 +983,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                                 capture_at: int | None = None,
                                 captured: dict[str, Any] | None = None,
                                 out_seqs: list[int] | None = None,
+                                visible_replies: list[str] | None = None,
                                 ) -> list[dict[str, Any]]:
     """Import ``turns`` as transcript rows ``start_seq`` onward.
 
@@ -1152,7 +1138,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 (agent_id, backend_session_id, assistant_ordinal,
                  assistant_ordinal),).fetchone()
             assistant_ordinal += 1
-            visible_reply = _strip_voice_markup(turn.get("text"))
+            visible_reply = visible_replies[index] if visible_replies is not None \
+                else _strip_voice_markup(turn.get("text"))
             if visible_reply:
                 batch_finals.append(
                     ((authority["trace_id"] or "") if authority is not None else reply_trace,
@@ -1423,10 +1410,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     # still matches its durable copy (markup stripped); raw startswith missed it.
     live_replace_revision = 0
     # A leftover live row goes only when a reply of ITS OWN turn landed in
-    # this batch; another turn's kept row waits for its own reply. A reply
-    # whose turn is unknown claims a leftover only while no other turn's live
-    # row matches it too.
-    live_traces = _live_traces_by_text(database, agent_id, backend_session_id)
+    # this batch (a reply of unknown turn: only an untraced row); another
+    # turn's kept row waits for its own reply.
     for live in database.execute(
         """SELECT message_id, text, trace_id FROM messages
             WHERE agent_id = ? AND backend_session_id = ?
@@ -1438,7 +1423,7 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if not live_text:
             continue
         live_trace = live["trace_id"] or ""
-        if any(_owns_leftover(trace, final, live_trace, live_text, live_traces)
+        if any(trace == live_trace and _related(final, live_text)
                for trace, final in batch_finals):
             live_replace_revision = max(live_replace_revision, _next_revision(database))
             latest_revision = max(latest_revision, live_replace_revision)
