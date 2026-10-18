@@ -177,3 +177,12 @@ def test_the_ring_a_phone_answered_stays_visible_to_it_after_it_switched_rings_o
     assert rings.event_visible(_event(state="ended", answered_by=PHONE, conversation_mode="agent_live_v1"), PHONE)
     assert not rings.event_visible(_event(state="answered", answered_by=OTHER_PHONE), PHONE)
     assert not rings.event_visible(_event(state="ringing"), PHONE)
+
+
+def test_the_answer_states_plainly_whether_ring_alerts_are_suppressed(sander):
+    assert rings.device_state(PHONE)["state"] == "on"
+    off = rings.set_receive_rings(PHONE, {"receive_rings": False})
+    assert (off["state"], off["alerts_suppressed"]) == ("partial", False)    # ring alerts still go out
+    _bind_alert(ALERT_PHONE)
+    off = rings.set_receive_rings(PHONE, {"receive_rings": False, "push_token": ALERT_PHONE})
+    assert (off["state"], off["alerts_suppressed"]) == ("off", True)
