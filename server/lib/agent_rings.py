@@ -435,7 +435,7 @@ def _answer_live(records: list[dict], ring: dict, principal: str, mode: str | No
         _live_intent(request_id, client_nonce)
         # The owner's repeat binds its exact original intent: the same request with the same nonce.
         if request_id != ring.get("_live_request_id"):
-            raise CallError(409, live.OWNER_CONFLICT)
+            raise CallError(409, live.CALL_STALE)   # another request mints no new attempt (fef6043f)
         if client_nonce != ring.get("_live_client_nonce"):
             raise CallError(400, live.REQUEST_INVALID)
         return False
