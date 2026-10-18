@@ -95,7 +95,7 @@ def test_a_finalized_reply_survives_the_next_turn_streaming_before_its_import(ho
 
 def test_the_late_import_adopts_the_kept_reply_once_under_its_id(host):
     agent_id = host.agent_id
-    _start(agent_id, "trace-a")
+    _prompt(agent_id, "trace-a", "work on the slides")
     a = _stream(agent_id, "trace-a", REPLY_A, "msg_a")
     message_store.mark_live_message_final(
         agent_id=agent_id, backend_session_id=BACKEND_SESSION, trace_id="trace-a",
@@ -152,7 +152,7 @@ def test_a_chain_of_turns_keeps_every_finished_reply_until_one_late_batch_import
     agent_id = host.agent_id
     replies = {}
     for n, trace in enumerate(["trace-1", "trace-2", "trace-3"]):
-        _start(agent_id, trace)
+        _prompt(agent_id, trace, f"prompt {n + 1}")
         if n == 0:
             note = _stream(agent_id, trace, "Checking the outline first.", "msg_1a")
             message_store.mark_live_message_final(

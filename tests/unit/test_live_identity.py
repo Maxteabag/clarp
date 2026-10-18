@@ -35,6 +35,10 @@ def test_import_adopts_the_live_row_instead_of_swapping_it():
     live = message_store.upsert_live_assistant_message(
         agent_id=agent_id, backend_session_id="b-1", trace_id="t-1",
         text="The answer is 42.")
+    # /send's client row names the reply's turn for the import.
+    message_store.record_user_message(
+        agent_id=agent_id, backend_session_id="b-1", client_msg_id="c-1",
+        text="question", trace_id="t-1")
     message_store.store_transcript_turns(
         agent_id=agent_id, backend_session_id="b-1", source_file="/x/t.jsonl",
         turns=[{"role": "user", "text": "question", "timestamp": "2026-10-03T00:00:00Z"},
@@ -57,6 +61,9 @@ def test_each_provider_message_streams_into_its_own_row():
     assert [r["text"] for r in _rows(agent_id)] == ["Looking at it.", "Found it."]
     assert _replace_revision(agent_id) == 0
     # The first message lands durably while the second still streams.
+    message_store.record_user_message(
+        agent_id=agent_id, backend_session_id="b-1", client_msg_id="c-1",
+        text="q", trace_id="t-1")
     message_store.store_transcript_turns(
         agent_id=agent_id, backend_session_id="b-1", source_file="/x/t.jsonl",
         turns=[{"role": "user", "text": "q", "timestamp": "2026-10-03T00:00:00Z"},

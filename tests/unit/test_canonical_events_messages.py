@@ -1,4 +1,5 @@
 from lib import agents as agents_db
+from lib.clock import iso_from_ms as _iso_from_ms, now_ms
 from lib.audio_stream import AudioStream
 from lib.protocol import ClipStatus
 
@@ -227,8 +228,9 @@ def test_live_assistant_row_superseded_despite_speak_markup(tmp_path):
     )
     agents_db.store_transcript_turns(
         agent_id=agent_id, backend_session_id=bsid, source_file="/tmp/t.jsonl",
+        # Wall-clock time inside the open turn, as a real transcript has.
         turns=[{"role": "assistant", "text": "Right, on it",
-                "timestamp": "2026-01-01T00:00:01Z"}],
+                "timestamp": _iso_from_ms(now_ms())}],
     )
     assistant = [m for m in agents_db.list_messages(agent_id=agent_id,
                  backend_session_id=bsid) if m["role"] == "assistant"]
@@ -406,8 +408,10 @@ def test_live_assistant_message_updates_and_final_transcript_adopts_it(tmp_path)
         source_file="/tmp/transcript.jsonl",
         turns=[
             *old_turns,
-            {"role": "user", "text": "new question", "timestamp": "3"},
-            {"role": "assistant", "text": "streaming hello world", "timestamp": "4"},
+            # Wall-clock times inside the open turn, as a real transcript has.
+            {"role": "user", "text": "new question", "timestamp": _iso_from_ms(now_ms() - 1)},
+            {"role": "assistant", "text": "streaming hello world",
+             "timestamp": _iso_from_ms(now_ms())},
         ],
     )
     visible = agents_db.list_messages(agent_id=agent_id, backend_session_id=bsid)

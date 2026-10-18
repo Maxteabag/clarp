@@ -39,6 +39,15 @@ def _private(agent: str, text: str, *, client_id: str, timestamp: str):
 def _answer(agent: str, text: str, timestamp: str, trace: str):
     """Stream, then import the whole backend transcript as the runners do."""
     agents_db.open_turn(agent_id=agent, source="pwa", trace_id=trace)
+    # The dispatcher records the prompt's client row under the turn's trace;
+    # the transcript import names the reply's turn from it.
+    pending = agents_db.conn().execute(
+        """SELECT source_file FROM messages WHERE agent_id = ? AND role = 'user'
+              AND source_file LIKE 'client:%' AND COALESCE(trace_id, '') = ''
+            ORDER BY timestamp DESC, seq DESC LIMIT 1""", (agent,)).fetchone()
+    if pending:
+        message_store.relink_client_message(
+            pending["source_file"].split(":", 1)[1], trace_id=trace)
     message_store.upsert_live_assistant_message(
         agent_id=agent, backend_session_id="bs1", trace_id=trace, text=text)
     history = _TRANSCRIPTS.setdefault(agent, [])
