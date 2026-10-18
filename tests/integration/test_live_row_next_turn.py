@@ -284,14 +284,14 @@ def test_prefix_sharing_replies_imported_complete_and_in_order_keep_their_own_id
 
 
 def test_a_reply_whose_turn_is_unknown_takes_and_clears_no_traced_row(host):
-    """No client row names the reply's turn and its time lies outside every
+    """No client row exists at all and the reply's time lies outside every
     turn window: its identity is unavailable. Kept rows of other turns are
     neither adopted nor deleted, whatever the text match; the reply gets a
     durable row of its own."""
     agent_id = host.agent_id
-    _prompt(agent_id, "trace-a", "first prompt")
+    _start(agent_id, "trace-a")
     a = _reply(agent_id, "trace-a", "Done.", TurnEvent.STOP_REQUESTED)
-    _prompt(agent_id, "trace-b", "second prompt")
+    _start(agent_id, "trace-b")
     b = _reply(agent_id, "trace-b", "Done. The tests pass.")
     batch = [{"role": "user", "text": "an unrelated prompt", "timestamp": "2020-01-01T00:00:00Z"},
              {"role": "assistant", "text": "Done. The tests pass.", "timestamp": "2020-01-01T00:00:10Z"}]
@@ -300,3 +300,21 @@ def test_a_reply_whose_turn_is_unknown_takes_and_clears_no_traced_row(host):
         owners = _owners(agent_id)
         assert owners[a] == ("Done.", "trace-a")
         assert owners[b] == ("Done. The tests pass.", "trace-b")
+
+
+def test_an_untraced_live_row_is_not_claimed_by_a_reply_of_unknown_turn(host):
+    """A missing trace is missing identity, not proof of a shared turn: a reply
+    of unknown turn leaves even an untraced live row in place (legacy control,
+    no client row)."""
+    agent_id = host.agent_id
+    _start(agent_id, "trace-a")
+    untraced = message_store.upsert_live_assistant_message(
+        agent_id=agent_id, backend_session_id=BACKEND_SESSION, trace_id="", text="Done.")
+    _finish(agent_id, "trace-a")
+    _import(agent_id, [{"role": "user", "text": "an unrelated prompt", "timestamp": "2020-01-01T00:00:00Z"},
+                       {"role": "assistant", "text": "Done.", "timestamp": "2020-01-01T00:00:10Z"}])
+    rows = {r["message_id"]: (r["text"], r["source_file"]) for r in agents_db.conn().execute(
+        "SELECT message_id, text, source_file FROM messages WHERE agent_id = ? AND role = 'assistant'",
+        (agent_id,)).fetchall()}
+    assert rows[untraced["id"]] == ("Done.", f"live:{untraced['id']}")   # not adopted
+    assert [text for id_, (text, _) in rows.items() if id_ != untraced["id"]] == ["Done."]
