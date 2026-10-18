@@ -176,13 +176,23 @@ def _insert_live_message_atomic(
                 database.execute("ROLLBACK")
                 return False, 0, False
         revision = _next_revision(database)
-        # A live row left behind by an earlier turn (interrupted before its
-        # transcript landed) goes; this turn's earlier messages stay.
+        # A live row an earlier turn left unfinished (interrupted or failed
+        # before its transcript landed) goes; this turn's earlier messages
+        # stay. So does a finished reply whose import has not landed yet: one
+        # marked final, or the last row of a turn that completed (runners that
+        # settle a message only when the next starts leave it live). The
+        # import adopts it in place.
         replaced = database.execute(
             """DELETE FROM messages
                 WHERE agent_id=? AND backend_session_id=?
                   AND source_file LIKE 'live:%' AND message_id<>?
-                  AND COALESCE(trace_id, '')<>?""",
+                  AND COALESCE(trace_id, '')<>?
+                  AND kind='live'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM turns
+                       WHERE turns.agent_id=messages.agent_id
+                         AND turns.trace_id=messages.trace_id
+                         AND turns.outcome='completed')""",
             (agent_id, backend_session_id, msg_id, trace_id or ""),
         ).rowcount > 0
         # Each message of a turn gets its own slot in the live band, in the
