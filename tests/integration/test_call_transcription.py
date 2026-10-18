@@ -80,7 +80,10 @@ def test_a_present_call_header_is_validated_before_any_stt(host):
 def test_the_settings_read_back_unset_by_default(host):
     status, body = call(host, "GET", "/server-info", token="qa-host-test")
     assert "call_transcription_policy" in body["capabilities"]["features"]
-    assert body["contract"]["features"]["call_transcription_policy"] == 67
+    # Its introduction number (booked at the landing, shared with listen-first), never a fixed one.
+    introduced = body["contract"]["features"]["call_transcription_policy"]
+    assert 1 < introduced <= body["contract"]["host"]
+    assert introduced == body["contract"]["features"]["agent_ring_listen_first"]
 
 
 # ---- L2 on a real Host: the language handed at the engine boundary (recording engines) -----------

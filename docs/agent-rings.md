@@ -185,7 +185,7 @@ call"). The reason shows on the lock screen only when the owner opts in:
 `POST /calls/ring/settings {"show_reason": true}`. The app still receives
 the reason in the payload.
 
-## Listen-first (feature `agent_ring_listen_first`, contract 67)
+## Listen-first (feature `agent_ring_listen_first`; contract number booked at landing)
 
 The normative contract is the agreed listen-first v5 (§11, then §10, §9, §9.1).
 A ring may ask the phone to let the user speak first:

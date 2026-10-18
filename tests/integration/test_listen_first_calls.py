@@ -126,8 +126,10 @@ def user_rows(host):
 def test_the_host_advertises_listen_first(host):
     info = host.request("/server-info")
     assert "agent_ring_listen_first" in info["capabilities"]["features"]
-    assert info["contract"]["features"]["agent_ring_listen_first"] == 67
-    assert info["contract"]["host"] >= 67
+    # Its introduction number (booked at the landing, shared with the call policy), never a fixed one.
+    introduced = info["contract"]["features"]["agent_ring_listen_first"]
+    assert 1 < introduced <= info["contract"]["host"]
+    assert introduced == info["contract"]["features"]["call_transcription_policy"]
 
 
 def test_the_qa_host_provisions_its_instance_generation_inside_its_root(host):
