@@ -27,6 +27,7 @@ import json
 import socket
 import threading
 import time
+import uuid
 from typing import Any
 
 from . import agent_ring_live as live
@@ -36,6 +37,11 @@ from .log import log, log_exception
 JOIN_WAIT_S = 10.0              # the first frame must come this soon after the upgrade
 CLIENT_IDLE_S = 30.0            # a phone that sends nothing (audio, ping) this long is gone
 OPENING_ACK_S = 10.0            # the provider must take the opening this soon after it was sent
+# Provider audio that arrives after the opening append was handed to the upstream socket but before its ACK is held,
+# never forwarded, up to this many decoded PCM bytes (3 s of 24 kHz mono PCM16, the phone's own ACK-output hold cap).
+OPENING_HOLD_BYTES = 144_000
+OPENING_HOLD_FRAME_B64 = 4 * ((OPENING_HOLD_BYTES + 2) // 3)   # longest base64 that can decode within the cap (192000)
+UPSTREAM_ORDER_EVENTS = 40      # metadata-only order log: the first N upstream event types per call
 READY_S = 15.0                  # phone and provider must both be ready this soon after the join, pings or not
 TICK_S = 0.1
 POLITE_CLOSE_S = 1.0            # the polite session.close (lock and send) before the transport is shut anyway
@@ -143,6 +149,22 @@ class LiveSocket:
         self._state = threading.Lock()
         self.client_ready = self.provider_ready = self.opening_sent = self.admitted = self.forwarding = False
         self.opening_sent_at = 0.0
+        # opening_sent only RESERVES the opening; opening_send_started is set under the send lock immediately before
+        # the append is handed to the upstream socket. Output can be attributed to the opening only after that.
+        # Opening stages, each distinct: opening_sent (reserved) -> SILENCE sent -> opening_send_started (append handed to
+        # the socket, under the send lock) -> opening_issued (send returned) -> admitted (matching ACK accepted) ->
+        # drained (opening_admitted and the held audio written). Output is attributable to the opening only after
+        # opening_send_started; an uncorrelated ACK only after opening_issued with exactly one instructions append.
+        self.opening_send_started = self.opening_issued = self.drained = False
+        self.opening_event_id = uuid.uuid4().hex
+        self.instructions_appends_issued = 0
+        self._pending_ack: dict | None = None   # a receipt (with or without id) that arrived during the send
+        self._opening_send_failed = False       # set inside the failed send, before any effect is released
+        self._ack_kind = ""                     # "correlated" or "uncorrelated_single_outstanding" (metadata)
+        self._emit = threading.RLock()          # serializes admission, held audio, live output and retirement
+        self._held: list[str] = []              # provider deltas after the opening send, before the drain
+        self._held_bytes = self._held_peak = 0
+        self._order: list[str] = []             # metadata-only upstream event order (type@ms[:cid])
         self.joined_at = time.monotonic()       # absolute: no frame or ping moves it
         self.reason = ""
 
@@ -217,6 +239,9 @@ class LiveSocket:
         def send():
             with self._send_lock:
                 upstream.send(json.dumps(event))
+                if event.get("type") == "session.instructions.append":
+                    with self._state:
+                        self.instructions_appends_issued += 1
         self.effect(send)
 
     # -- authority on the ring record ---------------------------------------------------
@@ -265,7 +290,14 @@ class LiveSocket:
                 return
             self.closed.set()
             self.reason = reason
+            self._held, self._held_bytes = [], 0          # held audio is never forwarded after a retirement
         self.stop.set()
+        try:
+            _quiet_note("agentLiveUpstreamOrder", f"call={self.call_id} reason={reason} admitted={self.admitted} "
+                        f"ack={self._ack_kind or 'none'} held_peak_bytes={self._held_peak} "
+                        f"instructions_appends={self.instructions_appends_issued} events={','.join(self._order)}")
+        except Exception:  # noqa: BLE001 - diagnostics never affect the stop
+            pass
         try:
             live._mark_retired(self.call_id)
         except Exception as exc:  # noqa: BLE001 - the stop below must still run
@@ -377,32 +409,114 @@ class LiveSocket:
         # The provider ingests an append only while input audio flows (U-1), so one frame goes first.
         self.upstream_send({"type": "session.input_audio.append", "audio": SILENCE})
         from .oracle_live_wire import LiveWire
-        self.upstream_send(LiveWire("api").context(
-            "instructions", "OPENING: say exactly this, once, now: " + self.snapshot["opening_text"]))
+        self._send_opening(LiveWire("api").context(
+            "instructions", "OPENING: say exactly this, once, now: " + self.snapshot["opening_text"],
+            event_id=self.opening_event_id))
 
-    def _admit(self) -> None:
+    def _send_opening(self, event: dict) -> None:
+        """Hand the opening append to the upstream socket. opening_send_started is marked under the send lock
+        immediately before the send (the provider cannot answer an append it has not received); opening_issued and
+        the instructions-append count only after the send returned. A send failure ends the call (nothing held is
+        ever forwarded). A receipt without client_event_id that arrived during the send is decided right after."""
+        upstream = self.upstream
+        if upstream is None:
+            return
+        outcome = {"failed": None, "pending": None}
+
+        def send():
+            with self._send_lock:
+                with self._state:
+                    self.opening_send_started = True
+                    self.opening_sent_at = time.monotonic()
+                try:
+                    upstream.send(json.dumps(event))
+                except Exception as exc:  # noqa: BLE001 - the call cannot open; reported below
+                    outcome["failed"] = exc
+                    with self._state:  # terminal BEFORE the send lock and fence are released: no ACK admits, no hold drains
+                        self._opening_send_failed = True
+                        self._pending_ack = None
+                        self._held, self._held_bytes = [], 0
+                    self.ending.set()
+                    return
+                with self._state:
+                    self.opening_issued = True
+                    self.instructions_appends_issued += 1
+                    outcome["pending"], self._pending_ack = self._pending_ack, None
+        self.effect(send)
+        if outcome["failed"] is not None:
+            _quiet_log("agentLiveOpeningSendFail", outcome["failed"], self.call_id)
+            return self.fail("live_unavailable", "opening_send_failed")
+        if outcome["pending"] is not None:
+            self._admit(outcome["pending"])
+
+    def _admit(self, event: dict | None = None) -> None:
+        """The provider acknowledged THIS opening: admit exactly once, then the held audio in order, before any later
+        output (the emit lock serializes this against _output and the drain's own effects against retirement).
+
+        Correlated: client_event_id == this opening's event_id. A present but different id is rejected. Absent id:
+        accepted only when this append has actually been issued AND it is the only instructions append ever issued
+        on this upstream session (none other outstanding) and the call is still current; marked uncorrelated."""
+        event = event or {}
+        # Key ABSENCE is the only "absent id". A present id that is null, empty, non-string or different is malformed or
+        # foreign and is rejected outright (never the sole-append fallback, never pending).
+        has_cid = "client_event_id" in event
+        cid = event.get("client_event_id")
         with self._state:
-            if self.admitted or not self.opening_sent or self.closed.is_set():
+            if (self.admitted or self.closed.is_set() or self.ending.is_set() or not self.opening_send_started
+                    or self._opening_send_failed):
                 return
-            self.admitted = True
-        if not self._record(lambda ring: ring.update(_live_phase="active")):
-            return self.fail("live_call_stale", "stale")
-        self.downstream({"type": "agent_live.opening_admitted", **self.ids(), "context_digest": self.context_digest})
+            if has_cid and (not isinstance(cid, str) or cid != self.opening_event_id):
+                kind = "foreign"
+            elif not self.opening_issued:
+                # A receipt during the send (reentrant or fast): decided only after the send returned; discarded if it
+                # failed, so nothing can be admitted or drained for an append that was never fully issued.
+                if self._pending_ack is None:
+                    self._pending_ack = dict(event)
+                return
+            elif has_cid:
+                kind = "correlated"
+            elif self.instructions_appends_issued != 1:
+                kind = "ambiguous"
+            else:
+                kind = "uncorrelated_single_outstanding"
+            if kind in ("correlated", "uncorrelated_single_outstanding"):
+                self.admitted = True
+                self._ack_kind = kind
+        if kind in ("foreign", "ambiguous"):
+            _quiet_note("agentLiveAckRejected", f"call={self.call_id} kind={kind}")
+            return
+        if live.retired(self.call_id) or not self._record(lambda ring: ring.update(_live_phase="active")):
+            return self.fail("live_call_stale", "stale")       # the ring write happens outside the emit lock
+        with self._emit:
+            with self._state:
+                if self.closed.is_set() or self.ending.is_set():
+                    return                     # a terminal verdict was reached first: nothing is admitted or drained
+                held, self._held, self._held_bytes = self._held, [], 0
+            if not self.effect(lambda: self.downstream({"type": "agent_live.opening_admitted", **self.ids(),
+                                                        "context_digest": self.context_digest})):
+                return
+            for delta in held:                 # in arrival order, each through the retirement fence, never twice
+                if self.ending.is_set() or not self.effect(
+                        lambda d=delta: self.downstream({"type": "session.output_audio.delta", "delta": d})):
+                    return
+            with self._state:
+                self.drained = True
 
     # -- upstream events ------------------------------------------------------------------
     def receive(self, event: dict) -> None:
         kind = event.get("type")
+        self._note_order(kind, event)
         if kind == "session.started":
             with self._state:
                 self.provider_ready = True
             self.downstream({"type": "agent_live.provider_ready", **self.ids()})
             self._maybe_open()
         elif kind == "session.instructions.appended":
-            self._admit()
+            self._admit(event)
         elif kind == "session.output_audio.delta":
             self._output(event.get("delta"))
         elif kind == "session.output_audio.interrupted":
-            if self.admitted and not self.closed.is_set():
+            if self.drained and not self.closed.is_set():
                 self.downstream({"type": "oracle_v2.playback_flush"})
                 self.downstream({"type": "oracle_v2.quiet"})
         elif kind == "session.closed":
@@ -416,18 +530,76 @@ class LiveSocket:
     def _output(self, delta: Any) -> None:
         """Provider audio reaches the phone only after the opening was admitted and while the call is current.
 
-        Any provider output before the provider acknowledged the opening is a violation of the admitted-opening
-        rule: the call fails terminally (live_unavailable) and nothing of it reaches the phone. Once a close or
-        fallback has retired the call (marked in memory under the ring lock, before its save and its stop),
-        output is dropped even though this session has not been told to stop yet."""
+        Provider output BEFORE the opening append was handed to the upstream socket (opening_send_started) is a
+        violation of the admitted-opening rule: the call fails terminally (live_unavailable) and nothing of it reaches
+        the phone. Output AFTER that send mark and before the drain is HELD (bounded, never forwarded early) and
+        released in order only after the matching admission. Once a close or fallback has retired the call (marked in
+        memory under the ring lock, before its save and its stop), output is dropped even though this session has not
+        been told to stop yet."""
         if not isinstance(delta, str) or self.closed.is_set() or self.stop.is_set() or self.ending.is_set():
             return
         if live.retired(self.call_id):
             return
-        if not self.admitted:
-            log("agentLiveEarlyOutput", f"call={self.call_id} opening_sent={self.opening_sent}")
-            return self.fail("live_unavailable", "provider_output_before_ack")
-        self.effect(lambda: self.downstream({"type": "session.output_audio.delta", "delta": delta}))
+        verdict = None
+        with self._emit:
+            with self._state:
+                drained, started = self.drained, self.opening_send_started
+                if self._opening_send_failed:
+                    return                    # the call is ending: nothing is held or forwarded
+            if drained:
+                self.effect(lambda: self.downstream({"type": "session.output_audio.delta", "delta": delta}))
+                return
+            verdict = self._hold(delta) if started else "before_ack"
+            if verdict is not None:
+                # Terminal authority BEFORE the emit lock is released: ending is the session's existing "retiring itself"
+                # flag (fail() sets it first). _admit and the drain refuse once it is set, so a deferred ACK running in the
+                # gap below cannot admit or drain held audio.
+                self.ending.set()
+        # Terminal decisions act outside the emit lock (fail() writes the ring).
+        if verdict == "before_ack":
+            log("agentLiveEarlyOutput", f"call={self.call_id} opening_sent={self.opening_sent} "
+                f"opening_send_started={self.opening_send_started}")
+            self.fail("live_unavailable", "provider_output_before_ack")
+        elif verdict == "invalid":
+            self.fail("live_unavailable", "provider_output_invalid")
+        elif verdict == "overflow":
+            _quiet_note("agentLiveOpeningHoldOverflow", f"call={self.call_id} held={self._held_bytes} cap={OPENING_HOLD_BYTES}")
+            self.fail("live_unavailable", "opening_output_overflow")
+
+    def _hold(self, delta: str) -> str | None:
+        """Keep one provider delta that arrived after the opening send and before the drain (caller holds the emit
+        lock). Never forwarded here, never truncated or coalesced. Returns None, "invalid" or "overflow"."""
+        if len(delta) > OPENING_HOLD_FRAME_B64:
+            return "overflow"                 # bounded BEFORE decoding: no oversized allocation
+        try:
+            pcm = base64.b64decode(delta, validate=True)
+        except (binascii.Error, ValueError):
+            pcm = b""
+        if not pcm or len(pcm) % 2:
+            return "invalid"
+        with self._state:
+            if self.closed.is_set():
+                return None
+            if self._held_bytes + len(pcm) > OPENING_HOLD_BYTES:
+                return "overflow"
+            self._held.append(delta)
+            self._held_bytes += len(pcm)
+            self._held_peak = max(self._held_peak, self._held_bytes)
+        return None
+
+    def _note_order(self, kind: Any, event: dict) -> None:
+        """Metadata-only, best-effort: event type, ms since the opening send, whether a receipt names this opening.
+        No audio, transcript, content or token is ever recorded."""
+        try:
+            if len(self._order) >= UPSTREAM_ORDER_EVENTS:
+                return
+            ms = int((time.monotonic() - self.opening_sent_at) * 1000) if self.opening_send_started else -1
+            entry = f"{str(kind)[:48]}@{ms}"
+            if isinstance(event.get("client_event_id"), str):
+                entry += ":cid=" + ("match" if event["client_event_id"] == self.opening_event_id else "other")
+            self._order.append(entry)
+        except Exception:  # noqa: BLE001 - diagnostics never affect the call
+            pass
 
     # -- client frames ----------------------------------------------------------------------
     def client(self, event: dict) -> None:
@@ -454,7 +626,7 @@ class LiveSocket:
                     self.client_ready = True
                 self._maybe_open()
         elif kind == "oracle_v2.interrupt":
-            if self.admitted:
+            if self.drained:
                 from .oracle_live_wire import LiveWire
                 self.upstream_send(LiveWire("api").context("instructions", "Stop speaking now and listen to the user."))
                 self.downstream({"type": "oracle_v2.playback_flush"})
