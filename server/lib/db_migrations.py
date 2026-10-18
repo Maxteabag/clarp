@@ -180,6 +180,12 @@ def _migrate(con: sqlite3.Connection) -> None:
         if version < 117:
             _migrate_to_v117(con)
 
+        # PROVISIONAL 120 (ledger, Nadia): 118 steer_receipts and 119 the LF family are reserved on other
+        # branches. Renumbered in its own reviewed change to the lowest free number above main before CI
+        # and merge if this lands first; never skip numbers on main.
+        if version < 120:
+            _migrate_to_v120(con)
+
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
     except BaseException:
@@ -904,3 +910,12 @@ def _migrate_to_v117(con: sqlite3.Connection) -> None:
     end = db_schema._SCHEMA_SQL.index(");", start) + 2
     con.execute(db_schema._SCHEMA_SQL[start:end].replace(
         "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1))
+
+
+def _migrate_to_v120(con: sqlite3.Connection) -> None:
+    """PROVISIONAL number. ``device_tokens.owner``: the authenticated paired device that registered an
+    alert token ('' = unbound). Additive with an unbound default, so legacy rows stay unbound and older
+    code ignores the column; guarded, so a rerun is a no-op."""
+    columns = {row[1] for row in con.execute("PRAGMA table_info(device_tokens)")}
+    if "owner" not in columns:
+        con.execute("ALTER TABLE device_tokens ADD COLUMN owner TEXT NOT NULL DEFAULT ''")

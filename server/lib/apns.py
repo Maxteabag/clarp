@@ -121,16 +121,6 @@ class TokenOwnedElsewhere(Exception):
     """POST /devices: this alert token belongs to another paired device. Nothing was written."""
 
 
-def _ensure_owner_column(database) -> None:
-    """``device_tokens.owner``: the authenticated device that registered the token ('' = unbound).
-
-    Added lazily and idempotently, without a schema version, until the migration number is allocated
-    in the ledger (Nadia); the column is additive and defaults to unbound, so legacy rows stay unbound."""
-    columns = {row[1] for row in database.execute("PRAGMA table_info(device_tokens)")}
-    if "owner" not in columns:
-        database.execute("ALTER TABLE device_tokens ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
-
-
 def register_token(token: str, session: str | None = None,
                     environment: str | None = None,
                     platform: str = "ios", base_url: str = "",
@@ -161,7 +151,6 @@ def register_token(token: str, session: str | None = None,
     owner_key = (owner or "").strip()
     now = db.now_ms()
     database = db.conn()
-    _ensure_owner_column(database)
     database.execute("BEGIN IMMEDIATE")
     try:
         row = database.execute("SELECT owner FROM device_tokens WHERE token = ?", (token,)).fetchone()
@@ -1335,7 +1324,6 @@ def owned_active_tokens() -> list[dict]:
     """Every live alert token with its owner ('' = unbound)."""
     from . import db
     database = db.conn()
-    _ensure_owner_column(database)
     rows = database.execute(
         "SELECT token, session, environment, base_url, push_grant, owner FROM device_tokens "
         "WHERE disabled_at IS NULL"

@@ -571,10 +571,11 @@ def test_two_importers_racing_keep_the_checkpoint_that_covers_more(tmp_path, clo
 
 def test_older_code_reads_a_v117_database_and_117_migrates_from_116(tmp_path, monkeypatch):
     from lib import db_schema, db_migrations
+    newest = db_schema._SCHEMA_VERSION                      # 117 or a later migration
     path = tmp_path / "state.sqlite"
     db.reset_for_tests(path)
     c = db.conn()
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 117
+    assert c.execute("PRAGMA user_version").fetchone()[0] == newest
     c.execute("INSERT INTO agents(agent_id, persona, voice_id, cwd, session, created_at)"
               " VALUES ('a', 'a', 'v', '/', 's', 1)")
     c.commit()
@@ -584,7 +585,7 @@ def test_older_code_reads_a_v117_database_and_117_migrates_from_116(tmp_path, mo
     db.reset_for_tests(path)
     message_store.store_transcript_turns(agent_id="a", backend_session_id="b", source_file="f",
                                          turns=[{"role": "user", "text": "hi", "timestamp": _ts(1)}])
-    assert db.conn().execute("PRAGMA user_version").fetchone()[0] == 117
+    assert db.conn().execute("PRAGMA user_version").fetchone()[0] == newest
     monkeypatch.undo()
     # A v116 database gains the table.
     old = tmp_path / "old.sqlite"
@@ -595,7 +596,7 @@ def test_older_code_reads_a_v117_database_and_117_migrates_from_116(tmp_path, mo
     c.commit()
     db.reset_for_tests(old)
     c = db.conn()
-    assert c.execute("PRAGMA user_version").fetchone()[0] == 117
+    assert c.execute("PRAGMA user_version").fetchone()[0] == newest
     assert c.execute("SELECT count(*) FROM transcript_import_checkpoints").fetchone()[0] == 0
     assert db_migrations._migrate_to_v117(c) is None     # idempotent
 
