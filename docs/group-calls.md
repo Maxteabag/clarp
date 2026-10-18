@@ -177,7 +177,7 @@ Nadia: The migration is the only risk.
   transcript parsers strip back off (`lib.voice_preamble`). The header is read
   only; building it never changes the call.
 
-## Transcription in a call (feature `call_transcription_policy`, contract 67)
+## Transcription in a call (feature `call_transcription_policy`; contract number booked at landing)
 
 Owner settings (via the transcription settings endpoint, read back by the
 same GET), unset by default: `call_languages` (one ISO code or a set of up to

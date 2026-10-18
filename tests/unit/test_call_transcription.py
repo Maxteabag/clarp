@@ -1,4 +1,4 @@
-"""Call transcription policy (contract §12, §12.1, §12.2; HOST_CONTRACT 67).
+"""Call transcription policy (contract §12, §12.1, §12.2; introduced with listen-first at one booked contract number).
 
 Scoped to calls: a clip is in a call only when its request names the call
 (`X-Clarp-Call-Id`) and that call is live, the requester's, on this Host, and
@@ -266,7 +266,9 @@ def test_the_call_record_shows_transcription_only_when_policy_or_override_applie
 def test_the_host_advertises_the_feature():
     from lib import server_identity
     assert "call_transcription_policy" in server_identity.FEATURES
-    assert server_identity.FEATURE_CONTRACTS["call_transcription_policy"] == 67
+    introduced = server_identity.FEATURE_CONTRACTS["call_transcription_policy"]
+    assert introduced == server_identity.FEATURE_CONTRACTS["agent_ring_listen_first"]
+    assert 1 < introduced <= server_identity.HOST_CONTRACT
 
 
 def test_the_transcribe_event_carries_the_same_stt_record(env, monkeypatch):
