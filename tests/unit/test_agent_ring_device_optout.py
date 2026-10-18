@@ -50,7 +50,7 @@ def _event(**extra):
 
 
 def _rows():
-    return {r["token"]: dict(r) for r in db.conn().execute("SELECT token, owner, disabled_at FROM device_tokens")}
+    return {r["token"]: dict(r) for r in db.conn().execute("SELECT token, principal AS owner, disabled_at FROM device_tokens")}
 
 
 # ---- the switch --------------------------------------------------------------------------
@@ -243,13 +243,13 @@ def test_the_owner_migration_keeps_legacy_tokens_unbound_and_is_idempotent(tmp_p
     path = tmp_path / "old.sqlite"
     db.reset_for_tests(path)
     c = db.conn()
-    c.execute("ALTER TABLE device_tokens DROP COLUMN owner")       # a database from before the migration
+    c.execute("ALTER TABLE device_tokens DROP COLUMN principal")       # a database from before the migration
     c.execute("INSERT INTO device_tokens(token, session, created_at, updated_at) VALUES ('ab', 's', 1, 1)")
     c.execute("PRAGMA user_version = 117")
     c.commit()
     db.reset_for_tests(path)
     c = db.conn()
     assert c.execute("PRAGMA user_version").fetchone()[0] == db_schema._SCHEMA_VERSION
-    assert dict(c.execute("SELECT token, owner, disabled_at FROM device_tokens").fetchone()) == \
+    assert dict(c.execute("SELECT token, principal AS owner, disabled_at FROM device_tokens").fetchone()) == \
         {"token": "ab", "owner": "", "disabled_at": None}
     assert db_migrations._migrate_to_v120(c) is None              # guarded: a rerun is a no-op
