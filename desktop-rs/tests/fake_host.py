@@ -932,7 +932,9 @@ class Handler(BaseHTTPRequestHandler):
                     "capabilities": {"version": 1, "features": features}}
             if artifact_summary["on"]:
                 features.append("artifact_summary_v1")
-                info["contract"] = {"host": 63, "min_ios": 1, "features": {"artifact_summary_v1": 1}}
+                # contract.features names the contract a feature landed in;
+                # these are test numbers, the real one is booked at landing.
+                info["contract"] = {"host": 999, "min_ios": 1, "features": {"artifact_summary_v1": 990}}
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
             if snapshot_delay[1] > 0:

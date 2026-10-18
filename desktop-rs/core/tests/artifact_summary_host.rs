@@ -284,7 +284,12 @@ fn a_question_reads_the_same_in_summary_and_flat_rows() {
 
 #[test]
 fn the_host_advertises_summary_lists_as_the_desktop_reads_them() {
-    assert!(summary::advertised(file("v2-05-server-info.body").as_object().unwrap()));
+    // Captured from a Host branch that still advertised 1; a landed Host
+    // advertises the contract the feature landed in instead.
+    let mut info = file("v2-05-server-info.body").as_object().unwrap().clone();
+    assert!(summary::advertised(&info));
+    info["contract"]["features"]["artifact_summary_v1"] = serde_json::json!(990);
+    assert!(summary::advertised(&info));
 }
 
 /// KNOWN LATENT ISSUE (not hidden; the main-line guard was reverted): a row
