@@ -214,7 +214,7 @@ under 3 s, both deliberately not built before the demo:
 `POST /calls/ring/device` `{"receive_rings": false, "push_token": "<this phone's APNs alert token>"}` switches
 agent rings off for the calling phone only (feature `agent_ring_device_optout`; `{"receive_rings": true}` switches
 them back on; `GET /calls/ring/device` reads the state). Both answer `{"ok": true, "receive_rings": bool,
-"push_token_bound": bool}`. Only a paired, full-scope, non-revoked device sets its own state (403
+"push_token_bound": bool, "alerts_suppressed": bool, "state": "on"|"off"|"partial"}`; `partial` must be shown as incomplete, never as off. Only a paired, full-scope, non-revoked device sets its own state (403
 `ring_device_required` otherwise); any other body is 400 `ring_device_invalid`.
 
 A phone with rings off gets no agent ring of any kind, classic or Live: no VoIP push, no `agent-ring` SSE event,
@@ -223,3 +223,7 @@ APNs alert tokens by session, not by device, so without a `push_token` that phon
 (`push_token_bound: false`). Default is on; with no phone switched off delivery is unchanged. The token is the
 phone's own word: a paired full-scope device could name another phone's alert token and silence that phone's ring
 alerts, nothing else.
+A token already bound to another phone is refused with 409 `ring_device_token_conflict`, never moved; switching off
+again without a token keeps the earlier binding. A Live ring is admitted only for a capable phone that still receives
+rings (else 409 `live_client_required`, nothing stored). The ring a phone answered stays its own: its later
+`agent-ring` events still reach it while rings are off.
