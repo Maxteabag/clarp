@@ -444,7 +444,7 @@ def test_v95_adds_background_job_inspection_columns(tmp_path):
 
 
 def test_v118_migrates_device_token_provenance_from_117_and_a_rerun_is_a_no_op(tmp_path):
-    """TENTATIVE v118: device_tokens.principal, '' (unbound) for every legacy row; no backfill."""
+    """v118: device_tokens.principal, '' (unbound) for every legacy row; no backfill."""
     from lib import db_migrations, db_schema
     path = tmp_path / "v117.sqlite"
     db.reset_for_tests(path)
