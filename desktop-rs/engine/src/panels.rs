@@ -9,12 +9,15 @@ use crate::Engine;
 impl Engine {
     /// True when a panel owned the reply.
     pub(crate) fn panels_json(&mut self, tag: &str, object: &Object) -> bool {
-        self.updates_json(tag, object) || self.teams_json(tag, object) || self.profile_json(tag, object)
+        self.artifact_summary_json(tag, object) || self.updates_json(tag, object) || self.teams_json(tag, object) || self.profile_json(tag, object)
     }
 
     /// True when a panel owned the failure; the rest become the engine's error.
     pub(crate) fn panels_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
+        if self.artifact_summary_failure(tag, message, status) {
+            return true;
+        }
         self.updates_failure(tag, &detail, status) || self.teams_failure(tag, &detail) || self.avatar_failure(tag, &detail) || self.profile_failure(tag, message, status, &detail)
     }
 
