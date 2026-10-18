@@ -203,8 +203,10 @@ def event_visible(event: dict, principal: str | None) -> bool:
     from .protocol import SSEType
     if event.get("type", SSEType.AGENT_RING) != SSEType.AGENT_RING:
         return True
-    if principal is not None and not receives_rings(principal) and event.get("answered_by") != principal:
-        return False                    # rings off: nothing new, but the ring this phone answered stays its own
+    if principal and event.get("answered_by") == principal:
+        return True                     # the ring this phone answered stays its own: rings off or capability dropped
+    if principal is not None and not receives_rings(principal):
+        return False                    # this phone switched agent rings off for itself
     if event.get("conversation_mode") != MODE_LIVE:
         return True
     return live_capable(principal)
@@ -619,9 +621,9 @@ def _eligible_live_tokens() -> list[dict]:
 
 def _push(ring: dict, kind: str) -> dict:
     from . import apns
-    excluded = {token for row in device_prefs() for token in row.get("push_tokens", ())}
-    if excluded:
-        return apns.send_agent_ring(ring, kind, exclude_tokens=excluded)
+    off = {row["principal"] for row in device_prefs()}
+    if off:
+        return apns.send_agent_ring(ring, kind, exclude_owners=off)
     return apns.send_agent_ring(ring, kind)
 
 
@@ -632,14 +634,12 @@ def _push(ring: dict, kind: str) -> dict:
 # Host then leaves it out of every agent ring: VoIP, ring alert push, agent-ring SSE event and
 # the GET /calls/ring poll. Default is on, and with no phone switched off delivery is unchanged.
 #
-# The ring alert push goes to APNs alert tokens, which the Host keys by session, not by device,
-# so it cannot tell which alert token is this phone's. The phone names its own alert token
-# ("push_token") when it switches off; without one, its ring alerts still go out (VoIP, SSE and
-# the poll are filtered regardless) and the answer says push_token_bound: false. LIMIT: the token
-# is the phone's own word, like its VoIP registration; a paired full-scope device could name
-# another phone's alert token and thereby silence that phone's ring alerts, never anything else.
+# Ring alerts are excluded by alert-token OWNER: POST /devices binds a token to the authenticated
+# device that registers it (apns.register_token). A legacy unbound token cannot be attributed, so
+# while any live unbound token remains the answer is "partial" (alerts_suppressed false), never "off".
+# Provenance is token possession by an authenticated device, not proof of the physical phone.
 
-_DEVICE_FIELDS = {"receive_rings", "push_token"}
+_DEVICE_FIELDS = {"receive_rings"}
 
 
 def device_prefs() -> list[dict]:
@@ -653,18 +653,18 @@ def receives_rings(principal: str | None) -> bool:
 
 
 def device_state(principal: str) -> dict:
-    """push_token_bound is true only while a bound alert token is still a live token: after iOS rotates the
-    token the old one is disabled and the phone's ring alerts flow again, so the state says so."""
-    row = next((r for r in device_prefs() if r.get("principal") == principal), None)
-    bound = False
-    if row and row.get("push_tokens"):
-        from . import apns
-        live = {str(t["token"]).lower() for t in apns.active_tokens()}
-        bound = any(token in live for token in row["push_tokens"])
-    # "partial": rings are off but this phone's ring alerts still go out (no live bound token): never a full OFF.
-    state = "on" if row is None else ("off" if bound else "partial")
-    return {"ok": True, "receive_rings": row is None, "push_token_bound": bound,
-            "alerts_suppressed": row is not None and bound, "state": state}
+    """The truthful state of this phone's rings. ``off`` only when no live alert token could still carry
+    a ring alert to it: none of its own is eligible (they are excluded by owner) and no live UNBOUND token
+    remains (one might be this phone's). Otherwise rings-off is ``partial`` and must be shown as pending."""
+    from . import apns
+    off = not receives_rings(principal)
+    unbound = sum(1 for row in apns.owned_active_tokens() if not row.get("owner"))
+    suppressed = off and unbound == 0
+    state = "on" if not off else ("off" if suppressed else "partial")
+    answer = {"ok": True, "receive_rings": not off, "alerts_suppressed": suppressed, "state": state}
+    if off and not suppressed:
+        answer.update(reason="unbound_alert_tokens", unbound_alert_tokens=unbound)
+    return answer
 
 
 def _ring_device(principal: str) -> None:
@@ -674,28 +674,18 @@ def _ring_device(principal: str) -> None:
 
 
 def set_receive_rings(principal: str, data: Any) -> dict:
-    """POST /calls/ring/device: this phone switches agent rings on or off for itself."""
+    """POST /calls/ring/device {"receive_rings": bool}: this phone switches agent rings on or off for itself."""
     _ring_device(principal)
     if not isinstance(data, dict) or set(data) - _DEVICE_FIELDS or not isinstance(data.get("receive_rings"), bool):
         raise CallError(400, "ring_device_invalid")
-    token = data.get("push_token")
-    if token is not None:
-        if not isinstance(token, str) or not _hex_token(token.strip().lower()):
-            raise CallError(400, "ring_device_invalid")
-        token = token.strip().lower()
     with _lock:
         rows = {r["principal"]: r for r in device_prefs()}
         if data["receive_rings"]:
             rows.pop(principal, None)
         else:
-            if token and any(token in r.get("push_tokens", ()) for p, r in rows.items() if p != principal):
-                raise CallError(409, "ring_device_token_conflict")   # never take another phone's token
-            previous = rows.get(principal, {}).get("push_tokens", [])
-            rows[principal] = {"principal": principal, "push_tokens": [token] if token else list(previous),
-                               "updated_at": now_ms()}
+            rows[principal] = {"principal": principal, "updated_at": now_ms()}
         settings_store.set_text(DEVICE_KEY, json.dumps(list(rows.values()), separators=(",", ":")))
-    log("agentRingDevice", f"principal={principal} receive_rings={int(data['receive_rings'])} "
-                           f"push_token={int(bool(token))}")
+    log("agentRingDevice", f"principal={principal} receive_rings={int(data['receive_rings'])}")
     return device_state(principal)
 
 
