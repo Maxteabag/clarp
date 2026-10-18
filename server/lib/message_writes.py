@@ -653,9 +653,6 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
     the transcript turn of each returned row. A checkpoint that fails to
     write is logged and dropped; it never fails the import.
     """
-    # Pure text normalization can dominate a large transcript import; do it
-    # before taking SQLite's single writer lock, once per assistant message.
-    final_assistant_texts = _final_assistant_texts(turns)
     database = _facade().conn()
     for locked in (False, True):
         writer = _ImportWriter(database, locked=locked)
@@ -664,7 +661,6 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                 writer, agent_id=agent_id,
                 backend_session_id=backend_session_id,
                 source_file=source_file, turns=turns,
-                final_assistant_texts=final_assistant_texts,
                 capture_at=capture_at, captured=captured, out_seqs=out_seqs)
             if on_stored is not None:
                 _write_checkpoint(writer, database, on_stored, captured)
@@ -681,16 +677,6 @@ def store_transcript_turns(*, agent_id: str, backend_session_id: str,
                 database.execute("ROLLBACK")
             raise
     raise AssertionError("the locked import pass cannot need a write")
-
-
-def _final_assistant_texts(turns: list[dict[str, Any]]) -> list[str]:
-    texts = []
-    for turn in turns:
-        if turn.get("role") == "assistant":
-            text = _strip_voice_markup(turn.get("text"))
-            if text:
-                texts.append(text)
-    return texts
 
 
 def _write_checkpoint(writer, database, on_stored, captured) -> None:
@@ -737,7 +723,6 @@ def store_transcript_tail(*, agent_id: str, backend_session_id: str,
         out = _store_transcript_turns_txn(
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
-            final_assistant_texts=_final_assistant_texts(turns),
             start_seq=start_seq, carry=carry,
             capture_at=capture_at, captured=captured)
         writer.commit()
@@ -825,7 +810,6 @@ def plan_transcript_tail(*, agent_id: str, backend_session_id: str,
         out = _store_transcript_turns_txn(
             writer, agent_id=agent_id, backend_session_id=backend_session_id,
             source_file=source_file, turns=turns,
-            final_assistant_texts=_final_assistant_texts(turns),
             start_seq=start_seq, carry=carry,
             capture_at=start_seq + len(turns), captured=end_state)
         return {"out": out, "deleted": writer.deleted, "updated": writer.updated,
@@ -901,14 +885,13 @@ class _FinalRows:
         return self._rows
 
 
-def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
-                   *, exclude: set[str]) -> str:
-    """The oldest still-live streamed row whose text this reply completes."""
-    visible = _strip_voice_markup(text)
-    if not visible:
-        return ""
+def _live_matches(database, agent_id: str, backend_session_id: str, visible: str,
+                  exclude: set[str]) -> tuple[list, list]:
+    """Still-live streamed rows whose text equals ``visible`` and those whose
+    text is a prefix-relative of it (either direction), oldest first."""
+    exact, prefix = [], []
     for row in database.execute(
-            """SELECT message_id, text FROM messages
+            """SELECT message_id, text, trace_id FROM messages
                 WHERE agent_id=? AND backend_session_id=? AND role='assistant'
                   AND source_file LIKE 'live:%'
                 ORDER BY timestamp, seq""",
@@ -916,9 +899,59 @@ def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
         if row["message_id"] in exclude:
             continue
         streamed = _strip_voice_markup(row["text"])
-        if streamed and (visible.startswith(streamed) or streamed.startswith(visible)):
-            return str(row["message_id"])
+        if streamed == visible:
+            exact.append(row)
+        elif streamed and (visible.startswith(streamed) or streamed.startswith(visible)):
+            prefix.append(row)
+    return exact, prefix
+
+
+def _streamed_twin(database, agent_id: str, backend_session_id: str, text: str,
+                   *, exclude: set[str], trace: str) -> str:
+    """The still-live streamed row of this reply's own turn that it completes.
+
+    Kept rows of several turns can coexist, so a text match alone could hand
+    one turn's row to another turn's reply. With the reply's turn known only
+    that turn's rows qualify. Without it, a match is taken only when every
+    candidate at the best level (exact text, else prefix) belongs to one turn;
+    otherwise nothing is adopted. Exact text wins over a prefix; among equals
+    the oldest."""
+    visible = _strip_voice_markup(text)
+    if not visible:
+        return ""
+    for rows in _live_matches(database, agent_id, backend_session_id, visible, exclude):
+        if trace:
+            rows = [row for row in rows if (row["trace_id"] or "") == trace]
+        elif len({row["trace_id"] or "" for row in rows}) > 1:
+            return ""
+        if rows:
+            return str(rows[0]["message_id"])
     return ""
+
+
+def _live_traces_by_text(database, agent_id: str,
+                         backend_session_id: str) -> list[tuple[str, str]]:
+    return [(row["trace_id"] or "", _strip_voice_markup(row["text"]))
+            for row in database.execute(
+                """SELECT text, trace_id FROM messages
+                    WHERE agent_id=? AND backend_session_id=? AND role='assistant'
+                      AND source_file LIKE 'live:%'""",
+                (agent_id, backend_session_id)).fetchall()]
+
+
+def _related(a: str, b: str) -> bool:
+    return bool(a and b) and (a.startswith(b) or b.startswith(a))
+
+
+def _owns_leftover(trace: str, final: str, live_trace: str, live_text: str,
+                   live_traces: list[tuple[str, str]]) -> bool:
+    """Whether this batch reply (of turn ``trace``, '' if unknown) is the
+    durable copy of a leftover live row of turn ``live_trace``."""
+    if not _related(final, live_text):
+        return False
+    if trace:
+        return trace == live_trace
+    return len({t for t, text in live_traces if _related(final, text)}) <= 1
 
 
 def _final_twins(final_rows: _FinalRows, *, text: str, timestamp: Any,
@@ -960,7 +993,6 @@ def _delete_slot(database, agent_id: str, backend_session_id: str,
 def _store_transcript_turns_txn(database, *, agent_id: str,
                                 backend_session_id: str, source_file: str,
                                 turns: list[dict[str, Any]],
-                                final_assistant_texts: list[str],
                                 start_seq: int = 0,
                                 carry: dict[str, Any] | None = None,
                                 capture_at: int | None = None,
@@ -1091,6 +1123,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         time.sleep(_facade().IMPORT_WRITER_YIELD_SECONDS)
         final_rows.invalidate()
 
+    # Each assistant reply of this batch with the turn it answers, for the
+    # live-row cleanup below; '' when no turn can be named.
+    batch_finals: list[tuple[str, str]] = []
     for index, turn in enumerate(turns):
         seq = start_seq + index
         if captured is not None and seq == capture_at:
@@ -1099,6 +1134,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         if database.due():
             commit_batch()
         role = turn.get("role")
+        reply_trace = ""
+        if role == "assistant":
+            reply_trace = current_request_trace or turn_index.trace_at(turn.get("timestamp"))
         if role == "user":
             closed_authority.update(authority_tools)
         if role == "assistant" and not turn.get("failed"):
@@ -1114,6 +1152,11 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 (agent_id, backend_session_id, assistant_ordinal,
                  assistant_ordinal),).fetchone()
             assistant_ordinal += 1
+            visible_reply = _strip_voice_markup(turn.get("text"))
+            if visible_reply:
+                batch_finals.append(
+                    ((authority["trace_id"] or "") if authority is not None else reply_trace,
+                     visible_reply))
             if authority is not None:
                 # Stream-json terminal authority owns this provider turn.
                 # Its canonical final row (or empty/error tombstone) remains
@@ -1237,7 +1280,8 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
                 # The row this reply streamed into becomes its durable row,
                 # in place: same id, so no client sees it vanish and return.
                 streamed = _streamed_twin(database, agent_id, backend_session_id,
-                                          text, exclude=adopted_final_ids)
+                                          text, exclude=adopted_final_ids,
+                                          trace=reply_trace)
                 if streamed:
                     msg_id = streamed
                     adopted_final_ids.add(msg_id)
@@ -1378,8 +1422,13 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
     # Compare markup-normalized so a streamed live row (with <speak>/<vox>/…)
     # still matches its durable copy (markup stripped); raw startswith missed it.
     live_replace_revision = 0
+    # A leftover live row goes only when a reply of ITS OWN turn landed in
+    # this batch; another turn's kept row waits for its own reply. A reply
+    # whose turn is unknown claims a leftover only while no other turn's live
+    # row matches it too.
+    live_traces = _live_traces_by_text(database, agent_id, backend_session_id)
     for live in database.execute(
-        """SELECT message_id, text FROM messages
+        """SELECT message_id, text, trace_id FROM messages
             WHERE agent_id = ? AND backend_session_id = ?
               AND source_file LIKE 'live:%'
               AND role = 'assistant'""",
@@ -1388,8 +1437,9 @@ def _store_transcript_turns_txn(database, *, agent_id: str,
         live_text = _strip_voice_markup(live["text"])
         if not live_text:
             continue
-        if any(final.startswith(live_text) or live_text.startswith(final)
-               for final in final_assistant_texts):
+        live_trace = live["trace_id"] or ""
+        if any(_owns_leftover(trace, final, live_trace, live_text, live_traces)
+               for trace, final in batch_finals):
             live_replace_revision = max(live_replace_revision, _next_revision(database))
             latest_revision = max(latest_revision, live_replace_revision)
             database.execute(
