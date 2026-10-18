@@ -332,3 +332,10 @@ def test_a_non_hex_token_never_collides_with_another_cases_bound_row(sander):
     apns.register_token("abg-opaque", session="s")               # a different token: no 409
     rows = _rows()
     assert rows["AbG-opaque"]["owner"] == PHONE and rows["abg-opaque"]["owner"] == ""
+
+
+@pytest.mark.parametrize("platform", ["mac", "web", "desktop"])
+def test_a_device_registering_on_another_platform_is_never_refused_and_stays_unbound(sander, platform):
+    apns.register_token("opaque-Token-1", session="s", platform=platform, owner=PHONE)
+    assert _rows()["opaque-Token-1"]["owner"] == ""
+    assert rings.set_receive_rings(PHONE, {"receive_rings": False})["state"] == "partial"
