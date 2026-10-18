@@ -203,8 +203,8 @@ def event_visible(event: dict, principal: str | None) -> bool:
     from .protocol import SSEType
     if event.get("type", SSEType.AGENT_RING) != SSEType.AGENT_RING:
         return True
-    if principal is not None and not receives_rings(principal):
-        return False                    # this phone switched agent rings off for itself
+    if principal is not None and not receives_rings(principal) and event.get("answered_by") != principal:
+        return False                    # rings off: nothing new, but the ring this phone answered stays its own
     if event.get("conversation_mode") != MODE_LIVE:
         return True
     return live_capable(principal)
@@ -304,7 +304,7 @@ def ring(*, caller_agent_id: str = "", agent: str = "", reason: str = "", openin
             if replay is None:
                 _admit(caller, records)
                 if mode == live.MODE_LIVE:
-                    if not _live_tokens():
+                    if not _eligible_live_tokens():   # capable AND receiving rings
                         raise CallError(409, live.CLIENT_REQUIRED)
                     snapshot = live.build_snapshot(caller, context)
         except CallError as exc:
@@ -602,11 +602,19 @@ def _live_tokens() -> list[dict]:
 
 def _push_voip(ring: dict) -> dict:
     from . import apns
-    tokens = _live_tokens() if ring.get("conversation_mode") else voip_tokens()
-    off = {row["principal"] for row in device_prefs()}
-    if off:
-        tokens = [row for row in tokens if row.get("principal") not in off]
+    tokens = _eligible_live_tokens() if ring.get("conversation_mode") else _receiving(voip_tokens())
     return apns.send_agent_ring_voip(ring, tokens)
+
+
+def _receiving(tokens: list[dict]) -> list[dict]:
+    """VoIP registrations less the phones that switched agent rings off."""
+    off = {row["principal"] for row in device_prefs()}
+    return [row for row in tokens if row.get("principal") not in off] if off else tokens
+
+
+def _eligible_live_tokens() -> list[dict]:
+    """Phones that can run a Live call and still receive rings: the only ones a Live ring may admit for."""
+    return _receiving(_live_tokens())
 
 
 def _push(ring: dict, kind: str) -> dict:
@@ -645,8 +653,15 @@ def receives_rings(principal: str | None) -> bool:
 
 
 def device_state(principal: str) -> dict:
+    """push_token_bound is true only while a bound alert token is still a live token: after iOS rotates the
+    token the old one is disabled and the phone's ring alerts flow again, so the state says so."""
     row = next((r for r in device_prefs() if r.get("principal") == principal), None)
-    return {"ok": True, "receive_rings": row is None, "push_token_bound": bool(row and row.get("push_tokens"))}
+    bound = False
+    if row and row.get("push_tokens"):
+        from . import apns
+        live = {str(t["token"]).lower() for t in apns.active_tokens()}
+        bound = any(token in live for token in row["push_tokens"])
+    return {"ok": True, "receive_rings": row is None, "push_token_bound": bound}
 
 
 def _ring_device(principal: str) -> None:
@@ -670,12 +685,11 @@ def set_receive_rings(principal: str, data: Any) -> dict:
         if data["receive_rings"]:
             rows.pop(principal, None)
         else:
-            row = {"principal": principal, "push_tokens": [], "updated_at": now_ms()}
-            if token:
-                row["push_tokens"] = [token]
-                for other in rows.values():          # one alert token belongs to one phone
-                    other["push_tokens"] = [t for t in other.get("push_tokens", ()) if t != token]
-            rows[principal] = row
+            if token and any(token in r.get("push_tokens", ()) for p, r in rows.items() if p != principal):
+                raise CallError(409, "ring_device_token_conflict")   # never take another phone's token
+            previous = rows.get(principal, {}).get("push_tokens", [])
+            rows[principal] = {"principal": principal, "push_tokens": [token] if token else list(previous),
+                               "updated_at": now_ms()}
         settings_store.set_text(DEVICE_KEY, json.dumps(list(rows.values()), separators=(",", ":")))
     log("agentRingDevice", f"principal={principal} receive_rings={int(data['receive_rings'])} "
                            f"push_token={int(bool(token))}")
