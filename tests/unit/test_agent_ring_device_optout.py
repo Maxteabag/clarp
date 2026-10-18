@@ -306,3 +306,12 @@ def test_inside_a_callers_transaction_registration_never_commits_or_rolls_back_f
     assert c.in_transaction                                      # the caller still owns its transaction
     c.execute("ROLLBACK")
     assert T_PHONE not in _rows()
+
+
+@pytest.mark.parametrize("token", ["abc123", "zz" * 32, "a1" * 31, "a1" * 101])
+def test_a_device_binds_only_a_real_apns_token_and_writes_nothing_otherwise(sander, token):
+    before = _rows()
+    with pytest.raises(apns.InvalidDeviceToken):
+        apns.register_token(token, owner=PHONE)
+    assert _rows() == before
+    apns.register_token("abc123", session="s")                  # an unbound registrant: legacy acceptance kept
