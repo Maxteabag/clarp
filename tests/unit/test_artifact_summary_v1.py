@@ -241,8 +241,12 @@ def test_over_budget_takes_the_pending_paths(theo):
 def test_the_feature_and_contract_are_advertised():
     assert "artifact_summary_v1" in server_identity.capabilities()["features"]
     contract = server_identity.contract()
-    assert contract["features"]["artifact_summary_v1"] == 1
-    assert contract["host"] == 65
+    # The map value is the feature's introduction number (booked at the landing), never the
+    # dict default 1, and the Host contract that ships is at least that number.
+    introduced = contract["features"]["artifact_summary_v1"]
+    assert introduced == server_identity.FEATURE_CONTRACTS["artifact_summary_v1"]
+    assert 1 < introduced <= server_identity.HOST_CONTRACT
+    assert contract["host"] == server_identity.HOST_CONTRACT
 
 
 # --- budget counts UTF-8 bytes; caches weigh retained bytes -------------------------
