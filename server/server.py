@@ -3219,6 +3219,8 @@ class Handler(BaseHTTPRequestHandler):
                 push_grant=str(data.get("push_grant") or ""),
                 owner=owner,
             )
+        except apns.InvalidDeviceToken:
+            return self._json(400, {"ok": False, "error": "device_token_invalid"})
         except apns.TokenOwnedElsewhere:
             log("deviceTokenOwnerConflict", f"registrant={owner or who.principal or '-'} token={token[:12]}…")
             return self._json(409, {"ok": False, "error": "device_token_owned_elsewhere"})

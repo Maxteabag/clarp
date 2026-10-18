@@ -117,6 +117,10 @@ def _push_grant(raw: str) -> str:
     return value if _PUSH_GRANT.match(value) else ""
 
 
+class InvalidDeviceToken(ValueError):
+    """POST /devices: a device-bound alert token must be an APNs hex token (64-200 hex digits)."""
+
+
 class TokenOwnedElsewhere(Exception):
     """POST /devices: this alert token belongs to another paired device. Nothing was written."""
 
@@ -149,6 +153,10 @@ def register_token(token: str, session: str | None = None,
     base_url_key = _device_base_url(base_url)
     grant_key = _push_grant(push_grant)
     owner_key = (owner or "").strip()
+    if owner_key and not (64 <= len(token) <= 200 and all(c in "0123456789abcdef" for c in token)):
+        # Only a device binds ownership, and only to a real APNs token; other registrants keep the legacy
+        # acceptance of any non-empty token (it binds nothing).
+        raise InvalidDeviceToken("device token must be 64-200 hex digits")
     now = db.now_ms()
     database = db.conn()
     # Own the transaction only when none is open; inside a caller's transaction, a savepoint, so this never
