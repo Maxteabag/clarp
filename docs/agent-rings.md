@@ -208,3 +208,18 @@ under 3 s, both deliberately not built before the demo:
   spawn/resume. A related lever: start TTS on the first finished sentence
   instead of the whole text block. Both are runtime and audio changes in
   Avana's area, to take up with Avana after the demo.
+
+## A phone that switches rings off for itself
+
+`POST /calls/ring/device` `{"receive_rings": false, "push_token": "<this phone's APNs alert token>"}` switches
+agent rings off for the calling phone only (feature `agent_ring_device_optout`; `{"receive_rings": true}` switches
+them back on; `GET /calls/ring/device` reads the state). Both answer `{"ok": true, "receive_rings": bool,
+"push_token_bound": bool}`. Only a paired, full-scope, non-revoked device sets its own state (403
+`ring_device_required` otherwise); any other body is 400 `ring_device_invalid`.
+
+A phone with rings off gets no agent ring of any kind, classic or Live: no VoIP push, no `agent-ring` SSE event,
+no ring from `GET /calls/ring`, and, when it named its alert token, no ring alert push for any state. The Host keys
+APNs alert tokens by session, not by device, so without a `push_token` that phone's ring alerts still go out
+(`push_token_bound: false`). Default is on; with no phone switched off delivery is unchanged. The token is the
+phone's own word: a paired full-scope device could name another phone's alert token and silence that phone's ring
+alerts, nothing else.

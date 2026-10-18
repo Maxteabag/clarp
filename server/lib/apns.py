@@ -1280,7 +1280,15 @@ def agent_ring_payload(ring: dict, kind: str, *, avatar_url: str | None = None,
     return payload
 
 
-def send_agent_ring(ring: dict, kind: str) -> dict:
+def ring_alert_tokens(exclude_tokens=None) -> list[dict]:
+    """The live alert tokens a ring alert goes to: all, less the phones that switched rings off."""
+    tokens = active_tokens()
+    if exclude_tokens:
+        tokens = [row for row in tokens if str(row["token"]).lower() not in exclude_tokens]
+    return tokens
+
+
+def send_agent_ring(ring: dict, kind: str, exclude_tokens=None) -> dict:
     """Push one ring state to every live token. Never raises.
 
     Unlike replies and decisions, a ring ignores desktop presence: an agent
@@ -1292,7 +1300,7 @@ def send_agent_ring(ring: dict, kind: str) -> dict:
     if not cfg.apns_enabled():
         return {"enabled": False, "sent": 0, "failed": 0, "disabled": 0}
     from . import agent_rings
-    tokens = active_tokens()
+    tokens = ring_alert_tokens(exclude_tokens)
     show_reason = agent_rings.settings()["show_reason"]
     sent = failed = disabled = 0
     collapse = agent_ring_collapse_id(ring)
