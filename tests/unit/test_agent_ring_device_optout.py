@@ -53,7 +53,8 @@ def test_every_phone_receives_rings_by_default(sander):
 
 def test_a_phone_that_switched_rings_off_gets_no_voip_for_a_classic_or_a_live_ring(senders):
     rings.set_receive_rings(PHONE, {"receive_rings": False})
-    _ring()
+    classic = _ring()["ring"]
+    rings.decline(OTHER_PHONE, classic["ring_id"])          # one ring at a time
     _live_ring()
     assert senders["voip"] == [[OTHER_PHONE], [OTHER_PHONE]]
 
