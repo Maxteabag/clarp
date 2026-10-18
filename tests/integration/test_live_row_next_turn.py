@@ -248,7 +248,9 @@ def test_an_import_without_the_earlier_reply_never_moves_identity_across_turns(h
         assert owners[a] == (text_a, "trace-a")
         assert owners[b] == (text_b, "trace-b")
         assert len(owners) == 2
-        assert _log(host) == [(a, text_a), (b, text_b)]
+        # Membership, not order: the adopted row takes the transcript's
+        # timestamp (ordering by timestamp is a separate follow-up).
+        assert sorted(_log(host)) == sorted([(a, text_a), (b, text_b)])
 
 
 def test_a_late_earlier_reply_appended_after_the_later_one_loses_nothing(host):
