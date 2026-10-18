@@ -129,3 +129,11 @@ def _owned(ring_id, owner):
     return events.agent_ring(ring_id=ring_id, session="rachel", agent_id="a", persona="Rachel", reason="r",
                              opening_line="o", opening_audio_url=None, state="answered", created_at=1,
                              expires_at=2, ended_at=None, answered_by=owner, call_id="c1", server_now=1)
+
+
+def test_post_devices_refuses_a_device_token_that_is_not_an_apns_token(running_server):
+    from lib import db
+    base, ctx, srv = running_server
+    camera, _ = _phones(srv, ctx)
+    assert _register(base, camera["token"], "not-hex") == (400, {"ok": False, "error": "device_token_invalid"})
+    assert db.conn().execute("SELECT count(*) FROM device_tokens").fetchone()[0] == 0
