@@ -41,16 +41,45 @@ def _phones(srv, ctx):
     return camera, other
 
 
+def _register(base, token, apns_token):
+    target = urlsplit(base)
+    client = http.client.HTTPConnection(target.hostname, target.port, timeout=5)
+    try:
+        client.request("POST", "/devices", body=json.dumps({"token": apns_token, "session": "koko"}),
+                       headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+        response = client.getresponse()
+        return response.status, json.loads(response.read() or b"{}")
+    finally:
+        client.close()
+
+
 def test_a_phone_switches_its_own_rings_off_and_on_over_http(running_server):
     base, ctx, srv = running_server
     camera, other = _phones(srv, ctx)
-    assert _call(base, camera["token"], "GET") == (200, {"ok": True, "receive_rings": True, "push_token_bound": False, "alerts_suppressed": False, "state": "on"})
-    from lib import apns
-    apns.register_token("a1" * 32, session="camera")
-    assert _call(base, camera["token"], "POST", {"receive_rings": False, "push_token": "a1" * 32}) == \
-        (200, {"ok": True, "receive_rings": False, "push_token_bound": True, "alerts_suppressed": True, "state": "off"})
+    assert _call(base, camera["token"], "GET") == \
+        (200, {"ok": True, "receive_rings": True, "alerts_suppressed": False, "state": "on"})
+    assert _register(base, camera["token"], "a1" * 32)[0] == 200          # POST /devices binds it to the camera
+    assert _call(base, camera["token"], "POST", {"receive_rings": False}) == \
+        (200, {"ok": True, "receive_rings": False, "alerts_suppressed": True, "state": "off"})
     assert _call(base, other["token"], "GET")[1]["receive_rings"] is True
-    assert _call(base, camera["token"], "POST", {"receive_rings": True})[1]["receive_rings"] is True
+    assert _call(base, camera["token"], "POST", {"receive_rings": True})[1]["state"] == "on"
+
+
+def test_post_devices_binds_to_the_authenticated_phone_and_refuses_another_phone_or_the_administrator(
+        running_server):
+    from lib import apns, db
+    base, ctx, srv = running_server
+    camera, other = _phones(srv, ctx)
+    assert _register(base, camera["token"], "a1" * 32)[0] == 200
+    assert _register(base, other["token"], "b2" * 32)[0] == 200           # same client session "koko"
+    owners = {r["token"]: (r["owner"], r["disabled_at"]) for r in
+              db.conn().execute("SELECT token, owner, disabled_at FROM device_tokens")}
+    assert owners["a1" * 32] == (camera["device_id"], None) and owners["b2" * 32] == (other["device_id"], None)
+    for token in (other["token"], "local-administrator"):
+        assert _register(base, token, "a1" * 32) == (409, {"ok": False, "error": "device_token_owned_elsewhere"})
+    assert apns.owned_active_tokens() and owners == {
+        r["token"]: (r["owner"], r["disabled_at"]) for r in
+        db.conn().execute("SELECT token, owner, disabled_at FROM device_tokens")}
 
 
 def test_the_administrator_cannot_switch_rings_and_a_malformed_body_is_refused(running_server):
