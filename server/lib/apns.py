@@ -166,16 +166,19 @@ def register_token(token: str, session: str | None = None,
     try:
         # Token identity is case-insensitive for APNs hex: every stored case variant counts. Any variant bound
         # to another principal (or any bound variant, for a non-device registrant) is refused before a write.
+        # Hex input matches its stored case variants only; any other token keeps exact, binary identity.
+        hex_token = _is_hex(token)
         variants = database.execute(
-            "SELECT token, principal FROM device_tokens WHERE lower(token) = lower(?)", (token,)).fetchall()
+            "SELECT token, principal FROM device_tokens WHERE " + ("lower(token) = ?" if hex_token else "token = ?"),
+            (token,)).fetchall()
         if any((v["principal"] or "") and v["principal"] != owner_key for v in variants):
             raise TokenOwnedElsewhere(next(v["principal"] for v in variants if v["principal"]))
-        if owner_key:
+        if owner_key and hex_token:
             # The same owner's own other-case rows of this token: retire them (same phone, same token).
             # Unbound legacy case variants stay as they are: ambiguous, never merged or claimed.
             database.execute(
                 """UPDATE device_tokens SET disabled_at = ?
-                    WHERE lower(token) = lower(?) AND token != ? AND principal = ? AND disabled_at IS NULL""",
+                    WHERE lower(token) = ? AND token != ? AND principal = ? AND disabled_at IS NULL""",
                 (now, token, token, owner_key),
             )
             database.execute(
@@ -246,11 +249,15 @@ def register_token(token: str, session: str | None = None,
         raise
 
 
+def _is_hex(value: str) -> bool:
+    return bool(value) and all(c in "0123456789abcdefABCDEF" for c in value)
+
+
 def canonical_token(token) -> str:
     """One identity per APNs token: a hex token is stored lowercase (APNs treats case as the same token);
     anything else (other platforms) is kept exactly, only trimmed."""
     value = str(token or "").strip()
-    return value.lower() if value and all(c in "0123456789abcdefABCDEF" for c in value) else value
+    return value.lower() if _is_hex(value) else value
 
 
 def active_tokens() -> list[dict]:
