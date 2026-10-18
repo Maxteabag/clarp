@@ -1,5 +1,5 @@
 {
- "description": "summary-v1 client fixtures (Host contract 63, feature artifact_summary_v1)",
+ "description": "summary-v1 client fixtures (feature artifact_summary_v1, captured from Host dfc489bb)",
  "source_sha": "dfc489bba1d8ae6a47a3037eb352aa8a043ae228",
  "generated_at": "2026-10-13T11:53:13+00:00",
  "generator": "/var/tmp/dagger/summary-v1-fixtures-gen.py",

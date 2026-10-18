@@ -22,23 +22,27 @@ use sha2::{Digest, Sha256};
 use crate::json::Object;
 
 /// The feature `/server-info` advertises, under `capabilities.features`,
-/// with `contract.features[FEATURE] == 1`.
+/// with `contract.features[FEATURE]` naming the Host contract that
+/// introduced it.
 pub const FEATURE: &str = "artifact_summary_v1";
 /// `representation=` on `GET /artifacts` and `/artifacts/pinned`.
 pub const REPRESENTATION: &str = "summary-v1";
 /// The old Host's answer (HTTP 400) to a representation it does not know.
 pub const UNSUPPORTED: &str = "unsupported artifact representation";
 
-/// The Host offers summary rows: the feature is listed and its contract
-/// version is 1. Never inferred from the Host's contract number.
+/// The Host offers summary rows: the feature is listed and
+/// `contract.features` gives it a positive introduction contract. That value
+/// is whatever contract the feature landed in, not a version of the feature,
+/// so any positive number counts. Never inferred from the Host's contract
+/// number.
 pub fn advertised(info: &Object) -> bool {
     let listed = info
         .get("capabilities")
         .and_then(|c| c.get("features"))
         .and_then(Value::as_array)
         .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(FEATURE)));
-    let version = info.get("contract").and_then(|c| c.get("features")).and_then(|f| f.get(FEATURE)).and_then(Value::as_i64);
-    listed && version == Some(1)
+    let introduced = info.get("contract").and_then(|c| c.get("features")).and_then(|f| f.get(FEATURE)).and_then(Value::as_i64);
+    listed && introduced.is_some_and(|n| n > 0)
 }
 
 /// Exactly the old Host's refusal: the one error that falls back to the

@@ -6,15 +6,20 @@ fn info(value: Value) -> clarp_core::json::Object {
 }
 
 #[test]
-fn the_feature_is_read_from_its_flag_and_version_never_the_contract_number() {
-    let both = info(json!({"capabilities": {"features": ["artifact_summary_v1"]}, "contract": {"host": 63, "features": {"artifact_summary_v1": 1}}}));
-    assert!(summary::advertised(&both));
-    let listed_only = info(json!({"capabilities": {"features": ["artifact_summary_v1"]}, "contract": {"host": 63}}));
-    assert!(!summary::advertised(&listed_only));
-    let other_version = info(json!({"capabilities": {"features": ["artifact_summary_v1"]}, "contract": {"features": {"artifact_summary_v1": 2}}}));
-    assert!(!summary::advertised(&other_version));
-    let number_only = info(json!({"capabilities": {"features": []}, "contract": {"host": 99, "features": {}}}));
-    assert!(!summary::advertised(&number_only));
+fn the_feature_is_read_from_its_flag_and_introduction_never_the_contract_number() {
+    let advertised = |features: Value, contract: Value| {
+        summary::advertised(&info(json!({"capabilities": {"features": features}, "contract": contract})))
+    };
+    // The Host gives each feature the contract it landed in, not 1.
+    let landed = json!({"host": 999, "features": {"artifact_summary_v1": 990}});
+    assert!(advertised(json!(["artifact_summary_v1"]), landed.clone()));
+    assert!(advertised(json!(["artifact_summary_v1"]), json!({"features": {"artifact_summary_v1": 1}})));
+    assert!(!advertised(json!([]), landed), "listed is required");
+    assert!(!advertised(json!(["artifact_summary_v1"]), json!({"host": 999})), "the introduction is required");
+    for bad in [json!(0), json!(-1), json!("990"), json!(990.5), json!(true), Value::Null] {
+        assert!(!advertised(json!(["artifact_summary_v1"]), json!({"features": {"artifact_summary_v1": bad.clone()}})), "{bad}");
+    }
+    assert!(!advertised(json!([]), json!({"host": 999, "features": {}})), "a contract number alone is not enough");
 }
 
 #[test]
