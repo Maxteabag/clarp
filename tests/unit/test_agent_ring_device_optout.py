@@ -325,3 +325,10 @@ def test_distinct_non_hex_tokens_that_differ_only_in_case_keep_their_own_identit
     apns.register_token(T_PHONE, owner=PHONE)                    # hex collision still sees case variants
     with pytest.raises(apns.TokenOwnedElsewhere):
         apns.register_token(T_PHONE.upper(), owner=OTHER_PHONE)
+
+
+def test_a_non_hex_token_never_collides_with_another_cases_bound_row(sander):
+    _raw("AbG-opaque", principal=PHONE)                          # a bound opaque row (not creatable by the API)
+    apns.register_token("abg-opaque", session="s")               # a different token: no 409
+    rows = _rows()
+    assert rows["AbG-opaque"]["owner"] == PHONE and rows["abg-opaque"]["owner"] == ""
