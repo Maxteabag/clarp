@@ -176,12 +176,14 @@ def _insert_live_message_atomic(
                 database.execute("ROLLBACK")
                 return False, 0, False
         revision = _next_revision(database)
-        # A live row an earlier turn left unfinished (interrupted or failed
-        # before its transcript landed) goes; this turn's earlier messages
-        # stay. So does a finished reply whose import has not landed yet: one
-        # marked final, or the last row of a turn that completed (runners that
-        # settle a message only when the next starts leave it live). The
-        # import adopts it in place.
+        # A row an earlier turn left unfinished (still live, its turn
+        # interrupted or failed before the transcript landed) goes; this turn's
+        # earlier messages stay. So does a finished reply whose import has not
+        # landed yet: one marked final (also in an interrupted turn: the user
+        # already saw that completed provider message, so it stays even if its
+        # transcript never lands), or the last row of a turn that completed
+        # (runners that settle a message only when the next starts leave it
+        # live). The import adopts it in place, only for its own turn.
         replaced = database.execute(
             """DELETE FROM messages
                 WHERE agent_id=? AND backend_session_id=?
