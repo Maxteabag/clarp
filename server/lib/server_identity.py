@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 72  # PROVISIONAL (agent_ring_device_optout over agent_ring_live 71): Nadia books the numbers at the ready landing
+HOST_CONTRACT = 73  # artifact_summary_v1 introduced (Nadia's ledger, proposed; booked at the ready landing, else main + 1)
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -366,7 +366,7 @@ FEATURE_CONTRACTS["controller_actions"] = 63
 FEATURE_CONTRACTS["agent_rings"] = 64
 # 65-68 are reserved by unmerged lanes (artifact_summary_v1, steer_receipts, listen-first calls,
 # opening_receipts); clients gate on the feature, never on the number.
-FEATURE_CONTRACTS["artifact_summary_v1"] = 65  # PROVISIONAL: its reserved number; Nadia books it at the ready landing (never 1)
+FEATURE_CONTRACTS["artifact_summary_v1"] = 73  # introduction number; reserved 65 was never used
 FEATURE_CONTRACTS["tts_provider_google"] = 69
 FEATURE_CONTRACTS["tts_google_id_guard"] = 70
 FEATURE_CONTRACTS["agent_ring_live"] = 71  # PROVISIONAL: booked at the ready landing, else the next free number

@@ -706,7 +706,7 @@ report. Create it with `POST /artifacts`:
 
 `GET /artifacts`, `GET /pinned-artifacts` and `GET /attention/inbox` accept
 `representation=summary-v1` when the Host advertises the feature
-`artifact_summary_v1` (contract 65). It is `flat-v1` (no `payload`) with
+`artifact_summary_v1` (introduced at contract 73; gate on the feature, not the number). It is `flat-v1` (no `payload`) with
 exactly two bodies left out, each replaced by an explicit marker. The rows,
 their order, count, filters, paging, archived and pinned rows, `decision` and
 every action field are exactly `flat-v1`'s.
