@@ -45,6 +45,8 @@ def test_a_phone_switches_its_own_rings_off_and_on_over_http(running_server):
     base, ctx, srv = running_server
     camera, other = _phones(srv, ctx)
     assert _call(base, camera["token"], "GET") == (200, {"ok": True, "receive_rings": True, "push_token_bound": False})
+    from lib import apns
+    apns.register_token("a1" * 32, session="camera")
     assert _call(base, camera["token"], "POST", {"receive_rings": False, "push_token": "a1" * 32}) == \
         (200, {"ok": True, "receive_rings": False, "push_token_bound": True})
     assert _call(base, other["token"], "GET")[1]["receive_rings"] is True
@@ -79,3 +81,22 @@ def test_a_phone_with_rings_off_gets_no_ring_event_and_no_ring_in_the_poll(runni
     finally:
         for client, _ in streams.values():
             client.close()
+
+
+def test_a_phone_with_rings_off_still_gets_the_lifecycle_of_the_ring_it_answered(running_server):
+    base, ctx, srv = running_server
+    camera, other = _phones(srv, ctx)
+    assert _call(base, camera["token"], "POST", {"receive_rings": False})[0] == 200
+    client, response = _stream(base, camera["token"])
+    try:
+        events.broadcast(srv.ctx.stream, _ring("rng_new"))                                   # a new ring: held back
+        events.broadcast(srv.ctx.stream, _owned("rng_mine", camera["device_id"]))     # the ring it answered
+        assert [e["ring_id"] for e in _until(response, "rng_mine")] == ["rng_mine"]
+    finally:
+        client.close()
+
+
+def _owned(ring_id, owner):
+    return events.agent_ring(ring_id=ring_id, session="rachel", agent_id="a", persona="Rachel", reason="r",
+                             opening_line="o", opening_audio_url=None, state="answered", created_at=1,
+                             expires_at=2, ended_at=None, answered_by=owner, call_id="c1", server_now=1)
