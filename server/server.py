@@ -3207,8 +3207,8 @@ class Handler(BaseHTTPRequestHandler):
         # Provenance: only the AUTHENTICATED paired, full-scope, non-revoked device owns what it registers
         # (never a body field or the client-supplied session); every other registrant leaves it unbound.
         who = principal_of(self)
-        owner = who.principal if (who.authenticated and who.principal.startswith("device_")
-                                  and who.device_scope != "limited" and device_ok(who.principal)) else ""
+        owner = who.principal if (who.full_scope and who.principal.startswith("device_")
+                                  and device_ok(who.principal)) else ""
         try:
             apns.register_token(
                 token,
