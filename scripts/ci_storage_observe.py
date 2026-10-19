@@ -9,9 +9,17 @@ Runs inside scripts/ci_contained.sh (no network, fresh tmpfs /tmp, no privilege)
 
 Bounds. Every sample runs in its own short-lived measurement worker (this file with --measure-worker, in its own
 process group). The observer never blocks on it: it polls in 0.2 s slices, and a worker that is not done within
---budget seconds, or any worker when a signal arrives, gets SIGKILL to its group and a bounded reap. That sample
-is then UNKNOWN (all fields null, qualified=false). A worker stuck in an uninterruptible call may outlive its reap
-wait; that is recorded (worker_reaped=false), never hidden.
+--budget seconds, or any worker when a signal arrives, gets SIGKILL to its group and a bounded reap (<= 1 s). That
+sample is then UNKNOWN (all fields null, qualified=false). A worker stuck in an uninterruptible call may outlive its
+reap wait; that is recorded (worker_reaped=false), never hidden. If the worker's exit cannot be collected here
+(wait4 ECHILD: reaped elsewhere), its exit, output and ownership are UNKNOWN (worker_reaped=null): it is neither
+read nor signalled, since its pid may already name another process.
+
+Timing (honest, not a guarantee). Noticing the command's exit can take one 0.2 s slice, plus <= 1 s to reap an
+interrupted worker. One sample costs <= budget + 0.2 s + <= 1 s reap (<= 6.2 s at --budget 5). The "before" sample
+runs before the command starts and the "after" sample after it ended: both are SERIAL overhead (<= 6.2 s each); only
+the "during" samples overlap the command. These bounds hold on a normal, interruptible OS; the CI job timeout stays
+the final bound.
 
 Records (JSON lines, fixed keys; integers, booleans, null and fixed enum strings only; no paths, names, content,
 headers, environment or exception text): one "before", at most --max "during" (every --cadence s), one "after"
@@ -33,7 +41,7 @@ import subprocess
 import sys
 import time
 
-SCHEMA = 2
+SCHEMA = 3
 SLICE_S = 0.2
 REAP_S = 1.0
 FIELDS = ("tmp_bytes", "tmp_avail_bytes", "tmp_used_bytes", "inodes", "inodes_avail", "inodes_used",
@@ -85,7 +93,8 @@ class Observer:
         self.write_errors = 0
         self.bytes_written = 0
         self.worker_cpu_ms = 0
-        self.samples = {"qualified": 0, "unknown": 0, "timeout": 0, "interrupted": 0, "unreaped": 0}
+        self.samples = {"qualified": 0, "unknown": 0, "timeout": 0, "interrupted": 0, "unreaped": 0,
+                        "reap_unknown": 0, "kill_denied": 0}
         self.maxima = {"tmp_used_bytes": None, "pytest_tmp_allocated_bytes": None}
         self.min_avail = None
 
@@ -150,12 +159,13 @@ class Observer:
             rec["sample_ms"] = 0
             self._count(rec)
             return rec
-        status, code = None, None
+        status, code, lost = None, None, False
         while status is None:                    # never blocks: 0.2 s slices, the signal flag and the budget win
             try:
                 pid, st, usage = os.wait4(worker.pid, os.WNOHANG)
-            except ChildProcessError:
-                pid, st, usage = worker.pid, 0, None
+            except ChildProcessError:            # reaped elsewhere: exit, output and ownership are unknown
+                status, lost = "unknown", True
+                break
             if pid:
                 code, status = os.waitstatus_to_exitcode(st), "done"
                 self._cpu(usage)
@@ -166,29 +176,34 @@ class Observer:
             else:
                 time.sleep(SLICE_S)
         out = b""
-        if status == "done":
+        if lost:
+            rec["worker_reaped"] = None          # never read, never signalled: the pid may name another process
+        elif status == "done":
             try:
                 out = worker.stdout.read(65536)
             except OSError:
                 out = b""
         else:                                    # kill the worker's own group, then a bounded reap
-            try:
+            try:                                 # still our unreaped child here, so its pid is still its own
                 os.killpg(worker.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
+            except ProcessLookupError:
                 pass
+            except PermissionError:
+                self.samples["kill_denied"] += 1
             deadline, reaped = time.monotonic() + REAP_S, False
             while time.monotonic() < deadline:
                 try:
                     pid, _st, usage = os.wait4(worker.pid, os.WNOHANG)
-                except ChildProcessError:
-                    pid, usage = worker.pid, None
+                except ChildProcessError:        # reaped elsewhere: whether it is gone is unknown here
+                    reaped = None
+                    break
                 if pid:
                     reaped = True
                     self._cpu(usage)
                     break
                 time.sleep(0.05)
             rec["worker_reaped"] = reaped
-        worker.returncode = code if code is not None else -signal.SIGKILL   # reaped here, not by Popen
+        worker.returncode = code if code is not None else -signal.SIGKILL   # never waited by Popen; not reported
         try:
             worker.stdout.close()
         except OSError:
@@ -219,8 +234,10 @@ class Observer:
     def _count(self, rec):
         key = {"qualified": "qualified", "timeout": "timeout", "interrupted": "interrupted"}.get(rec["status"], "unknown")
         self.samples[key] += 1
-        if not rec["worker_reaped"]:
+        if rec["worker_reaped"] is False:
             self.samples["unreaped"] += 1
+        elif rec["worker_reaped"] is None:
+            self.samples["reap_unknown"] += 1
         if rec["fs_qualified"]:
             if self.maxima["tmp_used_bytes"] is None or rec["tmp_used_bytes"] > self.maxima["tmp_used_bytes"]:
                 self.maxima["tmp_used_bytes"] = rec["tmp_used_bytes"]
@@ -271,12 +288,16 @@ class Observer:
                 try:
                     os.killpg(pgid, signal.SIGKILL)
                     cleanup = "group_killed"
-                except (ProcessLookupError, PermissionError):
+                except ProcessLookupError:
                     cleanup = "group_gone"
+                except PermissionError:
+                    cleanup = "group_check_failed"        # denied is not gone: the group's fate is unknown
                 try:
                     rc = self.child.wait(timeout=self.grace)
                 except subprocess.TimeoutExpired:
-                    cleanup, rc = "group_kill_unconfirmed", None
+                    rc = None
+                    if cleanup != "group_check_failed":
+                        cleanup = "group_kill_unconfirmed"
             else:
                 cleanup = "group_exited"
                 try:                                      # remnants left in the owned group (e.g. stray workers)
@@ -309,7 +330,8 @@ class Observer:
                     "samples_during": during, "cap_reached": during >= self.max,
                     "samples_qualified": self.samples["qualified"], "samples_unknown": self.samples["unknown"],
                     "samples_timeout": self.samples["timeout"], "samples_interrupted": self.samples["interrupted"],
-                    "workers_unreaped": self.samples["unreaped"],
+                    "workers_unreaped": self.samples["unreaped"], "workers_reap_unknown": self.samples["reap_unknown"],
+                    "worker_kill_denied": self.samples["kill_denied"],
                     "observed_sample_max_tmp_used_bytes": self.maxima["tmp_used_bytes"],
                     "observed_sample_max_pytest_tmp_allocated_bytes": self.maxima["pytest_tmp_allocated_bytes"],
                     "observed_sample_min_tmp_avail_bytes": self.min_avail,
