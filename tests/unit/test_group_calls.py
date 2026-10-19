@@ -10,7 +10,10 @@ import importlib
 import importlib.util
 import io
 import json
+import os
 import pathlib
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -24,6 +27,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PHONE = "device_phone1"
 OTHER = "device_tablet"
 ADMIN = calls.ADMINISTRATOR
+# The classes every other module imported from group_calls; a test that
+# reloaded the module in this process would replace them for later files.
+_IMPORTED_CALL_ERROR = calls.CallError
 
 
 def _agent(agent_id, persona, session, *, archived=False, janitor=False, helper=False, runtime=True):
@@ -399,17 +405,68 @@ def test_ending_while_agents_are_mid_turn_ends_routing_but_not_their_work(stream
 
 # ---- restarts, staleness, concurrency --------------------------------------
 
-def test_a_live_call_survives_an_http_restart(stream):
-    call = calls.start(PHONE, ["Theo", "Mike"])["call"]
-    calls.change(PHONE, "hold", "Mike")
-    restarted = importlib.reload(calls)
-    restarted.bind(type("Ctx", (), {"stream": stream})())
-    after = restarted.snapshot(PHONE)["call"]
-    assert after["call_id"] == call["call_id"] and after["revision"] == 2
-    assert _states(after) == {"Theo": "active", "Mike": "on_hold"}
-    out = restarted.change(PHONE, "resume", "Mike")
-    assert out["call"]["revision"] == 3
-    assert restarted.route(PHONE, call["call_id"], "mike-86db")["session"] == "mike-86db"
+_RESTART_PHASES = {
+    "before": """
+for agent_id, persona, session in (("a-theo", "Theo", "theo-97e5"), ("a-mike", "Mike", "mike-86db")):
+    db.conn().execute(
+        "INSERT INTO agents(agent_id, persona, voice_id, cwd, session, created_at, role)"
+        " VALUES (?,?,?,?,?,?,?)", (agent_id, persona, "v", "/tmp", session, db.now_ms(), "agent"))
+    db.conn().execute(
+        "INSERT INTO runtimes(agent_id, session, backend_session_id, started_at) VALUES (?,?,?,?)",
+        (agent_id, session, "bs-" + agent_id, db.now_ms()))
+call = calls.start(PHONE, ["Theo", "Mike"])["call"]
+calls.change(PHONE, "hold", "Mike")
+out = {"call_id": call["call_id"]}
+""",
+    "after": """
+after = calls.snapshot(PHONE)["call"]
+resumed = calls.change(PHONE, "resume", "Mike")["call"]
+out = {"call_id": after["call_id"], "revision": after["revision"],
+       "states": {p["persona"]: p["state"] for p in after["participants"]},
+       "resumed_revision": resumed["revision"],
+       "routed": calls.route(PHONE, after["call_id"], "mike-86db")["session"]}
+""",
+}
+
+
+def _host_process(db_path, phase):
+    """One Host process lifetime: a fresh interpreter on its own database
+    imports group_calls, runs ``phase`` and exits."""
+    script = (
+        "import json, sys\n"
+        f"sys.path.insert(0, {str(ROOT / 'server')!r})\n"
+        "from lib import db, group_calls as calls\n"
+        "calls.bind(type('Ctx', (), {'stream': type('S', (), {'broadcast': lambda self, e: None})()})())\n"
+        f"PHONE = {PHONE!r}\n"
+        + _RESTART_PHASES[phase]
+        + "print(json.dumps(out))\n")
+    env = {**os.environ, "CLAUDE_PWA_DB": str(db_path)}
+    done = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True,
+                          text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+def test_a_live_call_survives_an_http_restart(tmp_path):
+    # The restart is real: two processes, the second a fresh import, on a
+    # database of their own. Reloading group_calls here instead would swap
+    # CallError under every module that already imported it.
+    db_path = tmp_path / "restart" / "state.sqlite"
+    db_path.parent.mkdir()
+    before = _host_process(db_path, "before")
+    after = _host_process(db_path, "after")
+    assert after["call_id"] == before["call_id"] and after["revision"] == 2
+    assert after["states"] == {"Theo": "active", "Mike": "on_hold"}
+    assert after["resumed_revision"] == 3
+    assert after["routed"] == "mike-86db"
+
+
+def test_the_restart_leaves_this_process_s_group_calls_alone(stream):
+    """The restart above runs elsewhere: the module here, and the CallError
+    other modules imported from it, are the ones loaded at import."""
+    from lib import call_transcription
+    assert calls.CallError is _IMPORTED_CALL_ERROR
+    assert call_transcription.CallError is calls.CallError
 
 
 def test_a_call_untouched_for_twelve_hours_ends_as_stale(stream, monkeypatch):

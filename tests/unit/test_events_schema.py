@@ -39,7 +39,8 @@ FULL_SAMPLES = {
         agent_id="a", persona="P", trace_id="t", streamable=True,
         delivery="hls", stream_url="/s", playlist_url="/p",
         complete_url="/c", audio_format={}, preview=True, herald=True,
-        voice_id="v", phrase_key="k", cached_phrase=True, replay=True, ts=1),
+        voice_id="v", phrase_key="k", cached_phrase=True, replay=True, ts=1,
+        call_id="gcl_x", opening={"kind": "initiative"}),
     SSEType.SERVER_VERSION: lambda: events.server_version("1"),
     SSEType.REMOTE_ACTION: lambda: events.remote_action(
         "controller-event", 1, controller_event_id="c", button="primary",

@@ -177,6 +177,102 @@ Nadia: The migration is the only risk.
   transcript parsers strip back off (`lib.voice_preamble`). The header is read
   only; building it never changes the call.
 
+## Transcription in a call (feature `call_transcription_policy`; contract number booked at landing)
+
+Owner settings (via the transcription settings endpoint, read back by the
+same GET), unset by default: `call_languages` (one ISO code or a set of up to
+three, e.g. `no,en`) and `call_engines` (an ordered fallback list, e.g.
+`google:chirp_3,elevenlabs:scribe_v2`). A language set together with an engine
+that takes a single language (anything but Google Chirp and ElevenLabs
+Scribe) is refused when saved, and so is a set that only Scribe would get.
+
+A clip is in a call only when `/transcribe` carries `X-Clarp-Call-Id` and
+`X-Transcription-Session`, the call is live, belongs to this device on this
+Host, and the session is a reachable participant of the call record (never UI
+focus or name delegation). Otherwise the request is refused before any
+provider sees the audio; an absent header is ordinary chat transcription.
+
+Per field, independently: the language is the agent's own
+(`agent_languages`), else `call_languages`, else the global language; the
+engines are the agent's own (`agent_engines`), else `call_engines`, else the
+device's `X-Transcription-Model`, else the global engine. A device header
+that is not applied is reported (`requested_model.applied: false` with the
+reason), never refused.
+
+Without a call policy (`call_languages` and `call_engines` both unset),
+in-call transcription is unchanged: the same engine chain as chat, nothing
+skipped and no new refusal, with the sources still reported.
+
+An explicit `X-Transcription-Model: server-default` or `local` from a device
+(it is an ordinary header value, and clients may send it) is passed to the
+engine exactly as outside a call: the same `transcribe_model_bytes` call with
+the value as sent, and the same answer, including a refusal. Only an absent
+or empty header falls through to the global engine, as in chat.
+
+With a call policy configured, engines are planned on the real model and what
+it does with a language: `server-default` (and `local`) means the configured
+local model. Google Chirp takes a language set; ElevenLabs Scribe takes one
+code, and a set skips it (Scribe would drop the set and detect any language);
+other cloud engines take one code and get the first code of a set
+(`language_adapted: "first_code"`); an English-only local model (catalog
+`["en"]`, e.g. `small.en`) takes `en` only. Multilingual or unknown local
+engines never receive the code, so they are skipped when a call policy is
+configured. An incompatible engine is skipped (`{engine, outcome: "skipped",
+reason: "language_incompatible"}`); the rest run in order, the next only on
+failure.
+
+Either way every attempt records, in `stt.attempts` and the `transcribe`
+event, the `language` the Host handed at that engine's boundary: a local model
+(faster-whisper's own language, in process or in its worker; the `-l` value
+whisper.cpp runs with; OpenAI whisper's `language`), a custom adapter (none:
+the protocol carries no language), or the cloud provider adapter (the exact
+argument; Scribe is handed none for a set). It is not what a provider sent on,
+received or detected. `auto` means no language constraint was handed (not a
+detection). `null`, or no `language` at all (a skipped engine), means the
+boundary was unobserved for that attempt, and only that: it does not say
+whether the engine was invoked, and the Host never fills it in (an attempt can
+fail without its boundary noted, and an engine with no recorded boundary, such
+as a disabled or unavailable one, records `null`).
+
+When a call policy is configured and no engine can take the call language,
+the clip is refused before any provider sees it: **409** `{"ok": false, "error": "no compatible engine",
+"language": "<code(s)>", "engines": ["<real model ids>"], "attempts": [<the
+skips>]}`. Saving settings refuses a policy that can never work (the call
+languages against `call_engines`, or, when those are unset, the resolved
+global engine), including a later change of the global engine; the readback
+adds `call_policy_error` (empty, or why the stored policy can no longer work).
+Settings save `call_languages`, `call_engines` and the global engine in one
+transaction, and each clip reads all three in one read: a clip resolves,
+plans and reports with one policy, never a mix of an old and a new one. A
+stored policy that can never work (written around the settings check, an
+unreadable value, or broken by a later global engine) is refused for every
+call clip before any provider: **409** `{"ok": false, "error": "call policy
+invalid", "call_policy_error": "<why>", "language": "<stored call_languages>",
+"engines": ["<call_engines as real model ids>"], "attempts": []}`. It is never
+treated as unset or global, and the call record then omits `transcription`.
+
+The call record (`GET /calls`, the answer's `call`, route responses) adds
+`transcription: {session: {language: {value, source}, engines: {value,
+source}}}`. It is a **live derived view, not a snapshot**: the Host computes
+it at each read from the same per-field resolution the next clip would use,
+never stores it, and never sends it on the `group-call` event. A policy or
+override change mid-call shows at the next read; the per-clip `stt` of a
+transcription stays the authority for what actually ran.
+
+**Absence of `transcription` means unknown**, never "reset to global". It can
+mean any of:
+- neither a configured call policy nor a listen-first call makes it relevant
+  (a say-path call stays identical to before, even with agent overrides);
+- every participant field resolves to `global`;
+- the call is not live (ended, superseded);
+- computing the view failed;
+- an older Host.
+
+A client omits `X-Transcription-Model` on call-scoped requests only when the
+view explicitly shows `engines.source` exactly `"call_policy"` for the
+captured participant (and the Host advertises `call_transcription_policy`).
+Absence, or any other source, fails safe: keep sending the header.
+
 ## Events
 
 Every change emits one durable SSE event:
