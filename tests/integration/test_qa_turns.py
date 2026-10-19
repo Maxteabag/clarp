@@ -1,4 +1,5 @@
 """Real HTTP/dispatch/provider-process/SQLite round trips without credentials."""
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -123,6 +124,36 @@ class QAHost:
         raise AssertionError(f'no reply for {session}: {result}')
 
 
+TURN_READY_TIMEOUT_S = 5
+
+
+def _turns_of(host, message_id):
+    """Read-only, exact identity: the trace of one user row and the turn rows under that trace."""
+    with contextlib.closing(sqlite3.connect(f"file:{host.root / 'state.sqlite'}?mode=ro", uri=True)) as db:
+        row = db.execute("SELECT trace_id FROM messages WHERE message_id = ?", (message_id,)).fetchone()
+        trace = row[0] if row else None
+        turns = db.execute("SELECT started_at, settled_at, outcome FROM turns WHERE trace_id = ?",
+                           (trace,)).fetchall() if trace else []
+    return trace, turns
+
+
+def wait_turn(host, message_id, *, settled):
+    """Wait, bounded, until the turn that the user row ``message_id`` opened is settled
+    (``settled=True``) or open and running (``settled=False``). A row with no turn of its
+    own (it was steered into another turn) never qualifies; that fails, never passes."""
+    deadline = time.monotonic() + TURN_READY_TIMEOUT_S
+    while True:
+        trace, turns = _turns_of(host, message_id)
+        if turns and (all(t[1] is not None for t in turns) if settled
+                      else len(turns) == 1 and turns[0][1] is None):
+            return trace
+        if time.monotonic() >= deadline:
+            state = 'settled' if settled else 'started as its own open turn'
+            raise AssertionError(f'readiness: {message_id} not {state} within {TURN_READY_TIMEOUT_S} s '
+                                 f'(trace={trace}, turns={turns})')
+        time.sleep(.05)
+
+
 @pytest.fixture
 def qa_host(tmp_path):
     host = QAHost(tmp_path / 'host')
@@ -180,8 +211,12 @@ def test_durable_queue_survives_host_restart(qa_host):
     qa_host.request('/send', {'session': 'rachel', 'text': 'earlier conversation',
                              'client_msg_id': 'earlier', 'synthesize_audio': False})
     before = qa_host.wait_reply('rachel', 'earlier conversation')
+    # A visible reply is not a settled turn: a send before the settle is steered into it.
+    wait_turn(qa_host, 'u-earlier', settled=True)
     qa_host.request('/send', {'session': 'rachel', 'text': '[qa-slow] active',
                              'client_msg_id': 'active', 'synthesize_audio': False})
+    # The queue precondition: active runs as its own turn (not steered) and is still busy.
+    wait_turn(qa_host, 'u-active', settled=False)
     queued = qa_host.request('/send', {'session': 'rachel', 'text': 'queued after restart',
                                      'client_msg_id': 'queued', 'queue_if_busy': True,
                                      'synthesize_audio': False})
