@@ -1,15 +1,19 @@
 """Durable typed deliverables and approval decisions."""
 from __future__ import annotations
 
+import hashlib
 import json
+from contextlib import contextmanager
 import math
 import pathlib
 import re
 import secrets
+import sys
 from urllib.parse import urlsplit
 from typing import Any
 
 from . import agents, db, media_store
+from .revisioned_cache import RevisionedCache
 from .voice_markup import strip_hidden_blocks
 
 TYPES = {"countdown", "html_form", "decision", "question", "plan", "document", "research", "code_change", "data",
@@ -326,21 +330,274 @@ def _public(row) -> dict:
             item["decision"]["input_hint"] = _input_hint(item["payload"])
     elif item["type"] == "plan" and item.get("reference_id"):
         from . import task_plans
-        item["plan"] = task_plans.get(item["reference_id"])
+        plan, goal_text = task_plans.get_with_goal_text(item["reference_id"])
+        item["plan"] = _PlanWithGoalText(plan, goal_text) if plan is not None else None
     return item
 
 
-def response_representation(item: dict, representation: str = "") -> dict:
+class _PlanWithGoalText(dict):
+    """A plan dict that also remembers the exact goal_json text it came from.
+
+    It serializes exactly like the plain dict; only summary-v1 reads
+    ``goal_text`` to key the history digest (see _history_marker)."""
+    __slots__ = ("goal_text",)
+
+    def __init__(self, plan: dict, goal_text: str | None) -> None:
+        super().__init__(plan)
+        self.goal_text = goal_text
+
+
+REPRESENTATIONS = ("", "flat-v1", "summary-v1")
+
+
+def response_representation(item: dict, representation: str = "", *,
+                            budget: "SummaryBudget | None" = None) -> dict:
     """Opt-in wire projection; canonical storage and default clients keep payload.
 
     Flattening has already copied validated public fields, including large content,
     rows and diff. Native clients consume those top-level fields, never payload.
+    ``summary-v1`` is flat-v1 with exactly two bodies left out, each replaced by
+    an explicit marker: html_form ``content`` (``content_omitted``) and
+    ``plan.goal.history`` (``plan.goal.history_omitted``). Pass one ``budget``
+    per request; without one each call gets its own.
     """
     if representation == "":
         return item
-    if representation != "flat-v1":
+    if representation not in ("flat-v1", "summary-v1"):
         raise ValueError("unsupported artifact representation")
-    return {key: value for key, value in item.items() if key != "payload"}
+    flat = {key: value for key, value in item.items() if key != "payload"}
+    if representation == "flat-v1":
+        return flat
+    budget = budget or summary_budget()
+    if flat.get("type") == "html_form" and "content" in flat:
+        content = flat.pop("content")
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        flat["content_omitted"] = _content_marker(
+            item, content, payload.get("version"), budget)
+    plan = flat.get("plan")
+    if isinstance(plan, dict) and isinstance(plan.get("goal"), dict) \
+            and "history" in plan["goal"]:
+        goal = dict(plan["goal"])
+        history = goal.pop("history")
+        goal["history_omitted"] = _history_marker(
+            plan, history, getattr(plan, "goal_text", None), budget)
+        flat["plan"] = {**plan, "goal": goal}
+    return flat
+
+
+# --- summary-v1 identity markers -------------------------------------------------
+#
+# Three separate bounds, none of which limits the response itself (a summary
+# body is whatever its rows are, like any list response):
+#
+# * hashing work per request: SummaryBudget counts the UTF-8 bytes this request
+#   may still encode for markers on cache misses: the counting pass of a
+#   non-ASCII body and the hashing pass alike, so such a body costs twice its
+#   size. It is checked BEFORE a body is encoded, from a bound that never
+#   undercounts (characters for content, where bytes >= characters; the stored
+#   goal text for history, whose canonical history is a part of it). A body
+#   that turns out to be over spends what remained, so later misses in the
+#   request encode nothing: total encoding stays within the budget plus one
+#   counting chunk. Past it a marker says pending; it never carries a wrong value.
+# * retained memory: the two caches are LRU-bounded by entry count and by the
+#   bytes their entries hold (key, revision and value, measured with
+#   sys.getsizeof, plus a per-entry overhead), the history cache's exact
+#   goal_json text keys included.
+# * an unchanged list rebuild hashes nothing only while its rows' identities
+#   fit the caches. A list larger than a cache keeps a stable resident share
+#   (summary_request's scan-resistant admission) and rehashes only the excess
+#   on every build; rows past the budget stay pending, and hydrating them
+#   (GET /artifacts/<id>) returns the real content, never a missing item.
+
+SUMMARY_HASH_BUDGET_BYTES = 64 * 1024 * 1024
+_UTF8_COUNT_CHUNK = 256 * 1024          # characters encoded at a time to count bytes
+_ENTRY_OVERHEAD = 256                   # an OrderedDict slot and the weight record
+
+
+class SummaryBudget:
+    """UTF-8 bytes one request may still hash for summary-v1 markers, and,
+    for a request opened with summary_request(), its cache protection."""
+
+    def __init__(self, max_bytes: int, *, protect: bool = False) -> None:
+        self.remaining = max_bytes
+        self._protect = protect
+        self._scopes: dict = {}
+
+    def take(self, size: int) -> bool:
+        if size > self.remaining:
+            return False
+        self.remaining -= size
+        return True
+
+    def scope(self, cache: RevisionedCache):
+        """This request's protection on `cache`, or None outside a request."""
+        if not self._protect:
+            return None
+        if cache.name not in self._scopes:
+            self._scopes[cache.name] = cache.scope()
+        return self._scopes[cache.name]
+
+    def release(self) -> None:
+        for scope in self._scopes.values():
+            scope.release()
+        self._scopes.clear()
+
+
+def summary_budget(max_bytes: int | None = None) -> SummaryBudget:
+    return SummaryBudget(SUMMARY_HASH_BUDGET_BYTES if max_bytes is None else max_bytes)
+
+
+@contextmanager
+def summary_request(max_bytes: int | None = None):
+    """One summary-v1 request: its hash budget, plus protection of the cache
+    entries it hits or admits from its own later admissions (scan resistance:
+    a list larger than a cache keeps a stable resident share instead of
+    evicting everything it will need next time). Released when the request
+    ends, by completion, error or cancellation."""
+    budget = SummaryBudget(SUMMARY_HASH_BUDGET_BYTES if max_bytes is None else max_bytes,
+                           protect=True)
+    try:
+        yield budget
+    finally:
+        budget.release()
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _retained_bytes(*objects: Any) -> int:
+    """What an entry holds: each object and, for tuples, its members."""
+    size = _ENTRY_OVERHEAD
+    for obj in objects:
+        size += sys.getsizeof(obj)
+        if isinstance(obj, tuple):
+            size += sum(sys.getsizeof(member) for member in obj)
+    return size
+
+
+# (artifact_id) at (updated_at, version, exact content text) -> (UTF-8 bytes,
+# "c1:" sha) or (None, None) for content that has no UTF-8 encoding. A hit
+# needs the current content to equal the stored text exactly: updated_at and
+# version alone do not prove it (a direct write could keep both). The tuple
+# compares updated_at and version first, so the string comparison only runs
+# when they match. The text is held, so an entry weighs it; an entry heavier
+# than the whole bound is not kept and that body is rehashed (under the
+# request budget) each time. Over-budget results are never cached.
+# ``version`` is a scalar: an html_form's single writer accepts only a string
+# of at most 80 characters (html_forms.py), so weighing it shallow is exact.
+_CONTENT_IDENTITY: RevisionedCache[str, tuple[int | None, str | None]] = RevisionedCache(
+    "artifact_content_identity", max_entries=4096, max_weight=8 * 1024 * 1024,
+    weight=lambda key, revision, value: _retained_bytes(key, revision, value))
+
+# plan_id at the exact goal_json text last seen -> "h1:" digest. A hit needs
+# exact string equality: _goal_save rewrites goal_json without a revision or
+# updated_at bump. The text is held, so it is weighed in bytes.
+_HISTORY_DIGEST: RevisionedCache[str, str] = RevisionedCache(
+    "plan_history_digest", max_entries=4096, max_weight=64 * 1024 * 1024,
+    weight=lambda key, revision, value: _retained_bytes(key, revision, value))
+
+
+_OVER_BUDGET = object()
+
+
+def _encode_utf8(text: str) -> bytes:
+    return text.encode("utf-8")
+
+
+def _utf8_length(content: str, budget: SummaryBudget) -> int | None | object:
+    """The exact UTF-8 length of ``content`` if it fits the budget, charging
+    the bytes this counting encodes; _OVER_BUDGET past it, stopping at the
+    chunk that shows it and spending the rest of the budget (that work was
+    done); None when the text has no UTF-8 encoding. Encodes one chunk at a
+    time. ASCII needs no counting pass: its bytes are its characters."""
+    if len(content) > budget.remaining:
+        return _OVER_BUDGET                  # bytes >= characters
+    if content.isascii():
+        return len(content)
+    total = 0
+    for start in range(0, len(content), _UTF8_COUNT_CHUNK):
+        try:
+            size = len(_encode_utf8(content[start:start + _UTF8_COUNT_CHUNK]))
+        except UnicodeEncodeError:
+            return None
+        total += size
+        if not budget.take(size):
+            budget.remaining = 0
+            return _OVER_BUDGET
+    return total
+
+
+def content_identity(content: str) -> tuple[int | None, str | None]:
+    """(UTF-8 byte length, "c1:" sha256 of those bytes), or (None, None) when
+    the content cannot be encoded as UTF-8 (a lone surrogate)."""
+    try:
+        data = _encode_utf8(content)
+    except UnicodeEncodeError:
+        return None, None
+    return len(data), "c1:" + _sha256(data)
+
+
+def _content_marker(item: dict, content: str, version: Any, budget: SummaryBudget) -> dict:
+    revision = (item.get("updated_at"), version, content)
+    scope = budget.scope(_CONTENT_IDENTITY)
+    found, identity = _CONTENT_IDENTITY.get(item["artifact_id"], revision, scope=scope)
+    if not found:
+        size = _utf8_length(content, budget)
+        if size is None:
+            identity = (None, None)             # no UTF-8 encoding: cached, never hashed
+            _CONTENT_IDENTITY.put(item["artifact_id"], revision, identity, scope=scope)
+        elif size is _OVER_BUDGET or not budget.take(size):
+            if size is not _OVER_BUDGET:
+                budget.remaining = 0            # counted, cannot hash: no more misses
+            identity = (None, None)             # pending this request; not cached
+        else:
+            identity = content_identity(content)
+            _CONTENT_IDENTITY.put(item["artifact_id"], revision, identity, scope=scope)
+    size, digest = identity
+    marker: dict[str, Any] = {"reason": "summary", "bytes": size}
+    if size is None:
+        marker["size_unknown"] = True
+    marker["sha256"] = digest
+    if digest is None:
+        marker["hash_pending"] = True
+    marker["version"] = version
+    marker["updated_at"] = item.get("updated_at")
+    return marker
+
+
+def _history_marker(plan: dict, history: Any, goal_text: str | None,
+                    budget: SummaryBudget) -> dict:
+    """count/last_at from the history in hand; the digest only for a plan that
+    carries the exact goal_json text it was decoded from. Without that text
+    nothing proves a cached digest current, so the digest is explicitly
+    pending (computed nowhere, cached nowhere) and the client hydrates."""
+    entries = history if isinstance(history, list) else []
+    last = entries[-1] if entries and isinstance(entries[-1], dict) else {}
+    marker: dict[str, Any] = {"reason": "summary", "count": len(entries),
+                              "last_at": last.get("at")}
+    plan_id = str(plan.get("plan_id") or "")
+    digest = None
+    if goal_text is not None and plan_id:
+        scope = budget.scope(_HISTORY_DIGEST)
+        found, digest = _HISTORY_DIGEST.get(plan_id, goal_text, scope=scope)
+        if not found:
+            digest = None
+            # The canonical history is a part of the stored goal text, so its
+            # UTF-8 size is at most the text's: characters when ASCII, at most
+            # four bytes per character otherwise. Checked before serializing.
+            bound = len(goal_text) if goal_text.isascii() else 4 * len(goal_text)
+            if bound <= budget.remaining:
+                canonical = json.dumps(
+                    history, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                ).encode("utf-8", "surrogatepass")
+                if budget.take(len(canonical)):
+                    digest = "h1:" + _sha256(canonical)
+                    _HISTORY_DIGEST.put(plan_id, goal_text, digest, scope=scope)
+    marker["digest"] = digest
+    if digest is None:
+        marker["digest_pending"] = True
+    return marker
 
 
 def _public_field_valid(key: str, value: Any) -> bool:

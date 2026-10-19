@@ -1,0 +1,29 @@
+{
+ "method": "POST",
+ "path": "/artifacts",
+ "status": 409,
+ "reason": "Conflict",
+ "headers": [
+  [
+   "Server",
+   "ClaudePWA/1.0 Python/3.12.14"
+  ],
+  [
+   "Date",
+   "Tue, 13 Oct 2026 14:21:50 GMT"
+  ],
+  [
+   "Content-Type",
+   "application/json"
+  ],
+  [
+   "Content-Length",
+   "98"
+  ],
+  [
+   "Cache-Control",
+   "no-store"
+  ]
+ ],
+ "request_body_note": "see the generator: a JSON html_form whose content has a lone surrogate escape"
+}
