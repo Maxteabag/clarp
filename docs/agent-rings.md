@@ -191,10 +191,14 @@ The normative contract is the agreed listen-first v5 (§11, then §10, §9, §9.
 A ring may ask the phone to let the user speak first:
 
 - `POST /calls/ring` takes `opening_mode`: `say` (the default, exactly the
-  ring above) or `listen_first`. Any other value is 400 `unknown opening_mode`.
-  `opening_line` stays required and is still voiced at ring time: it is the
-  line a phone that cannot listen first plays. `clarp-admin call ring
-  --listen-first` sends it; without the flag the request is unchanged.
+  ring above) or `listen_first`. On a classic ring any other value is 400
+  `unknown opening_mode`. A Live ring (`conversation_mode: agent_live_v1`)
+  takes no listen-first opening (its opening is the Live model's): any sent
+  value other than `say`, `listen_first` included, is the existing 400
+  `live_mode_invalid` and nothing is stored. `opening_line` stays required
+  and is still voiced at ring time: it is the line a phone that cannot listen
+  first plays. `clarp-admin call ring --listen-first` sends it; without the
+  flag the request is unchanged.
 - `POST /calls/ring/answer` takes `opening_mode: "listen_first"` from a phone
   that can. On a listen_first ring it is an ACK only: the call starts, nothing
   is spoken, synthesized, written to history or run, and the answer's
@@ -203,7 +207,10 @@ A ring may ask the phone to let the user speak first:
   null}`. Without `opening_mode` the answer is today's, byte for byte; with any
   other value (or on a say ring) it is today's answer plus `opening.mode:
   "say"`. A listen_first ring answered the legacy way is `fallback`: the line
-  plays, nothing is dispatched.
+  plays, nothing is dispatched. `opening_mode` is chosen when the ring is
+  placed; the answer never renegotiates it. An answer's `opening_mode` only
+  picks how a listen_first ring's opening is handed back, and a Live ring's
+  answer ignores it (the Live grant, no listen-first opening; no refusal).
 - The phone owns timing (readiness, VAD onset, the 1.25 s deadline). It reports
   through `POST /calls/ring/opening {token, epoch, claim, request_id,
   capture_gen, at_ms}` with `claim` one of `listening`, `speech_started`
