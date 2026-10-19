@@ -148,6 +148,7 @@ pub fn open(app: &App, window: &AppWindow) {
 pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
     if changes.contains(&Change::Updates) {
         show(app, window);
+        crate::artifacts_view::settle_hydration(app);
         if *app.overlay.borrow() == "report" {
             show_report(app, window);
         }
@@ -184,6 +185,9 @@ pub fn next_attention(app: &Rc<App>, window: &AppWindow) {
 pub fn open_report(app: &App, window: &AppWindow, artifact_id: &str) {
     REPORT.with(|r| *r.borrow_mut() = artifact_id.to_owned());
     commands::open_overlay(app, window, "report");
+    // What a summary list left out (a report's body, a plan's history) is
+    // read now, and again if it changes while it shows.
+    app.engine.borrow_mut().set_artifact_in_view(Some(artifact_id));
     let started = std::time::Instant::now();
     show_report(app, window);
     eprintln!("clarp-slint: report {artifact_id} shown in {} ms ({} blocks)", started.elapsed().as_millis(), slint::Model::row_count(&window.get_report_blocks()));
@@ -226,6 +230,9 @@ pub fn open_report_link(index: i32) {
 /// The report's title, summary and body (Markdown blocks) for the viewer.
 fn show_report(app: &App, window: &AppWindow) {
     let id = REPORT.with(|r| r.borrow().clone());
+    if !report_body_in(app, window, &id) {
+        return;
+    }
     // What a card stands for (a plan, research with its sources...),
     // else the artifact's report body.
     let report = crate::artifacts_view::detail(app, &id)
@@ -246,6 +253,36 @@ fn show_report(app: &App, window: &AppWindow) {
     window.set_report_browser(html);
     window.set_report_kind(text(&report, "kind").into());
     window.set_report_blocks(model(blocks));
+}
+
+/// False when the viewer cannot show the artifact's body yet: a summary
+/// row's form or report still being read (it says so), or deleted on the
+/// Host (the viewer closes; the engine said why).
+fn report_body_in(app: &App, window: &AppWindow, id: &str) -> bool {
+    use clarp_engine::Hydration;
+    let state = app.engine.borrow().artifact_hydration(id);
+    if state == Hydration::Gone {
+        commands::close_overlay(app, window);
+        return false;
+    }
+    let row = app.engine.borrow().update_artifacts().iter().find(|a| a.get("artifact_id").and_then(Value::as_str) == Some(id)).cloned();
+    let Some(row) = row else { return true };
+    let missing = row.get("type").and_then(Value::as_str) == Some("html_form") && row.get("content").is_none() && row.get("content_omitted").is_some();
+    if !missing {
+        return true;
+    }
+    let said = match state {
+        Hydration::Failed(why) => format!("Not loaded: {why}"),
+        _ => "Loading…".to_owned(),
+    };
+    window.set_report_title(row.get("title").and_then(Value::as_str).unwrap_or_default().into());
+    window.set_report_summary(said.into());
+    window.set_report_html(false);
+    window.set_report_browser(false);
+    window.set_report_links(0);
+    REPORT_LINKS.with(|l| l.borrow_mut().clear());
+    window.set_report_blocks(model(Vec::new()));
+    false
 }
 
 /// Sanitized report HTML as Markdown, which Slint can draw: headings,

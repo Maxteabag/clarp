@@ -61,17 +61,19 @@ def test_provider_speech_before_the_opening_was_sent_never_reaches_the_phone_and
     assert not call.up.of("session.instructions.append")
 
 
-def test_provider_output_after_the_opening_was_sent_but_before_its_ack_is_terminal(call):
+def test_provider_output_after_the_opening_was_sent_but_before_its_ack_is_held_until_the_ack(call):
+    """2822 (18 Oct): the real provider can speak before it acknowledges the append. Held, then admitted, in order."""
     call.up.take_opening = False
     h, thread = _provider_ready(call)
     h.send(_ready(call.grant))
     _wait(lambda: call.up.of("session.instructions.append"))
     call.up.push(DELTA)                                   # the provider speaks before it acknowledges the append
-    call.up.push({"type": "session.instructions.appended"})
-    thread.join(15)
-    assert DELTA not in h.wfile.frames() and "agent_live.opening_admitted" not in _types(h)
-    assert next(f for f in h.wfile.frames() if f["type"] == "agent_live.error")["code"] == "live_unavailable"
-    assert _ring_of(call.grant)["_live_retired_reason"] == "provider_output_before_ack"
+    append = call.up.of("session.instructions.append")[-1]
+    call.up.push({"type": "session.instructions.appended", "client_event_id": append["event_id"]})
+    _wait(lambda: DELTA in h.wfile.frames())
+    kinds = _types(h)
+    assert kinds.index("agent_live.opening_admitted") < h.wfile.frames().index(DELTA)
+    assert "agent_live.error" not in kinds
 
 
 def test_output_in_the_window_between_a_saved_retirement_and_its_stop_never_reaches_the_phone(call, monkeypatch):

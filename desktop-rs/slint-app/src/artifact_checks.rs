@@ -2655,3 +2655,129 @@ fn big_report_stages(_out: &str) -> Vec<Stage> {
     ]);
     stages
 }
+
+// ---- summary lists (artifact_summary_v1)
+
+/// GETs of `path` in the fake Host's log (`CLARP_TEST_HOST_LOG`). The
+/// chat's own event reads happen before summary lists are on; the check
+/// counts from there (`READS_BEFORE`).
+fn host_gets(path: &str) -> usize {
+    let Some(log) = std::env::var_os("CLARP_TEST_HOST_LOG") else { return 0 };
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|r| r["method"] == "GET" && r["path"] == path)
+        .count()
+}
+
+thread_local! {
+    /// Item reads of the two reports when summary lists came on.
+    static READS_BEFORE: Cell<(usize, usize)> = const { Cell::new((0, 0)) };
+}
+
+/// Reads of `big-report` and `big-net` since summary lists came on.
+fn reads_since() -> (usize, usize) {
+    let (report, net) = READS_BEFORE.with(Cell::get);
+    (host_gets("/artifacts/big-report") - report, host_gets("/artifacts/big-net") - net)
+}
+
+fn listed_row(app: &crate::App, id: &str) -> Value {
+    app.engine.borrow().update_artifacts().iter().find(|a| a["artifact_id"] == id).cloned().unwrap_or(Value::Null)
+}
+
+/// `--check artifact-summary`: on a Host offering summary lists, the
+/// 1.16 MB reports' cards show without their bodies; the report viewer,
+/// asked twice quickly, reads one once and shows it; its card then opens
+/// in the browser from what was read; and one deleted meanwhile leaves the
+/// chat and says so.
+pub(super) fn artifact_summary_check(out: String) {
+    let before = Rc::new(Cell::new(0usize));
+    let before2 = before.clone();
+    // The chat first: a new artifact an event names is read whole once
+    // (its size is not known yet); these are then listed in summary shape.
+    let mut stages = load_chat("art-summary", &["html_big"]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("summary on", Box::new(|app, window, elapsed| {
+            if !placed(window, &["big-report", "big-net"], elapsed) {
+                return false;
+            }
+            READS_BEFORE.with(|r| r.set((host_gets("/artifacts/big-report"), host_gets("/artifacts/big-net"))));
+            check(control("/__control/artifact-summary", &json!({"on": true, "item_delay": 0.4})).is_ok(), "the Host offers summary lists");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("advertised", Box::new(|app, _, elapsed| {
+            let on = app.engine.borrow().artifact_summary_enabled() && app.engine.borrow().connection_state() == "live";
+            if !on && elapsed < Duration::from_secs(10) {
+                return false;
+            }
+            check(on, "the desktop reads the feature from /server-info");
+            true
+        })),
+    ]);
+    stages.extend::<Vec<Stage>>(vec![
+        ("summary cards", Box::new(|app, window, elapsed| {
+            let big = listed_row(app, "big-report");
+            if (!placed(window, &["big-report", "big-net"], elapsed) || big.get("content_omitted").is_none()) && elapsed < Duration::from_secs(10) {
+                return false;
+            }
+            check(big.get("content").is_none() && big["content_omitted"]["bytes"].as_u64().is_some_and(|b| b > 1_000_000), &format!("the list left the report's body out: {}", big["content_omitted"]));
+            check(card(window, "big-report").is_some_and(|c| c.label == "REPORT" && c.action == "Open report"), "its card is whole without it");
+            check(reads_since() == (0, 0), &format!("nothing is read before it is opened: {:?}", reads_since()));
+            // Updates' Open, twice quickly.
+            window.invoke_open_report("big-report".into());
+            window.invoke_open_report("big-report".into());
+            true
+        })),
+        ("report shows", Box::new(|_, window, elapsed| {
+            if (window.get_overlay() != "report" || window.get_report_blocks().row_count() == 0) && elapsed < Duration::from_secs(10) {
+                return false;
+            }
+            check(window.get_overlay() == "report" && window.get_report_title() == "Agentretten, offentlig stil" && window.get_report_blocks().row_count() > 0,
+                &format!("the report is read, then shows: overlay {:?} title {:?}", window.get_overlay(), window.get_report_title()));
+            check(reads_since().0 == 1, &format!("two quick opens read it once: {:?}", reads_since()));
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("report closed", Box::new(move |_, window, elapsed| {
+            if !window.get_overlay().is_empty() && elapsed < Duration::from_secs(2) {
+                return false;
+            }
+            before.set(opened().len());
+            window.global::<ArtifactBridge>().invoke_open("big-report".into());
+            true
+        })),
+        ("browser page", Box::new(move |_, _, elapsed| {
+            let urls = opened();
+            if urls.len() <= before2.get() {
+                if elapsed > Duration::from_secs(10) {
+                    check(false, &format!("the card opens the report in the browser: {urls:?}"));
+                    return true;
+                }
+                return false;
+            }
+            let page = urls.last().map(|url| fetch("GET", url, "", None)).unwrap_or_else(|| Err("no page".into()));
+            check(page.as_ref().is_ok_and(|(status, body)| *status == 200 && body.contains("Agentretten") && body.len() > 1_000_000),
+                &format!("its page holds the body read: {:?}", page.map(|(s, b)| (s, b.len()))));
+            check(reads_since().0 == 1, &format!("from the cache, not read again: {:?}", reads_since()));
+            true
+        })),
+        ("deleted meanwhile", Box::new(|_, window, _| {
+            check(control("/__control/fail", &json!({"path": "/artifacts/big-net", "status": 404})).is_ok(), "the Host deletes the other report");
+            window.global::<ArtifactBridge>().invoke_open("big-net".into());
+            true
+        })),
+        ("deleted", Box::new(move |_, window, elapsed| {
+            let gone = card(window, "big-net").is_none();
+            if !gone && elapsed < Duration::from_secs(10) {
+                return false;
+            }
+            check(gone, "a report deleted on the Host leaves the chat when it is opened");
+            check(window.get_error().contains("“The same report, with a connection” was deleted on the Host"), &format!("and says so: {:?}", window.get_error()));
+            shot(&out, "artifact-summary");
+            true
+        })),
+    ]);
+    run_stages(stages);
+}

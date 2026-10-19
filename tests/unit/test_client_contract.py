@@ -78,3 +78,14 @@ def test_agent_ring_live_is_advertised_with_the_number_of_its_row():
     text = (ROOT / "docs" / "compatibility.md").read_text()
     [row] = re.findall(r"^\|\s*(\d+)\s*\|\s*\d+\s*\|[^|]*\|\s*Agent-live rings[^\n]*feature `agent_ring_live`", text, re.M)
     assert server_identity.FEATURE_CONTRACTS["agent_ring_live"] == int(row) <= server_identity.HOST_CONTRACT
+
+
+def test_artifact_summary_v1_is_advertised_with_the_number_of_its_row():
+    """The map value is the introduction number its row documents, never the dict's default
+    1: a client gating on ``== 1`` would never enable against a real Host."""
+    assert "artifact_summary_v1" in server_identity.FEATURES
+    text = (ROOT / "docs" / "compatibility.md").read_text()
+    [row] = re.findall(r"^\|\s*(\d+)\s*\|\s*\d+\s*\|[^|]*\|\s*Opt-in artifact list summaries[^\n]*`artifact_summary_v1`", text, re.M)
+    number = server_identity.FEATURE_CONTRACTS["artifact_summary_v1"]
+    assert number == int(row) <= server_identity.HOST_CONTRACT
+    assert number > 1

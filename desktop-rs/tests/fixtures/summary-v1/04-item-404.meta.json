@@ -1,0 +1,28 @@
+{
+ "method": "GET",
+ "path": "/artifacts/artifact-does-not-exist?representation=flat-v1",
+ "status": 404,
+ "reason": "Not Found",
+ "headers": [
+  [
+   "Server",
+   "ClaudePWA/1.0 Python/3.12.14"
+  ],
+  [
+   "Date",
+   "Tue, 13 Oct 2026 11:53:12 GMT"
+  ],
+  [
+   "Content-Type",
+   "application/json"
+  ],
+  [
+   "Content-Length",
+   "31"
+  ],
+  [
+   "Cache-Control",
+   "no-store"
+  ]
+ ]
+}

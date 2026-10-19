@@ -259,9 +259,10 @@ def test_a_live_call_joins_opens_once_talks_and_hangs_up(call):
     assert start["session"]["model"] == "gpt-live-1" and start["session"]["audio"]["output"]["voice"] == "marin"
     assert start["session"]["audio"]["format"] == {"type": "audio/pcm", "rate": 24000}
     assert "Vann renner fra Farris-flaska" in start["session"]["instructions"]
-    assert call.up.of("session.instructions.append") == [
-        {"type": "session.instructions.append", "content": "OPENING: say exactly this, once, now: " + OPENING,
-         "delegation_id": None}]
+    [append] = call.up.of("session.instructions.append")
+    assert len(append.get("event_id") or "") == 32          # the opening names itself; its ACK must match (2822)
+    assert append == {"type": "session.instructions.append", "content": "OPENING: say exactly this, once, now: " + OPENING,
+                      "delegation_id": None, "event_id": append["event_id"]}
     assert _ring_of(g)["_live_opening_consumed"] is True and _ring_of(g)["_live_phase"] == "active"
     # Silence went upstream until the phone's first audio; after it, only the phone's audio.
     _wait(lambda: call.up.of("session.input_audio.append"))

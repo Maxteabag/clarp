@@ -130,7 +130,9 @@ fn rename_release_and_settings_report_the_mutation() {
     d.engine.set_agent_heartbeat("rachel", true);
     d.engine.set_agent_dreaming("rachel", false);
     d.engine.set_agent_push_muted("rachel", true);
-    d.until("settings posted", |_| !host.requests("POST", "/agent-mute").is_empty());
+    d.until("settings posted", |_| {
+        ["/agent-heartbeat", "/agent-dreaming", "/agent-mute"].iter().all(|path| !host.requests("POST", path).is_empty())
+    });
     assert_eq!(host.requests("POST", "/agent-heartbeat")[0]["body"], json!({"session": "rachel", "heartbeat_enabled": true}));
     assert_eq!(host.requests("POST", "/agent-dreaming")[0]["body"], json!({"session": "rachel", "dreaming_enabled": false}));
     assert_eq!(host.requests("POST", "/agent-mute")[0]["body"], json!({"session": "rachel", "muted": true}));
