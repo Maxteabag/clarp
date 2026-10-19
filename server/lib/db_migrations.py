@@ -184,6 +184,11 @@ def _migrate(con: sqlite3.Connection) -> None:
         # move up behind it. If main's schema changes before this merges, stop and renumber; never skip a number.
         if version < 118:
             _migrate_to_v118(con)
+        # 119 (listen-first state_log index) is PROVISIONAL: the next free number above main 118, decided by
+        # Nadia's ledger order at the landing (an earlier notice placed steer_receipts at 119 and the LF family
+        # at 120); renumber in this source before CI, never skip a number.
+        if version < 119:
+            _migrate_to_v119(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -900,6 +905,15 @@ def _migrate_to_v116(con: sqlite3.Connection) -> None:
     if "allow_paused" not in columns:
         con.execute("ALTER TABLE queued_turns"
                     " ADD COLUMN allow_paused INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_to_v119(con: sqlite3.Connection) -> None:
+    """The newest state row per agent in one seek, for the call-open end's write-time anchor
+    (turn_lifecycle's conditional transition). An additive index: older code ignores it, so
+    rolling back needs no down-migration. Version 119 is reserved behind steer_receipts' 118:
+    it must land after 118 (or be renumbered to 118 at merge), never ahead of it."""
+    con.execute("CREATE INDEX IF NOT EXISTS idx_state_log_agent_state"
+                " ON state_log(agent_id, state_id)")
 
 
 def _migrate_to_v117(con: sqlite3.Connection) -> None:

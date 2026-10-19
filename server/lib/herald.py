@@ -463,6 +463,10 @@ class HeraldManager:
         # Preserve the producer-selected delivery URL and any delivery-
         # specific fields (delivery=hls + playlist_url, or stream_url for
         # the chunked-file and raw-pcm paths).
+        # A listen-first opening clip carries its call and opening tag.
+        for key in ("call_id", "opening"):
+            if meta.get(key):
+                fields[key] = meta[key]
         if meta.get("streamable"):
             fields["streamable"] = True
             for key in ("delivery", "playlist_url", "stream_url",

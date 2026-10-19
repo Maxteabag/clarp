@@ -1,6 +1,9 @@
 """Real HTTP/dispatch/provider-process/SQLite round trips without credentials."""
 import json
+import os
 from pathlib import Path
+import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -11,29 +14,87 @@ import urllib.error
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+# QA-only startup bound, a monotonic deadline (not an iteration count). A host that
+# exits fails at once; one that shows no readiness by the deadline gets a stack dump
+# (host.py registers faulthandler on SIGUSR1) and is reaped. Worst case before
+# overhead: 20 s + 1 s dump + 8 s TERM + 3 s KILL = 32 s, under the 60 s per-test
+# timeout; a per-file budget can still be exceeded, which then fails, never passes.
+READY_TIMEOUT_S = 20
+STACK_DUMP_WAIT_S = 1
+LOG_TAIL_LINES, LOG_TAIL_BYTES = 40, 8192
+_SECRET = re.compile(r'Bearer\s+\S+|cld_[A-Za-z0-9_\-]+|qa-host-test')
 
 
 class QAHost:
-    def __init__(self, root):
+    def __init__(self, root, extra_args=()):
         self.root = root
+        self.extra_args = tuple(extra_args)
         self.process = None
 
-    def start(self):
+    def start(self, ready_timeout_s=READY_TIMEOUT_S):
         previous = (self.root / 'host.json')
         if previous.exists():
             previous.unlink()
-        self.log = (self.root.parent / f'{self.root.name}.log').open('a')
-        self.process = subprocess.Popen(
-            [sys.executable, str(ROOT / 'tests/qa/host.py'), '--state-dir', str(self.root)],
-            stdout=self.log, stderr=subprocess.STDOUT)
-        for _ in range(100):
-            if previous.exists():
-                self.url = json.loads(previous.read_text())['url']
-                return self
-            if self.process.poll() is not None:
-                raise AssertionError(f'QA host exited: {self.process.returncode}')
+        self.log_path = self.root.parent / f'{self.root.name}.log'
+        self.log = self.log_path.open('a')
+        try:
+            self.process = subprocess.Popen(
+                [sys.executable, str(ROOT / 'tests/qa/host.py'), '--state-dir', str(self.root),
+                 *self.extra_args],
+                stdout=self.log, stderr=subprocess.STDOUT)
+        except BaseException:
+            self.log.close()                # no child was started: only the log to release
+            raise
+        try:
+            deadline = time.monotonic() + ready_timeout_s
+            while not previous.exists():
+                if self.process.poll() is not None:
+                    raise AssertionError(f'QA host exited: {self.process.returncode}' + self._log_tail())
+                if time.monotonic() >= deadline:
+                    note = ''
+                    try:
+                        self._dump_stacks()
+                    except Exception as exc:  # noqa: BLE001 - the timeout stays the failure
+                        note = f'\n(stack dump failed: {exc!r})'
+                    raise AssertionError(f'QA host did not become ready after {ready_timeout_s} s'
+                                         + note + self._log_tail())
+                time.sleep(.05)
+            self.url = json.loads(previous.read_text())['url']
+            return self
+        except BaseException:
+            # Reap the child this call started on every failed start; the failure
+            # that got us here is the one raised.
+            try:
+                self.stop()
+            except Exception as exc:  # noqa: BLE001 - never replace the original failure
+                try:
+                    print(f'QA host cleanup after a failed start also failed: {exc!r}', file=sys.stderr)
+                except Exception:  # noqa: BLE001 - nothing left to report through; the
+                    pass           # original failure below still wins
+            raise
+
+    def _dump_stacks(self):
+        """Ask the still-owned, still-running child for its thread stacks."""
+        if self.process is None or self.process.poll() is not None:
+            return                          # exited (or reaped): its pid is no longer ours
+        try:
+            os.kill(self.process.pid, signal.SIGUSR1)
+        except ProcessLookupError:
+            return
+        deadline = time.monotonic() + STACK_DUMP_WAIT_S
+        while time.monotonic() < deadline and self.process.poll() is None:
             time.sleep(.05)
-        raise AssertionError('QA host did not become ready')
+
+    def _log_tail(self):
+        """The host log's last lines, bounded by bytes and lines, tokens redacted."""
+        try:
+            with open(self.log_path, 'rb') as f:
+                f.seek(max(0, f.seek(0, os.SEEK_END) - LOG_TAIL_BYTES))
+                text = f.read(LOG_TAIL_BYTES).decode('utf-8', 'replace')   # never more, even if it grows
+        except OSError as exc:
+            return f'\n(host log unreadable: {exc!r})'
+        lines = _SECRET.sub('<redacted>', text).splitlines()[-LOG_TAIL_LINES:]
+        return '\n--- host log tail ---\n' + '\n'.join(lines)
 
     def stop(self):
         if self.process is not None:

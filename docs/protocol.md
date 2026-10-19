@@ -350,7 +350,7 @@ Event types and payloads:
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. |
-| `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts` | A voice clip is ready. See §6. |
+| `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
 | `server-version` | `version` | Server restarted on a new version; reload the client when it differs from the last one seen. |
 | `remote-action` | `action` ∈ record, record-toggle, stop-agent, controller-event; `ts`; a controller event adds `controller_event_id`, `button`, `controller_event`, `duration_ms`, `age_ms`, `queued` and optionally `controller_id` | A live shortcut/controller asked the client to act. These input events are never replayed after reconnect. |
@@ -361,7 +361,7 @@ Event types and payloads:
 | `location-request` | `session` | An agent asked for the user's location; show the one-tap share prompt for that session. Extension surface. |
 | `oracle-handoff` | `handoff_id`, `parent_handoff_id`, `host_id`, `principal`, `generation`, `revision`, `direction`, `mode`, `state`, `reason`, `oracle_call`, `agent`, `oracle`, `issued_at`, `server_now`, `ttl_ms`, `expires_at` | An Oracle call is being put through to an agent's hands-free session or back to Oracle. Apply the fence and phase rules in [oracle-handoff.md](oracle-handoff.md); act only for your own `principal`. Extension surface. |
 | `group-call` | `call_id`, `host_id`, `principal`, `state`, `reason`, `revision`, `started_at`, `ended_at`, `floor`, `participants`, `change`, `server_now` | A group call changed (started, a participant added, removed, held, resumed or given the floor, or the call ended). Apply only for your own `principal` and a `revision` newer than the one held; `GET /calls` is the snapshot. See [group-calls.md](group-calls.md). Extension surface. |
-| `agent-ring` | `ring_id`, `session`, `agent_id`, `persona`, `reason`, `opening_line`, `opening_audio_url`, `state`, `created_at`, `expires_at`, `ended_at`, `answered_by`, `call_id`, `server_now`, `conversation_mode` | An agent is calling the user (`state: ringing`), or the call was `answered`, `declined`, `missed` or `cancelled`. Show an incoming call while ringing; answer with `POST /calls/ring/answer`. `conversation_mode: agent_live_v1` is present only on an agent-live ring (feature `agent_ring_live`); answer it only with `conversation_mode: agent_live_v1`. A classic ring has no such field. `GET /calls/ring` is the snapshot. See [agent-rings.md](agent-rings.md). Extension surface. |
+| `agent-ring` | `ring_id`, `session`, `agent_id`, `persona`, `reason`, `opening_line`, `opening_audio_url`, `state`, `created_at`, `expires_at`, `ended_at`, `answered_by`, `call_id`, `server_now`, `conversation_mode` (agent-live rings only); a listen_first ring also `opening_mode` and `opening` (state and epoch) | An agent is calling the user (`state: ringing`), or the call was `answered`, `declined`, `missed` or `cancelled`. Show an incoming call while ringing; answer with `POST /calls/ring/answer`. `GET /calls/ring` is the snapshot. A listen_first ring lets the user speak first (feature `agent_ring_listen_first`). See [agent-rings.md](agent-rings.md). Extension surface. |
 | `controller-actions-updated` | `revision` | The controller custom actions or their gesture mappings changed. Refetch `GET /controller-actions` when `revision` is newer than the one held. Ephemeral. See [controller-actions.md](controller-actions.md). |
 | `calendar-request` | `request_id`, `session`, `title`, `start`, `end`, `time_zone`, `location`, `notes`, `url`, `all_day`, `calendar` | An agent asked the app to write an Apple Calendar event. Extension surface. |
 | `goal-updated` | `agent_id`, `session`, `goal` | The agent's standing objective changed; `goal` is the new goal or null. Extension surface. |
@@ -470,6 +470,34 @@ recording, e.g. `audio/webm`), headers `X-Hands-Free: 1` for dictation,
 `X-Transcription-ID: <uuid>` for idempotent retries, `X-Transcription-Model`
 to pick a model. Response includes `text`, `trace_id`, and `transcription_id`;
 pass both ids on the following `/send`.
+
+In a group call (feature `call_transcription_policy`), a clip captured for a
+participant also sends `X-Clarp-Call-Id: <call_id>` and
+`X-Transcription-Session: <that participant>`. The Host checks them before any
+transcription and refuses with no transcript: 400 `bad call id`, 404 `unknown
+call`, 403 `not your call` (another device or Host), 409 `call ended` (+
+`call_id`, `reason`), 409 `not a call participant` (+ `session`). A valid one
+answers with `stt`: `{language: {value, source}, engines: {value, source},
+effective_engine, attempts: [{engine, outcome, language, ms|reason}],
+language_adapted, requested_model}`, sources `agent | call_policy | device |
+global`; `attempts[].language` is the language the Host handed at that
+engine's boundary (`auto` = no constraint handed, not a detection; `null`, or
+no `language` on a skip = the boundary was unobserved, never a statement that
+the engine was or was not invoked). With a call policy configured, when no
+engine can take the call language the clip is refused, with no provider call:
+409 `{"ok": false, "error": "no compatible engine", "language", "engines",
+"attempts"}`. A stored call policy that can never work is refused the same
+way for every call clip: 409 `{"ok": false, "error": "call policy invalid",
+"call_policy_error", "language", "engines", "attempts": []}`. A configured
+language set skips ElevenLabs Scribe, which would drop it. Multilingual or
+unknown local engines never receive the code, so they are skipped when a call
+policy is configured. Without a call policy,
+in-call transcription is unchanged. The transcription settings take `call_languages` and
+`call_engines`, refuse a combination that can never work, and read back
+`call_policy_error`. A settings save writes only the keys it names (an
+omitted key is left as stored); an explicit `null` for `engine` or
+`turn_taking` is refused with 400. Without the header nothing changes. See
+[group-calls.md](group-calls.md).
 
 **Out:** an `audio` event announces a clip. Pick a source in this order:
 

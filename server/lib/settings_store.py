@@ -84,6 +84,16 @@ def set_text(key: str, value: str, *, updated_at: int | None = None) -> None:
     )
 
 
+def increment(key: str) -> None:
+    """Add one to an integer setting (absent counts as 0)."""
+    conn().execute(
+        """INSERT INTO settings (key, value, updated_at) VALUES (?, '1', ?)
+           ON CONFLICT(key) DO UPDATE SET
+               value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
+               updated_at = excluded.updated_at""",
+        (key, now_ms()))
+
+
 def set_text_if_blank(key: str, value: str) -> str:
     """Store `value` unless a non-blank value exists; return what is stored."""
     conn().execute(

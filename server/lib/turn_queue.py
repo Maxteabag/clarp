@@ -425,6 +425,20 @@ def terminalize_idle_agent_receipts(
     return {"ended": ended}
 
 
+def mark_launched_call_open_unknown(queue_id: str) -> bool:
+    """A launched listen-first initiative whose turn failed after the backend had it
+    (agent_rings.resolve_launch_failure): its row becomes the durable ``unknown``, never
+    queued, retried or counted again. Only a ``call-open:`` row claimed or started for its one
+    launch; an ordinary row is never touched here (mark_unknown keeps its own scope)."""
+    queue_id = str(queue_id or "")
+    if not queue_id.startswith("call-open:"):
+        return False
+    cursor = db.conn().execute(
+        """UPDATE queued_turns SET status = 'unknown', text = ''
+            WHERE queue_id = ? AND status IN ('claimed', 'started')""", (queue_id,))
+    return cursor.rowcount == 1
+
+
 def mark_started(queue_id: str) -> None:
     """Keep a payload-free idempotency tombstone for as long as the message.
 
@@ -461,7 +475,11 @@ def mark_started(queue_id: str) -> None:
             if settled:
                 settle_receipt(str(row["agent_id"]), str(row["trace_id"]),
                                str(settled["outcome"] or ""))
-            if pending_count(str(row["agent_id"])) == 0 and set_paused(str(row["agent_id"]), False):
+            # A listen-first opening passes a pause that existed when the
+            # call was answered (agent_rings); it never ends that pause.
+            if (not queue_id.startswith("call-open:")
+                    and pending_count(str(row["agent_id"])) == 0
+                    and set_paused(str(row["agent_id"]), False)):
                 # Nothing is held any more, so a Stop's pause ends here. Say
                 # which item ended it: a peer message or goal wake can do so.
                 log("queuePauseEndedByDrain",
@@ -562,6 +580,47 @@ def update_text(queue_id: str, text: str) -> bool:
     return bool(cursor.rowcount)
 
 
+# --- listen-first openings (agent_rings): writes run in the caller's transaction ---
+
+def withdraw_unclaimed(queue_id: str) -> bool:
+    """A waiting (queued or Stop-held), unclaimed row that must never run."""
+    cursor = db.conn().execute(
+        """UPDATE queued_turns SET status = 'withdrawn', text = ''
+            WHERE queue_id = ? AND status IN ('queued', 'parked') AND claimed_at IS NULL""",
+        (queue_id,))
+    return cursor.rowcount == 1
+
+
+def claim_for_dispatch(queue_id: str) -> bool:
+    """The dispatcher's claim of an opening row before it spawns (once)."""
+    cursor = db.conn().execute(
+        """UPDATE queued_turns SET status = 'claimed', claimed_at = ?
+            WHERE queue_id = ? AND status = 'queued'""", (db.now_ms(), queue_id))
+    return cursor.rowcount == 1
+
+
+def mark_unknown(queue_id: str) -> bool:
+    """An opening row whose launch can never be known (agent_rings, P4): not
+    pending, claimed, settleable or a success, and nothing moves it back."""
+    cursor = db.conn().execute(
+        """UPDATE queued_turns SET status = 'unknown', text = ''
+            WHERE queue_id = ? AND status IN ('queued', 'claimed', 'parked')""", (queue_id,))
+    return cursor.rowcount == 1
+
+
+def withdraw_claimed(queue_id: str) -> bool:
+    """A claimed opening row that provably never passed the dispatcher's gate."""
+    cursor = db.conn().execute(
+        "UPDATE queued_turns SET status = 'withdrawn', text = '' WHERE queue_id = ? AND status = 'claimed'",
+        (queue_id,))
+    return cursor.rowcount == 1
+
+
+def allow_paused_for(queue_id: str) -> None:
+    """The opening row may pass a pause that already existed at the answer."""
+    db.conn().execute("UPDATE queued_turns SET allow_paused = 1 WHERE queue_id = ?", (queue_id,))
+
+
 def claim(queue_id: str) -> dict | None:
     """Atomically reserve one queued item for an explicit manual send."""
     row = db.conn().execute(
@@ -587,14 +646,17 @@ def release_claim(queue_id: str) -> bool:
     return row is not None
 
 
-def reset_stale_claims(max_age_ms: int = 30_000) -> int:
-    """Return abandoned manual-send claims to the visible durable queue."""
+def reset_stale_claims(max_age_ms: int = 30_000, *, exclude=()) -> int:
+    """Return abandoned manual-send claims to the visible durable queue.
+    ``exclude``: rows another owner already settled (agent_rings openings)."""
     cutoff = db.now_ms() - max(0, max_age_ms)
+    excluded = tuple(exclude)
     rows = db.conn().execute(
-        """UPDATE queued_turns SET status = 'queued', claimed_at = NULL
+        f"""UPDATE queued_turns SET status = 'queued', claimed_at = NULL
               WHERE status = 'claimed' AND COALESCE(claimed_at, 0) <= ?
+                {"AND queue_id NOT IN (" + ",".join("?" * len(excluded)) + ")" if excluded else ""}
           RETURNING agent_id""",
-        (cutoff,),
+        (cutoff, *excluded),
     ).fetchall()
     for agent_id in {str(row["agent_id"]) for row in rows}:
         _bump_revision(agent_id)
@@ -722,8 +784,39 @@ def is_paused(agent_id: str) -> bool:
     return bool(row and row["paused"])
 
 
+STOP_GENERATION_KEY = "turn_queue.stop_generation."
+
+
+def stop_generation(agent_id: str) -> int:
+    """How many times this agent's queue was paused by a Stop or cancel: an
+    ordering marker that moves on every Stop, even onto an already paused
+    queue (agent_rings fences a listen-first opening against it)."""
+    from . import settings_store
+    return settings_store.get_int(STOP_GENERATION_KEY + agent_id, default=0)
+
+
 def set_paused(agent_id: str, paused: bool) -> bool:
+    """Pause or resume the agent's queue. A pause (every Stop or cancel) also
+    moves the stop generation, in the same transaction as the pause itself."""
+    con = db.conn()
+    own = not con.in_transaction
+    if own:
+        con.execute("BEGIN IMMEDIATE")
+    try:
+        changed = _set_paused(agent_id, paused)
+        if own:
+            con.execute("COMMIT")
+    except BaseException:
+        if own:
+            con.execute("ROLLBACK")
+        raise
+    return changed
+
+
+def _set_paused(agent_id: str, paused: bool) -> bool:
     if paused:
+        from . import settings_store
+        settings_store.increment(STOP_GENERATION_KEY + agent_id)
         # A Stop (the only pauser) takes back every right the release drain
         # persisted for this agent's waiting work, as it does for work waiting
         # in memory when the runtime restarts: nothing queued before this Stop

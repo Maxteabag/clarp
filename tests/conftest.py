@@ -140,6 +140,29 @@ def _no_default_host_generation_paths(monkeypatch):
     monkeypatch.setattr(host_generation, "default_boot_id_path", refuse)
 
 
+# The synthetic host generation every test sees (W-1): a fixed boot id and a
+# canonical instance token, never the kernel's or the live data root's.
+PINNED_HOST_GENERATION = ("boot-synthetic-test", "00000000-0000-4000-8000-000000000001")
+
+
+@pytest.fixture(autouse=True)
+def _pinned_host_generation(monkeypatch):
+    """Pin agent_rings' identity seam to PINNED_HOST_GENERATION for every test,
+    before any ring, answer or opening reads the host identity. Tests about
+    identity override ``agent_rings._generation``; requesting this fixture
+    returns the real seam, which must still refuse (the guard above)."""
+    try:
+        from lib import agent_rings, host_generation
+    except ImportError:
+        yield None
+        return
+    original = getattr(agent_rings, "_generation", None)
+    monkeypatch.setattr(agent_rings, "_generation",
+                        lambda: host_generation.GenerationRead(PINNED_HOST_GENERATION),
+                        raising=False)
+    yield original
+
+
 @pytest.fixture(autouse=True)
 def _no_real_agy_cli(_transcript_importer_quiescent, monkeypatch, tmp_path):
     """Never run, or read the state of, the developer's real Antigravity CLI from

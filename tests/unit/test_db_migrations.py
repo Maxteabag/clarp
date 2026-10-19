@@ -460,3 +460,28 @@ def test_v118_migrates_device_token_provenance_from_117_and_a_rerun_is_a_no_op(t
     db_migrations._migrate_to_v118(con)
     assert [r[1] for r in con.execute("PRAGMA table_info(device_tokens)")].count("principal") == 1
 
+def test_v119_adds_the_per_agent_state_generation_index(tmp_path):
+    path = tmp_path / "v117.sqlite"
+    con = _fresh(path)
+    con.executescript("""
+        DROP INDEX idx_state_log_agent_state;
+        PRAGMA user_version = 117;
+    """)
+    con.close()
+
+    upgraded = _connect(path)
+    db._migrate(upgraded)
+
+    assert "idx_state_log_agent_state" in _names(upgraded, "index")
+    plan = " ".join(r[3] for r in upgraded.execute(
+        "EXPLAIN QUERY PLAN SELECT MAX(state_id) FROM state_log WHERE agent_id = 'a'"))
+    assert "idx_state_log_agent_state" in plan, plan
+    assert upgraded.execute("PRAGMA user_version").fetchone()[0] == db._SCHEMA_VERSION
+
+
+def test_v119_index_migration_is_a_no_op_when_rerun(tmp_path):
+    con = _fresh(tmp_path / "fresh.sqlite")                 # the fresh schema already has it
+    db._migrate_to_v119(con)
+    db._migrate_to_v119(con)
+    assert con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'"
+                       " AND name = 'idx_state_log_agent_state'").fetchone()[0] == 1
