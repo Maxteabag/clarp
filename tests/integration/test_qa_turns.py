@@ -127,9 +127,11 @@ class QAHost:
 TURN_READY_TIMEOUT_S = 5
 
 
-def _turns_of(host, message_id):
-    """Read-only, exact identity: the trace of one user row and the turn rows under that trace."""
-    with contextlib.closing(sqlite3.connect(f"file:{host.root / 'state.sqlite'}?mode=ro", uri=True)) as db:
+def _turns_of(host, message_id, busy_timeout_s):
+    """Read-only, exact identity: the trace of one user row and the turn rows under that trace.
+    SQLite waits at most ``busy_timeout_s`` for a lock (never its 5 s default)."""
+    uri = f"file:{host.root / 'state.sqlite'}?mode=ro"
+    with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=busy_timeout_s)) as db:
         row = db.execute("SELECT trace_id FROM messages WHERE message_id = ?", (message_id,)).fetchone()
         trace = row[0] if row else None
         turns = db.execute("SELECT started_at, settled_at, outcome FROM turns WHERE trace_id = ?",
@@ -139,19 +141,32 @@ def _turns_of(host, message_id):
 
 def wait_turn(host, message_id, *, settled):
     """Wait, bounded, until the turn that the user row ``message_id`` opened is settled
-    (``settled=True``) or open and running (``settled=False``). A row with no turn of its
-    own (it was steered into another turn) never qualifies; that fails, never passes."""
+    (``settled=True``) or open (``settled=False``). A row with no turn of its own (it was
+    steered into another turn) never qualifies; that fails, never passes. An open row means the
+    dispatcher claimed the agent's slot for this trace before inserting it (turn_dispatch:
+    _enqueue_if_busy, then turn_lifecycle.open_turn): the agent is busy with it. It does not
+    mean the backend process is ready. A failed state read fails at once; it is never ready."""
     deadline = time.monotonic() + TURN_READY_TIMEOUT_S
+    trace, turns = None, []
     while True:
-        trace, turns = _turns_of(host, message_id)
-        if turns and (all(t[1] is not None for t in turns) if settled
-                      else len(turns) == 1 and turns[0][1] is None):
-            return trace
-        if time.monotonic() >= deadline:
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            try:
+                trace, turns = _turns_of(host, message_id, min(.05, remaining))
+            except sqlite3.Error as exc:
+                raise AssertionError(f'readiness: {message_id} state read failed: {exc!r} '
+                                     f'(last trace={trace}, turns={turns})') from exc
+            ready = bool(turns) and (all(t[1] is not None for t in turns) if settled
+                                     else len(turns) == 1 and turns[0][1] is None)
+        else:
+            ready = False
+        if time.monotonic() > deadline:     # checked after the read, before any ready
             state = 'settled' if settled else 'started as its own open turn'
             raise AssertionError(f'readiness: {message_id} not {state} within {TURN_READY_TIMEOUT_S} s '
                                  f'(trace={trace}, turns={turns})')
-        time.sleep(.05)
+        if ready:
+            return trace
+        time.sleep(min(.05, max(0.0, deadline - time.monotonic())))
 
 
 @pytest.fixture
