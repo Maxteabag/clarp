@@ -28,7 +28,15 @@ was started at all, the sampler, the cleanup of the command's own process group,
 the true peak), the measurement workers' own CPU time and the bytes this diagnostic wrote.
 
 Diagnostics never change the command: output open/write/close failures are best effort and only counted; the
-command still runs and its exit status is returned unchanged (128+n when it died of signal n). A TERM/INT/HUP that
+command still runs and its exit status is returned unchanged (128+n when it died of signal n).
+
+The command's status is read ONLY through this observer's own wait4 (never Popen.wait/poll, which turn ECHILD into
+a fabricated 0). When it cannot be collected here (ECHILD, e.g. an inherited SIGCHLD=SIG_IGN let the kernel reap
+it), the result is UNKNOWN: child_status "lost", child_exit null, exit STATUS_LOST_EXIT (never 0), no "after"
+sample, cleanup "unconfirmed", and neither the pid nor its group is signalled again. An inherited SIGCHLD
+disposition is left as it is.
+
+A TERM/INT/HUP that
 arrives before the command starts means the command is NOT started (exit 128+n). Signals are forwarded to the
 command's own process group only while this observer still owns it.
 """
@@ -41,9 +49,10 @@ import subprocess
 import sys
 import time
 
-SCHEMA = 3
+SCHEMA = 4
 SLICE_S = 0.2
 REAP_S = 1.0
+STATUS_LOST_EXIT = 125                  # the command's status could not be collected: UNKNOWN, never success
 FIELDS = ("tmp_bytes", "tmp_avail_bytes", "tmp_used_bytes", "inodes", "inodes_avail", "inodes_used",
           "pytest_tmp_apparent_bytes", "pytest_tmp_allocated_bytes", "pytest_tmp_files")
 
@@ -88,6 +97,8 @@ class Observer:
         self.budget, self.grace, self.command = budget, grace, command
         self.sig = None                 # the first forwarded signal
         self.child = None               # owned only while running; cleared once ownership ends
+        self.owned = True               # False once the command's status was lost: nothing is signalled after
+        self.status = None              # ("exit", n) | ("signal", n) | ("lost", None): own wait4 evidence only
         self.stream = None
         self.output = "ok"              # ok | open_failed | write_failed | close_failed
         self.write_errors = 0
@@ -141,7 +152,7 @@ class Observer:
         if self.sig is None:
             self.sig = signum
         child = self.child
-        if child is not None:
+        if child is not None and self.owned:
             try:
                 os.killpg(child.pid, signum)
             except (ProcessLookupError, PermissionError):
@@ -169,7 +180,7 @@ class Observer:
             if pid:
                 code, status = os.waitstatus_to_exitcode(st), "done"
                 self._cpu(usage)
-            elif self.sig is not None or (self.child is not None and self.child.poll() is not None):
+            elif self.sig is not None or (self.child is not None and self.child_status() is not None):
                 status = "interrupted"           # a signal or the command's exit is never delayed by a sample
             elif time.monotonic() - started > self.budget:
                 status = "timeout"
@@ -227,6 +238,26 @@ class Observer:
         self._count(rec)
         return rec
 
+    def child_status(self):
+        """The command's status from this observer's own wait4 only; cached once observed. None while it runs."""
+        if self.status is None:
+            try:
+                pid, st, _usage = os.wait4(self.child.pid, os.WNOHANG)
+            except ChildProcessError:            # reaped elsewhere: exit and ownership are unknown
+                pid, st, self.status = 0, 0, ("lost", None)
+            if pid:
+                if os.WIFEXITED(st):
+                    self.status = ("exit", os.WEXITSTATUS(st))
+                elif os.WIFSIGNALED(st):
+                    self.status = ("signal", os.WTERMSIG(st))
+                else:                            # not reported without WUNTRACED; never read as success
+                    self.status = ("lost", None)
+            if self.status is not None:
+                self.child.returncode = -1       # never read; keeps Popen from ever waiting on this pid again
+                if self.status[0] == "lost":
+                    self.owned = False
+        return self.status
+
     def _cpu(self, usage):
         if usage is not None:
             self.worker_cpu_ms += int((usage.ru_utime + usage.ru_stime) * 1000)
@@ -267,24 +298,21 @@ class Observer:
                 self.on_signal(self.sig, None)
             next_sample = time.monotonic() + self.cadence
             sig_seen_at = None
-            while rc is None:
-                try:
-                    rc = self.child.wait(timeout=SLICE_S)
-                    break
-                except subprocess.TimeoutExpired:
-                    pass
+            while self.child_status() is None:
                 if self.sig is not None:
                     sig_seen_at = sig_seen_at or time.monotonic()
                     if time.monotonic() - sig_seen_at > self.grace:
                         break
-                    continue
-                if time.monotonic() >= next_sample:
+                elif time.monotonic() >= next_sample:
                     if during < self.max:
                         self.sample("during")
                         during += 1
                     next_sample = time.monotonic() + self.cadence
+                    continue
+                time.sleep(SLICE_S)
             pgid = self.child.pid
-            if rc is None:                                # still running after the grace: kill the owned group
+            status = self.child_status()
+            if status is None:                            # still running after the grace: kill the owned group
                 try:
                     os.killpg(pgid, signal.SIGKILL)
                     cleanup = "group_killed"
@@ -292,12 +320,14 @@ class Observer:
                     cleanup = "group_gone"
                 except PermissionError:
                     cleanup = "group_check_failed"        # denied is not gone: the group's fate is unknown
-                try:
-                    rc = self.child.wait(timeout=self.grace)
-                except subprocess.TimeoutExpired:
-                    rc = None
-                    if cleanup != "group_check_failed":
-                        cleanup = "group_kill_unconfirmed"
+                deadline = time.monotonic() + self.grace
+                while self.child_status() is None and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                status = self.child_status()
+                if (status is None or status[0] == "lost") and cleanup != "group_check_failed":
+                    cleanup = "group_kill_unconfirmed"
+            elif status[0] == "lost":
+                cleanup = "unconfirmed"                   # ownership lost: neither the pid nor the group is signalled
             else:
                 cleanup = "group_exited"
                 try:                                      # remnants left in the owned group (e.g. stray workers)
@@ -309,23 +339,29 @@ class Observer:
                 except PermissionError:
                     cleanup = "group_check_failed"
             self.child = None                             # ownership ended: no further forwarding
-        if child_started and self.sig is None and rc is not None:
+        status = self.status
+        if child_started and self.sig is None and status is not None and status[0] != "lost":
             self.sample("after")
             after = "taken"
         else:
             after = "skipped"
         if not child_started and self.sig is not None:
-            exit_status, child_exit, child_signal = 128 + self.sig, None, None
-        elif rc is None:
-            exit_status, child_exit, child_signal = 128 + signal.SIGKILL, None, None
-        elif rc < 0:
-            exit_status, child_exit, child_signal = 128 - rc, None, -rc
+            exit_status, child_exit, child_signal, child_status = 128 + self.sig, None, None, "not_started"
+        elif not child_started:
+            exit_status, child_exit, child_signal, child_status = rc, rc, None, "not_started"
+        elif status is None:
+            exit_status, child_exit, child_signal, child_status = 128 + signal.SIGKILL, None, None, "unconfirmed"
+        elif status[0] == "lost":
+            exit_status, child_exit, child_signal, child_status = STATUS_LOST_EXIT, None, None, "lost"
+        elif status[0] == "signal":
+            exit_status, child_exit, child_signal, child_status = 128 + status[1], None, status[1], "signaled"
         else:
-            exit_status, child_exit, child_signal = rc, rc, None
+            exit_status, child_exit, child_signal, child_status = status[1], status[1], None, "exited"
         self.write({"phase": "summary", "started_t": started_wall, "ended_t": int(time.time()),
                     "duration_s": round(time.monotonic() - started, 3), "child_started": child_started,
                     "cancelled_before_start": (not child_started) and self.sig is not None,
-                    "child_exit": child_exit, "child_signal": child_signal, "forwarded_signal": self.sig,
+                    "child_status": child_status, "child_exit": child_exit, "child_signal": child_signal,
+                    "forwarded_signal": self.sig,
                     "exit_status": exit_status, "cleanup": cleanup, "after": after,
                     "samples_during": during, "cap_reached": during >= self.max,
                     "samples_qualified": self.samples["qualified"], "samples_unknown": self.samples["unknown"],
