@@ -36,7 +36,8 @@ jobs:
       # no network (loopback only), no credentials, no privilege, an empty HOME and only their own
       # processes (scripts/ci_contained.sh, which self-checks that before the command starts).
       - name: Python unit, integration and contract tests
-        run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n 2 --junitxml=test-results/python.xml
+        # DIAGNOSTIC ONLY (storage evidence for the LF CI ENOSPC); the pytest argv after "--" is unchanged.
+        run: bash scripts/ci_contained.sh .venv/bin/python scripts/ci_storage_observe.py -- .venv/bin/python -m pytest -n 2 --junitxml=test-results/python.xml
       - name: JavaScript behavior and contract tests
         if: ${{ !cancelled() }}
         run: bash scripts/ci_contained.sh npm test -- --reporter=default --reporter=junit --outputFile=test-results/javascript.xml
