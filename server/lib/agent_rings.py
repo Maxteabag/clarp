@@ -1820,8 +1820,7 @@ def release_unsent(queue_id: str, trace_id: str) -> bool:
         if _identity_gate(op, box):
             return False                            # unknown, never queued again
         if op.get("retired"):
-            db.conn().execute("UPDATE queued_turns SET status = 'withdrawn', text = ''"
-                              " WHERE queue_id = ? AND status = 'claimed'", (queue_id,))
+            turn_queue.withdraw_claimed(queue_id)   # the queue's own writer, in this transaction
             intent["state"] = "cancelled"
         else:
             turn_queue.release_claim(queue_id)
@@ -1852,6 +1851,7 @@ def authorize_parked_launch(queue_id: str, trace_id: str) -> str:
     the provider handoff (claude's stdin write, the argv backends' Popen) still lets that one
     launch run. The spawn flag is possibly-sent bookkeeping, not delivery; closing the window
     needs a launch-commit mechanism this does not provide."""
+    from . import turn_queue
     queue_id = str(queue_id or "")
     if not queue_id.startswith(CALL_OPEN) or not is_initiative(queue_id, trace_id):
         return "unknown"
@@ -1868,8 +1868,7 @@ def authorize_parked_launch(queue_id: str, trace_id: str) -> str:
         if _identity_gate(op, box):
             box["result"] = "unknown"               # never "launch", never "cancelled"
         elif _enforce_fence(op):
-            db.conn().execute("UPDATE queued_turns SET status = 'withdrawn', text = ''"
-                              " WHERE queue_id = ? AND status = 'claimed'", (queue_id,))
+            turn_queue.withdraw_claimed(queue_id)   # the queue's own writer, in this transaction
             intent["state"] = "cancelled"
             box["dirty"] = True
             box["result"] = "cancelled"
