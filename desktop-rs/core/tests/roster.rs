@@ -322,6 +322,19 @@ fn a_quiet_agent_is_never_unread_or_in_the_attention_queue() {
 }
 
 #[test]
+fn a_helper_is_never_in_the_attention_queue() {
+    let mut roster = Roster::new();
+    roster.apply_snapshot(&obj(json!({"agents": [
+        agent("p", "parent", 100, 100, "idle"),
+        helper_row("worker", "p", "running", 200),
+        agent("o", "other", 100, 100, "waiting")]})));
+    roster.apply_notification_event(&obj(json!({"session": "worker"})));
+    let pending = ["worker".to_string()];
+    assert_eq!(roster.attention_queue("parent", &pending), ["other"], "Ctrl+J skips the helper");
+    assert_eq!(roster.next_attention_session("other", &pending), None);
+}
+
+#[test]
 fn first_session_prefers_a_working_agent() {
     let mut roster = Roster::new();
     roster.apply_snapshot(&obj(json!({"agents": [
