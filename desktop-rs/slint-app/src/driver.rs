@@ -99,6 +99,8 @@ thread_local! {
     // The sidebar check's theme before its compact work shots.
     static THEME_BEFORE: RefCell<String> = const { RefCell::new(String::new()) };
     static WIDTH_BEFORE: Cell<f32> = const { Cell::new(0.0) };
+    // Whether a row showed a Ctrl+J queue number when WIDTH_BEFORE was taken.
+    static QUEUED_BEFORE: Cell<bool> = const { Cell::new(false) };
     static TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
@@ -2302,6 +2304,7 @@ fn sidebar_check(out: String) {
             check(width < 320.0 && width >= 120.0, &format!("the compact explorer narrows to an average row: {width}px"));
             check(compact_marks().is_empty(), "nothing runs, so no compact row shows a work mark");
             WIDTH_BEFORE.with(|w| w.set(width));
+            QUEUED_BEFORE.with(|q| q.set(window.get_chats().iter().any(|c| c.queue > 0)));
             shot(&out3, "sidebar-02-compact");
             // Rachel runs Mike as a helper (its mirror job too) and two processes.
             let helper = serde_json::json!({"session": "mike", "set": {"role": "helper", "parent_agent_id": "a1", "helper_state": "working"}});
@@ -2322,7 +2325,13 @@ fn sidebar_check(out: String) {
             let row = explorer_row("Rachel").unwrap_or_default();
             let inside = |m: &Rect| m.0 >= row.0 && m.0 + m.2 <= row.0 + row.2 && m.1 >= row.1 && m.1 + m.3 <= row.1 + row.3;
             check(row.3 <= 40.0 && marks.iter().all(|m| inside(&m.2)), &format!("the marks fit inside the compact row {row:?}: {marks:?}"));
-            check(window.get_explorer_compact_width() == width_before(), "the marks leave the compact explorer's width as it was");
+            // A helper leaves the Ctrl+J queue, which can take the last queue
+            // number (and its badge) out of the compact width; the work marks
+            // themselves add nothing.
+            let queued = window.get_chats().iter().any(|c| c.queue > 0);
+            let badge = (queued as i32 - QUEUED_BEFORE.with(Cell::get) as i32) as f32 * 22.0;
+            let width = window.get_explorer_compact_width();
+            check(width == width_before() + badge, &format!("the marks leave the compact explorer's width as it was: {width}px, before {}px, queue badge {badge:+}px", width_before()));
             let turning = spinners(true);
             check(turning.iter().any(|s| within(s, &marks[1].2)), &format!("the processes mark is a turning spinner, not an hourglass: {turning:?} in {:?}", marks[1].2));
             check(!turning.iter().chain(spinners(false).iter()).any(|s| within(s, &marks[0].2)), "the helpers mark keeps the agent glyph");
