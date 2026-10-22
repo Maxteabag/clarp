@@ -71,7 +71,7 @@ expected_skill_links="$(jq '[.skills[] | select(.pack == "core")] | length' \
 [[ "$(docker exec "$NAME" sh -lc 'find /data/claude/skills -maxdepth 1 -type l | wc -l')" \
     == "$expected_skill_links" ]]
 docker exec "$NAME" python3 -c 'import faster_whisper'
-[[ "$(docker exec "$NAME" node --version)" == v22.22.2 ]]
+[[ "$(docker exec "$NAME" node --version)" == v22.23.4 ]]
 [[ "$(docker exec "$NAME" npm --version)" == 12.0.2 ]]
 [[ "$(docker exec "$NAME" npx --version)" == 12.0.2 ]]
 docker exec "$NAME" sh -lc 'claude --version && codex --version'
