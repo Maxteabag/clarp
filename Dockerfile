@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:22.22.2-bookworm-slim AS node-runtime
+FROM node:22.23.4-bookworm-slim AS node-runtime
 ADD --checksum=sha256:5dbb86c71d07a1957f2e90734092dd6a58bdcd9ebc2d8d41ca1c6e6a21d364e1 \
     https://registry.npmjs.org/npm/-/npm-12.0.2.tgz /tmp/npm.tgz
 RUN mkdir /tmp/npm-new \
@@ -11,7 +11,7 @@ RUN mkdir /tmp/npm-new \
     && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && npm --version
 
-FROM node:22.22.2-bookworm-slim AS frontend
+FROM node:22.23.4-bookworm-slim AS frontend
 WORKDIR /build
 COPY package.json package-lock.json vite.config.js ./
 COPY web ./web
