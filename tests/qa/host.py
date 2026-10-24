@@ -206,7 +206,13 @@ def main():
     server = module.build_server(ctx, args.port, bind_addr='127.0.0.1')
     metadata.update({'url': f'http://127.0.0.1:{server.server_address[1]}', 'pid': os.getpid(),
                 'state_dir': str(root), 'provider': 'deterministic-codex-process'})
-    (root / 'host.json').write_text(json.dumps(metadata, indent=2) + '\n')
+    # Publish readiness atomically: QAHost polls for host.json and reads it at once,
+    # so it must never see the file before its content is complete.
+    payload = json.dumps(metadata, indent=2) + '\n'
+    pending = root / f'.host.json.{os.getpid()}.tmp'
+    with open(pending, 'x') as handle:
+        handle.write(payload)
+    os.replace(pending, root / 'host.json')
     print(json.dumps(metadata), flush=True)
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: threading.Thread(target=server.shutdown, daemon=True).start())
