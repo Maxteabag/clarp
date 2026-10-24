@@ -17,6 +17,7 @@ pub mod directory;
 pub mod dirs;
 pub mod endpoint;
 pub mod form_events;
+pub mod hosts;
 pub mod jobs;
 pub mod json;
 pub mod instance;

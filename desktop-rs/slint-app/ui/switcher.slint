@@ -104,7 +104,7 @@ export component Switcher inherits Rectangle {
                             spacing: 10px;
                             Text {
                                 font-size: ChromeText.body;
-                                text: row.kind == "agent" ? "●" : row.kind == "contact" ? "+" : row.kind == "message" ? "❞" : "›";
+                                text: row.kind == "agent" ? "●" : row.kind == "contact" ? "+" : row.kind == "message" ? "❞" : row.kind == "host" ? "⇄" : "›";
                                 color: row.kind == "agent" ? Palette.success : Palette.faint;
                                 vertical-alignment: center;
                                 width: 12px;
