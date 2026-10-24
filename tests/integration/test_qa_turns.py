@@ -61,6 +61,27 @@ class QAHost:
             time.sleep(.05)
         raise AssertionError(f'no reply for {session}: {result}')
 
+    def wait_busy(self, session, busy):
+        for _ in range(200):
+            status = self.request('/status?session=' + session)
+            if status['busy'] is busy:
+                return status
+            time.sleep(.05)
+        raise AssertionError(f'{session} busy is not {busy}: {status}')
+
+    def wait_turn_started(self, text):
+        """The provider took `text` as a turn of its own, not as a steer into a running one."""
+        path = self.root / 'provider' / 'turn-requests.jsonl'
+        for _ in range(200):
+            requests = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+            said = [(r['method'], ''.join(i.get('text', '') for i in r.get('input', []))) for r in requests]
+            steered = [t for method, t in said if method == 'turn/steer' and text in t]
+            assert not steered, f'{text!r} was steered into a running turn: {steered}'
+            if any(method == 'turn/start' and text in t for method, t in said):
+                return
+            time.sleep(.05)
+        raise AssertionError(f'{text!r} never started a turn: {said}')
+
 
 @pytest.fixture
 def qa_host(tmp_path):
@@ -119,8 +140,14 @@ def test_durable_queue_survives_host_restart(qa_host):
     qa_host.request('/send', {'session': 'rachel', 'text': 'earlier conversation',
                              'client_msg_id': 'earlier', 'synthesize_audio': False})
     before = qa_host.wait_reply('rachel', 'earlier conversation')
+    # The reply is visible before its turn completes. A send in that gap is
+    # steered into the finishing turn, which then frees the agent, and the
+    # queue request below starts at once instead of queueing.
+    qa_host.wait_busy('rachel', False)
     qa_host.request('/send', {'session': 'rachel', 'text': '[qa-slow] active',
                              'client_msg_id': 'active', 'synthesize_audio': False})
+    qa_host.wait_turn_started('[qa-slow] active')
+    qa_host.wait_busy('rachel', True)
     queued = qa_host.request('/send', {'session': 'rachel', 'text': 'queued after restart',
                                      'client_msg_id': 'queued', 'queue_if_busy': True,
                                      'synthesize_audio': False})
