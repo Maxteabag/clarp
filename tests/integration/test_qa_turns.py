@@ -1,6 +1,10 @@
 """Real HTTP/dispatch/provider-process/SQLite round trips without credentials."""
+import contextlib
 import json
+import os
 from pathlib import Path
+import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -11,29 +15,87 @@ import urllib.error
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+# QA-only startup bound, a monotonic deadline (not an iteration count). A host that
+# exits fails at once; one that shows no readiness by the deadline gets a stack dump
+# (host.py registers faulthandler on SIGUSR1) and is reaped. Worst case before
+# overhead: 20 s + 1 s dump + 8 s TERM + 3 s KILL = 32 s, under the 60 s per-test
+# timeout; a per-file budget can still be exceeded, which then fails, never passes.
+READY_TIMEOUT_S = 20
+STACK_DUMP_WAIT_S = 1
+LOG_TAIL_LINES, LOG_TAIL_BYTES = 40, 8192
+_SECRET = re.compile(r'Bearer\s+\S+|cld_[A-Za-z0-9_\-]+|qa-host-test')
 
 
 class QAHost:
-    def __init__(self, root):
+    def __init__(self, root, extra_args=()):
         self.root = root
+        self.extra_args = tuple(extra_args)
         self.process = None
 
-    def start(self):
+    def start(self, ready_timeout_s=READY_TIMEOUT_S):
         previous = (self.root / 'host.json')
         if previous.exists():
             previous.unlink()
-        self.log = (self.root.parent / f'{self.root.name}.log').open('a')
-        self.process = subprocess.Popen(
-            [sys.executable, str(ROOT / 'tests/qa/host.py'), '--state-dir', str(self.root)],
-            stdout=self.log, stderr=subprocess.STDOUT)
-        for _ in range(100):
-            if previous.exists():
-                self.url = json.loads(previous.read_text())['url']
-                return self
-            if self.process.poll() is not None:
-                raise AssertionError(f'QA host exited: {self.process.returncode}')
+        self.log_path = self.root.parent / f'{self.root.name}.log'
+        self.log = self.log_path.open('a')
+        try:
+            self.process = subprocess.Popen(
+                [sys.executable, str(ROOT / 'tests/qa/host.py'), '--state-dir', str(self.root),
+                 *self.extra_args],
+                stdout=self.log, stderr=subprocess.STDOUT)
+        except BaseException:
+            self.log.close()                # no child was started: only the log to release
+            raise
+        try:
+            deadline = time.monotonic() + ready_timeout_s
+            while not previous.exists():
+                if self.process.poll() is not None:
+                    raise AssertionError(f'QA host exited: {self.process.returncode}' + self._log_tail())
+                if time.monotonic() >= deadline:
+                    note = ''
+                    try:
+                        self._dump_stacks()
+                    except Exception as exc:  # noqa: BLE001 - the timeout stays the failure
+                        note = f'\n(stack dump failed: {exc!r})'
+                    raise AssertionError(f'QA host did not become ready after {ready_timeout_s} s'
+                                         + note + self._log_tail())
+                time.sleep(.05)
+            self.url = json.loads(previous.read_text())['url']
+            return self
+        except BaseException:
+            # Reap the child this call started on every failed start; the failure
+            # that got us here is the one raised.
+            try:
+                self.stop()
+            except Exception as exc:  # noqa: BLE001 - never replace the original failure
+                try:
+                    print(f'QA host cleanup after a failed start also failed: {exc!r}', file=sys.stderr)
+                except Exception:  # noqa: BLE001 - nothing left to report through; the
+                    pass           # original failure below still wins
+            raise
+
+    def _dump_stacks(self):
+        """Ask the still-owned, still-running child for its thread stacks."""
+        if self.process is None or self.process.poll() is not None:
+            return                          # exited (or reaped): its pid is no longer ours
+        try:
+            os.kill(self.process.pid, signal.SIGUSR1)
+        except ProcessLookupError:
+            return
+        deadline = time.monotonic() + STACK_DUMP_WAIT_S
+        while time.monotonic() < deadline and self.process.poll() is None:
             time.sleep(.05)
-        raise AssertionError('QA host did not become ready')
+
+    def _log_tail(self):
+        """The host log's last lines, bounded by bytes and lines, tokens redacted."""
+        try:
+            with open(self.log_path, 'rb') as f:
+                f.seek(max(0, f.seek(0, os.SEEK_END) - LOG_TAIL_BYTES))
+                text = f.read(LOG_TAIL_BYTES).decode('utf-8', 'replace')   # never more, even if it grows
+        except OSError as exc:
+            return f'\n(host log unreadable: {exc!r})'
+        lines = _SECRET.sub('<redacted>', text).splitlines()[-LOG_TAIL_LINES:]
+        return '\n--- host log tail ---\n' + '\n'.join(lines)
 
     def stop(self):
         if self.process is not None:
@@ -81,6 +143,51 @@ class QAHost:
                 return
             time.sleep(.05)
         raise AssertionError(f'{text!r} never started a turn: {said}')
+
+
+TURN_READY_TIMEOUT_S = 5
+
+
+def _turns_of(host, message_id, busy_timeout_s):
+    """Read-only, exact identity: the trace of one user row and the turn rows under that trace.
+    SQLite waits at most ``busy_timeout_s`` for a lock (never its 5 s default)."""
+    uri = f"file:{host.root / 'state.sqlite'}?mode=ro"
+    with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=busy_timeout_s)) as db:
+        row = db.execute("SELECT trace_id FROM messages WHERE message_id = ?", (message_id,)).fetchone()
+        trace = row[0] if row else None
+        turns = db.execute("SELECT started_at, settled_at, outcome FROM turns WHERE trace_id = ?",
+                           (trace,)).fetchall() if trace else []
+    return trace, turns
+
+
+def wait_turn(host, message_id, *, settled):
+    """Wait, bounded, until the turn that the user row ``message_id`` opened is settled
+    (``settled=True``) or open (``settled=False``). A row with no turn of its own (it was
+    steered into another turn) never qualifies; that fails, never passes. An open row means the
+    dispatcher claimed the agent's slot for this trace before inserting it (turn_dispatch:
+    _enqueue_if_busy, then turn_lifecycle.open_turn): the agent is busy with it. It does not
+    mean the backend process is ready. A failed state read fails at once; it is never ready."""
+    deadline = time.monotonic() + TURN_READY_TIMEOUT_S
+    trace, turns = None, []
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            try:
+                trace, turns = _turns_of(host, message_id, min(.05, remaining))
+            except sqlite3.Error as exc:
+                raise AssertionError(f'readiness: {message_id} state read failed: {exc!r} '
+                                     f'(last trace={trace}, turns={turns})') from exc
+            ready = bool(turns) and (all(t[1] is not None for t in turns) if settled
+                                     else len(turns) == 1 and turns[0][1] is None)
+        else:
+            ready = False
+        if time.monotonic() > deadline:     # checked after the read, before any ready
+            state = 'settled' if settled else 'started as its own open turn'
+            raise AssertionError(f'readiness: {message_id} not {state} within {TURN_READY_TIMEOUT_S} s '
+                                 f'(trace={trace}, turns={turns})')
+        if ready:
+            return trace
+        time.sleep(min(.05, max(0.0, deadline - time.monotonic())))
 
 
 @pytest.fixture
@@ -142,11 +249,16 @@ def test_durable_queue_survives_host_restart(qa_host):
     before = qa_host.wait_reply('rachel', 'earlier conversation')
     # The reply is visible before its turn completes. A send in that gap is
     # steered into the finishing turn, which then frees the agent, and the
-    # queue request below starts at once instead of queueing.
+    # queue request below starts at once instead of queueing. Both observables
+    # must agree: the agent is idle and the earlier turn is settled.
     qa_host.wait_busy('rachel', False)
+    wait_turn(qa_host, 'u-earlier', settled=True)
     qa_host.request('/send', {'session': 'rachel', 'text': '[qa-slow] active',
                              'client_msg_id': 'active', 'synthesize_audio': False})
+    # The queue precondition: active runs as its own turn (not steered), seen by the
+    # provider and as its own open turn, and the agent is busy with it.
     qa_host.wait_turn_started('[qa-slow] active')
+    wait_turn(qa_host, 'u-active', settled=False)
     qa_host.wait_busy('rachel', True)
     queued = qa_host.request('/send', {'session': 'rachel', 'text': 'queued after restart',
                                      'client_msg_id': 'queued', 'queue_if_busy': True,
