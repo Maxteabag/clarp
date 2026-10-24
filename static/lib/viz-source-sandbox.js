@@ -122,6 +122,7 @@ export class SourceSandbox {
   draw(input){
     if(!this.ready||this.pending||this.stopped||document.hidden||performance.now()<(this.nextFrameAt||0))return;
     this.pending=true;this.sequence++;
+    this.lastFrameInput={camera:{...input.camera},playhead:input.playhead,pixelRatio:input.pixelRatio,width:input.width,height:input.height};
     this.sentAt=performance.now();
     const {scene,...frame}=input;
     if(scene!==this.scene){this.scene=scene;this.frame.contentWindow.postMessage({type:'scene',scene},'*');}
