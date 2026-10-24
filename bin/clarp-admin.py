@@ -1156,6 +1156,10 @@ def cmd_call_ring(args) -> int:
                 print(f"clarp-admin call ring: cannot use --context-file: {exc}", file=sys.stderr)
                 return 2
             body.update(conversation_mode="agent_live_v1", event_context=context)
+        if args.listen_first:
+            # The phone listens first; --say stays the fallback line for a
+            # phone that cannot (docs/agent-rings.md "Listen-first").
+            body["opening_mode"] = "listen_first"
         code, result = _ring_request("POST", "/calls/ring", body)
         ring_id = str((result.get("ring") or {}).get("ring_id") or "")
         if code == 0 and args.wait and ring_id:
@@ -3071,6 +3075,8 @@ Run ./setup.sh --help to see TUI, interactive CLI, and automation routes.
                       help="hold the call as a live voice conversation (agent_ring_live); needs --context-file")
     ring.add_argument("--context-file", default="",
                       help="the event context JSON for --oracle (CONTEXT-v1, at most 32768 bytes)")
+    ring.add_argument("--listen-first", action="store_true",
+                      help="let the user speak first; --say is then only the line for a phone that cannot")
     ring.set_defaults(func=cmd_call_ring)
     ring_status = call.add_parser("ring-status", help="the ringing call, or one call by id")
     ring_status.add_argument("ring_id", nargs="?", default="")

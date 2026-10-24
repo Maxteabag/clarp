@@ -41,7 +41,7 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 73  # artifact_summary_v1 introduced (Nadia's ledger, proposed; booked at the ready landing, else main + 1)
+HOST_CONTRACT = 74  # PROVISIONAL (listen-first + call transcription policy over artifact_summary_v1 73): Nadia books it at the ready landing, else the next free
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
@@ -50,6 +50,8 @@ FEATURES: tuple[str, ...] = (
     "agent_ring_live",
     "tts_google_id_guard",
     "tts_provider_google",
+    "call_transcription_policy",
+    "agent_ring_listen_first",
     "agent_rings",
     "controller_actions",
     "runtime_drain_status",
@@ -371,3 +373,9 @@ FEATURE_CONTRACTS["tts_provider_google"] = 69
 FEATURE_CONTRACTS["tts_google_id_guard"] = 70
 FEATURE_CONTRACTS["agent_ring_live"] = 71  # PROVISIONAL: booked at the ready landing, else the next free number
 FEATURE_CONTRACTS["agent_ring_device_optout"] = 72  # PROVISIONAL: booked at the ready landing, else the next free number
+# PROVISIONAL (fresh-base composition, not a landing): 74 is the next free number above the booked
+# artifact_summary_v1 73 (Nadia's ledger); it is booked at the ready landing (rule B), else the next free
+# number, and HOST_CONTRACT, both features and the compatibility row change together. 65-68 stay a
+# permanent gap and are never reused. Until booked this composition must not merge or reach CI.
+FEATURE_CONTRACTS["agent_ring_listen_first"] = 74
+FEATURE_CONTRACTS["call_transcription_policy"] = 74

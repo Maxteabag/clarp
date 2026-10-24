@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Versions 81 and 82 also exist on installed Hosts with additive indexing
 # migrations. History must run when upgrading those Hosts, not only main's v80.
-_SCHEMA_VERSION = 118  # ledger-confirmed next above main 117 (device_tokens.principal); stop and renumber if main's schema moves first
+_SCHEMA_VERSION = 119  # PROVISIONAL (listen-first index over main 118): Nadia's ledger order fixes it at the landing
 
 
 # The schema below is the complete current shape. It is applied in one step to
@@ -130,6 +130,7 @@ CREATE TABLE state_log (
     detail TEXT
 );
 CREATE INDEX idx_state_log_agent_ts ON state_log(agent_id, ts DESC);
+CREATE INDEX idx_state_log_agent_state ON state_log(agent_id, state_id);
 
 CREATE TABLE focus (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 0),

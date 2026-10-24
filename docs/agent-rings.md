@@ -185,6 +185,134 @@ call"). The reason shows on the lock screen only when the owner opts in:
 `POST /calls/ring/settings {"show_reason": true}`. The app still receives
 the reason in the payload.
 
+## Listen-first (feature `agent_ring_listen_first`; contract number booked at landing)
+
+The normative contract is the agreed listen-first v5 (§11, then §10, §9, §9.1).
+A ring may ask the phone to let the user speak first:
+
+- `POST /calls/ring` takes `opening_mode`: `say` (the default, exactly the
+  ring above) or `listen_first`. On a classic ring any other value is 400
+  `unknown opening_mode`. A Live ring (`conversation_mode: agent_live_v1`)
+  takes no listen-first opening (its opening is the Live model's): any sent
+  value other than `say`, `listen_first` included, is the existing 400
+  `live_mode_invalid` and nothing is stored. `opening_line` stays required
+  and is still voiced at ring time: it is the line a phone that cannot listen
+  first plays. `clarp-admin call ring --listen-first` sends it; without the
+  flag the request is unchanged.
+- `POST /calls/ring/answer` takes `opening_mode: "listen_first"` from a phone
+  that can. On a listen_first ring it is an ACK only: the call starts, nothing
+  is spoken, synthesized, written to history or run, and the answer's
+  `opening` is `{mode, ring_id, call_id, token, owner_nonce, epoch: 1,
+  state: "pending", silence_ms: 1250, session, persona, server_id, intent:
+  null}`. Without `opening_mode` the answer is today's, byte for byte; with any
+  other value (or on a say ring) it is today's answer plus `opening.mode:
+  "say"`. A listen_first ring answered the legacy way is `fallback`: the line
+  plays, nothing is dispatched. `opening_mode` is chosen when the ring is
+  placed; the answer never renegotiates it. An answer's `opening_mode` only
+  picks how a listen_first ring's opening is handed back, and a Live ring's
+  answer ignores it (the Live grant, no listen-first opening; no refusal).
+- The phone owns timing (readiness, VAD onset, the 1.25 s deadline). It reports
+  through `POST /calls/ring/opening {token, epoch, claim, request_id,
+  capture_gen, at_ms}` with `claim` one of `listening`, `speech_started`
+  (latches the greeting; later silence claims get 409 `speech latched`),
+  `speech_abandoned` (`reason`: `empty_capture` or `capture_aborted` only),
+  `silence` (needs `at_ms` and `watermark_ms` at or past the deadline),
+  `no_mic`, `not_ready`, and `renew` (`expected_epoch`, `owner_nonce`; a
+  compare-and-set that bumps the epoch and rotates the nonce, before any
+  resolution only). It answers `{ok, opening, changed}`; the same
+  `request_id` answers again with `changed: false`.
+- The greeting is the phone's ordinary captured-turn `/send` with `call_id`
+  and `call_opening: {token, epoch}`. It goes to the calling agent only (no
+  selection, no orchestrator) with the header "They answered and spoke first",
+  and the response carries `opening`. A retry of the same `client_msg_id` is
+  the same greeting, even across a renewal.
+- A silence claim (or no_mic, not_ready, speech_abandoned) admits ONE
+  initiative turn: prompt admission and queued row `call-open:<ring_id>`,
+  origin `automation`, whose whole input is the call header and why the agent
+  speaks first. It is never a user row; the reply is the agent's own words.
+- Refusals dispatch nothing: 400 `bad claim`, 403 `not the answering device`,
+  404 `unknown opening`, 409 `stale epoch`, `owner changed`, `already
+  resolved` (+`outcome`), `opening retired` (+`reason`), `wrong call`,
+  `speech latched`.
+
+Atomicity. The opening lives in its own settings row per ring
+(`agent_ring.opening.<ring_id>`), written only inside SQLite transactions.
+The initiative's intent is `intended` (no row yet), `admitted`, `cancelled`
+or `started`. The admitter inserts the admission and queued row only while the
+intent is still `intended`, in the same transaction; a greeting or speech
+onset cancels an intended intent, or withdraws an admitted, unclaimed row
+(`status = 'withdrawn'`), in one transaction; the dispatcher claims the row
+(`queued` to `claimed`) and starts the intent in one transaction before the
+turn runs. Whichever commits first wins; a greeting after the claim is an
+ordinary call utterance (`opening.greeting: "ordinary"`). Recovery (Host start
+and every read of the ring) admits only an `intended` intent.
+
+Claimed once. The dispatcher claims an initiative for a launch at most once.
+Only its own failure before the backend was invoked puts the row back
+(`queued`, intent `admitted`), to be claimed once more through the same fence.
+Any other way back (a stale-claim reset, a released or retried claim, a claim
+left by an earlier Host process, whatever the clock says) cannot tell whether
+the turn reached the backend: the opening and its intent become `unknown` and
+the row `status = 'unknown'`, never counted as queued, claimed or done and
+never run again. It is never listed by `GET /turn-queue` or counted in any
+queue depth; editing, deleting or sending it (`PUT`, `DELETE`,
+`POST /turn-queue/<id>/send`) is refused with 409 `opening launch unknown`,
+and the row stays as the record. The opening's `state: "unknown"` is how a
+client sees it. A newer Stop or retire still wins. A row named `call-open:…`
+is an initiative only when its prompt admission is the Host's own (`call`
+channel, same id and trace); a client's message under such an id stays that
+client's ordinary message, and the opening it collides with becomes `unknown`.
+
+Retirement. The call ending or being superseded, the device being revoked, or
+another Host instance retires the opening: later claims and greetings get 409
+`opening retired`. A committed opening keeps its outcome but loses its output.
+A replacement ring gets a new token.
+
+Audio. Clips of an opening turn carry `call_id` and `opening: {ring_id, token,
+epoch, kind: "initiative"|"greeting_reply", admission_id}`; ordinary clips are
+untagged. The Host skips voicing an initiative clip once its intent is
+cancelled or a greeting arrived after it started, and any opening clip once
+retired (best effort; the phone's fence decides).
+
+The `agent-ring` event and `GET /calls/ring` carry `opening_mode` and
+`opening` (state and epoch, never the token or nonce) for listen_first rings
+only; a say ring's event is unchanged.
+
+### Host identity
+
+A listen-first ring and its opening remember the host generation they were
+made under: the kernel boot id plus the instance token in
+`clarp/backups/instance.generation` (created at process start; rotated only by
+the supported restore). Every opening step reads it again, once before and
+once inside its transaction, and never creates, rotates or repairs it.
+
+- `POST /calls/ring` with `opening_mode: "listen_first"` while the identity
+  cannot be read: 409 `listen-first opening is unavailable: host identity
+  unprovable; ring with opening_mode say`. A say ring is unaffected.
+- Answering a listen-first ring placed on another boot or instance, or whose
+  identity cannot be proven: 409 `the call is over`; the ring ends `missed`
+  (the cause stays internal), no call starts and no opening is made. The miss
+  is announced like any missed ring: the `agent-ring` event and the replacing
+  push are sent, and devices on the event stream dismiss the ring. A push alone
+  does not end the original CallKit call (the terminal VoIP push uses another
+  call id), and a missed push may leave a notification in the list. The agent
+  gets no "did not answer" notice. Replaying an answered ring's opening (its
+  token) is refused when the ring or the opening is on another identity, or the
+  opening is retired or unknown; the say-shaped answer is unchanged.
+- A failure after the call has started (saving, recording the opening, an
+  audit write) ends that call once, best effort, and the error is returned. If
+  ending it fails, the call can stay up and an opening already recorded stays
+  usable until the call ends.
+- An opening still in flight on another identity becomes `unknown` and is
+  retired with the cause (`host_rebooted`, `db_restored`,
+  `host_identity_unprovable`); its queued or claimed row becomes `unknown`,
+  never withdrawn, and nothing runs. An opening that already finished is kept
+  as stored, and the step is still refused.
+- Equal identities mean only "not shown different". A restore applied by an
+  older Host (downgrade, restore, upgrade) does not rotate the token, so it is
+  not detected; that sequence is unsupported. A deleted token yields a new one
+  at the next start, which makes every older opening unknown.
+
 ## Follow-ups (after the 23 Oct 2026 demo)
 
 Reply latency on an answered call: measured by rk-integration (Sonnet, low

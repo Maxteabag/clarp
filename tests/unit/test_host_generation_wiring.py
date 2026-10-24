@@ -1,7 +1,8 @@
 """Host-generation wiring, slice C2-S2a (design r4 §12-§14, C2-S2 packet and addendum 1).
 
 The token is bootstrapped at every process start before the state database is opened, and rotated
-only by the supported exclusive restore before its first destructive step. Nothing reads it yet.
+only by the supported exclusive restore before its first destructive step. Its one reader is the
+listen-first opening fence (server/lib/agent_rings.py); nothing else reads it.
 
 Rotation and the import check run real file operations on owned temporary roots. The runtime's call
 order is recorded through its real main(). The server's `__main__` block and the entrypoint heredoc
@@ -324,8 +325,9 @@ def _callers(name: str) -> set[str]:
     return found
 
 
-def test_only_process_starts_bootstrap_only_the_restore_rotates_and_nothing_reads_yet():
+def test_only_process_starts_bootstrap_only_the_restore_rotates_and_only_agent_rings_reads():
     assert _callers("ensure_instance_generation") == {
         "docker/entrypoint.sh", "server/server.py", "server/runtime.py"}
     assert _callers("rotate_instance_generation") == {"server/lib/data_root_locks.py"}
-    assert _callers("read_host_generation") == set()                 # no consumer in this slice
+    # The listen-first opening fence is the one consumer; any other reader is a new decision.
+    assert _callers("read_host_generation") == {"server/lib/agent_rings.py"}

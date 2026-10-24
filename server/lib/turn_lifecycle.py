@@ -35,6 +35,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import json
+import sqlite3
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -93,6 +94,9 @@ class TurnEvent:
     STOP_REQUESTED = "stop_requested"            # user stop / janitor cancel
     RESTART_INTERRUPTED = "restart_interrupted"  # boot recovery
     UNLAUNCHED = "unlaunched"                    # back-dated launch receipt
+    # A listen-first call opening on a never-run agent that ended unknown (never confirmed)
+    # before any process ran: the agent is still SPAWNED, which no ordinary turn end leaves.
+    CALL_OPENING_UNCONFIRMED = "call_opening_unconfirmed"
     RECONCILE_REPAIR = "reconcile_repair"        # busy with nothing running
     BACKGROUND_EXPIRED = "background_expired"    # stale-work: declared work long over
     # The release drain handed a turn no process ran for back to the queue
@@ -140,6 +144,8 @@ TRANSITIONS: dict[str, tuple[str, frozenset[str]]] = {
     TurnEvent.STOP_REQUESTED: (AgentState.INTERRUPTED, STARTED),
     TurnEvent.RESTART_INTERRUPTED: (AgentState.INTERRUPTED, BUSY),
     TurnEvent.UNLAUNCHED: (AgentState.INTERRUPTED, ALL),
+    # Only from SPAWNED: a newer turn, a Stop or a successor has already moved the agent on.
+    TurnEvent.CALL_OPENING_UNCONFIRMED: (AgentState.INTERRUPTED, frozenset({AgentState.SPAWNED})),
     TurnEvent.RECONCILE_REPAIR: (AgentState.IDLE, BUSY),
     TurnEvent.BACKGROUND_EXPIRED: (AgentState.IDLE, frozenset({AgentState.BACKGROUND})),
     TurnEvent.UPDATE_HANDOFF: (AgentState.IDLE, BUSY),
@@ -215,6 +221,24 @@ class IllegalTransition(Exception):
             f"{from_state or 'none'} -> {to_state}")
 
 
+class TransitionNotWritten(IllegalTransition):
+    """A conditional transition its write-time conditions refused: nothing was written, settled
+    or observed. ``reason`` names the condition."""
+
+    def __init__(self, agent_id: str, event: str, reason: str):
+        super().__init__(agent_id, event, "", "")
+        self.reason = reason
+        self.args = (f"transition not written agent={agent_id} event={event}: {reason}",)
+
+
+# A hook prompt admission (PROMPT_ADMITTED from the Claude Code UserPromptSubmit hook or the agy
+# hook) as a state row: THINKING with a "source" and no "dispatch". A source-shape heuristic, not
+# an event identity (state_log keeps no event name). It also matches the slot repair's audit note
+# on a thinking agent, a false positive that refuses only an end whose slot was already released.
+PROMPT_ADMISSION_SQL = ("kind = 'thinking' AND json_extract(detail, '$.source') IS NOT NULL"
+                        " AND json_extract(detail, '$.dispatch') IS NULL")
+
+
 
 def _critical_write():
     """Wait out a long writer: losing this write wedges the agent's turn."""
@@ -277,13 +301,19 @@ class TurnStateMachine:
     def transition(self, agent_id: str, event: str,
                    detail: dict[str, Any] | None = None, *,
                    kind: str | None = None, force: bool = False,
-                   ts: int | None = None) -> Transition:
+                   ts: int | None = None, expect_trace: str | None = None,
+                   anchor: int | None = None, s_open: int | None = None) -> Transition:
         """Apply ``event`` to ``agent_id`` and write its ``state_log`` row.
 
         ``kind`` is only read for :attr:`TurnEvent.RECORDED`, the compatibility
         event whose target the caller names. ``force`` skips the legality
         check (repairs); ``ts`` back-dates the row (historical receipts).
+        ``expect_trace`` selects the conditional write (``anchor``, ``s_open``):
+        see :meth:`_conditional_transition`.
         """
+        if expect_trace is not None:
+            return self._conditional_transition(agent_id, event, detail, expect_trace=expect_trace,
+                                                anchor=anchor, s_open=s_open)
         from_state = self.current_kind(agent_id)
         if event == TurnEvent.RECORDED:
             if kind is None or not AgentState.is_valid(kind):
@@ -326,6 +356,80 @@ class TurnStateMachine:
             agent_id=agent_id, event=event, from_state=from_state,
             to_state=target, ts=stamp, detail=detail, forced=force,
             state_id=int(cursor.lastrowid or 0))
+
+    def _conditional_transition(self, agent_id: str, event: str,
+                                detail: dict[str, Any] | None, *, expect_trace: str,
+                                anchor: int | None, s_open: int | None) -> Transition:
+        """Write ``event`` only if nothing newer touched the agent (the call-open end).
+
+        Inside ONE ``BEGIN IMMEDIATE``, before the INSERT: the agent's newest state row is still
+        ``anchor`` (read before the caller's ownership check), its live trace is ``expect_trace``,
+        that trace's turn is unsettled, no hook prompt admission landed after ``s_open`` (the
+        generation read before the trace was set), and the edge is legal. Refused before any
+        statement inside a caller's transaction. Observed only after COMMIT. The state row is
+        atomic with these conditions; the turn's settlement is not (``_settle_turn`` swallows its
+        own failures).
+        """
+        database = conn()
+        if database.in_transaction:      # an attribute of this thread's open connection: no SQL
+            raise TransitionNotWritten(agent_id, event, "in_transaction")
+        target = self.table[event][0]
+        with _critical_write():
+            try:
+                database.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                if db.is_locked_error(exc):
+                    raise TransitionNotWritten(agent_id, event, "write_busy") from exc
+                raise
+            try:
+                newest = database.execute(
+                    "SELECT MAX(state_id) AS g FROM state_log WHERE agent_id = ?",
+                    (agent_id,)).fetchone()["g"]
+                live = database.execute("SELECT trace_id FROM traces WHERE agent_id = ?",
+                                        (agent_id,)).fetchone()
+                open_turn = database.execute(
+                    """SELECT 1 FROM turns WHERE agent_id = ? AND trace_id = ?
+                          AND settled_at IS NULL LIMIT 1""", (agent_id, expect_trace)).fetchone()
+                admitted = s_open is not None and database.execute(
+                    f"""SELECT 1 FROM state_log WHERE agent_id = ? AND state_id > ?
+                           AND {PROMPT_ADMISSION_SQL} LIMIT 1""", (agent_id, s_open)).fetchone()
+                if newest != anchor:
+                    raise TransitionNotWritten(agent_id, event, "g_anchor")
+                if live is None or live["trace_id"] != expect_trace:
+                    raise TransitionNotWritten(agent_id, event, "p1_trace")
+                if open_turn is None:
+                    raise TransitionNotWritten(agent_id, event, "p2_settled")
+                if s_open is None:
+                    raise TransitionNotWritten(agent_id, event, "p4_no_admission_mark")
+                if admitted:
+                    raise TransitionNotWritten(agent_id, event, "p4s_prompt_admitted")
+                from_state = self.current_kind(agent_id)
+                if not self.is_legal(from_state, event):
+                    self._refuse(agent_id, event, from_state, target)
+                    raise IllegalTransition(agent_id, event, from_state, target)
+                stamp = now_ms()
+                detail = _detail_with_origin(agent_id, target, detail, stamp)
+                from . import agents as agents_db
+                cursor = database.execute(
+                    """INSERT INTO state_log (agent_id, runtime_id, ts, kind, detail)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (agent_id, agents_db.current_runtime_id(agent_id), stamp, target,
+                     json.dumps(detail) if detail else None))
+                _settle_turn(agent_id, event, target, detail, stamp)
+                if not database.in_transaction:
+                    # An inner error rolled the transaction back and _settle_turn swallowed it.
+                    raise TransitionNotWritten(agent_id, event, "write_lost")
+                database.execute("COMMIT")
+            except BaseException:
+                if database.in_transaction:
+                    database.execute("ROLLBACK")
+                raise
+        from . import live_hub
+        live_hub.observe_transition(agent_id, event, target,
+                                    {**(detail or {}), "_state_id": int(cursor.lastrowid or 0)})
+        return Transition(
+            agent_id=agent_id, event=event, from_state=from_state, to_state=target,
+            ts=stamp, detail=detail, state_id=int(cursor.lastrowid or 0))
 
     def record(self, agent_id: str, kind: str,
                detail: dict[str, Any] | None = None) -> Transition:
@@ -513,9 +617,11 @@ MACHINE = TurnStateMachine()
 
 def transition(agent_id: str, event: str, detail: dict[str, Any] | None = None,
                *, kind: str | None = None, force: bool = False,
-               ts: int | None = None) -> Transition:
+               ts: int | None = None, expect_trace: str | None = None,
+               anchor: int | None = None, s_open: int | None = None) -> Transition:
     return MACHINE.transition(agent_id, event, detail, kind=kind, force=force,
-                              ts=ts)
+                              ts=ts, expect_trace=expect_trace, anchor=anchor,
+                              s_open=s_open)
 
 
 def try_transition(agent_id: str, event: str,
@@ -529,6 +635,12 @@ def try_transition(agent_id: str, event: str,
         return transition(agent_id, event, detail, force=force)
     except IllegalTransition:
         return None
+
+
+def state_generation(agent_id: str) -> int | None:
+    """The agent's newest state row id (idx_state_log_agent_state: one seek)."""
+    return conn().execute("SELECT MAX(state_id) AS g FROM state_log WHERE agent_id = ?",
+                          (agent_id,)).fetchone()["g"]
 
 
 def record(agent_id: str, kind: str,
