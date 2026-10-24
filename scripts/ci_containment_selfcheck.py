@@ -8,12 +8,15 @@ from __future__ import annotations
 import errno
 import os
 import pathlib
+import re
 import socket
 import stat
 import subprocess
 import sys
 
 ENV_ALLOWED = {"HOME", "PATH", "LANG", "CI", "VIRTUAL_ENV", "UV_OFFLINE", "NPM_CONFIG_OFFLINE", "PWD", "SHLVL", "_"}
+# The suite's pytest tree reached 8.38 GB in CI; the floor leaves more than twice that.
+VAR_TMP_MIN_FREE = 20 * 1024**3
 
 
 def fail(message: str) -> None:
@@ -101,6 +104,27 @@ def main(runner_home: str, runner_temp: str, workspace: str) -> None:
     header = subprocess.run(["git", "-C", workspace, "config", "--get-regexp", r"http\..*extraheader"],
                             capture_output=True, text=True)
     check(header.stdout.strip() == "", "git still holds an http extraheader (checkout credentials)")
+
+    # Temp space: /tmp is a fresh tmpfs; /var/tmp, pytest's temp root, is one fresh private directory
+    # beside the workspace on the workspace's own disk, never a RAM tmpfs and never the host's /var/tmp.
+    mounts = {}
+    for line in pathlib.Path("/proc/self/mountinfo").read_text().splitlines():
+        fields, _, rest = line.partition(" - ")
+        fields = fields.split()
+        mounts[fields[4]] = {"root": fields[3], "fstype": rest.split()[0]}
+    check(mounts.get("/tmp", {}).get("fstype") == "tmpfs", "/tmp is not a fresh tmpfs")
+    var_tmp = mounts.get("/var/tmp")
+    check(var_tmp is not None, "/var/tmp is not its own mount")
+    check(var_tmp["fstype"] != "tmpfs", "/var/tmp is a RAM tmpfs")
+    # mountinfo names the bind source relative to its filesystem's root, so match the mktemp name.
+    check(re.search(r"/\.ci-vartmp\.[A-Za-z0-9]{8}$", var_tmp["root"]) is not None,
+          f"/var/tmp is not the fresh scratch directory: {var_tmp['root']}")
+    held = os.stat("/var/tmp")
+    check(held.st_dev == os.stat(workspace).st_dev, "/var/tmp is not on the workspace's filesystem")
+    check(held.st_uid == os.geteuid() and stat.S_IMODE(held.st_mode) == 0o700, "/var/tmp is not private to the runner user")
+    check(list(pathlib.Path("/var/tmp").iterdir()) == [], "/var/tmp is not empty")
+    space = os.statvfs("/var/tmp")
+    check(space.f_bavail * space.f_frsize >= VAR_TMP_MIN_FREE, "less than 20 GiB free under /var/tmp")
     print("ci containment self-check passed", file=sys.stderr)
 
 
