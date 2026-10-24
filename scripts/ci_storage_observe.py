@@ -1,11 +1,26 @@
 """DIAGNOSTIC ONLY (not part of any feature): run one command unchanged and record, alongside it, fixed numeric
-metadata about the temp filesystem and the run's own pytest temp. The final LF source must decide explicitly, after
-review, whether this stays; it must never ship by accident.
+metadata about a FIXED, audited set of filesystems and the run's own pytest temp. The final LF source must decide
+explicitly, after review, whether this stays; it must never ship by accident.
 
-    python scripts/ci_storage_observe.py [--tmp /tmp] [--out test-results/storage-observe.jsonl]
+    python scripts/ci_storage_observe.py [--out test-results/storage-observe.jsonl]
         [--cadence 60] [--max 20] [--budget 5] [--grace 5] -- <command> [args...]
 
-Runs inside scripts/ci_contained.sh (no network, fresh tmpfs /tmp, no privilege).
+Runs inside scripts/ci_contained.sh (no network, fresh tmpfs /tmp AND a separate fresh tmpfs /var/tmp, no
+privilege, env -i with HOME=/ci-home and no TMPDIR / PYTEST_DEBUG_TEMPROOT).
+
+Targets (schema 5; ci6 measured only /tmp, which the tests do not use). Every sample measures ALL of TARGETS with
+statvfs plus the device id of each (``<label>_dev``, an integer, so distinct mounts are identifiable and duplicates
+deduplicated in ``distinct_filesystems``):
+  tmp      /tmp                       tempfile.gettempdir() for code that names no directory
+  var_tmp  /var/tmp                   tests/conftest.py default_temp_root(): pytest's temp root under ci_contained, so
+                                      every tmp_path, the per-test SQLite DB (CLAUDE_PWA_DB = tmp_path/state.sqlite)
+                                      and the test guard dir live here
+  work     the command's working dir  the workspace (junit, artifacts)
+  home     $HOME at observer start    /ci-home under ci_contained (conftest later moves HOME under the guard dir)
+The pytest temp root is DERIVED, never guessed, with the same rule as tests/conftest.py and pytest
+(``pytest_temp_root``). Its ``pytest-of-*`` trees are walked for apparent/allocated bytes and file count. A root that
+is not one of the targets, or any target that cannot be measured, makes the sample NOT qualified (unknown is never
+read as fine). ``pytest_runs`` counts the ``pytest-of-*`` directories under the derived root.
 
 Bounds. Every sample runs in its own short-lived measurement worker (this file with --measure-worker, in its own
 process group). The observer never blocks on it: it polls in 0.2 s slices, and a worker that is not done within
@@ -47,43 +62,81 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
-SCHEMA = 4
+SCHEMA = 5
 SLICE_S = 0.2
 REAP_S = 1.0
 STATUS_LOST_EXIT = 125                  # the command's status could not be collected: UNKNOWN, never success
-FIELDS = ("tmp_bytes", "tmp_avail_bytes", "tmp_used_bytes", "inodes", "inodes_avail", "inodes_used",
-          "pytest_tmp_apparent_bytes", "pytest_tmp_allocated_bytes", "pytest_tmp_files")
+LABELS = ("tmp", "var_tmp", "work", "home")
+METRICS = ("bytes", "avail_bytes", "used_bytes", "inodes", "inodes_avail", "inodes_used", "dev")
+FS_FIELDS = tuple(f"{label}_{metric}" for label in LABELS for metric in METRICS) + ("distinct_filesystems",)
+PY_FIELDS = ("pytest_tmp_apparent_bytes", "pytest_tmp_allocated_bytes", "pytest_tmp_files", "pytest_runs")
+FIELDS = FS_FIELDS + PY_FIELDS + ("pytest_root",)
+ROOT_LABELS = ("tmp", "var_tmp")            # the only roots pytest may use here; anything else is NOT qualified
 
 
-def measure_worker(tmp: str) -> None:
-    """One measurement; prints one JSON object. A failed part is null; the parent bounds the whole run."""
+def pytest_temp_root(environ, *, var_tmp_exists: bool) -> str:
+    """pytest's temp root as the tests will resolve it: tests/conftest.py default_temp_root() sets
+    PYTEST_DEBUG_TEMPROOT=/var/tmp unless TMPDIR or PYTEST_DEBUG_TEMPROOT is set or /var/tmp is missing; pytest then
+    uses PYTEST_DEBUG_TEMPROOT or tempfile.gettempdir()."""
+    if environ.get("PYTEST_DEBUG_TEMPROOT"):
+        return environ["PYTEST_DEBUG_TEMPROOT"]
+    if environ.get("TMPDIR") or not var_tmp_exists:
+        return tempfile.gettempdir()
+    return "/var/tmp"
+
+
+def targets(environ, cwd: str) -> dict:
+    return {"tmp": "/tmp", "var_tmp": "/var/tmp", "work": cwd, "home": environ.get("HOME") or ""}
+
+
+def measure_worker(spec: str) -> None:
+    """One measurement of every target; prints one JSON object. A failed part is null; the parent bounds the run."""
     fs = py = None
+    root_label = None
     try:
-        v = os.statvfs(tmp)
-        fs = {"tmp_bytes": v.f_blocks * v.f_frsize, "tmp_avail_bytes": v.f_bavail * v.f_frsize,
-              "tmp_used_bytes": (v.f_blocks - v.f_bfree) * v.f_frsize, "inodes": v.f_files,
-              "inodes_avail": v.f_favail, "inodes_used": v.f_files - v.f_ffree}
-    except OSError:
+        conf = json.loads(spec)
+        paths, root = conf["targets"], conf["pytest_root"]
+        part, seen = {}, []
+        for label in LABELS:
+            if not paths.get(label):
+                raise OSError("target unset")
+            v = os.statvfs(paths[label])
+            dev = os.stat(paths[label]).st_dev
+            part.update({f"{label}_bytes": v.f_blocks * v.f_frsize, f"{label}_avail_bytes": v.f_bavail * v.f_frsize,
+                         f"{label}_used_bytes": (v.f_blocks - v.f_bfree) * v.f_frsize, f"{label}_inodes": v.f_files,
+                         f"{label}_inodes_avail": v.f_favail, f"{label}_inodes_used": v.f_files - v.f_ffree,
+                         f"{label}_dev": dev})
+            if dev not in seen:
+                seen.append(dev)
+        part["distinct_filesystems"] = len(seen)
+        fs = part
+        root_label = next((label for label in ROOT_LABELS
+                           if os.path.realpath(paths[label]) == os.path.realpath(root)), None)
+    except (OSError, ValueError, KeyError, TypeError):
         pass
     try:
+        if root_label is None:
+            raise OSError("pytest root is not a measured target")
         apparent = allocated = files = 0
 
         def fail(err):
             raise err
-        for root in [os.path.join(tmp, n) for n in os.listdir(tmp) if n.startswith("pytest-of-")]:
-            for top, _dirs, names in os.walk(root, onerror=fail):
+        runs = [os.path.join(root, n) for n in os.listdir(root) if n.startswith("pytest-of-")]
+        for run in runs:
+            for top, _dirs, names in os.walk(run, onerror=fail):
                 for name in names:
                     st = os.lstat(os.path.join(top, name))
                     apparent += st.st_size
                     allocated += st.st_blocks * 512
                     files += 1
         py = {"pytest_tmp_apparent_bytes": apparent, "pytest_tmp_allocated_bytes": allocated,
-              "pytest_tmp_files": files}
+              "pytest_tmp_files": files, "pytest_runs": len(runs)}
     except OSError:
         pass
-    sys.stdout.write(json.dumps({"fs": fs, "pytest": py}))
+    sys.stdout.write(json.dumps({"fs": fs, "pytest": py, "pytest_root": root_label}))
 
 
 def _valid_part(part, keys) -> bool:
@@ -92,8 +145,8 @@ def _valid_part(part, keys) -> bool:
 
 
 class Observer:
-    def __init__(self, tmp, out, cadence, max_samples, budget, grace, command):
-        self.tmp, self.out, self.cadence, self.max = tmp, out, cadence, max_samples
+    def __init__(self, out, cadence, max_samples, budget, grace, command):
+        self.out, self.cadence, self.max = out, cadence, max_samples
         self.budget, self.grace, self.command = budget, grace, command
         self.sig = None                 # the first forwarded signal
         self.child = None               # owned only while running; cleared once ownership ends
@@ -106,8 +159,10 @@ class Observer:
         self.worker_cpu_ms = 0
         self.samples = {"qualified": 0, "unknown": 0, "timeout": 0, "interrupted": 0, "unreaped": 0,
                         "reap_unknown": 0, "kill_denied": 0}
-        self.maxima = {"tmp_used_bytes": None, "pytest_tmp_allocated_bytes": None}
-        self.min_avail = None
+        self.spec = json.dumps({"targets": targets(os.environ, os.getcwd()),
+                                "pytest_root": pytest_temp_root(os.environ, var_tmp_exists=os.path.isdir("/var/tmp"))})
+        self.maxima = {**{f"{label}_used_bytes": None for label in LABELS}, "pytest_tmp_allocated_bytes": None}
+        self.min_avail = {label: None for label in LABELS}
 
     # -- best-effort diagnostic output ------------------------------------------------------------
     def open(self):
@@ -164,7 +219,7 @@ class Observer:
                "fs_qualified": False, "pytest_qualified": False, "qualified": False, **{k: None for k in FIELDS}}
         started = time.monotonic()
         try:
-            worker = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--measure-worker", self.tmp],
+            worker = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--measure-worker", self.spec],
                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError:
             rec["sample_ms"] = 0
@@ -226,11 +281,11 @@ class Observer:
             except (ValueError, UnicodeDecodeError):
                 data = None
             if isinstance(data, dict):
-                fs, py = data.get("fs"), data.get("pytest")
-                if _valid_part(fs, FIELDS[:6]):
+                fs, py, root = data.get("fs"), data.get("pytest"), data.get("pytest_root")
+                if _valid_part(fs, FS_FIELDS):
                     rec.update(fs, fs_qualified=True)
-                if _valid_part(py, FIELDS[6:]):
-                    rec.update(py, pytest_qualified=True)
+                if root in ROOT_LABELS and _valid_part(py, PY_FIELDS):
+                    rec.update(py, pytest_root=root, pytest_qualified=True)
             rec["qualified"] = rec["fs_qualified"] and rec["pytest_qualified"]
             rec["status"] = "qualified" if rec["qualified"] else "partial"
         else:
@@ -270,10 +325,12 @@ class Observer:
         elif rec["worker_reaped"] is None:
             self.samples["reap_unknown"] += 1
         if rec["fs_qualified"]:
-            if self.maxima["tmp_used_bytes"] is None or rec["tmp_used_bytes"] > self.maxima["tmp_used_bytes"]:
-                self.maxima["tmp_used_bytes"] = rec["tmp_used_bytes"]
-            if self.min_avail is None or rec["tmp_avail_bytes"] < self.min_avail:
-                self.min_avail = rec["tmp_avail_bytes"]
+            for label in LABELS:
+                used, avail = rec[f"{label}_used_bytes"], rec[f"{label}_avail_bytes"]
+                if self.maxima[f"{label}_used_bytes"] is None or used > self.maxima[f"{label}_used_bytes"]:
+                    self.maxima[f"{label}_used_bytes"] = used
+                if self.min_avail[label] is None or avail < self.min_avail[label]:
+                    self.min_avail[label] = avail
         if rec["pytest_qualified"] and (self.maxima["pytest_tmp_allocated_bytes"] is None
                                         or rec["pytest_tmp_allocated_bytes"] > self.maxima["pytest_tmp_allocated_bytes"]):
             self.maxima["pytest_tmp_allocated_bytes"] = rec["pytest_tmp_allocated_bytes"]
@@ -368,9 +425,10 @@ class Observer:
                     "samples_timeout": self.samples["timeout"], "samples_interrupted": self.samples["interrupted"],
                     "workers_unreaped": self.samples["unreaped"], "workers_reap_unknown": self.samples["reap_unknown"],
                     "worker_kill_denied": self.samples["kill_denied"],
-                    "observed_sample_max_tmp_used_bytes": self.maxima["tmp_used_bytes"],
+                    **{f"observed_sample_max_{label}_used_bytes": self.maxima[f"{label}_used_bytes"]
+                       for label in LABELS},
+                    **{f"observed_sample_min_{label}_avail_bytes": self.min_avail[label] for label in LABELS},
                     "observed_sample_max_pytest_tmp_allocated_bytes": self.maxima["pytest_tmp_allocated_bytes"],
-                    "observed_sample_min_tmp_avail_bytes": self.min_avail,
                     "measurement_workers_cpu_ms": self.worker_cpu_ms,
                     "diag_bytes_written_before_summary": self.bytes_written, "diag_write_errors": self.write_errors,
                     "diag_output": self.output})
@@ -379,7 +437,7 @@ class Observer:
 
 
 def _args(argv):
-    opts = {"--tmp": "/tmp", "--out": "test-results/storage-observe.jsonl", "--cadence": "60", "--max": "20",
+    opts = {"--out": "test-results/storage-observe.jsonl", "--cadence": "60", "--max": "20",
             "--budget": "5", "--grace": "5"}
     if "--" not in argv:
         raise SystemExit("usage: ci_storage_observe.py [options] -- <command> [args...]")
@@ -391,7 +449,7 @@ def _args(argv):
         if key not in opts:
             raise SystemExit("usage: unknown option")
         opts[key] = value
-    return (opts["--tmp"], opts["--out"], float(opts["--cadence"]), int(opts["--max"]), float(opts["--budget"]),
+    return (opts["--out"], float(opts["--cadence"]), int(opts["--max"]), float(opts["--budget"]),
             float(opts["--grace"]), command)
 
 
