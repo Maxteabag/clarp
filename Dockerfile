@@ -49,7 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/clarp
 COPY requirements.txt requirements-docker.txt ./
 RUN python -m pip install --no-cache-dir -r requirements-docker.txt \
-    && python -m pip install --no-cache-dir uv==0.9.18
+    && python -m pip install --no-cache-dir uv==0.13.5
 
 COPY server/server.py ./server.py
 COPY server/runtime.py ./runtime.py

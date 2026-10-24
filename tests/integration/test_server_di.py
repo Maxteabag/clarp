@@ -2491,8 +2491,22 @@ def test_concurrent_transcription_retry_coalesces_inflight_work(running_server):
     assert sorted(body["cached"] for body in bodies) == [False, True]
     assert len({body["trace_id"] for body in bodies}) == 1
     assert len(ctx.stt.calls) == 1
+    _assert_job_lock_released("durable-recording-inflight")
+
+
+def _assert_job_lock_released(job_id, timeout=2.0):
+    """The server writes the HTTP response inside transcription_results.serialize() and
+    drops the job's lock entry in its finally, so a client can read the response a moment
+    before that cleanup runs. Wait (bounded, monotonic) for the entry to go; a leaked entry
+    never goes, so the final assertion still fails."""
     from lib import transcription_results
-    assert "durable-recording-inflight" not in transcription_results._locks
+    deadline = time.monotonic() + timeout
+    while job_id in transcription_results._locks:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(0.01, remaining))
+    assert job_id not in transcription_results._locks
 
 
 def test_post_transcribe_rejects_job_id_reused_for_different_audio(running_server):
