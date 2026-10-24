@@ -157,12 +157,16 @@ fn settings() -> Settings {
     }
 }
 
-/// The saved Hosts as the connection page lists them, the one in use marked.
+/// The saved Hosts as the connection page lists them, the one in use marked:
+/// the six most recent, the one in use always among them.
 pub(crate) fn saved_host_rows(engine: &Engine) -> ModelRc<SavedHostRow> {
+    const SHOWN: usize = 6;
     let current = engine.base_url().to_owned();
-    let rows: Vec<SavedHostRow> = engine
-        .saved_hosts()
-        .iter()
+    let hosts = engine.saved_hosts();
+    let mut shown: Vec<_> = hosts.iter().filter(|h| h.url == current).chain(hosts.iter().filter(|h| h.url != current)).take(SHOWN).collect();
+    shown.sort_by_key(|h| hosts.iter().position(|x| x.url == h.url));
+    let rows: Vec<SavedHostRow> = shown
+        .into_iter()
         .map(|host| SavedHostRow { url: host.url.clone().into(), name: host.label().into(), current: host.url == current })
         .collect();
     ModelRc::new(VecModel::from(rows))
