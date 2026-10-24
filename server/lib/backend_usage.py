@@ -293,11 +293,13 @@ def fetch_claude_usage(*, timeout: float = 8.0) -> dict[str, Any]:
     windows: dict[str, Any] = {}
     session = payload.get("five_hour")
     weekly = payload.get("seven_day_oauth_apps") or payload.get("seven_day")
+    # This endpoint reports utilization in percent already: 1 means 1 %, not a
+    # fraction to scale up. Scaling it turned a 1 % window into a full one.
     if isinstance(session, dict):
         used = _to_float(session.get("utilization"))
         if used is not None:
             windows["five_hour"] = {
-                "used_percentage": used if used > 1 else used * 100,
+                "used_percentage": used,
                 "resets_at": _normalize_time(session.get("resets_at")),
                 "window_minutes": 300,
             }
@@ -305,7 +307,7 @@ def fetch_claude_usage(*, timeout: float = 8.0) -> dict[str, Any]:
         used = _to_float(weekly.get("utilization"))
         if used is not None:
             windows["seven_day"] = {
-                "used_percentage": used if used > 1 else used * 100,
+                "used_percentage": used,
                 "resets_at": _normalize_time(weekly.get("resets_at")),
                 "window_minutes": 10_080,
             }

@@ -71,11 +71,19 @@ def test_structured_claude_canonicalizes_primary_secondary_aliases():
         == [("five_hour", 31), ("seven_day", 12)]
 
 
-def test_claude_oauth_usage_normalizes_windows(monkeypatch):
+@pytest.mark.parametrize("window", ["five_hour", "seven_day"])
+@pytest.mark.parametrize("utilization", [0, 0.5, 1, 2, 37, 100])
+def test_claude_oauth_usage_normalizes_windows(monkeypatch, window, utilization):
+    # The endpoint's utilization is already a percent (1 means 1 %), so only a
+    # full window may mark Claude exhausted for every Claude agent.
+    other = 12.0
     body = json.dumps({
-        "five_hour": {"utilization": 37.0, "resets_at": "2030-01-01T05:00:00Z"},
+        "five_hour": {
+            "utilization": utilization if window == "five_hour" else other,
+            "resets_at": "2030-01-01T05:00:00Z"},
         "seven_day_oauth_apps": {
-            "utilization": 12.0, "resets_at": "2030-01-07T00:00:00Z"},
+            "utilization": utilization if window == "seven_day" else other,
+            "resets_at": "2030-01-07T00:00:00Z"},
     }).encode()
 
     class Response:
@@ -89,10 +97,15 @@ def test_claude_oauth_usage_normalizes_windows(monkeypatch):
                         lambda *_args, **_kwargs: Response())
 
     result = backend_usage.fetch_claude_usage()
-    assert result["windows"]["five_hour"]["used_percentage"] == 37
+    assert result["windows"][window]["used_percentage"] == utilization
     assert result["windows"]["seven_day"]["window_minutes"] == 10_080
     snapshot = backend_usage.get_backend_usage(refresh_codex=False)["providers"]["claude"]
-    assert [window["kind"] for window in snapshot["windows"]] == ["five_hour", "seven_day"]
+    assert [entry["kind"] for entry in snapshot["windows"]] == ["five_hour", "seven_day"]
+    exhausted = backend_usage.exhausted_backends()
+    if utilization >= 100:
+        assert exhausted[backend_usage.CLAUDE]["window"] == window
+    else:
+        assert backend_usage.CLAUDE not in exhausted
 
 
 def test_codex_direct_failure_uses_app_server_fallback(monkeypatch):
