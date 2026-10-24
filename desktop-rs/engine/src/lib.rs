@@ -55,6 +55,8 @@ pub const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_millis(700);
 pub enum Change {
     Connection,
     ServerInfo,
+    /// The saved Hosts changed (`clarp_core::hosts`).
+    Hosts,
     Roster,
     /// Archived agents changed.
     Archive,
@@ -1414,6 +1416,12 @@ impl Engine {
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.server_version = json::string(object, "clarp_version");
             self.changes.push(Change::ServerInfo);
+            // A Host that answered is kept for switching back to it.
+            let before = clarp_core::hosts::list(&self.settings);
+            clarp_core::hosts::remember(&mut self.settings, &self.base_url, &self.server_name);
+            if clarp_core::hosts::list(&self.settings) != before {
+                self.changes.push(Change::Hosts);
+            }
             self.set_connecting(false);
             self.force_snapshot();
             self.live_server_info(object);

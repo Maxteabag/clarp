@@ -157,6 +157,17 @@ fn settings() -> Settings {
     }
 }
 
+/// The saved Hosts as the connection page lists them, the one in use marked.
+pub(crate) fn saved_host_rows(engine: &Engine) -> ModelRc<SavedHostRow> {
+    let current = engine.base_url().to_owned();
+    let rows: Vec<SavedHostRow> = engine
+        .saved_hosts()
+        .iter()
+        .map(|host| SavedHostRow { url: host.url.clone().into(), name: host.label().into(), current: host.url == current })
+        .collect();
+    ModelRc::new(VecModel::from(rows))
+}
+
 /// The compact explorer's width: an average row (avatar and name), so most
 /// names fit and the longest are elided. The chrome is a monospace face,
 /// about 0.6 em per character.
@@ -392,6 +403,9 @@ impl App {
         window.set_selected_name(if selected.is_empty() { String::new() } else { engine.chat_name(&selected) }.into());
         window.set_connection(engine.connection_state().into());
         window.set_base_url(engine.base_url().into());
+        if changes.iter().any(|c| matches!(c, Change::Hosts | Change::ServerInfo | Change::Endpoint)) {
+            window.set_saved_hosts(saved_host_rows(&engine));
+        }
         window.set_connecting(matches!(engine.connection_state(), "connecting" | "pairing"));
         window.set_stored_credential(engine.has_stored_credential());
         window.set_has_agents(!engine.roster().agents().is_empty());
@@ -891,6 +905,10 @@ fn main() {
     }));
     window.on_forget_host(|| with_window(|app, _| {
         app.engine.borrow_mut().forget_credential();
+        pump_now(app);
+    }));
+    window.on_remove_saved_host(|url| with_window(|app, _| {
+        app.engine.borrow_mut().forget_saved_host(&url);
         pump_now(app);
     }));
     window.on_overlay_closed(|| with_window(|app, window| commands::close_overlay(app, window)));

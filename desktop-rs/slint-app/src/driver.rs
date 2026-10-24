@@ -1997,6 +1997,43 @@ fn connection_check(out: String) {
             check(true, "and shows it again");
             true
         })),
+        // Saved Hosts: the one that answered is kept and marked, another one
+        // is found in the switcher by name, and Remove leaves it out.
+        ("host saved", Box::new(|app, window, _| {
+            let current = clarp_core::settings::normalized_base_url(&base());
+            if !window.get_saved_hosts().iter().any(|r| r.url == current.as_str() && r.current) {
+                return false;
+            }
+            check(true, "the Host that answered is saved and marked as the one in use");
+            clarp_core::hosts::remember(app.engine.borrow_mut().settings_mut(), "http://127.0.0.1:9", "Elsewhere");
+            headless::press_with(&[Key::Control], "k");
+            headless::type_text("elsewhere");
+            true
+        })),
+        ("host in the switcher", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || window.get_switcher_query() != "elsewhere" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            let rows: Vec<String> = window.get_switcher_rows().iter().map(|r| format!("{}|{}|{}", r.kind, r.label, r.detail)).collect();
+            check(rows.first().is_some_and(|r| r == "host|Switch to Elsewhere|http://127.0.0.1:9"), &format!("typing a saved Host's name finds it first: {rows:?}"));
+            headless::press(Key::Escape);
+            true
+        })),
+        ("host removed", Box::new(|app, window, _| {
+            if window.get_switcher_open() {
+                return false;
+            }
+            window.invoke_remove_saved_host("http://127.0.0.1:9".into());
+            check(!app.engine.borrow().saved_hosts().iter().any(|h| h.url == "http://127.0.0.1:9"), "Remove leaves the Host out of the saved list");
+            true
+        })),
+        ("host gone from the page", Box::new(|_, window, _| {
+            if window.get_saved_hosts().iter().any(|r| r.url == "http://127.0.0.1:9") {
+                return false;
+            }
+            check(true, "and out of the connection page's list");
+            true
+        })),
     ];
     run_stages(stages);
 }

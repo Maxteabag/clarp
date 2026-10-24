@@ -146,8 +146,16 @@ export component KeymapEditor inherits Modal {
     }
 }
 
+// A Host this desktop has connected to: what its row shows and where it is.
+export struct SavedHostRow {
+    url: string,
+    name: string,
+    current: bool,
+}
+
 // ConnectionPage.qml: the Host's address and a token, or a one-time pairing
-// code; the device token then stays in the keyring.
+// code; the device token then stays in the keyring. The Hosts connected to
+// before are listed above, each one click from being the Host again.
 export component ConnectionPage inherits Modal {
     in property <string> base-url;
     in property <string> state;
@@ -155,10 +163,13 @@ export component ConnectionPage inherits Modal {
     in property <bool> connecting;
     in property <bool> can-cancel;
     in property <bool> stored;
+    in property <[SavedHostRow]> hosts;
     callback connect(string, string);
     callback pair(string, string);
     callback forget();
     callback cancel();
+    // Leaves a saved Host out of the list.
+    callback remove(string);
     public function open() {
         server.text = root.base-url;
         token.text = "";
@@ -166,7 +177,7 @@ export component ConnectionPage inherits Modal {
         server.focus();
     }
     card-width: 520px;
-    card-height: 470px;
+    card-height: 470px + (root.hosts.length > 0 ? 28px + min(root.hosts.length, 5) * 40px : 0px);
     dismissed => { if (root.can-cancel) { root.cancel(); } }
     VerticalLayout {
         padding: 28px;
@@ -177,6 +188,39 @@ export component ConnectionPage inherits Modal {
             color: Palette.muted;
             font-size: 12 * Look.unit;
             wrap: word-wrap;
+        }
+        if root.hosts.length > 0: Text { text: "Saved Hosts"; color: Palette.muted; font-size: 11 * Look.unit; }
+        if root.hosts.length > 0: saved := Flickable {
+            height: min(root.hosts.length, 5) * 40px;
+            viewport-height: root.hosts.length * 40px;
+            for host[i] in root.hosts: HorizontalLayout {
+                y: i * 40px;
+                width: saved.width;
+                height: 40px;
+                spacing: 8px;
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    Text {
+                        text: (host.current ? "● " : "") + host.name;
+                        color: host.current ? Palette.success : Palette.text;
+                        font-size: 12 * Look.unit;
+                        overflow: elide;
+                        accessible-label: host.current ? "Connected Host " + host.name : "Saved Host " + host.name;
+                    }
+                    Text { text: host.url; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
+                }
+                if !host.current: Button {
+                    text: "Connect";
+                    enabled: !root.connecting;
+                    clicked => { root.connect(host.url, ""); }
+                }
+                Button {
+                    text: "Remove";
+                    enabled: !host.current;
+                    clicked => { root.remove(host.url); }
+                }
+            }
         }
         server := Field { placeholder-text: "http://127.0.0.1:7682"; accessible-label: "Server"; }
         token := Field {

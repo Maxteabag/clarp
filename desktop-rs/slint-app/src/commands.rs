@@ -422,6 +422,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "escape" if matches!(app.overlay.borrow().as_str(), crate::look::EDITOR | crate::look::CONFIRM) => crate::look::cancel_editor(app, window),
         "escape" if !app.overlay.borrow().is_empty() => close_overlay(app, window),
         "connection" => {
+            window.set_saved_hosts(crate::saved_host_rows(&app.engine.borrow()));
             open_overlay(app, window, "connection");
             window.invoke_open_connection_page();
         }
@@ -906,6 +907,7 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
                 switcher::Kind::Contact => "contact".into(),
                 switcher::Kind::Command => "command".into(),
                 switcher::Kind::Message => "message".into(),
+                switcher::Kind::Host => "host".into(),
             },
             snippet: if item.kind == switcher::Kind::Message { crate::view::styled(&item.detail, false) } else { slint::StyledText::default() },
             label: item.label.clone().into(),
@@ -988,6 +990,13 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
         switcher::Kind::Command if item.target.starts_with("settingpicker:") => {
             open_picker(app, window, item.target.trim_start_matches("settingpicker:"));
             return;
+        }
+        // A saved Host: connect to it with its device token from the keyring
+        // (or the local token for a Host on this machine).
+        switcher::Kind::Host => {
+            app.engine.borrow_mut().connect_to_server(&item.target, "");
+            pump_now(app);
+            restore = false;
         }
         // A message: its chat, scrolled to it, the transcript keeping the
         // keyboard to read around it.

@@ -14,6 +14,18 @@ impl Engine {
         self.has_stored_credential
     }
 
+    /// The Hosts this desktop has connected to, most recent first.
+    pub fn saved_hosts(&self) -> Vec<clarp_core::hosts::SavedHost> {
+        clarp_core::hosts::list(&self.settings)
+    }
+
+    /// Leaves a Host out of the saved list. Its device token stays in the
+    /// keyring, and the Host in use stays connected.
+    pub fn forget_saved_host(&mut self, url: &str) {
+        clarp_core::hosts::forget(&mut self.settings, url);
+        self.changes.push(Change::Hosts);
+    }
+
     /// Points the engine at another Host: its roster, rooms and chats go.
     pub fn set_base_url(&mut self, url: &str) {
         let normalized = normalized_base_url(url);

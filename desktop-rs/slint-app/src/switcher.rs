@@ -15,6 +15,8 @@ pub enum Kind {
     /// A message found by message search (`search_view.rs`): the target is
     /// its chat and id, the detail its snippet as Markdown.
     Message,
+    /// A saved Host to switch to; the target is its address.
+    Host,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,6 +306,31 @@ pub fn contacts(engine: &Engine, query: &str) -> Vec<Item> {
         .collect()
 }
 
+/// The saved Hosts other than the one in use, matching `query` by name or
+/// address, most recently used first.
+pub fn hosts(engine: &Engine, query: &str) -> Vec<Item> {
+    let needle = query.trim().to_lowercase();
+    let current = engine.base_url().to_owned();
+    engine
+        .saved_hosts()
+        .into_iter()
+        .filter(|host| host.url != current)
+        .filter(|host| needle.is_empty() || [host.label(), host.url.clone()].iter().any(|f| f.to_lowercase().contains(&needle)))
+        .map(|host| Item {
+            kind: Kind::Host,
+            label: format!("Switch to {}", host.label()),
+            detail: host.url.clone(),
+            target: host.url,
+            key: String::new(),
+            group: "host",
+            description: String::new(),
+            aliases: &[],
+            value: String::new(),
+            entry: "",
+        })
+        .collect()
+}
+
 /// The switcher's rows for `query`; `contacts_only` lists idle contacts only;
 /// `settings` are the settings page's rows as commands.
 pub fn results(engine: &Engine, query: &str, toggles: Toggles, contacts_only: bool, settings: Vec<Item>) -> Vec<Item> {
@@ -313,10 +340,11 @@ pub fn results(engine: &Engine, query: &str, toggles: Toggles, contacts_only: bo
     let commands = rank(commands(toggles).into_iter().chain(settings).collect(), query);
     let agents = agents(engine, query);
     let contacts = contacts(engine, query);
+    let hosts = hosts(engine, query);
     if query.trim().is_empty() {
-        commands.into_iter().chain(agents).chain(contacts).collect()
+        commands.into_iter().chain(agents).chain(contacts).chain(hosts).collect()
     } else {
-        agents.into_iter().chain(contacts).chain(commands).collect()
+        agents.into_iter().chain(contacts).chain(hosts).chain(commands).collect()
     }
 }
 
