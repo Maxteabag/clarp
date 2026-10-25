@@ -96,7 +96,7 @@ def test_launch_argv_is_declared_per_backend(monkeypatch):
         assert answers[0] == answers[1], backend.id
         if answers[0]:
             declared.add(backend.id)
-    assert declared == {backends.CLAUDE, backends.CODEX, backends.AGY}
+    assert declared == {backends.CLAUDE, backends.CODEX, backends.AGY, "muse"}
 
 
 @pytest.mark.parametrize("backend,resume,fresh", [
@@ -105,6 +105,7 @@ def test_launch_argv_is_declared_per_backend(monkeypatch):
     (backends.CODEX, ["codex", "resume", "sid"], ["codex"]),
     (backends.AGY, ["agy", "--dangerously-skip-permissions", "--conversation", "sid"],
      ["agy", "--dangerously-skip-permissions"]),
+    ("muse", ["muse", "--yolo", "resume", "sid"], ["muse", "--yolo"]),
 ])
 def test_launch_argv_per_backend(monkeypatch, backend, resume, fresh):
     monkeypatch.setattr("lib.deployment.plugin_dir", lambda: None)

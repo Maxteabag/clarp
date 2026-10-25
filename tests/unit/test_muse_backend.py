@@ -47,8 +47,11 @@ def test_catalogue_row():
     assert muse.fallback_models and all(m and label for m, label in muse.fallback_models)
 
 
-def test_terminal_resumes_the_session_in_the_tui():
-    assert backends.by_id("muse").terminal_argv("abc-123") == ["muse", "resume", "abc-123"]
+def test_terminal_resumes_the_session_in_the_tui_with_the_agents_posture():
+    # Approval and sandbox off, as the agent's own turns run (like Claude's
+    # --dangerously-skip-permissions terminal).
+    assert backends.by_id("muse").terminal_argv("abc-123") == ["muse", "--yolo", "resume", "abc-123"]
+    assert backends.by_id("muse").terminal_argv("") == ["muse", "--yolo"]
 
 
 def test_codex_only_protocols_are_unsupported():
