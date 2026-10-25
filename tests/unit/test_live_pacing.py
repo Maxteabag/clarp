@@ -107,9 +107,22 @@ def test_held_text_with_nothing_left_to_release_stops_the_timer():
     clock.now += 1.5
     assert _fire_due(clock) == 1
     assert [t for t in clock.timers if not t[2]] == []
-    # New text is released again (the hold has passed: up to the last word).
+    # Going quiet loses nothing: the final flush still writes the held text.
+    assert writes == []
+    pacer.flush()
+    assert writes == ["Done."]
+
+
+def test_after_going_quiet_a_later_offer_still_writes_the_held_text():
+    clock, writes = FakeClock(), []
+    pacer = _pacer(clock, writes)
+    pacer.offer("Done.")
+    clock.now += 1.5
+    _fire_due(clock)
     pacer.offer("Done. More words")
     assert writes == ["Done. More "]
+    pacer.offer("Done. More words.", final=True)
+    assert writes == ["Done. More ", "Done. More words."]
 
 
 def test_a_released_line_waits_one_hold_for_more_then_goes_quiet():
