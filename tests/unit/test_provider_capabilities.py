@@ -398,7 +398,7 @@ def test_quick_opencode_probe_is_remembered_for_the_next_slow_one(monkeypatch):
 
 
 def test_provider_discovery_runs_concurrently():
-    barrier = threading.Barrier(6)
+    barrier = threading.Barrier(7)
     seen: list[str] = []
 
     def resolve(provider_id: str):
@@ -412,7 +412,7 @@ def test_provider_discovery_runs_concurrently():
         run=lambda *_args, **_kwargs: None,
     )
 
-    assert set(seen) == {"claude", "codex", "agy", "grok", "opencode", "deepseek"}
+    assert set(seen) == {"claude", "codex", "agy", "grok", "opencode", "deepseek", "muse"}
 
 
 def test_cache_refresh_is_single_flight_for_concurrent_callers(monkeypatch):

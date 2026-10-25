@@ -532,6 +532,8 @@ class Config:
     opencode_effort: str = ""
     deepseek_model: str = ""             # OpenCode provider/model id of a DeepSeek model
     deepseek_effort: str = ""
+    muse_model: str = ""                 # passed as `muse exec --model`
+    muse_effort: str = ""                # passed as `muse exec --reasoning-effort`
     # MCP scoping for dispatched turns. By default a turn loads NO MCP servers
     # (--strict-mcp-config), so a heavy or flaky server can't block every
     # agent's turn at startup waiting on its handshake. Each agent's selection
@@ -1046,6 +1048,8 @@ def _parse_into_cache(path: pathlib.Path) -> Config:
         opencode_effort = str(agents.get("opencode_effort", "")),
         deepseek_model  = str(agents.get("deepseek_model", "")),
         deepseek_effort = str(agents.get("deepseek_effort", "")),
+        muse_model      = str(agents.get("muse_model", "")),
+        muse_effort     = str(agents.get("muse_effort", "")),
         mcp_strict      = bool(mcp.get("strict", True)),
         # Merge over the built-in roster (never wholesale-replace): a [roster]
         # in config.toml adds or overrides personas, but the built-ins always
