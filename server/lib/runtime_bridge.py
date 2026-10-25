@@ -101,13 +101,14 @@ class RuntimeClient:
     _CONNECT_BACKOFF_INITIAL = 0.02
     _CONNECT_BACKOFF_MAX = 0.25
 
-    def _connect(self) -> socket.socket:
-        deadline = time.monotonic() + self.timeout
+    def _connect(self, timeout: float | None = None) -> socket.socket:
+        timeout = self.timeout if timeout is None else timeout
+        deadline = time.monotonic() + timeout
         delay = self._CONNECT_BACKOFF_INITIAL
         while True:
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                client.settimeout(self.timeout)
+                client.settimeout(timeout)
                 client.connect(str(self.socket_path))
                 return client
             except OSError as exc:
@@ -121,10 +122,12 @@ class RuntimeClient:
             time.sleep(delay)
             delay = min(delay * 2, self._CONNECT_BACKOFF_MAX)
 
-    def _request(self, method: str, params: dict[str, Any] | None = None) -> dict:
+    def _request(self, method: str, params: dict[str, Any] | None = None, *,
+                 timeout: float | None = None) -> dict:
+        """One RPC; ``timeout`` overrides the client's for this call only."""
         request = encode_request(method, params)
         try:
-            with self._connect() as client:
+            with self._connect(timeout) as client:
                 client.sendall(request)
                 chunks: list[bytes] = []
                 total = 0
@@ -186,8 +189,10 @@ class RuntimeClient:
                 str(response.get("error") or "agent runtime recovery failed"))
         return int(response.get("result") or 0)
 
-    def status(self) -> dict[str, Any]:
-        response = self._request("status")
+    def status(self, *, timeout: float | None = None) -> dict[str, Any]:
+        """The runtime's status; ``timeout`` bounds this call alone (GET /status
+        must answer while the runtime is busy, see runtime_release)."""
+        response = self._request("status", timeout=timeout)
         if not response.get("ok"):
             raise RuntimeUnavailable(
                 str(response.get("error") or "agent runtime status unavailable"))
