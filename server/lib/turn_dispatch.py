@@ -16,7 +16,7 @@ from typing import Any, Callable
 from . import agents as agents_db
 from . import backend_usage, backends, config, db, error_classify, eventlog
 from . import judgment_sites, message_store, team_store, tts_queue, turn_queue
-from . import recovery_backoff, turn_lifecycle, turn_slots
+from . import launch_receipts, recovery_backoff, turn_lifecycle, turn_slots
 from . import events
 from .turn_lifecycle import TurnEvent
 from .turn_slots import OwnershipLock, defer_on
@@ -275,6 +275,7 @@ def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
 def reset_for_tests() -> None:
     _SLOTS.reset_for_tests()
     _RECOVERY_BACKOFF.reset_for_tests()
+    launch_receipts.reset_for_tests()
 
 
 def _terminal_live(agent_id: str) -> bool:
@@ -363,6 +364,9 @@ class _TurnSpec:
     # queued_turns row (status 'parked') holding a send admitted behind the
     # Stop barrier, so it survives a runtime restart; "" when not parked.
     park_id: str = ""
+    # Held behind a Stop barrier as newer work (``_claim_or_queue``): Stop has
+    # already decided it runs, so its launch receipt may not refuse it.
+    after_stop: bool = False
     # Launches of this spec that failed before the backend started; spaces
     # out the retries of a queued handoff (see _requeue_failed_handoff).
     handoff_failures: int = 0
@@ -444,6 +448,46 @@ class DispatchError(RuntimeError):
 
 class JanitorDispatchError(DispatchError):
     """A maintenance run lost authorization; retrying cannot restore it."""
+
+
+class _LaunchReceiptUnrecorded(DispatchError):
+    """The launch receipt could not leave ``pending``, so the backend was never
+    handed the prompt: a same-id retry may still launch it exactly once."""
+
+
+UNCONFIRMED_DELIVERY = "message is saved but delivery is unconfirmed; reconciliation required"
+
+
+class _LaunchReceiptRefused(DispatchError):
+    """The receipt was fenced by Stop or superseded by a relaunch: this prompt
+    is never handed to a backend. Clients get the existing unconfirmed 503:
+    a superseded send may still run under its newer attempt, and a stopped one
+    is not something this response can name until the delivery contract does.
+    ``reason`` stays internal, for diagnostics."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(503, UNCONFIRMED_DELIVERY)
+
+
+def _record_launch_attempt(spec: "_TurnSpec") -> None:
+    """Fail closed immediately before a backend receives a user prompt."""
+    if not launch_receipts.eligible(origin=spec.origin, client_msg_id=spec.client_msg_id,
+                                    call_opening=_is_call_opening(spec)):
+        return
+    # A spec launched from a durable queue or park row, or held behind Stop as
+    # newer work, is governed by that decision, not by a racing fence.
+    decided = bool(spec.queue_id or spec.park_id or spec.after_stop)
+    try:
+        launch_receipts.mark_attempted(spec.trace_id, override_fence=decided)
+    except launch_receipts.HandoffRefused as e:
+        log("launchReceiptRefused",
+            f"agent={spec.agent_id} trace={spec.trace_id or '∅'} state={e.state}")
+        raise _LaunchReceiptRefused(e.state) from e
+    except Exception as e:  # noqa: BLE001
+        log_exception("launchReceiptAttemptFail", e, detail=spec.session)
+        raise _LaunchReceiptUnrecorded(
+            503, "could not record the launch; the message was not sent") from e
 
 
 class GoalWakeDispatchError(DispatchError):
@@ -1450,6 +1494,7 @@ class TurnDispatchService:
             # busy timeout and fails with "database is locked". Read the
             # in-memory slot up front and pass the snapshot in.
             slot = self._slot_snapshot(spec)
+            held = self._held_in_memory(spec)
             deferred_events: list[dict] = []
             database = db.conn()
             database.execute("BEGIN IMMEDIATE")
@@ -1479,7 +1524,7 @@ class TurnDispatchService:
                 if queue_if_busy:
                     if message_store.has_client_message(request_id):
                         if not self._admitted_but_never_launched(
-                                spec, request_id, slot=slot):
+                                spec, request_id, slot=slot, held=held):
                             database.execute("COMMIT")
                             return DispatchResult(session=session, backend=backend)
                         message_store.relink_client_message(
@@ -1498,13 +1543,15 @@ class TurnDispatchService:
                 else:
                     admission = self._record_user_message(
                         spec, deferred=deferred_events)
+                    superseded_trace = ""
                     if admission is False and self._admitted_but_never_launched(
-                            spec, request_id, slot=slot):
+                            spec, request_id, slot=slot, held=held):
                         # The client is retrying a message this Host admitted
                         # but never launched (2026-09-20: the launch died on
                         # "database is locked" after the durable row was
                         # written, and every retry was answered "already
                         # sent"). Own the row under this attempt and launch.
+                        superseded_trace = message_store.client_message_trace(request_id) or ""
                         message_store.relink_client_message(
                             request_id, trace_id=spec.trace_id)
                         eventlog.emit("server", "sendRelaunched", context=spec.context)
@@ -1512,14 +1559,34 @@ class TurnDispatchService:
                             f"agent={spec.agent_id} client_msg_id={request_id} "
                             f"trace={spec.trace_id or '∅'}")
                         admission = True
+                    if admission is True and launch_receipts.eligible(
+                            origin=spec.origin, client_msg_id=spec.client_msg_id,
+                            call_opening=_is_call_opening(spec)):
+                        # Atomic with the row: until a backend is handed the
+                        # prompt, this is the proof a same-id retry may launch.
+                        launch_receipts.record_pending(
+                            agent_id=spec.agent_id, trace_id=spec.trace_id,
+                            client_msg_id=spec.client_msg_id, origin=spec.origin,
+                            sender_agent_id=spec.sender_agent_id,
+                            supersedes=superseded_trace,
+                            user_stop_generation=turn_queue.user_stop_generation(spec.agent_id))
                 database.execute("COMMIT")
             except BaseException:
                 database.execute("ROLLBACK")
                 raise
             # SSE fan-out takes the stream hub locks and writes sse_events;
             # do it only once the admission is durable and the lock released.
+            # It is a projection of a row that is already durable: a failed
+            # insert (2026-10-25, Lumi: "database is locked" here escaped
+            # before the launch) must never stop the turn from starting.
             for event in deferred_events:
-                events.broadcast(self.ctx.stream, events.as_event(event))
+                try:
+                    events.broadcast(self.ctx.stream, events.as_event(event))
+                except Exception as e:  # noqa: BLE001
+                    try:
+                        log_exception("admissionBroadcastFail", e, detail=spec.session)
+                    except Exception:  # noqa: BLE001 - not even logging may stop the launch
+                        pass
         if admission is False:
             eventlog.emit("server", "sendDeduplicated", context=spec.context)
             log("sendDeduplicated",
@@ -1694,25 +1761,46 @@ class TurnDispatchService:
         return in_flight, (_slot_is_spawning(spec.agent_id)
                            or self._has_live_turn(spec))
 
+    def _held_in_memory(self, spec: _TurnSpec) -> bool:
+        """Whether this process still holds the same client message behind a
+        busy turn (read before a write transaction, like the slot)."""
+        request_id = spec.client_msg_id or spec.trace_id
+        if not request_id:
+            return False
+        return _SLOTS.has_queued(spec.agent_id, lambda item: (
+            (getattr(item, "client_msg_id", "") or getattr(item, "trace_id", "")) == request_id))
+
     def _admitted_but_never_launched(self, spec: _TurnSpec, client_msg_id: str,
-                                     *, slot: tuple[str, bool] | None = None) -> bool:
+                                     *, slot: tuple[str, bool] | None = None,
+                                     held: bool | None = None) -> bool:
         """Retry only known failed launches; never infer safety from missing logs.
 
-        `slot` is the `_slot_snapshot` taken before the caller's write
-        transaction; without it the slot is read here (no transaction open)."""
+        `slot` and `held` are read before the caller's write transaction;
+        without them they are read here (no transaction open)."""
         trace = message_store.client_message_trace(client_msg_id)
         if not trace:
             return False
         if turn_queue.holds_client_message(client_msg_id):
             return False  # it is waiting (queued, or held by Stop or a drain)
-        status = agents_db.trace_launch_status(spec.agent_id, trace)
+        if held is None:
+            held = self._held_in_memory(spec)
+        if held:
+            return False  # waiting behind a busy turn in this process
+        status = agents_db.trace_launch_status(
+            spec.agent_id, trace, client_msg_id=client_msg_id,
+            origin=spec.origin, sender_agent_id=spec.sender_agent_id)
+        if status == "fenced":
+            # Stop withdrew it before launch: a resend is not new intent, and
+            # it is not "sent" either. Same answer an older client already handles.
+            log("sendFencedByStop", f"agent={spec.agent_id} client_msg_id={client_msg_id}")
+            raise DispatchError(503, UNCONFIRMED_DELIVERY)
         if slot is None:
             slot = self._slot_snapshot(spec)
         in_flight_trace, live = slot
         if in_flight_trace == trace and live:
             return False
         if status == "unknown":
-            raise DispatchError(503, "message is saved but delivery is unconfirmed; reconciliation required")
+            raise DispatchError(503, UNCONFIRMED_DELIVERY)
         return status == "retryable"
 
     def dispatch_queued(self, queue_id: str) -> DispatchResult:
@@ -1824,8 +1912,7 @@ class TurnDispatchService:
             # newer than the stopped work, so hold it and start it only after
             # the backend-wide interrupt returns. Its parked row keeps it
             # across a runtime restart.
-            if park_id:
-                spec = replace(spec, park_id=park_id)
+            spec = replace(spec, park_id=park_id, after_stop=True)
             _SLOTS.enqueue(agent_id, spec)
             return bool(park_id), True
         # An interactive terminal is attached to this agent — queue behind
@@ -1996,6 +2083,10 @@ class TurnDispatchService:
         # message; fall through so the busy path reclaims the slot instead.
         if not self._has_live_turn(spec):
             return False
+        # A steer hands the prompt to the provider too. Raised past the
+        # fall-through below: a failed receipt write must not turn into a
+        # preempt of the live turn.
+        _record_launch_attempt(spec)
         try:
             peer_text=spec.text
             if spec.origin=='agent' and spec.sender_agent_id:
@@ -2674,6 +2765,9 @@ class TurnDispatchService:
                     # window: a write after this check and before the provider handoff still
                     # launches once. The flag below is possibly-sent bookkeeping, not delivery.
                     return _ADMISSION_REFUSED
+                if attempt == 1:
+                    # Later attempts follow a handoff already recorded here.
+                    _record_launch_attempt(spec)
                 state["spawn_started"] = True
                 handle = self.backends.spawn_turn(
                     spec.backend,
@@ -2698,7 +2792,7 @@ class TurnDispatchService:
                 team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
                 if account_attempt is not None:
                     account_attempt.handle = handle
-            except JanitorDispatchError:
+            except (JanitorDispatchError, _LaunchReceiptUnrecorded, _LaunchReceiptRefused):
                 raise
             except FileNotFoundError as e:
                 if attempt == 1:
@@ -3384,8 +3478,34 @@ def _record_dreaming_result(agent_id: str, event: dict) -> None:
         log_exception("dreamingResultParseFail", e, detail=agent_id)
 
 
+_FENCE_RETRY_DELAYS = (1.0, 5.0, 15.0)
+
+
+def _fence_launch_receipts(agent_id: str, attempt: int = 0) -> None:
+    """Stop's fence. The in-process epoch lands first and holds on its own;
+    a failed durable write is retried, never allowed to fail Stop."""
+    if attempt == 0:
+        launch_receipts.note_stop(agent_id)
+    try:
+        launch_receipts.fence_agent(agent_id)
+    except Exception as e:  # noqa: BLE001 - Stop itself must still complete
+        log_exception("launchReceiptFenceFail", e, detail=agent_id)
+        if attempt < len(_FENCE_RETRY_DELAYS):
+            # The dispatcher's retry scheduler (a daemon timer; tests track and
+            # cancel it so a retry never outlives the test that armed it).
+            _default_retry_scheduler(_FENCE_RETRY_DELAYS[attempt],
+                                     lambda: _fence_launch_receipts(agent_id, attempt + 1))
+
+
+def fence_user_stop(agent_id: str) -> None:
+    """The user's Stop, in the process that owns turns: no admitted send that
+    has not been handed over may launch afterwards, nor relaunch on a retry."""
+    _fence_launch_receipts(agent_id)
+
+
 def clear_for_agent(
-    agent_id: str, *, preserve_queue: bool = False, pause_queue: bool = False
+    agent_id: str, *, preserve_queue: bool = False, pause_queue: bool = False,
+    user_stop: bool = True,
 ) -> int:
     """Drop the in-flight slot and optionally queued turns for an agent. Used by /stop:
     a SIGTERM'd turn may die without firing its terminal callback, so the slot
@@ -3399,7 +3519,13 @@ def clear_for_agent(
         # released, before this function returns.
         dropped = _SLOTS.clear(agent_id, stopping=pause_queue)
         if pause_queue:
-            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+            # A Stop pauses through here; ``user_stop`` is False only when a
+            # verified agent stopped this one (the work stops either way).
+            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=user_stop))
+            if user_stop:
+                # An admitted message that never launched is stopped work too:
+                # an automatic resend under the same id must not start it afterwards.
+                _TURN_LOCK.defer(lambda: _fence_launch_receipts(agent_id))
     if preserve_queue:
         turn_queue.discard_parked(agent_id)
     durable_dropped = 0 if preserve_queue else turn_queue.remove_for_agent(agent_id)
@@ -3503,8 +3629,12 @@ def snapshot_stop_state(agent_id: str) -> dict:
         return snapshot
 
 
-def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
-    """Atomically install the Stop barrier in the process that owns turns."""
+def begin_stop(agent_id: str, *, user_stop: bool = False) -> tuple[dict, int, bool]:
+    """Atomically install the Stop barrier in the process that owns turns.
+    ``user_stop`` marks the user's Stop: its pause also moves the durable user
+    stop generation in the same transaction. A maintenance cancel uses the same
+    barrier without it and never withdraws the user's own sends (see also
+    fence_user_stop)."""
     with _TURN_LOCK:
         value = _SLOTS.get(agent_id) or None
         recovery_parked = _recovery_parked(agent_id, value)
@@ -3512,7 +3642,10 @@ def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
         # As in clear_for_agent: the barrier keeps Stop atomic with
         # _finish_turn(); the pause flag lands right after the release.
         stop, dropped = _SLOTS.begin_stop(agent_id)
-        _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+        if user_stop:
+            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
+        else:
+            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
     snapshot = stop.as_dict()
     snapshot["account_recovery_parked"] = recovery_parked
     return snapshot, dropped, queue_was_paused
