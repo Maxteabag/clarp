@@ -58,7 +58,7 @@ def test_capabilities_are_explicit_per_backend():
     assert backends.capabilities("grok").required_binary == "grok"
     assert backends.capabilities("opencode").required_binary == "opencode"
     assert backends.capabilities("deepseek").required_binary == "opencode"
-    assert backends.ids() == ("claude", "codex", "agy", "grok", "opencode", "deepseek")
+    assert backends.ids() == ("claude", "codex", "agy", "grok", "opencode", "deepseek", "muse")
 
 
 def test_spawn_turn_routes_grok_and_opencode(monkeypatch):

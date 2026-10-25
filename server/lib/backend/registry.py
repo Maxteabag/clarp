@@ -15,6 +15,7 @@ from .claude import ClaudeBackend
 from .codex import CodexBackend
 from .deepseek import DeepSeekBackend
 from .grok import GrokBackend
+from .muse import MuseBackend
 from .opencode import OpenCodeBackend
 
 _CLASSES: dict[str, type[Backend]] = {
@@ -24,6 +25,7 @@ _CLASSES: dict[str, type[Backend]] = {
     AgentBackend.GROK: GrokBackend,
     AgentBackend.OPENCODE: OpenCodeBackend,
     AgentBackend.DEEPSEEK: DeepSeekBackend,
+    AgentBackend.MUSE: MuseBackend,
 }
 _LOCK = threading.Lock()
 _INSTANCES: dict[str, Backend] | None = None

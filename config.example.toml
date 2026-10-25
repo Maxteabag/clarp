@@ -150,6 +150,8 @@ opencode_model         = ""   # provider/model, e.g. anthropic/claude-sonnet-4-5
 opencode_effort        = ""   # passed as `opencode run --variant`
 deepseek_model         = ""   # OpenCode provider/model id, e.g. fireworks-ai/accounts/fireworks/routers/deepseek-pro-latest
 deepseek_effort        = ""   # same values as opencode_effort
+muse_model             = ""   # passed as `muse exec --model`
+muse_effort            = ""   # none | minimal | low | medium | high | xhigh | max | ultra
 
 # Persona name -> ElevenLabs voice id. The full built-in roster (see
 # config.DEFAULT_ROSTER) ALWAYS applies — this [roster] section MERGES over it,

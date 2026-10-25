@@ -83,6 +83,7 @@ class AgentBackend:
     GROK = "grok"
     OPENCODE = "opencode"
     DEEPSEEK = "deepseek"
+    MUSE = "muse"
 
     @classmethod
     def valid(cls) -> set[str]:

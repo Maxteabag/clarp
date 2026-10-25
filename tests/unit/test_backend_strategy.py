@@ -27,7 +27,7 @@ from lib.backend.stream_json import StreamJsonBackend  # noqa: E402
 from lib import turn_lifecycle  # noqa: E402
 from lib.turn_lifecycle import TurnEvent  # noqa: E402
 
-IDS = ("claude", "codex", "agy", "grok", "opencode", "deepseek")
+IDS = ("claude", "codex", "agy", "grok", "opencode", "deepseek", "muse")
 
 
 # --- registry ---------------------------------------------------------------
@@ -87,6 +87,7 @@ TERMINAL_ARGV = {
     "codex": (["codex", "resume", "s-1"], ["codex"]),
     "agy": (["agy", "--dangerously-skip-permissions", "--conversation", "s-1"],
             ["agy", "--dangerously-skip-permissions"]),
+    "muse": (["muse", "resume", "s-1"], ["muse"]),
 }
 
 
@@ -118,7 +119,7 @@ def test_claude_terminal_argv_appends_the_plugin_dir_itself(monkeypatch):
 def test_account_pool_per_backend():
     assert {b.id: b.account_pool() for b in registry.all()} == {
         "claude": "claude", "codex": "codex", "agy": "", "grok": "",
-        "opencode": "", "deepseek": ""}
+        "opencode": "", "deepseek": "", "muse": ""}
 
 
 def test_recover_usage_limit_reconnects_codex_only(monkeypatch):
@@ -254,15 +255,15 @@ def test_interrupt_any_stops_every_runner_once_including_codex_exec(monkeypatch)
     codex = registry.by_id("codex")
     monkeypatch.setattr(codex, "interrupt_exec", lambda aid: calls.append("codex-exec") or 1)
     # DeepSeek shares OpenCode's registry, so it is not signalled twice.
-    assert backends.interrupt_any("a1") == 6
-    assert sorted(calls) == sorted(["claude", "codex", "codex-exec", "agy", "grok", "opencode"])
+    assert backends.interrupt_any("a1") == 7
+    assert sorted(calls) == sorted(["claude", "codex", "codex-exec", "agy", "grok", "opencode", "muse"])
 
 
 TRANSCRIPT_MODULES = {
     # The parser module each backend reads its sessions through.
     "claude": "claude_transcript", "codex": "codex_transcript", "agy": "agy_transcript",
     "grok": "grok_transcript", "opencode": "opencode_transcript",
-    "deepseek": "opencode_transcript",
+    "deepseek": "opencode_transcript", "muse": "muse_transcript",
 }
 
 
