@@ -3491,10 +3491,10 @@ def _fence_launch_receipts(agent_id: str, attempt: int = 0) -> None:
     except Exception as e:  # noqa: BLE001 - Stop itself must still complete
         log_exception("launchReceiptFenceFail", e, detail=agent_id)
         if attempt < len(_FENCE_RETRY_DELAYS):
-            timer = threading.Timer(_FENCE_RETRY_DELAYS[attempt], _fence_launch_receipts,
-                                    args=(agent_id, attempt + 1))
-            timer.daemon = True
-            timer.start()
+            # The dispatcher's retry scheduler (a daemon timer; tests track and
+            # cancel it so a retry never outlives the test that armed it).
+            _default_retry_scheduler(_FENCE_RETRY_DELAYS[attempt],
+                                     lambda: _fence_launch_receipts(agent_id, attempt + 1))
 
 
 def fence_user_stop(agent_id: str) -> None:
