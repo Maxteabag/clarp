@@ -19,6 +19,7 @@ pub fn native_terminal_launch(agent: &Agent) -> Result<(String, Vec<String>), St
         "codex" => ("codex", "resume"),
         "agy" => ("agy", "--conversation"),
         "grok" => ("grok", "--resume"),
+        "muse" => ("muse", "resume"),
         _ => return Err("This backend does not have a supported interactive CLI".into()),
     };
     Ok((program.into(), vec![flag.into(), conversation.clone()]))

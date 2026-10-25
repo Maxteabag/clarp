@@ -57,3 +57,8 @@ def test_codex_only_protocols_are_unsupported():
         muse.goal("a1", "status")
     assert muse.account_pool() == ""
     assert muse.recover_usage_limit("anything") is False
+
+
+def test_live_items_get_a_short_muse_prefix():
+    from lib import live_hub
+    assert live_hub.item_prefix("muse") == "mu"

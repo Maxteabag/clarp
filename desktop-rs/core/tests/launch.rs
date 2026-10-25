@@ -12,6 +12,7 @@ fn a_backend_starts_an_agent_on_its_own() {
     let launch = options.launch_on_startup(false, false, false);
     assert!(launch && options.auto_start(launch), "an explicit backend auto-starts, whatever Settings say");
     assert_eq!(parse(&args("--backend=grok")).unwrap().backend, "grok");
+    assert_eq!(parse(&args("--backend Muse")).unwrap().backend, "muse");
 }
 
 #[test]

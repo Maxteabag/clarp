@@ -728,7 +728,7 @@ def report(method: str, *args: Any, **kwargs: Any) -> Any:
 
 
 PREFIXES = {"claude": "cl", "codex": "cx", "opencode": "oc", "grok": "gk",
-            "agy": "ag", "deepseek": "ds"}
+            "agy": "ag", "deepseek": "ds", "muse": "mu"}
 
 
 def item_prefix(backend: str) -> str:
