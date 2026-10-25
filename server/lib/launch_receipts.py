@@ -79,8 +79,13 @@ def get(trace_id: str) -> dict | None:
 
 def record_pending(*, agent_id: str, trace_id: str, client_msg_id: str,
                    origin: str, sender_agent_id: str = "",
-                   supersedes: str = "") -> None:
-    """Write the receipt inside the caller's admission transaction."""
+                   supersedes: str = "", stop_generation: int = 0) -> None:
+    """Write the receipt inside the caller's admission transaction.
+
+    ``stop_generation`` is the agent's durable Stop counter at admission
+    (turn_queue, moved in the same transaction as every Stop's pause): a
+    later Stop is visible to a retry even across a restart, without relying
+    on this module's fence write or its in-process epoch."""
     stamp = now_ms()
     if supersedes and supersedes != trace_id:
         settings_store.set_json_field_if(_key(supersedes), "state", RELAUNCHED, expect=PENDING)
@@ -88,6 +93,7 @@ def record_pending(*, agent_id: str, trace_id: str, client_msg_id: str,
         "state": PENDING, "agent_id": agent_id, "trace_id": trace_id,
         "client_msg_id": client_msg_id, "origin": origin,
         "sender_agent_id": sender_agent_id or "", "admitted_at": stamp,
+        "stop_gen": int(stop_generation),
     }, separators=(",", ":")), updated_at=stamp)
     _maybe_prune(stamp)
 
@@ -103,6 +109,15 @@ def _maybe_prune(stamp: int) -> None:
     # "retryable" again after Stop. Any other deletion only yields "unknown".
     settings_store.prune_prefix_keeping(
         PREFIX, updated_before=stamp - RETENTION_MS, field="state", keep=(FENCED,))
+
+
+def _stop_generation_moved(receipt: dict) -> bool:
+    """Durable: a Stop or cancel paused this agent's queue after admission.
+    A receipt without the counter (none exist in production) fails closed."""
+    from . import turn_queue
+    if "stop_gen" not in receipt:
+        return True
+    return turn_queue.stop_generation(str(receipt.get("agent_id") or "")) > int(receipt["stop_gen"])
 
 
 def _stopped_after_admission(receipt: dict) -> bool:
@@ -178,7 +193,8 @@ def status(agent_id: str, trace_id: str, *, client_msg_id: str | None = None,
     if not receipt or receipt.get("agent_id") != agent_id:
         return "unknown"
     state = receipt.get("state")
-    if state == FENCED or (state == PENDING and _stopped_after_admission(receipt)):
+    if state == FENCED or (state == PENDING and (
+            _stopped_after_admission(receipt) or _stop_generation_moved(receipt))):
         return "fenced"
     if state != PENDING:
         return "unknown"

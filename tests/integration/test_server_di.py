@@ -4455,3 +4455,31 @@ def test_a_google_voice_preview_is_the_requested_voice_only_even_with_a_fallback
         _get(base + f"/voice-preview?provider=google&id={GOOGLE_AOEDE}")
     assert failed.value.code == 502
     assert asked == [GOOGLE_AOEDE] and others == []
+
+
+def test_send_refused_by_a_launch_receipt_keeps_the_legacy_503_body(running_server, monkeypatch):
+    # Old clients retry a 503 and show it as unconfirmed; a 409 would end their
+    # retries, and a 200 would claim the message was sent. A handoff refused by
+    # a Stop-fenced or superseded receipt, and a same-id retry after Stop,
+    # answer exactly what they already understand.
+    from lib import launch_receipts, turn_dispatch, turn_queue
+    base, _ctx, _srv = running_server
+    real = launch_receipts.mark_attempted
+
+    def refused(trace_id, **kwargs):
+        raise launch_receipts.HandoffRefused("fenced")
+    monkeypatch.setattr(launch_receipts, "mark_attempted", refused)
+    body = {"text": "hello", "session": "rachel", "client_msg_id": "u-http-compat",
+            "force_session": True}
+    status, raw = _post_status(base + "/send", body)
+    assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
+    from lib import message_store
+    trace = message_store.client_message_trace("u-http-compat")
+    assert launch_receipts.get(trace)["state"] == "pending", "refused before any handoff"
+
+    monkeypatch.setattr(launch_receipts, "mark_attempted", real)
+    from lib import agents as agents_db
+    agent_id = agents_db.get_by_session("rachel")["agent_id"]
+    turn_queue.set_paused(agent_id, True)          # a Stop after admission (durable)
+    status, raw = _post_status(base + "/send", body)
+    assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
