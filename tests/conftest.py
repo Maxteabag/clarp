@@ -231,7 +231,19 @@ def _prepend(var: str, entry: str) -> None:
         os.environ[var] = entry + (os.pathsep + current if current else "")
 
 
+def pytest_addoption(parser):
+    import ci_timing
+    ci_timing.add_option(parser)
+
+
 def pytest_configure(config):
+    import ci_timing  # opt-in CI timing diagnostics (no-op without --clarp-timing-dir)
+    target = ci_timing.directory(config)
+    if target and not config.pluginmanager.has_plugin("clarp-ci-timing"):
+        controller = (not os.environ.get("PYTEST_XDIST_WORKER")
+                      and bool(getattr(config.option, "numprocesses", None)))
+        config.pluginmanager.register(ci_timing.Plugin(target, record_tests=not controller),
+                                      "clarp-ci-timing")
     config.addinivalue_line(
         "markers", "probes_provider_clis: the test exercises provider CLI resolution itself, "
                    "so the model-catalog warm-up stub stays off")
