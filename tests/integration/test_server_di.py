@@ -4480,6 +4480,6 @@ def test_send_refused_by_a_launch_receipt_keeps_the_legacy_503_body(running_serv
     monkeypatch.setattr(launch_receipts, "mark_attempted", real)
     from lib import agents as agents_db
     agent_id = agents_db.get_by_session("rachel")["agent_id"]
-    turn_queue.set_paused(agent_id, True)          # a Stop after admission (durable)
+    turn_queue.set_paused(agent_id, True, user_stop=True)   # the user's Stop after admission
     status, raw = _post_status(base + "/send", body)
     assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)

@@ -567,8 +567,10 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             if not agent_id:
                 return {"ok": False, "status": 400,
                         "error": "agent_id is required"}
-            snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(agent_id)
-            turn_dispatch.fence_user_stop(agent_id)  # the user's Stop, from the Host
+            # The Host's user Stop: its pause moves the user stop generation too.
+            snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(
+                agent_id, user_stop=True)
+            turn_dispatch.fence_user_stop(agent_id)
             try:
                 terminated = int(backends.interrupt(backend, agent_id) or 0)
             except Exception as exc:
