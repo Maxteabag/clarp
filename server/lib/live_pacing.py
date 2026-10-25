@@ -88,6 +88,10 @@ class LivePacer:
         self._held_since: float | None = None
         self._timer: Any = None
         self._timer_at: float | None = None
+        # Each armed timer carries the generation it was armed in; arming
+        # again or cancelling moves on, so a callback that was already
+        # running (blocked on the lock) when that happened does nothing.
+        self._generation = 0
 
     @property
     def written(self) -> str:
@@ -155,16 +159,21 @@ class LivePacer:
         if self._timer is not None and self._timer_at is not None and self._timer_at <= target:
             return
         self._cancel()
+        generation = self._generation
         self._timer_at = target
-        self._timer = self._schedule(max(0.0, target - now), self._fire)
+        self._timer = self._schedule(max(0.0, target - now),
+                                     lambda: self._fire(generation))
 
-    def _fire(self) -> None:
+    def _fire(self, generation: int) -> None:
         with self._lock:
+            if generation != self._generation:
+                return
             self._timer = None
             self._timer_at = None
             self._evaluate()
 
     def _cancel(self) -> None:
+        self._generation += 1
         if self._timer is not None:
             try:
                 self._timer.cancel()
