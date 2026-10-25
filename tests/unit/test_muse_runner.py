@@ -61,8 +61,23 @@ class _Stream:
         self.events.append(event)
 
 
+_STATES: list = []
+
+
+@pytest.fixture(autouse=True)
+def _events_fed_directly_end_their_turn():
+    """``_run`` feeds events without the drain thread, so it also ends the
+    turn the way the drain's ``finally`` does: no pacer outlives the test."""
+    yield
+    while _STATES:
+        pacer = getattr(_STATES.pop(), "_live_pacer", None)
+        if pacer is not None:
+            pacer.cancel()
+
+
 def _run(events, *, stream=None, enqueue=None, on_error=None):
     st = muse._TurnState(session_id=SID)
+    _STATES.append(st)
     for ev in events:
         MUSE._handle_event(ev, st, agent_id="agent-1", session="sess-1", trace_id="trace-1",
                            on_error=on_error, stream=stream,
@@ -245,3 +260,49 @@ def test_a_missing_muse_binary_says_how_to_get_it(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(FileNotFoundError, match="muse"):
         MUSE.start_turn(text="hi", cwd=tmp_path)
+
+
+# --- teardown: no live-text timer outlives the turn ---------------------------
+
+@pytest.fixture
+def pacer_timers(monkeypatch):
+    """Every timer a live pacer starts during the test."""
+    from lib import live_pacing
+    started: list = []
+    real = live_pacing._thread_timer
+
+    def record(delay, fn):
+        timer = real(delay, fn)
+        started.append(timer)
+        return timer
+    monkeypatch.setattr(live_pacing, "_thread_timer", record)
+    return started
+
+
+def _stream_then(*events) -> str:
+    return "".join(json.dumps(e) + "\n" for e in events)
+
+
+@pytest.mark.parametrize("ending", ["failed terminal", "nonzero exit", "drain error"])
+def test_a_turn_that_ends_with_held_text_leaves_no_pacer_timer(
+        tmp_path, fake_muse, pacer_timers, monkeypatch, ending):
+    # "Done." has no word break, so the pacer holds it back; whatever ends
+    # the turn, its timer must not keep running into the next one.
+    if ending == "failed terminal":
+        fake_muse(_stream_then(_delta("Done."), _terminal("failed", reason="boom")))
+    elif ending == "nonzero exit":
+        fake_muse(_stream_then(_delta("Done.")), rc=1, stderr="muse: crashed")
+    else:
+        fake_muse(_stream_then(_delta("Done."), _delta(" And")))
+        calls = iter([True])
+        monkeypatch.setattr(agents_db, "latest_turn_synthesize_audio",
+                            lambda agent_id: next(calls))     # 2nd delta raises
+    handle = MUSE.start_turn(text="hi", cwd=tmp_path, backend_session_id=SID,
+                             agent_id="agent-1", session="sess-1",
+                             on_session_init=lambda sid: True, on_error=lambda e: None,
+                             on_result=lambda r: None, enqueue=lambda **_k: 1)
+    handle.drain_thread.join(timeout=10)
+    assert pacer_timers, "the held text never reached a pacer"
+    for timer in pacer_timers:
+        timer.join(timeout=0.2)
+    assert [t for t in pacer_timers if t.is_alive()] == []
