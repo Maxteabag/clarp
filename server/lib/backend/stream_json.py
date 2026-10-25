@@ -385,6 +385,13 @@ class StreamJsonBackend(Backend):
         if pacer is not None:
             pacer.flush()
 
+    @staticmethod
+    def cancel_live_text(st: Any) -> None:
+        """The turn is over: its pacer writes nothing more and leaves no timer."""
+        pacer = getattr(st, "_live_pacer", None)
+        if pacer is not None:
+            pacer.cancel()
+
     def _write_live_text(self, st: Any, text: str, *, backend_session_id: str,
                          agent_id: str, session: str, trace_id: str,
                          stream: Any, item_key: str = "") -> None:
