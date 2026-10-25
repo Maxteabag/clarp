@@ -4483,3 +4483,6 @@ def test_send_refused_by_a_launch_receipt_keeps_the_legacy_503_body(running_serv
     turn_queue.set_paused(agent_id, True, user_stop=True)   # the user's Stop after admission
     status, raw = _post_status(base + "/send", body)
     assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
+    # The retry neither relinked nor handed over: same canonical trace, receipt still pending.
+    assert message_store.client_message_trace("u-http-compat") == trace
+    assert launch_receipts.get(trace)["state"] == "pending", "no handoff after the user's Stop"
