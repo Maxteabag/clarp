@@ -1569,7 +1569,7 @@ class TurnDispatchService:
                             client_msg_id=spec.client_msg_id, origin=spec.origin,
                             sender_agent_id=spec.sender_agent_id,
                             supersedes=superseded_trace,
-                            stop_generation=turn_queue.stop_generation(spec.agent_id))
+                            user_stop_generation=turn_queue.user_stop_generation(spec.agent_id))
                 database.execute("COMMIT")
             except BaseException:
                 database.execute("ROLLBACK")
@@ -3518,7 +3518,8 @@ def clear_for_agent(
         # released, before this function returns.
         dropped = _SLOTS.clear(agent_id, stopping=pause_queue)
         if pause_queue:
-            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+            # Only the user's Stop pauses through here.
+            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
             # An admitted message that never launched is stopped work too: an
             # automatic resend under the same id must not start it afterwards.
             _TURN_LOCK.defer(lambda: _fence_launch_receipts(agent_id))
@@ -3625,10 +3626,12 @@ def snapshot_stop_state(agent_id: str) -> dict:
         return snapshot
 
 
-def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
+def begin_stop(agent_id: str, *, user_stop: bool = False) -> tuple[dict, int, bool]:
     """Atomically install the Stop barrier in the process that owns turns.
-    It does not fence launch receipts: a maintenance cancel uses the same
-    barrier and must not withdraw the user's own sends (see fence_user_stop)."""
+    ``user_stop`` marks the user's Stop: its pause also moves the durable user
+    stop generation in the same transaction. A maintenance cancel uses the same
+    barrier without it and never withdraws the user's own sends (see also
+    fence_user_stop)."""
     with _TURN_LOCK:
         value = _SLOTS.get(agent_id) or None
         recovery_parked = _recovery_parked(agent_id, value)
@@ -3636,7 +3639,10 @@ def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
         # As in clear_for_agent: the barrier keeps Stop atomic with
         # _finish_turn(); the pause flag lands right after the release.
         stop, dropped = _SLOTS.begin_stop(agent_id)
-        _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
+        if user_stop:
+            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
+        else:
+            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
     snapshot = stop.as_dict()
     snapshot["account_recovery_parked"] = recovery_parked
     return snapshot, dropped, queue_was_paused

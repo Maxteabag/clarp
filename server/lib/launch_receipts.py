@@ -79,13 +79,14 @@ def get(trace_id: str) -> dict | None:
 
 def record_pending(*, agent_id: str, trace_id: str, client_msg_id: str,
                    origin: str, sender_agent_id: str = "",
-                   supersedes: str = "", stop_generation: int = 0) -> None:
+                   supersedes: str = "", user_stop_generation: int = 0) -> None:
     """Write the receipt inside the caller's admission transaction.
 
-    ``stop_generation`` is the agent's durable Stop counter at admission
-    (turn_queue, moved in the same transaction as every Stop's pause): a
-    later Stop is visible to a retry even across a restart, without relying
-    on this module's fence write or its in-process epoch."""
+    ``user_stop_generation`` is the agent's durable USER Stop counter at
+    admission (turn_queue, moved only in the pause transaction of the user's
+    Stop, never by a maintenance cancel or its restore): a later user Stop is
+    visible to a retry even across a restart, without relying on this
+    module's fence write or its in-process epoch."""
     stamp = now_ms()
     if supersedes and supersedes != trace_id:
         settings_store.set_json_field_if(_key(supersedes), "state", RELAUNCHED, expect=PENDING)
@@ -93,7 +94,7 @@ def record_pending(*, agent_id: str, trace_id: str, client_msg_id: str,
         "state": PENDING, "agent_id": agent_id, "trace_id": trace_id,
         "client_msg_id": client_msg_id, "origin": origin,
         "sender_agent_id": sender_agent_id or "", "admitted_at": stamp,
-        "stop_gen": int(stop_generation),
+        "user_stop_gen": int(user_stop_generation),
     }, separators=(",", ":")), updated_at=stamp)
     _maybe_prune(stamp)
 
@@ -112,12 +113,13 @@ def _maybe_prune(stamp: int) -> None:
 
 
 def _stop_generation_moved(receipt: dict) -> bool:
-    """Durable: a Stop or cancel paused this agent's queue after admission.
-    A receipt without the counter (none exist in production) fails closed."""
+    """Durable: the USER stopped this agent after admission. A receipt without
+    the counter (none exist in production) fails closed."""
     from . import turn_queue
-    if "stop_gen" not in receipt:
+    if "user_stop_gen" not in receipt:
         return True
-    return turn_queue.stop_generation(str(receipt.get("agent_id") or "")) > int(receipt["stop_gen"])
+    agent_id = str(receipt.get("agent_id") or "")
+    return turn_queue.user_stop_generation(agent_id) > int(receipt["user_stop_gen"])
 
 
 def _stopped_after_admission(receipt: dict) -> bool:

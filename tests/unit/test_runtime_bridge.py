@@ -484,7 +484,7 @@ def test_runtime_stop_lease_keeps_queue_barrier_in_process_owner(
     snapshot = {"trace_id": "trace-stop", "queued": ["private-spec"]}
     monkeypatch.setattr(
         turn_dispatch, "begin_stop",
-        lambda agent_id: calls.append(("begin", agent_id)) or
+        lambda agent_id, **_kwargs: calls.append(("begin", agent_id)) or
         (snapshot, 2, False))
     monkeypatch.setattr(
         backends, "interrupt",
@@ -537,7 +537,7 @@ def test_runtime_stop_lease_self_releases_if_http_server_disappears(
     finished = threading.Event()
     monkeypatch.setattr(
         turn_dispatch, "begin_stop",
-        lambda _agent_id: ({"trace_id": "trace", "queued": []}, 0, False))
+        lambda _agent_id, **_kwargs: ({"trace_id": "trace", "queued": []}, 0, False))
     monkeypatch.setattr(backends, "interrupt", lambda *_args: 1)
     monkeypatch.setattr(turn_queue, "set_paused", lambda *_args: None)
     monkeypatch.setattr(
@@ -793,20 +793,27 @@ def test_user_stop_over_the_runtime_rpc_fences_launch_receipts_in_the_owner(
 
     launch_receipts.record_pending(
         agent_id="agent-1", trace_id="t-pending", client_msg_id="u-1", origin="user",
-        stop_generation=turn_queue.stop_generation("agent-1"))
+        user_stop_generation=turn_queue.user_stop_generation("agent-1"))
     monkeypatch.setattr(backends, "interrupt", lambda *_args: 1)
     socket_path = tmp_path / "runtime.sock"
     dispatch = RecordingRuntime()
     dispatch.ctx = SimpleNamespace(name="runtime-context")
     dispatch.backends = backends
+    user_before = turn_queue.user_stop_generation("agent-1")
     runtime = RuntimeRPCServer(socket_path, dispatch_service=dispatch)
     thread = threading.Thread(target=runtime.serve_forever, daemon=True)
     thread.start()
     try:
-        RuntimeClient(socket_path).begin_stop("agent-1", "codex", strict=False, hold=False)
+        try:
+            RuntimeClient(socket_path).begin_stop("agent-1", "codex", strict=False, hold=False)
+        finally:
+            runtime.shutdown()
+            runtime.server_close()
+            thread.join(5)
+        assert launch_receipts.get("t-pending")["state"] == "fenced"
+        assert launch_receipts.status("agent-1", "t-pending") == "fenced"
+        assert turn_queue.user_stop_generation("agent-1") == user_before + 1, \
+            "the user Stop's pause moved the user stop generation in the owner"
+        assert not thread.is_alive()
     finally:
-        runtime.shutdown()
-        runtime.server_close()
-    assert launch_receipts.get("t-pending")["state"] == "fenced"
-    assert launch_receipts.status("agent-1", "t-pending") == "fenced"
-    turn_dispatch.reset_for_tests()
+        turn_dispatch.reset_for_tests()       # this test's fixed agent id leaves no epoch behind

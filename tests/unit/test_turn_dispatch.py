@@ -3456,3 +3456,47 @@ def test_retry_after_a_relaunch_is_never_a_200_for_the_superseded_attempt(tmp_pa
     assert (refused.value.status, str(refused.value)) == (503, _td.UNCONFIRMED_DELIVERY)
     assert refused.value.reason == "relaunched"
     assert len(backends.spawned) == 1
+
+
+def test_a_maintenance_cancel_and_restore_never_strands_a_pending_user_retry(tmp_path, monkeypatch):
+    # The maintenance cancel installs the Stop barrier and pauses, then restores
+    # the queue; it moves the shared stop generation but is not the user's Stop.
+    # An admitted-but-unlaunched user send must still launch exactly once.
+    from lib import turn_queue
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="full control over the pipeline", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-lost")
+    before_shared = turn_queue.stop_generation(agent_id)
+    before_user = turn_queue.user_stop_generation(agent_id)
+    snapshot, _dropped, was_paused = _td.begin_stop(agent_id)     # maintenance cancel
+    _td.restore_stop_state(agent_id, snapshot)
+    turn_queue.set_paused(agent_id, was_paused)                   # its restore
+    assert turn_queue.stop_generation(agent_id) > before_shared, "shared consumers unchanged"
+    assert turn_queue.user_stop_generation(agent_id) == before_user
+    assert _receipt_state("t-first") == "pending"
+
+    _assert_retry_delivers_once(service, backends, agent_id)
+    assert _receipt_state("t-retry") == "attempted"
+
+
+def test_only_the_users_stop_moves_the_user_stop_generation(tmp_path):
+    from lib import turn_queue
+    backends = _CodexSteerable()
+    _service, agent_id = _codex_service(tmp_path, backends)
+    shared, user = turn_queue.stop_generation(agent_id), turn_queue.user_stop_generation(agent_id)
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # local user Stop
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    after_user = turn_queue.stop_generation(agent_id)
+    assert after_user > shared, "the shared generation still moves for its consumers"
+    assert turn_queue.user_stop_generation(agent_id) == user + 1
+    snapshot, _dropped, was_paused = _td.begin_stop(agent_id)            # maintenance
+    _td.restore_stop_state(agent_id, snapshot)
+    turn_queue.set_paused(agent_id, was_paused)
+    assert turn_queue.stop_generation(agent_id) > after_user
+    assert turn_queue.user_stop_generation(agent_id) == user + 1, "maintenance never moves it"
+    snapshot, _dropped, _was = _td.begin_stop(agent_id, user_stop=True)   # the RPC user route
+    _td.restore_stop_state(agent_id, snapshot)
+    assert turn_queue.user_stop_generation(agent_id) == user + 2
