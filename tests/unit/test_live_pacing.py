@@ -5,6 +5,10 @@ transcript-updated wake-up is throttled the same way in both the HTTP and the
 runtime process."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from lib.audio_stream import AudioStream
 from lib.live_pacing import LivePacer, TrailingThrottle, stable_prefix
 
@@ -213,3 +217,90 @@ def test_codex_live_row_catches_up_after_a_burst_without_another_delta():
         _time.sleep(0.05)
     assert "World." in live_text()
     assert "More" not in live_text()
+
+
+# --- a timer callback already running when the pacer is cancelled -------------
+
+class _Captured:
+    """A schedule that hands each timer's callback to the test."""
+
+    def __init__(self):
+        self.callbacks: list = []
+
+    def __call__(self, delay, fn):
+        self.callbacks.append(fn)
+
+        class _Handle:
+            def cancel(self_inner):
+                pass            # too late: the callback is already running
+        return _Handle()
+
+
+def _cancel_while_a_callback_waits_on_the_lock(pacer, callback, cancel):
+    """Hold the pacer's lock, start ``callback`` on its own thread (it blocks on
+    the lock, as a real Timer that fired a moment before would), cancel, then
+    let it through. No sleeps: the lock orders it after the cancel."""
+    import threading
+    entered = threading.Event()
+
+    def run():
+        entered.set()
+        callback()
+    with pacer._lock:
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        assert entered.wait(5)
+        cancel()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+
+
+def _paced_with_a_write_due():
+    clock, writes, schedule = FakeClock(), [], _Captured()
+    pacer = LivePacer(writes.append, interval=0.25, hold=1.0, clock=clock, schedule=schedule)
+    pacer.offer("A.\n\nB")
+    pacer.offer("A.\n\nB.\n\nC")          # "A.\n\nB.\n\n" waits for the interval
+    assert writes == ["A.\n\n"] and len(schedule.callbacks) == 2   # hold, then the interval
+    clock.now += 0.3                       # the live (interval) timer is due
+    return pacer, writes, schedule
+
+
+@pytest.mark.parametrize("teardown", ["cancel", "turn teardown"])
+def test_a_callback_already_running_at_cancel_writes_nothing_and_never_re_arms(teardown):
+    pacer, writes, schedule = _paced_with_a_write_due()
+    if teardown == "cancel":
+        cancel = pacer.cancel
+    else:
+        from lib.backend.stream_json import StreamJsonBackend
+        st = SimpleNamespace(_live_pacer=pacer)
+        cancel = lambda: StreamJsonBackend.cancel_live_text(st)
+    _cancel_while_a_callback_waits_on_the_lock(pacer, schedule.callbacks[-1], cancel)
+    assert writes == ["A.\n\n"], "the pacer wrote after it was cancelled"
+    assert len(schedule.callbacks) == 2, "the pacer re-armed after it was cancelled"
+
+
+def test_a_cancelled_pacer_can_be_used_again():
+    # Claude's runner settles a message (final offer, cancel) and may keep
+    # offering on the same pacer: cancel stops timers, it does not close.
+    pacer, writes, schedule = _paced_with_a_write_due()
+    _cancel_while_a_callback_waits_on_the_lock(pacer, schedule.callbacks[-1], pacer.cancel)
+    pacer.offer("A.\n\nB.\n\nC.\n\nD")
+    assert writes == ["A.\n\n", "A.\n\nB.\n\nC.\n\n"]
+    pacer.offer("A.\n\nB.\n\nC.\n\nD.", final=True)
+    assert writes[-1] == "A.\n\nB.\n\nC.\n\nD."
+
+
+def test_a_rescheduled_timer_s_old_callback_does_nothing():
+    clock, writes, schedule = FakeClock(), [], _Captured()
+    pacer = LivePacer(writes.append, interval=0.25, hold=1.0, clock=clock, schedule=schedule)
+    pacer.offer("A.\n\nB")               # writes "A.\n\n"; armed for the hold
+    clock.now += 0.1
+    pacer.offer("A.\n\nB.\n\nC")          # a write is due sooner: re-armed for the interval
+    assert len(schedule.callbacks) == 2
+    stale, current = schedule.callbacks
+    clock.now += 0.05
+    stale()                                # the replaced timer fired a moment too late
+    assert writes == ["A.\n\n"] and len(schedule.callbacks) == 2
+    clock.now += 0.2
+    current()                              # the live timer still does its job
+    assert writes == ["A.\n\n", "A.\n\nB.\n\n"]

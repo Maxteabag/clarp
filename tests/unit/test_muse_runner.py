@@ -65,14 +65,24 @@ _STATES: list = []
 
 
 @pytest.fixture(autouse=True)
-def _events_fed_directly_end_their_turn():
+def _events_fed_directly_end_their_turn(monkeypatch):
     """``_run`` feeds events without the drain thread, so it also ends the
-    turn the way the drain's ``finally`` does: no pacer outlives the test."""
+    turn the way the drain's ``finally`` does: no pacer outlives the test.
+    Their cancelled timer threads get a bounded moment to exit; nothing is
+    cancelled here, so a timer the code itself left running still shows."""
+    from lib import live_pacing
+    started: list = []
+    real = live_pacing._thread_timer
+    monkeypatch.setattr(live_pacing, "_thread_timer",
+                        lambda delay, fn: started.append(real(delay, fn)) or started[-1])
     yield
     while _STATES:
         pacer = getattr(_STATES.pop(), "_live_pacer", None)
         if pacer is not None:
             pacer.cancel()
+    for timer in started:
+        if timer.finished.is_set():         # cancelled (or fired): let it exit
+            timer.join(timeout=1.0)
 
 
 def _run(events, *, stream=None, enqueue=None, on_error=None):
