@@ -37,8 +37,9 @@ def _worker() -> str:
 
 
 def _note(message: str) -> None:
-    """Best-effort stderr note; a broken stderr is ignored. Exception only: an
-    interrupt or a timeout signal still propagates as pytest expects."""
+    """Best-effort stderr note of a FIXED message (never an exception repr, which
+    can itself raise); a broken stderr is ignored. Ordinary diagnostic Exception
+    scope only: an interrupt or a timeout signal still propagates."""
     try:
         sys.stderr.write(f"ci_timing: {message}\n")
     except Exception:  # noqa: BLE001
@@ -48,8 +49,8 @@ def _note(message: str) -> None:
 def _close(handle) -> None:
     try:
         handle.close()
-    except Exception as exc:  # noqa: BLE001
-        _note(f"close failed: {exc!r}")
+    except Exception:  # noqa: BLE001
+        _note("close failed")
 
 
 def _write(record: dict, *, force: bool = False, handle=None) -> None:
@@ -92,23 +93,24 @@ def _meta() -> dict:
 
 
 def session_start(target: str) -> None:
-    """Never raises: any failure leaves diagnostics off (and the file closed)."""
+    """Ordinary diagnostic Exception scope: any such failure leaves diagnostics
+    off, with the file closed when it was opened."""
     if not target or "handle" in _state:
         return
     try:
         os.makedirs(target, exist_ok=True)
         handle = open(os.path.join(target, f"timing-{_worker()}.jsonl"), "a", buffering=1)
-    except Exception as exc:  # noqa: BLE001
-        _note(f"disabled (no file): {exc!r}")
+    except Exception:  # noqa: BLE001
+        _note("disabled: timing file not opened")
         return
-    _state.update(handle=handle, bytes=0, truncated=0, errors=0, written=0,
-                  short={"count": 0, "seconds": 0.0}, started=time.monotonic())
     try:
+        _state.update(handle=handle, bytes=0, truncated=0, errors=0, written=0,
+                      short={"count": 0, "seconds": 0.0}, started=time.monotonic())
         _write(_meta())
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         _state.clear()
         _close(handle)
-        _note(f"disabled (meta not written): {exc!r}")
+        _note("disabled: timing file not started")
 
 
 def phase(report) -> None:
@@ -131,8 +133,9 @@ def phase(report) -> None:
 
 
 def session_end(exitstatus) -> None:
-    """Never raises. The summary reports what was actually written; with any
-    writer error its status is 'degraded' and missing lines are unknown."""
+    """Ordinary diagnostic Exception scope; the file is always closed. The
+    summary reports what was actually written; with any writer error its
+    status is 'degraded' and missing lines are unknown."""
     handle = _state.pop("handle", None)
     if handle is None:
         return
@@ -144,8 +147,8 @@ def session_end(exitstatus) -> None:
                 "written_lines": _state["written"], "short_phases": _state["short"],
                 "truncated_lines": _state["truncated"]},
                force=True, handle=handle)   # always attempted, past the cap
-    except Exception as exc:  # noqa: BLE001
-        _note(f"summary not written: {exc!r}")
+    except Exception:  # noqa: BLE001
+        _note("summary not written")
     finally:
         _state.clear()
         _close(handle)
