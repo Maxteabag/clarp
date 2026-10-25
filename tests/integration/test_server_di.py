@@ -4502,3 +4502,60 @@ def test_send_refused_by_a_launch_receipt_keeps_the_legacy_503_body(running_serv
     assert handoffs == [], "no provider handoff was attempted"
     assert launch_receipts.get(trace)["state"] == "pending"
     assert launch_receipts.status(agent_id, trace) == "fenced", "eligibility stays blocked"
+
+
+def _seed_pending_user_receipt(agent_id: str, trace: str, client_id: str) -> None:
+    from lib import launch_receipts, turn_queue
+    launch_receipts.record_pending(
+        agent_id=agent_id, trace_id=trace, client_msg_id=client_id, origin="user",
+        user_stop_generation=turn_queue.user_stop_generation(agent_id))
+
+
+def test_a_verified_agent_stop_stops_work_but_keeps_the_users_pending_send(running_server):
+    # Another agent's Stop (proven by the Host-issued turn identity) pauses and
+    # interrupts as any Stop does, but does not withdraw the user's admitted,
+    # never-launched send: after the user resumes, its retry stays eligible.
+    import os
+    from lib import agents as agents_db, launch_receipts, turn_dispatch, turn_queue
+    from lib import provider_background_jobs as turns
+    base, ctx, _srv = running_server
+    mike = agents_db.get_by_session("claude")["agent_id"]
+    _seed_pending_user_receipt(mike, "t-agent-stop", "u-agent-stop")
+    user_gen = turn_queue.user_stop_generation(mike)
+    theo = agents_db.create_agent(persona="Theo", voice_id="v", cwd=str(ctx.root), session="theo-a1")
+    token = turns.new_turn_token()
+    turns.turn_started(token, agent_id=theo, provider="claude", pid=os.getpid())
+    try:
+        status, body = _post_with_headers(base + "/stop", {"session": "claude"},
+                                          {"X-Clarp-Turn": token})
+        assert status == 200
+        reply = json.loads(body)
+        assert (reply["stop_actor"], reply["stop_actor_verified"]) == ("agent:theo-a1", True)
+        assert turn_queue.is_paused(mike), "it is still a Stop: the queue is paused"
+        assert launch_receipts.get("t-agent-stop")["state"] == "pending"
+        assert turn_queue.user_stop_generation(mike) == user_gen
+        turn_queue.set_paused(mike, False)                      # the user resumes
+        assert launch_receipts.status(mike, "t-agent-stop", client_msg_id="u-agent-stop",
+                                      origin="user", sender_agent_id="") == "retryable"
+    finally:
+        turn_dispatch.reset_for_tests()
+
+
+def test_a_claimed_agent_actor_and_a_user_stop_both_withdraw_the_pending_send(running_server):
+    # Only the authenticated turn identity can make a Stop an agent's: a claimed
+    # 'actor' string is the user's Stop and fences, as a plain Stop does.
+    from lib import agents as agents_db, launch_receipts, turn_dispatch, turn_queue
+    base, _ctx, _srv = running_server
+    mike = agents_db.get_by_session("claude")["agent_id"]
+    try:
+        _seed_pending_user_receipt(mike, "t-claimed", "u-claimed")
+        status, body = _post(base + "/stop", {"session": "claude", "actor": "agent:theo-a1"})
+        assert status == 200 and json.loads(body)["stop_actor_verified"] is False
+        assert launch_receipts.status(mike, "t-claimed") == "fenced"
+        turn_queue.set_paused(mike, False)
+        _seed_pending_user_receipt(mike, "t-user", "u-user")
+        status, _body = _post(base + "/stop", {"session": "claude"})
+        assert status == 200
+        assert launch_receipts.status(mike, "t-user") == "fenced"
+    finally:
+        turn_dispatch.reset_for_tests()

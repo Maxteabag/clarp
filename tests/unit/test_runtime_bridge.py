@@ -817,3 +817,35 @@ def test_user_stop_over_the_runtime_rpc_fences_launch_receipts_in_the_owner(
         assert not thread.is_alive()
     finally:
         turn_dispatch.reset_for_tests()       # this test's fixed agent id leaves no epoch behind
+
+
+def test_an_agent_stop_over_the_runtime_rpc_leaves_pending_user_receipts(tmp_path, monkeypatch):
+    from lib import launch_receipts, turn_dispatch, turn_queue
+
+    launch_receipts.record_pending(
+        agent_id="agent-2", trace_id="t-kept", client_msg_id="u-2", origin="user",
+        user_stop_generation=turn_queue.user_stop_generation("agent-2"))
+    monkeypatch.setattr(backends, "interrupt", lambda *_args: 1)
+    socket_path = tmp_path / "runtime.sock"
+    dispatch = RecordingRuntime()
+    dispatch.ctx = SimpleNamespace(name="runtime-context")
+    dispatch.backends = backends
+    user_before = turn_queue.user_stop_generation("agent-2")
+    shared_before = turn_queue.stop_generation("agent-2")
+    runtime = RuntimeRPCServer(socket_path, dispatch_service=dispatch)
+    thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    thread.start()
+    try:
+        try:
+            RuntimeClient(socket_path).begin_stop("agent-2", "codex", strict=False, hold=False,
+                                                  fence_user_receipts=False)
+        finally:
+            runtime.shutdown()
+            runtime.server_close()
+            thread.join(5)
+        assert launch_receipts.get("t-kept")["state"] == "pending"
+        assert launch_receipts.status("agent-2", "t-kept") != "fenced"
+        assert turn_queue.user_stop_generation("agent-2") == user_before
+        assert turn_queue.stop_generation("agent-2") > shared_before, "still a Stop"
+    finally:
+        turn_dispatch.reset_for_tests()
