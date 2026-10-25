@@ -49,3 +49,33 @@ def test_without_a_directory_nothing_is_written(tmp_path, monkeypatch):
     ci_timing.phase(_report("t::x", "call", 9.0))
     ci_timing.session_end(0)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_test_that_replaces_threading_timer_cannot_break_the_writer(tmp_path, monkeypatch):
+    # CI 40223435447: a test patched threading.Timer with a factory function, and
+    # isinstance(t, threading.Timer) raised inside the logreport hook, crashing
+    # an xdist worker. The writer binds the real class at import instead.
+    import threading
+    monkeypatch.setattr(ci_timing, "_state", {})
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw3")
+    ci_timing.session_start(str(tmp_path))
+    monkeypatch.setattr(threading, "Timer", lambda *a, **k: None)
+    ci_timing.phase(_report("t::patched", "call", 0.5))
+    ci_timing.session_end(0)
+    rows = _lines(tmp_path / "timing-gw3.jsonl")
+    assert [r["type"] for r in rows] == ["meta", "test", "summary"]
+    assert isinstance(rows[1]["timers"], int) and rows[-1]["errors"] == 0
+
+
+def test_any_error_in_the_writer_is_counted_never_raised(tmp_path, monkeypatch):
+    import threading
+    monkeypatch.setattr(ci_timing, "_state", {})
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw4")
+    ci_timing.session_start(str(tmp_path))
+
+    def broken():
+        raise RuntimeError("thread table unavailable")
+    monkeypatch.setattr(threading, "enumerate", broken)
+    ci_timing.phase(_report("t::x", "call", 0.5))         # must not raise
+    ci_timing.session_end(0)
+    assert _lines(tmp_path / "timing-gw4.jsonl")[-1]["errors"] == 1
