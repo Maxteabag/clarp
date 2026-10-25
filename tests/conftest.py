@@ -232,14 +232,16 @@ def _prepend(var: str, entry: str) -> None:
 
 
 def pytest_addoption(parser):
-    import ci_timing
-    ci_timing.add_option(parser)
+    # Inline, so a copy of this conftest (tests that run an inner pytest) needs no
+    # sibling module; tests/ci_timing.py is imported only when the option is used.
+    parser.addoption("--clarp-timing-dir", default="",
+                     help="write per-test phase timings (JSON lines) here")
 
 
 def pytest_configure(config):
-    import ci_timing  # opt-in CI timing diagnostics (no-op without --clarp-timing-dir)
-    target = ci_timing.directory(config)
+    target = str(config.getoption("clarp_timing_dir", default="") or "")
     if target and not config.pluginmanager.has_plugin("clarp-ci-timing"):
+        import ci_timing  # opt-in CI timing diagnostics
         controller = (not os.environ.get("PYTEST_XDIST_WORKER")
                       and bool(getattr(config.option, "numprocesses", None)))
         config.pluginmanager.register(ci_timing.Plugin(target, record_tests=not controller),

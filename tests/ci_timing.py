@@ -22,19 +22,14 @@ import sys
 import threading
 import time
 
-OPTION = "--clarp-timing-dir"
 MIN_PHASE_SEC = 0.05
 MAX_BYTES = 8 * 1024 * 1024
 
+# Bound at import (pytest_configure, before any test), because tests replace
+# threading.Timer with factories that are not classes.
+_TIMER_TYPE = threading.Timer if isinstance(threading.Timer, type) else None
+
 _state: dict = {}
-
-
-def add_option(parser) -> None:
-    parser.addoption(OPTION, default="", help="write per-test phase timings (JSON lines) here")
-
-
-def directory(config) -> str:
-    return str(config.getoption(OPTION.lstrip("-").replace("-", "_"), default="") or "")
 
 
 def _worker() -> str:
@@ -79,39 +74,52 @@ def _meta() -> dict:
 
 
 def session_start(target: str) -> None:
+    # Diagnostics never fail a run: any error here just means no file.
     if not target or "handle" in _state:
         return
-    os.makedirs(target, exist_ok=True)
-    path = os.path.join(target, f"timing-{_worker()}.jsonl")
-    _state.update(handle=open(path, "a", buffering=1), bytes=0, truncated=0,
-                  short={"count": 0, "seconds": 0.0}, started=time.monotonic())
-    _write(_meta())
+    try:
+        os.makedirs(target, exist_ok=True)
+        path = os.path.join(target, f"timing-{_worker()}.jsonl")
+        _state.update(handle=open(path, "a", buffering=1), bytes=0, truncated=0, errors=0,
+                      short={"count": 0, "seconds": 0.0}, started=time.monotonic())
+        _write(_meta())
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"ci_timing: disabled: {exc!r}\n")
+        _state.pop("handle", None)
 
 
 def phase(report) -> None:
     if "handle" not in _state:
         return
-    duration = float(getattr(report, "duration", 0.0) or 0.0)
-    if duration < MIN_PHASE_SEC:
-        _state["short"]["count"] += 1
-        _state["short"]["seconds"] += duration
-        return
-    live = threading.enumerate()
-    _write({"type": "test", "id": report.nodeid, "phase": report.when,
-            "outcome": report.outcome, "sec": round(duration, 4),
-            "at": round(time.monotonic() - _state["started"], 3),
-            "threads": len(live) - 1,
-            "timers": sum(isinstance(t, threading.Timer) for t in live)})
+    try:
+        duration = float(getattr(report, "duration", 0.0) or 0.0)
+        if duration < MIN_PHASE_SEC:
+            _state["short"]["count"] += 1
+            _state["short"]["seconds"] += duration
+            return
+        live = threading.enumerate()
+        timers = sum(isinstance(t, _TIMER_TYPE) for t in live) if _TIMER_TYPE else None
+        _write({"type": "test", "id": report.nodeid, "phase": report.when,
+                "outcome": report.outcome, "sec": round(duration, 4),
+                "at": round(time.monotonic() - _state["started"], 3),
+                "threads": len(live) - 1, "timers": timers})
+    except Exception:  # noqa: BLE001 - counted in the summary, never raised into pytest
+        _state["errors"] += 1
 
 
 def session_end(exitstatus) -> None:
     if "handle" not in _state:
         return
-    _write({"type": "summary", "worker": _worker(), "exit": int(exitstatus),
-            "elapsed": round(time.monotonic() - _state["started"], 3),
-            "short_phases": _state["short"], "truncated_lines": _state["truncated"]},
-           force=True)   # the summary is always written, past the cap
-    _state.pop("handle").close()
+    try:
+        _write({"type": "summary", "worker": _worker(), "exit": int(exitstatus),
+                "elapsed": round(time.monotonic() - _state["started"], 3),
+                "short_phases": _state["short"], "truncated_lines": _state["truncated"],
+                "errors": _state["errors"]},
+               force=True)   # the summary is always written, past the cap
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"ci_timing: summary not written: {exc!r}\n")
+    finally:
+        _state.pop("handle").close()
 
 
 class Plugin:
