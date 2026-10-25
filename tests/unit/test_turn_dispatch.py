@@ -3544,3 +3544,22 @@ def test_the_stop_override_runs_the_newer_send_but_keeps_the_older_one_fenced(tm
         service.dispatch(text="old", requested_session="cipher", trace_id="t-old-retry",
                          client_msg_id="u-old")
     assert len(backends.spawned) == 1
+
+
+def test_an_agent_stop_then_resume_and_restart_keeps_the_pending_user_retry(tmp_path, monkeypatch):
+    from lib import turn_queue
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="full control over the pipeline", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-lost")
+    user_gen = turn_queue.user_stop_generation(agent_id)
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True, user_stop=False)
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    assert turn_queue.is_paused(agent_id)
+    assert turn_queue.user_stop_generation(agent_id) == user_gen
+    assert _receipt_state("t-first") == "pending"
+    turn_queue.set_paused(agent_id, False)                 # the user resumes
+    _td.reset_for_tests()                                  # and the runtime restarts
+    _assert_retry_delivers_once(service, backends, agent_id)

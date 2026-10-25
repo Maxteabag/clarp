@@ -3504,7 +3504,8 @@ def fence_user_stop(agent_id: str) -> None:
 
 
 def clear_for_agent(
-    agent_id: str, *, preserve_queue: bool = False, pause_queue: bool = False
+    agent_id: str, *, preserve_queue: bool = False, pause_queue: bool = False,
+    user_stop: bool = True,
 ) -> int:
     """Drop the in-flight slot and optionally queued turns for an agent. Used by /stop:
     a SIGTERM'd turn may die without firing its terminal callback, so the slot
@@ -3518,11 +3519,13 @@ def clear_for_agent(
         # released, before this function returns.
         dropped = _SLOTS.clear(agent_id, stopping=pause_queue)
         if pause_queue:
-            # Only the user's Stop pauses through here.
-            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=True))
-            # An admitted message that never launched is stopped work too: an
-            # automatic resend under the same id must not start it afterwards.
-            _TURN_LOCK.defer(lambda: _fence_launch_receipts(agent_id))
+            # A Stop pauses through here; ``user_stop`` is False only when a
+            # verified agent stopped this one (the work stops either way).
+            _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True, user_stop=user_stop))
+            if user_stop:
+                # An admitted message that never launched is stopped work too:
+                # an automatic resend under the same id must not start it afterwards.
+                _TURN_LOCK.defer(lambda: _fence_launch_receipts(agent_id))
     if preserve_queue:
         turn_queue.discard_parked(agent_id)
     durable_dropped = 0 if preserve_queue else turn_queue.remove_for_agent(agent_id)

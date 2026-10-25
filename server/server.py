@@ -4882,15 +4882,21 @@ class Handler(BaseHTTPRequestHandler):
         dropped = 0
         if agent:
             agent_id = agent["agent_id"]
+            # Only the user's Stop withdraws the agent's admitted-but-unlaunched
+            # user sends. A Stop by another agent, proven by the Host-issued turn
+            # identity (never a claimed name), stops the work but leaves them.
+            fence_user_receipts = not (actor_verified and str(actor).startswith("agent:"))
             runtime_client = getattr(self.ctx, "runtime_client", None)
             remote_lease = None
             if runtime_client is not None:
                 try:
+                    stop_options = {"strict": strict, "hold": True}
+                    if not fence_user_receipts:
+                        stop_options["fence_user_receipts"] = False
                     remote_lease = runtime_client.begin_stop(
                         agent_id,
                         backends.normalize(agent.get("backend")),
-                        strict=strict,
-                        hold=True,
+                        **stop_options,
                     )
                     n = remote_lease.terminated
                     dropped = remote_lease.dropped
@@ -4904,7 +4910,8 @@ class Handler(BaseHTTPRequestHandler):
                 stop_snapshot = turn_dispatch.snapshot_stop_state(agent_id)
                 queue_was_paused = bool(turn_queue.state(agent_id)["paused"])
                 dropped = turn_dispatch.clear_for_agent(
-                    agent_id, preserve_queue=True, pause_queue=True)
+                    agent_id, preserve_queue=True, pause_queue=True,
+                    user_stop=fence_user_receipts)
                 try:
                     n = backends.interrupt(
                         backends.normalize(agent.get("backend")), agent_id)
