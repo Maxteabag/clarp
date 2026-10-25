@@ -238,13 +238,11 @@ class RuntimeClient:
         return bool(response.get("ok") and response.get("result"))
 
     def begin_stop(self, agent_id: str, backend: str, *, strict: bool,
-                   hold: bool = True) -> StopLease:
-        response = self._request("begin_stop", {
-            "agent_id": agent_id,
-            "backend": backend,
-            "strict": strict,
-            "hold": hold,
-        })
+                   hold: bool = True, fence_user_receipts: bool = True) -> StopLease:
+        params = {"agent_id": agent_id, "backend": backend, "strict": strict, "hold": hold}
+        if not fence_user_receipts:
+            params["fence_user_receipts"] = False   # absent means the user's Stop
+        response = self._request("begin_stop", params)
         if not response.get("ok"):
             from .turn_dispatch import DispatchError
             raise DispatchError(
@@ -567,7 +565,14 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
             if not agent_id:
                 return {"ok": False, "status": 400,
                         "error": "agent_id is required"}
-            snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(agent_id)
+            # The Host's Stop. Unless it says a verified agent stopped this one,
+            # it is the user's: its pause moves the user stop generation and it
+            # fences the agent's pending user receipts.
+            user_stop = params.get("fence_user_receipts", True) is not False
+            snapshot, dropped, queue_was_paused = turn_dispatch.begin_stop(
+                agent_id, user_stop=user_stop)
+            if user_stop:
+                turn_dispatch.fence_user_stop(agent_id)
             try:
                 terminated = int(backends.interrupt(backend, agent_id) or 0)
             except Exception as exc:

@@ -807,12 +807,23 @@ def record_unlaunched_trace(agent_id: str, trace_id: str) -> None:
     turn_lifecycle.record_unlaunched(agent_id, trace_id)
 
 
-def trace_launch_status(agent_id: str, trace_id: str) -> str:
+def trace_launch_status(agent_id: str, trace_id: str, *,
+                        client_msg_id: str | None = None, origin: str | None = None,
+                        sender_agent_id: str | None = None) -> str:
     """Only an explicit pre-launch failure permits replay of a saved message.
 
     Missing state is ambiguous (e.g. a post-launch write failed), not evidence
-    that a backend never received work.
+    that a backend never received work. A Stop-fenced launch receipt is never
+    retryable. With no state, a launch receipt still ``pending`` (written with
+    the admission, moved on before any backend handoff) is that evidence; the
+    optional client id / principal must match it.
     """
+    from . import launch_receipts
+    receipt = launch_receipts.status(
+        agent_id, trace_id, client_msg_id=client_msg_id, origin=origin,
+        sender_agent_id=sender_agent_id)
+    if receipt == "fenced":
+        return "fenced"
     row = conn().execute(
         """SELECT detail FROM state_log
             WHERE agent_id = ? AND json_extract(detail, '$.trace_id') = ?
@@ -820,7 +831,7 @@ def trace_launch_status(agent_id: str, trace_id: str) -> str:
         (agent_id, trace_id),
     ).fetchone()
     if row is None:
-        return "unknown"
+        return "retryable" if receipt == "retryable" else "unknown"
     detail = json.loads(row["detail"] or "{}")
     return "retryable" if detail.get("dispatch_not_started") else "observed"
 

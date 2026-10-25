@@ -795,15 +795,28 @@ def stop_generation(agent_id: str) -> int:
     return settings_store.get_int(STOP_GENERATION_KEY + agent_id, default=0)
 
 
-def set_paused(agent_id: str, paused: bool) -> bool:
+USER_STOP_GENERATION_KEY = "turn_queue.user_stop_generation."
+
+
+def user_stop_generation(agent_id: str) -> int:
+    """How many times the USER stopped this agent: moved only by a pause that
+    is the user's Stop, in that pause's own transaction. Maintenance cancels
+    and their restores never move it (launch_receipts reads it)."""
+    from . import settings_store
+    return settings_store.get_int(USER_STOP_GENERATION_KEY + agent_id, default=0)
+
+
+def set_paused(agent_id: str, paused: bool, *, user_stop: bool = False) -> bool:
     """Pause or resume the agent's queue. A pause (every Stop or cancel) also
-    moves the stop generation, in the same transaction as the pause itself."""
+    moves the stop generation, in the same transaction as the pause itself;
+    a pause that is the user's Stop (``user_stop``) also moves the user stop
+    generation in that same transaction."""
     con = db.conn()
     own = not con.in_transaction
     if own:
         con.execute("BEGIN IMMEDIATE")
     try:
-        changed = _set_paused(agent_id, paused)
+        changed = _set_paused(agent_id, paused, user_stop=user_stop)
         if own:
             con.execute("COMMIT")
     except BaseException:
@@ -813,10 +826,12 @@ def set_paused(agent_id: str, paused: bool) -> bool:
     return changed
 
 
-def _set_paused(agent_id: str, paused: bool) -> bool:
+def _set_paused(agent_id: str, paused: bool, *, user_stop: bool = False) -> bool:
     if paused:
         from . import settings_store
         settings_store.increment(STOP_GENERATION_KEY + agent_id)
+        if user_stop:
+            settings_store.increment(USER_STOP_GENERATION_KEY + agent_id)
         # A Stop (the only pauser) takes back every right the release drain
         # persisted for this agent's waiting work, as it does for work waiting
         # in memory when the runtime restarts: nothing queued before this Stop
