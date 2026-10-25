@@ -455,9 +455,19 @@ class _LaunchReceiptUnrecorded(DispatchError):
     handed the prompt: a same-id retry may still launch it exactly once."""
 
 
+UNCONFIRMED_DELIVERY = "message is saved but delivery is unconfirmed; reconciliation required"
+
+
 class _LaunchReceiptRefused(DispatchError):
     """The receipt was fenced by Stop or superseded by a relaunch: this prompt
-    is never handed to a backend."""
+    is never handed to a backend. Clients get the existing unconfirmed 503:
+    a superseded send may still run under its newer attempt, and a stopped one
+    is not something this response can name until the delivery contract does.
+    ``reason`` stays internal, for diagnostics."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(503, UNCONFIRMED_DELIVERY)
 
 
 def _record_launch_attempt(spec: "_TurnSpec") -> None:
@@ -473,7 +483,7 @@ def _record_launch_attempt(spec: "_TurnSpec") -> None:
     except launch_receipts.HandoffRefused as e:
         log("launchReceiptRefused",
             f"agent={spec.agent_id} trace={spec.trace_id or '∅'} state={e.state}")
-        raise _LaunchReceiptRefused(409, f"message was not sent: {e.state} before launch") from e
+        raise _LaunchReceiptRefused(e.state) from e
     except Exception as e:  # noqa: BLE001
         log_exception("launchReceiptAttemptFail", e, detail=spec.session)
         raise _LaunchReceiptUnrecorded(
@@ -1558,7 +1568,8 @@ class TurnDispatchService:
                             agent_id=spec.agent_id, trace_id=spec.trace_id,
                             client_msg_id=spec.client_msg_id, origin=spec.origin,
                             sender_agent_id=spec.sender_agent_id,
-                            supersedes=superseded_trace)
+                            supersedes=superseded_trace,
+                            stop_generation=turn_queue.stop_generation(spec.agent_id))
                 database.execute("COMMIT")
             except BaseException:
                 database.execute("ROLLBACK")
@@ -1779,14 +1790,17 @@ class TurnDispatchService:
             spec.agent_id, trace, client_msg_id=client_msg_id,
             origin=spec.origin, sender_agent_id=spec.sender_agent_id)
         if status == "fenced":
-            return False  # Stop withdrew it before launch; a resend is not new intent
+            # Stop withdrew it before launch: a resend is not new intent, and
+            # it is not "sent" either. Same answer an older client already handles.
+            log("sendFencedByStop", f"agent={spec.agent_id} client_msg_id={client_msg_id}")
+            raise DispatchError(503, UNCONFIRMED_DELIVERY)
         if slot is None:
             slot = self._slot_snapshot(spec)
         in_flight_trace, live = slot
         if in_flight_trace == trace and live:
             return False
         if status == "unknown":
-            raise DispatchError(503, "message is saved but delivery is unconfirmed; reconciliation required")
+            raise DispatchError(503, UNCONFIRMED_DELIVERY)
         return status == "retryable"
 
     def dispatch_queued(self, queue_id: str) -> DispatchResult:
@@ -3483,6 +3497,12 @@ def _fence_launch_receipts(agent_id: str, attempt: int = 0) -> None:
             timer.start()
 
 
+def fence_user_stop(agent_id: str) -> None:
+    """The user's Stop, in the process that owns turns: no admitted send that
+    has not been handed over may launch afterwards, nor relaunch on a retry."""
+    _fence_launch_receipts(agent_id)
+
+
 def clear_for_agent(
     agent_id: str, *, preserve_queue: bool = False, pause_queue: bool = False
 ) -> int:
@@ -3606,7 +3626,9 @@ def snapshot_stop_state(agent_id: str) -> dict:
 
 
 def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
-    """Atomically install the Stop barrier in the process that owns turns."""
+    """Atomically install the Stop barrier in the process that owns turns.
+    It does not fence launch receipts: a maintenance cancel uses the same
+    barrier and must not withdraw the user's own sends (see fence_user_stop)."""
     with _TURN_LOCK:
         value = _SLOTS.get(agent_id) or None
         recovery_parked = _recovery_parked(agent_id, value)
@@ -3615,7 +3637,6 @@ def begin_stop(agent_id: str) -> tuple[dict, int, bool]:
         # _finish_turn(); the pause flag lands right after the release.
         stop, dropped = _SLOTS.begin_stop(agent_id)
         _TURN_LOCK.defer(lambda: turn_queue.set_paused(agent_id, True))
-        _TURN_LOCK.defer(lambda: _fence_launch_receipts(agent_id))
     snapshot = stop.as_dict()
     snapshot["account_recovery_parked"] = recovery_parked
     return snapshot, dropped, queue_was_paused

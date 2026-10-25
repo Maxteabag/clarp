@@ -782,3 +782,31 @@ def test_dispatch_through_runtime_invalidates_the_status_window(monkeypatch):
         assert runtime.calls == 2
     finally:
         backends.configure_runtime_client(None)
+
+
+def test_user_stop_over_the_runtime_rpc_fences_launch_receipts_in_the_owner(
+    tmp_path, monkeypatch,
+):
+    # The Host's Stop reaches the turn owner through begin_stop; the fence and
+    # its in-process epoch must land there, where every handoff is decided.
+    from lib import launch_receipts, turn_dispatch, turn_queue
+
+    launch_receipts.record_pending(
+        agent_id="agent-1", trace_id="t-pending", client_msg_id="u-1", origin="user",
+        stop_generation=turn_queue.stop_generation("agent-1"))
+    monkeypatch.setattr(backends, "interrupt", lambda *_args: 1)
+    socket_path = tmp_path / "runtime.sock"
+    dispatch = RecordingRuntime()
+    dispatch.ctx = SimpleNamespace(name="runtime-context")
+    dispatch.backends = backends
+    runtime = RuntimeRPCServer(socket_path, dispatch_service=dispatch)
+    thread = threading.Thread(target=runtime.serve_forever, daemon=True)
+    thread.start()
+    try:
+        RuntimeClient(socket_path).begin_stop("agent-1", "codex", strict=False, hold=False)
+    finally:
+        runtime.shutdown()
+        runtime.server_close()
+    assert launch_receipts.get("t-pending")["state"] == "fenced"
+    assert launch_receipts.status("agent-1", "t-pending") == "fenced"
+    turn_dispatch.reset_for_tests()

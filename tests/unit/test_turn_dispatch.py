@@ -3083,9 +3083,11 @@ def test_stop_after_an_unlaunched_admission_fences_the_resend(tmp_path, monkeypa
     _td.finish_stop(SimpleNamespace(), agent_id)
     assert _receipt_state("t-first") == "fenced"
 
-    resent = service.dispatch(text="never mind", requested_session="cipher",
-                              trace_id="t-retry", client_msg_id="u-stopped")
-    assert resent.queued is False
+    # Not "sent" (no 200 dedupe) and not relaunched: the legacy unconfirmed 503.
+    with pytest.raises(DispatchError, match="delivery is unconfirmed") as refused:
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-retry", client_msg_id="u-stopped")
+    assert refused.value.status == 503
     assert backends.spawned == [], "an automatic resend after Stop is not new intent"
 
 
@@ -3220,12 +3222,15 @@ def test_stop_fence_before_spawn_handoff_refuses_it(tmp_path, monkeypatch):
     finally:
         release.set()
     first.join(5)
-    assert isinstance(box.get("error"), DispatchError) and box["error"].status == 409
+    assert isinstance(box.get("error"), DispatchError)
+    assert (box["error"].status, str(box["error"])) == (503, _td.UNCONFIRMED_DELIVERY)
+    assert box["error"].reason == "fenced"                   # internal, diagnostics only
     assert backends.spawned == []
     assert _receipt_state("t-first") == "fenced"
-    again = service.dispatch(text="stop me", requested_session="cipher", trace_id="t-again",
-                             client_msg_id="u-stop")
-    assert again.queued is False and backends.spawned == []
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="stop me", requested_session="cipher", trace_id="t-again",
+                         client_msg_id="u-stop")
+    assert backends.spawned == []
 
 
 def test_real_stop_during_handoff_never_launches_after_stop(tmp_path, monkeypatch):
@@ -3262,7 +3267,8 @@ def test_stop_fence_before_steer_refuses_it(tmp_path, monkeypatch):
     finally:
         release.set()
     second.join(5)
-    assert isinstance(box.get("error"), DispatchError) and box["error"].status == 409
+    assert isinstance(box.get("error"), DispatchError)
+    assert (box["error"].status, str(box["error"])) == (503, _td.UNCONFIRMED_DELIVERY)
     assert backends.steered == []
     assert len(backends.spawned) == 1, "a refused steer never falls through to a preempt"
 
@@ -3285,9 +3291,9 @@ def test_a_failed_stop_fence_write_still_blocks_the_resend(tmp_path, monkeypatch
     _td.finish_stop(SimpleNamespace(), agent_id)
     assert _receipt_state("t-first") == "pending", "the durable write failed"
 
-    resent = service.dispatch(text="never mind", requested_session="cipher",
-                              trace_id="t-retry", client_msg_id="u-stopped")
-    assert resent.queued is False
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-retry", client_msg_id="u-stopped")
     assert backends.spawned == []
 
 
@@ -3374,3 +3380,79 @@ def test_a_failed_receipt_write_rolls_back_the_admission(tmp_path, monkeypatch):
                          client_msg_id="u-lost")
     assert _user_rows(agent_id) == [], "no user row without its receipt"
     _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_a_stop_across_a_restart_still_fences_the_resend(tmp_path, monkeypatch):
+    # Owner boundary + restart: the fence write failed and the process that
+    # recorded the in-memory epoch is gone. The durable Stop generation, moved
+    # in the same transaction as Stop's pause, still refuses the relaunch.
+    import sqlite3
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-stopped")
+
+    def locked(agent):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(launch_receipts, "fence_agent", locked)
+    monkeypatch.setattr(_td, "_FENCE_RETRY_DELAYS", ())
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # the user's Stop
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    _td.reset_for_tests()                                   # the runtime restarts
+    assert _receipt_state("t-first") == "pending", "no durable fence was written"
+
+    with pytest.raises(DispatchError, match="delivery is unconfirmed") as refused:
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-retry", client_msg_id="u-stopped")
+    assert refused.value.status == 503
+    assert backends.spawned == []
+
+
+def test_a_maintenance_cancel_barrier_does_not_withdraw_a_user_send(tmp_path, monkeypatch):
+    # begin_stop is also the janitor-cancel barrier: it must not fence the
+    # user's admitted send that is about to be handed over.
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    entered, release = _block_handoff(monkeypatch, "t-user")
+    first, box = _in_thread(lambda: service.dispatch(
+        text="mine", requested_session="cipher", trace_id="t-user", client_msg_id="u-user"))
+    try:
+        assert entered.wait(5)
+        snapshot, _dropped, _was_paused = _td.begin_stop(agent_id)   # maintenance barrier
+        assert _receipt_state("t-user") == "pending"
+    finally:
+        release.set()
+    first.join(5)
+    assert "error" not in box
+    assert len(backends.spawned) == 1
+    assert _receipt_state("t-user") == "attempted"
+    _td.restore_stop_state(agent_id, snapshot)
+
+
+def test_retry_after_a_relaunch_is_never_a_200_for_the_superseded_attempt(tmp_path, monkeypatch):
+    # The original attempt is superseded by a relaunch; its own late handoff is
+    # refused with the legacy unconfirmed 503, never "sent" and never a launch.
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="hello", requested_session="cipher", trace_id="t-old",
+                         client_msg_id="u-same")
+    _td.reset_for_tests()
+    service.dispatch(text="hello", requested_session="cipher", trace_id="t-new",
+                     client_msg_id="u-same")
+    assert len(backends.spawned) == 1 and _receipt_state("t-old") == "relaunched"
+    with pytest.raises(launch_receipts.HandoffRefused):
+        launch_receipts.mark_attempted("t-old")
+    spec = SimpleNamespace(origin="user", client_msg_id="u-same", trace_id="t-old",
+                           agent_id=agent_id, session="cipher", queue_id="", park_id="",
+                           after_stop=False, prompt_admission_id="")
+    with pytest.raises(DispatchError) as refused:
+        _td._record_launch_attempt(spec)
+    assert (refused.value.status, str(refused.value)) == (503, _td.UNCONFIRMED_DELIVERY)
+    assert refused.value.reason == "relaunched"
+    assert len(backends.spawned) == 1
