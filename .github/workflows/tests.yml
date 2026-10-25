@@ -36,7 +36,9 @@ jobs:
       # no network (loopback only), no credentials, no privilege, an empty HOME and only their own
       # processes (scripts/ci_contained.sh, which self-checks that before the command starts).
       - name: Python unit, integration and contract tests
-        run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n 2 --junitxml=test-results/python.xml
+        # Per-test phase timings stream into test-results/timing/ (flushed per line), so the
+        # always() upload below keeps them even when the job is cancelled at its time limit.
+        run: bash scripts/ci_contained.sh .venv/bin/python -m pytest -n 2 --junitxml=test-results/python.xml --clarp-timing-dir=test-results/timing
       - name: JavaScript behavior and contract tests
         if: ${{ !cancelled() }}
         run: bash scripts/ci_contained.sh npm test -- --reporter=default --reporter=junit --outputFile=test-results/javascript.xml
