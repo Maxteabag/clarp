@@ -92,6 +92,8 @@ class MuseBackend(StreamJsonBackend):
     symbol = 'sparkles'
     brand = BackendBrand('#1c2b4a', '#0d1526', '#8fb4ff', '#2b4a8a')
     efforts = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')
+    # Each model lists its own effort tiers in Muse's catalogue cache.
+    effort_scope = 'model'
     runner = 'muse'
     config_model_field = 'muse_model'
     config_effort_field = 'muse_effort'
