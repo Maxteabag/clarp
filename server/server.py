@@ -6803,6 +6803,22 @@ def _server_workers(ctx: ServerContext, srv: "ContextHTTPServer", cfg,
     ]
 
 
+def _recover_queued_after_start(ctx: ServerContext) -> None:
+    try:
+        recovered_queues = TurnDispatchService(ctx).recover_queued()
+    except Exception as exc:  # runtime may still be starting; its own boot recovers
+        from lib.runtime_bridge import RuntimeUnavailable
+        if not isinstance(exc, RuntimeUnavailable):
+            if getattr(ctx, "runtime_client", None) is None:
+                raise
+            log_exception("runtimeQueueRecoveryFail", exc)
+            return
+        log_exception("runtimeQueueRecoveryDeferred", exc)
+        recovered_queues = 0
+    if recovered_queues:
+        log("queuedRecovery", f"recovered={recovered_queues}")
+
+
 def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
                          restart_recovery: bool) -> None:
     """Boot-time repair, after the boot workers and before serving listeners."""
@@ -6818,16 +6834,14 @@ def _recover_after_start(ctx: ServerContext, workers: WorkerSet, *,
             stream=getattr(ctx, "stream", None))
         if interrupted:
             log("turnRestartRecovery", f"marked={len(interrupted)}")
-    try:
-        recovered_queues = TurnDispatchService(ctx).recover_queued()
-    except Exception as exc:  # runtime may still be starting; its own boot recovers
-        from lib.runtime_bridge import RuntimeUnavailable
-        if not isinstance(exc, RuntimeUnavailable):
-            raise
-        log_exception("runtimeQueueRecoveryDeferred", exc)
-        recovered_queues = 0
-    if recovered_queues:
-        log("queuedRecovery", f"recovered={recovered_queues}")
+    if runtime_client is None:
+        _recover_queued_after_start(ctx)
+    else:
+        # The runtime owns the queue and recovers it on its own boot; asking
+        # it here is a courtesy that must never hold up listening (a busy
+        # runtime once kept a new Host silent past the installer's 20 s check).
+        threading.Thread(target=_recover_queued_after_start, args=(ctx,),
+                         name="queued-recovery", daemon=True).start()
     try:
         # A listen-first initiative resolved but never admitted (the Host died
         # in between) is admitted now, exactly once (docs/agent-rings.md).
