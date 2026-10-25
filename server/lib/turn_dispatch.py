@@ -275,6 +275,7 @@ def live_work(agent_id: str, *, session: str = "") -> turn_slots.LiveWork:
 def reset_for_tests() -> None:
     _SLOTS.reset_for_tests()
     _RECOVERY_BACKOFF.reset_for_tests()
+    launch_receipts.reset_for_tests()
 
 
 def _terminal_live(agent_id: str) -> bool:
@@ -363,6 +364,9 @@ class _TurnSpec:
     # queued_turns row (status 'parked') holding a send admitted behind the
     # Stop barrier, so it survives a runtime restart; "" when not parked.
     park_id: str = ""
+    # Held behind a Stop barrier as newer work (``_claim_or_queue``): Stop has
+    # already decided it runs, so its launch receipt may not refuse it.
+    after_stop: bool = False
     # Launches of this spec that failed before the backend started; spaces
     # out the retries of a queued handoff (see _requeue_failed_handoff).
     handoff_failures: int = 0
@@ -451,13 +455,25 @@ class _LaunchReceiptUnrecorded(DispatchError):
     handed the prompt: a same-id retry may still launch it exactly once."""
 
 
+class _LaunchReceiptRefused(DispatchError):
+    """The receipt was fenced by Stop or superseded by a relaunch: this prompt
+    is never handed to a backend."""
+
+
 def _record_launch_attempt(spec: "_TurnSpec") -> None:
     """Fail closed immediately before a backend receives a user prompt."""
     if not launch_receipts.eligible(origin=spec.origin, client_msg_id=spec.client_msg_id,
                                     call_opening=_is_call_opening(spec)):
         return
+    # A spec launched from a durable queue or park row, or held behind Stop as
+    # newer work, is governed by that decision, not by a racing fence.
+    decided = bool(spec.queue_id or spec.park_id or spec.after_stop)
     try:
-        launch_receipts.mark_attempted(spec.trace_id)
+        launch_receipts.mark_attempted(spec.trace_id, override_fence=decided)
+    except launch_receipts.HandoffRefused as e:
+        log("launchReceiptRefused",
+            f"agent={spec.agent_id} trace={spec.trace_id or '∅'} state={e.state}")
+        raise _LaunchReceiptRefused(409, f"message was not sent: {e.state} before launch") from e
     except Exception as e:  # noqa: BLE001
         log_exception("launchReceiptAttemptFail", e, detail=spec.session)
         raise _LaunchReceiptUnrecorded(
@@ -1556,7 +1572,10 @@ class TurnDispatchService:
                 try:
                     events.broadcast(self.ctx.stream, events.as_event(event))
                 except Exception as e:  # noqa: BLE001
-                    log_exception("admissionBroadcastFail", e, detail=spec.session)
+                    try:
+                        log_exception("admissionBroadcastFail", e, detail=spec.session)
+                    except Exception:  # noqa: BLE001 - not even logging may stop the launch
+                        pass
         if admission is False:
             eventlog.emit("server", "sendDeduplicated", context=spec.context)
             log("sendDeduplicated",
@@ -1879,8 +1898,7 @@ class TurnDispatchService:
             # newer than the stopped work, so hold it and start it only after
             # the backend-wide interrupt returns. Its parked row keeps it
             # across a runtime restart.
-            if park_id:
-                spec = replace(spec, park_id=park_id)
+            spec = replace(spec, park_id=park_id, after_stop=True)
             _SLOTS.enqueue(agent_id, spec)
             return bool(park_id), True
         # An interactive terminal is attached to this agent — queue behind
@@ -2760,7 +2778,7 @@ class TurnDispatchService:
                 team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
                 if account_attempt is not None:
                     account_attempt.handle = handle
-            except (JanitorDispatchError, _LaunchReceiptUnrecorded):
+            except (JanitorDispatchError, _LaunchReceiptUnrecorded, _LaunchReceiptRefused):
                 raise
             except FileNotFoundError as e:
                 if attempt == 1:
@@ -3446,11 +3464,23 @@ def _record_dreaming_result(agent_id: str, event: dict) -> None:
         log_exception("dreamingResultParseFail", e, detail=agent_id)
 
 
-def _fence_launch_receipts(agent_id: str) -> None:
+_FENCE_RETRY_DELAYS = (1.0, 5.0, 15.0)
+
+
+def _fence_launch_receipts(agent_id: str, attempt: int = 0) -> None:
+    """Stop's fence. The in-process epoch lands first and holds on its own;
+    a failed durable write is retried, never allowed to fail Stop."""
+    if attempt == 0:
+        launch_receipts.note_stop(agent_id)
     try:
         launch_receipts.fence_agent(agent_id)
     except Exception as e:  # noqa: BLE001 - Stop itself must still complete
         log_exception("launchReceiptFenceFail", e, detail=agent_id)
+        if attempt < len(_FENCE_RETRY_DELAYS):
+            timer = threading.Timer(_FENCE_RETRY_DELAYS[attempt], _fence_launch_receipts,
+                                    args=(agent_id, attempt + 1))
+            timer.daemon = True
+            timer.start()
 
 
 def clear_for_agent(
