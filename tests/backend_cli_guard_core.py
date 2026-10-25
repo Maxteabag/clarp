@@ -24,7 +24,7 @@ import shutil
 import socket
 import subprocess
 
-BACKEND_CLIS = frozenset({"claude", "clarp", "codex", "agy", "grok", "opencode", "gemini", "tmux"})
+BACKEND_CLIS = frozenset({"claude", "clarp", "codex", "agy", "grok", "opencode", "gemini", "tmux", "muse"})
 # Package specs a runner can fetch and start (npx -y @anthropic-ai/claude-code ...).
 BACKEND_PACKAGES = frozenset({"@anthropic-ai/claude-code", "@openai/codex", "@google/gemini-cli",
                               "opencode-ai", "@vibe-kit/grok-cli"})
