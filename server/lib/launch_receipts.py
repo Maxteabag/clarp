@@ -15,11 +15,19 @@ sent; ``attempted`` says nothing, and the state log keeps deciding as before.
 Stop fences pending receipts so an automatic retry is not fresh intent.
 
 Rows live in ``settings`` under one prefix: same database and transaction as
-the admission, no schema change. Old rows are pruned on write.
+the admission, no schema change. Pruning is throttled, uses the key index, and
+never deletes a fenced receipt; deleting any other one only makes it unknown.
+
+The handoff never trusts a compare-and-set that changed nothing: it reads the
+receipt back and refuses a fenced or superseded one. Stop also records an
+in-process epoch first, so a fence write that failed still blocks a same-id
+resend here, and it retries the write.
 """
 from __future__ import annotations
 
 import json
+import threading
+import time
 
 from . import db, settings_store
 from .db import now_ms
@@ -31,6 +39,19 @@ ATTEMPTED = "attempted"
 FENCED = "fenced"
 RELAUNCHED = "relaunched"
 RETENTION_MS = 7 * 24 * 3600 * 1000
+PRUNE_INTERVAL_SEC = 600.0
+
+_LOCK = threading.Lock()
+_STOP_EPOCH: dict[str, int] = {}     # agent_id -> ms of its latest Stop in this process
+_LAST_PRUNE = 0.0
+
+
+class HandoffRefused(RuntimeError):
+    """The receipt says this prompt must not be handed to a backend."""
+
+    def __init__(self, state: str):
+        self.state = state
+        super().__init__(f"launch receipt is {state}")
 
 
 def eligible(*, origin: str, client_msg_id: str, call_opening: bool) -> bool:
@@ -68,17 +89,68 @@ def record_pending(*, agent_id: str, trace_id: str, client_msg_id: str,
         "client_msg_id": client_msg_id, "origin": origin,
         "sender_agent_id": sender_agent_id or "", "admitted_at": stamp,
     }, separators=(",", ":")), updated_at=stamp)
-    settings_store.prune_prefix(PREFIX, updated_before=stamp - RETENTION_MS)
+    _maybe_prune(stamp)
 
 
-def mark_attempted(trace_id: str) -> None:
-    """Called immediately before a backend receives the prompt. Raises when
-    the write fails, so the caller can refuse to hand it over: a launch that
-    is not recorded here could later be mistaken for one that never ran."""
+def _maybe_prune(stamp: int) -> None:
+    global _LAST_PRUNE
+    now = time.monotonic()
+    with _LOCK:
+        if _LAST_PRUNE and now - _LAST_PRUNE < PRUNE_INTERVAL_SEC:
+            return
+        _LAST_PRUNE = now
+    # Fenced receipts are kept: without them an older state row could read
+    # "retryable" again after Stop. Any other deletion only yields "unknown".
+    settings_store.prune_prefix_keeping(
+        PREFIX, updated_before=stamp - RETENTION_MS, field="state", keep=(FENCED,))
+
+
+def _stopped_after_admission(receipt: dict) -> bool:
+    with _LOCK:
+        stopped_at = _STOP_EPOCH.get(str(receipt.get("agent_id") or ""), 0)
+    return bool(stopped_at) and stopped_at >= int(receipt.get("admitted_at") or 0)
+
+
+def mark_attempted(trace_id: str, *, override_fence: bool = False) -> str:
+    """Called immediately before a backend receives the prompt.
+
+    Returns "attempted" (moved from pending), "already_attempted" or
+    "no_receipt". Raises HandoffRefused for a fenced or superseded receipt,
+    and any database error as is, so the caller refuses to hand it over: a
+    launch not recorded here could later be mistaken for one that never ran.
+    A compare-and-set that changed no row never authorizes a handoff by
+    itself; the receipt is read back to say why. ``override_fence`` is for a
+    launch Stop or a durable queue row already decided runs: a fence that
+    raced it is replaced; a superseded receipt still refuses.
+    """
     if not trace_id:
-        return
+        return "no_receipt"
     with db.busy_timeout(SQLITE_CRITICAL_BUSY_TIMEOUT_MS):
-        settings_store.set_json_field_if(_key(trace_id), "state", ATTEMPTED, expect=PENDING)
+        receipt = get(trace_id)
+        if (not override_fence and receipt and receipt.get("state") == PENDING
+                and _stopped_after_admission(receipt)):
+            settings_store.set_json_field_if(_key(trace_id), "state", FENCED, expect=PENDING)
+            raise HandoffRefused(FENCED)
+        if settings_store.set_json_field_if(_key(trace_id), "state", ATTEMPTED, expect=PENDING):
+            return "attempted"
+        if override_fence and settings_store.set_json_field_if(
+                _key(trace_id), "state", ATTEMPTED, expect=FENCED):
+            return "attempted"
+        receipt = get(trace_id)
+    if receipt is None:
+        return "no_receipt"
+    state = receipt.get("state")
+    if state == ATTEMPTED:
+        return "already_attempted"
+    raise HandoffRefused(str(state))
+
+
+def note_stop(agent_id: str) -> None:
+    """Stop, in this process, before its fence write: a resend or handoff
+    here never treats an earlier admission as unsent, even if that write fails."""
+    if agent_id:
+        with _LOCK:
+            _STOP_EPOCH[agent_id] = now_ms()
 
 
 def fence_agent(agent_id: str) -> int:
@@ -91,6 +163,13 @@ def fence_agent(agent_id: str) -> int:
         match_field="agent_id", match_value=agent_id)
 
 
+def reset_for_tests() -> None:
+    global _LAST_PRUNE
+    with _LOCK:
+        _STOP_EPOCH.clear()
+        _LAST_PRUNE = 0.0
+
+
 def status(agent_id: str, trace_id: str, *, client_msg_id: str | None = None,
            origin: str | None = None, sender_agent_id: str | None = None) -> str:
     """"retryable" only for a pending receipt of this agent (and, when given,
@@ -99,7 +178,7 @@ def status(agent_id: str, trace_id: str, *, client_msg_id: str | None = None,
     if not receipt or receipt.get("agent_id") != agent_id:
         return "unknown"
     state = receipt.get("state")
-    if state == FENCED:
+    if state == FENCED or (state == PENDING and _stopped_after_admission(receipt)):
         return "fenced"
     if state != PENDING:
         return "unknown"
