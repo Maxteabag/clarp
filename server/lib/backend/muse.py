@@ -319,8 +319,9 @@ class MuseBackend(StreamJsonBackend):
     # --- interactive terminal ----------------------------------------------
 
     def terminal_argv(self, session_id: str) -> list[str]:
-        """``muse resume <id>``, or a fresh TUI when there is no session yet."""
-        argv = [self.required_binary]
+        """``muse --yolo resume <id>``, or a fresh TUI when there is no session
+        yet; approval and the sandbox are off, as for the agent's own turns."""
+        argv = [self.required_binary, "--yolo"]
         if session_id:
             argv += ["resume", session_id]
         return argv

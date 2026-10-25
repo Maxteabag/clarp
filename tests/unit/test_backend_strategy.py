@@ -87,7 +87,7 @@ TERMINAL_ARGV = {
     "codex": (["codex", "resume", "s-1"], ["codex"]),
     "agy": (["agy", "--dangerously-skip-permissions", "--conversation", "s-1"],
             ["agy", "--dangerously-skip-permissions"]),
-    "muse": (["muse", "resume", "s-1"], ["muse"]),
+    "muse": (["muse", "--yolo", "resume", "s-1"], ["muse", "--yolo"]),
 }
 
 
