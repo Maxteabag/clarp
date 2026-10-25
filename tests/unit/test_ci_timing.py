@@ -103,8 +103,16 @@ CLOSED = pathlib.Path({closed!r})
 FAULTED = pathlib.Path({faulted!r})
 
 
+class BrokenRepr(OSError):
+    def __repr__(self):
+        raise RuntimeError("repr is broken")
+    __str__ = __repr__
+
+
 def _fault(message):
     FAULTED.write_text(message)          # proof the injected fault really fired
+    if MODE.endswith("_badrepr"):
+        raise BrokenRepr()
     raise OSError(message)
 
 
@@ -117,7 +125,7 @@ class Faulty:
         self.close()
     def write(self, text):
         self.lines += 1
-        if MODE == "startup_stderr" or (MODE == "write" and self.lines > 1):
+        if MODE == "startup_stderr" or (MODE in ("write", "write_badrepr") and self.lines > 1):
             _fault("disk full")
         return self.real.write(text)
     def flush(self):
@@ -127,7 +135,7 @@ class Faulty:
     def close(self):
         CLOSED.write_text("closed")
         self.real.close()
-        if MODE == "close":
+        if MODE in ("close", "close_badrepr"):
             _fault("close failed")
 
 
@@ -148,6 +156,12 @@ def _open(path, *args, **kwargs):
 ci_timing.open = _open
 if MODE == "startup_stderr":
     ci_timing.sys = types.SimpleNamespace(stderr=BrokenStderr(), modules=sys.modules)
+if MODE == "clock":
+    import time as _time
+
+    def _broken_clock():
+        _fault("clock failed")         # after open(), during the writer's initialization
+    ci_timing.time = types.SimpleNamespace(monotonic=_broken_clock, time=_time.time)
 
 
 def pytest_configure(config):
@@ -166,7 +180,8 @@ def test_sentinel_fails():
 """
 
 
-@pytest.mark.parametrize("mode", ["write", "flush", "close", "startup_stderr"])
+@pytest.mark.parametrize("mode", ["write", "flush", "close", "startup_stderr",
+                                  "write_badrepr", "close_badrepr", "clock"])
 def test_a_failing_writer_never_changes_the_test_outcome(tmp_path, mode):
     suite = tmp_path / "inner"
     suite.mkdir()
@@ -189,9 +204,9 @@ def test_a_failing_writer_never_changes_the_test_outcome(tmp_path, mode):
     assert faulted.exists(), "the injected fault really fired"
     assert closed.exists(), "the timing file is always closed, also after a startup failure"
     lines = (tmp_path / "timing" / "timing-controller.jsonl").read_text().splitlines()
-    if mode == "startup_stderr":
+    if mode in ("startup_stderr", "clock"):
         assert lines == [], "nothing was written; diagnostics were disabled, not faked"
     else:
         assert json.loads(lines[0])["type"] == "meta"     # the writer really started
-    if mode == "close":
+    if mode in ("close", "close_badrepr"):
         assert json.loads(lines[-1])["status"] == "ok"     # the summary was written before close
