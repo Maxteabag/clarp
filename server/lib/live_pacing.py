@@ -137,6 +137,12 @@ class LivePacer:
             target = self._last_write + self._interval
         else:
             target = (self._held_since or now) + self._hold
+            if target <= now:
+                # The hold has passed and nothing more can be released: only
+                # new text (``offer``) changes that, so stop rather than
+                # re-arm at zero delay forever.
+                self._cancel()
+                return
         self._arm(target, now)
 
     def _emit(self, text: str, now: float) -> None:
