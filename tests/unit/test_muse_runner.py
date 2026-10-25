@@ -61,8 +61,23 @@ class _Stream:
         self.events.append(event)
 
 
+_STATES: list = []
+
+
+@pytest.fixture(autouse=True)
+def _events_fed_directly_end_their_turn():
+    """``_run`` feeds events without the drain thread, so it also ends the
+    turn the way the drain's ``finally`` does: no pacer outlives the test."""
+    yield
+    while _STATES:
+        pacer = getattr(_STATES.pop(), "_live_pacer", None)
+        if pacer is not None:
+            pacer.cancel()
+
+
 def _run(events, *, stream=None, enqueue=None, on_error=None):
     st = muse._TurnState(session_id=SID)
+    _STATES.append(st)
     for ev in events:
         MUSE._handle_event(ev, st, agent_id="agent-1", session="sess-1", trace_id="trace-1",
                            on_error=on_error, stream=stream,
