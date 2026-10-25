@@ -3500,3 +3500,25 @@ def test_only_the_users_stop_moves_the_user_stop_generation(tmp_path):
     snapshot, _dropped, _was = _td.begin_stop(agent_id, user_stop=True)   # the RPC user route
     _td.restore_stop_state(agent_id, snapshot)
     assert turn_queue.user_stop_generation(agent_id) == user + 2
+
+
+def test_a_failed_stop_fence_write_retries_through_the_tracked_scheduler(monkeypatch):
+    # The retry must use the dispatcher's scheduler (tracked and cancelled per
+    # test), never a private timer that could outlive the test that armed it.
+    import sqlite3
+    from lib import launch_receipts
+    calls, scheduled = {"n": 0}, []
+
+    def flaky(agent):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return 0
+    monkeypatch.setattr(launch_receipts, "fence_agent", flaky)
+    monkeypatch.setattr(_td, "_default_retry_scheduler",
+                        lambda delay, fn: scheduled.append((delay, fn)))
+    _td.fence_user_stop("agent-retry")
+    assert [d for d, _fn in scheduled] == [_td._FENCE_RETRY_DELAYS[0]]
+    scheduled[0][1]()                                       # the timer fires
+    assert calls["n"] == 2 and len(scheduled) == 1, "a successful retry schedules nothing more"
+    _td.reset_for_tests()
