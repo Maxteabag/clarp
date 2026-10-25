@@ -538,3 +538,27 @@ def test_append_safety_cap_says_more_remains(conv):
     assert event["content"].endswith(mod.APPEND_CUT_NOTE)
     conv.append("commentary", "short")
     assert _events(conv)[-1]["content"] == "short"
+
+
+def test_a_call_interrupt_never_stops_an_agent_or_strands_a_pending_chat_send(conv, monkeypatch):
+    # The existing contract: a barge-in only flushes call audio ("Do not cancel
+    # agent work"). Only the explicit cancel_agent tool stops an agent. So a
+    # pending, unlaunched chat send of any agent stays eligible for its retry.
+    from lib import launch_receipts, turn_dispatch, turn_queue
+
+    def no_stop(*_args, **_kwargs):
+        raise AssertionError("a call interrupt must not stop an agent")
+    for name in ("begin_stop", "clear_for_agent", "fence_user_stop"):
+        monkeypatch.setattr(turn_dispatch, name, no_stop)
+    launch_receipts.record_pending(
+        agent_id="chat-agent", trace_id="t-chat", client_msg_id="u-chat", origin="user",
+        user_stop_generation=turn_queue.user_stop_generation("chat-agent"))
+    before = turn_queue.user_stop_generation("chat-agent")
+
+    conv.input({"type": "oracle_v2.interrupt"})                      # the phone's barge-in
+    conv.receive({"type": "session.output_audio.interrupted"})       # the provider's barge-in
+
+    assert launch_receipts.get("t-chat")["state"] == "pending"
+    assert launch_receipts.status("chat-agent", "t-chat", client_msg_id="u-chat",
+                                  origin="user", sender_agent_id="") == "retryable"
+    assert turn_queue.user_stop_generation("chat-agent") == before

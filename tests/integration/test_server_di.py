@@ -4481,8 +4481,24 @@ def test_send_refused_by_a_launch_receipt_keeps_the_legacy_503_body(running_serv
     from lib import agents as agents_db
     agent_id = agents_db.get_by_session("rachel")["agent_id"]
     turn_queue.set_paused(agent_id, True, user_stop=True)   # the user's Stop after admission
+    count_turns = lambda: agents_db.conn().execute(
+        "SELECT COUNT(*) AS n FROM turns WHERE agent_id = ? AND trace_id = ?",
+        (agent_id, trace)).fetchone()["n"]
+    turns_before = count_turns()        # the refused first attempt's own (closed) turn
+    handoffs = []
+    monkeypatch.setattr(launch_receipts, "mark_attempted",
+                        lambda *a, **k: handoffs.append(a) or real(*a, **k))
     status, raw = _post_status(base + "/send", body)
     assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
-    # The retry neither relinked nor handed over: same canonical trace, receipt still pending.
+    # The durable contract after the retry: the row is unchanged (same canonical
+    # trace, still exactly one user row), no turn opened, no handoff attempted,
+    # and the receipt stays pending behind the user's Stop, i.e. not eligible.
     assert message_store.client_message_trace("u-http-compat") == trace
-    assert launch_receipts.get(trace)["state"] == "pending", "no handoff after the user's Stop"
+    rows = agents_db.conn().execute(
+        "SELECT COUNT(*) AS n FROM messages WHERE role = 'user' AND message_id = ?",
+        ("u-http-compat",)).fetchone()["n"]
+    assert rows == 1
+    assert count_turns() == turns_before, "the retry opened no turn"
+    assert handoffs == [], "no provider handoff was attempted"
+    assert launch_receipts.get(trace)["state"] == "pending"
+    assert launch_receipts.status(agent_id, trace) == "fenced", "eligibility stays blocked"

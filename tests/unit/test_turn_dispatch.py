@@ -3522,3 +3522,25 @@ def test_a_failed_stop_fence_write_retries_through_the_tracked_scheduler(monkeyp
     scheduled[0][1]()                                       # the timer fires
     assert calls["n"] == 2 and len(scheduled) == 1, "a successful retry schedules nothing more"
     _td.reset_for_tests()
+
+
+def test_the_stop_override_runs_the_newer_send_but_keeps_the_older_one_fenced(tmp_path, monkeypatch):
+    # The user's Stop fences what was admitted before it; the override only lets
+    # a send that Stop itself held as newer work run. It never unfences the old one.
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="old", requested_session="cipher", trace_id="t-old",
+                         client_msg_id="u-old")
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # the user's Stop
+    assert _receipt_state("t-old") == "fenced"
+    service.dispatch(text="new", requested_session="cipher", trace_id="t-new",
+                     client_msg_id="u-new")                                # held behind it
+    _td.finish_stop(service.ctx, agent_id, backend_registry=backends)
+    assert [s[1]["trace_id"] for s in backends.spawned] == ["t-new"]
+    assert _receipt_state("t-new") == "attempted" and _receipt_state("t-old") == "fenced"
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="old", requested_session="cipher", trace_id="t-old-retry",
+                         client_msg_id="u-old")
+    assert len(backends.spawned) == 1
