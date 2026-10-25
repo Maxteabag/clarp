@@ -230,6 +230,7 @@ class MuseBackend(StreamJsonBackend):
                 except Exception:  # noqa: BLE001
                     pass
         finally:
+            self.cancel_live_text(st)
             if agent_id:
                 self.unregister_handle(agent_id, handle)
 

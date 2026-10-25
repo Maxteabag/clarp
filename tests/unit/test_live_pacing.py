@@ -83,6 +83,60 @@ def test_the_final_text_is_written_at_once_and_stops_the_timer():
     assert writes == ["Hello world."]
 
 
+def _fire_due(clock, limit=50):
+    """Fire due timers one at a time; how many fired (``limit`` = a loop)."""
+    fired = 0
+    while fired < limit:
+        due = [t for t in clock.timers if not t[2] and t[0] <= clock.now]
+        if not due:
+            return fired
+        due[0][2] = True
+        due[0][1]()
+        fired += 1
+    return fired
+
+
+def test_held_text_with_nothing_left_to_release_stops_the_timer():
+    # "Done." has no line or word break, so once the hold has passed nothing
+    # more can be released until new text arrives; the pacer must go quiet
+    # instead of re-arming itself at zero delay forever (CI 2026-10-25: a
+    # left-over pacer's timer loop slowed every later test on its worker).
+    clock, writes = FakeClock(), []
+    pacer = _pacer(clock, writes)
+    pacer.offer("Done.")
+    clock.now += 1.5
+    assert _fire_due(clock) == 1
+    assert [t for t in clock.timers if not t[2]] == []
+    # Going quiet loses nothing: the final flush still writes the held text.
+    assert writes == []
+    pacer.flush()
+    assert writes == ["Done."]
+
+
+def test_after_going_quiet_a_later_offer_still_writes_the_held_text():
+    clock, writes = FakeClock(), []
+    pacer = _pacer(clock, writes)
+    pacer.offer("Done.")
+    clock.now += 1.5
+    _fire_due(clock)
+    pacer.offer("Done. More words")
+    assert writes == ["Done. More "]
+    pacer.offer("Done. More words.", final=True)
+    assert writes == ["Done. More ", "Done. More words."]
+
+
+def test_a_released_line_waits_one_hold_for_more_then_goes_quiet():
+    clock, writes = FakeClock(), []
+    pacer = _pacer(clock, writes)
+    pacer.offer("A single long sentence that keeps go")
+    clock.advance(1.0)
+    assert writes == ["A single long sentence that keeps "]
+    clock.now += 5
+    assert _fire_due(clock) <= 1
+    assert [t for t in clock.timers if not t[2]] == []
+    assert writes == ["A single long sentence that keeps "]
+
+
 def test_throttle_delivers_the_first_and_the_last_of_a_burst():
     clock, sent = FakeClock(), []
     throttle = TrailingThrottle(0.25, clock=clock, schedule=clock.schedule)
