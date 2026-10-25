@@ -2924,3 +2924,221 @@ def test_a_retry_rechecks_the_fence(tmp_path, monkeypatch):
     turn_queue.set_paused(agents_db.get_by_session("mike")["agent_id"], True)   # a Stop after the claim
     assert agent_rings.claim_initiative(queue_id) is False
     assert agent_rings.opening_state(op["ring_id"])["retired"]["reason"] == "stopped_after_answer"
+
+
+# ---- 2026-10-25 Lumi: an admitted message whose launch never started -----------------------
+# The user row was committed, then the post-COMMIT transcript broadcast (an sse_events INSERT)
+# hit "database is locked" and escaped before any turn opened: no turn, no state, and every
+# same-id retry was refused as "delivery is unconfirmed". The admission now writes a pending
+# launch receipt in the same transaction; it leaves `pending` (fail-closed) right before a
+# backend is handed the prompt, so only a provably unsent message is ever launched again.
+
+def _receipt_state(trace_id):
+    import json
+    from lib import settings_store
+    raw = settings_store.get("launch-receipt:" + trace_id)
+    return json.loads(raw)["state"] if raw else None
+
+
+def _user_rows(agent_id):
+    return agents_db.conn().execute(
+        "SELECT message_id, trace_id FROM messages WHERE role = 'user' AND agent_id = ?",
+        (agent_id,)).fetchall()
+
+
+def _die_once_after_admission(monkeypatch, service):
+    """The process dies after the admission COMMIT and before any launch step."""
+    real = service._enqueue_if_busy
+    calls = {"n": 0}
+
+    def dies(spec, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("process died after admission")
+        return real(spec, **kwargs)
+    monkeypatch.setattr(service, "_enqueue_if_busy", dies)
+
+
+def test_locked_transcript_broadcast_after_admission_still_launches(tmp_path, monkeypatch):
+    import sqlite3
+    from lib.protocol import SSEType
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    real = _td.events.broadcast
+
+    def locked_transcript(stream, event):
+        if event.get("type") == SSEType.TRANSCRIPT_UPDATED:
+            raise sqlite3.OperationalError("database is locked")
+        return real(stream, event)
+    monkeypatch.setattr(_td.events, "broadcast", locked_transcript)
+
+    result = service.dispatch(text="what did the build log say?", requested_session="cipher",
+                              trace_id="t-lumi", client_msg_id="u-lumi")
+
+    assert result.queued is False
+    assert len(backends.spawned) == 1, "a failed projection must not stop the launch"
+    assert [r["message_id"] for r in _user_rows(agent_id)] == ["u-lumi"]
+    assert _receipt_state("t-lumi") == "attempted"
+
+
+def test_crash_between_admission_and_spawn_relaunches_once_on_same_id_retry(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError, match="process died"):
+        service.dispatch(text="are you there?", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-lost")
+    _td.reset_for_tests()                         # the process is gone
+    assert backends.spawned == []
+    assert _receipt_state("t-first") == "pending"
+
+    _assert_retry_delivers_once(service, backends, agent_id)
+    assert _receipt_state("t-first") == "relaunched"
+    assert _receipt_state("t-retry") == "attempted"
+
+
+def test_crash_after_spawn_is_never_launched_again(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+
+    def died_after_spawn(spec):
+        raise SystemExit("process died after the backend took the prompt")
+    monkeypatch.setattr(service, "_mark_spawned", died_after_spawn)
+    with pytest.raises(SystemExit):
+        service.dispatch(text="run once", requested_session="cipher",
+                         trace_id="t-ran", client_msg_id="u-ran")
+    assert len(backends.spawned) == 1
+    _td.reset_for_tests()
+    # Its post-launch state never landed either.
+    agents_db.conn().execute("DELETE FROM state_log WHERE agent_id = ?", (agent_id,))
+    assert _receipt_state("t-ran") == "attempted"
+
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="run once", requested_session="cipher",
+                         trace_id="t-again", client_msg_id="u-ran")
+    assert len(backends.spawned) == 1
+
+
+def test_unrecorded_launch_receipt_refuses_the_handoff_and_retry_runs_once(tmp_path, monkeypatch):
+    import sqlite3
+    from lib import launch_receipts
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    real = launch_receipts.mark_attempted
+    calls = {"n": 0}
+
+    def locked_once(trace_id):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(trace_id)
+    monkeypatch.setattr(launch_receipts, "mark_attempted", locked_once)
+    with pytest.raises(DispatchError, match="was not sent"):
+        service.dispatch(text="full control over the pipeline", requested_session="cipher",
+                         trace_id="t-died", client_msg_id="u-lost")
+    assert backends.spawned == [], "never hand over a prompt the receipt cannot record"
+    assert _td._INFLIGHT.get(agent_id) is None
+    _assert_retry_delivers_once(service, backends, agent_id)
+
+
+def test_concurrent_same_id_retries_of_an_unlaunched_message_launch_once(tmp_path, monkeypatch):
+    import threading
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="same message", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-concurrent")
+    _td.reset_for_tests()
+    start = threading.Barrier(3)
+    errors, results = [], []
+
+    def retry(trace):
+        try:
+            start.wait(3)
+            results.append(service.dispatch(text="same message", requested_session="cipher",
+                                            trace_id=trace, client_msg_id="u-concurrent"))
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+    threads = [threading.Thread(target=retry, args=(f"t-retry-{n}",)) for n in (1, 2)]
+    for thread in threads:
+        thread.start()
+    start.wait(3)
+    for thread in threads:
+        thread.join(5)
+    assert not errors
+    assert len(results) == 2
+    assert len(backends.spawned) == 1, "exactly one launch for one message"
+    assert len(_user_rows(agent_id)) == 1
+
+
+def test_stop_after_an_unlaunched_admission_fences_the_resend(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="never mind", requested_session="cipher",
+                         trace_id="t-first", client_msg_id="u-stopped")
+    _td.clear_for_agent(agent_id, preserve_queue=True, pause_queue=True)   # the user's Stop
+    _td.finish_stop(SimpleNamespace(), agent_id)
+    assert _receipt_state("t-first") == "fenced"
+
+    resent = service.dispatch(text="never mind", requested_session="cipher",
+                              trace_id="t-retry", client_msg_id="u-stopped")
+    assert resent.queued is False
+    assert backends.spawned == [], "an automatic resend after Stop is not new intent"
+
+
+def test_retry_while_the_message_waits_behind_a_busy_turn_is_not_launched_twice(tmp_path, monkeypatch):
+    backends = _Backends()
+    agent_id = agents_db.create_agent(
+        persona="Mike", voice_id="V", cwd=str(tmp_path), session="mike", backend="claude")
+    agents_db.start_runtime(agent_id, "mike")
+    ctx = SimpleNamespace(default_session="mike",
+                          agents_path=tmp_path / "unused.json", stream=_Stream())
+    service = TurnDispatchService(ctx, backend_registry=backends, home=tmp_path,
+                                  uuid_factory=lambda: "backend-session-1")
+    # An interactive terminal holds the agent: the send waits in this process's memory.
+    monkeypatch.setattr(_td, "_terminal_live", lambda agent: agent == agent_id)
+    service.dispatch(text="later", requested_session="mike", trace_id="t-held",
+                     client_msg_id="u-held")
+    assert _receipt_state("t-held") == "pending"
+    assert _td._SLOTS.has_queued(agent_id, lambda s: getattr(s, "client_msg_id", "") == "u-held")
+
+    service.dispatch(text="later", requested_session="mike", trace_id="t-retry",
+                     client_msg_id="u-held")
+    assert backends.spawned == [], "the held original is the only copy that may launch"
+    assert _td._SLOTS.queue_depth(agent_id) == 1
+
+
+def test_a_message_admitted_without_a_receipt_stays_unknown(tmp_path):
+    # Rows admitted before this receipt existed (e.g. 2026-10-25 u-D0524D85) are never
+    # launched automatically: missing evidence is still not proof.
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    from lib import message_store, settings_store
+    service.dispatch(text="historic", requested_session="cipher", trace_id="t-old",
+                     client_msg_id="u-old")
+    _td._INFLIGHT.pop(agent_id, None)
+    agents_db.conn().execute("DELETE FROM state_log WHERE agent_id = ?", (agent_id,))
+    settings_store.delete("launch-receipt:t-old")
+    assert message_store.client_message_trace("u-old") == "t-old"
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="historic", requested_session="cipher", trace_id="t-new",
+                         client_msg_id="u-old")
+    assert len(backends.spawned) == 1
+
+
+def test_a_different_principal_cannot_relaunch_a_pending_message(tmp_path, monkeypatch):
+    backends = _CodexSteerable()
+    service, agent_id = _codex_service(tmp_path, backends)
+    _die_once_after_admission(monkeypatch, service)
+    with pytest.raises(RuntimeError):
+        service.dispatch(text="mine", requested_session="cipher", trace_id="t-first",
+                         client_msg_id="u-mine")
+    _td.reset_for_tests()
+    with pytest.raises(DispatchError, match="delivery is unconfirmed"):
+        service.dispatch(text="mine", requested_session="cipher", trace_id="t-peer",
+                         client_msg_id="u-mine", origin="agent", sender_agent_id="peer")
+    assert backends.spawned == []
+    assert _receipt_state("t-first") == "pending"
