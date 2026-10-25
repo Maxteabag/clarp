@@ -110,6 +110,28 @@ def delete(key: str) -> None:
     conn().execute("DELETE FROM settings WHERE key = ?", (key,))
 
 
+def set_json_field_if(key: str, field: str, value: str, *, expect: str) -> bool:
+    """Compare-and-set one top-level field of a JSON value: only while it
+    still equals `expect`. Returns whether the row changed."""
+    path = "$." + field
+    return conn().execute(
+        """UPDATE settings SET value = json_set(value, ?, ?), updated_at = ?
+            WHERE key = ? AND json_valid(value) AND json_extract(value, ?) = ?""",
+        (path, value, now_ms(), key, path, expect)).rowcount > 0
+
+
+def set_json_field_for_prefix(prefix: str, field: str, value: str, *, expect: str,
+                              match_field: str, match_value: str) -> int:
+    """`set_json_field_if` for every key under `prefix` whose `match_field`
+    equals `match_value`. Returns the number of rows changed."""
+    path, match = "$." + field, "$." + match_field
+    return conn().execute(
+        """UPDATE settings SET value = json_set(value, ?, ?), updated_at = ?
+            WHERE key LIKE ? AND json_valid(value) AND json_extract(value, ?) = ?
+              AND json_extract(value, ?) = ?""",
+        (path, value, now_ms(), prefix + "%", path, expect, match, match_value)).rowcount
+
+
 def prune_prefix(prefix: str, *, updated_before: int) -> int:
     """Delete every key under `prefix` last written before `updated_before`.
 
