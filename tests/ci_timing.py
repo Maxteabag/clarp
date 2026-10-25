@@ -36,8 +36,25 @@ def _worker() -> str:
     return os.environ.get("PYTEST_XDIST_WORKER") or "controller"
 
 
-def _write(record: dict, *, force: bool = False) -> None:
-    handle = _state.get("handle")
+def _note(message: str) -> None:
+    """Best-effort stderr note; a broken stderr is ignored. Exception only: an
+    interrupt or a timeout signal still propagates as pytest expects."""
+    try:
+        sys.stderr.write(f"ci_timing: {message}\n")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _close(handle) -> None:
+    try:
+        handle.close()
+    except Exception as exc:  # noqa: BLE001
+        _note(f"close failed: {exc!r}")
+
+
+def _write(record: dict, *, force: bool = False, handle=None) -> None:
+    """Write one line; raises on an I/O error (callers contain it)."""
+    handle = handle if handle is not None else _state.get("handle")
     if handle is None:
         return
     line = json.dumps(record, separators=(",", ":")) + "\n"
@@ -47,6 +64,7 @@ def _write(record: dict, *, force: bool = False) -> None:
     handle.write(line)
     handle.flush()
     _state["bytes"] += len(line)
+    _state["written"] += 1
 
 
 def _meta() -> dict:
@@ -74,18 +92,23 @@ def _meta() -> dict:
 
 
 def session_start(target: str) -> None:
-    # Diagnostics never fail a run: any error here just means no file.
+    """Never raises: any failure leaves diagnostics off (and the file closed)."""
     if not target or "handle" in _state:
         return
     try:
         os.makedirs(target, exist_ok=True)
-        path = os.path.join(target, f"timing-{_worker()}.jsonl")
-        _state.update(handle=open(path, "a", buffering=1), bytes=0, truncated=0, errors=0,
-                      short={"count": 0, "seconds": 0.0}, started=time.monotonic())
+        handle = open(os.path.join(target, f"timing-{_worker()}.jsonl"), "a", buffering=1)
+    except Exception as exc:  # noqa: BLE001
+        _note(f"disabled (no file): {exc!r}")
+        return
+    _state.update(handle=handle, bytes=0, truncated=0, errors=0, written=0,
+                  short={"count": 0, "seconds": 0.0}, started=time.monotonic())
+    try:
         _write(_meta())
     except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"ci_timing: disabled: {exc!r}\n")
-        _state.pop("handle", None)
+        _state.clear()
+        _close(handle)
+        _note(f"disabled (meta not written): {exc!r}")
 
 
 def phase(report) -> None:
@@ -104,22 +127,28 @@ def phase(report) -> None:
                 "at": round(time.monotonic() - _state["started"], 3),
                 "threads": len(live) - 1, "timers": timers})
     except Exception:  # noqa: BLE001 - counted in the summary, never raised into pytest
-        _state["errors"] += 1
+        _state["errors"] = _state.get("errors", 0) + 1
 
 
 def session_end(exitstatus) -> None:
-    if "handle" not in _state:
+    """Never raises. The summary reports what was actually written; with any
+    writer error its status is 'degraded' and missing lines are unknown."""
+    handle = _state.pop("handle", None)
+    if handle is None:
         return
     try:
+        errors = _state.get("errors", 0)
         _write({"type": "summary", "worker": _worker(), "exit": int(exitstatus),
                 "elapsed": round(time.monotonic() - _state["started"], 3),
-                "short_phases": _state["short"], "truncated_lines": _state["truncated"],
-                "errors": _state["errors"]},
-               force=True)   # the summary is always written, past the cap
+                "status": "degraded" if errors else "ok", "errors": errors,
+                "written_lines": _state["written"], "short_phases": _state["short"],
+                "truncated_lines": _state["truncated"]},
+               force=True, handle=handle)   # always attempted, past the cap
     except Exception as exc:  # noqa: BLE001
-        sys.stderr.write(f"ci_timing: summary not written: {exc!r}\n")
+        _note(f"summary not written: {exc!r}")
     finally:
-        _state.pop("handle").close()
+        _state.clear()
+        _close(handle)
 
 
 class Plugin:
