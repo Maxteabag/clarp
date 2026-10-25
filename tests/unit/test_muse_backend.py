@@ -62,3 +62,39 @@ def test_codex_only_protocols_are_unsupported():
 def test_live_items_get_a_short_muse_prefix():
     from lib import live_hub
     assert live_hub.item_prefix("muse") == "mu"
+
+
+# --- models: Muse's own catalogue cache --------------------------------------
+
+_CATALOG = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "muse" / "model-catalog.json"
+
+
+def test_the_catalogue_cache_lists_visible_models_with_their_own_efforts():
+    from lib import provider_capabilities as pc
+    models = pc.parse_muse_models(_CATALOG.read_text(), observed_at="2026-10-25T00:00:00Z")
+    assert [m["id"] for m in models] == [
+        "muse-wonder-1.0", "muse-wonder-full-1.0", "muse-spark-1.3", "muse-spark-1.2"]
+    by = {m["id"]: m for m in models}
+    # Efforts come from each model's variants, in the backend's canonical order.
+    assert by["muse-wonder-1.0"]["supported_efforts"] == ["minimal", "low", "medium", "high", "xhigh", "max"]
+    assert "max" not in by["muse-spark-1.2"]["supported_efforts"]
+    assert by["muse-wonder-1.0"]["default_effort"] == "high"
+    assert all(m["source"]["kind"] == "cli_cache" for m in models)
+    assert pc.parse_muse_models("not json", observed_at="x") == []
+
+
+def test_discovery_reads_the_cache_and_falls_back_without_one(tmp_path, monkeypatch):
+    from lib import provider_capabilities as pc
+    import subprocess
+    monkeypatch.setenv("CLAUDE_PWA_MUSE_HOME", str(tmp_path))
+    run = lambda argv, **kw: subprocess.CompletedProcess(argv, 0, "1.4.13-R6996.1\n", "")
+    empty = pc._discover_provider("muse", "2026-10-25T00:00:00Z", resolve=lambda p: "/bin/muse", run=run)
+    assert [m["id"] for m in empty["models"]] == ["muse-wonder-1.0"]  # the bundled fallback row
+    cache = tmp_path / "model-catalog"
+    cache.mkdir()
+    (cache / "6d657461__p746268.json").write_text(_CATALOG.read_text())
+    found = pc._discover_provider("muse", "2026-10-25T00:00:00Z", resolve=lambda p: "/bin/muse", run=run)
+    assert [m["id"] for m in found["models"]][0] == "muse-wonder-1.0"
+    assert len(found["models"]) == 4
+    assert found["source"]["kind"] == "cli_cache"  # a cache, not a command that lists models
+    assert backends.by_id("muse").effort_scope == "model"

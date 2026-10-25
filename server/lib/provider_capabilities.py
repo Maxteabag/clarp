@@ -323,6 +323,50 @@ def parse_grok_models(raw: str, *, observed_at: str) -> list[dict[str, Any]]:
     return out
 
 
+def muse_model_catalog_dir() -> Path:
+    """Where Muse caches its provider's model catalogue (one JSON per profile)."""
+    from .muse_transcript import muse_home
+    return muse_home() / "model-catalog"
+
+
+def parse_muse_models(raw: str, *, observed_at: str) -> list[dict[str, Any]]:
+    """Parse one Muse ``model-catalog/*.json`` cache file.
+
+    Only ``visible`` rows are offered (Muse hides its contributor and image
+    variants). Each model carries its own effort tiers, put in the backend's
+    canonical order; ``high`` is Muse's default when the model has it.
+    """
+    try:
+        payload = json.loads(raw or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    rows = payload.get("rows") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return []
+    from .backend.muse import MuseBackend
+    order = MuseBackend.efforts
+    source = _source("cli_cache", "muse model catalogue cache", observed_at, "fresh")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or row.get("visibility") != "visible":
+            continue
+        model_id = str(row.get("model_id") or "").strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        tiers = {str(v.get("tier")) for v in row.get("reasoning_effort_variants") or []
+                 if isinstance(v, dict)}
+        efforts = [e for e in order if e in tiers]
+        out.append(_model(
+            model_id, str(row.get("display_label") or model_id),
+            default_effort="high" if "high" in efforts else None,
+            supported_efforts=efforts or None,
+            source=dict(source),
+        ))
+    return out
+
+
 # `opencode models --verbose`: the per-model detail Clarp needs (name and
 # reasoning variants) at the cost of a plain listing.
 OPENCODE_MODELS_ARGV = ("models", "--verbose")
@@ -674,6 +718,16 @@ def _discover_provider(
                             result.stdout, observed_at=observed_at)
                 except (OSError, subprocess.SubprocessError):
                     pass
+            elif provider_id == "muse":
+                probe_detail = "muse model catalogue cache"
+                try:
+                    for path in sorted(muse_model_catalog_dir().glob("*.json")):
+                        known = {item["id"] for item in models}
+                        models += [item for item in parse_muse_models(
+                            path.read_text(encoding="utf-8", errors="replace"),
+                            observed_at=observed_at) if item["id"] not in known]
+                except OSError:
+                    pass
             elif provider_id in ("opencode", "deepseek"):
                 # Same binary for both cards; DeepSeek keeps only its rows.
                 probe_detail = ("opencode models" if provider_id == "opencode"
@@ -719,7 +773,7 @@ def _discover_provider(
     elif observed_catalog:
         # Claude's catalog is read from the CLI's account cache, not from a
         # command that enumerates models; say which one it was.
-        kind = "cli_cache" if provider_id == "claude" else "cli_probe"
+        kind = "cli_cache" if provider_id in ("claude", "muse") else "cli_probe"
         catalog_source = _source(kind, probe_detail, observed_at, "fresh")
     else:
         catalog_source = _source(
