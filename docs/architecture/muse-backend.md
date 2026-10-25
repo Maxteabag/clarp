@@ -55,9 +55,18 @@ for `list_sessions`.
 
 ## Catalogue
 
-`id = "muse"`, label "Muse Code", binary `muse`, efforts
-`none|minimal|low|medium|high|xhigh|max|ultra` (default `high`), terminal
-`muse resume <id>`, login `muse login` (device code).
+`id = "muse"`, label "Muse Code", binary `muse`, terminal
+`muse --yolo resume <id>`. Sign-in happens outside Clarp (`muse login`).
+
+Models come from Muse's own catalogue cache,
+`~/.local/share/muse/model-catalog/*.json`: visible rows only, each with its
+own effort tiers (`effort_scope = "model"`, default `high`); without a cache
+the bundled `muse-wonder-1.0` row is offered.
+
+Not supported (yet): compaction (Muse compacts its own context; a typed
+`/compact` in `muse resume` is unverified), forks, steering, goals, and the
+quota card (`run.usage` carries the allowance windows, which the runner
+records but does not yet publish).
 
 ## Fixtures
 
