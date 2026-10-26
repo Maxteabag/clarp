@@ -4641,7 +4641,44 @@ def test_bad_delivery_parameters_are_refused(running_server, monkeypatch):
     base, _ctx, _srv = running_server
     _advertise_delivery(monkeypatch)
     for query in ("delivery_since=-1", "delivery_since=x", "delivery_stop_generation=x",
-                  "delivery_until=-2"):
+                  "delivery_until=-2", "delivery_since=%C2%B2",          # "²": not ASCII
+                  "delivery_stop_generation=%D9%A3", "delivery_until=%EF%BC%91"):
         with pytest.raises(urllib.error.HTTPError) as refused:
             _get(base + "/log?session=rachel&" + query)
         assert refused.value.code == 400
+
+
+def test_a_delivery_read_writes_nothing_inside_its_read_snapshot(running_server, monkeypatch):
+    # server_id() mints and stores the Host id on first use; that write must
+    # happen before the read snapshot, never inside it.
+    from contextlib import contextmanager
+    from lib import server_identity, settings_store
+    base, _ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    real_get = server_identity.get_text
+    monkeypatch.setattr(server_identity, "get_text",       # a Host whose id is not minted yet
+                        lambda key, **kw: "" if key == server_identity._ID_KEY else real_get(key, **kw))
+    inside = {"depth": 0, "writes": []}
+    real_snapshot, real_set_text = settings_store.read_snapshot, settings_store.set_text
+
+    @contextmanager
+    def watched():
+        inside["depth"] += 1                       # snapshots nest (annotate_rows, delivery_page)
+        try:
+            with real_snapshot():
+                yield
+        finally:
+            inside["depth"] -= 1
+
+    def guarded(key, value, **kw):
+        if inside["depth"]:
+            inside["writes"].append(key)
+        return real_set_text(key, value, **kw)
+    monkeypatch.setattr(settings_store, "read_snapshot", watched)
+    monkeypatch.setattr(settings_store, "set_text", guarded)
+    monkeypatch.setattr(server_identity, "set_text", guarded)   # its own import binding
+    status, raw = _get(base + "/log?session=rachel&delivery_since=0")
+    body = json.loads(raw)
+    assert status == 200 and body["delivery_scope"]["server_id"]
+    assert inside["writes"] == [], inside["writes"]
+    assert real_get(server_identity._ID_KEY) == body["delivery_scope"]["server_id"]
