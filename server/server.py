@@ -2923,12 +2923,33 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(body_obj).encode()
         self._send(200, body, "application/json")
 
+    def _delivery_observation(self, *, fresh: bool):
+        """A runtime status OBSERVATION (never "current"): O1 may come from the
+        shared cache (<= 1 s old), O2 is a fresh RPC. None when unavailable."""
+        client = getattr(self.ctx, "runtime_client", None)
+        try:
+            if not fresh and backends._RUNTIME_CLIENT is client:
+                return backends.runtime_status(max_age=1.0)
+            return client.status()
+        except Exception as e:  # noqa: BLE001 - unavailable means omit
+            log_exception("deliveryObservationFail", e)
+            return None
+
     def _add_delivery_state(self, body_obj: dict, session: str, qs: dict) -> str:
-        """F4 (send_delivery_state): S2 on user rows and the seq feed
-        (delivery_since / delivery_bootstrap / delivery_until /
-        delivery_stop_generation), in ONE read snapshot whose user Stop
-        generation is returned as the page's projection epoch. Returns a 400
-        message, or "" when fine."""
+        """F4 (send_delivery_state): S2 on user rows and the seq feed, in ONE
+        read snapshot, bracketed by two runtime observations (E2).
+
+        Fields are added only if O1 (before the snapshot) and O2 (a fresh RPC
+        after it) both name the SAME capable, non-draining runtime identity
+        (release_id, instance); otherwise nothing is added (omission is never
+        evidence). The bracket shows that the same runtime process answered at
+        both instants and that no switch COMPLETED in between. It does NOT
+        prove that this process was the only writer during the read, and it
+        cannot prevent a switch right after O2: that is caught by the NEXT
+        request, because a cursor is valid only for the exact scope
+        (server_id, agent_id, runtime_release, runtime_instance, G) returned
+        here. Without an external runtime the Host owns turns itself and uses
+        its own per-process identity. Returns a 400 message, or "" when fine."""
         from lib import launch_receipts, server_identity, settings_store
         agent = agents_db.get_by_session(session)
         if not agent:
@@ -2944,26 +2965,60 @@ class Handler(BaseHTTPRequestHandler):
                 return f"bad {name}"
             return int(raw)
 
+        def text(name: str) -> str:
+            return (qs.get(name, [""])[0] or "").strip()
+
         since, until = number("delivery_since"), number("delivery_until")
         generation = number("delivery_stop_generation")
         for value in (since, until, generation):
             if isinstance(value, str):
                 return value
         bootstrap = (qs.get("delivery_bootstrap", [""])[0] or "").strip() in {"1", "true"}
+        external = getattr(self.ctx, "runtime_client", None) is not None
+        first = None
+        if external:
+            first = launch_receipts.runtime_identity(self._delivery_observation(fresh=False))
+            if first is None:
+                return ""                      # O1 unusable: omit everything
         # server_id() may mint and store the id on first use: read it before
         # the read snapshot, which must stay write-free.
-        scope = {"server_id": server_identity.server_id(), "agent_id": agent_id}
-        with settings_store.read_snapshot():
-            epoch = launch_receipts.annotate_rows(agent_id, body_obj.get("turns") or [])
-            body_obj["delivery_scope"] = scope
-            body_obj["delivery_stop_generation"] = epoch
-            if since is None:
-                return ""
+        server_id = server_identity.server_id()
+        users = [dict(turn) for turn in body_obj.get("turns") or []
+                 if turn.get("role") == "user"]
+        page = None
+        if since is not None:
             # A plain since=0 is the first bootstrap page (packet v4 §1.3d).
             bootstrap = bootstrap or since == 0
-            page = launch_receipts.delivery_page(
-                agent_id, since=since, until=until, stop_generation=generation,
-                bootstrap=bootstrap)
+        with settings_store.read_snapshot():
+            epoch = launch_receipts.annotate_rows(agent_id, users)
+            if since is not None:
+                page = launch_receipts.delivery_page(
+                    agent_id, since=since, until=until, stop_generation=generation,
+                    bootstrap=bootstrap)
+        if external:
+            second = launch_receipts.runtime_identity(self._delivery_observation(fresh=True))
+            if second is None or second != first:
+                return ""                      # unusable or switched inside the bracket: omit
+            release, instance = second
+        else:
+            release, instance = (launch_receipts.IN_PROCESS_RELEASE,
+                                 launch_receipts.IN_PROCESS_INSTANCE)
+        by_id = {str(turn.get("id")): turn.get("delivery") for turn in users if "delivery" in turn}
+        for turn in body_obj.get("turns") or []:
+            if turn.get("role") == "user" and str(turn.get("id")) in by_id:
+                turn["delivery"] = by_id[str(turn.get("id"))]
+        body_obj["delivery_scope"] = {"server_id": server_id, "agent_id": agent_id,
+                                      "runtime_release": release, "runtime_instance": instance}
+        body_obj["delivery_stop_generation"] = epoch
+        if page is None:
+            return ""
+        continuation = not (bootstrap and since == 0 and until is None)
+        if continuation and (text("delivery_runtime_release"), text("delivery_runtime_instance")) \
+                != (release, instance):
+            # A cursor is valid only within the exact runtime scope it was
+            # taken under (E3): any runtime restart or switch resets it.
+            page = {"updates": [], "cursor": None, "more": False, "expired": True,
+                    "until": None, "skipped": 0}
         if page["skipped"]:
             log("deliveryPointerSkipped", f"agent={agent_id} skipped={page['skipped']}")
         body_obj["delivery_updates"] = page["updates"]
@@ -6101,10 +6156,14 @@ class Handler(BaseHTTPRequestHandler):
                 "trace_id": req.trace_id}
         if opening is not None:
             body["opening"] = opening["opening"]
-        from lib import server_identity
+        from lib import launch_receipts, server_identity
         if (isinstance(result.delivery, dict) and result.delivery.get("state") != "stopped"
-                and server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE)):
-            body["delivery"] = result.delivery      # F4 S1: 200 only, never "stopped"
+                and server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE)
+                and (getattr(self.ctx, "runtime_client", None) is None
+                     or launch_receipts.runtime_identity(result.delivery_runtime) is not None)):
+            # F4 S1: 200 only, never "stopped", and only with the identity of
+            # the runtime that wrote the receipt in this same dispatch result.
+            body["delivery"] = result.delivery
         self._json_ok(body)
 
     @staticmethod

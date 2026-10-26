@@ -3335,8 +3335,8 @@ def test_handoff_verdicts_never_trust_an_unchanged_row(tmp_path):
 
 def test_pruning_is_bounded_and_never_revives_a_fenced_receipt(tmp_path):
     import json
-    from lib import launch_receipts, settings_store
-    launch_receipts.reset_for_tests()                        # a fresh process: first prune due
+    from lib import launch_receipts, maintenance, settings_store
+    launch_receipts.reset_for_tests()
     old = 1_000
     for trace, state in (("p", "pending"), ("a", "attempted"), ("f", "fenced")):
         settings_store.set_text("launch-receipt:" + trace, json.dumps(
@@ -3347,18 +3347,16 @@ def test_pruning_is_bounded_and_never_revives_a_fenced_receipt(tmp_path):
         "EXPLAIN QUERY PLAN SELECT key FROM settings WHERE key >= ? AND key < ?",
         ("launch-receipt:", "launch-receipt;")))
     assert "INDEX" in plan.upper(), plan
+    # An admission never prunes (F4 N7): the Host maintenance pass does.
     launch_receipts.record_pending(agent_id="ag", trace_id="fresh", client_msg_id="w",
                                    origin="user")
+    assert _receipt_state("p") == "pending"
+    maintenance.prune_database(now_ms=launch_receipts.RETENTION_MS + 10 * old)
     assert _receipt_state("p") is None and _receipt_state("a") is None
     assert _receipt_state("f") == "fenced", "a fenced receipt is never pruned"
+    assert _receipt_state("fresh") == "pending", "a recent receipt is kept"
     assert settings_store.get("unrelated-key") == "keep"
     assert launch_receipts.status("ag", "p") == "unknown", "expiry never yields retryable"
-    # Throttled: a second admission inside the interval does not prune again.
-    settings_store.set_text("launch-receipt:p2", json.dumps(
-        {"state": "pending", "agent_id": "ag", "admitted_at": old}), updated_at=old)
-    launch_receipts.record_pending(agent_id="ag", trace_id="fresh2", client_msg_id="x",
-                                   origin="user")
-    assert _receipt_state("p2") == "pending"
 
 
 def test_a_failed_receipt_write_rolls_back_the_admission(tmp_path, monkeypatch):

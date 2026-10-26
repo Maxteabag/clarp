@@ -145,6 +145,19 @@ def prune_database(*, now_ms: int | None = None,
         c, now_ms, PROMPT_VERSION, tool_explanation_templates.VERSION)))
     from .tool_explanations import recover_programs
     counts["tool_explanation_programs"] = _timed(phases, "db.tool_explanation_programs", lambda: recover_programs(c))
+    # F4 N7: launch receipts and their delivery pointers, at most PRUNE_LIMIT
+    # per pass in their own short transaction (no catch-up loop). With this
+    # pass on schedule and no backlog a receipt lives about 7 days + up to one
+    # pass interval; that is not a guarantee. A failure is logged and never
+    # touches an admission or the other phases.
+    try:
+        from . import launch_receipts
+        counts["launch_receipts"] = _timed(
+            phases, "db.launch_receipts", lambda: launch_receipts.prune(now_ms)["receipts"])
+    except Exception as e:  # noqa: BLE001
+        from .log import log_exception
+        log_exception("launchReceiptPruneFail", e)
+        counts["launch_receipts"] = 0
     return counts
 
 

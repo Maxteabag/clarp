@@ -15,8 +15,9 @@ sent; ``attempted`` says nothing, and the state log keeps deciding as before.
 Stop fences pending receipts so an automatic retry is not fresh intent.
 
 Rows live in ``settings`` under one prefix: same database and transaction as
-the admission, no schema change. Pruning is throttled, uses the key index, and
-never deletes a fenced receipt; deleting any other one only makes it unknown.
+the admission, no schema change. Pruning runs in the Host's maintenance pass
+(never inside an admission), uses the key index, and never deletes a fenced
+receipt; deleting any other one only makes it unknown.
 
 The handoff never trusts a compare-and-set that changed nothing: it reads the
 receipt back and refuses a fenced or superseded one. Stop also records an
@@ -38,6 +39,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -51,8 +53,7 @@ ATTEMPTED = "attempted"
 FENCED = "fenced"
 RELAUNCHED = "relaunched"
 RETENTION_MS = 7 * 24 * 3600 * 1000
-PRUNE_INTERVAL_SEC = 600.0
-PRUNE_LIMIT = 500
+PRUNE_LIMIT = 500   # per maintenance pass; no catch-up loop (N7)
 
 SEQ_KEY = "launch-receipt.seq"              # global; one per transition, in its transaction
 PRUNE_SEQ_KEY = "launch-receipt.prune_seq"  # max seq the prune ever deleted (monotonic)
@@ -67,7 +68,6 @@ HANDED_OVER = "handed_over"
 
 _LOCK = threading.Lock()
 _STOP_EPOCH: dict[str, int] = {}     # agent_id -> ms of its latest Stop in this process
-_LAST_PRUNE = 0.0
 
 
 class HandoffRefused(RuntimeError):
@@ -189,21 +189,13 @@ def record_pending(*, agent_id: str, trace_id: str, client_msg_id: str,
             "user_stop_gen": int(user_stop_generation),
             "rev": _count((existing or {}).get("rev")) + 1, "seq": _next_seq(),
         }, stamp=stamp, previous_seq=_count((existing or {}).get("seq")))
-    _maybe_prune(stamp)
-
-
-def _maybe_prune(stamp: int) -> None:
-    global _LAST_PRUNE
-    now = time.monotonic()
-    with _LOCK:
-        if _LAST_PRUNE and now - _LAST_PRUNE < PRUNE_INTERVAL_SEC:
-            return
-        _LAST_PRUNE = now
-    prune(stamp)
 
 
 def prune(stamp: int) -> dict:
-    """Delete receipts last written over RETENTION_MS ago (fenced ones are kept:
+    """The Host maintenance pass's receipt phase (maintenance.prune_database),
+    at most once per pass and never inside a user admission, so a prune
+    failure can never roll back a send. Delete receipts last written over
+    RETENTION_MS ago (fenced ones are kept:
     without them an older state row could read "retryable" again after Stop;
     any other deletion only yields "unknown") and their pointers, at most
     PRUNE_LIMIT receipts, and advance PRUNE_SEQ_KEY over every deleted seq, all
@@ -323,10 +315,8 @@ def fence_agent(agent_id: str, *, on_fenced=None) -> int:
 
 
 def reset_for_tests() -> None:
-    global _LAST_PRUNE
     with _LOCK:
         _STOP_EPOCH.clear()
-        _LAST_PRUNE = 0.0
 
 
 def status(agent_id: str, trace_id: str, *, client_msg_id: str | None = None,
@@ -350,6 +340,33 @@ def status(agent_id: str, trace_id: str, *, client_msg_id: str | None = None,
             and (receipt.get("sender_agent_id") or "") != (sender_agent_id or "")):
         return "unknown"
     return "retryable"
+
+
+# --- delivery state (F4): runtime identity (E1-E4) ----------------------------------
+
+IN_PROCESS_RELEASE = "in-process"
+# This process's own identity when it owns turns itself (no external runtime):
+# minted once per process, so a Host restart resets cursors like a runtime one.
+IN_PROCESS_INSTANCE = uuid.uuid4().hex
+
+
+def runtime_identity(observation) -> tuple[str, str] | None:
+    """(release_id, instance) of a runtime status observation (or a dispatch
+    result's ``delivery_runtime``) that may serve delivery state: it declares
+    the capability, is not draining and names both parts. Anything else
+    (unavailable, draining, malformed, pre-F4) is None: omit."""
+    if not isinstance(observation, dict) or observation.get("draining") is not False:
+        return None
+    capabilities = observation.get("capabilities")
+    if not isinstance(capabilities, dict) or capabilities.get(SEND_DELIVERY_CAPABILITY) is not True:
+        return None
+    release, instance = observation.get("release_id"), observation.get("instance")
+    if not (isinstance(release, str) and release and isinstance(instance, str) and instance):
+        return None
+    return release, instance
+
+
+SEND_DELIVERY_CAPABILITY = "send_delivery_state"
 
 
 # --- delivery state (F4): projection and bounded reads ------------------------------

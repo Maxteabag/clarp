@@ -539,4 +539,5 @@ def test_hints_follow_committed_transitions_when_advertised(tmp_path, monkeypatc
     service, _agent = _service(tmp_path)
     _send(service, "u-h2", "th2")
     hints = [e for e in service.ctx.stream.events if "delivery-updated" in str(e)]
-    assert len(hints) >= 2, "pending at admission, then handed_over at the handoff"
+    assert [h["delivery"]["state"] for h in hints] == ["handed_over"], \
+        "one hint, after the handoff (N4 A); none at admission or before the spawn"

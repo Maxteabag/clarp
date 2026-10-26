@@ -407,6 +407,23 @@ def busy_timeout(timeout_ms: int) -> Iterator[sqlite3.Connection]:
         connection.execute(f"PRAGMA busy_timeout = {previous}")
 
 
+@contextmanager
+def busy_timeout_at_most(timeout_ms: int) -> Iterator[sqlite3.Connection]:
+    """Temporarily LOWER this thread's busy timeout to at most *timeout_ms*,
+    restoring the previous value on success and on exception. For optional
+    writes (F4 delivery hints) that must never hold up a launch behind a long
+    writer; a give-up inside is expected and not reported as a lock wait."""
+    connection = conn()
+    previous = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+    _LOCAL.busy_expected = True
+    try:
+        connection.execute(f"PRAGMA busy_timeout = {min(int(timeout_ms), previous)}")
+        yield connection
+    finally:
+        _LOCAL.busy_expected = False
+        connection.execute(f"PRAGMA busy_timeout = {previous}")
+
+
 def best_effort_write(sql: str, parameters=(), *, timeout_ms: int = 20) -> bool:
     """Run one optional write, giving up after *timeout_ms* if the file is busy.
 
