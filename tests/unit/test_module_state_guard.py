@@ -161,6 +161,9 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/turn_dispatch.py", "_JANITOR_SPAWN_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_REQUEST_LOCKS"): LOCKS,
     ("lib/turn_dispatch.py", "_RUNTIME_CLIENT"): CLIENT,
+    ("lib/turn_dispatch.py", "_DELIVERY_STREAM"): (
+        "the turn owner's event stream, bound when its TurnDispatchService is built; "
+        "used only for best-effort F4 delivery hints from module-level transitions"),
     ("lib/viz_learning.py", "_failed_until"): THROTTLE,
     ("lib/viz_learning.py", "_pending"): JOBS,
     ("lib/viz_learning.py", "_active"): JOBS,

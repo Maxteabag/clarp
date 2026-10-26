@@ -168,6 +168,10 @@ class RuntimeClient:
             queued=bool(result.get("queued")),
             queue_depth=int(result.get("queue_depth") or 0),
             queue_revision=int(result.get("queue_revision") or 0),
+            # F4 S1 from a runtime that computes it; an older runtime sends
+            # none, which stays unknown (never a hint invented here).
+            delivery=(result.get("delivery")
+                      if isinstance(result.get("delivery"), dict) else None),
         )
 
     def dispatch(self, **kwargs):

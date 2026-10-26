@@ -3509,7 +3509,7 @@ def test_a_failed_stop_fence_write_retries_through_the_tracked_scheduler(monkeyp
     from lib import launch_receipts
     calls, scheduled = {"n": 0}, []
 
-    def flaky(agent):
+    def flaky(agent, **_hooks):
         calls["n"] += 1
         if calls["n"] == 1:
             raise sqlite3.OperationalError("database is locked")

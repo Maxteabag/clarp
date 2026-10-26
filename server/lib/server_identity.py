@@ -43,6 +43,11 @@ CAPABILITIES_VERSION = 1
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
 HOST_CONTRACT = 74  # PROVISIONAL (listen-first + call transcription policy over artifact_summary_v1 73): Nadia books it at the ready landing, else the next free
 MIN_IOS_CONTRACT = 1
+# F4 delivery state (joint packet 9a96df74): implemented, NOT advertised. Its
+# introduction number is booked by Nadia at the ready landing; until then the
+# feature is absent from FEATURES/FEATURE_CONTRACTS and the Host emits none of
+# its fields (feature_advertised gates every read path).
+SEND_DELIVERY_STATE = "send_delivery_state"
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
     "artifact_summary_v1",
@@ -379,3 +384,8 @@ FEATURE_CONTRACTS["agent_ring_device_optout"] = 72  # PROVISIONAL: booked at the
 # permanent gap and are never reused. Until booked this composition must not merge or reach CI.
 FEATURE_CONTRACTS["agent_ring_listen_first"] = 74
 FEATURE_CONTRACTS["call_transcription_policy"] = 74
+
+
+def feature_advertised(name: str) -> bool:
+    """Whether this Host advertises ``name`` (clients gate on the same list)."""
+    return name in FEATURES and name in FEATURE_CONTRACTS

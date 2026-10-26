@@ -308,6 +308,28 @@ class DispatchResult:
     queued: bool = False
     queue_depth: int = 0
     queue_revision: int = 0
+    # F4 S1: the user send's delivery object (launch_receipts.delivery_for_send),
+    # read after the dispatch decided; None = unknown. Never retry authority.
+    delivery: dict | None = None
+
+
+def _with_delivery(command: "DispatchCommand", result: DispatchResult) -> DispatchResult:
+    """F4 S1, computed where turns are owned, after the decision: never from an
+    exception and never authority. A bookkeeping failure leaves it unknown."""
+    if not (command.client_msg_id and launch_receipts.eligible(
+            origin=command.origin, client_msg_id=command.client_msg_id, call_opening=False)):
+        return result
+    try:
+        agent = agents_db.get_by_session(result.session) if result.session else None
+        if not agent:
+            return result
+        shown = launch_receipts.delivery_for_send(
+            command.client_msg_id, agent_id=agent["agent_id"], origin=command.origin,
+            sender_agent_id=command.sender_agent_id or "")
+    except Exception as e:  # noqa: BLE001 - delivery state is a projection, never a failure
+        log_exception("deliveryStateReadFail", e, detail=result.session)
+        return result
+    return replace(result, delivery=shown) if shown is not None else result
 
 
 def _resolve_llm(agent: dict, backend: str) -> tuple[str, str]:
@@ -470,6 +492,40 @@ class _LaunchReceiptRefused(DispatchError):
         super().__init__(503, UNCONFIRMED_DELIVERY)
 
 
+_DELIVERY_STREAM = None   # the turn owner's stream (set by TurnDispatchService)
+
+
+def _announce_delivery(trace_id: str) -> None:
+    """F4: after a receipt transition COMMITTED, a best-effort, durable
+    ``delivery-updated`` hint. A failed append never affects the launch or
+    the Stop; clients heal through /log delivery_since. Not emitted until the
+    Host advertises send_delivery_state."""
+    from . import message_writes, server_identity
+    stream = _DELIVERY_STREAM
+    if stream is None or not server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE):
+        return
+    try:
+        receipt = launch_receipts.get(trace_id)
+        agent_id = str((receipt or {}).get("agent_id") or "")
+        agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+        if not agent:
+            return
+        shown = launch_receipts.project(
+            receipt, agent_id=agent_id,
+            user_stop_generation=turn_queue.user_stop_generation(agent_id))
+        if shown is None:
+            return
+        events.broadcast(stream, events.delivery_updated(
+            session=str(agent.get("session") or ""), agent_id=agent_id,
+            message_id=message_writes._client_message_id(shown["for"]["client_msg_id"]),
+            delivery=shown))
+    except Exception as e:  # noqa: BLE001 - a hint; never fails its caller
+        try:
+            log_exception("deliveryAnnounceFail", e, detail=trace_id)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _record_launch_attempt(spec: "_TurnSpec") -> None:
     """Fail closed immediately before a backend receives a user prompt."""
     if not launch_receipts.eligible(origin=spec.origin, client_msg_id=spec.client_msg_id,
@@ -488,6 +544,7 @@ def _record_launch_attempt(spec: "_TurnSpec") -> None:
         log_exception("launchReceiptAttemptFail", e, detail=spec.session)
         raise _LaunchReceiptUnrecorded(
             503, "could not record the launch; the message was not sent") from e
+    _announce_delivery(spec.trace_id)
 
 
 class GoalWakeDispatchError(DispatchError):
@@ -802,6 +859,9 @@ class TurnDispatchService:
         self.ctx = ctx
         self.backends = backend_registry
         self.home = home or pathlib.Path.home()
+        global _DELIVERY_STREAM
+        if getattr(ctx, "stream", None) is not None:
+            _DELIVERY_STREAM = ctx.stream
         self.uuid_factory = uuid_factory or (lambda: str(uuid.uuid4()))
         self.now = now
         # Injectable so tests can run retries synchronously instead of on a
@@ -1301,7 +1361,7 @@ class TurnDispatchService:
         runtime RPC, or admit and launch it here."""
         runtime = getattr(self.ctx, "runtime_client", None)
         if runtime is None:
-            return self._dispatch_owned(command)
+            return _with_delivery(command, self._dispatch_owned(command))
         try:
             send = getattr(runtime, "dispatch_command", None)
             result = (send(command) if send is not None
@@ -1587,6 +1647,8 @@ class TurnDispatchService:
                         log_exception("admissionBroadcastFail", e, detail=spec.session)
                     except Exception:  # noqa: BLE001 - not even logging may stop the launch
                         pass
+            if admission is True and not queue_if_busy:
+                _announce_delivery(spec.trace_id)
         if admission is False:
             eventlog.emit("server", "sendDeduplicated", context=spec.context)
             log("sendDeduplicated",
@@ -3487,7 +3549,7 @@ def _fence_launch_receipts(agent_id: str, attempt: int = 0) -> None:
     if attempt == 0:
         launch_receipts.note_stop(agent_id)
     try:
-        launch_receipts.fence_agent(agent_id)
+        launch_receipts.fence_agent(agent_id, on_fenced=_announce_delivery)
     except Exception as e:  # noqa: BLE001 - Stop itself must still complete
         log_exception("launchReceiptFenceFail", e, detail=agent_id)
         if attempt < len(_FENCE_RETRY_DELAYS):
