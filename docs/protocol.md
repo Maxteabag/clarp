@@ -237,6 +237,26 @@ Rules:
   cached chat.
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
+- **Delivery state (feature `send_delivery_state`; implemented but NOT
+  advertised until its contract number is booked, and no field below is
+  sent before then).** A user row whose current `trace_id` has a launch
+  receipt carries `delivery: {state, rev, seq, for: {client_msg_id,
+  trace_id}}` with `state` one of `pending_launch` (saved, waiting for
+  handoff; a display hint, never permission to retry), `stopped` (withdrawn
+  by the user's Stop before handoff) or `handed_over` (handoff recorded,
+  outcome unconfirmed; not "started"). Absent means unknown. Every response
+  carries `delivery_stop_generation` (the page's projection epoch) and
+  `delivery_scope {server_id, agent_id}`. Optional parameters, independent of
+  `after_revision`: `delivery_since=<seq>&delivery_stop_generation=<G>`
+  returns `delivery_updates` `[{message_id, delivery}]`, `delivery_cursor`,
+  `delivery_more` and `delivery_cursor_expired`; a cursor is valid only with
+  the epoch it was taken under. `delivery_since=0` (or `delivery_bootstrap=1`)
+  starts a bootstrap pass that fixes `delivery_until` and the epoch on its
+  first page and must be continued with
+  `delivery_bootstrap=1&delivery_since=<cursor>&delivery_until=<B>&delivery_stop_generation=<G>`
+  until `delivery_more` is false. Expired means: reload the chat and
+  bootstrap again. A `/send` 200 may carry the same `delivery` (never
+  `stopped`); every 503 body is unchanged.
 - A growing assistant reply appears as one message whose `text` and `revision`
   change on successive deltas. Replace it in place.
 
@@ -349,6 +369,7 @@ Event types and payloads:
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
+| `delivery-updated` | `agent_id`, `session`, `message_id`, `delivery` | F4 (feature `send_delivery_state`, NOT advertised until its contract number is booked; never emitted before then): a user send's delivery state changed. A hint only: clients re-read `GET /log` (`delivery_since`) and merge from there. `delivery` = `{state: pending_launch\|stopped\|handed_over, rev, seq, for: {client_msg_id, trace_id}}`. |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |

@@ -106,6 +106,10 @@ FULL_SAMPLES = {
     SSEType.AGENT_RING: lambda: events.agent_ring(**{
         key: "x" for key in events.FIELDS[SSEType.AGENT_RING]}),
     SSEType.CONTROLLER_ACTIONS_UPDATED: lambda: events.controller_actions_updated(revision=1),
+    SSEType.DELIVERY_UPDATED: lambda: events.delivery_updated(
+        session="s", agent_id="a", message_id="u-1",
+        delivery={"state": "handed_over", "rev": 2, "seq": 7,
+                  "for": {"client_msg_id": "u-1", "trace_id": "t"}}),
 }
 
 

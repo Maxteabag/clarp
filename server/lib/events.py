@@ -90,6 +90,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "agent_id", "session", "queue_depth", "queue_paused", "queue_started",
         "queue_revision", "client_msg_id",
     ),
+    SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id", "delivery"),
     SSEType.ARTIFACT_UPDATED: ("session", "agent_id", "artifact_id"),
     SSEType.ATTENTION_UPDATED: ("attention_count",),
     SSEType.BACKGROUND_JOB_UPDATED: (
@@ -317,6 +318,18 @@ def queue_updated(*, session: str, agent_id: str, queue_depth: int,
     ])
 
 
+def delivery_updated(*, session: str, agent_id: str, message_id: str,
+                     delivery: dict) -> Event:
+    """F4: a send's delivery state changed. A HINT only: clients re-read
+    /log (delivery_since) and merge from there."""
+    return _build(SSEType.DELIVERY_UPDATED, [
+        ("session", session),
+        ("agent_id", agent_id),
+        ("message_id", message_id),
+        ("delivery", delivery),
+    ])
+
+
 def artifact_updated(*, session: str, agent_id: str,
                      artifact_id: str) -> Event:
     return _build(SSEType.ARTIFACT_UPDATED, [
@@ -481,6 +494,7 @@ CONSTRUCTORS: dict[str, Callable[..., Event]] = {
     SSEType.AGENT_FOCUS: agent_focus,
     SSEType.TRANSCRIPT_UPDATED: transcript_updated,
     SSEType.QUEUE_UPDATED: queue_updated,
+    SSEType.DELIVERY_UPDATED: delivery_updated,
     SSEType.ARTIFACT_UPDATED: artifact_updated,
     SSEType.ATTENTION_UPDATED: attention_updated,
     SSEType.BACKGROUND_JOB_UPDATED: background_job_updated,

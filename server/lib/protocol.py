@@ -12,6 +12,7 @@ class SSEType:
     AGENT_FOCUS = "agent-focus"
     TRANSCRIPT_UPDATED = "transcript-updated"
     QUEUE_UPDATED = "queue-updated"
+    DELIVERY_UPDATED = "delivery-updated"  # F4: a hint to re-read /log delivery state
     ARTIFACT_UPDATED = "artifact-updated"
     ATTENTION_UPDATED = "attention-updated"
     BACKGROUND_JOB_UPDATED = "background-job-updated"

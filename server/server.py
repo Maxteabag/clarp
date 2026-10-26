@@ -2911,8 +2911,104 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as e:
             log_exception("logParseFail", e, detail=session)
             return self._json_error(500, str(e))
+        from lib import server_identity
+        if server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE):
+            try:
+                error = self._add_delivery_state(body_obj, session, qs)
+            except Exception as e:  # noqa: BLE001 - no cursor moves on a failed read
+                log_exception("deliveryReadFail", e, detail=session)
+                return self._json_error(500, "delivery state unavailable")
+            if error:
+                return self._json_error(400, error)
         body = json.dumps(body_obj).encode()
         self._send(200, body, "application/json")
+
+    def _add_delivery_state(self, body_obj: dict, session: str, qs: dict) -> str:
+        """F4 (send_delivery_state): S2 on user rows and the seq feed
+        (delivery_since / delivery_bootstrap / delivery_until /
+        delivery_stop_generation), in ONE read snapshot whose user Stop
+        generation is returned as the page's projection epoch. Returns a 400
+        message, or "" when fine."""
+        from lib import launch_receipts, server_identity, settings_store
+        agent = agents_db.get_by_session(session)
+        if not agent:
+            return ""
+        agent_id = agent["agent_id"]
+
+        def number(name: str) -> int | None | str:
+            raw = (qs.get(name, [""])[0] or "").strip()
+            if raw == "":
+                return None
+            if not raw.isdigit():
+                return f"bad {name}"
+            return int(raw)
+
+        since, until = number("delivery_since"), number("delivery_until")
+        generation = number("delivery_stop_generation")
+        for value in (since, until, generation):
+            if isinstance(value, str):
+                return value
+        bootstrap = (qs.get("delivery_bootstrap", [""])[0] or "").strip() in {"1", "true"}
+        with settings_store.read_snapshot():
+            epoch = launch_receipts.annotate_rows(agent_id, body_obj.get("turns") or [])
+            body_obj["delivery_scope"] = {"server_id": server_identity.server_id(),
+                                          "agent_id": agent_id}
+            body_obj["delivery_stop_generation"] = epoch
+            if since is None:
+                return ""
+            # A plain since=0 is the first bootstrap page (packet v4 §1.3d).
+            bootstrap = bootstrap or since == 0
+            page = launch_receipts.delivery_page(
+                agent_id, since=since, until=until, stop_generation=generation,
+                bootstrap=bootstrap)
+        body_obj["delivery_updates"] = page["updates"]
+        body_obj["delivery_cursor"] = page["cursor"]
+        body_obj["delivery_more"] = page["more"]
+        body_obj["delivery_cursor_expired"] = page["expired"]
+        if bootstrap and not page["expired"]:
+            body_obj["delivery_bootstrap"] = True
+            body_obj["delivery_until"] = page["until"]
+        return ""
+        agent_id = agent["agent_id"]
+        launch_receipts.annotate_rows(agent_id, body_obj.get("turns") or [])
+
+        def number(name: str) -> int | None | str:
+            raw = (qs.get(name, [""])[0] or "").strip()
+            if raw == "":
+                return None
+            if not raw.isdigit():
+                return f"bad {name}"
+            return int(raw)
+
+        since, until = number("delivery_since"), number("delivery_until")
+        for value in (since, until):
+            if isinstance(value, str):
+                return value
+        bootstrap = (qs.get("delivery_bootstrap", [""])[0] or "").strip() in {"1", "true"}
+        if since is not None:
+            # A plain since=0 is the first bootstrap page (packet v4 §1.3d).
+            bootstrap = bootstrap or since == 0
+            page = launch_receipts.delivery_page(
+                agent_id, since=since, until=until, bootstrap=bootstrap)
+            body_obj["delivery_scope"] = {"server_id": server_identity.server_id(),
+                                          "agent_id": agent_id}
+            body_obj["delivery_updates"] = page["updates"]
+            body_obj["delivery_stops"] = page["stops"]
+            body_obj["delivery_cursor"] = page["cursor"]
+            body_obj["delivery_more"] = page["more"]
+            body_obj["delivery_cursor_expired"] = page["expired"]
+            if bootstrap and not page["expired"]:
+                body_obj["delivery_bootstrap"] = True
+                body_obj["delivery_until"] = page["until"]
+        ids_raw = (qs.get("delivery_ids", [""])[0] or "").strip()
+        if ids_raw:
+            ids = [part.strip() for part in ids_raw.split(",") if part.strip()]
+            if len(ids) > launch_receipts.LOOKUP_CAP:
+                return "too many delivery_ids"
+            body_obj["delivery_scope"] = {"server_id": server_identity.server_id(),
+                                          "agent_id": agent_id}
+            body_obj["delivery_lookup"] = launch_receipts.lookup(agent_id, ids)
+        return ""
 
     def _interaction_id(self) -> str:
         value = str(self.headers.get("X-Clarp-Interaction-ID") or "").strip()
@@ -6040,6 +6136,10 @@ class Handler(BaseHTTPRequestHandler):
                 "trace_id": req.trace_id}
         if opening is not None:
             body["opening"] = opening["opening"]
+        from lib import server_identity
+        if (result.delivery is not None
+                and server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE)):
+            body["delivery"] = result.delivery      # F4 S1: 200 only, never "stopped"
         self._json_ok(body)
 
     @staticmethod

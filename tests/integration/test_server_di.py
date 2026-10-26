@@ -4559,3 +4559,89 @@ def test_a_claimed_agent_actor_and_a_user_stop_both_withdraw_the_pending_send(ru
         assert launch_receipts.status(mike, "t-user") == "fenced"
     finally:
         turn_dispatch.reset_for_tests()
+
+
+# --- F4 delivery state over HTTP (joint packet 9a96df74; feature not yet advertised) ---------
+
+def _advertise_delivery(monkeypatch):
+    from lib import server_identity
+    monkeypatch.setattr(server_identity, "feature_advertised",
+                        lambda name: name == server_identity.SEND_DELIVERY_STATE)
+
+
+def _fake_spawn(monkeypatch):
+    from lib import backends
+    spawned = []
+    monkeypatch.setattr(backends, "spawn_turn", lambda _backend, **kw: spawned.append(kw))
+    return spawned
+
+
+def test_delivery_fields_stay_off_until_the_feature_is_advertised(running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    _fake_spawn(monkeypatch)
+    status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
+                                                "client_msg_id": "u-off", "force_session": True})
+    assert status == 200 and "delivery" not in json.loads(raw)
+    status, raw = _get(base + "/log?session=rachel&delivery_since=0")
+    body = json.loads(raw)
+    assert not any(key.startswith("delivery") for key in body)
+    assert all("delivery" not in turn for turn in body.get("turns") or [])
+
+
+def test_an_advertised_send_200_carries_a_versioned_handed_over_and_log_heals(
+        running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    assert _fake_spawn(monkeypatch) == []
+    status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
+                                                "client_msg_id": "u-on", "force_session": True})
+    body = json.loads(raw)
+    assert status == 200 and body["delivery"]["state"] == "handed_over"
+    assert body["delivery"]["for"]["client_msg_id"] == "u-on" and body["delivery"]["rev"] == 2
+    status, raw = _get(base + "/log?session=rachel&delivery_since=0")
+    feed = json.loads(raw)
+    assert feed["delivery_bootstrap"] is True and feed["delivery_more"] is False
+    assert [u["message_id"] for u in feed["delivery_updates"]] == ["u-on"]
+    assert set(feed["delivery_scope"]) == {"server_id", "agent_id"}
+    cursor, epoch = feed["delivery_cursor"], feed["delivery_stop_generation"]
+    status, raw = _get(base + f"/log?session=rachel&delivery_since={cursor}"
+                              f"&delivery_stop_generation={epoch}"
+                              f"&after_revision={feed['latest_revision']}")
+    healed = json.loads(raw)
+    assert (healed["delivery_updates"], healed["delivery_cursor_expired"]) == ([], False)
+    status, raw = _get(base + f"/log?session=rachel&delivery_since={cursor}")
+    assert json.loads(raw)["delivery_cursor_expired"] is True, "a cursor without its epoch resets"
+    status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
+                                                "client_msg_id": "u-on", "force_session": True})
+    assert status == 200 and json.loads(raw).get("delivery", {}).get("state") != "stopped"
+
+
+def test_advertised_delivery_never_changes_any_503(running_server, monkeypatch):
+    from lib import launch_receipts, runtime_bridge, turn_dispatch
+    base, _ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    monkeypatch.setattr(launch_receipts, "mark_attempted",
+                        lambda *a, **k: (_ for _ in ()).throw(launch_receipts.HandoffRefused("fenced")))
+    status, raw = _post_status(base + "/send", {"text": "x", "session": "rachel",
+                                                "client_msg_id": "u-503", "force_session": True})
+    assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
+    monkeypatch.undo()
+    _advertise_delivery(monkeypatch)
+
+    class _Down:
+        def dispatch_command(self, command):
+            raise runtime_bridge.RuntimeUnavailable("agent runtime unavailable: timed out")
+    _ctx.replace_service("runtime_client", _Down())
+    status, raw = _post_status(base + "/send", {"text": "y", "session": "rachel",
+                                                "client_msg_id": "u-rpc", "force_session": True})
+    assert (status, raw.decode()) == (503, "agent runtime unavailable: timed out")
+
+
+def test_bad_delivery_parameters_are_refused(running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    for query in ("delivery_since=-1", "delivery_since=x", "delivery_stop_generation=x",
+                  "delivery_until=-2"):
+        with pytest.raises(urllib.error.HTTPError) as refused:
+            _get(base + "/log?session=rachel&" + query)
+        assert refused.value.code == 400
