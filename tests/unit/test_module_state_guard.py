@@ -52,7 +52,6 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/backend_auth.py", "_tasks"): JOBS,
     ("lib/backend_auth.py", "_validation_cache"): CACHE,
     ("lib/backends.py", "_RUNTIME_CLIENT"): CLIENT,
-    ("lib/launch_receipts.py", "_LAST_PRUNE"): THROTTLE,
     # Stop's in-process epoch backs up a durable fence write that failed; the
     # durable fence stays the authority, so losing it on restart is intended.
     ("lib/launch_receipts.py", "_STOP_EPOCH"): THROTTLE,

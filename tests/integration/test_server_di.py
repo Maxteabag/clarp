@@ -4602,10 +4602,14 @@ def test_an_advertised_send_200_carries_a_versioned_handed_over_and_log_heals(
     feed = json.loads(raw)
     assert feed["delivery_bootstrap"] is True and feed["delivery_more"] is False
     assert [u["message_id"] for u in feed["delivery_updates"]] == ["u-on"]
-    assert set(feed["delivery_scope"]) == {"server_id", "agent_id"}
+    scope = feed["delivery_scope"]
+    assert set(scope) == {"server_id", "agent_id", "runtime_release", "runtime_instance"}
+    assert scope["runtime_release"] == "in-process", "this Host owns turns itself"
     cursor, epoch = feed["delivery_cursor"], feed["delivery_stop_generation"]
     status, raw = _get(base + f"/log?session=rachel&delivery_since={cursor}"
                               f"&delivery_stop_generation={epoch}"
+                              f"&delivery_runtime_release={scope['runtime_release']}"
+                              f"&delivery_runtime_instance={scope['runtime_instance']}"
                               f"&after_revision={feed['latest_revision']}")
     healed = json.loads(raw)
     assert (healed["delivery_updates"], healed["delivery_cursor_expired"]) == ([], False)
@@ -4682,3 +4686,141 @@ def test_a_delivery_read_writes_nothing_inside_its_read_snapshot(running_server,
     assert status == 200 and body["delivery_scope"]["server_id"]
     assert inside["writes"] == [], inside["writes"]
     assert real_get(server_identity._ID_KEY) == body["delivery_scope"]["server_id"]
+
+
+# --- F4 enforcement over HTTP with an external runtime (R3 61c4caac) ---------------------------
+
+class _FakeRuntime:
+    """A runtime client whose status the test switches between observations."""
+
+    def __init__(self, *observations):
+        self.queue = list(observations)
+        self.calls = 0
+        self.result = None
+
+    def status(self):
+        self.calls += 1
+        value = self.queue[0] if len(self.queue) == 1 else self.queue.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    def ping(self):
+        return True
+
+    def recover_queued(self):
+        return 0
+
+    def dispatch_command(self, command):
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def _runtime_status(instance="i1", release="r-A", *, capable=True, draining=False):
+    caps = {"janitor_runs": True}
+    if capable:
+        caps["send_delivery_state"] = True
+    return {"protocol_version": 1, "capabilities": caps, "draining": draining,
+            "release_id": release, "instance": instance}
+
+
+def _log(base, query):
+    status, raw = _get(base + "/log?session=rachel&" + query)
+    assert status == 200
+    return json.loads(raw)
+
+
+def _seed_receipt():
+    from lib import agents as agents_db, launch_receipts
+    agent = agents_db.get_by_session("rachel")["agent_id"]
+    launch_receipts.record_pending(agent_id=agent, trace_id="t-seed", client_msg_id="u-seed",
+                                   origin="user")
+
+
+def _no_delivery(body):
+    return (not any(key.startswith("delivery") for key in body)
+            and all("delivery" not in turn for turn in body.get("turns") or []))
+
+
+def test_a_runtime_switch_a_old_b_same_release_a_resets_the_cursor(running_server, monkeypatch):
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    runtime = _FakeRuntime(_runtime_status("i1"))
+    ctx.replace_service("runtime_client", runtime)
+    first = _log(base, "delivery_since=0")
+    scope, cursor, g = first["delivery_scope"], first["delivery_cursor"], first["delivery_stop_generation"]
+    assert (scope["runtime_release"], scope["runtime_instance"]) == ("r-A", "i1")
+    carry = (f"delivery_since={cursor}&delivery_stop_generation={g}"
+             f"&delivery_runtime_release=r-A&delivery_runtime_instance=i1")
+    assert _log(base, carry)["delivery_cursor_expired"] is False
+    runtime.queue = [_runtime_status("iB", "r-old", capable=False)]      # old runtime B
+    assert _no_delivery(_log(base, carry)), "a pre-F4 runtime: everything omitted"
+    runtime.queue = [_runtime_status("i2")]                               # A again, new process
+    again = _log(base, carry)
+    assert again["delivery_cursor_expired"] is True and again["delivery_updates"] == []
+    assert again["delivery_scope"]["runtime_instance"] == "i2"
+    boot = _log(base, "delivery_since=0")
+    assert boot["delivery_scope"]["runtime_instance"] == "i2" and not boot["delivery_cursor_expired"]
+
+
+def test_a_same_release_restart_alone_resets_the_cursor(running_server, monkeypatch):
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    runtime = _FakeRuntime(_runtime_status("i1"))
+    ctx.replace_service("runtime_client", runtime)
+    first = _log(base, "delivery_since=0")
+    runtime.queue = [_runtime_status("i9")]
+    stale = _log(base, f"delivery_since={first['delivery_cursor']}"
+                       f"&delivery_stop_generation={first['delivery_stop_generation']}"
+                       f"&delivery_runtime_release=r-A&delivery_runtime_instance=i1")
+    assert stale["delivery_cursor_expired"] is True
+
+
+@pytest.mark.parametrize("observations", [
+    [RuntimeError("runtime down")],
+    [_runtime_status(draining=True)],
+    [_runtime_status(capable=False)],
+    [dict(_runtime_status(), instance="")],
+    [dict(_runtime_status(), capabilities=["send_delivery_state"])],
+    [_runtime_status("i1"), _runtime_status("i2")],                 # switched inside the bracket
+    [_runtime_status("i1"), RuntimeError("gone after the snapshot")],
+], ids=["unavailable", "draining", "pre-f4", "no-instance", "malformed", "mismatch", "o2-failed"])
+def test_unusable_or_mismatched_observations_omit_every_delivery_field(
+        running_server, monkeypatch, observations):
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(*observations))
+    assert _no_delivery(_log(base, "delivery_since=0"))
+
+
+def test_s1_needs_the_same_results_runtime_identity(running_server, monkeypatch):
+    from lib.turn_dispatch import DispatchResult
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    runtime = _FakeRuntime(_runtime_status())
+    ctx.replace_service("runtime_client", runtime)
+    shown = {"state": "handed_over", "rev": 2, "seq": 3,
+             "for": {"client_msg_id": "u-s1", "trace_id": "t"}}
+    body = {"text": "hi", "session": "rachel", "client_msg_id": "u-s1", "force_session": True}
+    for identity, expected in ((None, False), (_runtime_status(draining=True), False),
+                               (_runtime_status(capable=False), False), (_runtime_status(), True)):
+        runtime.result = DispatchResult(session="rachel", backend="claude", delivery=shown,
+                                        delivery_runtime=identity)
+        status, raw = _post_status(base + "/send", body)
+        assert status == 200 and ("delivery" in json.loads(raw)) is expected, identity
+
+
+def test_an_external_runtime_503_body_is_unchanged(running_server, monkeypatch):
+    from lib import turn_dispatch
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    runtime = _FakeRuntime(_runtime_status())
+    runtime.result = turn_dispatch.DispatchError(503, turn_dispatch.UNCONFIRMED_DELIVERY)
+    ctx.replace_service("runtime_client", runtime)
+    status, raw = _post_status(base + "/send", {"text": "x", "session": "rachel",
+                                                "client_msg_id": "u-503x", "force_session": True})
+    assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)

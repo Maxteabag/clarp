@@ -311,6 +311,9 @@ class DispatchResult:
     # F4 S1: the user send's delivery object (launch_receipts.delivery_for_send),
     # read after the dispatch decided; None = unknown. Never retry authority.
     delivery: dict | None = None
+    # F4 E2-S1: the identity of the runtime that computed ``delivery``, in the
+    # same RPC result (runtime_bridge); None when computed in-process.
+    delivery_runtime: dict | None = None
 
 
 def _with_delivery(command: "DispatchCommand", result: DispatchResult) -> DispatchResult:
@@ -495,35 +498,47 @@ class _LaunchReceiptRefused(DispatchError):
 _DELIVERY_STREAM = None   # the turn owner's stream (set by TurnDispatchService)
 
 
+DELIVERY_HINT_BUSY_MS = 50   # N4 B: a hint never waits longer for the writer lock
+
+
 def _announce_delivery(trace_id: str) -> None:
     """F4: after a receipt transition COMMITTED, a best-effort, durable
-    ``delivery-updated`` hint. A failed append never affects the launch or
-    the Stop; clients heal through /log delivery_since. Not emitted until the
-    Host advertises send_delivery_state."""
-    from . import message_writes, server_identity
+    ``delivery-updated`` hint. Called only AFTER the provider handoff (spawn
+    or steer returned) or after a Stop's fence, never before a launch (N4 A),
+    and under a short busy budget restored on success and on exception (N4
+    B): a busy database drops the hint instead of delaying anything. Clients
+    heal through /log delivery_since. Not emitted until the Host advertises
+    send_delivery_state."""
+    from . import server_identity
     stream = _DELIVERY_STREAM
     if stream is None or not server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE):
         return
     try:
-        receipt = launch_receipts.get(trace_id)
-        agent_id = str((receipt or {}).get("agent_id") or "")
-        agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
-        if not agent:
-            return
-        shown = launch_receipts.project(
-            receipt, agent_id=agent_id,
-            user_stop_generation=turn_queue.user_stop_generation(agent_id))
-        if shown is None:
-            return
-        events.broadcast(stream, events.delivery_updated(
-            session=str(agent.get("session") or ""), agent_id=agent_id,
-            message_id=message_writes._client_message_id(shown["for"]["client_msg_id"]),
-            delivery=shown))
+        with db.busy_timeout_at_most(DELIVERY_HINT_BUSY_MS):
+            _announce_delivery_locked(stream, trace_id)
     except Exception as e:  # noqa: BLE001 - a hint; never fails its caller
         try:
             log_exception("deliveryAnnounceFail", e, detail=trace_id)
         except Exception:  # noqa: BLE001
             pass
+
+
+def _announce_delivery_locked(stream, trace_id: str) -> None:
+    from . import message_writes
+    receipt = launch_receipts.get(trace_id)
+    agent_id = str((receipt or {}).get("agent_id") or "")
+    agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
+    if not agent:
+        return
+    shown = launch_receipts.project(
+        receipt, agent_id=agent_id,
+        user_stop_generation=turn_queue.user_stop_generation(agent_id))
+    if shown is None:
+        return
+    events.broadcast(stream, events.delivery_updated(
+        session=str(agent.get("session") or ""), agent_id=agent_id,
+        message_id=message_writes._client_message_id(shown["for"]["client_msg_id"]),
+        delivery=shown))
 
 
 def _record_launch_attempt(spec: "_TurnSpec") -> None:
@@ -544,7 +559,6 @@ def _record_launch_attempt(spec: "_TurnSpec") -> None:
         log_exception("launchReceiptAttemptFail", e, detail=spec.session)
         raise _LaunchReceiptUnrecorded(
             503, "could not record the launch; the message was not sent") from e
-    _announce_delivery(spec.trace_id)
 
 
 class GoalWakeDispatchError(DispatchError):
@@ -1647,8 +1661,6 @@ class TurnDispatchService:
                         log_exception("admissionBroadcastFail", e, detail=spec.session)
                     except Exception:  # noqa: BLE001 - not even logging may stop the launch
                         pass
-            if admission is True and not queue_if_busy:
-                _announce_delivery(spec.trace_id)
         if admission is False:
             eventlog.emit("server", "sendDeduplicated", context=spec.context)
             log("sendDeduplicated",
@@ -2183,6 +2195,9 @@ class TurnDispatchService:
             # always queueable), so an Oracle assignment is never preempted.
             return False
         if accepted:
+            if launch_receipts.eligible(origin=spec.origin, client_msg_id=spec.client_msg_id,
+                                        call_opening=_is_call_opening(spec)):
+                _announce_delivery(spec.trace_id)          # N4 A: after the steer handoff
             if spec.origin == "oracle":
                 from . import oracle_delegations
                 oracle_delegations.attach_steered_trace(spec.trace_id, active_trace)
@@ -2851,6 +2866,10 @@ class TurnDispatchService:
                     run_if_owned=run_if_owned,
                 )
                 state["handle"] = handle
+                if attempt == 1 and launch_receipts.eligible(
+                        origin=spec.origin, client_msg_id=spec.client_msg_id,
+                        call_opening=_is_call_opening(spec)):
+                    _announce_delivery(spec.trace_id)      # N4 A: after the handoff
                 team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
                 if account_attempt is not None:
                     account_attempt.handle = handle

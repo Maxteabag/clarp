@@ -244,13 +244,17 @@ Rules:
   trace_id}}` with `state` one of `pending_launch` (saved, waiting for
   handoff; a display hint, never permission to retry), `stopped` (withdrawn
   by the user's Stop before handoff) or `handed_over` (handoff recorded,
-  outcome unconfirmed; not "started"). Absent means unknown. Every response
-  carries `delivery_stop_generation` (the page's projection epoch) and
-  `delivery_scope {server_id, agent_id}`. Optional parameters, independent of
-  `after_revision`: `delivery_since=<seq>&delivery_stop_generation=<G>`
+  outcome unconfirmed; not "started"). Absent means unknown, and the whole
+  block is omitted when the Host cannot observe the same F4-capable runtime
+  process before and after its read. Every response carries
+  `delivery_stop_generation` (the page's projection epoch) and
+  `delivery_scope {server_id, agent_id, runtime_release, runtime_instance}`.
+  Optional parameters, independent of `after_revision`:
+  `delivery_since=<seq>&delivery_stop_generation=<G>&delivery_runtime_release=<R>&delivery_runtime_instance=<I>`
   returns `delivery_updates` `[{message_id, delivery}]`, `delivery_cursor`,
   `delivery_more` and `delivery_cursor_expired`; a cursor is valid only with
-  the epoch it was taken under. `delivery_since=0` (or `delivery_bootstrap=1`)
+  the exact epoch and runtime scope it was taken under, so any runtime
+  restart resets it. Receipts changed by an older runtime stay unknown. `delivery_since=0` (or `delivery_bootstrap=1`)
   starts a bootstrap pass that fixes `delivery_until` and the epoch on its
   first page and must be continued with
   `delivery_bootstrap=1&delivery_since=<cursor>&delivery_until=<B>&delivery_stop_generation=<G>`

@@ -172,6 +172,8 @@ class RuntimeClient:
             # none, which stays unknown (never a hint invented here).
             delivery=(result.get("delivery")
                       if isinstance(result.get("delivery"), dict) else None),
+            delivery_runtime=(result.get("delivery_runtime")
+                              if isinstance(result.get("delivery_runtime"), dict) else None),
         )
 
     def dispatch(self, **kwargs):
@@ -449,6 +451,10 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         self.dispatch_service = dispatch_service
         self.status_provider = status_provider or self._default_status
         self.release_id = str(release_id or "")
+        # F4 E1: this runtime PROCESS (a new id on every start, also for the
+        # same release); with release_id it is the runtime identity clients
+        # bind their delivery cursors to.
+        self.instance = uuid.uuid4().hex
         self.stop_lease_timeout = max(0.01, float(stop_lease_timeout))
         self._stop_leases: dict[str, tuple[str, dict[str, Any]]] = {}
         self._stop_lease_lock = threading.Lock()
@@ -509,9 +515,10 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         if method == "status":
             return {"ok": True, "result": {
                 "protocol_version": PROTOCOL_VERSION,
-                "capabilities": {"janitor_runs": True},
+                "capabilities": {"janitor_runs": True, "send_delivery_state": True},
                 "draining": self._draining,
                 "release_id": self.release_id,
+                "instance": self.instance,
                 "drain": self._drain_status(),
                 **dict(self.status_provider()),
             }}
@@ -718,9 +725,19 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                     return {"ok": False, "status": exc.status,
                             "error": str(exc)}
                 raise
-            return {"ok": True, "result": dataclasses.asdict(result)}
+            payload = dataclasses.asdict(result)
+            if payload.get("delivery") is not None:
+                # F4 E2-S1: the receipt's writer reports who it is in the SAME
+                # result, so the Host never binds S1 to a cached observation.
+                payload["delivery_runtime"] = self._delivery_identity()
+            return {"ok": True, "result": payload}
         return {"ok": False, "status": 404,
                 "error": f"unknown runtime method: {method}"}
+
+    def _delivery_identity(self) -> dict[str, Any]:
+        return {"release_id": self.release_id, "instance": self.instance,
+                "draining": self._draining,
+                "capabilities": {"send_delivery_state": True}}
 
     def begin_drain_if_idle(self) -> bool:
         """Fence new work exactly when no runtime-owned work remains."""
