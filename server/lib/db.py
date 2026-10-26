@@ -377,7 +377,13 @@ def conn() -> sqlite3.Connection:
     global _MIGRATED
     c = getattr(_LOCAL, "conn", None)
     if c is not None:
-        return c
+        if getattr(_LOCAL, "discard_conn", None) is not c or _in_transaction(c):
+            return c
+        # A busy-timeout restore failed inside a transaction (see
+        # busy_timeout_at_most): now that it ended, never reuse that
+        # connection with its lowered timeout; open a fresh one.
+        _LOCAL.discard_conn = None
+        close_local()
     # Migrate exactly once per process (idempotent + serialized). WAL means
     # every per-thread connection sees the migrated schema on the shared file.
     with _CONN_LOCK:
@@ -407,21 +413,58 @@ def busy_timeout(timeout_ms: int) -> Iterator[sqlite3.Connection]:
         connection.execute(f"PRAGMA busy_timeout = {previous}")
 
 
+def _in_transaction(connection: sqlite3.Connection) -> bool:
+    try:
+        return bool(connection.in_transaction)
+    except sqlite3.Error:
+        return False          # a closed/broken connection holds no transaction
+
+
 @contextmanager
 def busy_timeout_at_most(timeout_ms: int) -> Iterator[sqlite3.Connection]:
     """Temporarily LOWER this thread's busy timeout to at most *timeout_ms*,
     restoring the previous value on success and on exception. For optional
     writes (F4 delivery hints) that must never hold up a launch behind a long
-    writer; a give-up inside is expected and not reported as a lock wait."""
+    writer; a give-up inside is expected and not reported as a lock wait.
+
+    Nesting keeps the outer ``busy_expected`` value. If restoring the timeout
+    fails, the connection is never reused with the lowered value: it is
+    reported (previous, lowered and observed values) and dropped at once, or,
+    when the caller is inside a transaction (dropping it would roll that
+    back), the failure is raised and the connection is replaced as soon as
+    the transaction has ended (``conn``)."""
     connection = conn()
     previous = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+    lowered = min(int(timeout_ms), previous)
+    prior_expected = getattr(_LOCAL, "busy_expected", False)
     _LOCAL.busy_expected = True
     try:
-        connection.execute(f"PRAGMA busy_timeout = {min(int(timeout_ms), previous)}")
+        connection.execute(f"PRAGMA busy_timeout = {lowered}")
         yield connection
     finally:
-        _LOCAL.busy_expected = False
-        connection.execute(f"PRAGMA busy_timeout = {previous}")
+        _LOCAL.busy_expected = prior_expected
+        try:
+            connection.execute(f"PRAGMA busy_timeout = {previous}")
+        except Exception as exc:  # noqa: BLE001 - handled explicitly below
+            _busy_restore_failed(connection, previous=previous, lowered=lowered, error=exc)
+
+
+def _busy_restore_failed(connection: sqlite3.Connection, *, previous: int, lowered: int,
+                         error: BaseException) -> None:
+    try:
+        observed: int | str = int(connection.execute("PRAGMA busy_timeout").fetchone()[0])
+    except Exception:  # noqa: BLE001 - the connection may be unusable
+        observed = "unreadable"
+    from .log import log_exception
+    log_exception("busyTimeoutRestoreFail", error,
+                  detail=f"previous={previous} lowered={lowered} observed={observed} "
+                         f"delta_ms={(previous - observed) if isinstance(observed, int) else 'unknown'}")
+    if _in_transaction(connection):
+        _LOCAL.discard_conn = connection
+        raise RuntimeError("busy timeout restore failed inside a transaction; "
+                           "the connection is replaced once it ends") from error
+    if getattr(_LOCAL, "conn", None) is connection:
+        close_local()
 
 
 def best_effort_write(sql: str, parameters=(), *, timeout_ms: int = 20) -> bool:
