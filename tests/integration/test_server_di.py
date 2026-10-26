@@ -70,10 +70,13 @@ def fake_ctx(tmp_path):
     audio.mkdir()
     agents_path = tmp_path / "agents.json"  # legacy field on ctx; unused by DB
     from lib.agents import create_agent
-    create_agent(persona="Mike",   voice_id="V_MIKE",
-                 cwd=str(tmp_path), session="claude")
-    create_agent(persona="Rachel", voice_id="V_RACHEL",
-                 cwd=str(tmp_path), session="rachel")
+    from lib.turn_dispatch import clear_for_agent
+    agent_ids = [
+        create_agent(persona="Mike",   voice_id="V_MIKE",
+                     cwd=str(tmp_path), session="claude"),
+        create_agent(persona="Rachel", voice_id="V_RACHEL",
+                     cwd=str(tmp_path), session="rachel"),
+    ]
     ctx = ServerContext(
         root=tmp_path,
         static=static,                       # reuse real static so /sw.js works
@@ -85,7 +88,12 @@ def fake_ctx(tmp_path):
         stt=StubSTT(text="hello there", ends_terminal=True),
         roster_names=("Mike", "Rachel"),
     )
-    return ctx
+    yield ctx
+    # The turn slots are process-wide, but these agents live only as long as
+    # this test's database: a turn a test started and never finished must not
+    # show up as active work in the next test.
+    for agent_id in agent_ids:
+        clear_for_agent(agent_id)
 
 
 @pytest.fixture
