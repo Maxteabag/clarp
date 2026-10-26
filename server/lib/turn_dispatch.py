@@ -503,12 +503,17 @@ DELIVERY_HINT_BUSY_MS = 50   # N4 B: a hint never waits longer for the writer lo
 
 def _announce_delivery(trace_id: str) -> None:
     """F4: after a receipt transition COMMITTED, a best-effort, durable
-    ``delivery-updated`` hint. Called only AFTER the provider handoff (spawn
-    or steer returned) or after a Stop's fence, never before a launch (N4 A),
-    and under a short busy budget restored on success and on exception (N4
-    B): a busy database drops the hint instead of delaying anything. Clients
-    heal through /log delivery_since. Not emitted until the Host advertises
-    send_delivery_state."""
+    ``delivery-updated`` hint. Exactly two call sites (N4 A):
+    - a launch, after the provider accepted it: spawn attempt 1 returned and
+      its handle / injected inbox were recorded, or a steer was accepted;
+    - a user Stop's fence (``_fence_launch_receipts`` passes it as
+      ``fence_agent(on_fenced=...)``), once per receipt it moved to fenced,
+      after that fence transaction committed.
+    Never at admission and never before a launch. A FENCED transition taken
+    inside ``mark_attempted`` and failover-attempt spawns emit none (/log
+    heals them). It runs under a short busy budget restored on success and on
+    exception (N4 B): a busy database drops the hint instead of delaying
+    anything. Not emitted until the Host advertises send_delivery_state."""
     from . import server_identity
     stream = _DELIVERY_STREAM
     if stream is None or not server_identity.feature_advertised(server_identity.SEND_DELIVERY_STATE):
@@ -2866,13 +2871,15 @@ class TurnDispatchService:
                     run_if_owned=run_if_owned,
                 )
                 state["handle"] = handle
-                if attempt == 1 and launch_receipts.eligible(
-                        origin=spec.origin, client_msg_id=spec.client_msg_id,
-                        call_opening=_is_call_opening(spec)):
-                    _announce_delivery(spec.trace_id)      # N4 A: after the handoff
                 team_store.mark_injected(spec.agent_id, spec.team_inbox_ids)
                 if account_attempt is not None:
                     account_attempt.handle = handle
+                # N4 A: the hint comes after the handoff AND after the launch's
+                # own bookkeeping (handle, injected team inbox) is recorded.
+                if attempt == 1 and launch_receipts.eligible(
+                        origin=spec.origin, client_msg_id=spec.client_msg_id,
+                        call_opening=_is_call_opening(spec)):
+                    _announce_delivery(spec.trace_id)
             except (JanitorDispatchError, _LaunchReceiptUnrecorded, _LaunchReceiptRefused):
                 raise
             except FileNotFoundError as e:
