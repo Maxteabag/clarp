@@ -119,7 +119,14 @@ def _pointer_seq(key: str) -> int:
 
 @contextmanager
 def _write() -> Iterator[None]:
-    """The caller's transaction (admission, Stop pause), else our own."""
+    """The caller's transaction (admission, Stop pause), else our own.
+
+    Every receipt transition is a READ-MODIFY-WRITE inside this one write
+    transaction: the state is read, checked and rewritten while the SQLite
+    writer lock (BEGIN IMMEDIATE, taken by the caller or here) is held, so no
+    other writer can interleave. It is NOT a compare-and-set that relies on an
+    UPDATE's rowcount (packet v4 described "CAS, rowcount 0 -> rollback"; this
+    is the equivalent under the writer lock)."""
     if db.conn().in_transaction:
         yield
     else:
@@ -146,7 +153,12 @@ def _store(trace_id: str, receipt: dict, *, stamp: int, previous_seq: int = 0) -
 
 
 def _move(trace_id: str, receipt: dict, state: str) -> None:
-    """One transition of a receipt just read in this write transaction."""
+    """One transition of a receipt just read in this write transaction.
+
+    Read-modify-write, not a rowcount CAS: the caller has read ``receipt`` and
+    decided the transition under the same BEGIN IMMEDIATE writer lock (see
+    ``_write``); this rewrites state, rev+1, a fresh seq and the pointer in
+    that transaction, so all of them commit or roll back together."""
     stamp = now_ms()
     _store(trace_id, dict(receipt, state=state, rev=_count(receipt.get("rev")) + 1,
                           seq=_next_seq()),
