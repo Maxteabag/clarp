@@ -137,6 +137,10 @@ def test_another_phone_cannot_read_private_user_call_by_id_or_current(live_host)
     assert status == 404 and read["error"] == "unknown call"
     status, read = _req(base, owner["token"], "GET", path)
     assert status == 200 and read["ring"]["ring_id"] == out["ring"]["ring_id"]
+    for control in ("decline", "cancel"):
+        status, read = _req(base, other["token"], "POST", "/calls/ring/" + control,
+                            {"ring_id": out["ring"]["ring_id"]})
+        assert status == 404 and "ring" not in read
     for phone in (owner, other):
         status, read = _req(base, phone["token"], "GET", "/calls/ring")
         assert status == 200 and read["ring"] is None
