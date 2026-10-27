@@ -44,23 +44,30 @@ def record_sse_event(event: dict[str, Any]) -> int:
 
 _DELIVERY_HINT = "delivery-updated"
 _DELIVERY_HINT_IDENTITY = ("session", "agent_id", "message_id")
+# runtime_events._RUNTIME_MARKER: rows the runtime process recorded, which the
+# Host relays live. Kept on a hint only for that internal read.
+_RUNTIME_MARKER = "_clarp_runtime_event"
 
 
-def _egress(payload: dict[str, Any]) -> dict[str, Any] | None:
+def _egress(payload: dict[str, Any], internal: bool = False) -> dict[str, Any] | None:
     """F4: a stored ``delivery-updated`` row leaves as the identity hint ONLY
     (session, agent_id, message_id, plus the hub's type / event_id / ts): any
     stored ``delivery`` projection or other key is dropped on the way out. A row
     whose identity is missing or invalid is dropped from the output. The stored
-    row is never rewritten and no id is made up."""
+    row is never rewritten and no id is made up. ``internal`` (the Host's relay of
+    runtime events, never a client) also keeps the runtime marker."""
     if payload.get("type") != _DELIVERY_HINT:
         return payload
     if not all(isinstance(payload.get(k), str) and payload.get(k) for k in _DELIVERY_HINT_IDENTITY):
         return None
-    return {"type": _DELIVERY_HINT, **{k: payload[k] for k in _DELIVERY_HINT_IDENTITY},
+    hint = {"type": _DELIVERY_HINT, **{k: payload[k] for k in _DELIVERY_HINT_IDENTITY},
             "ts": payload["ts"], "event_id": payload["event_id"]}
+    if internal and payload.get(_RUNTIME_MARKER):
+        hint[_RUNTIME_MARKER] = payload[_RUNTIME_MARKER]
+    return hint
 
 
-def _decode_event_row(row: sqlite3.Row) -> dict[str, Any] | None:
+def _decode_event_row(row: sqlite3.Row, internal: bool = False) -> dict[str, Any] | None:
     try:
         payload = json.loads(row["payload"])
     except (TypeError, json.JSONDecodeError):
@@ -68,7 +75,7 @@ def _decode_event_row(row: sqlite3.Row) -> dict[str, Any] | None:
     payload.setdefault("event_id", int(row["event_id"]))
     payload.setdefault("ts", int(row["ts"]))
     payload.setdefault("type", row["type"])
-    return _egress(payload)
+    return _egress(payload, internal)
 
 
 def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
@@ -76,7 +83,17 @@ def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
     A row dropped on egress does not count against the limit: the read continues
     past it, so a caller's cursor (the last event_id it received) is never stuck
     behind dropped rows. Work: the rows returned plus the rows dropped."""
+    return events_after_scanned(event_id, limit)[0]
+
+
+def events_after_scanned(event_id: int, limit: int = 500, *,
+                         internal: bool = False) -> tuple[list[dict[str, Any]], int]:
+    """``events_after`` plus the highest stored event_id it READ (returned or
+    dropped; ``event_id`` itself when it read none). An internal cursor (the
+    Host's runtime-event relay) advances to it, so it never re-reads dropped
+    rows; a client never sees that id (no id is made up or sent)."""
     limit, after = max(1, min(limit, 5000)), max(0, int(event_id))
+    scanned = after
     out: list[dict[str, Any]] = []
     while len(out) < limit:
         want = limit - len(out)
@@ -88,11 +105,13 @@ def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
                 LIMIT ?""",
             (after, want),
         ).fetchall()
-        out.extend(event for event in map(_decode_event_row, rows) if event is not None)
+        out.extend(event for event in (_decode_event_row(row, internal) for row in rows) if event is not None)
+        if rows:
+            scanned = int(rows[-1]["event_id"])
         if len(rows) < want:
             break
-        after = int(rows[-1]["event_id"])
-    return out
+        after = scanned
+    return out, scanned
 
 
 def recent_events(window_ms: int, limit: int = 500) -> list[dict[str, Any]]:

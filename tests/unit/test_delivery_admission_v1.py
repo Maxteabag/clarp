@@ -455,6 +455,37 @@ def test_a_malformed_identity_is_dropped_from_replay_only_and_replay_moves_past_
     assert tail not in {e["event_id"] for e in sse_store.events_after(start)}
 
 
+def test_the_runtime_relay_reads_past_dropped_hints_and_relays_valid_ones_identity_only():
+    from lib import agents as agents_db
+    from lib.runtime_events import _RUNTIME_MARKER, RuntimeEventWatcher
+    assert _RUNTIME_MARKER == sse_store._RUNTIME_MARKER
+
+    class Recording:
+        def __init__(self):
+            self.events = []
+
+        def broadcast_ephemeral(self, event):
+            self.events.append(dict(event))
+    relay = Recording()
+    watcher = RuntimeEventWatcher(relay)
+    hint = {"type": "delivery-updated", "session": "s", "agent_id": "a", "message_id": "m", _RUNTIME_MARKER: True}
+    page = [agents_db.record_sse_event(dict(hint, message_id="")) for _ in range(501)]  # more than a whole page
+    valid = agents_db.record_sse_event(dict(hint, delivery={"state": "handed_over"}))   # a legacy stored hint
+    watcher._poll_once()
+    assert relay.events == [{"type": "delivery-updated", "session": "s", "agent_id": "a", "message_id": "m",
+                             "ts": relay.events[0]["ts"], "event_id": valid}], relay.events[:1]
+    assert watcher._last_id == valid > page[-1]
+    tail = [agents_db.record_sse_event(dict(hint, session=None)) for _ in range(3)]       # dropped rows at the tail
+    watcher._poll_once()
+    assert relay.events[1:] == [] and watcher._last_id == tail[-1], "the relay moves past them, never re-reads"
+    later = agents_db.record_sse_event(dict(hint, message_id="m2"))
+    watcher._poll_once()
+    assert [e["event_id"] for e in relay.events] == [valid, later], "nothing skipped, nothing duplicated"
+    client = sse_store.events_after(page[0] - 1)
+    assert [e["event_id"] for e in client] == [valid, later] and all(_RUNTIME_MARKER not in e for e in client), \
+        "a client's since-cursor reads the same valid rows; the internal marker never reaches it"
+
+
 def test_the_replay_strip_is_scoped_to_delivery_updated_only():
     others = [{"type": "agent-status", "session": "s", "agent_id": "a", "delivery": {"kept": True}, "n": 1},
               {"type": "agent-focus", "session": "s", "agent_id": "a", "message_id": 5},

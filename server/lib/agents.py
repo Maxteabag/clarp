@@ -999,6 +999,12 @@ def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
     return _events_after(event_id, limit)
 
 
+def events_after_scanned(event_id: int, limit: int = 500, *,
+                         internal: bool = False) -> tuple[list[dict[str, Any]], int]:
+    from .sse_store import events_after_scanned as _events_after_scanned
+    return _events_after_scanned(event_id, limit, internal=internal)
+
+
 def recent_events(window_ms: int, limit: int = 500) -> list[dict[str, Any]]:
     from .sse_store import recent_events as _recent_events
     return _recent_events(window_ms, limit)

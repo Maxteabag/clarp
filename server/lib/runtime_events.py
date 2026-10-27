@@ -107,9 +107,12 @@ class RuntimeEventWatcher:
                 log_exception("runtimeEventWatcherFail", exc)
 
     def _poll_once(self) -> None:
-        rows = agents_db.events_after(self._last_id)
+        rows, scanned = agents_db.events_after_scanned(self._last_id, internal=True)
         for row in rows:
             self._last_id = max(self._last_id, int(row.get("event_id") or 0))
             if not row.pop(_RUNTIME_MARKER, False):
                 continue
             events.broadcast_ephemeral(self.stream, events.as_event(row))
+        # Rows replay dropped (F4: a delivery hint without its identity) were read
+        # too: move past them so they are never re-read.
+        self._last_id = max(self._last_id, scanned)
