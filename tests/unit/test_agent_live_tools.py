@@ -486,14 +486,19 @@ def test_an_oversized_instruction_is_refused_never_cut(make):
     call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
     _user_says(call, clock, "Ta alt dette.")
     receipt = _receipts(said)[0]
-    assert effects.posts == [] and (receipt["status"], receipt["error"], receipt["max"]) == ("refused", "request_too_large", 1500)
-    assert effects.bodies[0]["tools"][0]["parameters"]["properties"]["request"]["maxLength"] == 1500
+    assert effects.posts == [] and (receipt["status"], receipt["error"], receipt["max"]) == ("refused", "request_too_large", 4000)
+    assert effects.bodies[0]["tools"][0]["parameters"]["properties"]["request"]["maxLength"] == 4000
 
 
-@pytest.mark.parametrize("answer, status", [({"ok": True, "result": "started", "sent_now": True}, "handed_off"),
-                                            ({"ok": True, "result": "forwarded"}, "handed_off"),
-                                            ({"ok": True, "result": "already_present", "sent_now": False}, "already_handed_off"),
-                                            ({"ok": True, "ny": False}, "already_handed_off")])
+@pytest.mark.parametrize("answer, status", [
+    ({"ok": True, "result": "started", "sent_now": True}, "handed_off"),
+    ({"ok": True, "result": "started", "sent_now": False}, "handed_off"),          # the session's start already ran
+    ({"ok": True, "result": "forwarded", "sent_now": True}, "handed_off"),
+    ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": True}, "handed_off"),
+    ({"ok": True, "result": "already_present", "sent_now": False}, "already_handed_off"),
+    ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": False}, "not_forwarded"),   # regi kept its one addition
+    ({"ok": True, "result": "forwarded", "sent_now": False}, "not_forwarded"),
+])
 def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
     class Director(FakeEffects):
         def post(self, url, body, timeout=30):
@@ -504,6 +509,22 @@ def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
     _user_says(call, clock, "Ta sak 182.")
     receipt = _receipts(said)[0]
     assert receipt["status"] == status and receipt["director"] == {k: v for k, v in answer.items() if k != "ok"}
+    assert ("NOT sent" in receipt.get("note", "")) is (status == "not_forwarded")
+
+
+def test_a_text_the_director_did_not_pass_on_stays_not_forwarded_and_is_never_called_handed_off(make, ledger):
+    class Director(FakeEffects):
+        def post(self, url, body, timeout=30):
+            self.posts.append((url, body))
+            return {"ok": True, "sesjon": 1, "agent": "jonas", "ny": False}
+    effects = Director([("delegate_to_agent", {"agent": "drammen-jonas", "request": "Og legg til en eksport"})])
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Og legg til en eksport.")
+    assert _receipts(said)[0]["status"] == "not_forwarded"
+    assert "handed_off" not in json.dumps(call.taken)
+    call, said, clock = make(effects, call_id="call-2", delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Og legg til en eksport.")
+    assert len(effects.posts) == 1 and _receipts(said)[0]["status"] == "not_forwarded"
 
 
 # ---- call backs: a Host transient timer that hands the call back once to the director ----

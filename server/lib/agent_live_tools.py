@@ -67,7 +67,7 @@ PROFILE_KEY = "live_tools"
 SNAPSHOT_KEY = "live_tools"
 MAX_AGENTS = 12
 SETTLE_S = 1.2                  # the user has been quiet this long after speaking: route the turn
-REQUEST_CHARS = 1500             # the director's own limit (regi); longer is refused, never cut
+REQUEST_CHARS = 4000             # the director's own limit (regi 4000 => 200, 4001 => 413); longer is refused, never cut
 FRAGMENTS_KEPT = 40
 ROUTER_TIMEOUT_S = 25
 COMMAND_TIMEOUT_S = 30
@@ -791,11 +791,22 @@ class CallTools:
             self.ledger.update(operation, status=UNCONFIRMED, route=route, error=type(exc).__name__)
             return {"status": "unknown", "note": "not known whether it arrived; it will not be sent again blindly"}
         # The director's own answer is the truth (regi dedupes per its session + agent and ignores our key).
-        director = {k: answer[k] for k in ("result", "sent_now", "intent_id", "sesjon", "ny") if k in answer}
-        status = "already_handed_off" if answer.get("result") == "already_present" or answer.get("ny") is False \
-            else "handed_off"
-        self.ledger.update(operation, status=DONE, route=route, director=director)
+        # ny:false (or sent_now:false) means the director deliberately did NOT pass this text on (regi keeps one
+        # addition per member per session): that is never "handed off". Only an explicit already_present says
+        # this very text is already with the member.
+        director = {k: answer[k] for k in ("result", "sent_now", "intent_id", "sesjon", "agent", "ny", "reason")
+                    if k in answer}
+        if answer.get("result") == "already_present":
+            status = "already_handed_off"
+        elif answer.get("ny") is False or (answer.get("sent_now") is False and answer.get("result") != "started"):
+            status = "not_forwarded"
+        else:
+            status = "handed_off"
+        self.ledger.update(operation, status=DONE, route=route, director=director, outcome=status)
         receipt = {"status": status, "request": request[:200], **({"director": director} if director else {})}
+        if status == "not_forwarded":
+            receipt["note"] = ("the director already holds this member's message for this session; this text was "
+                               "NOT sent to them")
         with self.lock:
             self.taken.append({"tool": "delegate_to_agent", "agent": member["name"], **receipt})
         return receipt
@@ -803,8 +814,11 @@ class CallTools:
     def _reconcile_delegate(self, operation: str, member: dict, request: str, row: dict) -> dict:
         """The same intent was claimed before. Done stays done; an unconfirmed one is checked, never resent blindly."""
         if row.get("status") == DONE:
-            return {"status": "already_handed_off",
-                    "since": time.strftime("%H:%M", time.localtime(float(row.get("at", 0))))}
+            since = time.strftime("%H:%M", time.localtime(float(row.get("at", 0))))
+            if row.get("outcome") == "not_forwarded":
+                return {"status": "not_forwarded", "since": since,
+                        "note": "the director did not pass this text on earlier; it is not sent again"}
+            return {"status": "already_handed_off", "since": since}
         if row.get("status") == CLAIMED and time.time() - float(row.get("at", 0)) < STALE_CLAIM_S:
             return {"status": "unknown", "note": "being handed off right now; not sent again"}
         if row.get("status") in (UNCONFIRMED, CLAIMED):     # unknown, or a claim a crash left behind
