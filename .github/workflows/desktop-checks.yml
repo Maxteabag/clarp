@@ -87,6 +87,36 @@ jobs:
         with:
           name: reply-order-negative-control
           path: /tmp/reply-order-baseline.log
+      - name: Wheel settling counter negative control
+        working-directory: desktop-rs
+        run: |
+          set -euo pipefail
+          file=slint-app/src/scrollbar_checks.rs
+          cp "$file" /tmp/scrollbar-candidate.rs
+          trap 'cp /tmp/scrollbar-candidate.rs "$file"' EXIT
+          python3 - <<'PYCTRL'
+          from pathlib import Path
+          path = Path('slint-app/src/scrollbar_checks.rs')
+          source = path.read_text()
+          before = 'self.action_offset = Some(offset);\n        self.still = 0;'
+          assert source.count(before) == 1
+          path.write_text(source.replace(before, 'self.action_offset = Some(offset);'))
+          PYCTRL
+          set +e
+          cargo test --locked -p clarp-slint --bin clarp-slint driver::scrollbar_checks::settling_tests::delayed_wheel_gets_fresh_settling_and_only_the_real_endpoint_finishes -- --exact > /tmp/wheel-counter-baseline.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/wheel-counter-baseline.log
+          test "$rc" -eq 101
+          grep -F 'fresh wheel must receive its own settling polls' /tmp/wheel-counter-baseline.log
+          grep -F '0 passed; 1 failed;' /tmp/wheel-counter-baseline.log
+          cp /tmp/scrollbar-candidate.rs "$file"
+          trap - EXIT
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wheel-counter-negative-control
+          path: /tmp/wheel-counter-baseline.log
       - name: Unit and contract tests
         working-directory: desktop-rs
         # pipefail: without it the job takes tee's exit code and a failing
@@ -116,6 +146,8 @@ jobs:
         with:
           workspaces: desktop-rs
           shared-key: desktop-debug
+      - name: Bounded projection observation for debug checks only
+        run: python3 .github/koko-projection-probe.py
       - name: Build the app
         working-directory: desktop-rs
         run: cargo build --locked -p clarp-slint

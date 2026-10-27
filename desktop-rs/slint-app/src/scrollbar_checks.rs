@@ -229,12 +229,43 @@ fn truth(window: &crate::AppWindow) -> f32 {
     slint::Model::row_data(&before, index).map_or(-1.0, |start| start + (top - row_top))
 }
 
+#[derive(Debug, PartialEq)]
+enum Step { Wait, Advance, End, Stalled }
+
+/// Settling belongs to one dispatched input, not the previous one's polls.
+#[derive(Default)]
+struct StepGate {
+    last_offset: Option<f32>,
+    last_rows: usize,
+    action_offset: Option<f32>,
+    still: usize,
+}
+
+impl StepGate {
+    fn poll(&mut self, offset: f32, rows: usize, measuring: bool, endpoint: bool, down: bool) -> Step {
+        if self.last_offset.is_some_and(|old| (old - offset).abs() < 0.5) && self.last_rows == rows && !measuring {
+            self.still += 1;
+        } else {
+            self.still = 0;
+        }
+        self.last_offset = Some(offset);
+        self.last_rows = rows;
+        if self.still < 2 { return Step::Wait; }
+        if self.action_offset.is_none_or(|old| (old - offset).abs() >= 0.5) { return Step::Advance; }
+        if self.still < if down { 4 } else { 10 } { return Step::Wait; }
+        if endpoint { Step::End } else { Step::Stalled }
+    }
+
+    fn acted(&mut self, offset: f32) {
+        self.action_offset = Some(offset);
+        self.still = 0;
+    }
+}
+
 #[derive(Default)]
 struct Pass {
     samples: Vec<Sample>,
-    last_offset: Option<f32>,
-    last_rows: usize,
-    still: usize,
+    gate: StepGate,
     acts: usize,
     done: bool,
     since: Option<Instant>,
@@ -266,36 +297,35 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
             // their heights move the thumb in the step they landed in, not
             // in the next one, however long measuring takes.
             let measuring = app.measured_height("").1 .1 > 0;
-            if st.last_offset.is_some_and(|o| (o - offset).abs() < 0.5) && count == st.last_rows && !measuring {
-                st.still += 1;
-            } else {
-                st.still = 0;
+            let drawn_thumb = thumb();
+            let endpoint = drawn_thumb.is_some_and(|t| if down {
+                (t.top + t.height - t.track_bottom).abs() <= 1.5
+            } else { (t.top - t.track_top).abs() <= 1.5 });
+            let step = st.gate.poll(offset, count, measuring, endpoint, down);
+            if step == Step::Wait { return false; }
+            // One sample per settled input (including its final endpoint),
+            // never duplicate a sample just because the next event is pending.
+            if let Some(thumb) = drawn_thumb {
+                st.samples.push(Sample { thumb, offset, rows: count, truth: truth(window) });
             }
-            st.last_offset = Some(offset);
-            st.last_rows = count;
-            if st.still < 2 {
-                return false;
-            }
-            if let Some(thumb) = thumb() {
-                st.samples.push(Sample { thumb, offset, rows: rows(window).len(), truth: truth(window) });
-            }
-            let moved = st.samples.len() >= 2 && (st.samples[st.samples.len() - 2].offset - offset).abs() >= 0.5;
-            // Going up, an older page may still land at the top: hold longer.
-            if st.acts > 0 && !moved && st.still >= if down { 4 } else { 10 } || st.acts > 400 {
+            if step == Step::End || step == Step::Stalled || st.acts > 400 {
+                // Optional CI-only accessibility probe, read after deciding
+                // whether this input ended or stalled (never drives scrolling).
+                use i_slint_backend_testing::ElementQuery;
+                let probe = ElementQuery::from_root(window).match_type_name("Transcript").find_first().and_then(|e| e.accessible_value());
+                eprintln!("SCROLL_STOP label={label} step={step:?} acts={} still={} report={:?} measuring={measuring} probe={probe:?}", st.acts, st.gate.still, report());
+                check(step == Step::End, &format!("{label}: the input reaches its actual endpoint (report {:?}, measuring {measuring}, thumb {drawn_thumb:?})", report()));
                 st.done = true;
                 return false;
             }
-            if st.since.is_none() {
-                st.since = Some(Instant::now());
-            }
-            if moved || st.acts == 0 || st.still == 2 {
-                st.acts += 1;
-                match (by_key, down) {
-                    (true, true) => headless::press(slint::platform::Key::PageDown),
-                    (true, false) => headless::press(slint::platform::Key::PageUp),
-                    (false, true) => wheel(-1200.0),
-                    (false, false) => wheel(1200.0),
-                }
+            if st.since.is_none() { st.since = Some(Instant::now()); }
+            st.acts += 1;
+            st.gate.acted(offset);
+            match (by_key, down) {
+                (true, true) => headless::press(slint::platform::Key::PageDown),
+                (true, false) => headless::press(slint::platform::Key::PageUp),
+                (false, true) => wheel(-1200.0),
+                (false, false) => wheel(1200.0),
             }
             false
         })));
@@ -602,4 +632,45 @@ pub(super) fn scrollbar_check(out: String) {
         }
     })));
     run_stages(stages);
+}
+
+#[cfg(test)]
+mod settling_tests {
+    use super::{Step, StepGate};
+
+    #[test]
+    fn delayed_wheel_gets_fresh_settling_and_only_the_real_endpoint_finishes() {
+        let mut gate = StepGate::default();
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait);
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait);
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Advance);
+        gate.acted(0.0);
+        // The old counter carried still=2 across dispatch: these two polls
+        // reached still=4 and ended the pass before its delayed wheel moved.
+        let mut legacy_still = 2;
+        let mut legacy_done = false;
+        for _ in 0..2 {
+            legacy_still += 1;
+            legacy_done |= legacy_still >= 4; // original down/no-movement stop
+            assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait, "fresh wheel must receive its own settling polls");
+        }
+        assert!(legacy_done, "negative control: old counter stops before the queued movement");
+        assert_eq!(gate.poll(-1200.0, 99, false, false, true), Step::Wait);
+        assert_eq!(gate.poll(-1200.0, 99, false, false, true), Step::Wait);
+        assert_eq!(gate.poll(-1200.0, 99, false, true, true), Step::Advance);
+        gate.acted(-1200.0);
+        for _ in 0..3 { assert_eq!(gate.poll(-1200.0, 99, false, true, true), Step::Wait); }
+        assert_eq!(gate.poll(-1200.0, 99, false, true, true), Step::End);
+    }
+
+    #[test]
+    fn a_genuinely_unmoving_input_fails_away_from_the_endpoint() {
+        let mut gate = StepGate::default();
+        gate.poll(0.0, 99, false, false, true);
+        gate.poll(0.0, 99, false, false, true);
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Advance);
+        gate.acted(0.0);
+        for _ in 0..3 { assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait); }
+        assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Stalled);
+    }
 }
