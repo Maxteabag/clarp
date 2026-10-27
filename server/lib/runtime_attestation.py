@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import select
+import selectors
 import subprocess
 import sys
 import threading
@@ -214,21 +214,24 @@ def run_probe(timeout: float = SHOW_TIMEOUT_S) -> tuple[int | None, bytes, str, 
     try:
         fd = child.stdout.fileno()
         os.set_blocking(fd, False)
-        while True:
-            left = deadline - CLOCK()
-            if left <= 0:
-                reason = "timeout"
-                break
-            ready, _, _ = select.select([fd], [], [], left)
-            if not ready:
-                continue
-            chunk = os.read(fd, OUT_CAP + 1 - len(out))
-            if not chunk:
-                break
-            out += chunk
-            if len(out) > OUT_CAP:
-                reason = "bad_bytes"
-                break
+        # selectors (epoll / poll), not select.select: select() rejects any fd >= FD_SETSIZE (1024),
+        # which a busy Host reaches; that made every bracket an exec_error omission (ROOT 9b2c02cb R-a).
+        with selectors.DefaultSelector() as selector:
+            selector.register(fd, selectors.EVENT_READ)
+            while True:
+                left = deadline - CLOCK()
+                if left <= 0:
+                    reason = "timeout"
+                    break
+                if not selector.select(left):
+                    continue
+                chunk = os.read(fd, OUT_CAP + 1 - len(out))
+                if not chunk:
+                    break
+                out += chunk
+                if len(out) > OUT_CAP:
+                    reason = "bad_bytes"
+                    break
         if not reason:
             try:
                 child.wait(timeout=max(0.0, deadline - CLOCK()))
