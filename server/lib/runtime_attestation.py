@@ -401,8 +401,9 @@ def log_due(kind: str, exc: BaseException) -> tuple[bool, str]:
 def admit(observation: Any, *, in_transaction: bool, disconnected: bool = False,
           budget: Budget | None = None, reserved: bool = False) -> bool:
     """One /log bracket's B. True only when THIS fresh manager read binds the observation's A2.
-    The caller passes whether a DB transaction is open and whether the client has gone; both
-    refuse without a probe. Every refusal is counted under its closed reason. With
+    The caller passes whether a DB transaction is open and MAY pass an explicit `disconnected`
+    (both refuse without a probe). The /log handler does not: it no longer peeks the request socket
+    (ROOT 8efe6041), so a departed client may let this bounded work finish. Every refusal is counted under its closed reason. With
     reserved=True the permit from reserve() is used, and given back on every path."""
     a2 = attestation_of(observation)
     refusal = ("no_attestation" if a2 is None else "disconnected" if disconnected

@@ -3039,9 +3039,12 @@ class Handler(BaseHTTPRequestHandler):
                 # B: ONE fresh, bounded manager read for this bracket, outside any
                 # transaction and before the read snapshot; never cached or reused.
                 taken, reserved = reserved, False      # admit() gives a reserved permit back itself
+                # No early-disconnect peek (ROOT 8efe6041): a peek on the request socket
+                # waits under its 120 s timeout. A client that left may let this bounded
+                # optional work finish (<= 2.0 s, 1 in flight, 2 starts/s); the response
+                # write's clientGone handling covers the rest. No cancellation is claimed.
                 admitted = runtime_attestation.admit(observed, in_transaction=db.conn().in_transaction,
-                                                     disconnected=self._client_gone(), budget=budget,
-                                                     reserved=taken)
+                                                     budget=budget, reserved=taken)
             finally:
                 if reserved:
                     runtime_attestation.release_reservation()
@@ -3136,8 +3139,7 @@ class Handler(BaseHTTPRequestHandler):
             return None
         if state == "hit":
             return cached, False
-        if not runtime_attestation.reserve(in_transaction=db.conn().in_transaction,
-                                           disconnected=self._client_gone()):
+        if not runtime_attestation.reserve(in_transaction=db.conn().in_transaction):
             return None
         # From here the permit is held: it goes back on EVERY path out (incl. a
         # log write or a BaseException raising), unless it is handed to the caller.
@@ -3159,16 +3161,6 @@ class Handler(BaseHTTPRequestHandler):
             if not handed:
                 runtime_attestation.release_reservation()
         return (observed, True) if handed else None
-
-    def _client_gone(self) -> bool:
-        """Best-effort: the client has already closed its connection (a
-        non-blocking peek reads EOF). Never a cancellation guarantee; anything
-        it cannot tell counts as still connected."""
-        import socket
-        try:
-            return self.connection.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) == b""
-        except Exception:  # noqa: BLE001 - would block, TLS, closed fd: not proven gone
-            return False
 
     def _interaction_id(self) -> str:
         value = str(self.headers.get("X-Clarp-Interaction-ID") or "").strip()
