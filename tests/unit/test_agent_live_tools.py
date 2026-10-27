@@ -489,6 +489,23 @@ def test_a_cancel_that_cannot_be_confirmed_is_reported_as_such(make):
     assert _receipts(said)[0]["status"] == "unconfirmed"
 
 
+
+# ---- one owner per effect: the director owns hand-out and call back -------------------
+
+def test_a_director_owned_profile_never_prompts_members_and_never_schedules_a_ring(make):
+    """The Drammen profile: hand-out only through the director (no prompt fallback), no call back from the Host.
+    The director stays the single owner of distribution and of the one call back ring."""
+    settings = {"delegate": {"kind": "http", "url": DIRECTOR, "fallback": "none"}, "callback": {"kind": "none"}}
+    for n, error in enumerate((None, tools.Unreachable("HTTP 404"), tools.Unconfirmed("timeout"))):
+        ask = ("delegate_to_agent", {"agent": "drammen-jonas", "request": f"Ta sak {182 + n}"})
+        effects = FakeEffects([ask, CALL_BACK, ("cancel_callback", {})])
+        effects.post_error = error
+        call, said, clock = make(effects, call_id=f"call-{error!r}", **settings)
+        _user_says(call, clock, "Ta sak 182 og ring meg om fem.")
+        assert len(effects.posts) == 1 and effects.prompts == [] and effects.scheduled == [] and effects.cancelled == []
+        assert {"schedule_callback", "cancel_callback"}.isdisjoint(t["name"] for t in effects.bodies[0]["tools"])
+
+
 # ---- the real POST ---------------------------------------------------------------------
 
 def test_the_real_post_is_loopback_only_never_proxied_or_redirected_and_reads_the_body(monkeypatch):
