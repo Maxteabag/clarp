@@ -3026,11 +3026,12 @@ class Handler(BaseHTTPRequestHandler):
         first = first_attestation = None
         if external:
             observed = self._first_observation(budget, client)
-            budget.phase("o1")
             if observed is None:
+                budget.phase("o1")
                 return None
             observed, reserved = observed
             try:
+                budget.phase("o1")
                 first = launch_receipts.runtime_identity(observed)
                 if first is None:
                     return None                # O1 unusable: omit everything
@@ -3138,22 +3139,26 @@ class Handler(BaseHTTPRequestHandler):
         if not runtime_attestation.reserve(in_transaction=db.conn().in_transaction,
                                            disconnected=self._client_gone()):
             return None
-        cap = budget.cap(runtime_attestation.O1_CAP_S)
-        observed = None
-        if cap is None:
-            runtime_attestation.note("deadline_exhausted")
-        else:
-            fetched_at = backends._clock()
-            observed = self._delivery_observation(fresh=False, timeout=cap)
-            if observed is None:
-                runtime_attestation.note("o1_unavailable")
-            elif shared:
-                backends.offer_runtime_status(client, observed, fetched_at=fetched_at,
-                                              generation=generation)
-        if observed is None:
-            runtime_attestation.release_reservation()
-            return None
-        return observed, True
+        # From here the permit is held: it goes back on EVERY path out (incl. a
+        # log write or a BaseException raising), unless it is handed to the caller.
+        observed, handed = None, False
+        try:
+            cap = budget.cap(runtime_attestation.O1_CAP_S)
+            if cap is None:
+                runtime_attestation.note("deadline_exhausted")
+            else:
+                fetched_at = backends._clock()
+                observed = self._delivery_observation(fresh=False, timeout=cap)
+                if observed is None:
+                    runtime_attestation.note("o1_unavailable")
+                elif shared:
+                    backends.offer_runtime_status(client, observed, fetched_at=fetched_at,
+                                                  generation=generation)
+            handed = observed is not None
+        finally:
+            if not handed:
+                runtime_attestation.release_reservation()
+        return (observed, True) if handed else None
 
     def _client_gone(self) -> bool:
         """Best-effort: the client has already closed its connection (a

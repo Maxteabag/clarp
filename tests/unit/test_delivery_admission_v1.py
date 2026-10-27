@@ -504,6 +504,29 @@ def test_a_refreshed_window_keeps_the_default_path_for_every_other_caller(fake, 
         "and refreshes it itself through status() with the client's default"
 
 
+def test_a_raising_o1_never_leaks_the_reserved_permit(fake, monkeypatch):
+    from lib.runtime_bridge import RuntimeUnavailable
+    server_module = _server()
+
+    def broken_log(*args, **kwargs):
+        raise OSError("stderr closed")
+    monkeypatch.setattr(server_module, "log", broken_log)
+    with pytest.raises(OSError):                  # the failure's own log write raises
+        _bracket(_Runtime(fake.clock, ("fail", RuntimeUnavailable("down"))))
+    assert ra.status_block()["gate"]["inflight_now"] == 0
+    monkeypatch.setattr(server_module, "log", lambda *args, **kwargs: None)
+
+    def interrupted(runtime):
+        raise KeyboardInterrupt()
+    fake.clock.t += 1
+    with pytest.raises(KeyboardInterrupt):        # a BaseException during the O1 RPC
+        _bracket(_Runtime(fake.clock, interrupted))
+    assert ra.status_block()["gate"]["inflight_now"] == 0
+    fake.clock.t += 1
+    assert _bracket(_Runtime(fake.clock)) is not None and fake.probe.calls == 1, \
+        "the next bracket reserves and runs B"
+
+
 def test_an_exhausted_probe_gate_starts_no_o1_rpc(fake):
     runtime = _Runtime(fake.clock)
     assert _bracket(runtime) is not None and _bracket(runtime) is not None
