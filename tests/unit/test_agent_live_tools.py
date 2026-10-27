@@ -494,7 +494,7 @@ def test_an_oversized_instruction_is_refused_never_cut(make):
     ({"ok": True, "result": "started", "sent_now": True}, "handed_off"),
     ({"ok": True, "result": "started", "sent_now": False}, "handed_off"),          # the session's start already ran
     ({"ok": True, "result": "forwarded", "sent_now": True}, "handed_off"),
-    ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": True}, "handed_off"),
+    ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": True}, "queued"),          # regi queued it: not delivered yet
     ({"ok": True, "result": "already_present", "sent_now": False}, "already_handed_off"),
     ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": False}, "not_forwarded"),   # regi kept its one addition
     ({"ok": True, "result": "forwarded", "sent_now": False}, "not_forwarded"),
@@ -510,6 +510,7 @@ def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
     receipt = _receipts(said)[0]
     assert receipt["status"] == status and receipt["director"] == {k: v for k, v in answer.items() if k != "ok"}
     assert ("NOT sent" in receipt.get("note", "")) is (status == "not_forwarded")
+    assert ("not yet confirmed" in receipt.get("note", "")) is (status == "queued")
 
 
 def test_a_text_the_director_did_not_pass_on_stays_not_forwarded_and_is_never_called_handed_off(make, ledger):
