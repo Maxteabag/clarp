@@ -47,6 +47,7 @@ class FakeEffects:
     def __init__(self, calls=()):
         self.calls, self.bodies = list(calls), []
         self.prompts, self.posts, self.scheduled, self.cancelled = [], [], [], []
+        self.post_error = None
 
     def route(self, body):
         self.bodies.append(body)
@@ -56,8 +57,10 @@ class FakeEffects:
     def prompt(self, to, sender, text):
         self.prompts.append((to, sender, text))
 
-    def post(self, url, body):
+    def post(self, url, body, timeout=30):
         self.posts.append((url, body))
+        if self.post_error is not None:
+            raise self.post_error
         return {}
 
     def later(self, command, delay_seconds, unit):
@@ -335,6 +338,93 @@ def test_a_route_runs_at_most_its_bounded_number_of_actions(make):
     _user_says(call, clock, "Hvordan går det?")
     assert said[-1][1].count('"get_agent_status"') == tools.MAX_ACTIONS_PER_ROUTE
     assert '"untrusted_data"' in said[-1][1]
+
+
+
+# ---- delegation through the director, with the prompt as fallback ---------------------
+
+DIRECTOR = "http://127.0.0.1:7790/regi/sandra/deleger"
+ASK = ("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182"})
+
+
+@pytest.mark.parametrize("error, prompted, status", [
+    (None, 0, "handed_off"),
+    (tools.Unreachable("refused"), 1, "handed_off"),
+    (tools.Unconfirmed("timeout"), 0, "unconfirmed"),
+    (tools.Refused(400), 0, "failed"),
+])
+def test_a_director_delegation_falls_back_only_when_it_certainly_did_not_arrive(make, error, prompted, status):
+    effects = FakeEffects([ASK])
+    effects.post_error = error
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"})
+    _user_says(call, clock, "Ta sak 182.")
+    assert len(effects.posts) == 1 and effects.posts[0][1]["idempotency_key"].startswith("delegate:")
+    assert len(effects.prompts) == prompted and f'"{status}"' in said[-1][1]
+
+
+def test_an_unconfirmed_delegation_is_never_resent_by_any_route(make):
+    effects = FakeEffects([ASK])
+    effects.post_error = tools.Unconfirmed("timeout")
+    call, _said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"})
+    _user_says(call, clock, "Ta sak 182.")
+    _user_says(call, clock, "Ta sak 182, sa jeg.")
+    assert len(effects.posts) == 1 and effects.prompts == []
+
+
+def test_without_a_fallback_an_unreachable_director_is_a_failure(make):
+    effects = FakeEffects([ASK])
+    effects.post_error = tools.Unreachable("refused")
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")
+    assert effects.prompts == [] and '"failed"' in said[-1][1]
+
+
+@pytest.mark.parametrize("fallback", ["shell", 1])
+def test_an_unknown_fallback_is_no_tools(fallback):
+    profile = {"agent_session": "rk-sander-0001",
+               "live_tools": _block(delegate={"kind": "http", "url": DIRECTOR, "fallback": fallback})}
+    assert tools.frozen_config(profile, "user_call") is None
+
+
+def test_the_real_post_classifies_every_outcome():
+    import http.server
+    import socket
+    import threading as th
+
+    class Director(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            code = {"/ok": 200, "/missing": 404, "/down": 503, "/bad": 400}.get(self.path)
+            if self.path == "/slow":
+                time.sleep(1.5)
+                code = 200
+            self.send_response(code)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Director)
+    th.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        assert tools._post(base + "/ok", {}) == {}
+        for path in ("/missing", "/down"):
+            with pytest.raises(tools.Unreachable):
+                tools._post(base + path, {})
+        with pytest.raises(tools.Refused):
+            tools._post(base + "/bad", {})
+        with pytest.raises(tools.Unconfirmed):
+            tools._post(base + "/slow", {}, timeout=0.3)
+    finally:
+        server.shutdown()
+    closed = socket.socket()
+    closed.bind(("127.0.0.1", 0))
+    port = closed.getsockname()[1]
+    closed.close()
+    with pytest.raises(tools.Unreachable):
+        tools._post(f"http://127.0.0.1:{port}/x", {})
 
 
 # ---- inside a real Agent Live socket ---------------------------------------------------

@@ -15,7 +15,10 @@ audio never waits for it.
 
 Tools:
 - delegate_to_agent(agent, request): only to the allowlisted sessions, as a
-  Clarp prompt from the profile's sender (or a loopback HTTP POST).
+  Clarp prompt from the profile's agent, or a loopback HTTP POST to a director
+  with the prompt as fallback when the director certainly did not take it
+  (refused connection, 404/405/502/503). A timeout is "unconfirmed": never
+  resent by either route.
 - get_agent_status(agent), read_agent_transcript(agent, limit): read-only.
 - schedule_callback(minutes, reason): at most one pending call back per
   (Host, principal, agent), a systemd timer that runs ``clarp-admin call ring``
@@ -34,7 +37,8 @@ Profile block (all keys but ``agents`` optional)::
       "stories": ["user_call"],
       "from": "rk-sander",
       "agents": [{"session": "drammen-jonas", "name": "Jonas", "role": "backend"}],
-      "delegate": {"kind": "prompt"} | {"kind": "http", "url": "http://127.0.0.1:7790/..."},
+      "delegate": {"kind": "prompt"}
+                | {"kind": "http", "url": "http://127.0.0.1:7790/regi/sandra/deleger", "fallback": "prompt"},
       "callback": {"kind": "ring", "say": "Hei Peter, det er Sandra igjen."}
                 | {"kind": "http", "url": "http://127.0.0.1:7790/regi/ring"},
       "callback_minutes": {"default": 5, "min": 1, "max": 30}
@@ -153,9 +157,10 @@ def frozen_config(profile: dict, story: str) -> dict | None:
         return None
     if delegate["kind"] == "http":
         url = _loopback_url(delegate.get("url"))
-        if not url:
+        fallback = delegate.get("fallback", "none")
+        if not url or fallback not in ("prompt", "none"):
             return None
-        delegate = {"kind": "http", "url": url}
+        delegate = {"kind": "http", "url": url, "fallback": fallback}
     else:
         delegate = {"kind": "prompt"}
     callback = block.get("callback") or {"kind": "ring"}
@@ -236,11 +241,46 @@ def _run(command: list[str]) -> None:
         raise RuntimeError(f"exit {result.returncode}: {(result.stderr or result.stdout)[-300:]}")
 
 
-def _post(url: str, body: dict) -> dict:
+DELEGATE_HTTP_TIMEOUT_S = 5
+
+
+class Unreachable(Exception):
+    """The target certainly did not take the request (refused, no route, no such endpoint, unavailable)."""
+
+
+class Unconfirmed(Exception):
+    """The request may have arrived (a timeout after sending): never sent again by another route."""
+
+
+class Refused(Exception):
+    """The target answered and declined (a 4xx other than a missing endpoint)."""
+
+    def __init__(self, status: int):
+        super().__init__(f"HTTP {status}")
+        self.status = status
+
+
+def _post(url: str, body: dict, timeout: float = COMMAND_TIMEOUT_S) -> dict:
+    """POST JSON to a loopback URL; failures are classified so a fallback never duplicates delivery."""
+    import socket
+    from urllib.error import HTTPError, URLError
     from urllib.request import Request, urlopen
     request = Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"})
-    with urlopen(request, timeout=COMMAND_TIMEOUT_S) as response:
-        raw = response.read(65536)
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read(65536)
+    except HTTPError as exc:
+        if exc.code in (404, 405, 502, 503):
+            raise Unreachable(f"HTTP {exc.code}") from None
+        raise Refused(exc.code) from None
+    except (TimeoutError, socket.timeout) as exc:
+        raise Unconfirmed(type(exc).__name__) from None
+    except URLError as exc:
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            raise Unconfirmed("timeout") from None
+        raise Unreachable(str(exc.reason)[:120]) from None
+    except ConnectionError as exc:
+        raise Unconfirmed(type(exc).__name__) from None
     try:
         value = json.loads(raw or b"{}")
     except ValueError:
@@ -280,8 +320,8 @@ class Effects:
     def prompt(self, to: str, sender: str, text: str) -> None:
         _run(_clarp_admin() + ["prompt", "--to", to, "--from", sender, "--text", text])
 
-    def post(self, url: str, body: dict) -> dict:
-        return _post(url, body)
+    def post(self, url: str, body: dict, timeout: float = COMMAND_TIMEOUT_S) -> dict:
+        return _post(url, body, timeout)
 
     def later(self, command: list[str], delay_seconds: int, unit: str) -> None:
         _launch_later(command, delay_seconds, unit)
@@ -596,18 +636,34 @@ class CallTools:
             return {"tool": "delegate_to_agent", "agent": member["name"], "status": "already_handed_off",
                     "since": time.strftime("%H:%M", time.localtime(float(row.get("at", 0))))}
         delegate = self.cfg["delegate"]
+        route = "prompt"
+        text = f"Fra {self.name} (teamleder), rett fra telefonsamtalen med Peter: {request}"
         try:
             if delegate["kind"] == "http":
-                self.effects.post(delegate["url"], {"call_id": self.call_id, "from": self.agent_session,
-                                                    "agent": member["session"], "name": member["name"],
-                                                    "request": request, "idempotency_key": key})
+                try:
+                    self.effects.post(delegate["url"], {"call_id": self.call_id, "from": self.agent_session,
+                                                        "agent": member["session"], "name": member["name"],
+                                                        "request": request, "idempotency_key": key},
+                                      DELEGATE_HTTP_TIMEOUT_S)
+                    route = "http"
+                except Unreachable as exc:
+                    if delegate["fallback"] != "prompt":
+                        raise
+                    log("agentLiveDelegateFallback", f"call={self.call_id} to={member['session']} reason={exc}")
+                    self.effects.prompt(member["session"], self.agent_session, text)
+                    route = "prompt_fallback"
             else:
-                text = f"Fra {self.name} (teamleder), rett fra telefonsamtalen med Peter: {request}"
                 self.effects.prompt(member["session"], self.agent_session, text)
+        except Unconfirmed as exc:
+            # It may have arrived: the claim stays (never resent by any route) and nothing claims it was handed off.
+            self.ledger.update(key, status="unconfirmed", error=str(exc)[:120])
+            log("agentLiveDelegateUnconfirmed", f"call={self.call_id} to={member['session']} reason={exc}")
+            return {"tool": "delegate_to_agent", "agent": member["name"], "status": "unconfirmed",
+                    "note": "may or may not have arrived; do not say it was handed off"}
         except Exception:
-            self.ledger.update(key, status="failed")      # failed before delivery is known: a new ask may retry
+            self.ledger.update(key, status="failed")      # certainly not delivered: a new ask may retry
             raise
-        self.ledger.update(key, status="handed_off")
+        self.ledger.update(key, status="handed_off", route=route)
         receipt = {"tool": "delegate_to_agent", "agent": member["name"], "status": "handed_off", "request": request[:200]}
         with self.lock:
             self.taken.append(receipt)
