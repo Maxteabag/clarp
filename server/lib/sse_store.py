@@ -47,15 +47,17 @@ _DELIVERY_HINT_IDENTITY = ("session", "agent_id", "message_id")
 
 
 def _egress(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """F4: a stored ``delivery-updated`` row leaves as the identity hint only.
-    A deprecated stored ``delivery`` projection is dropped on the way out (the
-    stored row is never rewritten); a row without its identity is not sent."""
+    """F4: a stored ``delivery-updated`` row leaves as the identity hint ONLY
+    (session, agent_id, message_id, plus the hub's type / event_id / ts): any
+    stored ``delivery`` projection or other key is dropped on the way out. A row
+    whose identity is missing or invalid is dropped from the output. The stored
+    row is never rewritten and no id is made up."""
     if payload.get("type") != _DELIVERY_HINT:
         return payload
-    payload.pop("delivery", None)
     if not all(isinstance(payload.get(k), str) and payload.get(k) for k in _DELIVERY_HINT_IDENTITY):
         return None
-    return payload
+    return {"type": _DELIVERY_HINT, **{k: payload[k] for k in _DELIVERY_HINT_IDENTITY},
+            "ts": payload["ts"], "event_id": payload["event_id"]}
 
 
 def _decode_event_row(row: sqlite3.Row) -> dict[str, Any] | None:
@@ -70,15 +72,27 @@ def _decode_event_row(row: sqlite3.Row) -> dict[str, Any] | None:
 
 
 def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
-    rows = conn().execute(
-        """SELECT event_id, ts, type, payload
-             FROM sse_events
-            WHERE event_id > ?
-            ORDER BY event_id ASC
-            LIMIT ?""",
-        (max(0, int(event_id)), max(1, min(limit, 5000))),
-    ).fetchall()
-    return [event for event in map(_decode_event_row, rows) if event is not None]
+    """Up to ``limit`` replayable events after ``event_id``, in event_id order.
+    A row dropped on egress does not count against the limit: the read continues
+    past it, so a caller's cursor (the last event_id it received) is never stuck
+    behind dropped rows. Work: the rows returned plus the rows dropped."""
+    limit, after = max(1, min(limit, 5000)), max(0, int(event_id))
+    out: list[dict[str, Any]] = []
+    while len(out) < limit:
+        want = limit - len(out)
+        rows = conn().execute(
+            """SELECT event_id, ts, type, payload
+                 FROM sse_events
+                WHERE event_id > ?
+                ORDER BY event_id ASC
+                LIMIT ?""",
+            (after, want),
+        ).fetchall()
+        out.extend(event for event in map(_decode_event_row, rows) if event is not None)
+        if len(rows) < want:
+            break
+        after = int(rows[-1]["event_id"])
+    return out
 
 
 def recent_events(window_ms: int, limit: int = 500) -> list[dict[str, Any]]:
