@@ -447,6 +447,31 @@ def test_a_malformed_identity_is_dropped_from_replay_only_and_replay_moves_past_
     assert sse_store.events_after(first, limit=1) == [out[1]] and sse_store.events_after(last) == []
     assert not {e["event_id"] for e in sse_store.recent_events(10 ** 9)} & set(bad)
     assert rows() == stored, "replay rewrites no stored row and makes up no id"
+    tail = sse_store.record_sse_event(dict(hint, session=None))           # a dropped row at the tail of the page
+    assert sse_store.events_after(last, limit=1) == [], "only the table's end shortens a page"
+    later = sse_store.record_sse_event(dict(hint, message_id="m3"))
+    assert [e["event_id"] for e in sse_store.events_after(last, limit=1)] == [later], \
+        "the next cursor reads past the dropped tail: nothing skipped, nothing duplicated"
+    assert tail not in {e["event_id"] for e in sse_store.events_after(start)}
+
+
+def test_the_replay_strip_is_scoped_to_delivery_updated_only():
+    others = [{"type": "agent-status", "session": "s", "agent_id": "a", "delivery": {"kept": True}, "n": 1},
+              {"type": "agent-focus", "session": "s", "agent_id": "a", "message_id": 5},
+              {"type": "runtime-x", "session": "", "agent_id": None, "extra": [1, 2]}]
+    ids = [sse_store.record_sse_event(event) for event in others]
+    stored = {}
+    for eid, ts, kind, payload in db.conn().execute(
+            "SELECT event_id, ts, type, payload FROM sse_events WHERE event_id IN (?, ?, ?)", ids):
+        expected = json.loads(payload)                  # the decode as before F4: column fill-ins only
+        expected.setdefault("event_id", eid)
+        expected.setdefault("ts", ts)
+        expected.setdefault("type", kind)
+        stored[eid] = expected
+    after = {e["event_id"]: e for e in sse_store.events_after(0)}
+    recent = {e["event_id"]: e for e in sse_store.recent_events(10 ** 9)}
+    assert all(after[eid] == stored[eid] and recent[eid] == stored[eid] for eid in ids), \
+        "every other type replays exactly as stored, also to the Host's runtime-event relay"
 
 
 # --- egress gate (source) -------------------------------------------------------------------

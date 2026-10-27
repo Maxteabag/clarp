@@ -717,7 +717,10 @@ keys: `scope` ("process"), `reset_on` ("process_restart"), `gate`
 `unexpected_by_type` (at most 16 exception type names plus `_other`) and
 `reconcile` (`passes`, `laps`, `last_lap_ms`, `failures`,
 `consecutive_failures`, `last_failure_type`, `refused`, `findings` per fixed
-kind). Reading it does no database, manager, runtime or file access. It is at
+kind). The `start_mismatch` reason counts any main start time the Host could not
+confirm equal: a different start, a process that is gone, or an unreadable
+`/proc` entry (fail-closed; it is not evidence of a different process). Reading
+it does no database, manager, runtime or file access. It is at
 most 8 KiB; past that it is `{"overflow": true, "serialized_bytes", "limit",
 "scope"}`.
 
