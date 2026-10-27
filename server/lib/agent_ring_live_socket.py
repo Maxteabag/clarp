@@ -16,7 +16,8 @@ the phone holds what it captured (at most 3 s) and sends it after the ACK.
 
 This reuses only the Oracle-v2 socket helpers, the shared voice-ownership claim
 (never superseding another session) and the upstream connector; no Oracle
-prompt, tools, router, memory, contact selection or voice-provider choice.
+prompt, tools, router, memory, contact selection or voice-provider choice. A profile that opts in with
+``live_tools`` gets its own Host-run tools (agent_live_tools); every other call is unchanged.
 """
 from __future__ import annotations
 
