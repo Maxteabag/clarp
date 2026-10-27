@@ -49,7 +49,13 @@ _COUNTER_MAX = (1 << 53) - 1
 OMIT_REASONS = (
     "no_attestation", "gate_inflight", "gate_rate", "unreaped", "in_transaction", "disconnected",
     "timeout", "nonzero", "exec_error", "bad_bytes", "inactive", "mainpid_mismatch", "start_mismatch",
-    "invocation_mismatch", "cgroup_mismatch", "boot_mismatch", "non_systemd", "o2_mismatch", "unexpected")
+    "invocation_mismatch", "cgroup_mismatch", "boot_mismatch", "non_systemd", "o2_mismatch", "unexpected",
+    "deadline_exhausted", "o1_unavailable", "o2_unavailable")
+# ROOT 17e71bf1: ONE absolute monotonic deadline for the optional /log enrichment, from its entry
+# (after the core read). Each phase is capped and clamped to what is left; B's kill + reap reserve
+# is inside it. Exhausted before a phase => omit without calling it.
+ENRICH_DEADLINE_S, O1_CAP_S, O2_CAP_S = 2.0, 0.5, 0.5
+PHASES = ("o1", "b", "snapshot", "o2", "total")
 _BOOT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _INVOCATION = re.compile(r"[0-9a-f]{32}")
 _TYPE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
@@ -73,7 +79,7 @@ def reset_for_tests() -> None:
         _HEALTH.clear()
         _HEALTH.update({"started": 0, "reaped": 0, "bound": 0, "last_duration_ms": None, "unexpected": 0,
                         "omitted": {reason: 0 for reason in OMIT_REASONS}, "unexpected_by_type": {},
-                        "log_at": {}})
+                        "log_at": {}, "phase_last_ms": {}, "phase_max_ms": {}})
 
 
 reset_for_tests()
@@ -191,10 +197,10 @@ def read_proc_start(pid: int) -> int | None:
 BOOT_READER, PROC_READER = read_boot_id, read_proc_start
 
 
-def run_probe() -> tuple[int | None, bytes, str, Any, bool]:
+def run_probe(timeout: float = SHOW_TIMEOUT_S) -> tuple[int | None, bytes, str, Any, bool]:
     """ONE bounded `systemctl show`: (rc, stdout, failure reason or "", unreaped child or None,
     whether a child was spawned).
-    At most SHOW_TIMEOUT_S of reading and OUT_CAP bytes; on timeout / oversize the child is
+    At most `timeout` (<= SHOW_TIMEOUT_S) of reading and OUT_CAP bytes; on timeout / oversize the child is
     killed and waited for at most REAP_RESERVE_S; a child still alive is returned, never waited on."""
     if not sys.platform.startswith("linux") or not os.path.exists(SYSTEMCTL):
         return None, b"", "non_systemd", None, False
@@ -203,7 +209,7 @@ def run_probe() -> tuple[int | None, bytes, str, Any, bool]:
                       stderr=subprocess.DEVNULL, close_fds=True)
     except OSError:
         return None, b"", "exec_error", None, False
-    deadline, out, reason = CLOCK() + SHOW_TIMEOUT_S, b"", ""
+    deadline, out, reason = CLOCK() + min(SHOW_TIMEOUT_S, timeout), b"", ""
     try:
         fd = child.stdout.fileno()
         os.set_blocking(fd, False)
@@ -317,7 +323,43 @@ def _release(unreaped, spawned: bool) -> None:
             _HEALTH["reaped"] = min(_COUNTER_MAX, _HEALTH["reaped"] + 1)
 
 
-def admit(observation: Any, *, in_transaction: bool, disconnected: bool = False) -> bool:
+class Budget:
+    """The one enrichment deadline of a /log bracket (ROOT 17e71bf1). `cap` is a phase's limit
+    clamped to what is left (less a reserve kept inside the deadline), or None when nothing is
+    left: the caller omits and does not start that phase."""
+
+    def __init__(self, total_s: float = ENRICH_DEADLINE_S):
+        self.start = self.mark_at = CLOCK()
+        self.deadline = self.start + total_s
+        self.phases: dict[str, float] = {}
+
+    def left(self) -> float:
+        return self.deadline - CLOCK()
+
+    def expired(self) -> bool:
+        return self.left() <= 0
+
+    def cap(self, limit: float, reserve: float = 0.0) -> float | None:
+        room = self.left() - reserve
+        return min(limit, room) if room > 0 else None
+
+    def phase(self, name: str) -> None:
+        now = CLOCK()
+        self.phases[name] = now - self.mark_at
+        self.mark_at = now
+
+    def finish(self) -> None:
+        """Bounded health metadata (last and max ms per phase), never a benchmark."""
+        took = {**self.phases, "total": CLOCK() - self.start}
+        with _LOCK:
+            for name, seconds in took.items():
+                ms = max(0, min(_COUNTER_MAX, int(seconds * 1000)))
+                _HEALTH["phase_last_ms"][name] = ms
+                _HEALTH["phase_max_ms"][name] = max(ms, _HEALTH["phase_max_ms"].get(name, 0))
+
+
+def admit(observation: Any, *, in_transaction: bool, disconnected: bool = False,
+          budget: Budget | None = None) -> bool:
     """One /log bracket's B. True only when THIS fresh manager read binds the observation's A2.
     The caller passes whether a DB transaction is open and whether the client has gone; both
     refuse without a probe. Every refusal is counted under its closed reason."""
@@ -331,13 +373,17 @@ def admit(observation: Any, *, in_transaction: bool, disconnected: bool = False)
     if in_transaction:
         note("in_transaction")
         return False
+    read_s = SHOW_TIMEOUT_S if budget is None else budget.cap(SHOW_TIMEOUT_S, reserve=REAP_RESERVE_S)
+    if read_s is None:
+        note("deadline_exhausted")                  # no room for B and its reap reserve: no probe
+        return False
     refused = _try_acquire()
     if refused:
         note(refused)
         return False
     unreaped, spawned, started = None, False, CLOCK()
     try:
-        rc, raw, reason, unreaped, spawned = run_probe()
+        rc, raw, reason, unreaped, spawned = run_probe(read_s)
         if not reason:
             reason = bind(a2, rc, raw)
     finally:
@@ -370,6 +416,11 @@ def status_block() -> dict:
                        "last_duration_ms": _HEALTH["last_duration_ms"]},
             "omitted": {reason: _HEALTH["omitted"].get(reason, 0) for reason in OMIT_REASONS},
             "unexpected_by_type": dict(_HEALTH["unexpected_by_type"]),
+            "budget": {"deadline_ms": int(ENRICH_DEADLINE_S * 1000),
+                       "caps_ms": {"o1": int(O1_CAP_S * 1000), "b": int(SHOW_TIMEOUT_S * 1000),
+                                   "b_reap_reserve": int(REAP_RESERVE_S * 1000), "o2": int(O2_CAP_S * 1000)},
+                       "last_ms": {p: _HEALTH["phase_last_ms"].get(p) for p in PHASES},
+                       "max_ms": {p: _HEALTH["phase_max_ms"].get(p) for p in PHASES}},
         }
     block["reconcile"] = launch_receipts.health_snapshot()
     size = len(json.dumps(block, separators=(",", ":")))

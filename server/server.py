@@ -2925,14 +2925,18 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(body_obj).encode()
         self._send(200, body, "application/json")
 
-    def _delivery_observation(self, *, fresh: bool):
+    def _delivery_observation(self, *, fresh: bool, timeout: float):
         """A runtime status OBSERVATION (never "current"): O1 may come from the
-        shared cache (<= 1 s old), O2 is a fresh RPC. None when unavailable."""
+        shared cache (<= 1 s old, read without waiting), else, like O2 always, ONE
+        fresh RPC bounded as a whole by ``timeout`` (never the client's shared
+        default). None when unavailable."""
         client = getattr(self.ctx, "runtime_client", None)
         try:
             if not fresh and backends._RUNTIME_CLIENT is client:
-                return backends.runtime_status(max_age=1.0)
-            return client.status()
+                cached = backends.peek_runtime_status(max_age=1.0)
+                if cached is not None:
+                    return cached
+            return client.status_within(timeout)
         except Exception as e:  # noqa: BLE001 - unavailable means omit
             log_exception("deliveryObservationFail", e)
             return None
@@ -3005,19 +3009,40 @@ class Handler(BaseHTTPRequestHandler):
                          bootstrap: bool, carried: tuple[str, str]):
         """The delivery fields of one /log bracket, or None to omit them all. Nothing
         is written into the response here: the caller merges only a complete result."""
+        from lib import runtime_attestation
+        # ROOT 17e71bf1: ONE monotonic deadline for this whole optional bracket.
+        budget = runtime_attestation.Budget()
+        try:
+            return self._delivery_bracket(budget, body_obj, agent_id, since=since, until=until,
+                                          generation=generation, bootstrap=bootstrap, carried=carried)
+        finally:
+            budget.finish()
+
+    def _delivery_bracket(self, budget, body_obj: dict, agent_id: str, *, since, until, generation,
+                          bootstrap: bool, carried: tuple[str, str]):
         from lib import launch_receipts, runtime_attestation, server_identity, settings_store
         external = getattr(self.ctx, "runtime_client", None) is not None
         first = first_attestation = None
         if external:
-            observed = self._delivery_observation(fresh=False)
+            cap = budget.cap(runtime_attestation.O1_CAP_S)
+            if cap is None:
+                runtime_attestation.note("deadline_exhausted")
+                return None
+            observed = self._delivery_observation(fresh=False, timeout=cap)
+            budget.phase("o1")
+            if observed is None:
+                runtime_attestation.note("o1_unavailable")
+                return None
             first = launch_receipts.runtime_identity(observed)
             if first is None:
                 return None                    # O1 unusable: omit everything
             first_attestation = runtime_attestation.attestation_key(observed)
             # B: ONE fresh, bounded manager read for this bracket, outside any
             # transaction and before the read snapshot; never cached or reused.
-            if not runtime_attestation.admit(observed, in_transaction=db.conn().in_transaction,
-                                             disconnected=self._client_gone()):
+            admitted = runtime_attestation.admit(observed, in_transaction=db.conn().in_transaction,
+                                                 disconnected=self._client_gone(), budget=budget)
+            budget.phase("b")
+            if not admitted:
                 return None
         # server_id() may mint and store the id on first use: read it before
         # the read snapshot, which must stay write-free.
@@ -3028,14 +3053,39 @@ class Handler(BaseHTTPRequestHandler):
         if since is not None:
             # A plain since=0 is the first bootstrap page (packet v4 §1.3d).
             bootstrap = bootstrap or since == 0
-        with settings_store.read_snapshot():
-            epoch = launch_receipts.annotate_rows(agent_id, users)
-            if since is not None:
-                page = launch_receipts.delivery_page(
-                    agent_id, since=since, until=until, stop_generation=generation,
-                    bootstrap=bootstrap)
+        if budget.expired():
+            runtime_attestation.note("deadline_exhausted")
+            return None
+        connection = db.conn()
+        try:
+            with settings_store.read_snapshot():
+                # The deadline also bounds the SQL: past it, SQLite interrupts the
+                # running statement. Cleared before the snapshot's COMMIT runs.
+                connection.set_progress_handler(lambda: 1 if budget.expired() else 0, 1000)
+                try:
+                    epoch = launch_receipts.annotate_rows(agent_id, users)
+                    if since is not None:
+                        page = launch_receipts.delivery_page(
+                            agent_id, since=since, until=until, stop_generation=generation,
+                            bootstrap=bootstrap)
+                finally:
+                    connection.set_progress_handler(None, 0)
+        except sqlite3.OperationalError:
+            if not budget.expired():
+                raise
+            runtime_attestation.note("deadline_exhausted")
+            return None
+        budget.phase("snapshot")
         if external:
-            observed = self._delivery_observation(fresh=True)
+            cap = budget.cap(runtime_attestation.O2_CAP_S)
+            if cap is None:
+                runtime_attestation.note("deadline_exhausted")
+                return None                    # nothing left for O2: nothing of the snapshot escapes
+            observed = self._delivery_observation(fresh=True, timeout=cap)
+            budget.phase("o2")
+            if observed is None:
+                runtime_attestation.note("o2_unavailable")
+                return None
             second = launch_receipts.runtime_identity(observed)
             if (second is None or second != first
                     or runtime_attestation.attestation_key(observed) != first_attestation):

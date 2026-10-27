@@ -714,10 +714,22 @@ keys: `scope` ("process"), `reset_on` ("process_restart"), `gate`
 (`inflight_limit` 1, `rate_per_s` 2, `burst` 2, `probes_per_log_response` 1,
 `inflight_now`, `tokens_now`), `probes` (`started`, `reaped`, `bound`,
 `last_duration_ms`), `omitted` (one counter per fixed reason),
-`unexpected_by_type` (at most 16 exception type names plus `_other`) and
+`unexpected_by_type` (at most 16 exception type names plus `_other`), `budget`
+(`deadline_ms` 2000, `caps_ms` {`o1` 500, `b` 1000, `b_reap_reserve` 250,
+`o2` 500}, and `last_ms` / `max_ms` per phase `o1`, `b`, `snapshot`, `o2`,
+`total`: bounded health metadata, not a benchmark) and
 `reconcile` (`passes`, `laps`, `last_lap_ms`, `failures`,
 `consecutive_failures`, `last_failure_type`, `refused`, `findings` per fixed
-kind). The `start_mismatch` reason counts any main start time the Host could not
+kind). The optional delivery part of one `GET /log` has ONE monotonic 2.0 s deadline
+from its start (after the core read): the first runtime observation (shared
+status of at most 1 s, else one RPC of at most 0.5 s), the manager read (at most
+1.0 s plus its 0.25 s kill / reap reserve, both inside the deadline), the read
+snapshot (its SQL is interrupted past the deadline) and the fresh second
+observation (one RPC of at most 0.5 s); each is clamped to what is left. When
+nothing is left before a step, or a step times out or fails, every delivery
+field is omitted and the step is counted (`deadline_exhausted`,
+`o1_unavailable`, `o2_unavailable`); nothing is retried and no partial field or
+cursor is returned. The `start_mismatch` reason counts any main start time the Host could not
 confirm equal: a different start, a process that is gone, or an unreadable
 `/proc` entry (fail-closed; it is not evidence of a different process). Reading
 it does no database, manager, runtime or file access. It is at

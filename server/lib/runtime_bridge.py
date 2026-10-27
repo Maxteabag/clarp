@@ -123,15 +123,31 @@ class RuntimeClient:
             delay = min(delay * 2, self._CONNECT_BACKOFF_MAX)
 
     def _request(self, method: str, params: dict[str, Any] | None = None, *,
-                 timeout: float | None = None) -> dict:
-        """One RPC; ``timeout`` overrides the client's for this call only."""
+                 timeout: float | None = None, total_s: float | None = None) -> dict:
+        """One RPC; ``timeout`` overrides the client's for this call only.
+
+        ``total_s`` (opt-in; None keeps the behaviour above exactly) bounds the
+        WHOLE call: connect, send and every read each get only the time left of
+        one monotonic deadline, so a slow or dripping answer cannot extend it."""
         request = encode_request(method, params)
+        deadline = None if total_s is None else time.monotonic() + max(0.0, float(total_s))
+
+        def left() -> float:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise socket.timeout("runtime call deadline passed")
+            return remaining
         try:
-            with self._connect(timeout) as client:
+            with self._connect(timeout if deadline is None
+                               else min(self.timeout if timeout is None else timeout, left())) as client:
+                if deadline is not None:
+                    client.settimeout(left())
                 client.sendall(request)
                 chunks: list[bytes] = []
                 total = 0
                 while True:
+                    if deadline is not None:
+                        client.settimeout(left())
                     chunk = client.recv(65536)
                     if not chunk:
                         break
@@ -198,7 +214,16 @@ class RuntimeClient:
     def status(self, *, timeout: float | None = None) -> dict[str, Any]:
         """The runtime's status; ``timeout`` bounds this call alone (GET /status
         must answer while the runtime is busy, see runtime_release)."""
-        response = self._request("status", timeout=timeout)
+        return self._status(self._request("status", timeout=timeout))
+
+    def status_within(self, total_s: float) -> dict[str, Any]:
+        """``status`` bounded as a WHOLE by ``total_s`` (F4: a /log bracket's
+        observation under its own deadline). Every other caller keeps ``status``
+        and this client's default timeout."""
+        return self._status(self._request("status", total_s=total_s))
+
+    @staticmethod
+    def _status(response: dict) -> dict[str, Any]:
         if not response.get("ok"):
             raise RuntimeUnavailable(
                 str(response.get("error") or "agent runtime status unavailable"))
