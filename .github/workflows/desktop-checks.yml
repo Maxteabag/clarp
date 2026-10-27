@@ -147,10 +147,17 @@ jobs:
           workspaces: desktop-rs
           shared-key: desktop-debug
       - name: Bounded projection observation for debug checks only
-        run: python3 .github/koko-projection-probe.py
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/checks
+          python3 .github/koko-projection-probe.py | tee /tmp/checks/projection-probe.json
+          git diff --binary -- desktop-rs/slint-app/src/live_view.rs desktop-rs/slint-app/ui/transcript.slint > /tmp/checks/projection-instrument.patch
       - name: Build the app
         working-directory: desktop-rs
-        run: cargo build --locked -p clarp-slint
+        run: |
+          set -euo pipefail
+          cargo build --locked -p clarp-slint
+          sha256sum target/debug/clarp-slint | tee /tmp/checks/instrumented-checks-binary.sha256
       - name: Headless checks
         working-directory: desktop-rs
         env:
