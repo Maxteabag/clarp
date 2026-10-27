@@ -330,7 +330,7 @@ class _Runtime:
 def _handler(runtime):
     server_module = _server()
     handler = server_module.Handler.__new__(server_module.Handler)
-    handler.ctx = SimpleNamespace(runtime_client=runtime)
+    handler.server = SimpleNamespace(ctx=SimpleNamespace(runtime_client=runtime))   # Handler.ctx reads server.ctx
     handler._client_gone = lambda: False
     return handler
 
