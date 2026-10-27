@@ -268,6 +268,7 @@ def test_reusing_request_for_another_agent_refuses_before_second_call(opted):
 
 @pytest.mark.parametrize("damage", ["overflow", "malformed"])
 def test_incomplete_registry_is_refused_without_silent_normal(opted, damage):
+    live.user_call_profiles(strict=False)  # advertisement is durably bound before later uncertainty
     if damage == "overflow":
         for i in range(64):
             folder = opted.folder.parent / f"other-{i}"
@@ -277,7 +278,8 @@ def test_incomplete_registry_is_refused_without_silent_normal(opted, damage):
     _refused(409, "live_context_unavailable", _call)
     from lib.snapshot import build_agent_snapshot
     rows = build_agent_snapshot(None)["agents"]
-    assert next(a for a in rows if a["agent_id"] == "a-sander")["call_mode"] == "unavailable"
+    assert next(a for a in rows if a["agent_id"] == "a-sander")["call_mode"] == "agent_live_v1"
+    assert next(a for a in rows if a["agent_id"] == "a-theo")["call_mode"] == "classic"
     assert not rings._load()
 
 
@@ -333,3 +335,32 @@ def test_provider_opens_only_after_valid_user_socket_join(opted, monkeypatch):
         thread.join(5)
         live.reset_for_tests()
     assert not thread.is_alive() and len(connects) == 1
+
+
+def test_observed_live_binding_survives_unreadable_profile_without_disabling_normal(opted):
+    from lib.snapshot import build_agent_snapshot
+    assert "rk-sander-0001" in live.user_call_profiles(strict=False)
+    (opted.folder / "profile.json").write_text("{")
+    # No process cache: discovery reloads the binding from the real temporary settings store.
+    rows = {a["agent_id"]: a for a in build_agent_snapshot(None)["agents"]}
+    assert rows["a-sander"]["call_mode"] == "agent_live_v1"
+    assert rows["a-theo"]["call_mode"] == "classic"
+    _refused(409, "live_context_unavailable", _call)
+
+
+def test_duplicate_optin_refuses_live_agent_but_normal_agent_remains_normal(opted):
+    from lib.snapshot import build_agent_snapshot
+    other = opted.folder.parent / "duplicate"
+    data = json.loads((opted.folder / "profile.json").read_text())
+    data["profile_id"] = "duplicate"
+    _write(other / "profile.json", json.dumps(data))
+    rows = {a["agent_id"]: a for a in build_agent_snapshot(None)["agents"]}
+    assert rows["a-sander"]["call_mode"] == "agent_live_v1"
+    assert rows["a-theo"]["call_mode"] == "classic"
+    _refused(409, "live_context_unavailable", _call)
+
+
+def test_explicit_profile_optout_restores_normal_without_reviving_a_missing_profile(opted):
+    assert live.user_call_profiles(strict=False).get("rk-sander-0001") == PROFILE
+    _opt_in(opted.folder, user_call_default="normal")
+    assert "rk-sander-0001" not in live.user_call_profiles(strict=False)

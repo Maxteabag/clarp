@@ -134,7 +134,7 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     exhausted = _exhausted_backends()
     from . import agent_ring_live
     try:
-        call_profiles = agent_ring_live.user_call_profiles()
+        call_profiles = agent_ring_live.user_call_profiles(strict=False)
     except agent_ring_live.CallError:
         call_profiles = None  # uncertainty must refuse explicitly, never silently start Normal
     agent_rows = agents_db.list_agents()
