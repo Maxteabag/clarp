@@ -346,10 +346,14 @@ def _age(ledger, key, seconds):
 
 
 
-# ---- delegate_to_agent against regi (schema v1): exact receipts, regi owns dedupe ---------
+# ---- delegate_to_agent against regi (schema v3.1): exact receipts, regi owns dedupe -------
 
-def _v1(outcome, sent=False, intent="a1b2c3d4e5f60718", intent_status="venter", reason=None, **extra):
-    return {"sesjon": 1, "agent": "jonas", "intent": intent, "outcome": outcome, "intent_status": intent_status,
+INTENT = "ab" * 32
+
+
+def _v1(result, sent=False, intent=INTENT, intent_status="venter", reason=None, **extra):
+    """One regi v3.1 success-path answer (HTTP 200, always every field)."""
+    return {"sesjon": 1, "agent": "jonas", "intent": intent, "result": result, "intent_status": intent_status,
             "base_task": "already_started", "additions_used": 1, "additions_max": 3, "reason": reason,
             "sent": sent, "ok": sent, **extra}
 
@@ -381,15 +385,17 @@ REGI = {"delegate": {"kind": "http", "url": DIRECTOR, "fallback": "none",
 
 
 @pytest.mark.parametrize("answer, status", [
-    (_v1("queued"), "queued_at_regi"),
+    (_v1("forwarded", True, intent_status="sendt", base_task="started_now"), "forwarded"),
     (_v1("forwarded", True, intent_status="sendt"), "forwarded"),
     (_v1("forwarded", False, intent_status="venter"), "unknown_delivery"),       # forwarded only when sent:true
+    (_v1("queued", intent_status="venter"), "queued_at_regi"),
+    (_v1("queued", intent_status="sender"), "queued_at_regi"),
     (_v1("already_present", True, intent_status="sendt"), "already_present"),
-    (_v1("already_present", False, intent_status="venter"), "already_present"),
-    (_v1("already_present", False, intent_status="feil"), "unknown_delivery"),
-    (_v1("queued", False, intent_status="sender"), "pending_unknown"),
     (_v1("not_forwarded", intent_status=None, reason="cap_reached"), "not_forwarded"),
-    ({"ok": True, "result": "forwarded"}, "unknown_delivery"),                     # missing schema fields
+    (_v1("not_forwarded", intent_status="feil", reason="base_task_failed", base_task="failed"), "not_forwarded"),
+    (_v1("not_forwarded", intent_status="feil", reason="send_failed"), "not_forwarded"),
+    (_v1("not_forwarded", intent_status="ukjent", reason="send_failed"), "unknown_delivery"),   # never retried
+    ({"ok": True, "outcome": "forwarded", "sent": True}, "unknown_delivery"),     # missing schema fields
 ])
 def test_every_regi_answer_maps_to_its_exact_receipt(make, answer, status):
     effects = Regi([ASK], [answer])
@@ -402,14 +408,19 @@ def test_every_regi_answer_maps_to_its_exact_receipt(make, answer, status):
     if "intent" in answer:
         assert receipt["intent"] == answer["intent"]                              # regi's hash, never our own
     if status == "not_forwarded":
-        assert receipt["reason"] == "cap_reached" and "nothing was sent" in receipt["note"]
+        assert receipt["reason"] == answer["reason"] and receipt["note"]
+    if answer.get("base_task") == "started_now":
+        assert "base task was started" in receipt["note"]
 
 
 @pytest.mark.parametrize("code, body, reason", [
-    (400, {"ok": False, "outcome": "refused", "reason": "empty_request"}, "empty_request"),
-    (413, {"ok": False, "outcome": "refused", "reason": "request_too_large", "max": 4000, "len": 4001}, "request_too_large"),
-    (409, {"ok": False, "outcome": "refused", "reason": "reset_in_progress"}, "reset_in_progress"),
-    (409, {"ok": False, "outcome": "refused", "reason": "unknown_agent"}, "unknown_agent"),
+    (400, {"ok": False, "result": "refused", "reason": "empty_request"}, "empty_request"),
+    (400, {"ok": False, "result": "refused", "reason": "invalid_json"}, "invalid_json"),
+    (400, {"ok": False, "result": "refused", "reason": "unknown_agent"}, "unknown_agent"),
+    (400, {"ok": False, "result": "refused", "reason": "missing_principal"}, "missing_principal"),
+    (409, {"ok": False, "result": "refused", "reason": "reset_in_progress"}, "reset_in_progress"),
+    (413, {"ok": False, "result": "refused", "reason": "request_too_large", "max": 4000, "len": 4001}, "request_too_large"),
+    (413, {"ok": False, "result": "refused", "reason": "body_too_large", "max_bytes": 65536}, "body_too_large"),
 ])
 def test_a_regi_refusal_is_refused_with_its_reason_and_nothing_was_sent(make, code, body, reason):
     effects = Regi([ASK], [tools.Refused(f"HTTP {code}", code, body)])
@@ -464,22 +475,25 @@ def test_the_host_never_suppresses_a_follow_up_and_sends_exactly_the_schema_body
 
 
 def test_the_ledger_is_keyed_by_regi_intent_and_the_caller(make, ledger):
-    effects = Regi([ASK], [_v1("forwarded", True, intent="feedfacecafebeef", intent_status="sendt")])
+    effects = Regi([ASK], [_v1("forwarded", True, intent="fe" * 32, intent_status="sendt")])
     call, said, clock = make(effects, **REGI)
     _user_says(call, clock, "Ta sak 182.")
     rows = _rows(ledger)
     request_row = next(r for k, r in rows.items() if k.startswith("rq-"))
     intent_row = next(r for k, r in rows.items() if k.startswith("dl-"))
     assert request_row["status_text"] == intent_row["status_text"] == "forwarded"
-    assert intent_row["intent"] == "feedfacecafebeef" and intent_row["principal"] == "device_phone"
-    expected = "dl-" + tools._digest("host-1", "device_phone", "rk-sander-0001", "drammen-jonas", "feedfacecafebeef")
+    assert intent_row["intent"] == "fe" * 32 and intent_row["principal"] == "device_phone"
+    expected = "dl-" + tools._digest("host-1", "device_phone", "rk-sander-0001", "drammen-jonas", "fe" * 32)
     assert expected in rows
 
 
 @pytest.mark.parametrize("first, later, after", [
-    (_v1("queued"), {"intent_status": "sendt", "sent": True}, "forwarded"),
-    (_v1("queued"), {"intent_status": "venter", "sent": False}, "queued_at_regi"),
-    (_v1("queued", intent_status="sender"), {"intent_status": "feil", "sent": False}, "unknown_delivery"),
+    (_v1("queued"), {"result": "forwarded", "intent_status": "sendt", "sent": True}, "forwarded"),
+    (_v1("queued"), {"result": "queued", "intent_status": "venter", "sent": False}, "queued_at_regi"),
+    (_v1("queued", intent_status="sender"), {"result": "not_forwarded", "intent_status": "feil", "sent": False},
+     "not_forwarded"),
+    (_v1("queued", intent_status="sender"), {"result": "not_forwarded", "intent_status": "ukjent", "sent": False},
+     "unknown_delivery"),
 ])
 def test_a_queued_intent_is_reconciled_with_at_most_one_read_only_get(make, ledger, first, later, after):
     effects = Regi([ASK], [first], [{"sesjon": 1, "intent": first["intent"], "agent": "jonas", **later}])
@@ -489,12 +503,28 @@ def test_a_queued_intent_is_reconciled_with_at_most_one_read_only_get(make, ledg
     call.tick()
     clock.now += 600
     call.tick()
-    assert effects.gets == [f"http://127.0.0.1:7790/regi/sandra/intent?sesjon=1&intent={first['intent']}"]
+    assert effects.gets == ["http://127.0.0.1:7790/regi/sandra/intent?sesjon=1&principal=device_phone&intent=" + INTENT]
     assert len(effects.posts) == 1                                                # never a resend
     row = next(r for k, r in _rows(ledger).items() if k.startswith("dl-"))
     assert row["status_text"] == after and row["reconciled"] is True
     assert ("reconciled" in said[-1][1]) is (after == "forwarded")
 
+
+
+def test_the_principal_comes_only_from_the_call_binding_and_the_post_waits_30_s(make):
+    timeouts = []
+
+    class Timed(Regi):
+        def post(self, url, body, timeout=30):
+            timeouts.append(timeout)
+            return super().post(url, body, timeout)
+    effects = Timed([("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182",
+                                            "principal": "attacker", "from": "someone-else"})],
+                    [_v1("forwarded", True, intent_status="sendt")])
+    call, said, clock = make(effects, **REGI)
+    _user_says(call, clock, "Ta sak 182.")
+    body = effects.posts[0][1]
+    assert (body["principal"], body["from"]) == ("device_phone", "rk-sander-0001") and timeouts == [30]
 
 def test_without_a_reconcile_url_nothing_is_read(make):
     effects = Regi([ASK], [_v1("queued")])

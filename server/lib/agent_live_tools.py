@@ -15,10 +15,10 @@ actually done. Routing runs on one worker thread; the call's audio never waits.
 
 Tools:
 - delegate_to_agent(agent, request): only to the allowlisted sessions. With a
-  director (regi, COORD-216-REGI-HOST-SCHEMA-v1) one POST per ask; regi owns
+  director (regi, COORD-216-REGI-HOST-SCHEMA-v3.1) one POST per ask; regi owns
   normalization, the intent hash, dedupe and the cap, and every receipt says
   exactly what regi reported (forwarded only with sent:true; queued_at_regi,
-  already_present, not_forwarded, refused, pending_unknown, unknown_delivery).
+  already_present, not_forwarded, refused, unknown_delivery).
   Unclear answers are never retried; a queued or in-flight intent gets at most
   one read-only reconciliation GET. Without a director, one Clarp prompt.
 - get_agent_status(agent), read_agent_transcript(agent, limit): read-only.
@@ -62,7 +62,7 @@ import threading
 import time
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import HTTPRedirectHandler
 
 from .log import log, log_exception
@@ -239,9 +239,8 @@ def tools_schema(cfg: dict) -> list[dict]:
 
 # ---- side effects (replaceable in tests) -------------------------------------------------
 
-# The director answers only once the hand-out really happened: its first answer waits for the tested team start
-# (regi's own bound is 40 s). A shorter timeout would turn a delivered hand-out into "unknown".
-DELEGATE_HTTP_TIMEOUT_S = 50
+# Schema v3.1: regi always answers within 20 s (queued if the send is still running); the Host waits 30 s.
+DELEGATE_HTTP_TIMEOUT_S = 30
 CALLBACK_HTTP_TIMEOUT_S = 10
 CLARP_ADMIN_REFUSED = 4         # clarp-admin prompt: the Host refused it, nothing was sent
 
@@ -304,7 +303,7 @@ def _post(url: str, body: dict, timeout: float = COMMAND_TIMEOUT_S) -> dict:
         raise Unconfirmed("unreadable answer") from None
     if not isinstance(value, dict):
         raise Unconfirmed("answer is not a JSON object")
-    return value          # 2xx: the caller reads the app-level outcome (regi: outcome/sent; ring: ok)
+    return value          # 2xx: the caller reads the app-level outcome (regi: result/sent; ring: ok)
 
 
 def _get(url: str, timeout: float = COMMAND_TIMEOUT_S) -> dict:
@@ -428,49 +427,53 @@ class Effects:
         return _agent_transcript(agent, limit) if agent else {"error": "agent not running"}
 
 
-# ---- what regi said (schema v1) ---------------------------------------------------------
+# ---- what regi said (COORD-216-REGI-HOST-SCHEMA-v3.1) -----------------------------------------
 
+REGI_SCHEMA = "COORD-216-REGI-HOST-SCHEMA-v3.1"
 RECEIPT_FIELDS = ("sesjon", "intent", "intent_status", "base_task", "additions_used", "additions_max", "reason",
-                  "sent", "max", "len")
+                  "sent", "max", "len", "max_bytes")
 RECONCILE_AFTER_S = 15
-_OUTCOMES = ("queued", "forwarded", "already_present", "not_forwarded")
+_RESULTS = ("forwarded", "queued", "already_present", "not_forwarded")
+_NOT_FORWARDED_NOTE = {"cap_reached": "max 3 additions for this member this session were reached; it was not added",
+                       "base_task_failed": "the team's base task failed; nothing was sent",
+                       "send_failed": "a definite failure before delivery; nothing was sent (only an explicit new "
+                                      "ask may try again)"}
 
 
 def regi_outcome(answer: Any, code: int | None) -> dict:
-    """The exact Host receipt for one regi answer (COORD-216-REGI-HOST-SCHEMA-v1).
+    """The exact Host receipt for one regi answer (schema v3.1, Host receipt mapping).
 
-    Never "forwarded" unless regi observed the sending (sent:true); never a retry for anything unclear."""
+    "forwarded" only for result forwarded with sent:true; anything unclear is unknown_delivery and never retried."""
     answer = answer if isinstance(answer, dict) else {}
     fields = {k: answer.get(k) for k in RECEIPT_FIELDS if k in answer}
-    if code in (400, 409, 413) and answer.get("outcome", "refused") == "refused":
+    if code in (400, 409, 413) and answer.get("result", "refused") == "refused":
         return {"state": NOT_DONE, "status": "refused", **fields, "note": "nothing was sent"}
     if code != 200:
         return {"state": UNCONFIRMED, "status": "unknown_delivery", **fields,
                 "reason": fields.get("reason") or f"HTTP {code}", "note": "regi's answer was unclear; not retried"}
-    outcome, status_ = answer.get("outcome"), answer.get("intent_status")
-    if (outcome not in _OUTCOMES or not isinstance(answer.get("intent"), str) or "sesjon" not in answer
+    result, status_, reason = answer.get("result"), answer.get("intent_status"), answer.get("reason")
+    if (result not in _RESULTS or not isinstance(answer.get("intent"), str) or "sesjon" not in answer
             or not isinstance(answer.get("sent"), bool)):
         return {"state": UNCONFIRMED, "status": "unknown_delivery", **fields, "reason": "missing fields",
                 "note": "regi's answer was incomplete; not retried"}
-    if outcome == "not_forwarded":
+    if result == "not_forwarded":
+        if status_ == "ukjent":
+            return {"state": UNCONFIRMED, "status": "unknown_delivery", **fields,
+                    "note": "regi does not know whether it reached the member; never retried"}
         return {"state": NOT_DONE, "status": "not_forwarded", **fields,
-                "note": "regi did not pass it on (" + str(answer.get("reason") or "") + "); nothing was sent"}
-    if status_ == "feil":
-        return {"state": UNCONFIRMED, "status": "unknown_delivery", **fields,
-                "note": "regi does not know whether it reached the member; not retried"}
-    if status_ == "sender":
-        return {"state": UNCONFIRMED, "status": "pending_unknown", **fields,
-                "note": "regi is sending it right now; not yet confirmed"}
-    if outcome == "forwarded":
+                "note": _NOT_FORWARDED_NOTE.get(reason, "regi did not pass it on; nothing was sent")}
+    if result == "forwarded":
         if answer["sent"] is not True:
             return {"state": UNCONFIRMED, "status": "unknown_delivery", **fields,
                     "note": "regi said forwarded without observing the sending; not retried"}
-        return {"state": DONE, "status": "forwarded", **fields}
-    if outcome == "queued":
+        note = ("the team's base task was started and the instruction was sent"
+                if answer.get("base_task") == "started_now" else None)
+        return {"state": DONE, "status": "forwarded", **fields, **({"note": note} if note else {})}
+    if result == "queued":
         return {"state": DONE, "status": "queued_at_regi", **fields,
-                "note": "lagt i kø hos regi; not yet confirmed delivered"}
+                "note": "in regi's queue (" + str(status_) + "); not yet confirmed delivered"}
     return {"state": DONE, "status": "already_present", **fields,
-            "note": "regi already holds this very instruction (" + str(status_) + ")"}
+            "note": "regi already has this very instruction (" + str(status_) + "); nothing new was sent"}
 
 
 # ---- the durable ledger -----------------------------------------------------------------
@@ -769,7 +772,7 @@ class CallTools:
                       + " forwarded means regi saw it sent to the member (not that it is done); queued_at_regi "
                       "means it is in regi's queue, not yet confirmed delivered; already_present means regi already "
                       "had that very instruction; not_forwarded and refused mean nothing was sent (say why); "
-                      "pending_unknown, unknown and unknown_delivery mean it is not known whether it arrived. "
+                      "unknown and unknown_delivery mean it is not known whether it arrived. "
                       "Mention them briefly and naturally only if you have not already said so, and never claim "
                       "more than a receipt says.",
                       kind="commentary" if waiting else "thinking")
@@ -818,7 +821,7 @@ class CallTools:
                 "call_id": self.call_id}
 
     # delegate_to_agent ---------------------------------------------------------------------
-    # delegate_to_agent (regi<->Host schema v1, COORD-216-REGI-HOST-SCHEMA-v1) -----------------
+    # delegate_to_agent (regi<->Host schema v3.1, COORD-216-REGI-HOST-SCHEMA-v3.1) -----------------
     #
     # Regi owns dispatch, normalization, the intent hash and the cap. The Host never dedupes a request by its text:
     # every ask is one POST, recorded as "requesting" before it and keyed by regi's own intent once regi answered.
@@ -898,7 +901,7 @@ class CallTools:
             self.ledger.claim(key, {"kind": "delegate_intent", "to": member["session"], **self._binding()},
                               live=lambda row, now: False)
             self.ledger.update(key, status=outcome["state"], status_text=outcome["status"], request_id=attempt, **fields)
-            if outcome["status"] in ("queued_at_regi", "pending_unknown"):
+            if outcome["status"] == "queued_at_regi":
                 with self.lock:
                     self.to_reconcile.append({"key": key, "member": member["name"], "sesjon": outcome["sesjon"],
                                               "intent": outcome["intent"], "due": self.clock() + RECONCILE_AFTER_S})
@@ -920,15 +923,15 @@ class CallTools:
             self.to_reconcile = [r for r in self.to_reconcile if r["due"] > self.clock()]
         for item in due:
             try:
-                answer = self._effect(lambda i=item: self.effects.get(
-                    f"{url}?sesjon={int(i['sesjon'])}&intent={i['intent']}", DELEGATE_HTTP_TIMEOUT_S))
+                query = urlencode({"sesjon": int(item["sesjon"]), "principal": self.principal, "intent": item["intent"]})
+                answer = self._effect(lambda q=query: self.effects.get(f"{url}?{q}", DELEGATE_HTTP_TIMEOUT_S))
             except CallEnded:
                 return
             except Exception as exc:  # noqa: BLE001 - the one check failed: it stays as it was
                 log("agentLiveDelegateReconcileFailed", f"call={self.call_id} intent={item['intent']} error={exc}")
                 continue
-            status = {"sendt": "forwarded", "sender": "pending_unknown", "venter": "queued_at_regi"}.get(
-                answer.get("intent_status"), "unknown_delivery")
+            status = {"sendt": "forwarded", "sender": "queued_at_regi", "venter": "queued_at_regi",
+                      "feil": "not_forwarded"}.get(answer.get("intent_status"), "unknown_delivery")
             if status == "forwarded" and answer.get("sent") is not True:
                 status = "unknown_delivery"
             self.ledger.update(item["key"], status_text=status, intent_status=answer.get("intent_status"),
