@@ -202,7 +202,11 @@ class LiveSocket:
             return
         from .agent_live_tools import CallTools, Effects
         self.tools = CallTools(self.snapshot, self.call_id, self.tool_context, effects=Effects(api_key),
-                               principal=self.principal)
+                               principal=self.principal, current=self.tools_current)
+
+    def tools_current(self) -> bool:
+        """The tools' lifecycle fence: this socket still owns a live, unretired call."""
+        return not (self.closed.is_set() or self.stop.is_set() or self.ending.is_set() or live.retired(self.call_id))
 
     def tool_context(self, kind: str, text: str) -> None:
         """A Host note to the voice model, only once the opening was admitted and drained."""
