@@ -953,7 +953,7 @@ class CallTools:
             done = {**receipt, "status": result, "operation_id": current, "at": self._at(reply.get("due")),
                     "regi_status": reply.get("status"),
                     **({"superseded": reply["superseded"]} if reply.get("superseded") else {})}
-            done["note"] = self._schedule_note(result, reply.get("status"), done["at"])
+            done["note"] = self._schedule_note(result, reply.get("status"), done["at"], reply.get("feil"))
             with self.lock:
                 self.taken.append(done)
             log("agentLiveCallbackScheduled", f"call={self.call_id} op={current} result={result} "
@@ -963,19 +963,28 @@ class CallTools:
                 "note": "regi did not schedule it"}
 
     @staticmethod
-    def _schedule_note(result: str, regi_status: Any, at: str) -> str:
-        """What to tell the user, from regi's CURRENT status of the op (never more than it says)."""
-        if regi_status in ("fyrt", "fyrer"):
+    def _schedule_note(result: str, regi_status: Any, at: str, failure: Any = None) -> str:
+        """What to tell the user, from regi's CURRENT status of the op (never more than it says).
+
+        "gone out" only with an actual receipt (fyrt); "pending" only while regi says venter."""
+        if regi_status == "fyrt":
             return "that call back has already gone out (at " + at + ")"
+        if regi_status == "fyrer":
+            return "the call back is being placed now (not confirmed)"
         if regi_status == "fyrt_usikker":
             return "that call back may already have gone out; regi is not sure, and it is never rung again"
         if regi_status == "avlyst":
             return "that call back was cancelled earlier; it will not ring"
         if regi_status == "ikke_plassert":
             return "that call back was not placed (another call was ringing); it is not tried again"
-        if result == "scheduled":
-            return "call back scheduled at " + at + " (never 'rang')"
-        return "an earlier call back is already pending at " + at
+        if regi_status == "feil":
+            return "that call back failed (" + (str(failure)[:120] if failure else "no reason given") + \
+                "); it is not tried again"
+        if regi_status == "venter":
+            if result == "scheduled":
+                return "call back scheduled at " + at + " (never 'rang')"
+            return "an earlier call back is already pending at " + at
+        return "the call back's status is unknown (" + str(regi_status) + "); it is neither confirmed pending nor rung"
 
     def _cancel_callback(self) -> dict:
         receipt = {"tool": "cancel_callback"}

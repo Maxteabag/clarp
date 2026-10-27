@@ -684,16 +684,25 @@ def test_ikke_ring_likevel_cancels_only_this_callers_pending_call_back(make):
 
 
 
-@pytest.mark.parametrize("regi_status, words", [("venter", "already pending"), ("fyrt", "already gone out"),
-                                                ("fyrt_usikker", "never rung again"), ("avlyst", "cancelled earlier"),
-                                                ("ikke_plassert", "not placed")])
-def test_an_already_scheduled_answer_is_told_by_regis_current_status(make, regi_status, words):
+@pytest.mark.parametrize("regi_status, extra, words, never", [
+    ("venter", {}, "already pending", "gone out"),
+    ("fyrt", {}, "already gone out", "pending"),
+    ("fyrer", {}, "being placed now (not confirmed)", "gone out"),
+    ("fyrt_usikker", {}, "never rung again", "pending"),
+    ("avlyst", {}, "cancelled earlier", "pending"),
+    ("ikke_plassert", {}, "not placed", "gone out"),
+    ("feil", {"feil": "ring_feil: no device"}, "failed (ring_feil: no device); it is not tried again", "pending"),
+    ("feil", {}, "failed (no reason given)", "gone out"),
+    (None, {}, "status is unknown", "already pending"),
+    ("something_new", {}, "status is unknown", "gone out"),
+])
+def test_an_already_scheduled_answer_is_told_by_regis_current_status(make, regi_status, extra, words, never):
     effects = Tilbakering([CALL_BACK], [{"ok": True, "result": "already_scheduled", "operation_id": "cb-x",
-                                         "due": 1_800_000_300, "status": regi_status, "fired_at": None}])
+                                         "due": 1_800_000_300, "status": regi_status, "fired_at": None, **extra}])
     call, said, clock = make(effects, **CB)
     _user_says(call, clock, "Ring meg om fem.")
     receipt = _receipts(said)[0]
-    assert receipt["regi_status"] == regi_status and words in receipt["note"]
+    assert receipt["regi_status"] == regi_status and words in receipt["note"] and never not in receipt["note"]
 
 @pytest.mark.parametrize("script, posts, status", [
     ([tools.Unconfirmed("timeout"), None], 2, "scheduled"),         # one identical re-POST reconciles it
