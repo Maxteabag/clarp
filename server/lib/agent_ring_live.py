@@ -24,7 +24,7 @@ import pathlib
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from .deployment import LAYOUT
@@ -232,6 +232,79 @@ def build_snapshot(agent: dict, context: dict) -> dict:
     if len(canonical(snapshot)) > SNAPSHOT_BYTES:
         raise CallError(409, CONTEXT_UNAVAILABLE)
     return snapshot
+
+
+# ---- user-initiated Live calls (issue #216): a truthful USER_CALL context, never a fake event
+#
+# When the USER calls an agent whose operator-approved profile opts it in
+# (``"user_call_default": "live"`` plus an approved ``stories.user_call`` and
+# ``user_call_opening``), the Host builds this context itself. The phone
+# supplies only the agent and its request id: no path, prompt, event or text.
+# It carries no event and no observation, so nothing of a leak-watch event can
+# reach such a call. CONTEXT-v1 (rings) is unchanged and still refuses it.
+
+USER_CALL_KIND = "user_call"
+USER_CALL_STORY = "user_call"
+USER_CALL_SOURCE = "user-initiated"
+USER_CALL_DEFAULT_KEY = "user_call_default"
+USER_CALL_OPENING_KEY = "user_call_opening"
+CALL_ACTIVE = "live_call_active"
+USER_CALL_ORIGIN = "user_call"
+PROFILE_SCAN_LIMIT = 64
+
+
+def user_call_profiles() -> dict[str, str]:
+    """Bounded complete opt-in index. Never guess after an unreadable or partial scan."""
+    import os
+    matches = {}
+    try:
+        with os.scandir(ROOT / "profiles") as entries:
+            folders = []
+            for entry in entries:
+                if len(folders) >= PROFILE_SCAN_LIMIT:
+                    raise CallError(409, CONTEXT_UNAVAILABLE)
+                folders.append(entry)
+        for entry in folders:
+            if not _PROFILE_ID.fullmatch(entry.name) or not entry.is_dir(follow_symlinks=False):
+                raise CallError(409, CONTEXT_UNAVAILABLE)
+            path = pathlib.Path(entry.path) / "profile.json"
+            with path.open("rb") as handle:
+                raw = handle.read(65537)
+            if len(raw) > 65536:
+                raise CallError(409, CONTEXT_UNAVAILABLE)
+            data = json.loads(raw)
+            if not isinstance(data, dict) or data.get("profile_id") != entry.name:
+                raise CallError(409, CONTEXT_UNAVAILABLE)
+            if data.get(USER_CALL_DEFAULT_KEY) == "live":
+                session = data.get("agent_session")
+                if not isinstance(session, str) or not session or session in matches:
+                    raise CallError(409, CONTEXT_UNAVAILABLE)
+                matches[session] = entry.name
+    except FileNotFoundError:
+        # Only an absent root is an empty registry; a missing profile is uncertainty.
+        if (ROOT / "profiles").exists():
+            raise CallError(409, CONTEXT_UNAVAILABLE) from None
+    except (OSError, ValueError):
+        raise CallError(409, CONTEXT_UNAVAILABLE) from None
+    return matches
+
+
+def user_call_profile_id(agent: dict) -> str | None:
+    return user_call_profiles().get(str(agent.get("session") or ""))
+
+
+def user_call_context(profile_id: str, agent: dict, request_id: Any) -> dict:
+    """The Host-built context of one user-initiated Live call (raises CallError; nothing is cut)."""
+    if not _request_id_ok(request_id):
+        raise CallError(400, REQUEST_INVALID)
+    _folder, profile = _profile(profile_id, agent)
+    opening = profile.get(USER_CALL_OPENING_KEY)
+    if not isinstance(opening, str) or not opening.strip() or len(opening) > OPENING_TEXT_CHARS:
+        raise CallError(409, CONTEXT_UNAVAILABLE)
+    return {"version": 1, "kind": USER_CALL_KIND, "profile_id": profile_id, "story": USER_CALL_STORY,
+            "source": USER_CALL_SOURCE, "request_id": request_id,
+            "requested_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "opening_text": " ".join(opening.split())}
 
 
 def snapshot_of(ring_id: str) -> dict | None:
@@ -555,6 +628,8 @@ def fallback(principal: str, data: Any) -> dict:
         with agent_rings._lock:
             records = agent_rings._load()
             ring = _owned(records, principal, data)
+            if ring.get("_user_call"):
+                raise CallError(409, FALLBACK_NOT_ALLOWED)
             epoch = _epoch(data, "expected_epoch")
             if data.get("audio_stopped") is not True or not _request_id_ok(data.get("request_id")):
                 raise CallError(400, REQUEST_INVALID)

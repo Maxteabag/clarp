@@ -86,11 +86,26 @@ class Refused(Exception):
         self.code, self.message = code, message or code
 
 
+USER_CALL_OVERLAY = """
+This is a live phone call with the user, spoken in real time, in Norwegian bokmål.
+- The user called you from the Clarp app. There is no event, camera observation or event log in this call.
+- Speak plainly: no <speak> tags or SSML, no markup, no stage directions.
+- Nothing has been played to the user yet. You begin the call with the opening line you are given, once.
+- You have no tools in this call: never say that you logged, filed, dispatched or saved anything.
+- There is no shell, no agent roster and no delegation; you cannot reach other agents from here.
+- Where a procedure revision is marked withdrawn, never follow it; follow the current revision.
+"""
+
+
 def instructions(snapshot: dict) -> str:
     """The Live model's instructions, from the frozen snapshot only."""
-    context, event = snapshot["event_context"], snapshot["event_context"]["event"]
+    context = snapshot["event_context"]
     parts = [f"You are {snapshot['profile']['display_name']}."]
     parts += [f"[{key}]\n{text}" for key, text in snapshot["texts"].items()]
+    if context.get("kind") == "user_call":      # issue #216: the user called; there is no event to describe
+        parts.append(USER_CALL_OVERLAY.strip())
+        return "\n\n".join(parts)
+    event = context["event"]
     meta = event.get("meta") or {}
     observation = {"event_id": event["id"], "time": event["time"], "camera": event["camera_label"] or event["camera_id"],
                    "when": event["when_text"], "what": event["what_text"], "log": event["log"],
@@ -753,6 +768,8 @@ def _join(principal: str, event: Any) -> dict:
             raise Refused("live_owner_conflict")
         if ring.get("_live_join_consumed"):
             raise Refused("live_join_consumed")
+        if ring.get("_live_retired_reason") == "live_join_expired":
+            raise Refused("live_join_expired")
         if ring.get("_live_phase") != "answered_waiting_join":
             raise Refused("live_call_stale")
         if agent_rings.now_ms() >= ring["_live_join_expires_at"]:

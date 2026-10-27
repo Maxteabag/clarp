@@ -41,10 +41,11 @@ CAPABILITIES_VERSION = 1
 # adds a row to docs/compatibility.md; tests/unit/test_client_contract.py
 # fails when the table and these constants disagree. Clients identify
 # themselves with the X-Clarp-Client header ("ios/2620 contract=1").
-HOST_CONTRACT = 74  # PROVISIONAL (listen-first + call transcription policy over artifact_summary_v1 73): Nadia books it at the ready landing, else the next free
+HOST_CONTRACT = 75  # PROVISIONAL (listen-first + call transcription policy over artifact_summary_v1 73): Nadia books it at the ready landing, else the next free
 MIN_IOS_CONTRACT = 1
 CLIENT_HEADER = "X-Clarp-Client"
 FEATURES: tuple[str, ...] = (
+    "agent_call_live",
     "artifact_summary_v1",
     "agent_ring_device_optout",
     "agent_ring_live",
@@ -379,3 +380,5 @@ FEATURE_CONTRACTS["agent_ring_device_optout"] = 72  # PROVISIONAL: booked at the
 # permanent gap and are never reused. Until booked this composition must not merge or reach CI.
 FEATURE_CONTRACTS["agent_ring_listen_first"] = 74
 FEATURE_CONTRACTS["call_transcription_policy"] = 74
+
+FEATURE_CONTRACTS["agent_call_live"] = 75

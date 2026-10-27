@@ -132,6 +132,11 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
     janitor_templates = {row["agent_id"]: row["template_id"] for row in
                          db.conn().execute("SELECT agent_id,template_id FROM janitor_configs")}
     exhausted = _exhausted_backends()
+    from . import agent_ring_live
+    try:
+        call_profiles = agent_ring_live.user_call_profiles()
+    except agent_ring_live.CallError:
+        call_profiles = None  # uncertainty must refuse explicitly, never silently start Normal
     agent_rows = agents_db.list_agents()
     tree = helper_tree(agent_rows, states, visible_labels)
     child_count = tree.child_count
@@ -218,6 +223,8 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
                 root=model_avatar_root,
                 default_model=default_models[resolved_backend])
         rows.append({
+            "call_mode": ("unavailable" if call_profiles is None else
+                          "agent_live_v1" if a.get("session") in call_profiles else "classic"),
             "agent_id":       agent_id,
             "persona":        a["persona"],
             "voice_id":       a["voice_id"],
