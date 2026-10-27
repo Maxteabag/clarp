@@ -4878,7 +4878,6 @@ def test_an_external_runtime_503_body_is_unchanged(running_server, monkeypatch):
 
 def test_a_log_bracket_is_o1_then_b_then_the_snapshot_then_a_fresh_o2(running_server, monkeypatch):
     from contextlib import contextmanager
-    import server as server_module
     from lib import db, runtime_attestation, settings_store
     base, ctx, _srv = running_server
     manager = _advertise_delivery(monkeypatch)
