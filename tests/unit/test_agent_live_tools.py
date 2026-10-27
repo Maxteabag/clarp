@@ -364,7 +364,7 @@ def test_a_claim_left_by_a_crash_mid_send_is_never_sent_again(make, ledger):
     again = FakeEffects([ASK])
     call, said, clock = make(again, call_id="call-2")
     _user_says(call, clock, "Ta sak 182.")
-    assert again.prompts == [] and _receipts(said)[0]["status"] == "unknown"
+    assert again.prompts == [] and _receipts(said)[0]["status"] == "pending"
 
 
 
@@ -374,7 +374,7 @@ def _age(ledger, key, seconds):
     ledger.path.write_text(json.dumps(rows))
 
 
-@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unknown")])
+@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unknown_delivery")])
 def test_a_stale_crash_claim_is_reconciled_never_resent(make, ledger, arrived, status):
     first = FakeEffects([ASK])
     call, _said, clock = make(first)
@@ -395,7 +395,7 @@ def test_an_unclassified_delivery_failure_is_unknown_and_never_retried(make, led
     effects.prompt_error = (RuntimeError("boom"), True)
     call, said, clock = make(effects)
     _user_says(call, clock, "Ta sak 182.")
-    assert _receipts(said)[0]["status"] == "unknown"
+    assert _receipts(said)[0]["status"] == "unknown_delivery"
     assert next(iter(_rows(ledger).values()))["status"] == tools.UNCONFIRMED
     effects.prompt_error = None
     call, said, clock = make(effects, call_id="call-2")
@@ -416,13 +416,13 @@ def test_the_intent_scope_includes_the_caller_and_a_correction_is_a_new_intent(m
     assert len(effects.prompts) == 3 and _receipts(said)[0]["status"] == "handed_off"
 
 
-@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unknown")])
+@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unknown_delivery")])
 def test_an_unconfirmed_prompt_is_reconciled_by_its_marker_never_resent(make, ledger, arrived, status):
     effects = FakeEffects([ASK])
     effects.prompt_error = (tools.Unconfirmed("clarp-admin timeout"), arrived)
     call, said, clock = make(effects)
     _user_says(call, clock, "Ta sak 182.")
-    assert _receipts(said)[0]["status"] == "unknown"
+    assert _receipts(said)[0]["status"] == "unknown_delivery"
     effects.prompt_error = None
     call2, said2, clock2 = make(effects, call_id="call-2")
     _user_says(call2, clock2, "Ta sak 182.")
@@ -444,7 +444,7 @@ def test_a_refused_prompt_is_not_done_and_may_be_asked_again(make):
 @pytest.mark.parametrize("error, prompted, status", [
     (None, 0, "handed_off"),
     (tools.Unreachable("connection refused"), 1, "handed_off"),
-    (tools.Unconfirmed("timeout"), 0, "unknown"),
+    (tools.Unconfirmed("timeout"), 0, "unknown_delivery"),
     (tools.Refused("HTTP 400", 400, {"ok": False, "result": "refused", "reason": "tom beskjed"}), 0, "refused"),
 ])
 def test_a_director_delegation_falls_back_only_when_it_certainly_did_not_arrive(make, error, prompted, status):
@@ -497,7 +497,8 @@ def test_an_oversized_instruction_is_refused_never_cut(make):
     ({"ok": True, "result": "forwarded", "sent_now": False}, "accepted"),         # never claimed as sent
     ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": True}, "queued"),          # regi queued it: not delivered yet
     ({"ok": True, "result": "already_present", "delivered": "sendt"}, "already_present"),
-    ({"ok": True, "result": "already_present", "delivered": "ukjent"}, "unknown"),  # regi itself does not know
+    ({"ok": True, "result": "already_present", "delivered": "ukjent"}, "unknown_delivery"),  # regi itself does not know
+    ({"ok": True, "result": "already_present", "delivered": "sender"}, "pending"),       # regi is sending it now
     ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": False}, "not_forwarded"),   # regi kept its one addition
 ])
 def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
@@ -511,7 +512,7 @@ def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
     receipt = _receipts(said)[0]
     assert receipt["status"] == status and receipt["director"] == {k: v for k, v in answer.items() if k != "ok"}
     assert ("NOT sent" in receipt.get("note", "")) is (status == "not_forwarded")
-    assert ("not yet confirmed" in receipt.get("note", "")) is (status == "queued")
+    assert ("not yet confirmed" in receipt.get("note", "")) is (status in ("queued", "pending"))
     assert status != "handed_off" or answer.get("sent_now") is True
 
 
@@ -520,7 +521,7 @@ def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
      "not_forwarded", True),
     (409, {"ok": False, "result": "not_forwarded", "reason": "nullstilling pågår"}, "not_forwarded", True),
     (413, {"ok": False, "result": "refused", "error": "request_too_large"}, "refused", True),
-    (502, {"ok": False, "result": "not_forwarded", "reason": "sending til agenten feilet"}, "unknown", False),
+    (502, {"ok": False, "result": "not_forwarded", "reason": "sending til agenten feilet"}, "unknown_delivery", False),
 ])
 def test_a_regi_refusal_is_reported_as_regi_said_and_only_a_certain_one_may_be_asked_again(make, code, body, status,
                                                                                          retry_sends):
