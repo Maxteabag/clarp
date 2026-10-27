@@ -775,60 +775,66 @@ def test_a_director_owned_profile_never_prompts_members_and_never_schedules_a_ri
 
 # ---- the 20:06 real-call findings: the note's size and the promised call back ----------------
 
-def test_the_host_note_always_fits_the_providers_500_token_append_limit():
-    long = "Gå gjennom backend-arbeidet og identifiser de viktigste konkrete oppgavene på to-do-listen. " * 3
-    receipts = [{"tool": "delegate_to_agent", "agent": n, "status": "forwarded", "request": long[:200],
-                 "sesjon": 1, "intent": "ab" * 32, "intent_status": "sendt", "base_task": "already_started",
-                 "additions_used": 0, "additions_max": 3, "sent": True, "note": long}
-                for n in ("Jonas", "Noel", "Eira", "Mira")]
-    receipts += [{"tool": "get_agent_status", "agent": "Jonas", "status": "ok",
-                  "untrusted_data": {"state": "working", "current_step": long, "last_said": long * 3}}] * 8
-    note = REAL_HOST_NOTE(receipts)
-    assert len(note) <= tools.NOTE_CHARS
-    assert note.count('"forwarded"') == 4 and "request" not in note and "intent" not in note
+
+def _status_of(note_text, receipt):
+    return receipt["status"] in note_text
 
 
-def test_the_host_note_of_the_real_call_is_small_and_complete(make, monkeypatch):
+WORST8 = ([{"tool": "delegate_to_agent", "agent": a, "status": s, "reason": r, "regi_status": None}
+           for a, s, r in (("Jonas", "forwarded", None), ("Noël-Østensjø 🚀🚀🚀", "not_forwarded",
+                           "maks 3 tillegg per agent per sesjon er nådd; ikke lagt inn 🙈" * 4),
+                           ("Eira", "unknown_delivery", "Tidsavbrudd etter 30 s – usikkert om det kom frem æøå" * 3),
+                           ("Mira", "refused", "request_too_large"))]
+          + [{"tool": "schedule_callback", "status": "scheduled", "minutes": 7, "at": "20:41", "replaced": {"minutes": 5}},
+             {"tool": "cancel_callback", "status": "unconfirmed", "note": "the call back may still come"},
+             {"tool": "schedule_callback", "status": "already_scheduled", "regi_status": "feil",
+              "reason": "ring() feilet: ingen enhet svarte 😬 " * 10},
+             {"tool": "get_agent_status", "agent": "Jonas", "status": "ok",
+              "untrusted_data": {"state": "working", "current_step": "Skriver tester for prisvisning 🧪" * 20,
+                                 "last_said": "Jeg holder på med API-et og regner med å være ferdig snart 👍" * 30}}])
+
+
+def test_every_note_is_at_most_the_byte_budget_including_control_text_for_the_worst_case():
+    notes = REAL_HOST_NOTE(WORST8)
+    assert notes and all(tools.note_tokens(n) <= tools.NOTE_BYTES < 500 for n in notes)
+    assert all(n.startswith("Host note") for n in notes)
+    joined = " ".join(notes)
+    for r in WORST8:                                   # every receipt, with its status, is in exactly one note
+        assert sum(1 for n in notes if r["status"] in n) >= 1
+    assert "not_forwarded" in joined and "unknown_delivery" in joined and "refused" in joined
+    assert "regi feil" in joined and "reason ring() feilet" in joined and "replaced 5 min" in joined
+    assert "7 min" in joined and "unconfirmed" in joined
+
+
+def test_receipts_are_never_split_across_notes():
+    notes = REAL_HOST_NOTE(WORST8 * 3)
+    for n in notes:
+        body = n[len("Host note"):]
+        assert all(part.count(": ") >= 1 for part in body.split(" | "))
+    assert sum(n.count(" | ") + 1 for n in notes) == 24
+
+
+def test_the_20_06_receipts_now_fit_in_bounded_notes():
+    """The real call's four receipts (the provider refused them as one 500+ token append) are bounded now."""
+    text = ("Gå gjennom backend-arbeidet og identifiser de viktigste konkrete oppgavene på to-do-listen akkurat nå. "
+            "Prioriter dem og meld kort tilbake hva som bør tas først.")
+    receipts = [{"tool": "delegate_to_agent", "agent": a, "status": "forwarded", "request": text, "sesjon": 1,
+                 "intent": "ab" * 32, "intent_status": "sendt", "base_task": b, "additions_used": 0, "additions_max": 3,
+                 "sent": True, "note": "the team's base task was started and the instruction was sent"}
+                for a, b in (("Jonas", "started_now"), ("Noel", "already_started"), ("Eira", "already_started"),
+                             ("Mira", "already_started"))]
+    notes = REAL_HOST_NOTE(receipts)
+    assert all(tools.note_tokens(n) <= tools.NOTE_BYTES for n in notes) and " ".join(notes).count(": forwarded") == 4
+
+
+def test_a_live_call_sends_bounded_notes(make, monkeypatch):
     monkeypatch.setattr(tools, "host_note", REAL_HOST_NOTE)
-    texts = {"jonas": "Gå gjennom backend-arbeidet og identifiser de viktigste konkrete oppgavene på to-do-listen "
-                      "akkurat nå. Prioriter dem og meld kort tilbake hva som bør tas først."}
-    effects = Regi([("delegate_to_agent", {"agent": "drammen-jonas", "request": texts["jonas"]}),
-                    ("delegate_to_agent", {"agent": "drammen-noel", "request": texts["jonas"]})],
+    effects = Regi([ASK, ("delegate_to_agent", {"agent": "drammen-noel", "request": "x"})],
                    [_v1("forwarded", True, intent_status="sendt", base_task="started_now"),
                     _v1("forwarded", True, intent_status="sendt")])
     call, said, clock = make(effects, **REGI)
-    _user_says(call, clock, "Kan teamet gå gjennom to-do-listene sine?")
-    assert len(said[-1][1]) <= tools.NOTE_CHARS and said[-1][1].count('"forwarded"') == 2
-
-
-
-@pytest.mark.parametrize("receipts", [
-    [{"tool": "schedule_callback", "status": "refused", "reason": "x" * 5000}],                     # a huge reason
-    [{"tool": "delegate_to_agent", "agent": f"Agent{n:02d}", "status": ["forwarded", "not_forwarded",
-      "unknown_delivery", "queued_at_regi"][n % 4], "reason": "cap_reached " * 20, "note": "y" * 400}
-     for n in range(40)],                                                                            # a long list
-    [{"tool": "schedule_callback", "status": "scheduled", "at": "20:30", "minutes": 7,
-      "note": "call back scheduled at 20:30 (never 'rang')"},
-     {"tool": "cancel_callback", "status": "unconfirmed", "note": "z" * 3000},
-     {"tool": "get_agent_status", "agent": "Jonas", "status": "failed", "reason": "Traceback " * 300}],   # failure text
-])
-def test_an_overflowing_note_stays_within_the_token_limit_and_keeps_every_status(receipts):
-    note = REAL_HOST_NOTE(receipts)
-    assert tools.note_tokens(note) <= tools.NOTE_TOKENS < 500
-    counts = {}
-    for r in receipts:
-        counts[r["status"]] = counts.get(r["status"], 0) + 1
-    for status, n in counts.items():                         # each status is still there: listed or counted
-        listed = note.count(f'"status": "{status}"')
-        counted = f'"{status}": ' in note.split("by status:")[-1] if "by status:" in note else False
-        assert listed == n or counted, (status, listed)
-
-
-def test_a_short_note_keeps_its_detail():
-    receipts = [{"tool": "schedule_callback", "status": "scheduled", "at": "20:30", "minutes": 7,
-                 "replaced": {"minutes": 5}, "note": "call back scheduled at 20:30 (never 'rang')"}]
-    note = REAL_HOST_NOTE(receipts)
-    assert '"minutes": 7' in note and '"replaced_minutes": 5' in note and "never 'rang'" in note
+    _user_says(call, clock, "Kan teamet ta sak 182?")
+    assert said and all(tools.note_tokens(text) <= tools.NOTE_BYTES for _k, text in said)
 
 AUTO = {"callback": {"kind": "http", "url": RING}, "callback_on_delegation": {"minutes": 5}}
 
@@ -939,6 +945,25 @@ def test_ikke_ring_cancels_the_automatic_booking(make):
     _user_says(call, clock, "Ikke ring meg likevel.")
     assert _receipts(said)[-1]["status"] == "cancelled" and effects.pending == {}
 
+
+
+def test_delegation_and_ikke_ring_in_the_same_round_never_books_a_call_back(make):
+    effects = Tilbakering([ASK, ("cancel_callback", {})])
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Ta sak 182, men ikke ring meg.")
+    assert [b["action"] for b in effects.to(RING)] == ["cancel"] and effects.pending == {}
+    effects.calls = [("delegate_to_agent", {"agent": "drammen-noel", "request": "Lag skjermbildet"})]
+    _user_says(call, clock, "Og Noel tar skjermbildet.")                      # a later round: still no auto booking
+    assert [b["action"] for b in effects.to(RING)] == ["cancel"] and effects.pending == {}
+
+
+def test_ikke_ring_in_an_earlier_round_suppresses_the_auto_booking_later(make):
+    effects = Tilbakering([("cancel_callback", {})])
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Du trenger ikke ringe meg i kveld.")
+    effects.calls = [ASK]
+    _user_says(call, clock, "Ta sak 182.")
+    assert [b["action"] for b in effects.to(RING)] == ["cancel"]
 
 def test_two_cancels_in_one_call_are_two_operations(make):
     effects = Tilbakering([ASK], explicit_support=False)               # the replacement itself cancels once
