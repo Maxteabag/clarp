@@ -5037,3 +5037,63 @@ def test_an_enrichment_failure_omits_delivery_but_keeps_the_log_and_its_errors(r
     with pytest.raises(urllib.error.HTTPError) as refused:
         _get(base + "/log?session=rachel&delivery_since=x")
     assert refused.value.code == 400, "the parameter 400 is not an enrichment failure"
+
+
+# --- ROOT 8efe6041: no early-disconnect peek; real sockets in the handler's real timeout mode -----
+
+def _raw_get(base, path):
+    """A REAL client socket (no stub of the handler path): one HTTP/1.1 GET, the connection then
+    left open and idle, with the test's UNCHANGED 2 s timeout on every read."""
+    parts = urlsplit(base)
+    sock = socket.create_connection((parts.hostname, parts.port), timeout=2)
+    sock.sendall(f"GET {path} HTTP/1.1\r\nHost: {parts.hostname}\r\n\r\n".encode())
+    return sock
+
+
+def test_a_connected_idle_client_gets_its_enriched_log_within_the_unchanged_timeout(running_server, monkeypatch):
+    import re
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    assert server_module.Handler.timeout == 120, "the request socket keeps its 120 s timeout mode"
+    started = time.monotonic()
+    sock = _raw_get(base, "/log?session=rachel&delivery_since=0")
+    try:
+        data = b""
+        while b"\r\n\r\n" not in data:
+            chunk = sock.recv(65536)             # socket.timeout after 2 s if the handler blocks
+            assert chunk, "server closed before answering"
+            data += chunk
+        head, _, rest = data.partition(b"\r\n\r\n")
+        length = int(re.search(rb"(?i)\r\ncontent-length: *(\d+)", head).group(1))
+        while len(rest) < length:
+            chunk = sock.recv(65536)
+            assert chunk, "server closed mid-body"
+            rest += chunk
+    finally:
+        sock.close()
+    assert head.startswith(b"HTTP/1.1 200") and time.monotonic() - started < 2.0
+    body = json.loads(rest[:length])
+    assert body["delivery_scope"]["runtime_instance"] == "i1" and manager.calls == 1
+
+
+def test_a_client_that_left_gets_no_state_or_retry_and_leaks_no_permit(running_server, monkeypatch):
+    from lib import launch_receipts, runtime_attestation
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    before = launch_receipts.get("t-seed")
+    sock = _raw_get(base, "/log?session=rachel&delivery_since=0")
+    sock.close()                                 # gone before the server answers
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and (manager.calls < 1
+                                           or runtime_attestation.status_block()["gate"]["inflight_now"]):
+        time.sleep(0.01)
+    assert manager.calls == 1, "the departed request's bounded work ran once (no cancel is claimed)"
+    assert runtime_attestation.status_block()["gate"]["inflight_now"] == 0, "no leaked permit"
+    assert launch_receipts.get("t-seed") == before, "a read grants no state"
+    follow = _log(base, "delivery_since=0")
+    assert follow["delivery_scope"]["runtime_instance"] == "i1"
+    assert manager.calls == 2, "nothing retried the departed request; the next one is served"

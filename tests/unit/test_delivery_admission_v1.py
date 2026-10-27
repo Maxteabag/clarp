@@ -331,7 +331,6 @@ def _handler(runtime):
     server_module = _server()
     handler = server_module.Handler.__new__(server_module.Handler)
     handler.server = SimpleNamespace(ctx=SimpleNamespace(runtime_client=runtime))   # Handler.ctx reads server.ctx
-    handler._client_gone = lambda: False
     return handler
 
 
@@ -873,6 +872,20 @@ def test_the_replay_strip_is_scoped_to_delivery_updated_only():
         "every other type replays exactly as stored, also to the Host's runtime-event relay"
 
 
+def test_no_enrichment_call_site_peeks_polls_or_touches_the_request_socket():
+    """ROOT 8efe6041: the early-disconnect peek is REMOVED (a peek on the request socket waits under its
+    120 s timeout). Neither call site reads, polls or re-times the connection; the helper is gone."""
+    import inspect
+    server_module = _server()
+    for name in ("_delivery_fields", "_delivery_bracket", "_first_observation"):
+        src = inspect.getsource(getattr(server_module.Handler, name))
+        for needle in ("recv(", "MSG_PEEK", "MSG_DONTWAIT", "select(", "poll(", "settimeout(", "setblocking(",
+                       "self.connection", "_client_gone", "disconnected="):
+            assert needle not in src, (name, needle)
+    assert not hasattr(server_module.Handler, "_client_gone")
+    assert server_module.Handler.timeout == 120, "the request socket timeout is unchanged"
+
+
 # --- egress gate (source) -------------------------------------------------------------------
 
 def test_no_f4_projection_leaves_the_host_outside_the_log_bracket():
@@ -880,7 +893,7 @@ def test_no_f4_projection_leaves_the_host_outside_the_log_bracket():
     assert "result.delivery" not in server_src, "the Host forwards no dispatch-result delivery"
     assert len(re.findall(r"launch_receipts\.annotate_rows\(", server_src)) == 1
     assert len(re.findall(r"launch_receipts\.delivery_page\(", server_src)) == 1
-    body = server_src[server_src.index("def _delivery_fields"):server_src.index("def _client_gone")]
+    body = server_src[server_src.index("def _delivery_fields"):server_src.index("def _first_observation")]
     assert "annotate_rows(" in body and "delivery_page(" in body
     lib = SERVER / "lib"
     users = sorted(p.name for p in lib.glob("*.py")
