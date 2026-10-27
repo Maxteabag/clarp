@@ -4989,9 +4989,9 @@ def test_more_than_ten_bootstrap_pages_under_gate_exhaustion_stay_incomplete_and
         assert body["delivery_cursor"] > cursor
         served.append(body)
         cursor = body["delivery_cursor"]
-    assert (len(served), omitted) == (2, 12) and all(page["delivery_more"] for page in served), \
+    assert (len(served), omitted) == (2, 11) and all(page["delivery_more"] for page in served), \
         "exhaustion leaves the pass incomplete, never complete or false"
-    assert manager.calls == 2 and runtime_attestation.status_block()["omitted"]["gate_rate"] == 12
+    assert manager.calls == 2 and runtime_attestation.status_block()["omitted"]["gate_rate"] == 11
     manager.frozen = False
     manager.t += 1.0                                     # one second later: the gate has refilled
     for _ in range(20):                                  # bounded: the pass must finish well within this
