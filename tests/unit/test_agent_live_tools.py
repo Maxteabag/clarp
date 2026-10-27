@@ -182,10 +182,10 @@ def test_a_missing_disabled_unsafe_or_impersonating_block_gives_no_tools(block):
 def test_a_valid_block_is_normalised_with_call_backs_off_by_default():
     assert _config()["callback"] == {"kind": "none"}
     cfg = _config(callback={"kind": "http", "url": RING}, callback_minutes={"default": 50, "min": 2, "max": 10},
-                  delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"})
+                  delegate={"kind": "http", "url": DIRECTOR})
     assert cfg["callback"] == {"kind": "http", "url": RING}
     assert cfg["callback_minutes"] == {"default": 10, "min": 2, "max": 10}
-    assert cfg["delegate"] == {"kind": "http", "url": DIRECTOR, "fallback": "prompt"} and cfg["from"] == "rk-sander-0001"
+    assert cfg["delegate"] == {"kind": "http", "url": DIRECTOR} and cfg["from"] == "rk-sander-0001"
 
 
 @pytest.mark.parametrize("change", [{"principal": ""}, {"call_id": ""}])
@@ -535,11 +535,12 @@ def test_without_a_reconcile_url_nothing_is_read(make):
     assert effects.gets == []
 
 
-def test_an_unreachable_regi_falls_back_to_a_prompt_only_when_configured(make):
+def test_there_is_no_prompt_fallback_regi_is_the_one_dispatch_owner(make):
+    assert _config(delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"}) is None
     effects = Regi([ASK], [tools.Unreachable("connection refused")])
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"})
+    call, said, clock = make(effects, **REGI)
     _user_says(call, clock, "Ta sak 182.")
-    assert len(effects.prompts) == 1 and _receipts(said)[0]["status"] == "forwarded"
+    assert effects.prompts == [] and _receipts(said)[0]["status"] == "unknown_delivery"
 
 
 def test_a_refused_or_unclear_prompt_is_never_called_forwarded(make):
@@ -684,7 +685,8 @@ def test_ikke_ring_likevel_cancels_only_this_callers_pending_call_back(make):
 
 
 @pytest.mark.parametrize("regi_status, words", [("venter", "already pending"), ("fyrt", "already gone out"),
-                                                ("fyrt_usikker", "never rung again"), ("avlyst", "cancelled earlier")])
+                                                ("fyrt_usikker", "never rung again"), ("avlyst", "cancelled earlier"),
+                                                ("ikke_plassert", "not placed")])
 def test_an_already_scheduled_answer_is_told_by_regis_current_status(make, regi_status, words):
     effects = Tilbakering([CALL_BACK], [{"ok": True, "result": "already_scheduled", "operation_id": "cb-x",
                                          "due": 1_800_000_300, "status": regi_status, "fired_at": None}])

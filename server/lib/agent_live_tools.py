@@ -43,7 +43,7 @@ Profile block::
       "from": "<the profile's agent_session>",
       "agents": [{"session": "drammen-jonas", "name": "Jonas", "role": "backend"}],
       "delegate": {"kind": "prompt"}
-                | {"kind": "http", "url": "http://127.0.0.1:7790/regi/sandra/deleger", "fallback": "none",
+                | {"kind": "http", "url": "http://127.0.0.1:7790/regi/sandra/deleger",
                    "reconcile_url": "http://127.0.0.1:7790/regi/sandra/intent"},
       "callback": {"kind": "none"} | {"kind": "http", "url": "http://127.0.0.1:7790/regi/sandra/tilbakering"},
       "callback_minutes": {"default": 5, "min": 1, "max": 30}
@@ -169,13 +169,12 @@ def frozen_config(profile: dict, story: str) -> dict | None:
         return invalid("delegate.kind")
     if delegate["kind"] == "http":
         url = _loopback_url(delegate.get("url"))
-        fallback = delegate.get("fallback", "none")
-        if not url or fallback not in ("prompt", "none"):
+        if not url or delegate.get("fallback", "none") != "none":     # regi is the one dispatch owner: no fallback
             return invalid("delegate.url/fallback")
         reconcile = delegate.get("reconcile_url")
         if reconcile is not None and not _loopback_url(reconcile):
             return invalid("delegate.reconcile_url")
-        delegate = {"kind": "http", "url": url, "fallback": fallback,
+        delegate = {"kind": "http", "url": url,
                     **({"reconcile_url": reconcile} if reconcile else {})}
     else:
         delegate = {"kind": "prompt"}
@@ -799,9 +798,6 @@ class CallTools:
         except Refused as exc:
             outcome = regi_outcome(exc.body, exc.code)
         except Unreachable as exc:
-            if delegate["fallback"] == "prompt":
-                log("agentLiveDelegateFallback", f"call={self.call_id} req={attempt} reason={exc}")
-                return self._prompt_once(attempt, member, request)
             outcome = {"state": UNCONFIRMED, "status": "unknown_delivery", "reason": str(exc)[:120],
                        "note": "regi did not answer; not retried"}
         except Exception as exc:  # noqa: BLE001 - timeout, connection, non-JSON: unknown, never retried
@@ -975,6 +971,8 @@ class CallTools:
             return "that call back may already have gone out; regi is not sure, and it is never rung again"
         if regi_status == "avlyst":
             return "that call back was cancelled earlier; it will not ring"
+        if regi_status == "ikke_plassert":
+            return "that call back was not placed (another call was ringing); it is not tried again"
         if result == "scheduled":
             return "call back scheduled at " + at + " (never 'rang')"
         return "an earlier call back is already pending at " + at
