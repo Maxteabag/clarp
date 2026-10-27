@@ -201,7 +201,8 @@ class LiveSocket:
         if not self.snapshot.get("live_tools"):
             return
         from .agent_live_tools import CallTools, Effects
-        self.tools = CallTools(self.snapshot, self.call_id, self.tool_context, effects=Effects(api_key))
+        self.tools = CallTools(self.snapshot, self.call_id, self.tool_context, effects=Effects(api_key),
+                               principal=self.principal)
 
     def tool_context(self, kind: str, text: str) -> None:
         """A Host note to the voice model, only once the opening was admitted and drained."""
