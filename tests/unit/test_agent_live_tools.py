@@ -17,7 +17,7 @@ from lib import agent_live_tools as tools
 from lib import agent_ring_live as live
 from lib import agent_ring_live_socket as sock
 from tests.unit.test_agent_ring_live import _live_ring, sander  # noqa: F401 - sander is a fixture
-from tests.unit.test_agent_rings import env  # noqa: F401 - env is a fixture
+from tests.unit.test_agent_rings import PHONE, env  # noqa: F401 - env is a fixture
 
 TEAM = [{"session": "drammen-jonas", "name": "Jonas", "role": "backend"},
         {"session": "drammen-noel", "name": "Noel", "role": "frontend"}]
@@ -263,6 +263,29 @@ def test_a_route_runs_at_most_its_bounded_number_of_actions(make):
     call, said, clock = make(effects)
     _user_says(call, clock, "Hvordan går det?")
     assert len(_receipts(said)) == tools.MAX_ACTIONS_PER_ROUTE
+
+
+
+def test_router_spend_is_capped_per_call(make):
+    effects = FakeEffects()
+    call, _said, clock = make(effects)
+    for n in range(tools.MAX_ROUTES_PER_CALL + 10):
+        _user_says(call, clock, f"Setning {n}.")
+    assert len(effects.bodies) == tools.MAX_ROUTES_PER_CALL
+    assert all(b["max_output_tokens"] == 2000 for b in effects.bodies)
+
+
+def test_delegations_are_capped_per_call(make):
+    asks = [("delegate_to_agent", {"agent": "drammen-jonas", "request": f"Oppgave {n}"}) for n in range(20)]
+    effects = FakeEffects(asks[:tools.MAX_ACTIONS_PER_ROUTE])
+    call, said, clock = make(effects)
+    sent = []
+    for start in range(0, 20, tools.MAX_ACTIONS_PER_ROUTE):
+        effects.calls = asks[start:start + tools.MAX_ACTIONS_PER_ROUTE]
+        _user_says(call, clock, f"Flere oppgaver {start}.")
+        sent += [r["status"] for r in _receipts(said)]
+    assert len(effects.prompts) == tools.MAX_DELEGATIONS_PER_CALL
+    assert sent.count("refused") == 20 - tools.MAX_DELEGATIONS_PER_CALL
 
 
 # ---- the lifecycle fence ---------------------------------------------------------------
@@ -625,6 +648,10 @@ def test_a_live_call_routes_the_users_turn_and_tells_the_voice_what_was_done(opt
     assert not any(f["type"].startswith("session.thinking") for f in h.wfile.frames())   # nothing new to the phone
     h.send({"type": "session.close"})
     thread.join(15)
+    # The tools act for the device that answered and joined this call (the grant's owner), never the agent.
+    row = next(iter(json.loads((live.ROOT / "tool-ledger.json").read_text()).values()))
+    assert row["principal"] == PHONE != row["agent_session"] == "rk-sander-0001"
+    assert row["call_id"] == call.grant["call_id"]
 
 
 def test_a_live_call_after_hang_up_starts_no_effect(opted_in, call, monkeypatch):
