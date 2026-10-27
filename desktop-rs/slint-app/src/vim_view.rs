@@ -256,6 +256,20 @@ fn copy(app: &App, rows: &[(String, String, String)]) {
     say(format!("Copied: {preview}"));
 }
 
+/// v: the cursor's message (as y picks it) on the select-text page.
+fn select(app: &App, rows: &[(String, String, String)]) {
+    let cursor = cursor();
+    let index = rows.iter().position(|(id, _, _)| !cursor.is_empty() && *id == cursor).or_else(|| {
+        let report = app.active_report();
+        if report.at_end { rows.iter().rposition(|(_, author, _)| author != "activity" && author != "live") } else { anchor(app, rows) }
+    });
+    let Some(index) = index else { return say("Nothing to select") };
+    STATE.with(|s| s.borrow_mut().cursor = rows[index].0.clone());
+    if let Some(window) = crate::window() {
+        crate::select_text::open_message(app, &window, &app.active_id(), &rows[index].0);
+    }
+}
+
 /// The tool activity row the cursor is on, or the nearest one after it
 /// (before it, at the end).
 fn fold(app: &App, window: &AppWindow, open: Option<bool>) {
@@ -342,6 +356,7 @@ fn run(app: &Rc<App>, window: &AppWindow, region: Region, action: &'static str, 
             }
         }
         ("vim-yank", _) => copy(app, &rows(app)),
+        ("vim-select", _) => select(app, &rows(app)),
         ("vim-fold-open" | "vim-fold-close", Region::Explorer) => {
             commands::run(app, window, if action == "vim-fold-open" { "unfold" } else { "fold" });
         }

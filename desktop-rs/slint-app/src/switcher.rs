@@ -124,6 +124,7 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
         ("change-directory", "Ctrl+Alt+D"),
         ("recent-agents", "Ctrl+R"),
         ("search-messages", "Ctrl+F"),
+        ("select-text", "V"),
         ("refresh", "F5"),
         ("refresh-agents", "Shift+F5"),
         ("overview", "Ctrl+Shift+O"),

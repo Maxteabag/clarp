@@ -752,6 +752,7 @@ component TranscriptRow inherits HorizontalLayout {
     callback link-clicked(string);
     callback toggle-activity(string, string);
     callback copy-message(string);
+    callback select-message(string);
     // The widest the message's content is drawn. Slint measures a
     // repeated or conditional layout in a row (opened tool calls, a
     // card) at its preferred width when it sizes the row, so one
@@ -804,6 +805,18 @@ component TranscriptRow inherits HorizontalLayout {
             accessible-label: "Copy message";
             Image { source: @image-url("icons/copy.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
             copy := TouchArea { clicked => { root.copy-message(root.message.id); } }
+        }
+        // Next to it: the message as plain text to select from.
+        if root.message.author != "activity" && root.message.author != "live" && root.message.receipt.key == "": Rectangle {
+            x: parent.width - 42px * ChatText.scale;
+            y: 2px;
+            width: 18px * ChatText.scale;
+            height: 18px * ChatText.scale;
+            opacity: hover.has-hover || select-touch.has-hover ? 1 : 0;
+            accessible-role: button;
+            accessible-label: "Select text";
+            Image { source: @image-url("icons/select-text.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
+            select-touch := TouchArea { clicked => { root.select-message(root.message.id); } }
         }
         VerticalLayout {
             // A folded prompt is one line in a slim bubble.
@@ -964,6 +977,7 @@ export component Transcript inherits FocusScope {
     callback link-clicked(string);
     callback toggle-activity(string, string);
     callback copy-message(string);
+    callback select-message(string);
     // The reader reached the oldest loaded row: time for the page before.
     callback reached-top();
     // The scroll journal: a move of the offset that was not the reader's
@@ -1022,6 +1036,7 @@ export component Transcript inherits FocusScope {
             link-clicked(url) => { root.link-clicked(url); }
             toggle-activity(id, group) => { root.toggle-activity(id, group); }
             copy-message(id) => { root.copy-message(id); }
+            select-message(id) => { root.select-message(id); }
             // Where the row is drawn in the viewport (a ListView row's y is
             // in the list's estimated coordinates): the one across the
             // viewport's top tells the scrollbar where the reader is.

@@ -213,6 +213,8 @@ fn state(name: &str) -> Vec<Binding> {
             b("close-pane", &["Alt+X", "Ctrl+Alt+X", "Ctrl+Shift+W"], "Close pane", false, Always, false),
             b("zoom", &["Alt+Z", "Ctrl+Alt+Z", "Ctrl+Shift+Z"], "Zoom pane", false, Always, false),
             b("balance", &["Alt+=", "Ctrl+Alt+=", "Ctrl+Shift+="], "Balance panes", false, Always, false),
+            // Slint's rich text cannot be selected: the chat as plain text.
+            b("select-text", &["V"], "Select text", false, Agent, false),
         ],
         "sidebar" => vec![
             b("agent-next", &["J", "Down"], "Next", false, Rows, false),
@@ -1262,6 +1264,13 @@ mod tests {
         assert_eq!(chord(" ", false, false, false).as_deref(), Some("Space"));
         assert_eq!(chord("=", true, false, true).as_deref(), Some("Ctrl+="), "a symbol keeps its own shift");
         assert_eq!(chord(&key(Key::Control), true, false, false), None);
+    }
+
+    #[test]
+    fn v_in_the_chat_selects_text() {
+        let none = Overrides::new();
+        assert_eq!(action_for("pane", "V", &none, all()), Some("select-text"));
+        assert_eq!(action_for("sidebar", "V", &none, all()), Some("toggle-compact"), "V in the explorer stays the compact view");
     }
 
     #[test]

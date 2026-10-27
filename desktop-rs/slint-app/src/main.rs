@@ -29,6 +29,7 @@ mod settings_view;
 mod look;
 mod switcher;
 mod search_view;
+mod select_text;
 mod mention_view;
 mod view;
 mod vim;
@@ -780,20 +781,17 @@ fn main() {
         }
     });
     window.on_copy_message(|pane, id| with_window(|app, _| {
-        let session = app.session_of(&pane);
-        let text = app.engine.borrow().conversation(&session).and_then(|c| {
-            c.rows().iter().find(|m| m.id == id.as_str()).map(|m| match clarp_core::decision_receipt::parse(&m.text) {
-                // A receipt copies as it reads, not as the Host's prompt.
-                Some(receipt) => format!("{}\n{}", receipt.question, receipt.outcome.label()),
-                // A reply copies its written form only.
-                None if m.display_text.is_empty() && m.role == "user" => m.text.clone(),
-                None => m.display_text.clone(),
-            })
-        });
+        let text = select_text::message_text(app, &pane, &id);
         match text.map(|text| platform::clipboard::copy(&text)) {
             Some(Ok(())) => {}
             Some(Err(error)) => app.engine.borrow_mut().report_error(&format!("Could not copy: {error}")),
             None => eprintln!("clarp-slint: no message {id} to copy"),
+        }
+    }));
+    window.on_select_message(|pane, id| with_window(|app, window| select_text::open_message(app, window, &pane, &id)));
+    window.on_select_copy_all(|| with_window(|app, window| {
+        if let Err(error) = platform::clipboard::copy(&window.get_select_body()) {
+            app.engine.borrow_mut().report_error(&format!("Could not copy: {error}"));
         }
     }));
     window.on_paste_image(|pane| {

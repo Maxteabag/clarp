@@ -8,7 +8,7 @@ import { MessageRow, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, 
 import { Workspace, PaneView, SplitView, WorkspaceTab, DraftMirror } from "workspace.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
-import { KeymapEditor, KeymapRow, ConnectionPage } from "dialogs.slint";
+import { KeymapEditor, KeymapRow, ConnectionPage, SelectTextPage } from "dialogs.slint";
 export { KeymapRow }
 import { PreviewPanel, PreviewBanner, PreviewWindow, PreviewVersion } from "preview.slint";
 // ---- updates and teams
@@ -236,6 +236,13 @@ export component AppWindow inherits Window {
     callback scroll-journal(string, string, length, length, float, float, length, length, bool, bool, int);
     callback toggle-activity(string, string, string);
     callback copy-message(string, string);
+    // The selectable view of a message (pane, message id).
+    callback select-message(string, string);
+    // What the select-text page shows, and its buttons.
+    in property <string> select-title;
+    in property <string> select-body;
+    callback select-copy-all();
+    public function open-select-text() { select-text-page.open(); }
     callback silence();
     callback cancel-transcription(string);
     callback paste-image(string) -> bool;
@@ -545,6 +552,7 @@ export component AppWindow inherits Window {
                     scroll-journal(id, cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows) => { root.scroll-journal(id, cause, old, new, old-place, new-place, content, viewport, at-end, follow, rows); }
                     toggle-activity(id, message, group) => { root.toggle-activity(id, message, group); }
                     copy-message(id, message) => { root.copy-message(id, message); }
+                    select-message(id, message) => { root.select-message(id, message); }
                     silence => { root.silence(); }
                     cancel-transcription(id) => { root.cancel-transcription(id); }
                     paste-image(id) => { return root.paste-image(id); }
@@ -651,6 +659,15 @@ export component AppWindow inherits Window {
                     Text { text: hint.label; color: Palette.chrome-text; font-size: 12 * Look.unit; overflow: elide; horizontal-stretch: 1; }
                 }
             }
+        }
+        select-text-page := SelectTextPage {
+            visible: root.overlay == "select-text";
+            width: parent.width;
+            height: parent.height;
+            title: root.select-title;
+            body: root.select-body;
+            copy-all => { root.select-copy-all(); }
+            close => { root.overlay-closed(); }
         }
         connection-page := ConnectionPage {
             visible: root.overlay == "connection";
