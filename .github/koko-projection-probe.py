@@ -24,6 +24,7 @@ s=s.replace(needle,'''    // Test-only probe measures this actual present call; 
     });
     folded''');src.write_text(s)
 s=ui.read_text();needle='export component Transcript inherits FocusScope {\n';assert s.count(needle)==1;s=s.replace(needle,needle+'''    // Accessibility-only CI observation: no layout or scroll assignment.
+    accessible-role: groupbox;
     accessible-value: "content=" + (list.content-height / 1px) + " viewport=" + (list.visible-height / 1px) + " offset=" + (list.content-y / 1px) + " following=" + (root.follow ? "true" : "false");
 ''',1);ui.write_text(s)
 print(json.dumps({'probe_only':True,'shipped_release_unchanged':True,'before':before,'after':{str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (src,ui)}},sort_keys=True))
