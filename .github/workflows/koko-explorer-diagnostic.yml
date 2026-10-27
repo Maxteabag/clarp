@@ -1,0 +1,52 @@
+name: Koko Explorer controlled diagnosis
+on:
+  push:
+    branches: [diag/koko-explorer-control]
+    paths: [.github/workflows/koko-explorer-diagnostic.yml, .github/koko-explorer-control.py]
+permissions:
+  contents: read
+concurrency:
+  group: koko-explorer-control
+  cancel-in-progress: false
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 6da6d1ddcdcf6ad2b5e81402f71cf3fdee1d81fb
+          path: baseline
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 998044a9c884ed9b4a3b0250b81d9331a262080e
+          path: candidate
+          persist-credentials: false
+      - name: Existing check dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
+            libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev \
+            dbus gnome-keyring python3 fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: control/desktop-rs
+          shared-key: desktop-debug
+          save-if: 'false'
+      - name: Same-runner exact-ref single-arm checks
+        run: python3 control/.github/koko-explorer-control.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: explorer-controlled-diagnosis
+          path: explorer-control-raw
