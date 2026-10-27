@@ -328,17 +328,19 @@ def build_agent_snapshot(ctx) -> dict[str, Any]:
         if key and key not in roster_keys:
             roster.append(name.strip())
             roster_keys.add(key)
+    from . import settings_store
+    projected_settings = settings_store.get_many([avatar_settings.KEY, *tool_explanation_settings.KEYS])
     return {
         "agents": rows,
         "focus": focus,
         "roster": roster,
         "personas": [persona_store.public(row) for row in persona_rows],
         # Whether clients should prefer the model portrait where one exists.
-        "model_avatars": avatar_settings.get()["model_avatars"],
+        "model_avatars": avatar_settings.get(stored=projected_settings)["model_avatars"],
         # The menu of MCP servers an agent can be granted (from ~/.claude.json).
         "available_mcp_servers": sorted(config.read_global_mcp_servers().keys()),
         # Whether tool rows carry plain-language explanations (Host setting).
-        "tool_explanations": tool_explanation_settings.get(),
+        "tool_explanations": tool_explanation_settings.get(stored=projected_settings),
     }
 
 

@@ -314,7 +314,9 @@ def user_call_profiles(*, strict: bool = True) -> dict[str, str | None]:
         if not uncertain:
             known -= normal - matches.keys()
         known.update(matches)
-        settings_store.set_text(USER_CALL_BINDINGS_KEY, json.dumps(sorted(known)))
+        serialized = json.dumps(sorted(known))
+        if serialized != raw:
+            settings_store.set_text(USER_CALL_BINDINGS_KEY, serialized)
         if uncertain and strict:
             raise CallError(409, CONTEXT_UNAVAILABLE)
         return {session: matches.get(session) for session in known}
