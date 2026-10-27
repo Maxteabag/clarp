@@ -89,7 +89,7 @@ class FakeEffects:
         error = self.url_errors.get(url, self.post_error)
         if error is not None:
             raise error
-        return {"ok": True, "result": "accepted"}
+        return {"ok": True, "result": "forwarded", "sent_now": True}
 
     def to(self, url):
         return [body for u, body in self.posts if u == url]
@@ -445,7 +445,7 @@ def test_a_refused_prompt_is_not_done_and_may_be_asked_again(make):
     (None, 0, "handed_off"),
     (tools.Unreachable("connection refused"), 1, "handed_off"),
     (tools.Unconfirmed("timeout"), 0, "unknown"),
-    (tools.Refused("HTTP 400"), 0, "failed"),
+    (tools.Refused("HTTP 400", 400, {"ok": False, "result": "refused", "reason": "tom beskjed"}), 0, "refused"),
 ])
 def test_a_director_delegation_falls_back_only_when_it_certainly_did_not_arrive(make, error, prompted, status):
     effects = FakeEffects([ASK])
@@ -491,13 +491,14 @@ def test_an_oversized_instruction_is_refused_never_cut(make):
 
 
 @pytest.mark.parametrize("answer, status", [
-    ({"ok": True, "result": "started", "sent_now": True}, "handed_off"),
-    ({"ok": True, "result": "started", "sent_now": False}, "handed_off"),          # the session's start already ran
+    ({"ok": True, "result": "started", "sent_now": True}, "task_started"),       # the prepared team task went out
+    ({"ok": True, "result": "started", "sent_now": False}, "task_started"),
     ({"ok": True, "result": "forwarded", "sent_now": True}, "handed_off"),
+    ({"ok": True, "result": "forwarded", "sent_now": False}, "accepted"),         # never claimed as sent
     ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": True}, "queued"),          # regi queued it: not delivered yet
-    ({"ok": True, "result": "already_present", "sent_now": False}, "already_handed_off"),
+    ({"ok": True, "result": "already_present", "delivered": "sendt"}, "already_present"),
+    ({"ok": True, "result": "already_present", "delivered": "ukjent"}, "unknown"),  # regi itself does not know
     ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": False}, "not_forwarded"),   # regi kept its one addition
-    ({"ok": True, "result": "forwarded", "sent_now": False}, "not_forwarded"),
 ])
 def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
     class Director(FakeEffects):
@@ -511,6 +512,78 @@ def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
     assert receipt["status"] == status and receipt["director"] == {k: v for k, v in answer.items() if k != "ok"}
     assert ("NOT sent" in receipt.get("note", "")) is (status == "not_forwarded")
     assert ("not yet confirmed" in receipt.get("note", "")) is (status == "queued")
+    assert status != "handed_off" or answer.get("sent_now") is True
+
+
+@pytest.mark.parametrize("code, body, status, retry_sends", [
+    (409, {"ok": False, "result": "not_forwarded", "reason": "maks 3 tillegg per agent per sesjon er nådd"},
+     "not_forwarded", True),
+    (409, {"ok": False, "result": "not_forwarded", "reason": "nullstilling pågår"}, "not_forwarded", True),
+    (413, {"ok": False, "result": "refused", "error": "request_too_large"}, "refused", True),
+    (502, {"ok": False, "result": "not_forwarded", "reason": "sending til agenten feilet"}, "unknown", False),
+])
+def test_a_regi_refusal_is_reported_as_regi_said_and_only_a_certain_one_may_be_asked_again(make, code, body, status,
+                                                                                         retry_sends):
+    class Director(FakeEffects):
+        answers = [tools.Refused(f"HTTP {code}", code, body)]
+
+        def post(self, url, body_, timeout=30):
+            self.posts.append((url, body_))
+            if self.answers:
+                raise self.answers.pop(0)
+            return {"ok": True, "result": "already_present", "delivered": "sendt"}
+    effects = Director([ASK])
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")
+    receipt = _receipts(said)[0]
+    assert receipt["status"] == status and (receipt.get("note") or "")
+    call, said, clock = make(effects, call_id="call-2", delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")
+    second = _receipts(said)[0]
+    assert len({body["operation_id"] for _url, body in effects.posts}) == 1   # never a new operation
+    if retry_sends:                                   # certainly not passed on: asked again as a fresh attempt
+        assert "reconciled" not in second and second["status"] == "already_present"
+    else:                                             # 502 may have been sent: only reconciled, same operation
+        assert second["reconciled"] is True and second["status"] == "already_present"
+
+
+
+@pytest.mark.parametrize("error", [tools.Unreachable("connection refused"),
+                                   tools.Refused("HTTP 409", 409, {"ok": False, "result": "not_forwarded",
+                                                                   "reason": "nullstilling pågår"})])
+def test_a_failed_re_ask_never_downgrades_an_earlier_delivery(make, ledger, error):
+    effects = FakeEffects([ASK])
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")
+    operation = _receipts(said)[0]["operation_id"]
+    effects.post_error = error
+    call, said, clock = make(effects, call_id="call-2", delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")
+    receipt = _receipts(said)[0]
+    assert receipt["earlier"] == "handed_off" and receipt["status"] in ("failed", "not_forwarded")
+    row = _rows(ledger)[operation]
+    assert (row["status"], row["outcome"]) == (tools.DONE, "handed_off")
+
+def test_ny_false_is_already_present_only_for_the_very_text_regi_holds(make):
+    class Director(FakeEffects):
+        def post(self, url, body, timeout=30):
+            self.posts.append((url, body))
+            return {"ok": True, "sesjon": 7, "agent": "jonas", "ny": len(self.posts) == 1}
+    effects = Director([ASK])
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")
+    assert _receipts(said)[0]["status"] == "queued"
+    call, said, clock = make(effects, call_id="call-2", principal="device_other", delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")                    # another caller, the same words regi already holds
+    assert _receipts(said)[0]["status"] == "already_present"
+    effects.calls = [("delegate_to_agent", {"agent": "drammen-jonas", "request": "Og legg til eksport"})]
+    call, said, clock = make(effects, call_id="call-3", delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Og legg til eksport.")
+    receipt = _receipts(said)[0]
+    assert receipt["status"] == "not_forwarded" and "one addition per member per session" in receipt["note"]
+
+
+
 
 
 def test_a_text_the_director_did_not_pass_on_stays_not_forwarded_and_is_never_called_handed_off(make, ledger):
@@ -525,7 +598,8 @@ def test_a_text_the_director_did_not_pass_on_stays_not_forwarded_and_is_never_ca
     assert "handed_off" not in json.dumps(call.taken)
     call, said, clock = make(effects, call_id="call-2", delegate={"kind": "http", "url": DIRECTOR})
     _user_says(call, clock, "Og legg til en eksport.")
-    assert len(effects.posts) == 1 and _receipts(said)[0]["status"] == "not_forwarded"
+    assert _receipts(said)[0]["status"] == "not_forwarded" and _receipts(said)[0]["asked_again"] is True
+    assert len({body["operation_id"] for _u, body in effects.posts}) == 1    # regi asked again, same operation
 
 
 # ---- call backs: a Host transient timer that hands the call back once to the director ----
