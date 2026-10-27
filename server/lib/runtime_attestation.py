@@ -50,7 +50,7 @@ OMIT_REASONS = (
     "no_attestation", "gate_inflight", "gate_rate", "unreaped", "in_transaction", "disconnected",
     "timeout", "nonzero", "exec_error", "bad_bytes", "inactive", "mainpid_mismatch", "start_mismatch",
     "invocation_mismatch", "cgroup_mismatch", "boot_mismatch", "non_systemd", "o2_mismatch", "unexpected",
-    "deadline_exhausted", "o1_unavailable", "o2_unavailable")
+    "deadline_exhausted", "o1_unavailable", "o2_unavailable", "status_contended")
 # ROOT 17e71bf1: ONE absolute monotonic deadline for the optional /log enrichment, from its entry
 # (after the core read). Each phase is capped and clamped to what is left; B's kill + reap reserve
 # is inside it. Exhausted before a phase => omit without calling it.
@@ -79,7 +79,8 @@ def reset_for_tests() -> None:
         _HEALTH.clear()
         _HEALTH.update({"started": 0, "reaped": 0, "bound": 0, "last_duration_ms": None, "unexpected": 0,
                         "omitted": {reason: 0 for reason in OMIT_REASONS}, "unexpected_by_type": {},
-                        "log_at": {}, "phase_last_ms": {}, "phase_max_ms": {}})
+                        "log_at": {}, "phase_last_ms": {}, "phase_max_ms": {},
+                        "fail_log_at": {}})
 
 
 reset_for_tests()
@@ -310,7 +311,6 @@ def _try_acquire() -> str:
             return "gate_rate"
         _GATE["tokens"] -= 1.0
         _GATE["busy"] = True
-        _HEALTH["started"] = min(_COUNTER_MAX, _HEALTH["started"] + 1)
         return ""
 
 
@@ -358,29 +358,72 @@ class Budget:
                 _HEALTH["phase_max_ms"][name] = max(ms, _HEALTH["phase_max_ms"].get(name, 0))
 
 
-def admit(observation: Any, *, in_transaction: bool, disconnected: bool = False,
-          budget: Budget | None = None) -> bool:
-    """One /log bracket's B. True only when THIS fresh manager read binds the observation's A2.
-    The caller passes whether a DB transaction is open and whether the client has gone; both
-    refuse without a probe. Every refusal is counted under its closed reason."""
-    a2 = attestation_of(observation)
-    if a2 is None:
-        note("no_attestation")
-        return False
+def reserve(*, in_transaction: bool, disconnected: bool = False) -> bool:
+    """Take this bracket's ONE probe permit BEFORE an O1 cache-miss RPC (ROOT 6f243300), so that
+    RPC is admitted by the same 1-in-flight / 2-per-second gate as B: no O1 storm while the gate
+    is exhausted. The bracket then passes reserved=True to admit(), which always gives the permit
+    back; call release_reservation() if it never gets there. Refusals are counted."""
     if disconnected:
         note("disconnected")
         return False
     if in_transaction:
         note("in_transaction")
         return False
-    read_s = SHOW_TIMEOUT_S if budget is None else budget.cap(SHOW_TIMEOUT_S, reserve=REAP_RESERVE_S)
-    if read_s is None:
-        note("deadline_exhausted")                  # no room for B and its reap reserve: no probe
-        return False
     refused = _try_acquire()
     if refused:
         note(refused)
         return False
+    return True
+
+
+def release_reservation() -> None:
+    """Give back a permit from reserve() that no probe used."""
+    _release(None, False)
+
+
+def log_due(kind: str, exc: BaseException) -> tuple[bool, str]:
+    """Coalesced logging for an optional-enrichment failure of a CLOSED kind: (whether to write a
+    line, sanitized type label). At most one line per (kind, exception TYPE) per LOG_COALESCE_S;
+    at most TYPE_NAMES_MAX type names per kind, then "_other". The caller's per-occurrence counter
+    is separate and always counts; no message text is ever kept."""
+    label = type_label(exc)
+    with _LOCK:
+        table = _HEALTH["fail_log_at"].setdefault(kind if kind in OMIT_REASONS else "unexpected", {})
+        if label not in table and len([n for n in table if n != "_other"]) >= TYPE_NAMES_MAX:
+            label = "_other"
+        now, last = CLOCK(), table.get(label)
+        if last is not None and now - last < LOG_COALESCE_S:
+            return False, label
+        table[label] = now
+        return True, label
+
+
+def admit(observation: Any, *, in_transaction: bool, disconnected: bool = False,
+          budget: Budget | None = None, reserved: bool = False) -> bool:
+    """One /log bracket's B. True only when THIS fresh manager read binds the observation's A2.
+    The caller passes whether a DB transaction is open and whether the client has gone; both
+    refuse without a probe. Every refusal is counted under its closed reason. With
+    reserved=True the permit from reserve() is used, and given back on every path."""
+    a2 = attestation_of(observation)
+    refusal = ("no_attestation" if a2 is None else "disconnected" if disconnected
+               else "in_transaction" if in_transaction else "")
+    read_s = None
+    if not refusal:
+        read_s = SHOW_TIMEOUT_S if budget is None else budget.cap(SHOW_TIMEOUT_S, reserve=REAP_RESERVE_S)
+        if read_s is None:
+            refusal = "deadline_exhausted"          # no room for B and its reap reserve: no probe
+    if refusal:
+        if reserved:
+            release_reservation()
+        note(refusal)
+        return False
+    if not reserved:
+        refused = _try_acquire()
+        if refused:
+            note(refused)
+            return False
+    with _LOCK:
+        _HEALTH["started"] = min(_COUNTER_MAX, _HEALTH["started"] + 1)
     unreaped, spawned, started = None, False, CLOCK()
     try:
         rc, raw, reason, unreaped, spawned = run_probe(read_s)

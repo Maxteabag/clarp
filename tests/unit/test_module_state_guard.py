@@ -69,6 +69,9 @@ ALLOWED: dict[tuple[str, str], str] = {
     ("lib/transcript_import_cache.py", "_deferred"): THROTTLE,
     ("lib/live_hub.py", "_FANOUT"): CLIENT,
     ("lib/backends.py", "_STATUS_CACHE"): CACHE,
+    # Invalidation generation of that window: an F4 O1 never stores a status
+    # fetched before a reconfigure / invalidate.
+    ("lib/backends.py", "_STATUS_GENERATION"): CACHE,
     ("lib/reconcile.py", "_LEAK_CHECK_ASKED"): THROTTLE,
     ("lib/cartesia_voices.py", "_cache"): CACHE,
     ("lib/codex_app_server.py", "_CLIENTS"): CLIENT,

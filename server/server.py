@@ -2926,19 +2926,19 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body, "application/json")
 
     def _delivery_observation(self, *, fresh: bool, timeout: float):
-        """A runtime status OBSERVATION (never "current"): O1 may come from the
-        shared cache (<= 1 s old, read without waiting), else, like O2 always, ONE
-        fresh RPC bounded as a whole by ``timeout`` (never the client's shared
-        default). None when unavailable."""
+        """ONE fresh runtime status RPC bounded as a whole by ``timeout`` (never the
+        client's shared default): an OBSERVATION, never "current". None when it
+        times out or fails; the caller counts every one, and the log line is
+        coalesced (at most one per phase and exception type per 10 s, type name
+        only)."""
+        from lib import runtime_attestation
         client = getattr(self.ctx, "runtime_client", None)
         try:
-            if not fresh and backends._RUNTIME_CLIENT is client:
-                cached = backends.peek_runtime_status(max_age=1.0)
-                if cached is not None:
-                    return cached
             return client.status_within(timeout)
         except Exception as e:  # noqa: BLE001 - unavailable means omit
-            log_exception("deliveryObservationFail", e)
+            due, label = runtime_attestation.log_due("o2_unavailable" if fresh else "o1_unavailable", e)
+            if due:
+                log("deliveryObservationFail", f"phase={'o2' if fresh else 'o1'} type={label}")
             return None
 
     def _add_delivery_state(self, body_obj: dict, session: str, qs: dict) -> str:
@@ -3021,26 +3021,29 @@ class Handler(BaseHTTPRequestHandler):
     def _delivery_bracket(self, budget, body_obj: dict, agent_id: str, *, since, until, generation,
                           bootstrap: bool, carried: tuple[str, str]):
         from lib import launch_receipts, runtime_attestation, server_identity, settings_store
-        external = getattr(self.ctx, "runtime_client", None) is not None
+        client = getattr(self.ctx, "runtime_client", None)
+        external = client is not None
         first = first_attestation = None
         if external:
-            cap = budget.cap(runtime_attestation.O1_CAP_S)
-            if cap is None:
-                runtime_attestation.note("deadline_exhausted")
-                return None
-            observed = self._delivery_observation(fresh=False, timeout=cap)
+            observed = self._first_observation(budget, client)
             budget.phase("o1")
             if observed is None:
-                runtime_attestation.note("o1_unavailable")
                 return None
-            first = launch_receipts.runtime_identity(observed)
-            if first is None:
-                return None                    # O1 unusable: omit everything
-            first_attestation = runtime_attestation.attestation_key(observed)
-            # B: ONE fresh, bounded manager read for this bracket, outside any
-            # transaction and before the read snapshot; never cached or reused.
-            admitted = runtime_attestation.admit(observed, in_transaction=db.conn().in_transaction,
-                                                 disconnected=self._client_gone(), budget=budget)
+            observed, reserved = observed
+            try:
+                first = launch_receipts.runtime_identity(observed)
+                if first is None:
+                    return None                # O1 unusable: omit everything
+                first_attestation = runtime_attestation.attestation_key(observed)
+                # B: ONE fresh, bounded manager read for this bracket, outside any
+                # transaction and before the read snapshot; never cached or reused.
+                taken, reserved = reserved, False      # admit() gives a reserved permit back itself
+                admitted = runtime_attestation.admit(observed, in_transaction=db.conn().in_transaction,
+                                                     disconnected=self._client_gone(), budget=budget,
+                                                     reserved=taken)
+            finally:
+                if reserved:
+                    runtime_attestation.release_reservation()
             budget.phase("b")
             if not admitted:
                 return None
@@ -3114,6 +3117,43 @@ class Handler(BaseHTTPRequestHandler):
         if bootstrap and not page["expired"]:
             top.update(delivery_bootstrap=True, delivery_until=page["until"])
         return rows, top
+
+    def _first_observation(self, budget, client):
+        """O1 (ROOT 6f243300): the shared status window when it holds a success at most
+        1 s old (no RPC; B stays fresh per bracket). On a miss the bracket first takes
+        its probe permit (the same 1-in-flight / 2-per-second gate as B: no O1 RPC while
+        it is exhausted), then makes ONE RPC of at most 0.5 s and offers the result to
+        the shared window without waiting, never over a newer entry. A busy window
+        (another caller's shared RPC) is an omission, not a wait or a second RPC.
+        Returns (observation, permit_reserved) or None (omitted and counted)."""
+        from lib import runtime_attestation
+        shared = backends._RUNTIME_CLIENT is client
+        state, cached, generation = (backends.peek_runtime_status(max_age=1.0) if shared
+                                     else ("miss", None, 0))
+        if state == "busy":
+            runtime_attestation.note("status_contended")
+            return None
+        if state == "hit":
+            return cached, False
+        if not runtime_attestation.reserve(in_transaction=db.conn().in_transaction,
+                                           disconnected=self._client_gone()):
+            return None
+        cap = budget.cap(runtime_attestation.O1_CAP_S)
+        observed = None
+        if cap is None:
+            runtime_attestation.note("deadline_exhausted")
+        else:
+            fetched_at = backends._clock()
+            observed = self._delivery_observation(fresh=False, timeout=cap)
+            if observed is None:
+                runtime_attestation.note("o1_unavailable")
+            elif shared:
+                backends.offer_runtime_status(client, observed, fetched_at=fetched_at,
+                                              generation=generation)
+        if observed is None:
+            runtime_attestation.release_reservation()
+            return None
+        return observed, True
 
     def _client_gone(self) -> bool:
         """Best-effort: the client has already closed its connection (a

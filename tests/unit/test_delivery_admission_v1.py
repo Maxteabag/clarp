@@ -310,7 +310,11 @@ class _Runtime:
         from lib.runtime_bridge import RuntimeUnavailable
         self.caps.append(total_s)
         stall = self.stalls.pop(0) if self.stalls else 0.0
-        if isinstance(stall, tuple):
+        if callable(stall):
+            stall(self)                            # acts DURING this RPC
+        elif isinstance(stall, tuple) and stall[0] == "fail":
+            raise stall[1]                         # an outage that answers at once
+        elif isinstance(stall, tuple):
             self.clock.t += stall[1]
         elif stall > total_s:
             self.clock.t += total_s
@@ -367,6 +371,7 @@ def test_an_o1_miss_that_stalls_times_out_at_its_cap_and_omits_before_b(fake):
     assert runtime.caps == [0.5] and fake.probe.calls == 0
     assert ra.status_block()["omitted"]["o1_unavailable"] == 1
     assert ra.status_block()["budget"]["last_ms"]["total"] == 500
+    assert ra.status_block()["gate"]["inflight_now"] == 0, "the permit reserved for O1 is given back"
 
 
 def test_an_o2_that_stalls_omits_and_no_partial_field_or_cursor_escapes(fake, monkeypatch):
@@ -419,20 +424,122 @@ def test_sql_past_the_deadline_is_interrupted_and_the_snapshot_still_closes(fake
     assert db.conn().execute(heavy).fetchone()[0] == 200000, "the interrupt handler is cleared"
 
 
-def test_o1_reads_a_fresh_shared_status_without_waiting_and_o2_is_always_fresh(fake, monkeypatch):
+def _shared(monkeypatch, fake, runtime, *, at=None, observation=None):
     from lib import backends
-    runtime = _Runtime(fake.clock)
     monkeypatch.setattr(backends, "_RUNTIME_CLIENT", runtime)
     monkeypatch.setattr(backends, "_clock", fake.clock)
-    monkeypatch.setattr(backends, "_STATUS_CACHE", (runtime, fake.clock.t, _obs(), None))
-    assert _bracket(runtime) is not None and runtime.caps == [0.5], "O1 from the cache, O2 fresh"
-    monkeypatch.setattr(backends, "_STATUS_CACHE", (runtime, fake.clock.t - 1.0, _obs(), None))
+    entry = (None, 0.0, None, None) if at is None else (runtime, at, observation or _obs(), None)
+    monkeypatch.setattr(backends, "_STATUS_CACHE", entry)
+    return backends
+
+
+def test_o1_reads_a_fresh_shared_status_and_a_miss_refreshes_it_while_o2_stays_fresh(fake, monkeypatch):
+    runtime = _Runtime(fake.clock)
+    backends = _shared(monkeypatch, fake, runtime, at=fake.clock.t)
+    assert _bracket(runtime) is not None and runtime.caps == [0.5], "O1 from the window, O2 fresh"
+    assert fake.probe.calls == 1, "a hit still takes its own fresh B"
     fake.clock.t += 1
-    assert _bracket(runtime) is not None and runtime.caps == [0.5, 0.5, 0.5], "a 1 s old status is a miss"
-    with backends._STATUS_LOCK:                   # another caller's shared RPC in flight: never waited for
-        monkeypatch.setattr(backends, "_STATUS_CACHE", (runtime, fake.clock.t, _obs(), None))
-        fake.clock.t += 1
-        assert _bracket(runtime) is not None and runtime.caps == [0.5] * 5
+    assert _bracket(runtime) is not None and runtime.caps == [0.5] * 3, "a 1 s old status is a miss"
+    assert backends._STATUS_CACHE[0] is runtime and backends._STATUS_CACHE[1] == fake.clock.t, \
+        "the capped O1 refreshed the window, stamped with when its RPC started"
+    fake.clock.t += 1
+    with backends._STATUS_LOCK:                   # another caller's shared RPC in flight
+        assert _bracket(runtime) is None
+    assert runtime.caps == [0.5] * 3 and ra.status_block()["omitted"]["status_contended"] == 1, \
+        "a busy window is an omission: no wait, no second RPC"
+
+
+def test_an_outage_under_high_request_volume_starts_a_bounded_number_of_status_rpcs(fake, monkeypatch):
+    from lib.runtime_bridge import RuntimeUnavailable
+    down = _Runtime(fake.clock, *[("fail", RuntimeUnavailable("refused"))] * 200)
+    assert all(_bracket(down) is None for _ in range(50))
+    assert len(down.caps) == 2, "O1 RPCs are admitted by the probe gate: the burst, then none"
+    fake.clock.t += 1
+    assert all(_bracket(down) is None for _ in range(50)) and len(down.caps) == 4
+    assert fake.probe.calls == 0 and ra.status_block()["omitted"]["o1_unavailable"] == 4
+    up = _Runtime(fake.clock)
+    _shared(monkeypatch, fake, up)
+    fake.clock.t += 1
+    results = [_bracket(up) for _ in range(50)]
+    assert len(up.caps) == 3, "1 O1 (it refreshes the window; the rest hit) + 2 O2, one per admitted B"
+    assert sum(r is not None for r in results) == 2 and fake.probe.calls == 2
+
+
+def test_no_concurrent_o1_rpc_while_one_is_in_flight(fake):
+    inner = []
+    runtime = _Runtime(fake.clock, lambda rt: inner.append(_bracket(rt)))
+    assert _bracket(runtime) is not None
+    assert inner == [None] and runtime.caps == [0.5, 0.5], "the in-flight O1 holds the permit: no second RPC"
+    assert ra.status_block()["omitted"]["gate_inflight"] == 1
+
+
+def test_a_refresh_never_overwrites_a_newer_or_invalidated_window(fake, monkeypatch):
+    runtime = _Runtime(fake.clock)
+    backends = _shared(monkeypatch, fake, runtime)
+    newer = dict(_obs(), instance="newer")
+
+    def another_caller_stores_newer(rt):
+        backends._STATUS_CACHE = (rt, fake.clock.t + 0.1, newer, None)
+    runtime.stalls = [another_caller_stores_newer]
+    assert _bracket(runtime) is not None, "the bracket itself is unaffected (O2 is its own fresh RPC)"
+    assert backends._STATUS_CACHE[2] is newer, "the newer entry stays"
+    fake.clock.t += 5
+    runtime.stalls = [lambda rt: backends.invalidate_runtime_status()]
+    _bracket(runtime)
+    assert backends._STATUS_CACHE == (None, 0.0, None, None), "an invalidation during the RPC wins"
+
+
+def test_a_refreshed_window_keeps_the_default_path_for_every_other_caller(fake, monkeypatch):
+    class Both(_Runtime):
+        def status(self, **kwargs):
+            self.plain = getattr(self, "plain", []) + [kwargs]
+            return dict(self.observation, instance="plain")
+    runtime = Both(fake.clock)
+    backends = _shared(monkeypatch, fake, runtime)
+    assert _bracket(runtime) is not None
+    assert backends.runtime_status(max_age=1.0)["instance"] == "i1" and not hasattr(runtime, "plain"), \
+        "another caller is served the refreshed window"
+    fake.clock.t += 2
+    assert backends.runtime_status(max_age=1.0)["instance"] == "plain" and runtime.plain == [{}], \
+        "and refreshes it itself through status() with the client's default"
+
+
+def test_an_exhausted_probe_gate_starts_no_o1_rpc(fake):
+    runtime = _Runtime(fake.clock)
+    assert _bracket(runtime) is not None and _bracket(runtime) is not None
+    assert _bracket(runtime) is None
+    assert runtime.caps == [0.5] * 4, "the third bracket made no O1 RPC"
+    assert ra.status_block()["omitted"]["gate_rate"] == 1
+
+
+def test_observation_failures_are_counted_every_time_and_logged_coalesced(fake, monkeypatch):
+    from lib.runtime_bridge import RuntimeUnavailable
+    server_module = _server()
+    lines = []
+    monkeypatch.setattr(server_module, "log", lambda event, detail="", **kw: lines.append((event, detail)))
+    secret = RuntimeUnavailable("token=s3cr3t")
+    down = _Runtime(fake.clock, *[("fail", secret)] * 50)
+    for _ in range(5):
+        fake.clock.t += 0.5                       # the gate refills one permit
+        assert _bracket(down) is None
+    assert ra.status_block()["omitted"]["o1_unavailable"] == 5
+    assert lines == [("deliveryObservationFail", "phase=o1 type=RuntimeUnavailable")]
+    down.stalls = [("fail", TimeoutError())] + down.stalls
+    fake.clock.t += 0.5
+    _bracket(down)
+    fake.clock.t += 10
+    _bracket(down)
+    assert ra.status_block()["omitted"]["o1_unavailable"] == 7
+    assert [d for _, d in lines] == ["phase=o1 type=RuntimeUnavailable", "phase=o1 type=TimeoutError",
+                                     "phase=o1 type=RuntimeUnavailable"]
+    o2_down = _Runtime(fake.clock, 0.0, ("fail", secret))
+    fake.clock.t += 1
+    _bracket(o2_down)
+    assert lines[-1] == ("deliveryObservationFail", "phase=o2 type=RuntimeUnavailable")
+    assert not any("s3cr3t" in d for _, d in lines)
+    for i in range(20):
+        ra.log_due("o1_unavailable", type(f"Err{i}", (Exception,), {})())
+    assert len(ra._HEALTH["fail_log_at"]["o1_unavailable"]) <= ra.TYPE_NAMES_MAX + 1
 
 
 class _Socket:
@@ -529,7 +636,7 @@ def test_the_status_block_is_closed_bounded_and_side_effect_free(fake, monkeypat
                           "reconcile"}
     assert block["gate"]["inflight_limit"] == 1 and block["gate"]["rate_per_s"] == 2
     assert block["gate"]["burst"] == 2 and block["gate"]["probes_per_log_response"] == 1
-    assert list(block["omitted"]) == list(ra.OMIT_REASONS) and len(ra.OMIT_REASONS) == 22
+    assert list(block["omitted"]) == list(ra.OMIT_REASONS) and len(ra.OMIT_REASONS) == 23
     names = block["unexpected_by_type"]
     assert len([n for n in names if n != "_other"]) == 16 and names["_other"] == 5
     assert set(block["reconcile"]["findings"]) == set(lr.FINDING_KINDS)
