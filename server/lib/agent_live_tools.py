@@ -957,8 +957,7 @@ class CallTools:
             done = {**receipt, "status": result, "operation_id": current, "at": self._at(reply.get("due")),
                     "regi_status": reply.get("status"),
                     **({"superseded": reply["superseded"]} if reply.get("superseded") else {})}
-            done["note"] = ("call back scheduled at " + done["at"] + " (never 'rang')" if result == "scheduled"
-                            else "an earlier call back is already pending at " + done["at"])
+            done["note"] = self._schedule_note(result, reply.get("status"), done["at"])
             with self.lock:
                 self.taken.append(done)
             log("agentLiveCallbackScheduled", f"call={self.call_id} op={current} result={result} "
@@ -967,14 +966,27 @@ class CallTools:
         return {**receipt, "status": "refused", "error": reply.get("error") or reply.get("reason") or f"HTTP {code}",
                 "note": "regi did not schedule it"}
 
+    @staticmethod
+    def _schedule_note(result: str, regi_status: Any, at: str) -> str:
+        """What to tell the user, from regi's CURRENT status of the op (never more than it says)."""
+        if regi_status in ("fyrt", "fyrer"):
+            return "that call back has already gone out (at " + at + ")"
+        if regi_status == "fyrt_usikker":
+            return "that call back may already have gone out; regi is not sure, and it is never rung again"
+        if regi_status == "avlyst":
+            return "that call back was cancelled earlier; it will not ring"
+        if result == "scheduled":
+            return "call back scheduled at " + at + " (never 'rang')"
+        return "an earlier call back is already pending at " + at
+
     def _cancel_callback(self) -> dict:
         receipt = {"tool": "cancel_callback"}
         if self.cfg["callback"]["kind"] != "http":
             return {**receipt, "status": "refused", "error": "call backs are off"}
         slot = self._callback_slot()
-        known = self.ledger.get(slot) or {}
-        body = {"action": "cancel", "operation_id": known.get("operation_id") or
-                "cb-cancel-" + _digest(self.host_id, self.principal, self.agent_session, self.call_id),
+        # A cancel is its own operation (an op id is bound to one action); regi cancels this caller's pending one.
+        body = {"action": "cancel",
+                "operation_id": "cbx-" + _digest(self.host_id, self.principal, self.agent_session, self.call_id),
                 "recipient_principal": self.principal, "agent_session": self.agent_session,
                 "call_id": self.call_id, "host_id": self.host_id}
         answer = self._post_twice_at_most(body)

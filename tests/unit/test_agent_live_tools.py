@@ -564,7 +564,7 @@ class Tilbakering(FakeEffects):
 
     def __init__(self, calls=(), script=()):
         super().__init__(calls)
-        self.script, self.pending = list(script), {}
+        self.script, self.pending, self.ops = list(script), {}, {}
 
     def post(self, url, body, timeout=30):
         self.posts.append((url, dict(body)))
@@ -575,6 +575,9 @@ class Tilbakering(FakeEffects):
             return answer
         key = (body["recipient_principal"], body["agent_session"])
         current = self.pending.get(key)
+        seen = self.ops.setdefault(body["operation_id"], body["action"])
+        if seen != body["action"]:                                       # A1.4: an op id is bound to one action
+            raise tools.Refused("HTTP 409", 409, {"ok": False, "result": "refused", "error": "operation_id_mismatch"})
         if body["action"] == "cancel":
             if current:
                 del self.pending[key]
@@ -678,6 +681,17 @@ def test_ikke_ring_likevel_cancels_only_this_callers_pending_call_back(make):
     _user_says(call, clock, "Ikke ring likevel.")
     assert _receipts(said)[0]["status"] == "cancelled" and effects.pending == {}
 
+
+
+@pytest.mark.parametrize("regi_status, words", [("venter", "already pending"), ("fyrt", "already gone out"),
+                                                ("fyrt_usikker", "never rung again"), ("avlyst", "cancelled earlier")])
+def test_an_already_scheduled_answer_is_told_by_regis_current_status(make, regi_status, words):
+    effects = Tilbakering([CALL_BACK], [{"ok": True, "result": "already_scheduled", "operation_id": "cb-x",
+                                         "due": 1_800_000_300, "status": regi_status, "fired_at": None}])
+    call, said, clock = make(effects, **CB)
+    _user_says(call, clock, "Ring meg om fem.")
+    receipt = _receipts(said)[0]
+    assert receipt["regi_status"] == regi_status and words in receipt["note"]
 
 @pytest.mark.parametrize("script, posts, status", [
     ([tools.Unconfirmed("timeout"), None], 2, "scheduled"),         # one identical re-POST reconciles it
