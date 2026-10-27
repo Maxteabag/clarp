@@ -470,3 +470,25 @@ def test_snapshot_never_reports_a_busy_agent_as_started_in_1970(tmp_path, monkey
     row = next(r for r in snap["agents"] if r["persona"] == "Felix")
     assert row["busy"] or row["state"] in {"thinking", "tool", "compacting", "background"}
     assert row["turn_started_at"] > 1_700_000_000_000
+
+
+def test_snapshot_settings_projection_keeps_defaults_and_reads_external_updates():
+    import sqlite3
+    from lib import settings_store, tool_explanation_settings
+    first = build_agent_snapshot(None)
+    assert first["model_avatars"] is False
+    assert first["tool_explanations"] == {"enabled": True, "detail_level": 2}
+    # An independent writer, as used by another Host process; no in-process cache refresh.
+    database = db.conn().execute("PRAGMA database_list").fetchone()["file"]
+    with sqlite3.connect(database) as writer:
+        for key, value in (("avatars.model_variants", "true"),
+                           ("tool_explanations.enabled", "false"),
+                           ("tool_explanations.detail_level", "99")):
+            writer.execute("INSERT INTO settings(key,value,updated_at) VALUES(?,?,1) "
+                           "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+    second = build_agent_snapshot(None)
+    assert second["model_avatars"] is True
+    assert second["tool_explanations"] == {"enabled": False, "detail_level": 4}
+    settings_store.set_text("tool_explanations.detail_level", "invalid")
+    third = build_agent_snapshot(None)
+    assert third["tool_explanations"] == {"enabled": False, "detail_level": tool_explanation_settings.DEFAULT_LEVEL}

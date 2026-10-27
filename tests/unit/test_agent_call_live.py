@@ -410,7 +410,6 @@ def test_binding_persistence_failure_cannot_advertise_success_or_silent_normal(o
     import sqlite3
     from lib import settings_store
     from lib.snapshot import build_agent_snapshot
-    live.user_call_profiles(strict=False)
     def fail(*args, **kwargs):
         raise sqlite3.OperationalError("simulated persistence failure")
     monkeypatch.setattr(settings_store, "set_text", fail)
