@@ -127,6 +127,16 @@ class Clock:
         return self.now
 
 
+REAL_HOST_NOTE = tools.host_note
+
+
+@pytest.fixture(autouse=True)
+def full_receipts(monkeypatch):
+    """Behaviour tests read every receipt field back from the note; the size tests use REAL_HOST_NOTE."""
+    monkeypatch.setattr(tools, "host_note", lambda receipts: "Host note, receipts (not that it is done): "
+                        + json.dumps(receipts, ensure_ascii=False) + " end")
+
+
 @pytest.fixture(autouse=True)
 def ledger(tmp_path):
     return tools.Ledger(tmp_path / "tool-ledger.json")
@@ -756,6 +766,66 @@ def test_a_director_owned_profile_never_prompts_members_and_never_schedules_a_ri
         assert len(effects.posts) == 1 and effects.to(RING) == [] and effects.prompts == []
         assert {"schedule_callback", "cancel_callback"}.isdisjoint(t["name"] for t in effects.bodies[0]["tools"])
 
+
+
+# ---- the 20:06 real-call findings: the note's size and the promised call back ----------------
+
+def test_the_host_note_always_fits_the_providers_500_token_append_limit():
+    long = "Gå gjennom backend-arbeidet og identifiser de viktigste konkrete oppgavene på to-do-listen. " * 3
+    receipts = [{"tool": "delegate_to_agent", "agent": n, "status": "forwarded", "request": long[:200],
+                 "sesjon": 1, "intent": "ab" * 32, "intent_status": "sendt", "base_task": "already_started",
+                 "additions_used": 0, "additions_max": 3, "sent": True, "note": long}
+                for n in ("Jonas", "Noel", "Eira", "Mira")]
+    receipts += [{"tool": "get_agent_status", "agent": "Jonas", "status": "ok",
+                  "untrusted_data": {"state": "working", "current_step": long, "last_said": long * 3}}] * 8
+    note = REAL_HOST_NOTE(receipts)
+    assert len(note) <= tools.NOTE_CHARS
+    assert note.count('"forwarded"') == 4 and "request" not in note and "intent" not in note
+
+
+def test_the_host_note_of_the_real_call_is_small_and_complete(make, monkeypatch):
+    monkeypatch.setattr(tools, "host_note", REAL_HOST_NOTE)
+    texts = {"jonas": "Gå gjennom backend-arbeidet og identifiser de viktigste konkrete oppgavene på to-do-listen "
+                      "akkurat nå. Prioriter dem og meld kort tilbake hva som bør tas først."}
+    effects = Regi([("delegate_to_agent", {"agent": "drammen-jonas", "request": texts["jonas"]}),
+                    ("delegate_to_agent", {"agent": "drammen-noel", "request": texts["jonas"]})],
+                   [_v1("forwarded", True, intent_status="sendt", base_task="started_now"),
+                    _v1("forwarded", True, intent_status="sendt")])
+    call, said, clock = make(effects, **REGI)
+    _user_says(call, clock, "Kan teamet gå gjennom to-do-listene sine?")
+    assert len(said[-1][1]) <= tools.NOTE_CHARS and said[-1][1].count('"forwarded"') == 2
+
+
+AUTO = {"callback": {"kind": "http", "url": RING}, "callback_on_delegation": {"minutes": 5}}
+
+
+def test_callback_on_delegation_books_the_promised_call_back_once_after_work_was_handed_on(make):
+    effects = Tilbakering([ASK, ("delegate_to_agent", {"agent": "drammen-noel", "request": "Lag skjermbildet"})])
+    call, said, clock = make(effects, **AUTO)
+    _user_says(call, clock, "Kan teamet ta sak 182?")             # nobody said "ring meg"
+    callbacks = effects.to(RING)
+    assert len(callbacks) == 1 and callbacks[0]["action"] == "schedule" and callbacks[0]["minutes"] == 5
+    assert [r["status"] for r in _receipts(said)][-1] == "scheduled"
+    effects.calls = [("delegate_to_agent", {"agent": "drammen-jonas", "request": "Og eksport"})]
+    _user_says(call, clock, "Og eksport.")
+    assert len(effects.to(RING)) == 1                              # once per call
+
+
+def test_callback_on_delegation_does_nothing_without_handed_on_work_or_when_already_asked(make):
+    effects = Tilbakering([("get_agent_status", {"agent": "drammen-jonas"})])
+    call, said, clock = make(effects, **AUTO)
+    _user_says(call, clock, "Hva gjør Jonas?")
+    assert effects.to(RING) == []
+    both = Tilbakering([ASK, ("schedule_callback", {"minutes": 7, "reason": "status"})])
+    call, said, clock = make(both, call_id="call-2", **AUTO)
+    _user_says(call, clock, "Ta sak 182 og ring meg om sju.")
+    assert [b["minutes"] for b in both.to(RING)] == [7]            # the user's own ask wins; no second booking
+
+
+def test_callback_on_delegation_needs_a_regi_call_back():
+    assert _config(callback_on_delegation={"minutes": 5}) is None
+    cfg = _config(callback={"kind": "http", "url": RING}, callback_on_delegation=True)
+    assert cfg["callback_on_delegation"] == {"minutes": 5}
 
 # ---- the real POST ---------------------------------------------------------------------
 
