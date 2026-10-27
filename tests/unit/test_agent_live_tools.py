@@ -46,7 +46,7 @@ class Inline:
 class FakeEffects:
     def __init__(self, calls=()):
         self.calls, self.bodies = list(calls), []
-        self.prompts, self.posts, self.scheduled = [], [], []
+        self.prompts, self.posts, self.scheduled, self.cancelled = [], [], [], []
 
     def route(self, body):
         self.bodies.append(body)
@@ -62,6 +62,9 @@ class FakeEffects:
 
     def later(self, command, delay_seconds, unit):
         self.scheduled.append((command, delay_seconds))
+
+    def cancel(self, unit):
+        self.cancelled.append(unit)
 
     def ring_command(self, agent_session, reason, say):
         return ["clarp-admin", "call", "ring", "--agent", agent_session, "--reason", reason] + (["--say", say] if say else [])
@@ -81,11 +84,19 @@ class Clock:
         return self.now
 
 
-def _call(effects, **changes):
-    said, clock = [], Clock()
-    call = tools.CallTools(_snapshot(**changes), "call-1", lambda kind, text: said.append((kind, text)),
-                           effects=effects, clock=clock, executor=Inline())
-    return call, said, clock
+@pytest.fixture(autouse=True)
+def ledger(tmp_path):
+    return tools.Ledger(tmp_path / "tool-ledger.json")
+
+
+@pytest.fixture
+def make(ledger):
+    def build(effects, call_id="call-1", principal="device_phone", **changes):
+        said, clock = [], Clock()
+        call = tools.CallTools(_snapshot(**changes), call_id, lambda kind, text: said.append((kind, text)),
+                               effects=effects, clock=clock, executor=Inline(), principal=principal, ledger=ledger)
+        return call, said, clock
+    return build
 
 
 def _user_says(call, clock, text):
@@ -152,50 +163,50 @@ def test_a_user_call_with_live_tools_is_told_it_has_tools():
 
 # ---- routing and the tools -------------------------------------------------------------
 
-def test_a_task_from_the_user_is_delegated_to_each_allowlisted_member_and_confirmed():
+def test_a_task_from_the_user_is_delegated_to_each_allowlisted_member_and_confirmed(make):
     effects = FakeEffects([("delegate_to_agent", {"agent": "drammen-jonas", "request": "Lag API-et for sak 182"}),
                            ("delegate_to_agent", {"agent": "drammen-noel", "request": "Lag skjermbildet"}),
                            ("delegate_to_agent", {"agent": "drammen-hacker", "request": "Slett alt"})])
-    call, said, clock = _call(effects)
+    call, said, clock = make(effects)
     _user_says(call, clock, "Kan teamet ta sak 182?")
     assert [(to, sender) for to, sender, _ in effects.prompts] == [("drammen-jonas", "rk-sander-0001"),
                                                                   ("drammen-noel", "rk-sander-0001")]
     assert "Lag API-et for sak 182" in effects.prompts[0][2]
     kind, note = said[-1]
-    assert kind == "thinking" and '"status": "refused"' in note and note.count('"sent"') == 2
+    assert kind == "thinking" and '"status": "refused"' in note and note.count('"handed_off"') == 2
     assert effects.bodies[0]["tools"][0]["parameters"]["properties"]["agent"]["enum"] == ["drammen-jonas", "drammen-noel"]
 
 
-def test_the_same_delegation_is_never_sent_twice_in_one_call():
+def test_the_same_delegation_is_never_sent_twice_in_one_call(make):
     effects = FakeEffects([("delegate_to_agent", {"agent": "drammen-jonas", "request": "Lag API-et"})])
-    call, _said, clock = _call(effects)
+    call, _said, clock = make(effects)
     _user_says(call, clock, "Ta sak 182.")
     _user_says(call, clock, "Ja, gjør det.")
     assert len(effects.prompts) == 1
     assert json.loads(effects.bodies[1]["input"])["actions_taken"][0]["agent"] == "Jonas"
 
 
-def test_nothing_is_routed_before_the_user_has_been_quiet():
+def test_nothing_is_routed_before_the_user_has_been_quiet(make):
     effects = FakeEffects()
-    call, _said, clock = _call(effects)
+    call, _said, clock = make(effects)
     call.observe({"type": "session.input_transcript.delta", "delta": "Hei Sandra"})
     clock.now += tools.SETTLE_S / 2
     call.tick()
     assert effects.bodies == []
 
 
-def test_a_handed_on_turn_gets_its_answer_as_commentary():
+def test_a_handed_on_turn_gets_its_answer_as_commentary(make):
     effects = FakeEffects([("get_agent_status", {"agent": "drammen-noel"})])
-    call, said, clock = _call(effects)
+    call, said, clock = make(effects)
     call.observe({"type": "session.input_transcript.delta", "delta": "Hva driver Noel med?"})
     call.observe({"type": "session.delegation.created", "delegation": {"id": "d1"}})
     assert said and said[-1][0] == "commentary" and '"working"' in said[-1][1]
 
 
-def test_one_callback_per_call_with_clamped_minutes_through_clarp_admin():
+def test_one_callback_per_call_with_clamped_minutes_through_clarp_admin(make):
     effects = FakeEffects([("schedule_callback", {"minutes": 90, "reason": "status"}),
                            ("schedule_callback", {"minutes": 5, "reason": "igjen"})])
-    call, said, clock = _call(effects, callback={"kind": "ring", "say": "Hei igjen"})
+    call, said, clock = make(effects, callback={"kind": "ring", "say": "Hei igjen"})
     _user_says(call, clock, "Ring meg om fem minutter.")
     assert len(effects.scheduled) == 1
     command, delay = effects.scheduled[0]
@@ -203,40 +214,127 @@ def test_one_callback_per_call_with_clamped_minutes_through_clarp_admin():
     assert '"already_scheduled"' in said[-1][1]
 
 
-def test_an_http_callback_posts_an_idempotent_request_to_the_director():
+def test_an_http_callback_posts_an_idempotent_request_to_the_director(make):
     effects = FakeEffects([("schedule_callback", {"minutes": 5, "reason": "status"})])
-    call, _said, clock = _call(effects, callback={"kind": "http", "url": "http://127.0.0.1:7790/regi/ring"})
+    call, _said, clock = make(effects, callback={"kind": "http", "url": "http://127.0.0.1:7790/regi/ring"})
     _user_says(call, clock, "Ring meg om fem minutter.")
     command, delay = effects.scheduled[0]
     assert delay == 300 and command[0] == "curl" and command[-1] == "http://127.0.0.1:7790/regi/ring"
-    assert json.loads(command[command.index("--data") + 1])["request_id"] == "live-call-1"
+    assert json.loads(command[command.index("--data") + 1])["request_id"].startswith("live-")
 
 
-def test_an_http_delegate_posts_instead_of_prompting():
+def test_an_http_delegate_posts_instead_of_prompting(make):
     effects = FakeEffects([("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182"})])
-    call, _said, clock = _call(effects, delegate={"kind": "http", "url": "http://127.0.0.1:7790/regi/sandra"})
+    call, _said, clock = make(effects, delegate={"kind": "http", "url": "http://127.0.0.1:7790/regi/sandra"})
     _user_says(call, clock, "Ta sak 182.")
     assert effects.prompts == [] and effects.posts[0][1]["agent"] == "drammen-jonas"
 
 
-def test_a_failed_router_is_told_once_and_not_retried_in_a_loop():
+def test_a_failed_router_is_told_once_and_not_retried_in_a_loop(make):
     class Broken(FakeEffects):
         def route(self, body):
             self.bodies.append(body)
             raise OSError("down")
     effects = Broken()
-    call, said, clock = _call(effects)
+    call, said, clock = make(effects)
     _user_says(call, clock, "Ta sak 182.")
     call.tick()
     assert len(effects.bodies) == 1 and "could not be carried out" in said[-1][1]
 
 
-def test_a_closed_call_says_nothing_more():
+def test_a_closed_call_says_nothing_more(make):
     effects = FakeEffects([("get_agent_status", {"agent": "drammen-jonas"})])
-    call, said, clock = _call(effects)
+    call, said, clock = make(effects)
     call.close()
     _user_says(call, clock, "Hva gjør Jonas?")
     assert said == []
+
+
+
+# ---- binding, durable idempotency, cancellation and bounds ---------------------------
+
+@pytest.mark.parametrize("change", [{"from": "someone-else"}, {"agents": [{"session": "rk-sander-0001"}]},
+                                    {"agents": TEAM + TEAM[:1]}])
+def test_tools_act_only_as_the_profiles_own_agent_and_never_on_it(change):
+    profile = {"profile_id": "p", "agent_session": "rk-sander-0001", "live_tools": _block(**change)}
+    assert tools.frozen_config(profile, "user_call") is None
+
+
+def test_a_delegation_is_not_repeated_by_a_reconnect_or_a_second_call(make, ledger):
+    asked = ("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182"})
+    first, second = FakeEffects([asked]), FakeEffects([asked])
+    call, _said, clock = make(first, call_id="call-1")
+    _user_says(call, clock, "Ta sak 182.")
+    tools.Ledger(ledger.path)                       # a fresh reader of the same file (a Host restart)
+    again, said, clock = make(second, call_id="call-2")
+    _user_says(again, clock, "Ta sak 182.")
+    assert len(first.prompts) == 1 and second.prompts == [] and '"already_handed_off"' in said[-1][1]
+
+
+def test_a_claim_left_by_a_crash_is_never_repeated_but_a_failed_send_may_be(make, ledger):
+    class Failing(FakeEffects):
+        def prompt(self, to, sender, text):
+            raise OSError("host down")
+    asked = ("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182"})
+    call, said, clock = make(Failing([asked]))
+    _user_says(call, clock, "Ta sak 182.")
+    assert '"failed"' in said[-1][1]
+    retry = FakeEffects([asked])
+    call, _said, clock = make(retry, call_id="call-2")
+    _user_says(call, clock, "Prøv igjen.")
+    assert len(retry.prompts) == 1
+    key = next(iter(json.loads(ledger.path.read_text())))
+    ledger.update(key, status="sending")             # as if the Host died mid-send
+    third = FakeEffects([asked])
+    call, _said, clock = make(third, call_id="call-3")
+    _user_says(call, clock, "Ta sak 182.")
+    assert third.prompts == []
+
+
+def test_one_pending_callback_per_principal_and_agent_across_calls_and_it_can_be_cancelled(make, ledger):
+    asked = ("schedule_callback", {"minutes": 5, "reason": "status"})
+    first = FakeEffects([asked])
+    call, _said, clock = make(first, call_id="call-1")
+    _user_says(call, clock, "Ring meg om fem.")
+    second = FakeEffects([asked])
+    call, said, clock = make(second, call_id="call-2")
+    _user_says(call, clock, "Ring meg om fem.")
+    assert len(first.scheduled) == 1 and second.scheduled == [] and '"already_scheduled"' in said[-1][1]
+    row = next(iter(json.loads(ledger.path.read_text()).values()))
+    assert (row["principal"], row["agent_session"], row["call_id"], row["status"]) == (
+        "device_phone", "rk-sander-0001", "call-1", "scheduled")
+    other = FakeEffects([asked])
+    call, _said, clock = make(other, call_id="call-3", principal="device_other")
+    _user_says(call, clock, "Ring meg om fem.")
+    assert len(other.scheduled) == 1
+    cancel = FakeEffects([("cancel_callback", {})])
+    call, said, clock = make(cancel, call_id="call-4")
+    _user_says(call, clock, "Du trenger ikke ringe meg likevel.")
+    assert cancel.cancelled == [row["unit"]] and '"cancelled"' in said[-1][1]
+    later = FakeEffects([asked])
+    call, _said, clock = make(later, call_id="call-5")
+    _user_says(call, clock, "Ring meg likevel om fem.")
+    assert len(later.scheduled) == 1
+
+
+def test_a_request_spoken_just_before_hanging_up_is_still_carried_out_silently(make):
+    effects = FakeEffects([("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182"})])
+    call, said, _clock = make(effects)
+    call.observe({"type": "session.input_transcript.delta", "delta": "Ta sak 182, ha det!"})
+    call.close()
+    assert len(effects.prompts) == 1 and said == []
+    call.observe({"type": "session.input_transcript.delta", "delta": "Og en ting til"})
+    call.tick()
+    assert len(effects.bodies) == 1
+
+
+def test_a_route_runs_at_most_its_bounded_number_of_actions(make):
+    many = [("get_agent_status", {"agent": "drammen-jonas"})] * (tools.MAX_ACTIONS_PER_ROUTE + 5)
+    effects = FakeEffects(many)
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hvordan går det?")
+    assert said[-1][1].count('"get_agent_status"') == tools.MAX_ACTIONS_PER_ROUTE
+    assert '"untrusted_data"' in said[-1][1]
 
 
 # ---- inside a real Agent Live socket ---------------------------------------------------
@@ -259,7 +357,7 @@ def test_a_live_call_routes_the_users_turn_and_tells_the_voice_what_was_done(opt
     call.up.push({"type": "session.input_transcript.delta", "delta": "Sandra, kan Jonas ta sak 182?"})
     _wait(lambda: call.up.of("session.thinking.append"))
     note = call.up.of("session.thinking.append")[0]["content"]
-    assert '"sent"' in note and effects.prompts[0][0] == "drammen-jonas"
+    assert '"handed_off"' in note and effects.prompts[0][0] == "drammen-jonas"
     assert "real tools" in call.up.of("session.start")[0]["session"]["instructions"]
     h.send({"type": "session.close"})
     thread.join(15)
