@@ -573,9 +573,10 @@ CB = {"callback": {"kind": "http", "url": RING}}
 class Tilbakering(FakeEffects):
     """An isolated fake of regi's /regi/sandra/tilbakering (A1.4): one pending per (principal, agent)."""
 
-    def __init__(self, calls=(), script=()):
+    def __init__(self, calls=(), script=(), explicit_support=True):
         super().__init__(calls)
         self.script, self.pending, self.ops = list(script), {}, {}
+        self.explicit_support, self.cancel_errors = explicit_support, []
 
     def post(self, url, body, timeout=30):
         self.posts.append((url, dict(body)))
@@ -590,11 +591,14 @@ class Tilbakering(FakeEffects):
         if seen != body["action"]:                                       # A1.4: an op id is bound to one action
             raise tools.Refused("HTTP 409", 409, {"ok": False, "result": "refused", "error": "operation_id_mismatch"})
         if body["action"] == "cancel":
+            if self.cancel_errors:
+                raise self.cancel_errors.pop(0)
             if current:
                 del self.pending[key]
                 return {"ok": True, "result": "cancelled", "operation_id": current["op"], "status": "avlyst"}
             return {"ok": True, "result": "nothing_pending"}
-        if current and current["call_id"] == body["call_id"]:
+        explicit = body.get("explicit") is True and self.explicit_support
+        if current and current["call_id"] == body["call_id"] and not explicit:
             return {"ok": True, "result": "already_scheduled", "operation_id": current["op"], "due": current["due"],
                     "status": "venter", "fired_at": None}
         if current and body.get("supersedes") != current["op"]:
@@ -797,6 +801,35 @@ def test_the_host_note_of_the_real_call_is_small_and_complete(make, monkeypatch)
     assert len(said[-1][1]) <= tools.NOTE_CHARS and said[-1][1].count('"forwarded"') == 2
 
 
+
+@pytest.mark.parametrize("receipts", [
+    [{"tool": "schedule_callback", "status": "refused", "reason": "x" * 5000}],                     # a huge reason
+    [{"tool": "delegate_to_agent", "agent": f"Agent{n:02d}", "status": ["forwarded", "not_forwarded",
+      "unknown_delivery", "queued_at_regi"][n % 4], "reason": "cap_reached " * 20, "note": "y" * 400}
+     for n in range(40)],                                                                            # a long list
+    [{"tool": "schedule_callback", "status": "scheduled", "at": "20:30", "minutes": 7,
+      "note": "call back scheduled at 20:30 (never 'rang')"},
+     {"tool": "cancel_callback", "status": "unconfirmed", "note": "z" * 3000},
+     {"tool": "get_agent_status", "agent": "Jonas", "status": "failed", "reason": "Traceback " * 300}],   # failure text
+])
+def test_an_overflowing_note_stays_within_the_token_limit_and_keeps_every_status(receipts):
+    note = REAL_HOST_NOTE(receipts)
+    assert tools.note_tokens(note) <= tools.NOTE_TOKENS < 500
+    counts = {}
+    for r in receipts:
+        counts[r["status"]] = counts.get(r["status"], 0) + 1
+    for status, n in counts.items():                         # each status is still there: listed or counted
+        listed = note.count(f'"status": "{status}"')
+        counted = f'"{status}": ' in note.split("by status:")[-1] if "by status:" in note else False
+        assert listed == n or counted, (status, listed)
+
+
+def test_a_short_note_keeps_its_detail():
+    receipts = [{"tool": "schedule_callback", "status": "scheduled", "at": "20:30", "minutes": 7,
+                 "replaced": {"minutes": 5}, "note": "call back scheduled at 20:30 (never 'rang')"}]
+    note = REAL_HOST_NOTE(receipts)
+    assert '"minutes": 7' in note and '"replaced_minutes": 5' in note and "never 'rang'" in note
+
 AUTO = {"callback": {"kind": "http", "url": RING}, "callback_on_delegation": {"minutes": 5}}
 
 
@@ -833,20 +866,35 @@ AUTO7 = {"callback": {"kind": "http", "url": RING}, "callback_minutes": {"defaul
          "callback_on_delegation": {"minutes": 7}}
 
 
-def test_the_automatic_booking_is_replaced_when_peter_names_other_minutes_in_the_same_call(make, ledger):
-    effects = Tilbakering([ASK])
+@pytest.mark.parametrize("explicit_support, actions", [
+    (True, ["schedule", "schedule"]),                          # regi with explicit: replaced in one POST
+    (False, ["schedule", "schedule", "cancel", "schedule"]),   # an older regi: kept => cancel + book anew
+])
+def test_the_automatic_booking_is_replaced_when_peter_names_other_minutes_in_the_same_call(make, ledger,
+                                                                                         explicit_support, actions):
+    effects = Tilbakering([ASK], explicit_support=explicit_support)
     call, said, clock = make(effects, **AUTO7)
     _user_says(call, clock, "Kan teamet ta sak 182?")
     first = _receipts(said)[-1]
     assert (first["status"], first["minutes"]) == ("scheduled", 7)
+    assert "explicit" not in effects.to(RING)[0]                               # the automatic one never is
     effects.calls = [("schedule_callback", {"minutes": 5, "reason": "status"})]
     _user_says(call, clock, "Ring meg om fem minutter.")
     receipt = _receipts(said)[-1]
     assert (receipt["status"], receipt["minutes"], receipt["replaced"]["minutes"]) == ("scheduled", 5, 7)
-    assert [b["action"] for _u, b in effects.posts if _u == RING] == ["schedule", "cancel", "schedule"]
-    assert [v["call_id"] for v in effects.pending.values()] == ["call-1"] and len(effects.pending) == 1
+    assert [b["action"] for b in effects.to(RING)] == actions
+    explicit_post = effects.to(RING)[1]
+    assert explicit_post["explicit"] is True and explicit_post["supersedes"] == first["operation_id"]
+    assert len(effects.pending) == 1 and next(iter(effects.pending.values()))["op"] == receipt["operation_id"]
     row = next(v for k, v in _rows(ledger).items() if k.startswith("cb-"))
     assert (row["minutes"], row["status"]) == (5, "pending")
+
+
+def test_explicit_minutes_and_a_delegation_in_one_utterance_book_exactly_one_call_back(make):
+    effects = Tilbakering([ASK, ("schedule_callback", {"minutes": 5, "reason": "status"})])
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Ta sak 182 og ring meg om fem minutter.")
+    assert [b["minutes"] for b in effects.to(RING)] == [5] and len(effects.pending) == 1
 
 
 def test_the_same_minutes_as_the_automatic_booking_keep_it(make):
@@ -860,15 +908,27 @@ def test_the_same_minutes_as_the_automatic_booking_keep_it(make):
 
 
 def test_a_replacement_whose_cancel_is_unclear_never_books_a_second_call_back(make):
+    effects = Tilbakering([ASK], explicit_support=False)
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Kan teamet ta sak 182?")
+    effects.calls = [("schedule_callback", {"minutes": 5, "reason": "status"})]
+    effects.cancel_errors = [tools.Unconfirmed("timeout"), tools.Unconfirmed("timeout")]
+    _user_says(call, clock, "Ring meg om fem.")
+    receipt = _receipts(said)[-1]
+    assert receipt["status"] == "unconfirmed" and "still stands" in receipt["note"]
+    assert [b["action"] for b in effects.to(RING)] == ["schedule", "schedule", "cancel", "cancel"]
+    assert len(effects.pending) == 1                                          # still exactly the old one
+
+
+def test_an_unclear_explicit_replacement_is_unconfirmed_and_never_books_twice(make):
     effects = Tilbakering([ASK])
     call, said, clock = make(effects, **AUTO7)
     _user_says(call, clock, "Kan teamet ta sak 182?")
     effects.calls = [("schedule_callback", {"minutes": 5, "reason": "status"})]
-    effects.script = [tools.Unconfirmed("timeout"), tools.Unconfirmed("timeout")]      # the cancel, twice
+    effects.script = [tools.Unconfirmed("timeout"), tools.Unconfirmed("timeout")]
     _user_says(call, clock, "Ring meg om fem.")
     receipt = _receipts(said)[-1]
-    assert receipt["status"] == "unconfirmed" and "still stands" in receipt["note"]
-    assert [b["action"] for _u, b in effects.posts if _u == RING] == ["schedule", "cancel", "cancel"]
+    assert receipt["status"] == "unconfirmed" and len(effects.pending) == 1
 
 
 def test_ikke_ring_cancels_the_automatic_booking(make):
@@ -881,7 +941,7 @@ def test_ikke_ring_cancels_the_automatic_booking(make):
 
 
 def test_two_cancels_in_one_call_are_two_operations(make):
-    effects = Tilbakering([ASK])
+    effects = Tilbakering([ASK], explicit_support=False)               # the replacement itself cancels once
     call, said, clock = make(effects, **AUTO7)
     _user_says(call, clock, "Ta sak 182.")
     effects.calls = [("schedule_callback", {"minutes": 5, "reason": "x"})]
