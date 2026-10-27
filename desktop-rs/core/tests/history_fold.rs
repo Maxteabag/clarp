@@ -353,3 +353,39 @@ fn next_send_keeps_completed_reply_until_exact_log_row_arrives() {
     assert!(!canonical.hidden_rows.contains("answer-first"), "canonical reply stays visible");
     assert_eq!(rows.iter().map(|r|r.id.as_str()).collect::<Vec<_>>(), ["u-first","answer-first","u-next"]);
 }
+
+/// A prompt can arrive during the previous turn's work. Retiring its final
+/// answer must keep it after that prompt and before the next send, whether
+/// that next send is pending or failed; delivery flags are not chronology.
+#[test]
+fn retained_final_stays_between_prompts_sent_during_and_after_its_reply() {
+    let mut view = LiveView::new();
+    view.apply_snapshot(json!({"epoch":"ordering", "lseq":1,
+        "turn":{"turn_id":"first", "status":"completed", "started_at_ms":1767225600100_i64},
+        "items":[{"id":"final", "turn_id":"first", "kind":"message",
+            "status":"completed", "phase":"final", "ordinal":1, "row_id":"answer",
+            "started_at_ms":1767225602000_i64, "text":"Synthetic final answer"}]
+    }).as_object().unwrap());
+    view.apply_snapshot(json!({"epoch":"ordering", "lseq":2,
+        "turn":{"turn_id":"next", "status":"running", "started_at_ms":1767225604100_i64},
+        "items":[]}).as_object().unwrap());
+    let mut rows = vec![
+        row(&prompt("u-first", "2026-01-01T00:00:00Z", "first")),
+        row(&prompt("u-during", "2026-01-01T00:00:01Z", "during")),
+        row(&prompt("u-after", "2026-01-01T00:00:04Z", "next")),
+    ];
+    for failed in [false, true] {
+        rows[2].pending = !failed;
+        rows[2].delivery_failed = failed;
+        let folded = present(&rows, Some(&view), &Options::default());
+        assert_eq!(folded.folds.len(), 1);
+        assert_eq!(folded.folds[0].next.as_deref(), Some("u-after"),
+            "the final must not move above the prompt sent during work");
+        let mut order: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        let at = order.iter().position(|id| Some(*id) == folded.folds[0].next.as_deref()).unwrap();
+        order.insert(at, "answer");
+        assert_eq!(order, ["u-first", "u-during", "answer", "u-after"]);
+        assert_eq!(rows[2].delivery_failed, failed);
+        assert_eq!(rows[2].id, "u-after");
+    }
+}
