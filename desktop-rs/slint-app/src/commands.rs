@@ -395,6 +395,8 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         }
         // The composer's mention list closes before the composer is left.
         "escape" if crate::mention_view::is_open(app) => crate::mention_view::dismiss_active(app),
+        // V in the chat: the whole loaded chat as plain text to select from.
+        "select-text" => crate::select_text::open_conversation(app, window),
         // Ctrl+F: message search, in the switcher.
         "search-messages" => {
             open_switcher(app, window);

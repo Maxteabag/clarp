@@ -495,6 +495,7 @@ pub fn start_check(name: &str, out: String) {
         "connection" => connection_check(out),
         "lifecycle" => lifecycle_check(out),
         "narration" => narration_check(out),
+        "select-text" => select_text_check(out),
         "sidebar" => sidebar_check(out),
         // ---- updates and teams
         "updates" => updates_check(out),
@@ -2142,6 +2143,70 @@ fn narration_check(out: String) {
             window.invoke_copy_message(app_now().active_id(), "n2".into());
             let copied = std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
             check(copied == "Here they are.", &format!("the copy button copies the message: {copied:?}"));
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// `--check select-text --out DIR`: a message's select icon opens it as
+/// plain text, Escape closes that, the command shows the whole chat under
+/// who wrote each message, and Copy all copies it.
+fn select_text_check(out: String) {
+    let turns = serde_json::json!({"session": "rachel", "turns": [
+        {"id": "s1", "role": "user", "text": "Show me the plan"},
+        {"id": "s2", "role": "assistant", "text": "Step one, then step two."},
+    ]});
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(move |app, _window, _| {
+            if app.engine.borrow().connection_state() != "live" {
+                return false;
+            }
+            check(control("/__control/turns", &turns).is_ok(), "the Host has a short chat");
+            true
+        })),
+        ("loaded", Box::new(|_, window, _| {
+            if !rows(window).iter().any(|r| r.id == "s2") {
+                return false;
+            }
+            window.invoke_select_message(app_now().active_id(), "s2".into());
+            true
+        })),
+        ("message", Box::new(move |_, window, elapsed| {
+            if window.get_overlay() != "select-text" || elapsed < Duration::from_millis(200) {
+                return false;
+            }
+            check(window.get_select_body() == "Step one, then step two.", &format!("a message's select icon shows its text: {:?}", window.get_select_body()));
+            check(window.get_select_title().starts_with("Select text"), "under a Select text title");
+            shot(&out, "select-text-01");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("closed", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(true, "Escape closes it");
+            check(crate::commands::run(&app_now(), window, "select-text"), "the Select text command runs");
+            true
+        })),
+        ("whole chat", Box::new(|_, window, _| {
+            if window.get_overlay() != "select-text" {
+                return false;
+            }
+            let body = window.get_select_body().to_string();
+            check(body.contains("You:\nShow me the plan") && body.contains("Step one, then step two."), &format!("the whole chat, each message under who wrote it: {body:?}"));
+            window.invoke_select_copy_all();
+            let copied = std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+            check(copied == body, &format!("Copy all copies all of it: {copied:?}"));
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("done", Box::new(|_, window, _| {
+            if !window.get_overlay().is_empty() {
+                return false;
+            }
+            check(true, "and Escape closes the whole-chat page too");
             true
         })),
     ];

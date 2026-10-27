@@ -56,6 +56,7 @@ const NORMAL: &[Entry] = &[
     entry("n", "vim-match-next", "Next match", Place::Chat),
     entry("N", "vim-match-previous", "Previous match", Place::Chat),
     entry("y", "vim-yank", "Copy the message", Place::Chat),
+    entry("v", "vim-select", "Select text in the message", Place::Chat),
     entry("z o", "vim-fold-open", "Open", Place::Both),
     entry("z c", "vim-fold-close", "Close", Place::Both),
     entry("z a", "vim-fold-toggle", "Toggle", Place::Chat),

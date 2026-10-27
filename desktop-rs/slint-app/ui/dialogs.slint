@@ -1,4 +1,4 @@
-import { Button } from "std-widgets.slint";
+import { Button, TextEdit } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing, Look, ChromeText } from "theme.slint";
 
@@ -226,6 +226,71 @@ export component ConnectionPage inherits Modal {
                 enabled: !root.connecting;
                 clicked => { root.connect(server.text, token.text); }
             }
+        }
+    }
+}
+
+// A message (or the whole chat) as plain text to select from: Slint's rich
+// text cannot be selected, so this shows the same words without styling.
+// Drag or Shift+arrows select, Ctrl+A selects all, Ctrl+C copies the
+// selection; Escape or a click outside closes it.
+export component SelectTextPage inherits Modal {
+    in property <string> title;
+    in property <string> body;
+    callback copy-all();
+    callback close();
+    public function open() {
+        view.focus();
+    }
+    card-width: 860px;
+    card-height: 2000px;
+    dismissed => { root.close(); }
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.title;
+                color: Palette.text;
+                font-size: 15 * Look.unit;
+                font-weight: 600;
+                overflow: elide;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+            copy-button := Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 4px;
+                background: copy-touch.has-hover ? Palette.hover : transparent;
+                accessible-role: button;
+                accessible-label: "Copy all";
+                Image { source: @image-url("icons/copy.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
+                copy-touch := TouchArea { clicked => { root.copy-all(); } }
+            }
+            close-button := Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 4px;
+                background: close-touch.has-hover ? Palette.hover : transparent;
+                accessible-role: button;
+                accessible-label: "Close";
+                Image { source: @image-url("icons/close.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
+                close-touch := TouchArea { clicked => { root.close(); } }
+            }
+        }
+        Text {
+            text: "Drag or Shift+arrows to select · Ctrl+A all · Ctrl+C copy · Esc close";
+            color: Palette.muted;
+            font-size: 11 * Look.unit;
+        }
+        view := TextEdit {
+            text: root.body;
+            read-only: true;
+            wrap: word-wrap;
+            vertical-stretch: 1;
+            accessible-label: "Selectable text";
         }
     }
 }

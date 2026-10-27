@@ -512,6 +512,7 @@ pub const ENTRIES: &[Entry] = &[
     e("keep-layout", "Keep this window's layout", "view", "Saves this window's layout over the newer one another window saved.", &["another window", "newer layout", "conflict", "recovery", "save instead"]),
     e("change-directory", "Change directory", "agent", "Starts a new chat in another folder.", &["folder", "workspace", "cwd", "new chat", "path"]),
     e("recent-agents", "Recent agents", "agent", "Lists the agents you opened last, newest first.", &["last", "previous", "switch back", "mru", "history"]),
+    e("select-text", "Select text", "view", "Shows the open chat as plain text to select from with the mouse or Shift+arrows and copy with Ctrl+C; a message's own select icon shows just that message.", &["select", "highlight", "copy text", "copy part", "mark text", "visual"]),
     e("search-messages", "Search messages", "view", "Finds words in the messages of every chat on this computer and jumps to the message.", &["find", "find in chats", "text", "history", "transcript", "grep", "look up"]),
     e("open-in-browser", "Open report in browser", "view", "Opens an HTML report's whole page, pictures and layout included, in a new browser window; Clarp shows plain ones as a quick preview.", &["browser", "full page", "images", "html", "web page", "external"]),
     e("refresh", "Refresh conversation", "view", "Loads the open chat again from the Host.", &["reload", "update", "sync", "fetch"]),
