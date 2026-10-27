@@ -49,10 +49,12 @@ class _Clock:
 def fake(monkeypatch):
     """Fake boot / proc readers and a frozen clock; run_probe returns `probe.result`."""
     clock = _Clock()
-    probe = SimpleNamespace(result=(0, _show(), "", None, True), calls=0, in_tx=[], gate=None)
+    probe = SimpleNamespace(result=(0, _show(), "", None, True), calls=0, in_tx=[], gate=None, timeouts=[], advance=0.0)
 
-    def run_probe():
+    def run_probe(timeout=None):
         probe.calls += 1
+        probe.timeouts.append(timeout)
+        clock.t += probe.advance
         if threading.current_thread() is threading.main_thread():
             probe.in_tx.append(db.conn().in_transaction)
         if probe.gate is not None:
@@ -293,6 +295,221 @@ def test_an_enrichment_exception_omits_and_is_counted_but_baseexception_propagat
         server_module.Handler._add_delivery_state(raises(KeyboardInterrupt()), body, "s", {})
 
 
+# --- ROOT 17e71bf1: ONE 2.0 s enrichment deadline (mock clock) -------------------------------
+
+class _Runtime:
+    """A runtime client on the test's clock. A stall above the call's cap times out after
+    exactly the cap (an honest client); ("over", s) takes s and still answers (a residual
+    blocking client), so the deadline checks after it are exercised too."""
+
+    def __init__(self, clock, *stalls, observation=None):
+        self.clock, self.stalls, self.caps = clock, list(stalls), []
+        self.observation = observation or _obs()
+
+    def status_within(self, total_s):
+        from lib.runtime_bridge import RuntimeUnavailable
+        self.caps.append(total_s)
+        stall = self.stalls.pop(0) if self.stalls else 0.0
+        if isinstance(stall, tuple):
+            self.clock.t += stall[1]
+        elif stall > total_s:
+            self.clock.t += total_s
+            raise RuntimeUnavailable("timed out")
+        else:
+            self.clock.t += stall
+        return dict(self.observation)
+
+    def status(self, **kwargs):
+        raise AssertionError("a /log bracket never uses the shared default status()")
+
+
+def _handler(runtime):
+    server_module = _server()
+    handler = server_module.Handler.__new__(server_module.Handler)
+    handler.ctx = SimpleNamespace(runtime_client=runtime)
+    handler._client_gone = lambda: False
+    return handler
+
+
+def _bracket(runtime, body=None):
+    body = {"turns": []} if body is None else body
+    return _handler(runtime)._delivery_fields(body, "ag", since=0, until=None, generation=None,
+                                              bootstrap=False, carried=("", ""))
+
+
+def _snapshot_takes(monkeypatch, clock, seconds, calls=None):
+    from lib import launch_receipts
+    real = launch_receipts.annotate_rows
+
+    def annotate(agent_id, users):
+        if calls is not None:
+            calls.append(agent_id)
+        clock.t += seconds
+        return real(agent_id, users)
+    monkeypatch.setattr(launch_receipts, "annotate_rows", annotate)
+
+
+def test_a_normal_bracket_fits_the_deadline_and_reports_its_phases(fake, monkeypatch):
+    runtime = _Runtime(fake.clock, 0.125, 0.125)
+    fake.probe.advance = 0.25
+    _snapshot_takes(monkeypatch, fake.clock, 0.125)
+    assert _bracket(runtime) is not None
+    assert runtime.caps == [ra.O1_CAP_S, ra.O2_CAP_S] == [0.5, 0.5] and fake.probe.timeouts == [1.0]
+    budget = ra.status_block()["budget"]
+    assert budget["last_ms"] == {"o1": 125, "b": 250, "snapshot": 125, "o2": 125, "total": 625}
+    assert budget["deadline_ms"] == 2000 and budget["caps_ms"] == {"o1": 500, "b": 1000, "b_reap_reserve": 250,
+                                                                   "o2": 500}
+
+
+def test_an_o1_miss_that_stalls_times_out_at_its_cap_and_omits_before_b(fake):
+    runtime = _Runtime(fake.clock, 5.0)
+    assert _bracket(runtime) is None
+    assert runtime.caps == [0.5] and fake.probe.calls == 0
+    assert ra.status_block()["omitted"]["o1_unavailable"] == 1
+    assert ra.status_block()["budget"]["last_ms"]["total"] == 500
+
+
+def test_an_o2_that_stalls_omits_and_no_partial_field_or_cursor_escapes(fake, monkeypatch):
+    server_module = _server()
+    monkeypatch.setattr(server_module.agents_db, "get_by_session", lambda session: {"agent_id": "ag"})
+    runtime = _Runtime(fake.clock, 0.0, 5.0)
+    handler = _handler(runtime)
+    body = {"turns": [{"role": "user", "id": "m1"}]}
+    assert server_module.Handler._add_delivery_state(handler, body, "s", {"delivery_since": ["0"]}) == ""
+    assert body == {"turns": [{"role": "user", "id": "m1"}]}, "nothing of the snapshot leaves"
+    assert runtime.caps == [0.5, 0.5] and fake.probe.calls == 1
+    assert ra.status_block()["omitted"]["o2_unavailable"] == 1
+
+
+@pytest.mark.parametrize("o1,b,snapshot,calls_o2,calls_b,snapshots", [
+    (("over", 1.875), 0.0, 0.0, 0, 0, 0),         # nothing left for B and its reap reserve
+    (0.125, 1.875, 0.0, 0, 1, 0),                 # nothing left for the snapshot
+    (0.125, 0.25, 1.625, 0, 1, 1),                # nothing left for O2
+], ids=["before-b", "before-snapshot", "before-o2"])
+def test_an_exhausted_budget_omits_and_never_starts_the_next_phase(fake, monkeypatch, o1, b, snapshot,
+                                                                    calls_o2, calls_b, snapshots):
+    runtime = _Runtime(fake.clock, o1)
+    fake.probe.advance = b
+    seen = []
+    _snapshot_takes(monkeypatch, fake.clock, snapshot, seen)
+    assert _bracket(runtime) is None
+    assert (len(runtime.caps) - 1, fake.probe.calls, len(seen)) == (calls_o2, calls_b, snapshots)
+    assert ra.status_block()["omitted"]["deadline_exhausted"] == 1
+
+
+def test_each_phase_cap_is_clamped_to_what_is_left(fake):
+    runtime = _Runtime(fake.clock, ("over", 1.0), 0.0)
+    fake.probe.advance = 0.625
+    assert _bracket(runtime) is not None
+    assert fake.probe.timeouts == [0.75], "B: min(1.0, 1.0 left - 0.25 reap reserve)"
+    assert runtime.caps == [0.5, 0.375], "O2: min(0.5, 0.375 left)"
+
+
+def test_sql_past_the_deadline_is_interrupted_and_the_snapshot_still_closes(fake, monkeypatch):
+    from lib import launch_receipts
+    heavy = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 200000) SELECT count(*) FROM c"
+
+    def annotate(agent_id, users):
+        fake.clock.t += 2.5
+        return db.conn().execute(heavy).fetchone()[0]
+    monkeypatch.setattr(launch_receipts, "annotate_rows", annotate)
+    assert _bracket(_Runtime(fake.clock)) is None
+    assert ra.status_block()["omitted"]["deadline_exhausted"] == 1
+    assert db.conn().in_transaction is False
+    assert db.conn().execute(heavy).fetchone()[0] == 200000, "the interrupt handler is cleared"
+
+
+def test_o1_reads_a_fresh_shared_status_without_waiting_and_o2_is_always_fresh(fake, monkeypatch):
+    from lib import backends
+    runtime = _Runtime(fake.clock)
+    monkeypatch.setattr(backends, "_RUNTIME_CLIENT", runtime)
+    monkeypatch.setattr(backends, "_clock", fake.clock)
+    monkeypatch.setattr(backends, "_STATUS_CACHE", (runtime, fake.clock.t, _obs(), None))
+    assert _bracket(runtime) is not None and runtime.caps == [0.5], "O1 from the cache, O2 fresh"
+    monkeypatch.setattr(backends, "_STATUS_CACHE", (runtime, fake.clock.t - 1.0, _obs(), None))
+    fake.clock.t += 1
+    assert _bracket(runtime) is not None and runtime.caps == [0.5, 0.5, 0.5], "a 1 s old status is a miss"
+    with backends._STATUS_LOCK:                   # another caller's shared RPC in flight: never waited for
+        monkeypatch.setattr(backends, "_STATUS_CACHE", (runtime, fake.clock.t, _obs(), None))
+        fake.clock.t += 1
+        assert _bracket(runtime) is not None and runtime.caps == [0.5] * 5
+
+
+class _Socket:
+    def __init__(self, log, replies, clock=None):
+        self.log, self.replies, self.clock = log, list(replies), clock
+
+    def __call__(self, *args):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def settimeout(self, value):
+        self.log.append(value)
+
+    def connect(self, path):
+        pass
+
+    def sendall(self, data):
+        pass
+
+    def recv(self, n):
+        if self.clock is not None:
+            self.clock[0] += 0.2
+        return self.replies.pop(0) if self.replies else b"x"
+
+    def close(self):
+        pass
+
+
+def test_the_shared_10s_default_stays_for_every_other_caller(monkeypatch):
+    import socket as real_socket
+    from lib import runtime_bridge
+    from lib.runtime_bridge import RuntimeClient, RuntimeUnavailable
+
+    def fake_socket(sock):
+        return SimpleNamespace(socket=sock, AF_UNIX=real_socket.AF_UNIX, SOCK_STREAM=real_socket.SOCK_STREAM,
+                               timeout=real_socket.timeout)
+    log = []
+    monkeypatch.setattr(runtime_bridge, "socket", fake_socket(_Socket(log, [b'{"ok":true,"result":{"a":1}}\n'])))
+    client = RuntimeClient("/nonexistent.sock")
+    assert client.timeout == 10.0 and client.status() == {"a": 1} and log == [10.0]
+    log.clear()
+    now = [0.0]
+    monkeypatch.setattr(runtime_bridge, "time", SimpleNamespace(monotonic=lambda: now[0], sleep=lambda s: None))
+    monkeypatch.setattr(runtime_bridge, "socket", fake_socket(_Socket(log, [], clock=now)))
+    with pytest.raises(RuntimeUnavailable):
+        client.status_within(0.5)                 # a reply that drips forever
+    assert now[0] == pytest.approx(0.6) and len(log) == 5 and max(log) <= 0.5, log
+    assert client.timeout == 10.0
+
+
+def test_cleanup_stays_inside_the_budget_and_an_unreaped_child_keeps_the_slot(tmp_path, monkeypatch):
+    monkeypatch.setattr(ra, "SYSTEMCTL", sys.executable)
+    monkeypatch.setattr(ra, "SHOW_ARGV", tuple(_fixture(tmp_path, "import time; time.sleep(30)")))
+    budget = ra.Budget(total_s=0.6)
+    t0 = time.monotonic()
+    assert ra.admit(_obs(), in_transaction=False, budget=budget) is False
+    assert time.monotonic() - t0 < 0.6 + 0.15 and ra.status_block()["probes"]["reaped"] == 1
+    spawned = []
+
+    def spawn(*a, **k):
+        spawned.append(_Stuck())
+        return spawned[-1]
+    monkeypatch.setattr(ra, "SPAWN", spawn)
+    monkeypatch.setattr(ra, "CLOCK", lambda: time.monotonic() + 10)    # the gate has refilled
+    budget = ra.Budget(total_s=0.6)
+    t0 = time.monotonic()
+    assert ra.admit(_obs(), in_transaction=False, budget=budget) is False
+    assert time.monotonic() - t0 < 0.6 + 0.15 and len(spawned) == 1
+    assert ra.admit(_obs(), in_transaction=False, budget=ra.Budget(total_s=0.6)) is False and len(spawned) == 1
+    assert ra.status_block()["omitted"]["unreaped"] == 1 and ra.status_block()["gate"]["inflight_now"] == 1
+
+
 # --- health block -------------------------------------------------------------------------
 
 def test_the_status_block_is_closed_bounded_and_side_effect_free(fake, monkeypatch):
@@ -308,10 +525,11 @@ def test_the_status_block_is_closed_bounded_and_side_effect_free(fake, monkeypat
         assert ra.status_block() == block
         assert json.dumps([ra._GATE["tokens"], ra._GATE["stamp"], ra._HEALTH], sort_keys=True,
                           default=str) == before, "reading the block changes nothing"
-    assert set(block) == {"scope", "reset_on", "gate", "probes", "omitted", "unexpected_by_type", "reconcile"}
+    assert set(block) == {"scope", "reset_on", "gate", "probes", "omitted", "unexpected_by_type", "budget",
+                          "reconcile"}
     assert block["gate"]["inflight_limit"] == 1 and block["gate"]["rate_per_s"] == 2
     assert block["gate"]["burst"] == 2 and block["gate"]["probes_per_log_response"] == 1
-    assert list(block["omitted"]) == list(ra.OMIT_REASONS) and len(ra.OMIT_REASONS) == 19
+    assert list(block["omitted"]) == list(ra.OMIT_REASONS) and len(ra.OMIT_REASONS) == 22
     names = block["unexpected_by_type"]
     assert len([n for n in names if n != "_other"]) == 16 and names["_other"] == 5
     assert set(block["reconcile"]["findings"]) == set(lr.FINDING_KINDS)

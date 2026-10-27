@@ -4578,23 +4578,26 @@ _RUNTIME_A2 = {"pid": 4242, "start_ticks": 777, "boot_id": "0b8a1f9e-2c3d-4e5f-8
 
 class _FakeManager:
     """F4 B for the HTTP tests: a fake `systemctl show` (no process) naming _RUNTIME_A2's
-    pid as the unit's main, a fake /proc and boot id, and a clock that moves one second
-    per reading so the 2/s gate never throttles unless a test freezes it."""
+    pid as the unit's main, a fake /proc and boot id, and a clock that only moves when a
+    probe runs (0.5 s: one token of the 2/s gate back per bracket, well inside the 2.0 s
+    enrichment deadline) and not at all while a test freezes it."""
 
     def __init__(self, monkeypatch, *, main=4242):
         from lib import db, runtime_attestation
         self.main, self.calls, self.in_tx, self.t, self.frozen = main, 0, [], 1000.0, False
+        self.timeouts = []
         a2 = _RUNTIME_A2
 
-        def probe():
+        def probe(timeout=None):
             self.calls += 1
+            self.timeouts.append(timeout)
             self.in_tx.append(db.conn().in_transaction)
+            if not self.frozen:
+                self.t += 0.5
             return 0, (f"MainPID={self.main}\nInvocationID={a2['invocation']}\n"
                        f"ControlGroup={a2['cgroup']}\nActiveState=active\n").encode(), "", None, True
 
         def clock():
-            if not self.frozen:
-                self.t += 1.0
             return self.t
         monkeypatch.setattr(runtime_attestation, "run_probe", probe)
         monkeypatch.setattr(runtime_attestation, "CLOCK", clock)
@@ -4745,6 +4748,10 @@ class _FakeRuntime:
             raise value
         return value
 
+    def status_within(self, total_s):
+        self.caps = getattr(self, "caps", []) + [total_s]
+        return self.status()
+
     def ping(self):
         return True
 
@@ -4881,13 +4888,13 @@ def test_a_log_bracket_is_o1_then_b_then_the_snapshot_then_a_fresh_o2(running_se
     real_observation, real_probe = server_module.Handler._delivery_observation, runtime_attestation.run_probe
     real_snapshot, real_proc = settings_store.read_snapshot, runtime_attestation.PROC_READER
 
-    def observation(self, *, fresh):
+    def observation(self, *, fresh, timeout):
         order.append("O2" if fresh else "O1")
-        return real_observation(self, fresh=fresh)
+        return real_observation(self, fresh=fresh, timeout=timeout)
 
-    def probe():
+    def probe(timeout=None):
         order.append("B")
-        return real_probe()
+        return real_probe(timeout)
 
     def proc(pid):
         proc_in_tx.append(db.conn().in_transaction)
@@ -4987,6 +4994,7 @@ def test_more_than_ten_bootstrap_pages_under_gate_exhaustion_stay_incomplete_and
         "exhaustion leaves the pass incomplete, never complete or false"
     assert manager.calls == 2 and runtime_attestation.status_block()["omitted"]["gate_rate"] == 12
     manager.frozen = False
+    manager.t += 1.0                                     # one second later: the gate has refilled
     for _ in range(20):                                  # bounded: the pass must finish well within this
         body = _log(base, carry(cursor))
         assert not _no_delivery(body) and not body["delivery_cursor_expired"]
@@ -5007,7 +5015,8 @@ def test_status_reports_delivery_admission_health_without_probing(running_server
     status, raw = _get(base + "/status")
     block = json.loads(raw)["delivery_admission"]
     assert status == 200 and manager.calls == 0
-    assert set(block) == {"scope", "reset_on", "gate", "probes", "omitted", "unexpected_by_type", "reconcile"}
+    assert set(block) == {"scope", "reset_on", "gate", "probes", "omitted", "unexpected_by_type", "budget",
+                          "reconcile"}
     assert len(json.dumps(block, separators=(",", ":"))) <= 8192
 
 

@@ -85,6 +85,22 @@ def runtime_status(*, max_age: float | None = None) -> dict:
         return result if isinstance(result, dict) else {}
 
 
+def peek_runtime_status(*, max_age: float) -> dict | None:
+    """The shared status result if it is a success at most ``max_age`` seconds
+    old, else None. Never waits for, starts or refreshes an RPC (for a caller
+    with its own deadline; a busy cache counts as a miss)."""
+    if not _STATUS_LOCK.acquire(blocking=False):
+        return None
+    try:
+        client, fetched_at, result, error = _STATUS_CACHE
+    finally:
+        _STATUS_LOCK.release()
+    if (_RUNTIME_CLIENT is None or client is not _RUNTIME_CLIENT or error is not None
+            or not isinstance(result, dict) or _clock() - fetched_at >= max_age):
+        return None
+    return result
+
+
 @dataclass(frozen=True)
 class _RemoteHandle:
     trace_id: str
