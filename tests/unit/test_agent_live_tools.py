@@ -22,7 +22,7 @@ from tests.unit.test_agent_rings import PHONE, env  # noqa: F401 - env is a fixt
 TEAM = [{"session": "drammen-jonas", "name": "Jonas", "role": "backend"},
         {"session": "drammen-noel", "name": "Noel", "role": "frontend"}]
 DIRECTOR = "http://127.0.0.1:7790/regi/sandra/deleger"
-RING = "http://127.0.0.1:7790/regi/sandra/tilbakering"
+RING = "http://127.0.0.1:7790/regi/ring"
 ASK = ("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182"})
 CALL_BACK = ("schedule_callback", {"minutes": 5, "reason": "status"})
 
@@ -56,7 +56,9 @@ class Inline:
 class FakeEffects:
     def __init__(self, calls=()):
         self.calls, self.bodies = list(calls), []
-        self.prompts, self.posts = [], []
+        self.prompts, self.posts, self.scheduled, self.stopped = [], [], [], []
+        self.later_error = None
+        self.timers: dict[str, str] = {}
         self.post_error = self.prompt_error = None
         self.url_errors: dict[str, Exception] = {}
         self.inbox: list[tuple[str, str]] = []      # what really reached members (for reconcile)
@@ -91,6 +93,21 @@ class FakeEffects:
 
     def to(self, url):
         return [body for u, body in self.posts if u == url]
+
+    def later(self, command, delay_seconds, unit):
+        self.scheduled.append((command, delay_seconds, unit))
+        if self.later_error is not None:
+            error, state = self.later_error
+            self.timers[unit] = state
+            raise error
+        self.timers[unit] = "active"
+
+    def timer_state(self, unit):
+        return self.timers.get(unit, "absent")
+
+    def stop(self, unit):
+        self.stopped.append(unit)
+        self.timers[unit] = "absent"
 
     def recipient_ok(self, principal):
         return principal in self.recipients
@@ -462,30 +479,76 @@ def test_without_a_fallback_an_unreachable_director_is_a_failure(make):
     assert effects.prompts == [] and _receipts(said)[0]["status"] == "failed"
 
 
-# ---- call backs: handed to the director, which owns the timer and the one ring ---------
+
+def test_an_oversized_instruction_is_refused_never_cut(make):
+    long = "x" * (tools.REQUEST_CHARS + 1)
+    effects = FakeEffects([("delegate_to_agent", {"agent": "drammen-jonas", "request": long})])
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta alt dette.")
+    receipt = _receipts(said)[0]
+    assert effects.posts == [] and (receipt["status"], receipt["error"], receipt["max"]) == ("refused", "request_too_large", 1500)
+    assert effects.bodies[0]["tools"][0]["parameters"]["properties"]["request"]["maxLength"] == 1500
+
+
+@pytest.mark.parametrize("answer, status", [({"ok": True, "result": "started", "sent_now": True}, "handed_off"),
+                                            ({"ok": True, "result": "forwarded"}, "handed_off"),
+                                            ({"ok": True, "result": "already_present", "sent_now": False}, "already_handed_off"),
+                                            ({"ok": True, "ny": False}, "already_handed_off")])
+def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
+    class Director(FakeEffects):
+        def post(self, url, body, timeout=30):
+            self.posts.append((url, body))
+            return answer
+    effects = Director([ASK])
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")
+    receipt = _receipts(said)[0]
+    assert receipt["status"] == status and receipt["director"] == {k: v for k, v in answer.items() if k != "ok"}
+
+
+# ---- call backs: a Host transient timer that hands the call back once to the director ----
 
 CB = {"callback": {"kind": "http", "url": RING}}
 
 
-def test_call_backs_are_off_unless_a_director_places_them(make):
+def _fire(ledger, effects, scheduled=0, answer=None, error=None):
+    """Run what the timer would run: fire() for the scheduled unit, posting through a fake."""
+    command = effects.scheduled[scheduled][0]
+    posted = []
+
+    def post(url, body, timeout):
+        posted.append((url, body))
+        if error is not None:
+            raise error
+        return answer or {"ok": True, "ring": {"state": "starter"}}
+    assert command[-3] == str(ledger.path)
+    tools.fire(command[-3], command[-2], command[-1], post=post)
+    return posted
+
+
+def test_call_backs_are_off_unless_configured(make):
     effects = FakeEffects([CALL_BACK, ("cancel_callback", {})])
     call, said, clock = make(effects)
     _user_says(call, clock, "Ring meg om fem.")
-    assert effects.posts == [] and [r["status"] for r in _receipts(said)] == ["refused", "refused"]
+    assert effects.scheduled == [] and [r["status"] for r in _receipts(said)] == ["refused", "refused"]
     assert "schedule_callback" not in [t["name"] for t in effects.bodies[0]["tools"]]
 
 
-def test_a_call_back_is_handed_to_the_director_once_bound_to_the_calling_phone(make, ledger):
+def test_a_call_back_is_a_timer_that_hands_it_over_once_bound_to_the_calling_phone(make, ledger):
     effects = FakeEffects([("schedule_callback", {"minutes": 90, "reason": "status"})])
     call, said, clock = make(effects, **CB)
     _user_says(call, clock, "Ring meg om fem.")
-    [body] = effects.to(RING)
-    assert body["action"] == "schedule" and body["minutes"] == 30 and "supersedes" not in body
-    assert (body["recipient_principal"], body["agent_session"], body["call_id"], body["host_id"]) == (
-        "device_phone", "rk-sander-0001", "call-1", "host-1")
-    assert body["operation_id"] == _receipts(said)[0]["operation_id"] and _receipts(said)[0]["status"] == "scheduled"
+    command, delay, unit = effects.scheduled[0]
+    assert delay == 30 * 60 and command[1] == "-c" and "fire" in command[2]
+    receipt = _receipts(said)[0]
+    assert receipt["status"] == "scheduled"
+    posted = _fire(ledger, effects)
+    [(url, body)] = posted
+    assert url == RING and body["request_id"] == body["operation_id"] == receipt["operation_id"]
+    assert (body["recipient_principal"], body["agent_session"], body["call_id"]) == ("device_phone", "rk-sander-0001", "call-1")
     row = next(iter(_rows(ledger).values()))
-    assert (row["status"], row["operation_id"], row["recipient_principal"]) == (tools.DONE, body["operation_id"], "device_phone")
+    assert (row["status"], row["fire"], row["unit"]) == (tools.DONE, "fired", unit)
+    assert _fire(ledger, effects) == []                       # the same timer again, or a restarted one: never twice
 
 
 def test_a_phone_that_cannot_take_a_live_call_back_gets_none(make):
@@ -493,7 +556,7 @@ def test_a_phone_that_cannot_take_a_live_call_back_gets_none(make):
     effects.recipients = set()
     call, said, clock = make(effects, **CB)
     _user_says(call, clock, "Ring meg om fem.")
-    assert effects.posts == [] and _receipts(said)[0]["status"] == "refused"
+    assert effects.scheduled == [] and _receipts(said)[0]["status"] == "refused"
 
 
 def test_the_caller_principal_can_never_be_the_agent_itself(make):
@@ -505,12 +568,11 @@ def test_asking_again_in_the_same_call_keeps_the_one_already_scheduled(make):
     effects = FakeEffects([CALL_BACK, CALL_BACK])
     call, said, clock = make(effects, **CB)
     _user_says(call, clock, "Ring meg om fem. Ring meg om fem, ja.")
-    _user_says(call, clock, "Husk å ringe meg.")
-    assert len(effects.to(RING)) == 1
-    assert [r["status"] for r in _receipts(said)] == ["already_scheduled", "already_scheduled"]
+    assert len(effects.scheduled) == 1
+    assert [r["status"] for r in _receipts(said)] == ["scheduled", "already_scheduled"]
 
 
-def test_a_new_call_supersedes_the_pending_call_back_and_other_phones_have_their_own(make, ledger):
+def test_a_new_call_supersedes_and_the_old_timer_refuses_to_fire(make, ledger):
     first = FakeEffects([CALL_BACK])
     call, said, clock = make(first, **CB)
     _user_says(call, clock, "Ring meg om fem.")
@@ -518,119 +580,90 @@ def test_a_new_call_supersedes_the_pending_call_back_and_other_phones_have_their
     second = FakeEffects([("schedule_callback", {"minutes": 2, "reason": "status"})])
     call, said, clock = make(second, call_id="call-2", **CB)
     _user_says(call, clock, "Ring meg heller om to minutter.")
-    [body] = second.to(RING)
     receipt = _receipts(said)[0]
-    assert body["supersedes"] == old and receipt["superseded"] == old and receipt["operation_id"] != old
+    assert receipt["superseded"] == old and receipt["operation_id"] != old
+    assert second.stopped == [first.scheduled[0][2]]
+    assert _fire(ledger, first) == []                         # the old timer, if it still ran: refused
+    assert len(_fire(ledger, second)) == 1
     other = FakeEffects([CALL_BACK])
     call, said, clock = make(other, call_id="call-3", principal="device_other", **CB)
     _user_says(call, clock, "Ring meg om fem.")
-    assert "supersedes" not in other.to(RING)[0]
-    assert len(_rows(ledger)) == 2                            # one slot per (Host, principal, agent)
+    assert "superseded" not in _receipts(said)[0] and len(_rows(ledger)) == 2
 
 
-def test_a_supersede_the_director_certainly_did_not_take_keeps_the_earlier_call_back(make, ledger):
+def test_ikke_ring_likevel_cancels_and_the_timer_then_refuses(make, ledger):
     first = FakeEffects([CALL_BACK])
     call, said, clock = make(first, **CB)
     _user_says(call, clock, "Ring meg om fem.")
-    old = _receipts(said)[0]["operation_id"]
-    second = FakeEffects([CALL_BACK])
-    second.url_errors[RING] = tools.Unreachable("connection refused")
-    call, said, clock = make(second, call_id="call-2", **CB)
-    _user_says(call, clock, "Ring meg om fem i stedet.")
-    assert _receipts(said)[0]["status"] == "failed"
-    row = next(iter(_rows(ledger).values()))
-    assert (row["operation_id"], row["status"]) == (old, tools.DONE)
-
-
-def test_ikke_ring_likevel_cancels_the_pending_call_back_at_the_director(make, ledger):
-    first = FakeEffects([CALL_BACK])
-    call, said, clock = make(first, **CB)
-    _user_says(call, clock, "Ring meg om fem.")
-    op = _receipts(said)[0]["operation_id"]
     cancel = FakeEffects([("cancel_callback", {})])
     call, said, clock = make(cancel, call_id="call-2", **CB)
     _user_says(call, clock, "Ikke ring likevel.")
-    assert cancel.to(RING) == [{"action": "cancel", "operation_id": op, "recipient_principal": "device_phone",
-                                "agent_session": "rk-sander-0001", "call_id": "call-2", "host_id": "host-1"}]
-    assert _receipts(said)[0]["status"] == "cancelled"
+    assert _receipts(said)[0]["status"] == "cancelled" and cancel.stopped == [first.scheduled[0][2]]
+    assert _fire(ledger, first) == []                         # even if the stop failed, the ledger refuses
     again = FakeEffects([("cancel_callback", {})])
     call, said, clock = make(again, call_id="call-3", **CB)
     _user_says(call, clock, "Ikke ring.")
-    assert again.posts == [] and _receipts(said)[0]["status"] == "nothing_pending"
+    assert _receipts(said)[0]["status"] == "nothing_pending"
     later = FakeEffects([CALL_BACK])
     call, said, clock = make(later, call_id="call-4", **CB)
     _user_says(call, clock, "Ring meg likevel om fem.")
-    assert "supersedes" not in later.to(RING)[0] and _receipts(said)[0]["status"] == "scheduled"
+    assert _receipts(said)[0]["status"] == "scheduled" and "superseded" not in _receipts(said)[0]
 
 
-@pytest.mark.parametrize("error, status", [(tools.Unconfirmed("timeout"), "unknown"),
-                                           (tools.Refused("HTTP 409"), "failed")])
-def test_a_cancel_the_director_did_not_confirm_never_claims_cancelled(make, error, status):
+def test_a_cancel_after_the_timer_fired_is_too_late_and_says_so(make, ledger):
     first = FakeEffects([CALL_BACK])
-    call, _said, clock = make(first, **CB)
-    _user_says(call, clock, "Ring meg om fem.")
-    cancel = FakeEffects([("cancel_callback", {})])
-    cancel.url_errors[RING] = error
-    call, said, clock = make(cancel, call_id="call-2", **CB)
-    _user_says(call, clock, "Ikke ring likevel.")
-    assert _receipts(said)[0]["status"] == status
-
-
-@pytest.mark.parametrize("second_error, status", [(None, "already_scheduled"), (tools.Unconfirmed("timeout"), "unknown")])
-def test_an_unconfirmed_schedule_is_reconciled_with_the_same_operation_id_only(make, ledger, second_error, status):
-    first = FakeEffects([CALL_BACK])
-    first.url_errors[RING] = tools.Unconfirmed("timeout")
     call, said, clock = make(first, **CB)
     _user_says(call, clock, "Ring meg om fem.")
-    assert _receipts(said)[0]["status"] == "unknown"
-    op = first.to(RING)[0]["operation_id"]
-    second = FakeEffects([("schedule_callback", {"minutes": 2, "reason": "x"})])
-    if second_error:
-        second.url_errors[RING] = second_error
-    call, said, clock = make(second, call_id="call-2", **CB)
-    _user_says(call, clock, "Ring meg om to.")
-    [body] = second.to(RING)
-    assert body == first.to(RING)[0] and body["operation_id"] == op       # the same intent, nothing new
+    _fire(ledger, first)
+    cancel = FakeEffects([("cancel_callback", {})])
+    call, said, clock = make(cancel, call_id="call-2", **CB)
+    _user_says(call, clock, "Ikke ring likevel.")
+    assert _receipts(said)[0]["status"] in ("too_late", "nothing_pending")
+
+
+@pytest.mark.parametrize("error, fire", [(tools.Unconfirmed("timeout"), "unknown"), (RuntimeError("boom"), "unknown"),
+                                         (tools.Refused("HTTP 409"), "failed"), (tools.Unreachable("refused"), "failed")])
+def test_the_fired_receipt_is_truthful_and_never_retried(make, ledger, error, fire):
+    effects = FakeEffects([CALL_BACK])
+    call, said, clock = make(effects, **CB)
+    _user_says(call, clock, "Ring meg om fem.")
+    assert len(_fire(ledger, effects, error=error)) == 1
+    assert next(iter(_rows(ledger).values()))["fire"] == fire
+    assert _fire(ledger, effects) == []
+
+
+@pytest.mark.parametrize("state, status, again", [("active", "scheduled", False), ("absent", "failed", True),
+                                                  ("unknown", "unknown", False)])
+def test_an_uncertain_launch_is_reconciled_by_its_unit_never_relaunched_blindly(make, ledger, state, status, again):
+    effects = FakeEffects([CALL_BACK])
+    effects.later_error = (tools.Unconfirmed("systemd-run failed"), state)
+    call, said, clock = make(effects, **CB)
+    _user_says(call, clock, "Ring meg om fem.")
     assert _receipts(said)[0]["status"] == status
+    if state == "unknown":
+        assert _fire(ledger, effects) == []                   # an unconfirmed timer never fires
+    retry = FakeEffects([CALL_BACK])
+    retry.timers = dict(effects.timers)
+    call, _said, clock = make(retry, call_id="call-1", **CB)    # the same call asks again (a reconnect)
+    _user_says(call, clock, "Ring meg om fem.")
+    assert bool(retry.scheduled) is again
 
 
-def test_a_call_back_being_handed_over_is_unknown_never_already_scheduled(make, ledger):
+def test_a_call_back_being_scheduled_is_unknown_and_a_crash_claim_is_reconciled_by_its_unit(make, ledger):
     first = FakeEffects([CALL_BACK])
     call, _said, clock = make(first, **CB)
     _user_says(call, clock, "Ring meg om fem.")
     slot = next(iter(_rows(ledger)))
-    ledger.update(slot, status=tools.CLAIMED)               # another route is handing it over right now
+    ledger.update(slot, status=tools.CLAIMED)
     second = FakeEffects([CALL_BACK])
+    second.timers = dict(first.timers)
     call, said, clock = make(second, call_id="call-2", **CB)
     _user_says(call, clock, "Ring meg om fem.")
-    assert second.posts == [] and _receipts(said)[0]["status"] == "unknown"
-    _age(ledger, slot, tools.STALE_CLAIM_S + 1)             # ...or a crash left it: reconcile with the same op id
-    third = FakeEffects([CALL_BACK])
-    call, said, clock = make(third, call_id="call-3", **CB)
+    assert second.scheduled == [] and _receipts(said)[0]["status"] == "unknown"
+    _age(ledger, slot, tools.STALE_CLAIM_S + 1)
+    call, said, clock = make(second, call_id="call-3", **CB)
     _user_says(call, clock, "Ring meg om fem.")
-    assert third.to(RING) == first.to(RING) and _receipts(said)[0]["status"] == "already_scheduled"
-
-
-@pytest.mark.parametrize("error", [RuntimeError("boom"), tools.Unconfirmed("timeout")])
-def test_an_unclear_schedule_is_unknown_not_failed(make, ledger, error):
-    effects = FakeEffects([CALL_BACK])
-    effects.url_errors[RING] = error
-    call, said, clock = make(effects, **CB)
-    _user_says(call, clock, "Ring meg om fem.")
-    assert _receipts(said)[0]["status"] == "unknown"
-    assert next(iter(_rows(ledger).values()))["status"] == tools.UNCONFIRMED
-
-
-def test_a_schedule_the_director_certainly_did_not_take_may_be_asked_again(make):
-    first = FakeEffects([CALL_BACK])
-    first.url_errors[RING] = tools.Unreachable("connection refused")
-    call, said, clock = make(first, **CB)
-    _user_says(call, clock, "Ring meg om fem.")
-    assert _receipts(said)[0]["status"] == "failed"
-    second = FakeEffects([CALL_BACK])
-    call, said, clock = make(second, call_id="call-2", **CB)
-    _user_says(call, clock, "Ring meg om fem.")
-    assert _receipts(said)[0]["status"] == "scheduled" and "supersedes" not in second.to(RING)[0]
+    assert second.scheduled == [] and _receipts(said)[0]["status"] == "already_scheduled"
 
 
 # ---- one owner per effect: the director owns hand-out and call back -------------------
@@ -645,7 +678,7 @@ def test_a_director_owned_profile_never_prompts_members_and_never_schedules_a_ri
         effects.post_error = error
         call, said, clock = make(effects, call_id=f"call-{error!r}", **settings)
         _user_says(call, clock, "Ta sak 182 og ring meg om fem.")
-        assert len(effects.posts) == 1 and effects.to(RING) == [] and effects.prompts == []
+        assert len(effects.posts) == 1 and effects.scheduled == [] and effects.prompts == []
         assert {"schedule_callback", "cancel_callback"}.isdisjoint(t["name"] for t in effects.bodies[0]["tools"])
 
 
