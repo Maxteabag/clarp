@@ -230,7 +230,10 @@ def tools_schema(cfg: dict) -> list[dict]:
 
 # ---- side effects (replaceable in tests) -------------------------------------------------
 
-DELEGATE_HTTP_TIMEOUT_S = 5
+# The director answers only once the hand-out really happened: its first answer waits for the tested team start
+# (regi's own bound is 40 s). A shorter timeout would turn a delivered hand-out into "unconfirmed".
+DELEGATE_HTTP_TIMEOUT_S = 50
+CALLBACK_HTTP_TIMEOUT_S = 10
 CLARP_ADMIN_REFUSED = 4         # clarp-admin prompt: the Host refused it, nothing was sent
 
 
@@ -768,7 +771,7 @@ class CallTools:
     def _tell_director(self, body: dict) -> dict:
         """POST to the director; returns its answer or raises Unreachable / Unconfirmed / Refused."""
         url = self.cfg["callback"]["url"]
-        return self._effect(lambda: self.effects.post(url, body, DELEGATE_HTTP_TIMEOUT_S))
+        return self._effect(lambda: self.effects.post(url, body, CALLBACK_HTTP_TIMEOUT_S))
 
     def _callback(self, arguments: dict) -> dict:
         receipt = {"tool": "schedule_callback"}
