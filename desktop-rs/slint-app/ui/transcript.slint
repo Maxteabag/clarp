@@ -806,16 +806,17 @@ component TranscriptRow inherits HorizontalLayout {
             Image { source: @image-url("icons/copy.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
             copy := TouchArea { clicked => { root.copy-message(root.message.id); } }
         }
-        // Next to it: the message as plain text to select from.
+        // Next to it: the message as plain text to select from. Its icon is
+        // made only while the message is hovered (no layer per row for a
+        // faded-out icon), its click area always.
         if root.message.author != "activity" && root.message.author != "live" && root.message.receipt.key == "": Rectangle {
             x: parent.width - 42px * ChatText.scale;
             y: 2px;
             width: 18px * ChatText.scale;
             height: 18px * ChatText.scale;
-            opacity: hover.has-hover || select-touch.has-hover ? 1 : 0;
             accessible-role: button;
             accessible-label: "Select text";
-            Image { source: @image-url("icons/select-text.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
+            if hover.has-hover || select-touch.has-hover: Image { source: @image-url("icons/select-text.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
             select-touch := TouchArea { clicked => { root.select-message(root.message.id); } }
         }
         VerticalLayout {
