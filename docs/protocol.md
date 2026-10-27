@@ -259,8 +259,12 @@ Rules:
   first page and must be continued with
   `delivery_bootstrap=1&delivery_since=<cursor>&delivery_until=<B>&delivery_stop_generation=<G>`
   until `delivery_more` is false. Expired means: reload the chat and
-  bootstrap again. A `/send` 200 may carry the same `delivery` (never
-  `stopped`); every 503 body is unchanged.
+  bootstrap again. A `/send` 200 carries no `delivery`: the client learns it
+  only from `GET /log`; every 503 body is unchanged. The fields are served
+  only when the Host can bind the answering runtime process to the runtime
+  unit's main process with one bounded manager read per `/log` response
+  (the runtime reports its pid, start time, boot, cgroup and invocation in an
+  internal `attestation` status field); otherwise they are omitted.
 - A growing assistant reply appears as one message whose `text` and `revision`
   change on successive deltas. Replace it in place.
 
@@ -373,7 +377,7 @@ Event types and payloads:
 | `agent-roster` | `kind` ∈ created, relaunched, forked, deleted, persona-created, persona-updated, persona-deleted, portrait-selected, backend-quota, contact-assigned, agent-renamed, janitor-changed, janitor-attention, stale-work (absent on the reconnect nudge); optional `session`, `persona`, `voice_id`, `backend`, `name` | Refetch the snapshot. `created`, `relaunched`, `forked` for a session you have cached means that session's conversation is new: discard the cache. |
 | `agent-focus` | `session`, `agent_id` | Server-wide focus moved (someone called `/select`, or hands-free routing picked an agent). Update `focused` flags. A client may follow focus or ignore it; the PWA follows, the native app follows only in hands-free mode. |
 | `queue-updated` | `agent_id`, `session`, `queue_depth`, `queue_paused`, `queue_started`, `queue_revision`, optional `client_msg_id` | The agent's pending-turn queue changed (a send while busy was queued, started, or the queue was paused by `/stop`). |
-| `delivery-updated` | `agent_id`, `session`, `message_id`, `delivery` | F4 (feature `send_delivery_state`, NOT advertised until its contract number is booked; never emitted before then): a user send's delivery state changed. A hint only: clients re-read `GET /log` (`delivery_since`) and merge from there. `delivery` = `{state: pending_launch\|stopped\|handed_over, rev, seq, for: {client_msg_id, trace_id}}`. |
+| `delivery-updated` | `agent_id`, `session`, `message_id` | F4 (feature `send_delivery_state`, NOT advertised until its contract number is booked; never emitted before then): a user send's delivery state may have changed. An invalidation hint only, carrying NO state: clients re-read `GET /log` (`delivery_since`) and merge from there, and never merge the hint itself into history or cursors. Replay of a stored event drops any older `delivery` field. |
 | `user-notification` | `notification_id`, `agent_id`, `session`, `persona`, `done_ts`, `source_message_id`, `cause_message_id`, `origin`, `push`, `badge`, `unread`, `muted`, `preview`, `reason` | The server decided this completed turn deserves the user's attention. Badge and mark unread from this event only; never infer it from state changes. |
 | `audio` | `clip_id`, `url`, `name`, `session`, `agent_id`, `persona`, `trace_id`, `streamable`, `delivery`, `stream_url`, `playlist_url`, `complete_url`, `audio_format`, `preview`; a cross-agent clip adds `herald`; a cached phrase adds `voice_id`, `phrase_key`, `cached_phrase`; a replayed clip adds `voice_id`, `replay`; a message replay adds `ts`; a clip of a listen-first opening turn adds `call_id` and `opening` (ring id, token, epoch, kind and admission id; see agent-rings.md) | A voice clip is ready. See §6. |
 | `tts-error` | `session`, `agent_id`, `persona`, `message`, `error` | Synthesis failed; tell the user instead of playing silence. |
@@ -701,6 +705,21 @@ Returns 404 for an unknown job, otherwise:
   declared `background` state it left behind settles to `idle`, and
   `agent-roster` with `kind: "stale-work"` asks for a refetch. Janitor
   labels keep their own validity window.
+
+### Delivery admission in `GET /status`
+
+`delivery_admission` is process-local health of the F4 delivery admission
+(reset when the Host restarts; never used to admit anything). It has fixed
+keys: `scope` ("process"), `reset_on` ("process_restart"), `gate`
+(`inflight_limit` 1, `rate_per_s` 2, `burst` 2, `probes_per_log_response` 1,
+`inflight_now`, `tokens_now`), `probes` (`started`, `reaped`, `bound`,
+`last_duration_ms`), `omitted` (one counter per fixed reason),
+`unexpected_by_type` (at most 16 exception type names plus `_other`) and
+`reconcile` (`passes`, `laps`, `last_lap_ms`, `failures`,
+`consecutive_failures`, `last_failure_type`, `refused`, `findings` per fixed
+kind). Reading it does no database, manager, runtime or file access. It is at
+most 8 KiB; past that it is `{"overflow": true, "serialized_bytes", "limit",
+"scope"}`.
 
 ### Runtime status in `GET /status`
 

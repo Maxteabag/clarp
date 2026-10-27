@@ -225,6 +225,56 @@ def prune(stamp: int) -> dict:
     return deleted
 
 
+# Process-local, health-only counters of the reconcile phase (GET /status). Never an
+# admission input; a failure writes nothing to the database. Closed keys.
+FINDING_KINDS = ("orphan_missing", "orphan_legacy", "orphan_other", "stale")
+_RECONCILE_HEALTH: dict = {}
+_HEALTH_LOCK = threading.Lock()
+_HEALTH_MAX = (1 << 53) - 1
+
+
+def reset_health_for_tests() -> None:
+    with _HEALTH_LOCK:
+        _RECONCILE_HEALTH.clear()
+        _RECONCILE_HEALTH.update({"passes": 0, "laps": 0, "last_lap_ms": None, "failures": 0,
+                                  "consecutive_failures": 0, "last_failure_type": None, "refused": 0,
+                                  "findings": {kind: 0 for kind in FINDING_KINDS}})
+
+
+reset_health_for_tests()
+
+
+def record_reconcile_pass(done: dict) -> None:
+    with _HEALTH_LOCK:
+        if done.get("refused"):
+            _RECONCILE_HEALTH["refused"] = min(_HEALTH_MAX, _RECONCILE_HEALTH["refused"] + 1)
+            return
+        _RECONCILE_HEALTH["passes"] = min(_HEALTH_MAX, _RECONCILE_HEALTH["passes"] + 1)
+        _RECONCILE_HEALTH["consecutive_failures"] = 0
+        if done.get("wrapped"):
+            _RECONCILE_HEALTH["laps"] = min(_HEALTH_MAX, _RECONCILE_HEALTH["laps"] + 1)
+            _RECONCILE_HEALTH["last_lap_ms"] = max(0, int(now_ms()))
+        findings = _RECONCILE_HEALTH["findings"]
+        for kind in FINDING_KINDS:
+            findings[kind] = min(_HEALTH_MAX, findings[kind] + int((done.get("kinds") or {}).get(kind, 0)))
+
+
+def record_reconcile_failure(exc: BaseException) -> None:
+    import re
+    name = type(exc).__name__
+    with _HEALTH_LOCK:
+        _RECONCILE_HEALTH["failures"] = min(_HEALTH_MAX, _RECONCILE_HEALTH["failures"] + 1)
+        _RECONCILE_HEALTH["consecutive_failures"] = min(_HEALTH_MAX, _RECONCILE_HEALTH["consecutive_failures"] + 1)
+        _RECONCILE_HEALTH["last_failure_type"] = (
+            name if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", name) else "_other")
+
+
+def health_snapshot() -> dict:
+    with _HEALTH_LOCK:
+        return {**{k: v for k, v in _RECONCILE_HEALTH.items() if k != "findings"},
+                "findings": dict(_RECONCILE_HEALTH["findings"])}
+
+
 def reconcile() -> dict:
     """The Host maintenance pass's pointer phase: find delivery pointers that an
     older (pre-F4) runtime left inconsistent, and make every cursor that could
@@ -250,9 +300,17 @@ def reconcile() -> dict:
     all in ONE write transaction (a concurrent admission is either committed and
     valid, or not visible). RECONCILE_CURSOR_KEY resumes the next pass after the
     last pointer read; a short page wraps it, so the whole prefix is covered in
-    ceil(pointers / RECONCILE_LIMIT) passes, never in one."""
+    ceil(pointers / RECONCILE_LIMIT) passes, never in one. It refuses (and writes
+    nothing) inside a caller's transaction rather than joining it."""
     low_all, high = settings_store._prefix_range(POINTER_PREFIX)
-    done = {"read": 0, "orphans": 0, "stale": 0, "reset_to": 0, "wrapped": False}
+    done = {"read": 0, "orphans": 0, "stale": 0, "reset_to": 0, "wrapped": False, "refused": False,
+            "kinds": {kind: 0 for kind in FINDING_KINDS}}
+    if db.conn().in_transaction:
+        # Never join a caller's transaction: this pass must take the writer lock itself.
+        from .log import log
+        log("launchReceiptReconcileRefused", "a caller transaction is open")
+        done["refused"] = True
+        return done
     with _write():
         after = settings_store.get_text(RECONCILE_CURSOR_KEY)
         low = after + "\x00" if after.startswith(POINTER_PREFIX) else low_all
@@ -267,9 +325,12 @@ def reconcile() -> dict:
             if (receipt is None or _count(receipt.get("seq")) != seq or receipt.get("trace_id") != trace
                     or str(receipt.get("agent_id") or "") != agent):
                 orphans.append(key)
+                done["kinds"]["orphan_missing" if receipt is None else
+                              "orphan_legacy" if not _count(receipt.get("seq")) else "orphan_other"] += 1
             elif receipt_at != at:
                 settings_store.set_text(key, trace, updated_at=receipt_at)
                 done["stale"] += 1
+                done["kinds"]["stale"] += 1
         settings_store.delete_keys(orphans)
         done["orphans"], done["read"] = len(orphans), len(rows)
         if orphans or done["stale"]:

@@ -42,7 +42,23 @@ def record_sse_event(event: dict[str, Any]) -> int:
     return event_id
 
 
-def _decode_event_row(row: sqlite3.Row) -> dict[str, Any]:
+_DELIVERY_HINT = "delivery-updated"
+_DELIVERY_HINT_IDENTITY = ("session", "agent_id", "message_id")
+
+
+def _egress(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """F4: a stored ``delivery-updated`` row leaves as the identity hint only.
+    A deprecated stored ``delivery`` projection is dropped on the way out (the
+    stored row is never rewritten); a row without its identity is not sent."""
+    if payload.get("type") != _DELIVERY_HINT:
+        return payload
+    payload.pop("delivery", None)
+    if not all(isinstance(payload.get(k), str) and payload.get(k) for k in _DELIVERY_HINT_IDENTITY):
+        return None
+    return payload
+
+
+def _decode_event_row(row: sqlite3.Row) -> dict[str, Any] | None:
     try:
         payload = json.loads(row["payload"])
     except (TypeError, json.JSONDecodeError):
@@ -50,7 +66,7 @@ def _decode_event_row(row: sqlite3.Row) -> dict[str, Any]:
     payload.setdefault("event_id", int(row["event_id"]))
     payload.setdefault("ts", int(row["ts"]))
     payload.setdefault("type", row["type"])
-    return payload
+    return _egress(payload)
 
 
 def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
@@ -62,7 +78,7 @@ def events_after(event_id: int, limit: int = 500) -> list[dict[str, Any]]:
             LIMIT ?""",
         (max(0, int(event_id)), max(1, min(limit, 5000))),
     ).fetchall()
-    return [_decode_event_row(row) for row in rows]
+    return [event for event in map(_decode_event_row, rows) if event is not None]
 
 
 def recent_events(window_ms: int, limit: int = 500) -> list[dict[str, Any]]:
@@ -75,7 +91,7 @@ def recent_events(window_ms: int, limit: int = 500) -> list[dict[str, Any]]:
             LIMIT ?""",
         (cutoff, max(1, min(limit, 5000))),
     ).fetchall()
-    events = [_decode_event_row(row) for row in rows]
+    events = [event for event in map(_decode_event_row, rows) if event is not None]
     latest_singletons: dict[str, dict[str, Any]] = {}
     ordered: list[dict[str, Any]] = []
     for event in events:

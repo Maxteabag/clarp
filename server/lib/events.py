@@ -90,7 +90,7 @@ FIELDS: dict[str, tuple[str, ...]] = {
         "agent_id", "session", "queue_depth", "queue_paused", "queue_started",
         "queue_revision", "client_msg_id",
     ),
-    SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id", "delivery"),
+    SSEType.DELIVERY_UPDATED: ("session", "agent_id", "message_id"),
     SSEType.ARTIFACT_UPDATED: ("session", "agent_id", "artifact_id"),
     SSEType.ATTENTION_UPDATED: ("attention_count",),
     SSEType.BACKGROUND_JOB_UPDATED: (
@@ -318,15 +318,14 @@ def queue_updated(*, session: str, agent_id: str, queue_depth: int,
     ])
 
 
-def delivery_updated(*, session: str, agent_id: str, message_id: str,
-                     delivery: dict) -> Event:
-    """F4: a send's delivery state changed. A HINT only: clients re-read
-    /log (delivery_since) and merge from there."""
+def delivery_updated(*, session: str, agent_id: str, message_id: str) -> Event:
+    """F4: a send's delivery state may have changed. An invalidation HINT only,
+    carrying no state: clients re-read /log (delivery_since) and merge from
+    there; a hint is never merged into history or cursors."""
     return _build(SSEType.DELIVERY_UPDATED, [
         ("session", session),
         ("agent_id", agent_id),
         ("message_id", message_id),
-        ("delivery", delivery),
     ])
 
 
