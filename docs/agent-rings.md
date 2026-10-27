@@ -362,9 +362,13 @@ physical phone.
 
 `agent_call_live` advertises `POST /calls/live`. Snapshot agents carry
 `call_mode: "agent_live_v1"` for an operator opt-in, otherwise `"classic"`.
-An unreadable, ambiguous or overflowing profile registry yields `"unavailable"`:
-clients must refuse unknown modes and Live without the feature, never silently
-start Normal. Discovery does not check or open the provider.
+The Host persists observed opt-in session bindings in existing settings before
+advertising them. Unreadable profiles retain known Live defaults; unrelated
+Normal agents remain classic. A complete readable explicit opt-out restores
+Normal. The POST refuses incomplete, ambiguous or overflowing registries. A
+never-readable profile grants no opt-in. Clients refuse unknown modes and Live
+without the feature, never silently start Normal. Discovery does not check or
+open the provider.
 
 A paired full-scope Live-capable phone posts exactly
 `{agent: <raw snapshot agent_id>, request_id, client_nonce}`. The Host requires

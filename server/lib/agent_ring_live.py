@@ -253,40 +253,71 @@ USER_CALL_ORIGIN = "user_call"
 PROFILE_SCAN_LIMIT = 64
 
 
-def user_call_profiles() -> dict[str, str]:
-    """Bounded complete opt-in index. Never guess after an unreadable or partial scan."""
+USER_CALL_BINDINGS_KEY = "agent_ring.user_call_bindings"
+
+
+def user_call_profiles(*, strict: bool = True) -> dict[str, str | None]:
+    """Bounded registry admission with durable, fail-closed discovery of known opt-ins.
+
+    A malformed unrelated profile cannot disable Normal calls. Previously observed
+    Live sessions stay Live until a readable profile explicitly opts them out; the
+    strict POST scan still refuses an incomplete or ambiguous registry.
+    """
     import os
-    matches = {}
-    try:
-        with os.scandir(ROOT / "profiles") as entries:
-            folders = []
-            for entry in entries:
-                if len(folders) >= PROFILE_SCAN_LIMIT:
-                    raise CallError(409, CONTEXT_UNAVAILABLE)
-                folders.append(entry)
-        for entry in folders:
-            if not _PROFILE_ID.fullmatch(entry.name) or not entry.is_dir(follow_symlinks=False):
-                raise CallError(409, CONTEXT_UNAVAILABLE)
-            path = pathlib.Path(entry.path) / "profile.json"
-            with path.open("rb") as handle:
-                raw = handle.read(65537)
-            if len(raw) > 65536:
-                raise CallError(409, CONTEXT_UNAVAILABLE)
-            data = json.loads(raw)
-            if not isinstance(data, dict) or data.get("profile_id") != entry.name:
-                raise CallError(409, CONTEXT_UNAVAILABLE)
-            if data.get(USER_CALL_DEFAULT_KEY) == "live":
-                session = data.get("agent_session")
-                if not isinstance(session, str) or not session or session in matches:
-                    raise CallError(409, CONTEXT_UNAVAILABLE)
-                matches[session] = entry.name
-    except FileNotFoundError:
-        # Only an absent root is an empty registry; a missing profile is uncertainty.
-        if (ROOT / "profiles").exists():
+    from . import settings_store
+    from . import agent_rings
+    with agent_rings._lock:
+        raw = settings_store.get(USER_CALL_BINDINGS_KEY)
+        try:
+            known = set(json.loads(raw)) if raw else set()
+            if any(not isinstance(session, str) or not session for session in known):
+                raise ValueError("invalid binding")
+        except (ValueError, TypeError):
             raise CallError(409, CONTEXT_UNAVAILABLE) from None
-    except (OSError, ValueError):
-        raise CallError(409, CONTEXT_UNAVAILABLE) from None
-    return matches
+        matches, normal, uncertain = {}, set(), False
+        try:
+            with os.scandir(ROOT / "profiles") as entries:
+                folders = []
+                for entry in entries:
+                    if len(folders) >= PROFILE_SCAN_LIMIT:
+                        uncertain = True
+                        break  # detected overflow; strict admission below always refuses
+                    folders.append(entry)
+            for entry in folders:
+                try:
+                    if not _PROFILE_ID.fullmatch(entry.name) or not entry.is_dir(follow_symlinks=False):
+                        raise ValueError("invalid profile folder")
+                    with (pathlib.Path(entry.path) / "profile.json").open("rb") as handle:
+                        raw_profile = handle.read(65537)
+                    if len(raw_profile) > 65536:
+                        raise ValueError("profile too large")
+                    data = json.loads(raw_profile)
+                    if not isinstance(data, dict) or data.get("profile_id") != entry.name:
+                        raise ValueError("invalid profile")
+                    session = data.get("agent_session")
+                    if not isinstance(session, str) or not session:
+                        raise ValueError("missing binding")
+                    if data.get(USER_CALL_DEFAULT_KEY) == "live":
+                        if session in matches:
+                            uncertain = True
+                        matches[session] = entry.name
+                    else:
+                        normal.add(session)
+                except (OSError, ValueError):
+                    uncertain = True
+        except FileNotFoundError:
+            uncertain = bool(known)
+        except OSError:
+            uncertain = True
+        # An explicit readable opt-out clears its observed binding only after a
+        # complete scan, so another unreadable/overflowed opt-in cannot be hidden.
+        if not uncertain:
+            known -= normal - matches.keys()
+        known.update(matches)
+        settings_store.set_text(USER_CALL_BINDINGS_KEY, json.dumps(sorted(known)))
+        if uncertain and strict:
+            raise CallError(409, CONTEXT_UNAVAILABLE)
+        return {session: matches.get(session) for session in known}
 
 
 def user_call_profile_id(agent: dict) -> str | None:
