@@ -729,7 +729,14 @@ observation (one RPC of at most 0.5 s); each is clamped to what is left. When
 nothing is left before a step, or a step times out or fails, every delivery
 field is omitted and the step is counted (`deadline_exhausted`,
 `o1_unavailable`, `o2_unavailable`); nothing is retried and no partial field or
-cursor is returned. The `start_mismatch` reason counts any main start time the Host could not
+cursor is returned. A first observation that misses the shared status first
+takes the request's manager-read permit (the same 1 in flight / 2 per second
+gate), so no status RPC starts while that gate is exhausted; its result refreshes
+the shared status only if that is free at that moment and holds nothing newer.
+While the shared status is busy (another status read in flight) the delivery
+fields are omitted (`status_contended`) rather than waiting or reading twice. A
+failed observation is logged at most once per step and exception type per 10 s
+(type name only); every one is counted. The `start_mismatch` reason counts any main start time the Host could not
 confirm equal: a different start, a process that is gone, or an unreadable
 `/proc` entry (fail-closed; it is not evidence of a different process). Reading
 it does no database, manager, runtime or file access. It is at

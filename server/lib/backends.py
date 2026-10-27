@@ -42,6 +42,9 @@ _STATUS_LOCK = threading.Lock()
 _STATUS_CACHE: tuple[Any | None, float, dict | None, BaseException | None] = (
     None, 0.0, None, None)
 _clock = time.monotonic
+# Bumped (under _STATUS_LOCK) whenever the window is reconfigured or invalidated,
+# so a status fetched before that is never stored into it afterwards.
+_STATUS_GENERATION = 0
 
 
 def configure_runtime_client(client: Any | None) -> None:
@@ -53,9 +56,10 @@ def configure_runtime_client(client: Any | None) -> None:
 
 def invalidate_runtime_status() -> None:
     """Forget the shared status window, e.g. right after this process dispatched."""
-    global _STATUS_CACHE
+    global _STATUS_CACHE, _STATUS_GENERATION
     with _STATUS_LOCK:
         _STATUS_CACHE = (None, 0.0, None, None)
+        _STATUS_GENERATION += 1
 
 
 def runtime_status(*, max_age: float | None = None) -> dict:
@@ -85,20 +89,44 @@ def runtime_status(*, max_age: float | None = None) -> dict:
         return result if isinstance(result, dict) else {}
 
 
-def peek_runtime_status(*, max_age: float) -> dict | None:
-    """The shared status result if it is a success at most ``max_age`` seconds
-    old, else None. Never waits for, starts or refreshes an RPC (for a caller
-    with its own deadline; a busy cache counts as a miss)."""
+def peek_runtime_status(*, max_age: float) -> tuple[str, dict | None, int]:
+    """For a caller with its own deadline (F4 O1): ("hit", result, generation)
+    for a success at most ``max_age`` seconds old, ("miss", None, generation)
+    otherwise, or ("busy", None, -1) when the window's lock is held (another
+    caller's shared RPC may be in flight: the caller omits rather than wait or
+    start a duplicate). Never waits for, starts or refreshes an RPC."""
     if not _STATUS_LOCK.acquire(blocking=False):
-        return None
+        return "busy", None, -1
     try:
         client, fetched_at, result, error = _STATUS_CACHE
+        generation = _STATUS_GENERATION
     finally:
         _STATUS_LOCK.release()
     if (_RUNTIME_CLIENT is None or client is not _RUNTIME_CLIENT or error is not None
             or not isinstance(result, dict) or _clock() - fetched_at >= max_age):
-        return None
-    return result
+        return "miss", None, generation
+    return "hit", result, generation
+
+
+def offer_runtime_status(client: Any, result: dict, *, fetched_at: float, generation: int) -> bool:
+    """Store a successful status this caller fetched itself (F4 O1, bounded RPC)
+    into the shared window, stamped with when its RPC STARTED. Only if the lock
+    is free right now (never waits), ``client`` is still the configured one,
+    nothing reconfigured or invalidated the window since ``generation`` and the
+    entry there is not newer. status(), its default timeout and runtime_status()
+    are unchanged for every other caller."""
+    global _STATUS_CACHE
+    if not _STATUS_LOCK.acquire(blocking=False):
+        return False
+    try:
+        current_client, current_at = _STATUS_CACHE[0], _STATUS_CACHE[1]
+        if (client is not _RUNTIME_CLIENT or generation != _STATUS_GENERATION
+                or (current_client is client and current_at >= fetched_at)):
+            return False
+        _STATUS_CACHE = (client, fetched_at, dict(result), None)
+        return True
+    finally:
+        _STATUS_LOCK.release()
 
 
 @dataclass(frozen=True)
