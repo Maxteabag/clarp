@@ -669,6 +669,7 @@ class Handler(BaseHTTPRequestHandler):
         "/calls/ring/settings": "_handle_calls_ring_settings_post",
         "/calls/ring/voip-token": "_handle_calls_ring_voip_token",
         "/calls/ring/device": "_handle_calls_ring_device",
+        "/calls/live": "_handle_calls_live",
         "/calls/ring/live/close": "_handle_calls_ring_live_close",
         "/calls/ring/live/fallback": "_handle_calls_ring_live_fallback",
         "/oracle/handoffs/ack": "_handle_oracle_handoff_ack",
@@ -4510,6 +4511,15 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_calls_ring_live_socket(self):
         from lib.agent_ring_live_socket import serve
         return serve(self)
+
+    def _handle_calls_live(self):
+        def work(rings, principal, data):
+            from lib import agent_ring_live as live
+            live.require_device(principal)
+            if set(data) != {"agent", "request_id", "client_nonce"}:
+                raise rings.CallError(400, live.REQUEST_INVALID)
+            return rings.user_call_live(principal, data["agent"], data["request_id"], data["client_nonce"])
+        return self._calls_ring_run(work)
 
     def _handle_calls_ring_live_close(self):
         from lib import agent_ring_live
