@@ -356,3 +356,31 @@ another device owns. Legacy tokens registered before this are unbound and still 
 provenance and gets no ring alerts; a re-paired phone with a new device id cannot take the old id's token until an
 explicit owner release is designed. Provenance means token possession by an authenticated device, not proof of the
 physical phone.
+
+
+## User-initiated Live calls (contract 75)
+
+`agent_call_live` advertises `POST /calls/live`. Snapshot agents carry
+`call_mode: "agent_live_v1"` for an operator opt-in, otherwise `"classic"`.
+An unreadable, ambiguous or overflowing profile registry yields `"unavailable"`:
+clients must refuse unknown modes and Live without the feature, never silently
+start Normal. Discovery does not check or open the provider.
+
+A paired full-scope Live-capable phone posts exactly
+`{agent: <raw snapshot agent_id>, request_id, client_nonce}`. The Host requires
+one profile bound to the agent session with `user_call_default: "live"`, a
+nonempty `user_call_opening`, and pinned `stories.user_call` file keys. It builds
+a truthful `user_call` / `user-initiated` context with no event. This returns the
+existing answered Live envelope directly; no answer hop, GET discovery, push,
+chat notice, incoming CallKit or group call. The public ring has `origin:
+"user_call"`; grant fields and gpt-live-1/marin remain unchanged.
+
+The principal's request id binds the raw agent and nonce. Exact replays return
+the same grant; conflicts fail before another ring is persisted. Its persisted
+join deadline is 60 seconds, checked at the deadline without extending on replay.
+An expired unjoined call is retired; a joined call is not subject to that expiry.
+Only an authenticated, valid one-use WebSocket join opens the provider. Existing
+socket and close controls apply. User calls refuse classic fallback; incoming
+Live rings retain their existing explicit fallback. Normal `/calls`, group calls,
+and CLI `--oracle --context-file` rings are unchanged. This feature changes no
+schema and does not authorize a production profile edit or a real call.
