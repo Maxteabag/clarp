@@ -61,6 +61,32 @@ jobs:
         with:
           workspaces: desktop-rs
           shared-key: desktop-debug
+      - name: Retained reply ordering negative control
+        working-directory: desktop-rs
+        run: |
+          set -euo pipefail
+          # This contains the disappearance fix, before its ordering correction.
+          baseline=6a80900dd7c44972a393d285a47c4dbfb6ba7ad3
+          git fetch --no-tags --depth=1 origin "$baseline"
+          file=core/src/history_fold.rs
+          cp "$file" /tmp/history-fold-candidate.rs
+          trap 'cp /tmp/history-fold-candidate.rs "$file"' EXIT
+          git show "$baseline:desktop-rs/$file" > "$file"
+          set +e
+          cargo test --locked -p clarp-core --test history_fold retained_final_stays_between_prompts_sent_during_and_after_its_reply -- --exact > /tmp/reply-order-baseline.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/reply-order-baseline.log
+          test "$rc" -eq 101
+          grep -F 'the final must not move above the prompt sent during work' /tmp/reply-order-baseline.log
+          grep -F '0 passed; 1 failed;' /tmp/reply-order-baseline.log
+          cp /tmp/history-fold-candidate.rs "$file"
+          trap - EXIT
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reply-order-negative-control
+          path: /tmp/reply-order-baseline.log
       - name: Unit and contract tests
         working-directory: desktop-rs
         # pipefail: without it the job takes tee's exit code and a failing

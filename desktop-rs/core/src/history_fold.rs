@@ -144,7 +144,13 @@ fn retain_unfiled_messages(rows: &[Message], live: Option<&LiveView>, options: &
         if pieces.is_empty() {
             continue;
         }
-        let started = turn.get("started_at_ms").and_then(Value::as_i64);
+        // A final can begin after another prompt was sent while this turn
+        // was working. Anchor the reply by its own time, not the turn
+        // start, so retaining it does not move it above that prompt.
+        let started = pieces.iter().filter_map(|piece| match piece {
+            Piece::Entry(entry) => entry.started_at_ms,
+            Piece::Row(_) => None,
+        }).min().or_else(|| turn.get("started_at_ms").and_then(Value::as_i64));
         let next = rows.iter().find(|row| row.role == "user" && row.trace_id != trace
             && started.is_some_and(|start| ms(row).is_some_and(|time| time > start)));
         folded.folds.push(Fold {
