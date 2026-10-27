@@ -279,7 +279,7 @@ def _admit(agent: dict, records: list[dict]) -> None:
     if mine and now - mine[-1]["created_at"] < AGENT_INTERVAL_MS:
         wait = (AGENT_INTERVAL_MS - (now - mine[-1]["created_at"]) + 999) // 1000
         raise CallError(429, "wait before calling again", retry_after_s=int(wait))
-    if sum(1 for r in records if now - r["created_at"] < HOUR_MS) >= HOURLY_LIMIT:
+    if sum(1 for r in records if not r.get("_user_call") and now - r["created_at"] < HOUR_MS) >= HOURLY_LIMIT:
         raise CallError(429, "too many calls this hour")
 
 
