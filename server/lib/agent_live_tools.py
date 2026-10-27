@@ -55,8 +55,8 @@ import subprocess
 import sys
 import threading
 import time
-import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler
 
@@ -143,7 +143,6 @@ def frozen_config(profile: dict, story: str) -> dict | None:
 
     def invalid(why: str) -> None:
         log("agentLiveToolsInvalid", f"profile={profile.get('profile_id')} {why}")
-        return None
     agents = []
     for row in block.get("agents") or []:
         if not isinstance(row, dict) or not isinstance(row.get("session"), str) or \
@@ -261,7 +260,6 @@ def _post(url: str, body: dict, timeout: float = COMMAND_TIMEOUT_S) -> dict:
     """POST JSON to a validated loopback URL: no proxy, no redirect, outcome classified truthfully.
 
     A 2xx counts only when its body does not say otherwise ({"ok": false} or an "error")."""
-    import socket
     from urllib.error import HTTPError, URLError
     from urllib.request import ProxyHandler, Request, build_opener
     if _loopback_url(url) is None:
@@ -277,7 +275,7 @@ def _post(url: str, body: dict, timeout: float = COMMAND_TIMEOUT_S) -> dict:
         if exc.code in (404, 405):
             raise Unreachable(f"HTTP {exc.code}") from None
         raise Refused(f"HTTP {exc.code}") from None
-    except (TimeoutError, socket.timeout) as exc:
+    except TimeoutError as exc:
         raise Unconfirmed(type(exc).__name__) from None
     except URLError as exc:
         if isinstance(exc.reason, ConnectionRefusedError):
@@ -332,7 +330,7 @@ class Effects:
         """One Clarp prompt; raises Refused (exit 4: nothing sent) or Unconfirmed (anything else unclear)."""
         try:
             result = subprocess.run(_clarp_admin() + ["prompt", "--to", to, "--from", sender, "--text", text],
-                                    capture_output=True, text=True, timeout=COMMAND_TIMEOUT_S)
+                                    capture_output=True, text=True, timeout=COMMAND_TIMEOUT_S, check=False)
         except subprocess.TimeoutExpired:
             raise Unconfirmed("clarp-admin timeout") from None
         if result.returncode == CLARP_ADMIN_REFUSED:
