@@ -550,9 +550,11 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 "draining": self._draining,
                 "release_id": self.release_id,
                 "instance": self.instance,
-                "attestation": self.attestation,
                 "drain": self._drain_status(),
                 **dict(self.status_provider()),
+                # Computed here, AFTER the provider's fields, so a provider can never replace it
+                # (ROOT 9b2c02cb R-c).
+                "attestation": self.attestation,
             }}
         if method == "recover_queued":
             return {"ok": True,
