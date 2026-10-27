@@ -430,6 +430,25 @@ def test_replay_strips_a_stored_delivery_without_rewriting_the_row():
     assert events.FIELDS[events.SSEType.DELIVERY_UPDATED] == ("session", "agent_id", "message_id")
 
 
+def test_a_malformed_identity_is_dropped_from_replay_only_and_replay_moves_past_it():
+    hint = {"type": "delivery-updated", "session": "s", "agent_id": "a", "message_id": "m"}
+    start = int(db.conn().execute("SELECT COALESCE(MAX(event_id), 0) FROM sse_events").fetchone()[0])
+    first = sse_store.record_sse_event(dict(hint, delivery={"state": "pending_launch"}, extra="x"))
+    malformed = [dict(hint, session=""), {k: v for k, v in hint.items() if k != "agent_id"},
+                 dict(hint, message_id=7), dict(hint, agent_id=None)] * 3          # 12 consecutive bad rows
+    bad = [sse_store.record_sse_event(event) for event in malformed]
+    last = sse_store.record_sse_event(dict(hint, message_id="m2"))
+    def rows():
+        return [tuple(r) for r in db.conn().execute("SELECT event_id, payload FROM sse_events ORDER BY event_id")]
+    stored = rows()
+    out = sse_store.events_after(start, limit=2)
+    assert [e["event_id"] for e in out] == [first, last], "a page of dropped rows never stalls the cursor"
+    assert all(set(e) == {"type", "session", "agent_id", "message_id", "event_id", "ts"} for e in out)
+    assert sse_store.events_after(first, limit=1) == [out[1]] and sse_store.events_after(last) == []
+    assert not {e["event_id"] for e in sse_store.recent_events(10 ** 9)} & set(bad)
+    assert rows() == stored, "replay rewrites no stored row and makes up no id"
+
+
 # --- egress gate (source) -------------------------------------------------------------------
 
 def test_no_f4_projection_leaves_the_host_outside_the_log_bracket():
