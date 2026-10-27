@@ -486,6 +486,26 @@ def test_the_runtime_relay_reads_past_dropped_hints_and_relays_valid_ones_identi
         "a client's since-cursor reads the same valid rows; the internal marker never reaches it"
 
 
+def test_a_hint_the_runtime_emits_is_relayed_live_as_the_identity_only():
+    from lib.runtime_events import _RUNTIME_MARKER, RuntimeEventStream, RuntimeEventWatcher
+
+    class Recording:
+        def __init__(self):
+            self.events = []
+
+        def broadcast_ephemeral(self, event):
+            self.events.append(dict(event))
+    relay = Recording()
+    watcher = RuntimeEventWatcher(relay)
+    events.broadcast(RuntimeEventStream(), events.delivery_updated(session="s", agent_id="a", message_id="m"))
+    watcher._poll_once()
+    [sent] = relay.events
+    assert set(sent) == {"type", "session", "agent_id", "message_id", "event_id", "ts"}
+    assert (sent["type"], sent["session"], sent["agent_id"], sent["message_id"]) == ("delivery-updated", "s", "a", "m")
+    [replayed] = sse_store.events_after(sent["event_id"] - 1)
+    assert replayed == sent and _RUNTIME_MARKER not in replayed, "a client replays the same hint without the marker"
+
+
 def test_the_replay_strip_is_scoped_to_delivery_updated_only():
     others = [{"type": "agent-status", "session": "s", "agent_id": "a", "delivery": {"kept": True}, "n": 1},
               {"type": "agent-focus", "session": "s", "agent_id": "a", "message_id": 5},
