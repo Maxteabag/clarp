@@ -241,7 +241,7 @@ def test_a_task_is_delegated_only_to_allowlisted_members_as_the_agent_itself(mak
     _user_says(call, clock, "Kan teamet ta sak 182?")
     assert [(to, sender) for to, sender, _ in effects.prompts] == [("drammen-jonas", "rk-sander-0001"),
                                                                   ("drammen-noel", "rk-sander-0001")]
-    assert [r["status"] for r in _receipts(said)] == ["handed_off", "handed_off", "refused"]
+    assert [r["status"] for r in _receipts(said)] == ["forwarded", "forwarded", "refused"]
     assert said[-1][0] == "thinking" and "not that it is done" in said[-1][1]
     assert effects.bodies[0]["tools"][0]["parameters"]["properties"]["agent"]["enum"] == ["drammen-jonas", "drammen-noel"]
 
@@ -339,268 +339,189 @@ def test_a_closed_call_routes_and_says_nothing_more(make):
 
 # ---- delegation: one durable operation per intent ---------------------------------------
 
-def test_a_delegation_is_one_operation_across_routes_reconnects_calls_and_restarts(make, ledger):
-    first = FakeEffects([ASK, ASK])
-    call, said, clock = make(first, call_id="call-1")
-    _user_says(call, clock, "Ta sak 182.")
-    assert [r["status"] for r in _receipts(said)] == ["handed_off", "already_handed_off"]
-    operation = _receipts(said)[0]["operation_id"]
-    assert f"[{operation}]" in first.prompts[0][2]
-    tools.Ledger(ledger.path)                               # a Host restart reads the same file
-    second = FakeEffects([ASK])
-    call, said, clock = make(second, call_id="call-2")
-    _user_says(call, clock, "Ta sak 182.")
-    assert second.prompts == [] and _receipts(said)[0]["operation_id"] == operation
-    row = _rows(ledger)[operation]
-    assert (row["status"], row["call_id"], row["principal"], row["agent_session"], row["host_id"]) == (
-        tools.DONE, "call-1", "device_phone", "rk-sander-0001", "host-1")
-
-
-def test_a_claim_left_by_a_crash_mid_send_is_never_sent_again(make, ledger):
-    call, _said, clock = make(FakeEffects([ASK]))
-    _user_says(call, clock, "Ta sak 182.")
-    operation = next(iter(_rows(ledger)))
-    ledger.update(operation, status=tools.CLAIMED)           # as if the Host died between claim and outcome
-    again = FakeEffects([ASK])
-    call, said, clock = make(again, call_id="call-2")
-    _user_says(call, clock, "Ta sak 182.")
-    assert again.prompts == [] and _receipts(said)[0]["status"] == "pending"
-
-
-
 def _age(ledger, key, seconds):
     rows = _rows(ledger)
     rows[key]["at"] -= seconds
     ledger.path.write_text(json.dumps(rows))
 
 
-@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unknown_delivery")])
-def test_a_stale_crash_claim_is_reconciled_never_resent(make, ledger, arrived, status):
-    first = FakeEffects([ASK])
-    call, _said, clock = make(first)
-    _user_says(call, clock, "Ta sak 182.")
-    operation = next(iter(_rows(ledger)))
-    ledger.update(operation, status=tools.CLAIMED)
-    _age(ledger, operation, tools.STALE_CLAIM_S + 1)
-    again = FakeEffects([ASK])
-    if arrived:
-        again.inbox = list(first.inbox)
-    call, said, clock = make(again, call_id="call-2")
-    _user_says(call, clock, "Ta sak 182.")
-    assert again.prompts == [] and _receipts(said)[0]["status"] == status
+
+# ---- delegate_to_agent against regi (schema v1): exact receipts, regi owns dedupe ---------
+
+def _v1(outcome, sent=False, intent="a1b2c3d4e5f60718", intent_status="venter", reason=None, **extra):
+    return {"sesjon": 1, "agent": "jonas", "intent": intent, "outcome": outcome, "intent_status": intent_status,
+            "base_task": "already_started", "additions_used": 1, "additions_max": 3, "reason": reason,
+            "sent": sent, "ok": sent, **extra}
 
 
-def test_an_unclassified_delivery_failure_is_unknown_and_never_retried(make, ledger):
-    effects = FakeEffects([ASK])
-    effects.prompt_error = (RuntimeError("boom"), True)
-    call, said, clock = make(effects)
+class Regi(FakeEffects):
+    """An isolated fake regi: answers from a script, records every POST and GET."""
+
+    def __init__(self, calls=(), answers=(), gets=()):
+        super().__init__(calls)
+        self.answers, self.gets, self.get_answers = list(answers), [], list(gets)
+
+    def post(self, url, body, timeout=30):
+        self.posts.append((url, body))
+        answer = self.answers.pop(0) if self.answers else _v1("already_present", True, intent_status="sendt")
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    def get(self, url, timeout=30):
+        self.gets.append(url)
+        answer = self.get_answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+REGI = {"delegate": {"kind": "http", "url": DIRECTOR, "fallback": "none",
+                     "reconcile_url": "http://127.0.0.1:7790/regi/sandra/intent"}}
+
+
+@pytest.mark.parametrize("answer, status", [
+    (_v1("queued"), "queued_at_regi"),
+    (_v1("forwarded", True, intent_status="sendt"), "forwarded"),
+    (_v1("forwarded", False, intent_status="venter"), "unknown_delivery"),       # forwarded only when sent:true
+    (_v1("already_present", True, intent_status="sendt"), "already_present"),
+    (_v1("already_present", False, intent_status="venter"), "already_present"),
+    (_v1("already_present", False, intent_status="feil"), "unknown_delivery"),
+    (_v1("queued", False, intent_status="sender"), "pending_unknown"),
+    (_v1("not_forwarded", intent_status=None, reason="cap_reached"), "not_forwarded"),
+    ({"ok": True, "result": "forwarded"}, "unknown_delivery"),                     # missing schema fields
+])
+def test_every_regi_answer_maps_to_its_exact_receipt(make, answer, status):
+    effects = Regi([ASK], [answer])
+    call, said, clock = make(effects, **REGI)
+    _user_says(call, clock, "Ta sak 182.")
+    receipt = _receipts(said)[0]
+    assert receipt["status"] == status
+    assert "handed_off" not in json.dumps(receipt)
+    assert status != "forwarded" or receipt["sent"] is True
+    if "intent" in answer:
+        assert receipt["intent"] == answer["intent"]                              # regi's hash, never our own
+    if status == "not_forwarded":
+        assert receipt["reason"] == "cap_reached" and "nothing was sent" in receipt["note"]
+
+
+@pytest.mark.parametrize("code, body, reason", [
+    (400, {"ok": False, "outcome": "refused", "reason": "empty_request"}, "empty_request"),
+    (413, {"ok": False, "outcome": "refused", "reason": "request_too_large", "max": 4000, "len": 4001}, "request_too_large"),
+    (409, {"ok": False, "outcome": "refused", "reason": "reset_in_progress"}, "reset_in_progress"),
+    (409, {"ok": False, "outcome": "refused", "reason": "unknown_agent"}, "unknown_agent"),
+])
+def test_a_regi_refusal_is_refused_with_its_reason_and_nothing_was_sent(make, code, body, reason):
+    effects = Regi([ASK], [tools.Refused(f"HTTP {code}", code, body)])
+    call, said, clock = make(effects, **REGI)
+    _user_says(call, clock, "Ta sak 182.")
+    receipt = _receipts(said)[0]
+    assert (receipt["status"], receipt["reason"]) == ("refused", reason) and "nothing was sent" in receipt["note"]
+
+
+@pytest.mark.parametrize("error", [tools.Unconfirmed("timeout"), tools.Unconfirmed("answer is not a JSON object"),
+                                   tools.Unreachable("connection refused"),
+                                   tools.Refused("HTTP 502", 502, {}), RuntimeError("boom")])
+def test_an_unclear_regi_answer_is_unknown_delivery_and_never_retried(make, ledger, error):
+    effects = Regi([ASK], [error])
+    call, said, clock = make(effects, **REGI)
     _user_says(call, clock, "Ta sak 182.")
     assert _receipts(said)[0]["status"] == "unknown_delivery"
-    assert next(iter(_rows(ledger).values()))["status"] == tools.UNCONFIRMED
-    effects.prompt_error = None
-    call, said, clock = make(effects, call_id="call-2")
+    call.tick()
+    clock.now += 60
+    call.tick()
+    assert len(effects.posts) == 1 and effects.gets == []                         # no retry, no intent to read
+    row = next(iter(_rows(ledger).values()))
+    assert (row["status"], row["status_text"]) == (tools.UNCONFIRMED, "unknown_delivery")
+
+
+def test_an_empty_or_oversized_request_is_refused_host_side_and_never_sent(make):
+    effects = Regi([("delegate_to_agent", {"agent": "drammen-jonas", "request": "   "}),
+                    ("delegate_to_agent", {"agent": "drammen-noel", "request": "x" * (tools.REQUEST_CHARS + 1)})])
+    call, said, clock = make(effects, **REGI)
+    _user_says(call, clock, "Gjør dette.")
+    assert effects.posts == []
+    assert [(r["status"], r["reason"]) for r in _receipts(said)] == [("refused", "empty_request"),
+                                                                      ("refused", "request_too_large")]
+    assert effects.bodies[0]["tools"][0]["parameters"]["properties"]["request"]["maxLength"] == 4000
+
+
+def test_the_host_never_suppresses_a_follow_up_and_sends_exactly_the_schema_body(make):
+    """No Host text window: the same words again, a new call and another caller each reach regi, which dedupes."""
+    effects = Regi([ASK], [_v1("forwarded", True, intent_status="sendt"),
+                           _v1("already_present", True, intent_status="sendt"),
+                           _v1("already_present", True, intent_status="sendt")])
+    call, said, clock = make(effects, **REGI)
     _user_says(call, clock, "Ta sak 182.")
-    assert len(effects.prompts) == 1 and _receipts(said)[0]["status"] == "already_handed_off"   # found by its marker
-
-
-def test_the_intent_scope_includes_the_caller_and_a_correction_is_a_new_intent(make):
-    effects = FakeEffects([ASK])
-    call, said, clock = make(effects)
+    call, said2, clock = make(effects, call_id="call-2", **REGI)
     _user_says(call, clock, "Ta sak 182.")
-    call, said, clock = make(effects, call_id="call-2", principal="device_other")
+    call, said3, clock = make(effects, call_id="call-3", principal="device_other", **REGI)
     _user_says(call, clock, "Ta sak 182.")
-    assert len(effects.prompts) == 2                                  # another caller is another intent
-    effects.calls = [("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182, men bare API-et"})]
-    call, said, clock = make(effects, call_id="call-3")
-    _user_says(call, clock, "Nei, bare API-et.")
-    assert len(effects.prompts) == 3 and _receipts(said)[0]["status"] == "handed_off"
+    assert len(effects.posts) == 3
+    assert [_receipts(s)[0]["status"] for s in (said, said2, said3)] == ["forwarded", "already_present", "already_present"]
+    assert set(effects.posts[0][1]) == {"call_id", "principal", "from", "agent", "request"}
+    assert effects.posts[0][1]["principal"] == "device_phone" and effects.posts[2][1]["principal"] == "device_other"
 
 
-@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unknown_delivery")])
-def test_an_unconfirmed_prompt_is_reconciled_by_its_marker_never_resent(make, ledger, arrived, status):
-    effects = FakeEffects([ASK])
-    effects.prompt_error = (tools.Unconfirmed("clarp-admin timeout"), arrived)
-    call, said, clock = make(effects)
+def test_the_ledger_is_keyed_by_regi_intent_and_the_caller(make, ledger):
+    effects = Regi([ASK], [_v1("forwarded", True, intent="feedfacecafebeef", intent_status="sendt")])
+    call, said, clock = make(effects, **REGI)
     _user_says(call, clock, "Ta sak 182.")
-    assert _receipts(said)[0]["status"] == "unknown_delivery"
-    effects.prompt_error = None
-    call2, said2, clock2 = make(effects, call_id="call-2")
-    _user_says(call2, clock2, "Ta sak 182.")
-    assert len(effects.prompts) == 1 and _receipts(said2)[0]["status"] == status
+    rows = _rows(ledger)
+    request_row = next(r for k, r in rows.items() if k.startswith("rq-"))
+    intent_row = next(r for k, r in rows.items() if k.startswith("dl-"))
+    assert request_row["status_text"] == intent_row["status_text"] == "forwarded"
+    assert intent_row["intent"] == "feedfacecafebeef" and intent_row["principal"] == "device_phone"
+    expected = "dl-" + tools._digest("host-1", "device_phone", "rk-sander-0001", "drammen-jonas", "feedfacecafebeef")
+    assert expected in rows
 
 
-def test_a_refused_prompt_is_not_done_and_may_be_asked_again(make):
+@pytest.mark.parametrize("first, later, after", [
+    (_v1("queued"), {"intent_status": "sendt", "sent": True}, "forwarded"),
+    (_v1("queued"), {"intent_status": "venter", "sent": False}, "queued_at_regi"),
+    (_v1("queued", intent_status="sender"), {"intent_status": "feil", "sent": False}, "unknown_delivery"),
+])
+def test_a_queued_intent_is_reconciled_with_at_most_one_read_only_get(make, ledger, first, later, after):
+    effects = Regi([ASK], [first], [{"sesjon": 1, "intent": first["intent"], "agent": "jonas", **later}])
+    call, said, clock = make(effects, **REGI)
+    _user_says(call, clock, "Ta sak 182.")
+    clock.now += tools.RECONCILE_AFTER_S + 1
+    call.tick()
+    clock.now += 600
+    call.tick()
+    assert effects.gets == [f"http://127.0.0.1:7790/regi/sandra/intent?sesjon=1&intent={first['intent']}"]
+    assert len(effects.posts) == 1                                                # never a resend
+    row = next(r for k, r in _rows(ledger).items() if k.startswith("dl-"))
+    assert row["status_text"] == after and row["reconciled"] is True
+    assert ("reconciled" in said[-1][1]) is (after == "forwarded")
+
+
+def test_without_a_reconcile_url_nothing_is_read(make):
+    effects = Regi([ASK], [_v1("queued")])
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
+    _user_says(call, clock, "Ta sak 182.")
+    clock.now += 600
+    call.tick()
+    assert effects.gets == []
+
+
+def test_an_unreachable_regi_falls_back_to_a_prompt_only_when_configured(make):
+    effects = Regi([ASK], [tools.Unreachable("connection refused")])
+    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"})
+    _user_says(call, clock, "Ta sak 182.")
+    assert len(effects.prompts) == 1 and _receipts(said)[0]["status"] == "forwarded"
+
+
+def test_a_refused_or_unclear_prompt_is_never_called_forwarded(make):
     effects = FakeEffects([ASK])
     effects.prompt_error = (tools.Refused("refused"), False)
     call, said, clock = make(effects)
     _user_says(call, clock, "Ta sak 182.")
-    assert _receipts(said)[0]["status"] == "failed"
-    effects.prompt_error = None
+    assert _receipts(said)[0]["status"] == "refused"
+    effects.prompt_error = (tools.Unconfirmed("clarp-admin timeout"), True)
     call, said, clock = make(effects, call_id="call-2")
     _user_says(call, clock, "Ta sak 182.")
-    assert len(effects.prompts) == 2 and _receipts(said)[0]["status"] == "handed_off"
-
-
-@pytest.mark.parametrize("error, prompted, status", [
-    (None, 0, "handed_off"),
-    (tools.Unreachable("connection refused"), 1, "handed_off"),
-    (tools.Unconfirmed("timeout"), 0, "unknown_delivery"),
-    (tools.Refused("HTTP 400", 400, {"ok": False, "result": "refused", "reason": "tom beskjed"}), 0, "refused"),
-])
-def test_a_director_delegation_falls_back_only_when_it_certainly_did_not_arrive(make, error, prompted, status):
-    effects = FakeEffects([ASK])
-    effects.post_error = error
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"})
-    _user_says(call, clock, "Ta sak 182.")
-    body = effects.posts[0][1]
-    assert body["operation_id"].startswith("dl-") and body["principal"] == "device_phone"
-    assert body["from"] == "rk-sander-0001"
-    assert len(effects.prompts) == prompted and _receipts(said)[0]["status"] == status
-
-
-def test_an_unconfirmed_director_delegation_is_reconciled_with_the_same_operation_id_only(make):
-    effects = FakeEffects([ASK])
-    effects.post_error = tools.Unconfirmed("timeout")
-    call, _said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"})
-    _user_says(call, clock, "Ta sak 182.")
-    effects.post_error = tools.Unreachable("connection refused")      # the director is down now
-    call, said, clock = make(effects, call_id="call-2", delegate={"kind": "http", "url": DIRECTOR, "fallback": "prompt"})
-    _user_says(call, clock, "Ta sak 182.")
-    ids = {body["operation_id"] for _url, body in effects.posts}
-    assert len(effects.posts) == 2 and len(ids) == 1 and effects.prompts == []   # never the prompt route
-    assert _receipts(said)[0]["status"] == "failed"
-
-
-def test_without_a_fallback_an_unreachable_director_is_a_failure(make):
-    effects = FakeEffects([ASK])
-    effects.post_error = tools.Unreachable("connection refused")
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta sak 182.")
-    assert effects.prompts == [] and _receipts(said)[0]["status"] == "failed"
-
-
-
-def test_an_oversized_instruction_is_refused_never_cut(make):
-    long = "x" * (tools.REQUEST_CHARS + 1)
-    effects = FakeEffects([("delegate_to_agent", {"agent": "drammen-jonas", "request": long})])
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta alt dette.")
-    receipt = _receipts(said)[0]
-    assert effects.posts == [] and (receipt["status"], receipt["error"], receipt["max"]) == ("refused", "request_too_large", 4000)
-    assert effects.bodies[0]["tools"][0]["parameters"]["properties"]["request"]["maxLength"] == 4000
-
-
-@pytest.mark.parametrize("answer, status", [
-    ({"ok": True, "result": "started", "sent_now": True}, "task_started"),       # the prepared team task went out
-    ({"ok": True, "result": "started", "sent_now": False}, "task_started"),
-    ({"ok": True, "result": "forwarded", "sent_now": True}, "handed_off"),
-    ({"ok": True, "result": "forwarded", "sent_now": False}, "accepted"),         # never claimed as sent
-    ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": True}, "queued"),          # regi queued it: not delivered yet
-    ({"ok": True, "result": "already_present", "delivered": "sendt"}, "already_present"),
-    ({"ok": True, "result": "already_present", "delivered": "ukjent"}, "unknown_delivery"),  # regi itself does not know
-    ({"ok": True, "result": "already_present", "delivered": "sender"}, "pending"),       # regi is sending it now
-    ({"ok": True, "sesjon": 1, "agent": "jonas", "ny": False}, "not_forwarded"),   # regi kept its one addition
-])
-def test_a_receipt_says_what_the_director_actually_did(make, answer, status):
-    class Director(FakeEffects):
-        def post(self, url, body, timeout=30):
-            self.posts.append((url, body))
-            return answer
-    effects = Director([ASK])
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta sak 182.")
-    receipt = _receipts(said)[0]
-    assert receipt["status"] == status and receipt["director"] == {k: v for k, v in answer.items() if k != "ok"}
-    assert ("NOT sent" in receipt.get("note", "")) is (status == "not_forwarded")
-    assert ("not yet confirmed" in receipt.get("note", "")) is (status in ("queued", "pending"))
-    assert status != "handed_off" or answer.get("sent_now") is True
-
-
-@pytest.mark.parametrize("code, body, status, retry_sends", [
-    (409, {"ok": False, "result": "not_forwarded", "reason": "maks 3 tillegg per agent per sesjon er nådd"},
-     "not_forwarded", True),
-    (409, {"ok": False, "result": "not_forwarded", "reason": "nullstilling pågår"}, "not_forwarded", True),
-    (413, {"ok": False, "result": "refused", "error": "request_too_large"}, "refused", True),
-    (502, {"ok": False, "result": "not_forwarded", "reason": "sending til agenten feilet"}, "unknown_delivery", False),
-])
-def test_a_regi_refusal_is_reported_as_regi_said_and_only_a_certain_one_may_be_asked_again(make, code, body, status,
-                                                                                         retry_sends):
-    class Director(FakeEffects):
-        answers = [tools.Refused(f"HTTP {code}", code, body)]
-
-        def post(self, url, body_, timeout=30):
-            self.posts.append((url, body_))
-            if self.answers:
-                raise self.answers.pop(0)
-            return {"ok": True, "result": "already_present", "delivered": "sendt"}
-    effects = Director([ASK])
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta sak 182.")
-    receipt = _receipts(said)[0]
-    assert receipt["status"] == status and (receipt.get("note") or "")
-    call, said, clock = make(effects, call_id="call-2", delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta sak 182.")
-    second = _receipts(said)[0]
-    assert len({body["operation_id"] for _url, body in effects.posts}) == 1   # never a new operation
-    if retry_sends:                                   # certainly not passed on: asked again as a fresh attempt
-        assert "reconciled" not in second and second["status"] == "already_present"
-    else:                                             # 502 may have been sent: only reconciled, same operation
-        assert second["reconciled"] is True and second["status"] == "already_present"
-
-
-
-@pytest.mark.parametrize("error", [tools.Unreachable("connection refused"),
-                                   tools.Refused("HTTP 409", 409, {"ok": False, "result": "not_forwarded",
-                                                                   "reason": "nullstilling pågår"})])
-def test_a_failed_re_ask_never_downgrades_an_earlier_delivery(make, ledger, error):
-    effects = FakeEffects([ASK])
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta sak 182.")
-    operation = _receipts(said)[0]["operation_id"]
-    effects.post_error = error
-    call, said, clock = make(effects, call_id="call-2", delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta sak 182.")
-    receipt = _receipts(said)[0]
-    assert receipt["earlier"] == "handed_off" and receipt["status"] in ("failed", "not_forwarded")
-    row = _rows(ledger)[operation]
-    assert (row["status"], row["outcome"]) == (tools.DONE, "handed_off")
-
-def test_ny_false_is_already_present_only_for_the_very_text_regi_holds(make):
-    class Director(FakeEffects):
-        def post(self, url, body, timeout=30):
-            self.posts.append((url, body))
-            return {"ok": True, "sesjon": 7, "agent": "jonas", "ny": len(self.posts) == 1}
-    effects = Director([ASK])
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta sak 182.")
-    assert _receipts(said)[0]["status"] == "queued"
-    call, said, clock = make(effects, call_id="call-2", principal="device_other", delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Ta sak 182.")                    # another caller, the same words regi already holds
-    assert _receipts(said)[0]["status"] == "already_present"
-    effects.calls = [("delegate_to_agent", {"agent": "drammen-jonas", "request": "Og legg til eksport"})]
-    call, said, clock = make(effects, call_id="call-3", delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Og legg til eksport.")
-    receipt = _receipts(said)[0]
-    assert receipt["status"] == "not_forwarded" and "one addition per member per session" in receipt["note"]
-
-
-
-
-
-def test_a_text_the_director_did_not_pass_on_stays_not_forwarded_and_is_never_called_handed_off(make, ledger):
-    class Director(FakeEffects):
-        def post(self, url, body, timeout=30):
-            self.posts.append((url, body))
-            return {"ok": True, "sesjon": 1, "agent": "jonas", "ny": False}
-    effects = Director([("delegate_to_agent", {"agent": "drammen-jonas", "request": "Og legg til en eksport"})])
-    call, said, clock = make(effects, delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Og legg til en eksport.")
-    assert _receipts(said)[0]["status"] == "not_forwarded"
-    assert "handed_off" not in json.dumps(call.taken)
-    call, said, clock = make(effects, call_id="call-2", delegate={"kind": "http", "url": DIRECTOR})
-    _user_says(call, clock, "Og legg til en eksport.")
-    assert _receipts(said)[0]["status"] == "not_forwarded" and _receipts(said)[0]["asked_again"] is True
-    assert len({body["operation_id"] for _u, body in effects.posts}) == 1    # regi asked again, same operation
+    assert _receipts(said)[0]["status"] == "unknown_delivery"
 
 
 # ---- call backs: a Host transient timer that hands the call back once to the director ----
@@ -811,9 +732,11 @@ def test_the_real_post_is_loopback_only_never_proxied_or_redirected_and_reads_th
         assert tools._post(base + "/ok", {}) == {"ok": True}
         with pytest.raises(tools.Unreachable):
             tools._post(base + "/missing", {})
-        for path in ("/down", "/bad", "/lies"):
-            with pytest.raises(tools.Refused):
+        for path in ("/down", "/bad"):
+            with pytest.raises(tools.Refused) as refused:
                 tools._post(base + path, {})
+            assert refused.value.code in (503, 400)
+        assert tools._post(base + "/lies", {}) == {"ok": False, "error": "busy"}   # 2xx: the caller reads it
         for path, timeout in (("/moved", 5), ("/slow", 0.3)):
             with pytest.raises(tools.Unconfirmed):
                 tools._post(base + path, {}, timeout=timeout)
@@ -849,7 +772,7 @@ def test_a_live_call_routes_the_users_turn_and_tells_the_voice_what_was_done(opt
     call.up.push({"type": "session.input_transcript.delta", "delta": "Sandra, kan Jonas ta sak 182?"})
     _wait(lambda: call.up.of("session.thinking.append"))
     note = call.up.of("session.thinking.append")[0]["content"]
-    assert '"handed_off"' in note and effects.prompts[0][:2] == ("drammen-jonas", "rk-sander-0001")
+    assert '"forwarded"' in note and effects.prompts[0][:2] == ("drammen-jonas", "rk-sander-0001")
     assert "real tools" in call.up.of("session.start")[0]["session"]["instructions"]
     assert not any(f["type"].startswith("session.thinking") for f in h.wfile.frames())   # nothing new to the phone
     h.send({"type": "session.close"})
