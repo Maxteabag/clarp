@@ -388,3 +388,31 @@ def test_concurrent_conflicting_replays_preserve_the_original_grant(opted):
                        "owner_nonce": first["owner_nonce"], "request_id": "close",
                        "call_epoch": first["call_epoch"], "reason": "user_hangup"})
     _refused(409, "live_call_stale", _call)
+
+
+def test_unchanged_discovery_and_unrelated_profile_damage_do_not_write_database(opted):
+    from lib import db
+    live.user_call_profiles(strict=False)
+    statements = []
+    connection = db.conn()
+    connection.set_trace_callback(statements.append)
+    try:
+        assert live.user_call_profiles(strict=False)["rk-sander-0001"] == PROFILE
+        _write(opted.folder.parent / "broken" / "profile.json", "{")
+        assert live.user_call_profiles(strict=False)["rk-sander-0001"] == PROFILE
+    finally:
+        connection.set_trace_callback(None)
+    assert not [sql for sql in statements if sql.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE", "REPLACE"))]
+    assert not connection.in_transaction
+
+
+def test_binding_persistence_failure_cannot_advertise_success_or_silent_normal(opted, monkeypatch):
+    import sqlite3
+    from lib import settings_store
+    from lib.snapshot import build_agent_snapshot
+    live.user_call_profiles(strict=False)
+    def fail(*args, **kwargs):
+        raise sqlite3.OperationalError("simulated persistence failure")
+    monkeypatch.setattr(settings_store, "set_text", fail)
+    with pytest.raises(sqlite3.OperationalError, match="simulated persistence failure"):
+        build_agent_snapshot(None)
