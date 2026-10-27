@@ -352,9 +352,10 @@ def test_f_round_trip_keeps_every_receipt_state_and_retry_answer(clock, legacy, 
     remaining = []
     for agent in ("ag", "bg"):
         for key, trace, at in _pointers(agent):
-            receipt_at = next(a for k, _v, a in _receipt_rows() if k == lr.PREFIX + trace)
+            receipt_at = {k: a for k, _v, a in _receipt_rows()}.get(lr.PREFIX + trace)
             receipt = lr.get(trace)
-            assert receipt is not None and receipt["seq"] == lr._pointer_seq(key) and receipt_at == at
+            assert receipt is not None and receipt["seq"] == lr._pointer_seq(key) and receipt_at == at, \
+                f"pointer {key} -> {trace} is not valid (orphan or stale)"
             remaining.append(trace)
     assert sorted(remaining) == ["p1", "p3", "q1"], "valid pointers kept, orphans (old, p2) gone"
 
