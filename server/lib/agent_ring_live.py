@@ -298,6 +298,8 @@ def user_call_context(profile_id: str, agent: dict, request_id: Any) -> dict:
     if not _request_id_ok(request_id):
         raise CallError(400, REQUEST_INVALID)
     _folder, profile = _profile(profile_id, agent)
+    if profile.get(USER_CALL_DEFAULT_KEY) != "live":
+        raise CallError(409, CONTEXT_UNAVAILABLE)
     opening = profile.get(USER_CALL_OPENING_KEY)
     if not isinstance(opening, str) or not opening.strip() or len(opening) > OPENING_TEXT_CHARS:
         raise CallError(409, CONTEXT_UNAVAILABLE)
