@@ -384,6 +384,8 @@ def _end(ring_id: str, state: str, *, by: str, allowed=None) -> dict:
         records = _load()
         _settle(records)
         ring = _find(records, ring_id)
+        if ring.get("_user_call") and ring["_user_call"] != by:
+            raise CallError(404, "unknown call")
         if allowed is not None:
             allowed(ring)
         if ring["state"] == state:
@@ -408,6 +410,8 @@ def cancel(caller_agent_id: str, ring_id: str) -> dict:
             raise CallError(403, "an agent can only cancel its own call")
     with _lock:
         ring = _find(_load(), ring_id)
+        if ring.get("_user_call"):
+            raise CallError(404, "unknown call")
         if ring["state"] in FINAL:
             return {"ok": True, "ring": public(ring), "changed": False}
     return _end(ring_id, "cancelled", by=caller_agent_id or "owner", allowed=own)
@@ -521,7 +525,7 @@ def user_call_live(principal: str, agent: Any, request_id: Any, client_nonce: An
     from . import agent_ring_live as live, agents as agents_db
     live.require_device(principal)
     _live_intent(request_id, client_nonce)  # validate everything before persisting a ring
-    if not isinstance(agent, str) or not agent or len(agent.encode("utf-8")) > 128:
+    if not live._request_id_ok(agent):
         raise CallError(400, live.REQUEST_INVALID)
     caller = agents_db.get_by_agent_id(agent)  # exact snapshot raw id; no persona/session resolution
     if caller is None:
