@@ -140,6 +140,11 @@ impl LiveView {
         Some((turn, items.iter().collect()))
     }
 
+    /// Retired live turns remain available until /log has caught up.
+    pub fn retired_turns(&self) -> impl Iterator<Item = (&Object, &[Object])> {
+        self.retired.iter().map(|(turn, items)| (turn, items.as_slice()))
+    }
+
     /// Keeps the held turn and its items when `next` is another turn.
     fn retire(&mut self, next: Option<&Object>) {
         let id = |t: &Object| t.get("turn_id").and_then(Value::as_str).map(str::to_owned);

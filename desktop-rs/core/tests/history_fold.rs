@@ -304,3 +304,52 @@ fn the_phase_says_what_is_commentary_and_the_summary_that_the_turn_is_over() {
     assert_eq!(read(&folded.folds[0]), ["row a1", "Worked for 4s · 1 tool"]);
     assert_eq!(sorted(&folded.hidden_rows), ["a2"], "the commentary stays in view");
 }
+
+/// /live may begin the next turn while a delayed /log delta still lacks the
+/// completed reply. The database can already contain it: these are distinct
+/// delivery channels. Never erase the reply already shown to the reader.
+#[test]
+fn next_send_keeps_completed_reply_until_exact_log_row_arrives() {
+    let prompt = row(&json!({"id":"u-first", "role":"user", "text":"First question",
+        "trace_id":"first", "timestamp":"2026-01-01T00:00:00Z"}));
+    let mut next = row(&json!({"id":"u-next", "role":"user", "text":"Next question",
+        "timestamp":"2026-01-01T00:00:03Z"}));
+    next.pending = true;
+    let mut view = LiveView::new();
+    view.apply_snapshot(json!({"epoch":"test", "lseq":1,
+        "turn":{"turn_id":"first", "status":"completed", "started_at_ms":1767225600100_i64},
+        "items":[{"id":"message-first", "turn_id":"first", "kind":"message",
+            "status":"completed", "phase":"final", "ordinal":1, "row_id":"answer-first", "text":"First answer"}]
+    }).as_object().unwrap());
+    let shown = clarp_core::live_present::present(&view, std::slice::from_ref(&prompt),
+        &clarp_core::live_present::Options::default());
+    assert!(shown.entries.iter().any(|entry| entry.text == "First answer"));
+    view.apply_snapshot(json!({"epoch":"test", "lseq":2,
+        "turn":{"turn_id":"next", "status":"running", "started_at_ms":1767225603100_i64},
+        "items":[]}).as_object().unwrap());
+    let mut rows = vec![prompt, next];
+    // Preserve the handoff even when the old turn had no tools/summary.
+    let opts = Options::default();
+    let missing = present(&rows, Some(&view), &opts);
+    assert_eq!(missing.folds.len(), 1, "the prior answer must not disappear on the new turn");
+    assert_eq!(missing.folds[0].prompt, None, "the final stays after the old work");
+    assert_eq!(missing.folds[0].next.as_deref(), Some("u-next"));
+    let Piece::Entry(entry) = &missing.folds[0].pieces[0] else { panic!("retained message entry") };
+    assert_eq!(entry.text, "First answer");
+    assert_eq!(entry.key, shown.entries[0].key, "keep the already displayed identity");
+    assert!(rows[1].pending && rows[1].text == "Next question", "pending delivery stays untouched");
+    assert!(present(&rows[1..], Some(&view), &opts).folds.is_empty(),
+        "without the original trace-bound prompt, a new/reset conversation must not revive the reply");
+    rows.insert(1, row(&json!({"id":"answer-first", "role":"assistant", "kind":"live",
+        "trace_id":"first", "text":"First", "timestamp":"2026-01-01T00:00:01Z"})));
+    let prefix = present(&rows, Some(&view), &opts);
+    assert!(prefix.hidden_rows.contains("answer-first"), "do not duplicate the unfinished prefix");
+    let Piece::Entry(entry) = &prefix.folds[0].pieces[0] else { panic!("completed reply retained") };
+    assert_eq!(entry.text, "First answer", "never regress to an older prefix on the next send");
+    rows[1] = row(&json!({"id":"answer-first", "role":"assistant", "phase":"final",
+        "trace_id":"first", "text":"First answer", "timestamp":"2026-01-01T00:00:01Z"}));
+    let canonical = present(&rows, Some(&view), &opts);
+    assert!(canonical.folds.is_empty(), "the exact canonical row takes over once");
+    assert!(!canonical.hidden_rows.contains("answer-first"), "canonical reply stays visible");
+    assert_eq!(rows.iter().map(|r|r.id.as_str()).collect::<Vec<_>>(), ["u-first","answer-first","u-next"]);
+}
