@@ -455,6 +455,12 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
         # same release); with release_id it is the runtime identity clients
         # bind their delivery cursors to.
         self.instance = uuid.uuid4().hex
+        # F4: this process's own self-report (cgroup MEMBERSHIP: pid, start time,
+        # boot, cgroup, INVOCATION_ID), an internal status field. The Host binds it
+        # against the manager once per /log bracket (runtime_attestation); it is
+        # None (omitted delivery) when any part is missing, e.g. outside systemd.
+        from .runtime_attestation import self_report
+        self.attestation = self_report()
         self.stop_lease_timeout = max(0.01, float(stop_lease_timeout))
         self._stop_leases: dict[str, tuple[str, dict[str, Any]]] = {}
         self._stop_lease_lock = threading.Lock()
@@ -519,6 +525,7 @@ class RuntimeRPCServer(socketserver.ThreadingMixIn,
                 "draining": self._draining,
                 "release_id": self.release_id,
                 "instance": self.instance,
+                "attestation": self.attestation,
                 "drain": self._drain_status(),
                 **dict(self.status_provider()),
             }}

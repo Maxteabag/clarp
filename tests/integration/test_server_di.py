@@ -4571,10 +4571,43 @@ def test_a_claimed_agent_actor_and_a_user_stop_both_withdraw_the_pending_send(ru
 
 # --- F4 delivery state over HTTP (joint packet 9a96df74; feature not yet advertised) ---------
 
+_RUNTIME_A2 = {"pid": 4242, "start_ticks": 777, "boot_id": "0b8a1f9e-2c3d-4e5f-8a9b-0c1d2e3f4a5b",
+               "cgroup": "/user.slice/user-1000.slice/user@1000.service/app.slice/clarp-runtime.service",
+               "invocation": "3932aee90792440bae6f9c8c5a14c973"}
+
+
+class _FakeManager:
+    """F4 B for the HTTP tests: a fake `systemctl show` (no process) naming _RUNTIME_A2's
+    pid as the unit's main, a fake /proc and boot id, and a clock that moves one second
+    per reading so the 2/s gate never throttles unless a test freezes it."""
+
+    def __init__(self, monkeypatch, *, main=4242):
+        from lib import db, runtime_attestation
+        self.main, self.calls, self.in_tx, self.t, self.frozen = main, 0, [], 1000.0, False
+        a2 = _RUNTIME_A2
+
+        def probe():
+            self.calls += 1
+            self.in_tx.append(db.conn().in_transaction)
+            return 0, (f"MainPID={self.main}\nInvocationID={a2['invocation']}\n"
+                       f"ControlGroup={a2['cgroup']}\nActiveState=active\n").encode(), "", None, True
+
+        def clock():
+            if not self.frozen:
+                self.t += 1.0
+            return self.t
+        monkeypatch.setattr(runtime_attestation, "run_probe", probe)
+        monkeypatch.setattr(runtime_attestation, "CLOCK", clock)
+        monkeypatch.setattr(runtime_attestation, "BOOT_READER", lambda: a2["boot_id"])
+        monkeypatch.setattr(runtime_attestation, "PROC_READER",
+                            lambda pid: a2["start_ticks"] if pid == a2["pid"] else None)
+
+
 def _advertise_delivery(monkeypatch):
     from lib import server_identity
     monkeypatch.setattr(server_identity, "feature_advertised",
                         lambda name: name == server_identity.SEND_DELIVERY_STATE)
+    return _FakeManager(monkeypatch)
 
 
 def _fake_spawn(monkeypatch):
@@ -4596,7 +4629,7 @@ def test_delivery_fields_stay_off_until_the_feature_is_advertised(running_server
     assert all("delivery" not in turn for turn in body.get("turns") or [])
 
 
-def test_an_advertised_send_200_carries_a_versioned_handed_over_and_log_heals(
+def test_an_advertised_send_200_carries_no_delivery_and_log_heals(
         running_server, monkeypatch):
     base, _ctx, _srv = running_server
     _advertise_delivery(monkeypatch)
@@ -4604,8 +4637,7 @@ def test_an_advertised_send_200_carries_a_versioned_handed_over_and_log_heals(
     status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
                                                 "client_msg_id": "u-on", "force_session": True})
     body = json.loads(raw)
-    assert status == 200 and body["delivery"]["state"] == "handed_over"
-    assert body["delivery"]["for"]["client_msg_id"] == "u-on" and body["delivery"]["rev"] == 2
+    assert status == 200 and "delivery" not in body, "F2: a /send 200 never carries delivery"
     status, raw = _get(base + "/log?session=rachel&delivery_since=0")
     feed = json.loads(raw)
     assert feed["delivery_bootstrap"] is True and feed["delivery_more"] is False
@@ -4625,7 +4657,7 @@ def test_an_advertised_send_200_carries_a_versioned_handed_over_and_log_heals(
     assert json.loads(raw)["delivery_cursor_expired"] is True, "a cursor without its epoch resets"
     status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
                                                 "client_msg_id": "u-on", "force_session": True})
-    assert status == 200 and json.loads(raw).get("delivery", {}).get("state") != "stopped"
+    assert status == 200 and "delivery" not in json.loads(raw)
 
 
 def test_advertised_delivery_never_changes_any_503(running_server, monkeypatch):
@@ -4725,12 +4757,13 @@ class _FakeRuntime:
         return self.result
 
 
-def _runtime_status(instance="i1", release="r-A", *, capable=True, draining=False):
+def _runtime_status(instance="i1", release="r-A", *, capable=True, draining=False, attestation=None):
     caps = {"janitor_runs": True}
     if capable:
         caps["send_delivery_state"] = True
     return {"protocol_version": 1, "capabilities": caps, "draining": draining,
-            "release_id": release, "instance": instance}
+            "release_id": release, "instance": instance,
+            "attestation": dict(_RUNTIME_A2 if attestation is None else attestation)}
 
 
 def _log(base, query):
@@ -4805,7 +4838,7 @@ def test_unusable_or_mismatched_observations_omit_every_delivery_field(
     assert _no_delivery(_log(base, "delivery_since=0"))
 
 
-def test_s1_needs_the_same_results_runtime_identity(running_server, monkeypatch):
+def test_a_send_200_never_carries_delivery_whatever_the_runtime_identity(running_server, monkeypatch):
     from lib.turn_dispatch import DispatchResult
     base, ctx, _srv = running_server
     _advertise_delivery(monkeypatch)
@@ -4815,7 +4848,7 @@ def test_s1_needs_the_same_results_runtime_identity(running_server, monkeypatch)
              "for": {"client_msg_id": "u-s1", "trace_id": "t"}}
     body = {"text": "hi", "session": "rachel", "client_msg_id": "u-s1", "force_session": True}
     for identity, expected in ((None, False), (_runtime_status(draining=True), False),
-                               (_runtime_status(capable=False), False), (_runtime_status(), True)):
+                               (_runtime_status(capable=False), False), (_runtime_status(), False)):
         runtime.result = DispatchResult(session="rachel", backend="claude", delivery=shown,
                                         delivery_runtime=identity)
         status, raw = _post_status(base + "/send", body)
@@ -4832,3 +4865,166 @@ def test_an_external_runtime_503_body_is_unchanged(running_server, monkeypatch):
     status, raw = _post_status(base + "/send", {"text": "x", "session": "rachel",
                                                 "client_msg_id": "u-503x", "force_session": True})
     assert (status, raw.decode()) == (503, turn_dispatch.UNCONFIRMED_DELIVERY)
+
+
+# --- F4 delivery admission, first source child (ROOT 1710a835, design 67922402) ---------------
+
+def test_a_log_bracket_is_o1_then_b_then_the_snapshot_then_a_fresh_o2(running_server, monkeypatch):
+    from contextlib import contextmanager
+    import server as server_module
+    from lib import db, runtime_attestation, settings_store
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    order, proc_in_tx = [], []
+    real_observation, real_probe = server_module.Handler._delivery_observation, runtime_attestation.run_probe
+    real_snapshot, real_proc = settings_store.read_snapshot, runtime_attestation.PROC_READER
+
+    def observation(self, *, fresh):
+        order.append("O2" if fresh else "O1")
+        return real_observation(self, fresh=fresh)
+
+    def probe():
+        order.append("B")
+        return real_probe()
+
+    def proc(pid):
+        proc_in_tx.append(db.conn().in_transaction)
+        return real_proc(pid)
+
+    @contextmanager
+    def snapshot():
+        order.append("S")
+        with real_snapshot():
+            yield
+    monkeypatch.setattr(server_module.Handler, "_delivery_observation", observation)
+    monkeypatch.setattr(runtime_attestation, "run_probe", probe)
+    monkeypatch.setattr(runtime_attestation, "PROC_READER", proc)
+    monkeypatch.setattr(settings_store, "read_snapshot", snapshot)
+    body = _log(base, "delivery_since=0")
+    assert body["delivery_scope"]["runtime_instance"] == "i1"
+    bracket = order[order.index("O1"):]
+    assert bracket[:3] == ["O1", "B", "S"] and bracket[-1] == "O2" and set(bracket[2:-1]) == {"S"}, order
+    assert manager.calls == 1 and manager.in_tx == [False] and proc_in_tx == [False]
+    _log(base, "delivery_since=0")
+    assert manager.calls == 2, "every bracket reads the manager afresh: one probe per /log response"
+
+
+@pytest.mark.parametrize("second", [
+    dict(_runtime_status(), attestation=dict(_RUNTIME_A2, start_ticks=778)),
+    dict(_runtime_status(), attestation=None),
+], ids=["switched", "missing"])
+def test_an_attestation_that_changes_or_vanishes_by_o2_omits(running_server, monkeypatch, second):
+    from lib import runtime_attestation
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status(), second))
+    assert _no_delivery(_log(base, "delivery_since=0"))
+    assert manager.calls == 1
+    assert runtime_attestation.status_block()["omitted"]["o2_mismatch"] == 1
+
+
+def test_an_unbound_or_unattested_runtime_omits(running_server, monkeypatch):
+    from lib import runtime_attestation
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    manager.main = 5151                                  # the manager names another main process
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    assert _no_delivery(_log(base, "delivery_since=0")) and manager.calls == 1
+    ctx.replace_service("runtime_client", _FakeRuntime(dict(_runtime_status(), attestation=None)))
+    assert _no_delivery(_log(base, "delivery_since=0")) and manager.calls == 1, "no A2: no probe"
+    omitted = runtime_attestation.status_block()["omitted"]
+    assert (omitted["mainpid_mismatch"], omitted["no_attestation"]) == (1, 1)
+
+
+def test_a_send_never_probes_the_manager_or_carries_delivery(running_server, monkeypatch):
+    from lib import runtime_attestation
+    from lib.turn_dispatch import DispatchResult
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    runtime = _FakeRuntime(_runtime_status())
+    runtime.result = DispatchResult(session="rachel", backend="claude")
+    ctx.replace_service("runtime_client", runtime)
+    status, raw = _post_status(base + "/send", {"text": "hi", "session": "rachel",
+                                                "client_msg_id": "u-noprobe", "force_session": True})
+    assert status == 200 and "delivery" not in json.loads(raw)
+    assert manager.calls == 0 and runtime_attestation.status_block()["probes"]["started"] == 0
+
+
+def test_more_than_ten_bootstrap_pages_under_gate_exhaustion_stay_incomplete_and_resume(
+        running_server, monkeypatch):
+    from lib import agents as agents_db, launch_receipts, runtime_attestation, settings_store, turn_queue
+    base, ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    agent = agents_db.get_by_session("rachel")["agent_id"]
+    total = 11 * launch_receipts.PAGE_CAP
+    with settings_store.transaction():
+        for i in range(total):
+            launch_receipts.record_pending(agent_id=agent, trace_id=f"t-b{i}", client_msg_id=f"u-b{i}",
+                                           origin="user",
+                                           user_stop_generation=turn_queue.user_stop_generation(agent))
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+    manager.frozen = True                                # no refill: the burst of 2, then exhaustion
+    first = _log(base, "delivery_since=0")
+    until, g = first["delivery_until"], first["delivery_stop_generation"]
+
+    def carry(cursor):
+        return (f"delivery_bootstrap=1&delivery_since={cursor}&delivery_until={until}"
+                f"&delivery_stop_generation={g}&delivery_runtime_release=r-A&delivery_runtime_instance=i1")
+    served, cursor, omitted = [first], first["delivery_cursor"], 0
+    for _ in range(12):
+        body = _log(base, carry(cursor))
+        if _no_delivery(body):                           # no cursor, no partial page: keep the last one
+            omitted += 1
+            continue
+        assert body["delivery_cursor"] > cursor
+        served.append(body)
+        cursor = body["delivery_cursor"]
+    assert (len(served), omitted) == (2, 12) and all(page["delivery_more"] for page in served), \
+        "exhaustion leaves the pass incomplete, never complete or false"
+    assert manager.calls == 2 and runtime_attestation.status_block()["omitted"]["gate_rate"] == 12
+    manager.frozen = False
+    for _ in range(20):                                  # bounded: the pass must finish well within this
+        body = _log(base, carry(cursor))
+        assert not _no_delivery(body) and not body["delivery_cursor_expired"]
+        assert body["delivery_cursor"] >= cursor
+        served.append(body)
+        cursor = body["delivery_cursor"]
+        if not body["delivery_more"]:
+            break
+    assert not served[-1]["delivery_more"] and len(served) > 10
+    ids = [u["message_id"] for page in served for u in page["delivery_updates"]]
+    assert len(ids) == len(set(ids)) == total
+    assert manager.calls == len(served), "one probe per served page, none for the omitted ones"
+
+
+def test_status_reports_delivery_admission_health_without_probing(running_server, monkeypatch):
+    base, _ctx, _srv = running_server
+    manager = _advertise_delivery(monkeypatch)
+    status, raw = _get(base + "/status")
+    block = json.loads(raw)["delivery_admission"]
+    assert status == 200 and manager.calls == 0
+    assert set(block) == {"scope", "reset_on", "gate", "probes", "omitted", "unexpected_by_type", "reconcile"}
+    assert len(json.dumps(block, separators=(",", ":"))) <= 8192
+
+
+def test_an_enrichment_failure_omits_delivery_but_keeps_the_log_and_its_errors(running_server, monkeypatch):
+    from lib import launch_receipts, runtime_attestation
+    base, ctx, _srv = running_server
+    _advertise_delivery(monkeypatch)
+    _seed_receipt()
+    ctx.replace_service("runtime_client", _FakeRuntime(_runtime_status()))
+
+    def boom(*a, **k):
+        raise RuntimeError("enrichment broke")
+    monkeypatch.setattr(launch_receipts, "annotate_rows", boom)
+    status, raw = _get(base + "/log?session=rachel&delivery_since=0")
+    body = json.loads(raw)
+    assert status == 200 and isinstance(body, dict) and _no_delivery(body)
+    assert runtime_attestation.status_block()["unexpected_by_type"] == {"RuntimeError": 1}
+    with pytest.raises(urllib.error.HTTPError) as refused:
+        _get(base + "/log?session=rachel&delivery_since=x")
+    assert refused.value.code == 400, "the parameter 400 is not an enrichment failure"

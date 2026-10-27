@@ -136,7 +136,8 @@ def test_n4a_the_hint_is_written_after_the_handoff_never_before(tmp_path, monkey
                                    client_msg_id="u-1", synthesize_audio=False, origin="user"))
     assert backends.hints_at_spawn == 0, "no hint existed when the provider got the prompt"
     hints = [e for e in backends.stream.events if "delivery-updated" in str(e)]
-    assert [h["delivery"]["state"] for h in hints] == ["handed_over"]
+    assert len(hints) == 1 and "delivery" not in hints[0] \
+        and set(hints[0]) - {"type", "ts", "event_id"} == {"session", "agent_id", "message_id"}
 
 
 def _busy():

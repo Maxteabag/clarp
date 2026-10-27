@@ -453,6 +453,21 @@ def _isolate_agy_skills(_transcript_importer_quiescent, monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _reset_delivery_admission(_transcript_importer_quiescent):
+    """F4 delivery admission keeps process-local state (the probe gate and its
+    health counters, the reconcile health counters): every test starts fresh."""
+    for module in ("lib.runtime_attestation", "lib.launch_receipts"):
+        loaded = __import__("sys").modules.get(module)
+        if loaded is None:
+            continue
+        reset = getattr(loaded, "reset_for_tests", None) if module.endswith("attestation") \
+            else getattr(loaded, "reset_health_for_tests", None)
+        if reset is not None:
+            reset()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_xdg(_transcript_importer_quiescent, monkeypatch):
     """Clear the XDG base-dir variables for every test.
 

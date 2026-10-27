@@ -535,15 +535,16 @@ def _announce_delivery_locked(stream, trace_id: str) -> None:
     agent = agents_db.get_by_agent_id(agent_id) if agent_id else None
     if not agent:
         return
-    shown = launch_receipts.project(
-        receipt, agent_id=agent_id,
-        user_stop_generation=turn_queue.user_stop_generation(agent_id))
-    if shown is None:
+    # The projection is ONLY the eligibility gate (exactly the receipts that
+    # emitted before); no state leaves this function. The hint names the
+    # message from the receipt's own client message id.
+    if launch_receipts.project(
+            receipt, agent_id=agent_id,
+            user_stop_generation=turn_queue.user_stop_generation(agent_id)) is None:
         return
     events.broadcast(stream, events.delivery_updated(
         session=str(agent.get("session") or ""), agent_id=agent_id,
-        message_id=message_writes._client_message_id(shown["for"]["client_msg_id"]),
-        delivery=shown))
+        message_id=message_writes._client_message_id(receipt["client_msg_id"])))
 
 
 def _record_launch_attempt(spec: "_TurnSpec") -> None:

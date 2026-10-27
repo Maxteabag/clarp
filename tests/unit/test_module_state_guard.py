@@ -55,6 +55,13 @@ ALLOWED: dict[tuple[str, str], str] = {
     # Stop's in-process epoch backs up a durable fence write that failed; the
     # durable fence stays the authority, so losing it on restart is intended.
     ("lib/launch_receipts.py", "_STOP_EPOCH"): THROTTLE,
+    # F4 delivery admission: health-only, process-local counters (never an
+    # admission input), reset on restart and by reset_*_for_tests.
+    ("lib/launch_receipts.py", "_RECONCILE_HEALTH"): THROTTLE,
+    ("lib/runtime_attestation.py", "_HEALTH"): THROTTLE,
+    # The one manager-probe slot and start-rate bucket of this Host process: a
+    # rate limit by design; it only withholds work and never proves anything.
+    ("lib/runtime_attestation.py", "_GATE"): THROTTLE,
     ("lib/live_hub.py", "_HUB"): CLIENT,
     ("lib/server_identity.py", "_live_probe"): CLIENT,
     ("lib/static_assets.py", "_hashes"): CACHE,
