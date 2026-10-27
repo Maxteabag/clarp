@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 
 use super::{Stage, check, control, report, rows, run_stages, shot};
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Model};
 
 use crate::headless;
 
@@ -207,6 +207,10 @@ struct Sample {
     /// The reader's place by the rows drawn: the measured height above the
     /// topmost row on screen less how far up it is (-1 when unknown).
     truth: f32,
+    /// Same measured book and viewport used to place the visible thumb.
+    book_total: f32,
+    viewport_height: f32,
+    measured: (usize, usize),
 }
 
 /// The reader's place by the rows drawn (see `Sample::truth`).
@@ -271,6 +275,14 @@ struct Pass {
     since: Option<Instant>,
 }
 
+impl Pass {
+    /// The last bounded segment must return its failed pass and leave no
+    /// samples, pending input or direction state for the next pass.
+    fn expire_segment(&mut self, last: bool) -> Option<Self> {
+        if last { Some(std::mem::take(self)) } else { None }
+    }
+}
+
 /// A pass through the chat: act (a wheel notch, a key), wait until the
 /// offset holds for two polls with no row waiting to be measured, sample
 /// the thumb, and again, until the offset no longer moves. `down`: the direction the reader goes.
@@ -289,6 +301,10 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
                 return true;
             }
             if elapsed > Duration::from_secs(12) {
+                if let Some(expired) = st.expire_segment(part == 9) {
+                    check(false, &format!("{label}: pass exhausted its ten 12-second segments ({} inputs, {} samples); state cleared before the next direction", expired.acts, expired.samples.len()));
+                    verdict(label, &expired.samples, down, first);
+                }
                 return true;
             }
             let offset = report().offset;
@@ -296,7 +312,8 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
             // A step is read once the rows that landed in it are measured:
             // their heights move the thumb in the step they landed in, not
             // in the next one, however long measuring takes.
-            let measuring = app.measured_height("").1 .1 > 0;
+            let measured = app.measured_height("").1;
+            let measuring = measured.1 > 0;
             let drawn_thumb = thumb();
             let endpoint = drawn_thumb.is_some_and(|t| if down {
                 (t.top + t.height - t.track_bottom).abs() <= 1.5
@@ -306,7 +323,10 @@ fn pass(state: Rc<RefCell<Pass>>, label: &'static str, down: bool, by_key: bool,
             // One sample per settled input (including its final endpoint),
             // never duplicate a sample just because the next event is pending.
             if let Some(thumb) = drawn_thumb {
-                st.samples.push(Sample { thumb, offset, rows: count, truth: truth(window) });
+                let before = super::view().before;
+                let book_total = before.row_data(before.row_count().saturating_sub(1)).unwrap_or(-1.0);
+                let viewport_height = viewport().map_or(-1.0, |(_, _, _, height)| height);
+                st.samples.push(Sample { thumb, offset, rows: count, truth: truth(window), book_total, viewport_height, measured });
             }
             if step == Step::End || step == Step::Stalled || st.acts > 400 {
                 // Optional CI-only accessibility probe, read after deciding
@@ -347,7 +367,7 @@ fn verdict(label: &str, samples: &[Sample], down: bool, first: bool) {
         .iter()
         .enumerate()
         .filter(|(_, w)| back(*w) > 1.0)
-        .map(|(n, w)| format!("step {}: {:.1} → {:.1} (offset {:.0} → {:.0}, read {:.0} → {:.0})", n + 1, w[0].thumb.top, w[1].thumb.top, w[0].offset, w[1].offset, w[0].truth, w[1].truth))
+        .map(|(n, w)| format!("step {}: {:.1} → {:.1} (offset {:.0} → {:.0}, read {:.0} → {:.0}, book {:.1} → {:.1}, viewport {:.1} → {:.1}, measured {:?} → {:?})", n + 1, w[0].thumb.top, w[1].thumb.top, w[0].offset, w[1].offset, w[0].truth, w[1].truth, w[0].book_total, w[1].book_total, w[0].viewport_height, w[1].viewport_height, w[0].measured, w[1].measured))
         .collect();
     let read_back = steady.iter().filter(|w| w[0].truth >= 0.0 && w[1].truth >= 0.0 && if down { w[1].truth < w[0].truth - 1.0 } else { w[1].truth > w[0].truth + 1.0 }).count();
     let trace: Vec<String> = samples.iter().step_by((samples.len() / 12).max(1)).map(|s| format!("{:.0}/{:.0}", s.thumb.top, s.thumb.height)).collect();
@@ -636,7 +656,7 @@ pub(super) fn scrollbar_check(out: String) {
 
 #[cfg(test)]
 mod settling_tests {
-    use super::{Step, StepGate};
+    use super::{Pass, Sample, Step, StepGate, Thumb};
 
     #[test]
     fn delayed_wheel_gets_fresh_settling_and_only_the_real_endpoint_finishes() {
@@ -673,4 +693,25 @@ mod settling_tests {
         for _ in 0..3 { assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Wait); }
         assert_eq!(gate.poll(0.0, 99, false, false, true), Step::Stalled);
     }
+    #[test]
+    fn exhausted_pass_fails_and_cannot_leak_into_the_next_direction() {
+        let mut pass = Pass { acts: 74, ..Pass::default() };
+        pass.samples.push(Sample { thumb: Thumb::default(), offset: -1200.0, rows: 576, truth: 12813.0, book_total: 59574.0, viewport_height: 688.0, measured: (576, 0) });
+        pass.gate.acted(-1200.0);
+        // Earlier segments retain progress; only the final budget exit is
+        // a terminal failure. This is the actual callback's state owner.
+        assert!(pass.expire_segment(false).is_none());
+        assert_eq!(pass.acts, 74);
+        let expired = pass.expire_segment(true);
+        assert_eq!(pass.acts, 0, "budget expiry must isolate the next direction");
+        assert!(pass.samples.is_empty() && pass.gate.action_offset.is_none());
+        let expired = expired.expect("genuine budget exhaustion must report failure, not success");
+        assert_eq!(expired.acts, 74);
+        assert_eq!(expired.samples.len(), 1, "failed-pass evidence is retained for its own verdict");
+        assert_eq!((expired.samples[0].truth, expired.samples[0].book_total), (12813.0, 59574.0));
+        assert_eq!(pass.gate.poll(0.0, 576, false, false, true), Step::Wait);
+        assert_eq!(pass.gate.poll(0.0, 576, false, false, true), Step::Wait);
+        assert_eq!(pass.gate.poll(0.0, 576, false, false, true), Step::Advance);
+    }
+
 }
