@@ -121,3 +121,22 @@ def test_missing_field_is_refused_before_persistence(live_host):
     status, out = _req(base, phone["token"], "POST", "/calls/live", {"agent": "a-sander", "request_id": "r"})
     assert (status, out["error"]) == (400, "live_request_invalid")
     assert not agent_rings._load()
+
+
+def test_another_phone_cannot_read_private_user_call_by_id_or_current(live_host):
+    from lib import device_pairing
+    base, _srv, owner = live_host
+    other = device_pairing.exchange(device_pairing.issue()["code"])
+    agent_rings.register_voip_token(other["device_id"], "ef" * 32,
+                                    supported_conversation_modes=["classic", "agent_live_v1"])
+    status, out = _req(base, owner["token"], "POST", "/calls/live",
+                       {"agent": "a-sander", "request_id": "private", "client_nonce": "n"})
+    assert status == 200
+    path = "/calls/ring?ring_id=" + out["ring"]["ring_id"]
+    status, read = _req(base, other["token"], "GET", path)
+    assert status == 404 and read["error"] == "unknown call"
+    status, read = _req(base, owner["token"], "GET", path)
+    assert status == 200 and read["ring"]["ring_id"] == out["ring"]["ring_id"]
+    for phone in (owner, other):
+        status, read = _req(base, phone["token"], "GET", "/calls/ring")
+        assert status == 200 and read["ring"] is None

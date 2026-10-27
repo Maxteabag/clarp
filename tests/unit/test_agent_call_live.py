@@ -364,3 +364,27 @@ def test_explicit_profile_optout_restores_normal_without_reviving_a_missing_prof
     assert live.user_call_profiles(strict=False).get("rk-sander-0001") == PROFILE
     _opt_in(opted.folder, user_call_default="normal")
     assert "rk-sander-0001" not in live.user_call_profiles(strict=False)
+
+
+def test_user_call_history_never_consumes_incoming_agent_hourly_or_interval_budget(opted):
+    for i in range(rings.HOURLY_LIMIT):
+        grant = _call(request_id=f"out-{i}")["live"]
+        live.close(PHONE, {"call_id": grant["call_id"], "attempt_id": grant["attempt_id"],
+                           "owner_nonce": grant["owner_nonce"], "request_id": f"close-{i}",
+                           "call_epoch": grant["call_epoch"], "reason": "user_hangup"})
+    assert _live_ring()["ring"]["state"] == "ringing"
+
+
+def test_concurrent_conflicting_replays_preserve_the_original_grant(opted):
+    from concurrent.futures import ThreadPoolExecutor
+    first = _call()["live"]
+    def conflict(i):
+        _refused(400, "live_request_invalid", _call, nonce=f"wrong-{i}")
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        list(workers.map(conflict, range(4)))
+    assert _call()["live"] == first
+    assert len(rings._load()) == 1
+    live.close(PHONE, {"call_id": first["call_id"], "attempt_id": first["attempt_id"],
+                       "owner_nonce": first["owner_nonce"], "request_id": "close",
+                       "call_epoch": first["call_epoch"], "reason": "user_hangup"})
+    _refused(409, "live_call_stale", _call)
