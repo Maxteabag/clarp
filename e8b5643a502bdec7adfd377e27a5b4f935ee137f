@@ -1,0 +1,1 @@
+CORRECTION (2026-10-27, sandra-verktoy-d66e): the subject line wrongly calls the Host transient timer "Koko's call back design". Koko never chose a Host timer. Koko's decision: regi owns the due date and the Host has NO timer. The timer added here was removed in f6bcaf56 (A1.4: schedule/cancel via POST /regi/sandra/tilbakering); the installed head 7d80c250 has no timer.
