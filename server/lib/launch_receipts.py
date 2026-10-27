@@ -56,8 +56,10 @@ RETENTION_MS = 7 * 24 * 3600 * 1000
 PRUNE_LIMIT = 500   # per maintenance pass; no catch-up loop (N7)
 
 SEQ_KEY = "launch-receipt.seq"              # global; one per transition, in its transaction
-PRUNE_SEQ_KEY = "launch-receipt.prune_seq"  # max seq the prune ever deleted (monotonic)
+PRUNE_SEQ_KEY = "launch-receipt.prune_seq"  # cursor watermark: the prune's top deleted seq or a reconcile reset (monotonic)
 POINTER_PREFIX = "launch-receipt-seq:"      # <agent>:<seq, 20 digits> -> trace_id
+RECONCILE_CURSOR_KEY = "launch-receipt.reconcile_cursor"  # last pointer key the reconcile pass read
+RECONCILE_LIMIT = 500                       # pointers per maintenance pass; no catch-up loop
 PAGE_CAP = 200
 _SEQ_WIDTH = 20
 
@@ -221,6 +223,66 @@ def prune(stamp: int) -> dict:
             settings_store.set_int(PRUNE_SEQ_KEY, top)
         deleted["watermark"] = settings_store.get_int(PRUNE_SEQ_KEY)
     return deleted
+
+
+def reconcile() -> dict:
+    """The Host maintenance pass's pointer phase: find delivery pointers that an
+    older (pre-F4) runtime left inconsistent, and make every cursor that could
+    have read them expire. Nothing here heals or completes the feed: a transition
+    an older runtime made has no rev/seq history to rebuild, so the honest result
+    is a fresh projection (bootstrap) or unknown.
+
+    A d98 transition writes a receipt and its pointer with ONE ``updated_at`` in
+    one write transaction, so a pointer (agent, s) -> trace is valid iff the
+    receipt exists, parses, names the same agent and trace, carries seq s and
+    the same ``updated_at``. An older runtime breaks that in two ways:
+      orphan     its full rewrite dropped rev/seq, or its prune deleted the
+                 receipt and not the pointer: the pointer is deleted;
+      stale rev  its state-only write moved the receipt's state and
+                 ``updated_at`` but not rev/seq/pointer: the pointer is kept and
+                 only its ``updated_at`` is aligned, so it is reported once.
+    Either one makes this pass take ONE fresh seq and raise PRUNE_SEQ_KEY to it,
+    so every cursor taken before it is behind the watermark and expires (the
+    client reloads and bootstraps). Receipts, their states, rev/seq, Stop
+    generations and retry authority are never touched; no counter goes back.
+
+    At most RECONCILE_LIMIT pointers, one batched receipt read and their writes,
+    all in ONE write transaction (a concurrent admission is either committed and
+    valid, or not visible). RECONCILE_CURSOR_KEY resumes the next pass after the
+    last pointer read; a short page wraps it, so the whole prefix is covered in
+    ceil(pointers / RECONCILE_LIMIT) passes, never in one."""
+    low_all, high = settings_store._prefix_range(POINTER_PREFIX)
+    done = {"read": 0, "orphans": 0, "stale": 0, "reset_to": 0, "wrapped": False}
+    with _write():
+        after = settings_store.get_text(RECONCILE_CURSOR_KEY)
+        low = after + "\x00" if after.startswith(POINTER_PREFIX) else low_all
+        rows = settings_store.stamped_items_in_range(low, high, limit=RECONCILE_LIMIT)
+        receipts = settings_store.get_many_stamped([_key(trace) for _k, trace, _at in rows])
+        orphans = []
+        for key, trace, at in rows:
+            agent_seq = key[len(POINTER_PREFIX):]
+            agent, seq = agent_seq[:-_SEQ_WIDTH - 1], _pointer_seq(key)
+            raw, receipt_at = receipts.get(_key(trace), (None, None))
+            receipt = _parse(raw)
+            if (receipt is None or _count(receipt.get("seq")) != seq or receipt.get("trace_id") != trace
+                    or str(receipt.get("agent_id") or "") != agent):
+                orphans.append(key)
+            elif receipt_at != at:
+                settings_store.set_text(key, trace, updated_at=receipt_at)
+                done["stale"] += 1
+        settings_store.delete_keys(orphans)
+        done["orphans"], done["read"] = len(orphans), len(rows)
+        if orphans or done["stale"]:
+            reset_to = _next_seq()
+            if reset_to > settings_store.get_int(PRUNE_SEQ_KEY):
+                settings_store.set_int(PRUNE_SEQ_KEY, reset_to)
+            done["reset_to"] = reset_to
+        if len(rows) == RECONCILE_LIMIT:
+            settings_store.set_text(RECONCILE_CURSOR_KEY, rows[-1][0])
+        else:
+            settings_store.set_text(RECONCILE_CURSOR_KEY, "")
+            done["wrapped"] = True
+    return done
 
 
 def _parse(raw: str | None) -> dict | None:

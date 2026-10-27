@@ -201,6 +201,24 @@ def items_in_range(low: str, high: str, *, limit: int) -> list[tuple[str, str]]:
     return [(str(row["key"]), str(row["value"])) for row in rows]
 
 
+def stamped_items_in_range(low: str, high: str, *, limit: int) -> list[tuple[str, str, int]]:
+    """``items_in_range`` with each row's ``updated_at``: (key, value, updated_at)."""
+    rows = conn().execute(
+        "SELECT key, value, updated_at FROM settings WHERE key >= ? AND key < ? ORDER BY key LIMIT ?",
+        (low, high, int(limit))).fetchall()
+    return [(str(row["key"]), str(row["value"]), int(row["updated_at"])) for row in rows]
+
+
+def get_many_stamped(keys: list[str]) -> dict[str, tuple[str, int]]:
+    """``get_many`` with each row's ``updated_at``: key -> (value, updated_at)."""
+    if not keys:
+        return {}
+    rows = conn().execute(
+        f"SELECT key, value, updated_at FROM settings WHERE key IN ({','.join('?' * len(keys))})",
+        tuple(keys)).fetchall()
+    return {str(row["key"]): (str(row["value"]), int(row["updated_at"])) for row in rows}
+
+
 def json_prefix_items(prefix: str, **match: str) -> list[tuple[str, str]]:
     """(key, value) under ``prefix`` whose JSON top-level fields equal ``match``.
     A key-range read of the prefix (primary key) filtered per row."""

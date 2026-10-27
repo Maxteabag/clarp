@@ -158,6 +158,18 @@ def prune_database(*, now_ms: int | None = None,
         from .log import log_exception
         log_exception("launchReceiptPruneFail", e)
         counts["launch_receipts"] = 0
+    # Pointers an older runtime left inconsistent (rollback residue): at most
+    # RECONCILE_LIMIT per pass in their own transaction; any finding expires
+    # every delivery cursor. Never touches a receipt. Logged, never fatal.
+    try:
+        from . import launch_receipts
+        counts["launch_receipt_pointers"] = _timed(
+            phases, "db.launch_receipt_pointers",
+            lambda: (lambda r: r["orphans"] + r["stale"])(launch_receipts.reconcile()))
+    except Exception as e:  # noqa: BLE001
+        from .log import log_exception
+        log_exception("launchReceiptReconcileFail", e)
+        counts["launch_receipt_pointers"] = 0
     return counts
 
 
