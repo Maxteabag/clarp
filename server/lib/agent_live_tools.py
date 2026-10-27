@@ -22,17 +22,17 @@ Tools:
   Unclear answers are never retried; a queued or in-flight intent gets at most
   one read-only reconciliation GET. Without a director, one Clarp prompt.
 - get_agent_status(agent), read_agent_transcript(agent, limit): read-only.
-- schedule_callback(minutes, reason) / cancel_callback(): a Host transient
-  systemd timer that, when due, hands the call back ONCE to the director
-  (loopback POST, request_id = operation id; regi /regi/ring places the ring).
-  At most one pending per (Host, calling principal, agent); a new call asking
-  again supersedes it; "ikke ring likevel" cancels it. The timer survives a
-  Host restart; a reboot loses it, and then there is no call back at all.
+- schedule_callback(minutes, reason) / cancel_callback(): handed at once to
+  regi (COORD-216-REGI-CALLBACK-ADDENDUM-A1.4), the SOLE due-owner, under a
+  stable operation id. The Host keeps no timer. At most one pending per
+  (calling principal, agent); a new call supersedes it, "ikke ring likevel"
+  cancels it, and a regi session reset cancels every pending call back.
 
 Every delegation request and call back is recorded in the ledger
 ``agent-live/tool-ledger.json`` before its effect (a delegation as
 "requesting", then keyed by regi's own intent and the caller once regi
-answered). Nothing whose outcome is unclear is ever sent again. Every effect passes the call's lifecycle fence:
+answered). Nothing whose outcome is unclear is ever sent as a new operation (a call back gets ONE identical,
+idempotent re-POST). Every effect passes the call's lifecycle fence:
 nothing starts after the call ended.
 
 Profile block::
@@ -45,7 +45,7 @@ Profile block::
       "delegate": {"kind": "prompt"}
                 | {"kind": "http", "url": "http://127.0.0.1:7790/regi/sandra/deleger", "fallback": "none",
                    "reconcile_url": "http://127.0.0.1:7790/regi/sandra/intent"},
-      "callback": {"kind": "none"} | {"kind": "http", "url": "http://127.0.0.1:7790/regi/ring"},
+      "callback": {"kind": "none"} | {"kind": "http", "url": "http://127.0.0.1:7790/regi/sandra/tilbakering"},
       "callback_minutes": {"default": 5, "min": 1, "max": 30}
     }
 """
@@ -382,31 +382,6 @@ class Effects:
     def post(self, url: str, body: dict, timeout: float = COMMAND_TIMEOUT_S) -> dict:
         return _post(url, body, timeout)
 
-    def later(self, command: list[str], delay_seconds: int, unit: str) -> None:
-        from . import service_manager
-        ok, error = service_manager.launch_detached(command, unit=unit, delay_seconds=delay_seconds)
-        if not ok:
-            raise Unconfirmed(error or "systemd-run failed")
-
-    def timer_state(self, unit: str) -> str:
-        """"active", "absent" or "unknown" for a call back's transient timer."""
-        try:
-            result = subprocess.run(["systemctl", "--user", "show", unit + ".timer", "-p", "LoadState,ActiveState"],
-                                    capture_output=True, text=True, timeout=COMMAND_TIMEOUT_S, check=False)
-        except (OSError, subprocess.TimeoutExpired):
-            return "unknown"
-        if result.returncode != 0:
-            return "unknown"
-        state = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-        if state.get("LoadState") == "not-found" or state.get("ActiveState") in ("inactive", "failed"):
-            return "absent"
-        return "active" if state.get("ActiveState") in ("active", "activating") else "unknown"
-
-    def stop(self, unit: str) -> None:
-        for suffix in (".timer", ".service"):
-            subprocess.run(["systemctl", "--user", "stop", unit + suffix], capture_output=True,
-                           timeout=COMMAND_TIMEOUT_S, check=False)
-
     def recipient_ok(self, principal: str) -> bool:
         """The caller's own phone is a paired full device that can take a Live ring."""
         from . import agent_rings
@@ -478,12 +453,10 @@ def regi_outcome(answer: Any, code: int | None) -> dict:
 
 # ---- the durable ledger -----------------------------------------------------------------
 
-CALLBACK_GRACE_S = 120           # a call back is still "pending" this long after its due time
 LEDGER_KEEP_S = 24 * 3600
 MAX_ROUTES_PER_CALL = 30
 MAX_ACTIONS_PER_ROUTE = 8
 MAX_DELEGATIONS_PER_CALL = 12
-STALE_CLAIM_S = 120              # a claim older than every effect's timeout was left by a crash: reconcile it
 # Ledger states. Only NOT_DONE may be claimed again; UNCONFIRMED is reconciled, never blindly retried.
 CLAIMED, DONE, NOT_DONE, UNCONFIRMED, CANCELLED = "claimed", "done", "not_done", "unconfirmed", "cancelled"
 
@@ -538,43 +511,6 @@ class Ledger:
             if key in rows:
                 rows[key].update(fields, updated_at=now)
         self._apply(change)
-
-    def replace(self, key: str, operation_id: Any, record: dict, *, unless_fired: bool = False) -> bool:
-        """Supersede the row only if it still holds ``operation_id`` (and has not started firing)."""
-        def change(rows, now):
-            row = rows.get(key) or {}
-            if row.get("operation_id") != operation_id or (unless_fired and row.get("fire")):
-                return False
-            rows[key] = {**record, "status": CLAIMED, "at": now, "supersedes": operation_id}
-            return True
-        return self._apply(change)
-
-    def cancel(self, key: str, call_id: str) -> dict:
-        """Cancel the pending call back before its timer can claim the firing."""
-        def change(rows, now):
-            row = rows.get(key)
-            if not row or row.get("status") not in (CLAIMED, DONE, UNCONFIRMED) or \
-                    now >= float(row.get("due", 0)) + CALLBACK_GRACE_S:
-                return {"result": "nothing_pending"}
-            if row.get("fire"):
-                return {"result": "already_fired", "operation_id": row.get("operation_id")}
-            row.update(status=CANCELLED, cancelled_by_call=call_id, updated_at=now)
-            return {"result": "cancelled", "operation_id": row.get("operation_id"), "unit": row.get("unit", "")}
-        return self._apply(change)
-
-    def claim_fire(self, key: str, operation_id: str) -> tuple[bool, Any]:
-        """The timer's one chance: only a scheduled, unfired row that still holds this operation may fire."""
-        def change(rows, now):
-            row = rows.get(key)
-            if not row or row.get("operation_id") != operation_id:
-                return False, "superseded or gone"
-            if row.get("status") != DONE:
-                return False, f"status {row.get('status')}"
-            if row.get("fire"):
-                return False, f"already {row.get('fire')}"
-            row.update(fire="firing", fire_claimed_at=now)
-            return True, dict(row)
-        return self._apply(change)
 
     def get(self, key: str) -> dict | None:
         return self._apply(lambda rows, now: dict(rows[key]) if key in rows else None)
@@ -940,30 +876,50 @@ class CallTools:
                 self._say("Host note (reconciled, untrusted data): " + json.dumps(
                     {"agent": item["member"], "status": "forwarded"}) + " Mention it only if it matters.")
 
-    # schedule_callback / cancel_callback ---------------------------------------------------
+    # schedule_callback / cancel_callback (COORD-216-REGI-CALLBACK-ADDENDUM-A1.4) ---------------
     #
-    # Koko's decision (27.10): the call back is a Host transient timer that, when due, hands it ONCE to the director
-    # (POST callback.url, e.g. regi /regi/ring with request_id = operation_id); the director places the ring.
-    # Exactly once: the timer runs fire(), which claims the firing in the ledger (compare-and-swap on the operation
-    # and status) before its single POST and records the fired receipt after it; it never posts twice.
-    # Policy, per (Host, calling principal, agent): at most one pending call back; asking again in the same call
-    # keeps it; asking in a NEW call supersedes it (the ledger swaps to the new operation first, so the old timer,
-    # should it still run, refuses to fire); "ikke ring likevel" cancels it (status cancelled before the timer is
-    # stopped, so a timer that still runs refuses). Honest durability: the timer is a transient systemd user unit.
-    # It survives a Host restart; a reboot loses it and then there is NO call back (never a late or double one).
+    # Regi is the SOLE due-owner: it persists the call back, keeps the one timer and places the one ring. The Host
+    # keeps NO timer. It POSTs schedule/cancel at once under a stable operation id. Regi's policy: at most one pending
+    # per (recipient_principal, agent_session); the same call asking again => already_scheduled (due unchanged); a NEW
+    # call => supersedes the pending op (the Host passes regi's current pending id, retrying ONCE on
+    # supersedes_mismatch); cancel ("ikke ring likevel") cancels only this caller's pending op; a regi session reset
+    # cancels every pending call back. An unclear answer => "unconfirmed" + ONE identical re-POST, never a new op;
+    # an unconfirmed cancel never claims cancelled.
 
     def _callback_slot(self) -> str:
         return "cb-" + _digest(self.host_id, self.principal, self.agent_session)
 
+    def _tell_regi(self, body: dict) -> tuple[int, dict]:
+        """One POST to regi's call back endpoint: (HTTP code, answer), or raises Unconfirmed / CallEnded."""
+        url = self.cfg["callback"]["url"]
+        try:
+            return 200, self._effect(lambda: self.effects.post(url, body, CALLBACK_HTTP_TIMEOUT_S))
+        except Refused as exc:
+            if (exc.code or 0) >= 500:                 # regi failed mid-request: it may have stored it
+                raise Unconfirmed(f"HTTP {exc.code}") from None
+            return exc.code or 400, exc.body
+        except (CallEnded, Unconfirmed):
+            raise
+        except Exception as exc:  # noqa: BLE001 - unreachable, unreadable, timeout: not known
+            raise Unconfirmed(str(exc)[:120] or type(exc).__name__) from None
+
+    def _post_twice_at_most(self, body: dict) -> tuple[int, dict] | None:
+        """The POST, and if its outcome is unclear ONE identical re-POST (regi answers a replay idempotently)."""
+        for _ in range(2):
+            try:
+                return self._tell_regi(body)
+            except Unconfirmed as exc:
+                log("agentLiveCallbackUnconfirmed", f"call={self.call_id} op={body.get('operation_id')} error={exc}")
+        return None
+
     @staticmethod
-    def _pending(row: dict | None, now: float) -> bool:
-        return bool(row) and row.get("status") in (CLAIMED, DONE, UNCONFIRMED) and not row.get("fire") and \
-            now < float(row.get("due", 0)) + CALLBACK_GRACE_S
+    def _at(due: Any) -> str:
+        return time.strftime("%H:%M", time.localtime(float(due))) if isinstance(due, (int, float)) else "?"
 
     def _callback(self, arguments: dict) -> dict:
         receipt = {"tool": "schedule_callback"}
-        bounds, callback = self.cfg["callback_minutes"], self.cfg["callback"]
-        if callback["kind"] != "http":
+        bounds = self.cfg["callback_minutes"]
+        if self.cfg["callback"]["kind"] != "http":
             return {**receipt, "status": "refused", "error": "call backs are off"}
         if not self._effect(lambda: self.effects.recipient_ok(self.principal)):
             return {**receipt, "status": "refused", "error": "the calling phone cannot take a Live call back"}
@@ -973,134 +929,71 @@ class CallTools:
         minutes = min(max(minutes, bounds["min"]), bounds["max"])
         reason = " ".join(str(arguments.get("reason") or "status").split())[:200] or "status"
         slot = self._callback_slot()
-        due = int(time.time() + minutes * 60)
-        operation = slot + "-" + _digest(self.call_id, str(due))
-        unit = "clarp-live-cb-" + _digest(operation)
-        body = {"request_id": operation, "operation_id": operation, "recipient_principal": self.principal,
-                "agent_session": self.agent_session, "call_id": self.call_id, "host_id": self.host_id,
-                "due_epoch": due, "reason": reason, "by": f"{self.name} (Live-verktøy)"}
-        record = {"kind": "callback", "operation_id": operation, "unit": unit, "url": callback["url"], "due": due,
-                  "minutes": minutes, "reason": reason, "recipient_principal": self.principal, "body": body,
-                  **self._binding()}
-        claimed, row = self.ledger.claim(slot, record, live=lambda row, now: self._pending(row, now))
-        previous = None
-        if not claimed:
-            if row.get("status") == CLAIMED and time.time() - float(row.get("at", 0)) < STALE_CLAIM_S:
-                return {**receipt, "status": "unknown", "operation_id": row.get("operation_id"),
-                        "note": "a call back is being scheduled right now; not scheduled again"}
-            if row.get("status") in (UNCONFIRMED, CLAIMED):          # unknown, or a claim a crash left behind
-                return {**receipt, **self._reconcile_callback(slot, row)}
-            if row.get("call_id") == self.call_id:
-                return {**receipt, "status": "already_scheduled", "operation_id": row.get("operation_id"),
-                        "at": time.strftime("%H:%M", time.localtime(float(row.get("due", 0))))}
-            previous = row                                         # a new call asks again: supersede
-            if not self.ledger.replace(slot, row.get("operation_id"), record, unless_fired=True):
-                return {**receipt, "status": "unknown", "note": "the earlier call back is firing or changed; not replaced"}
-            self._stop_quietly(str(row.get("unit") or ""))          # it would refuse anyway: the ledger moved on
+        operation = "cb-" + _digest(self.host_id, self.principal, self.agent_session, self.call_id, str(minutes), reason)
+        known = self.ledger.get(slot) or {}
+        body = {"action": "schedule", "operation_id": operation, "minutes": minutes, "reason": reason,
+                "recipient_principal": self.principal, "agent_session": self.agent_session,
+                "call_id": self.call_id, "host_id": self.host_id}
+        if known.get("operation_id") and known.get("call_id") != self.call_id and known.get("status") == "pending":
+            body["supersedes"] = known["operation_id"]
+        self.ledger.claim(slot, {"kind": "callback"}, live=lambda row, now: True)
+        self.ledger.update(slot, requesting=operation, **self._binding())
+        answer = self._post_twice_at_most(body)
+        if answer is not None and answer[0] == 409 and answer[1].get("error") == "supersedes_mismatch":
+            body["supersedes"] = answer[1].get("pending")               # regi named its current pending op: once
+            answer = self._post_twice_at_most(body)
         receipt["operation_id"] = operation
-        command = fire_command(self.ledger.path, slot, operation)
-        try:
-            self._effect(lambda: self.effects.later(command, minutes * 60, unit))
-        except CallEnded:
-            self.ledger.update(slot, status=NOT_DONE, error="call ended before scheduling")
-            raise
-        except Exception as exc:  # noqa: BLE001 - reconcile by the stable unit name, never relaunch blindly
-            state = self.effects.timer_state(unit)
-            if state == "absent":
-                self.ledger.update(slot, status=NOT_DONE, error=str(exc)[:120] or type(exc).__name__)
-                return {**receipt, "status": "failed", "error": "not scheduled",
-                        **({"note": "the earlier call back was replaced and is not scheduled any more"} if previous else {})}
-            if state != "active":
-                self.ledger.update(slot, status=UNCONFIRMED, error=str(exc)[:120] or type(exc).__name__)
-                return {**receipt, "status": "unknown", "note": "not known whether the call back is scheduled; "
-                        "an unconfirmed timer never fires"}
-        self.ledger.update(slot, status=DONE)
-        done = {**receipt, "status": "scheduled", "minutes": minutes,
-                "at": time.strftime("%H:%M", time.localtime(due)), "reason": reason}
-        if previous:
-            done["superseded"] = previous.get("operation_id")
-        with self.lock:
-            self.taken.append(done)
-        log("agentLiveCallbackScheduled", f"call={self.call_id} op={operation} unit={unit} minutes={minutes} "
-            f"agent={self.agent_session} recipient={self.principal} supersedes={done.get('superseded')}")
-        return done
-
-    def _stop_quietly(self, unit: str) -> None:
-        if not unit:
-            return
-        try:
-            self.effects.stop(unit)
-        except Exception as exc:  # noqa: BLE001 - the ledger already refuses that timer; this is only cleanup
-            log_exception("agentLiveCallbackStop", exc, unit)
-
-    def _reconcile_callback(self, slot: str, row: dict) -> dict:
-        """An unknown schedule: read its timer by the stable unit name; nothing is launched again."""
-        state = self.effects.timer_state(str(row.get("unit") or ""))
-        if state == "active":
-            self.ledger.update(slot, status=DONE, reconciled=True)
-            return {"status": "already_scheduled", "operation_id": row.get("operation_id"), "reconciled": True,
-                    "at": time.strftime("%H:%M", time.localtime(float(row.get("due", 0))))}
-        if state == "absent":
-            self.ledger.update(slot, status=NOT_DONE, reconciled=True)
-            return {"status": "failed", "operation_id": row.get("operation_id"),
-                    "note": "the earlier call back was not scheduled; ask again to schedule one"}
-        return {"status": "unknown", "operation_id": row.get("operation_id"), "note": "still not known; not resent"}
+        if answer is None:
+            self.ledger.update(slot, unconfirmed=operation)
+            return {**receipt, "status": "unconfirmed", "note": "regi's answer was unclear twice; not known whether "
+                    "the call back is scheduled"}
+        code, reply = answer
+        result = reply.get("result")
+        if code == 200 and reply.get("ok") is True and result in ("scheduled", "already_scheduled"):
+            current = reply.get("operation_id") or operation
+            self.ledger.update(slot, operation_id=current, call_id=self.call_id if result == "scheduled"
+                               else (known.get("call_id") or self.call_id), status="pending", due=reply.get("due"),
+                               regi_status=reply.get("status"))
+            done = {**receipt, "status": result, "operation_id": current, "at": self._at(reply.get("due")),
+                    "regi_status": reply.get("status"),
+                    **({"superseded": reply["superseded"]} if reply.get("superseded") else {})}
+            done["note"] = ("call back scheduled at " + done["at"] + " (never 'rang')" if result == "scheduled"
+                            else "an earlier call back is already pending at " + done["at"])
+            with self.lock:
+                self.taken.append(done)
+            log("agentLiveCallbackScheduled", f"call={self.call_id} op={current} result={result} "
+                f"due={reply.get('due')} recipient={self.principal} superseded={reply.get('superseded')}")
+            return done
+        return {**receipt, "status": "refused", "error": reply.get("error") or reply.get("reason") or f"HTTP {code}",
+                "note": "regi did not schedule it"}
 
     def _cancel_callback(self) -> dict:
         receipt = {"tool": "cancel_callback"}
         if self.cfg["callback"]["kind"] != "http":
             return {**receipt, "status": "refused", "error": "call backs are off"}
         slot = self._callback_slot()
-        outcome = self.ledger.cancel(slot, self.call_id)
-        if outcome["result"] == "nothing_pending":
-            return {**receipt, "status": "nothing_pending"}
-        if outcome["result"] == "already_fired":
-            return {**receipt, "status": "too_late", "operation_id": outcome["operation_id"],
-                    "note": "the call back has already been handed over"}
-        self._effect(lambda: self._stop_quietly(outcome["unit"]))   # the ledger already refuses it
-        done = {**receipt, "status": "cancelled", "operation_id": outcome["operation_id"]}
-        with self.lock:
-            self.taken.append(done)
-        log("agentLiveCallbackCancelled", f"call={self.call_id} op={outcome['operation_id']}")
-        return done
-
-
-FIRE_SNIPPET = ("import sys; sys.path.insert(0, sys.argv[1]); "
-                "from lib.agent_live_tools import fire; sys.exit(fire(*sys.argv[2:]))")
-
-
-def fire_command(ledger_path: pathlib.Path, slot: str, operation: str) -> list[str]:
-    """What the transient timer runs: fire() from this very release, against this ledger."""
-    root = pathlib.Path(__file__).resolve().parents[1]          # the directory that holds lib/
-    return [sys.executable, "-c", FIRE_SNIPPET, str(root), str(ledger_path), slot, operation]
-
-
-def fire(ledger_path: str, slot: str, operation: str, post: Callable | None = None) -> int:
-    """The due call back: claim the firing, POST once, record the fired receipt. Never posts twice.
-
-    Refuses (returns 0, logs why) unless the slot still holds this operation, scheduled (done) and not fired,
-    cancelled or superseded. The claim is persisted before the POST, so a second run of the same timer, a
-    restarted process or a racing cancel can never cause a second hand-over."""
-    ledger = Ledger(pathlib.Path(ledger_path))
-    claimed, row = ledger.claim_fire(slot, operation)
-    if not claimed:
-        log("agentLiveCallbackFireRefused", f"op={operation} reason={row}")
-        return 0
-    try:
-        answer = (post or _post)(row["url"], row["body"], CALLBACK_HTTP_TIMEOUT_S)
-        if answer.get("ok") is False or answer.get("error"):
-            raise Refused(answer.get("error") or "declined", 200, answer)
-    except (Unreachable, Refused) as exc:
-        ledger.update(slot, fire="failed", fire_error=str(exc)[:120], fired_at=time.time())
-        log("agentLiveCallbackFireFailed", f"op={operation} error={exc}")
-        return 0
-    except Exception as exc:  # noqa: BLE001 - it may have arrived: unknown, never posted again
-        ledger.update(slot, fire="unknown", fire_error=str(exc)[:120] or type(exc).__name__, fired_at=time.time())
-        log("agentLiveCallbackFireUnknown", f"op={operation} error={exc}")
-        return 0
-    ledger.update(slot, fire="fired", fired_at=time.time(), director=json.dumps(answer, ensure_ascii=False)[:300])
-    log("agentLiveCallbackFired", f"op={operation} director={answer.get('ok')!s}")
-    return 0
+        known = self.ledger.get(slot) or {}
+        body = {"action": "cancel", "operation_id": known.get("operation_id") or
+                "cb-cancel-" + _digest(self.host_id, self.principal, self.agent_session, self.call_id),
+                "recipient_principal": self.principal, "agent_session": self.agent_session,
+                "call_id": self.call_id, "host_id": self.host_id}
+        answer = self._post_twice_at_most(body)
+        if answer is None:
+            return {**receipt, "status": "unconfirmed", "note": "not known whether it was cancelled; the call back "
+                    "may still come"}
+        code, reply = answer
+        result = reply.get("result")
+        if code == 200 and reply.get("ok") is True and result in ("cancelled", "nothing_pending"):
+            if result == "cancelled":
+                self.ledger.update(slot, status="cancelled", regi_status=reply.get("status"))
+            done = {**receipt, "status": result, **({"operation_id": reply["operation_id"]}
+                                                    if reply.get("operation_id") else {})}
+            with self.lock:
+                self.taken.append(done)
+            log("agentLiveCallbackCancel", f"call={self.call_id} result={result} op={reply.get('operation_id')}")
+            return done
+        return {**receipt, "status": "refused", "error": reply.get("error") or f"HTTP {code}",
+                "note": "regi did not cancel it; the call back may still come"}
 
 
 def router_model() -> str:
