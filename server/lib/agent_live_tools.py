@@ -249,8 +249,9 @@ class Unconfirmed(Exception):
 class Refused(Exception):
     """The target answered and declined (a non-2xx answer, or a 2xx whose body says it failed)."""
 
-    def __init__(self, detail: Any):
+    def __init__(self, detail: Any, code: int | None = None, body: dict | None = None):
         super().__init__(str(detail)[:120])
+        self.code, self.body = code, body or {}
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -276,7 +277,11 @@ def _post(url: str, body: dict, timeout: float = COMMAND_TIMEOUT_S) -> dict:
     except HTTPError as exc:
         if exc.code in (404, 405):
             raise Unreachable(f"HTTP {exc.code}") from None
-        raise Refused(f"HTTP {exc.code}") from None
+        try:
+            answer = json.loads(exc.read(65536) or b"{}")
+        except (OSError, ValueError):
+            answer = {}
+        raise Refused(f"HTTP {exc.code}", exc.code, answer if isinstance(answer, dict) else {}) from None
     except TimeoutError as exc:
         raise Unconfirmed(type(exc).__name__) from None
     except URLError as exc:
@@ -290,7 +295,8 @@ def _post(url: str, body: dict, timeout: float = COMMAND_TIMEOUT_S) -> dict:
     except ValueError:
         raise Unconfirmed("unreadable answer") from None
     if not isinstance(value, dict) or value.get("ok") is False or value.get("error"):
-        raise Refused((value.get("error") if isinstance(value, dict) else "") or "declined")
+        raise Refused((value.get("error") if isinstance(value, dict) else "") or "declined", 200,
+                      value if isinstance(value, dict) else {})
     return value
 
 
@@ -395,6 +401,47 @@ class Effects:
         from .oracle_calls_stable import _agent_transcript
         agent = _find_agent(session)
         return _agent_transcript(agent, limit) if agent else {"error": "agent not running"}
+
+
+# ---- what the director said ----------------------------------------------------------
+
+DIRECTOR_FIELDS = ("result", "sent_now", "intent_id", "sesjon", "agent", "ny", "reason", "delivered", "error")
+REPEAT_STATUS = {"handed_off": "already_handed_off", "already_present": "already_handed_off",
+                 "task_started": "already_handed_off", "queued": "already_queued", "accepted": "already_accepted",
+                 "not_forwarded": "not_forwarded"}
+
+
+def director_outcome(answer: dict, code: int | None) -> dict:
+    """The truthful outcome of one director (regi) answer: ledger state, receipt status and a note.
+
+    Both regi contracts: {ok, sesjon, agent, ny} and {ok, result, sent_now, delivered, reason}. A 502 means the
+    sending to the member failed after it may have started (regi's own rc != 0): unknown, never resent."""
+    result, delivered = answer.get("result"), answer.get("delivered")
+    reason = str(answer.get("reason") or answer.get("error") or "")[:160]
+    if code == 502:
+        return {"state": UNCONFIRMED, "status": "unknown", "note": "regi could not confirm the sending; not resent"}
+    if code is not None and code >= 400 or answer.get("ok") is False:
+        if result == "not_forwarded":
+            return {"state": NOT_DONE, "status": "not_forwarded", "note": reason or "regi did not pass it on"}
+        if code in (400, 413) or result == "refused":
+            return {"state": NOT_DONE, "status": "refused", "note": reason or f"regi refused it (HTTP {code})"}
+        return {"state": NOT_DONE, "status": "failed", "note": reason or f"HTTP {code}"}
+    if answer.get("ny") is True:
+        return {"state": DONE, "status": "queued",
+                "note": "regi accepted it and passes it on; delivery to the member is not yet confirmed"}
+    if answer.get("ny") is False:
+        return {"state": DONE, "status": "not_forwarded", "note": "regi did not pass this text on"}
+    if result == "already_present":
+        if delivered in ("sender", "ukjent"):
+            return {"state": UNCONFIRMED, "status": "unknown",
+                    "note": "regi holds this instruction but does not know whether it reached the member"}
+        return {"state": DONE, "status": "already_present", "note": "regi already passed this very instruction on"}
+    if result == "started":
+        return {"state": DONE, "status": "task_started",
+                "note": "the member received this session's prepared task; these words were not added separately"}
+    if result == "forwarded" and answer.get("sent_now") is True:
+        return {"state": DONE, "status": "handed_off"}
+    return {"state": DONE, "status": "accepted", "note": "regi accepted it; it did not say whether it was sent"}
 
 
 # ---- the durable ledger -----------------------------------------------------------------
@@ -755,7 +802,7 @@ class CallTools:
     def _prompt_text(self, operation: str, request: str) -> str:
         return f"Fra {self.name} (teamleder), rett fra telefonsamtalen med Peter: {request}\n[{operation}]"
 
-    def _deliver(self, operation: str, member: dict, request: str, *, retry: bool) -> dict:
+    def _deliver(self, operation: str, member: dict, request: str, *, retry: bool, repeat_of: dict | None = None) -> dict:
         """Deliver one claimed operation once; the ledger always ends in a truthful state."""
         delegate = self.cfg["delegate"]
         route = delegate["kind"]
@@ -784,46 +831,82 @@ class CallTools:
             self.ledger.update(operation, status=UNCONFIRMED, route=route, error=str(exc)[:120])
             log("agentLiveDelegateUnconfirmed", f"call={self.call_id} op={operation} route={route} reason={exc}")
             return {"status": "unknown", "note": "not known whether it arrived; it will not be sent again blindly"}
-        except (Unreachable, Refused) as exc:
-            self.ledger.update(operation, status=NOT_DONE, route=route, error=str(exc)[:120])
-            return {"status": "failed", "error": str(exc)[:120]}
+        except Refused as exc:
+            if route != "http":                       # clarp-admin refused (exit 4): nothing was sent
+                return self._settle(operation, member, request, route,
+                                    {"state": NOT_DONE, "status": "failed", "note": str(exc)[:120] or "refused"},
+                                    repeat_of=repeat_of)
+            return self._settle(operation, member, request, route,
+                                director_outcome(exc.body, exc.code if exc.code is not None else 400),
+                                repeat_of=repeat_of)
+        except Unreachable as exc:
+            if repeat_of is None:
+                self.ledger.update(operation, status=NOT_DONE, route=route, error=str(exc)[:120])
+            return {"status": "failed", "error": str(exc)[:120], "note": "nothing was sent",
+                    **({"earlier": repeat_of.get("outcome") or "handed_off"} if repeat_of else {})}
         except Exception as exc:  # noqa: BLE001 - an unclassified failure may have delivered: unknown, never retried
             log_exception("agentLiveDelegateUnknown", exc, f"call={self.call_id} op={operation}")
             self.ledger.update(operation, status=UNCONFIRMED, route=route, error=type(exc).__name__)
             return {"status": "unknown", "note": "not known whether it arrived; it will not be sent again blindly"}
-        # The director's own answer is the truth (regi dedupes per its session + agent and ignores our key).
-        # ny:false (or sent_now:false) means the director deliberately did NOT pass this text on (regi keeps one
-        # addition per member per session): that is never "handed off". Only an explicit already_present says
-        # this very text is already with the member.
-        director = {k: answer[k] for k in ("result", "sent_now", "intent_id", "sesjon", "agent", "ny", "reason")
-                    if k in answer}
-        if answer.get("result") == "already_present":
-            status = "already_handed_off"
-        elif answer.get("ny") is False or (answer.get("sent_now") is False and answer.get("result") != "started"):
-            status = "not_forwarded"
-        elif answer.get("ny") is True:
-            status = "queued"                 # regi took it and passes it on after the member's base task
+        if route == "http":
+            outcome = director_outcome(answer, 200)
+            if outcome["status"] == "not_forwarded" and answer.get("ny") is False:
+                outcome = self._held_or_dropped(answer, member, request)
+            elif outcome["status"] == "queued":
+                self._remember_held(answer, member, request)
         else:
-            status = "handed_off"
-        self.ledger.update(operation, status=DONE, route=route, director=director, outcome=status)
-        receipt = {"status": status, "request": request[:200], **({"director": director} if director else {})}
-        if status == "queued":
-            receipt["note"] = "the director accepted it and passes it on; delivery to the member is not yet confirmed"
-        if status == "not_forwarded":
-            receipt["note"] = ("the director already holds this member's message for this session; this text was "
-                               "NOT sent to them")
-        with self.lock:
-            self.taken.append({"tool": "delegate_to_agent", "agent": member["name"], **receipt})
+            outcome = {"state": DONE, "status": "handed_off"}
+        return self._settle(operation, member, request, route, outcome, answer, repeat_of)
+
+    def _held_key(self, answer: dict, member: dict) -> str:
+        return "held-" + _digest(self.host_id, str(answer.get("sesjon")), member["session"])
+
+    def _remember_held(self, answer: dict, member: dict, request: str) -> None:
+        """What regi holds for this member this session (the ny:true text), to read a later ny:false truthfully."""
+        key = self._held_key(answer, member)
+        self.ledger.claim(key, {"kind": "held", "text": _digest(request.casefold())}, live=lambda row, now: True)
+
+    def _held_or_dropped(self, answer: dict, member: dict, request: str) -> dict:
+        held = self.ledger.get(self._held_key(answer, member)) or {}
+        if held.get("text") == _digest(request.casefold()):
+            return {"state": DONE, "status": "already_present",
+                    "note": "regi already holds this very instruction for the member this session"}
+        return {"state": DONE, "status": "not_forwarded",
+                "note": "regi accepts one addition per member per session; this text was NOT sent to them"}
+
+    def _settle(self, operation: str, member: dict, request: str, route: str, outcome: dict,
+                answer: dict | None = None, repeat_of: dict | None = None) -> dict:
+        """Record the director's outcome truthfully in the ledger and as the receipt."""
+        answer = answer if answer is not None else {}
+        if repeat_of is not None and outcome["state"] == NOT_DONE:
+            # This re-ask certainly did nothing; the earlier delivery still stands in the ledger.
+            return {"status": outcome["status"], "note": outcome.get("note", ""),
+                    "earlier": repeat_of.get("outcome") or "handed_off"}
+        director = {k: answer[k] for k in DIRECTOR_FIELDS if k in answer}
+        self.ledger.update(operation, status=outcome["state"], route=route, director=director,
+                           outcome=outcome["status"], error=outcome.get("note", "")[:120] if outcome["state"] != DONE else "")
+        receipt = {"status": outcome["status"], "request": request[:200], **({"director": director} if director else {})}
+        if outcome.get("note"):
+            receipt["note"] = outcome["note"]
+        if outcome["state"] == DONE:
+            with self.lock:
+                self.taken.append({"tool": "delegate_to_agent", "agent": member["name"], **receipt})
         return receipt
 
     def _reconcile_delegate(self, operation: str, member: dict, request: str, row: dict) -> dict:
         """The same intent was claimed before. Done stays done; an unconfirmed one is checked, never resent blindly."""
+        if row.get("status") == DONE and row.get("route") == "http":
+            # The director owns dispatch and dedupes per its own session: ask it again under the SAME operation id.
+            # Within its session it answers already_present; after a session reset it accepts the task again. A
+            # failed re-ask never downgrades the earlier, delivered record.
+            outcome = self._deliver(operation, member, request, retry=True, repeat_of=row)
+            return {**outcome, "asked_again": True}
         if row.get("status") == DONE:
             since = time.strftime("%H:%M", time.localtime(float(row.get("at", 0))))
-            if row.get("outcome") == "not_forwarded":
-                return {"status": "not_forwarded", "since": since,
-                        "note": "the director did not pass this text on earlier; it is not sent again"}
-            return {"status": "already_handed_off", "since": since}
+            earlier = row.get("outcome") or "handed_off"
+            status = REPEAT_STATUS.get(earlier, "already_requested")
+            return {"status": status, "since": since, "earlier": earlier, "note": "the same instruction was asked "
+                    "for earlier; it is not sent again"}
         if row.get("status") == CLAIMED and time.time() - float(row.get("at", 0)) < STALE_CLAIM_S:
             return {"status": "unknown", "note": "being handed off right now; not sent again"}
         if row.get("status") in (UNCONFIRMED, CLAIMED):     # unknown, or a claim a crash left behind
