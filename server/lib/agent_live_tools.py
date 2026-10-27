@@ -98,9 +98,10 @@ Act only on what the user actually asks for now:
 - When the user gives the team a task (a case, a feature, a bug), delegate it with delegate_to_agent to EACH team
   member it concerns, one call per member, with a concrete instruction fitting that member's role, in Norwegian.
   If the user just says "the team" or "everyone", give every member their part.
-- When the user asks to be called back (e.g. "ring meg om fem minutter", "ring meg tilbake", "gi meg status om litt",
-  "si fra til meg når"), call schedule_callback with the minutes
-  said (default {default_minutes}) and a short reason. Only when the user explicitly says not to call back, call
+- When the user asks to be called back (e.g. "ring meg", "ring meg om fem minutter", "ring tilbake", "gi meg status",
+  "meld tilbake til meg"), call schedule_callback with the minutes
+  said (default {default_minutes}) and a short reason; an explicit number of minutes replaces an earlier booking
+  in the same call. Only when the user explicitly says not to call back ("ikke ring", "ikke ring likevel"), call
   cancel_callback.
 - When the user asks what someone is doing or how it is going, use get_agent_status (or read_agent_transcript
   for what they said).
@@ -944,6 +945,18 @@ class CallTools:
         slot = self._callback_slot()
         operation = "cb-" + _digest(self.host_id, self.principal, self.agent_session, self.call_id, str(minutes), reason)
         known = self.ledger.get(slot) or {}
+        replaced = None
+        if (known.get("status") == "pending" and known.get("call_id") == self.call_id
+                and known.get("minutes") not in (None, minutes)):
+            # The same call asks for a DIFFERENT time (e.g. the automatic booking, then "ring meg om fem"): regi keeps
+            # a same-call repeat as already_scheduled, so the Host cancels the pending one first, then books anew.
+            cancelled = self._cancel_callback(record=False)
+            if cancelled["status"] not in ("cancelled", "nothing_pending"):
+                return {**receipt, "status": "unconfirmed" if cancelled["status"] == "unconfirmed" else "refused",
+                        "note": "the earlier call back could not be replaced; it still stands at " +
+                                self._at(known.get("due"))}
+            replaced = {"operation_id": known.get("operation_id"), "minutes": known.get("minutes")}
+            known = self.ledger.get(slot) or {}
         body = {"action": "schedule", "operation_id": operation, "minutes": minutes, "reason": reason,
                 "recipient_principal": self.principal, "agent_session": self.agent_session,
                 "call_id": self.call_id, "host_id": self.host_id}
@@ -966,10 +979,14 @@ class CallTools:
             current = reply.get("operation_id") or operation
             self.ledger.update(slot, operation_id=current, call_id=self.call_id if result == "scheduled"
                                else (known.get("call_id") or self.call_id), status="pending", due=reply.get("due"),
-                               regi_status=reply.get("status"))
+                               regi_status=reply.get("status"),
+                               **({"minutes": minutes} if result == "scheduled" else {}))
             done = {**receipt, "status": result, "operation_id": current, "at": self._at(reply.get("due")),
                     "regi_status": reply.get("status"),
-                    **({"superseded": reply["superseded"]} if reply.get("superseded") else {})}
+                    **({"minutes": minutes} if result == "scheduled" else
+                       ({"minutes": known.get("minutes")} if known.get("minutes") else {})),
+                    **({"superseded": reply["superseded"]} if reply.get("superseded") else {}),
+                    **({"replaced": replaced} if replaced else {})}
             done["note"] = self._schedule_note(result, reply.get("status"), done["at"], reply.get("feil"))
             with self.lock:
                 self.taken.append(done)
@@ -1003,14 +1020,16 @@ class CallTools:
             return "an earlier call back is already pending at " + at
         return "the call back's status is unknown (" + str(regi_status) + "); it is neither confirmed pending nor rung"
 
-    def _cancel_callback(self) -> dict:
+    def _cancel_callback(self, record: bool = True) -> dict:
         receipt = {"tool": "cancel_callback"}
         if self.cfg["callback"]["kind"] != "http":
             return {**receipt, "status": "refused", "error": "call backs are off"}
         slot = self._callback_slot()
-        # A cancel is its own operation (an op id is bound to one action); regi cancels this caller's pending one.
+        pending = (self.ledger.get(slot) or {}).get("operation_id") or ""
+        # A cancel is its own operation (an op id is bound to one action), one per pending op it targets; regi
+        # cancels this caller's pending one.
         body = {"action": "cancel",
-                "operation_id": "cbx-" + _digest(self.host_id, self.principal, self.agent_session, self.call_id),
+                "operation_id": "cbx-" + _digest(self.host_id, self.principal, self.agent_session, self.call_id, pending),
                 "recipient_principal": self.principal, "agent_session": self.agent_session,
                 "call_id": self.call_id, "host_id": self.host_id}
         answer = self._post_twice_at_most(body)
@@ -1024,8 +1043,9 @@ class CallTools:
                 self.ledger.update(slot, status="cancelled", regi_status=reply.get("status"))
             done = {**receipt, "status": result, **({"operation_id": reply["operation_id"]}
                                                     if reply.get("operation_id") else {})}
-            with self.lock:
-                self.taken.append(done)
+            if record:
+                with self.lock:
+                    self.taken.append(done)
             log("agentLiveCallbackCancel", f"call={self.call_id} result={result} op={reply.get('operation_id')}")
             return done
         return {**receipt, "status": "refused", "error": reply.get("error") or f"HTTP {code}",

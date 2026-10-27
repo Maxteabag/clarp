@@ -642,11 +642,12 @@ def test_the_caller_principal_can_never_be_the_agent_itself(make):
         make(FakeEffects(), principal="rk-sander-0001")
 
 
-def test_asking_again_in_the_same_call_is_already_scheduled_and_never_supersedes(make):
-    effects = Tilbakering([CALL_BACK, ("schedule_callback", {"minutes": 7, "reason": "igjen"})])
+def test_asking_again_in_the_same_call_with_the_same_minutes_is_already_scheduled(make):
+    effects = Tilbakering([CALL_BACK, ("schedule_callback", {"minutes": 5, "reason": "igjen"})])
     call, said, clock = make(effects, **CB)
-    _user_says(call, clock, "Ring meg om fem. Nei, om sju.")
+    _user_says(call, clock, "Ring meg om fem. Ja, om fem.")
     assert [r["status"] for r in _receipts(said)] == ["scheduled", "already_scheduled"]
+    assert [b["action"] for _u, b in effects.posts] == ["schedule", "schedule"]
     assert all("supersedes" not in body for _url, body in effects.posts)
 
 
@@ -826,6 +827,69 @@ def test_callback_on_delegation_needs_a_regi_call_back():
     assert _config(callback_on_delegation={"minutes": 5}) is None
     cfg = _config(callback={"kind": "http", "url": RING}, callback_on_delegation=True)
     assert cfg["callback_on_delegation"] == {"minutes": 5}
+
+
+AUTO7 = {"callback": {"kind": "http", "url": RING}, "callback_minutes": {"default": 7, "min": 1, "max": 15},
+         "callback_on_delegation": {"minutes": 7}}
+
+
+def test_the_automatic_booking_is_replaced_when_peter_names_other_minutes_in_the_same_call(make, ledger):
+    effects = Tilbakering([ASK])
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Kan teamet ta sak 182?")
+    first = _receipts(said)[-1]
+    assert (first["status"], first["minutes"]) == ("scheduled", 7)
+    effects.calls = [("schedule_callback", {"minutes": 5, "reason": "status"})]
+    _user_says(call, clock, "Ring meg om fem minutter.")
+    receipt = _receipts(said)[-1]
+    assert (receipt["status"], receipt["minutes"], receipt["replaced"]["minutes"]) == ("scheduled", 5, 7)
+    assert [b["action"] for _u, b in effects.posts if _u == RING] == ["schedule", "cancel", "schedule"]
+    assert [v["call_id"] for v in effects.pending.values()] == ["call-1"] and len(effects.pending) == 1
+    row = next(v for k, v in _rows(ledger).items() if k.startswith("cb-"))
+    assert (row["minutes"], row["status"]) == (5, "pending")
+
+
+def test_the_same_minutes_as_the_automatic_booking_keep_it(make):
+    effects = Tilbakering([ASK])
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Kan teamet ta sak 182?")
+    effects.calls = [("schedule_callback", {"minutes": 7, "reason": "status"})]
+    _user_says(call, clock, "Ring meg om sju.")
+    assert _receipts(said)[-1]["status"] == "already_scheduled"
+    assert [b["action"] for _u, b in effects.posts if _u == RING] == ["schedule", "schedule"]
+
+
+def test_a_replacement_whose_cancel_is_unclear_never_books_a_second_call_back(make):
+    effects = Tilbakering([ASK])
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Kan teamet ta sak 182?")
+    effects.calls = [("schedule_callback", {"minutes": 5, "reason": "status"})]
+    effects.script = [tools.Unconfirmed("timeout"), tools.Unconfirmed("timeout")]      # the cancel, twice
+    _user_says(call, clock, "Ring meg om fem.")
+    receipt = _receipts(said)[-1]
+    assert receipt["status"] == "unconfirmed" and "still stands" in receipt["note"]
+    assert [b["action"] for _u, b in effects.posts if _u == RING] == ["schedule", "cancel", "cancel"]
+
+
+def test_ikke_ring_cancels_the_automatic_booking(make):
+    effects = Tilbakering([ASK])
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Kan teamet ta sak 182?")
+    effects.calls = [("cancel_callback", {})]
+    _user_says(call, clock, "Ikke ring meg likevel.")
+    assert _receipts(said)[-1]["status"] == "cancelled" and effects.pending == {}
+
+
+def test_two_cancels_in_one_call_are_two_operations(make):
+    effects = Tilbakering([ASK])
+    call, said, clock = make(effects, **AUTO7)
+    _user_says(call, clock, "Ta sak 182.")
+    effects.calls = [("schedule_callback", {"minutes": 5, "reason": "x"})]
+    _user_says(call, clock, "Ring meg om fem.")
+    effects.calls = [("cancel_callback", {})]
+    _user_says(call, clock, "Ikke ring.")
+    cancels = [b["operation_id"] for _u, b in effects.posts if _u == RING and b["action"] == "cancel"]
+    assert len(cancels) == 2 and len(set(cancels)) == 2 and _receipts(said)[-1]["status"] == "cancelled"
 
 # ---- the real POST ---------------------------------------------------------------------
 
