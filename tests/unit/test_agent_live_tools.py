@@ -347,16 +347,65 @@ def test_a_claim_left_by_a_crash_mid_send_is_never_sent_again(make, ledger):
     again = FakeEffects([ASK])
     call, said, clock = make(again, call_id="call-2")
     _user_says(call, clock, "Ta sak 182.")
-    assert again.prompts == [] and _receipts(said)[0]["status"] == "in_progress"
+    assert again.prompts == [] and _receipts(said)[0]["status"] == "unknown"
 
 
-@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unconfirmed")])
+
+def _age(ledger, key, seconds):
+    rows = _rows(ledger)
+    rows[key]["at"] -= seconds
+    ledger.path.write_text(json.dumps(rows))
+
+
+@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unknown")])
+def test_a_stale_crash_claim_is_reconciled_never_resent(make, ledger, arrived, status):
+    first = FakeEffects([ASK])
+    call, _said, clock = make(first)
+    _user_says(call, clock, "Ta sak 182.")
+    operation = next(iter(_rows(ledger)))
+    ledger.update(operation, status=tools.CLAIMED)
+    _age(ledger, operation, tools.STALE_CLAIM_S + 1)
+    again = FakeEffects([ASK])
+    if arrived:
+        again.inbox = list(first.inbox)
+    call, said, clock = make(again, call_id="call-2")
+    _user_says(call, clock, "Ta sak 182.")
+    assert again.prompts == [] and _receipts(said)[0]["status"] == status
+
+
+def test_an_unclassified_delivery_failure_is_unknown_and_never_retried(make, ledger):
+    effects = FakeEffects([ASK])
+    effects.prompt_error = (RuntimeError("boom"), True)
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Ta sak 182.")
+    assert _receipts(said)[0]["status"] == "unknown"
+    assert next(iter(_rows(ledger).values()))["status"] == tools.UNCONFIRMED
+    effects.prompt_error = None
+    call, said, clock = make(effects, call_id="call-2")
+    _user_says(call, clock, "Ta sak 182.")
+    assert len(effects.prompts) == 1 and _receipts(said)[0]["status"] == "already_handed_off"   # found by its marker
+
+
+def test_the_intent_scope_includes_the_caller_and_a_correction_is_a_new_intent(make):
+    effects = FakeEffects([ASK])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Ta sak 182.")
+    call, said, clock = make(effects, call_id="call-2", principal="device_other")
+    _user_says(call, clock, "Ta sak 182.")
+    assert len(effects.prompts) == 2                                  # another caller is another intent
+    effects.calls = [("delegate_to_agent", {"agent": "drammen-jonas", "request": "Ta sak 182, men bare API-et"})]
+    call, said, clock = make(effects, call_id="call-3")
+    _user_says(call, clock, "Nei, bare API-et.")
+    assert len(effects.prompts) == 3 and _receipts(said)[0]["status"] == "handed_off"
+
+
+@pytest.mark.parametrize("arrived, status", [(True, "already_handed_off"), (False, "unknown")])
 def test_an_unconfirmed_prompt_is_reconciled_by_its_marker_never_resent(make, ledger, arrived, status):
     effects = FakeEffects([ASK])
     effects.prompt_error = (tools.Unconfirmed("clarp-admin timeout"), arrived)
     call, said, clock = make(effects)
     _user_says(call, clock, "Ta sak 182.")
-    assert _receipts(said)[0]["status"] == "unconfirmed"
+    assert _receipts(said)[0]["status"] == "unknown"
     effects.prompt_error = None
     call2, said2, clock2 = make(effects, call_id="call-2")
     _user_says(call2, clock2, "Ta sak 182.")
@@ -378,7 +427,7 @@ def test_a_refused_prompt_is_not_done_and_may_be_asked_again(make):
 @pytest.mark.parametrize("error, prompted, status", [
     (None, 0, "handed_off"),
     (tools.Unreachable("connection refused"), 1, "handed_off"),
-    (tools.Unconfirmed("timeout"), 0, "unconfirmed"),
+    (tools.Unconfirmed("timeout"), 0, "unknown"),
     (tools.Refused("HTTP 400"), 0, "failed"),
 ])
 def test_a_director_delegation_falls_back_only_when_it_certainly_did_not_arrive(make, error, prompted, status):
@@ -514,7 +563,7 @@ def test_ikke_ring_likevel_cancels_the_pending_call_back_at_the_director(make, l
     assert "supersedes" not in later.to(RING)[0] and _receipts(said)[0]["status"] == "scheduled"
 
 
-@pytest.mark.parametrize("error, status", [(tools.Unconfirmed("timeout"), "unconfirmed"),
+@pytest.mark.parametrize("error, status", [(tools.Unconfirmed("timeout"), "unknown"),
                                            (tools.Refused("HTTP 409"), "failed")])
 def test_a_cancel_the_director_did_not_confirm_never_claims_cancelled(make, error, status):
     first = FakeEffects([CALL_BACK])
@@ -527,13 +576,13 @@ def test_a_cancel_the_director_did_not_confirm_never_claims_cancelled(make, erro
     assert _receipts(said)[0]["status"] == status
 
 
-@pytest.mark.parametrize("second_error, status", [(None, "already_scheduled"), (tools.Unconfirmed("timeout"), "unconfirmed")])
+@pytest.mark.parametrize("second_error, status", [(None, "already_scheduled"), (tools.Unconfirmed("timeout"), "unknown")])
 def test_an_unconfirmed_schedule_is_reconciled_with_the_same_operation_id_only(make, ledger, second_error, status):
     first = FakeEffects([CALL_BACK])
     first.url_errors[RING] = tools.Unconfirmed("timeout")
     call, said, clock = make(first, **CB)
     _user_says(call, clock, "Ring meg om fem.")
-    assert _receipts(said)[0]["status"] == "unconfirmed"
+    assert _receipts(said)[0]["status"] == "unknown"
     op = first.to(RING)[0]["operation_id"]
     second = FakeEffects([("schedule_callback", {"minutes": 2, "reason": "x"})])
     if second_error:
@@ -543,6 +592,33 @@ def test_an_unconfirmed_schedule_is_reconciled_with_the_same_operation_id_only(m
     [body] = second.to(RING)
     assert body == first.to(RING)[0] and body["operation_id"] == op       # the same intent, nothing new
     assert _receipts(said)[0]["status"] == status
+
+
+def test_a_call_back_being_handed_over_is_unknown_never_already_scheduled(make, ledger):
+    first = FakeEffects([CALL_BACK])
+    call, _said, clock = make(first, **CB)
+    _user_says(call, clock, "Ring meg om fem.")
+    slot = next(iter(_rows(ledger)))
+    ledger.update(slot, status=tools.CLAIMED)               # another route is handing it over right now
+    second = FakeEffects([CALL_BACK])
+    call, said, clock = make(second, call_id="call-2", **CB)
+    _user_says(call, clock, "Ring meg om fem.")
+    assert second.posts == [] and _receipts(said)[0]["status"] == "unknown"
+    _age(ledger, slot, tools.STALE_CLAIM_S + 1)             # ...or a crash left it: reconcile with the same op id
+    third = FakeEffects([CALL_BACK])
+    call, said, clock = make(third, call_id="call-3", **CB)
+    _user_says(call, clock, "Ring meg om fem.")
+    assert third.to(RING) == first.to(RING) and _receipts(said)[0]["status"] == "already_scheduled"
+
+
+@pytest.mark.parametrize("error", [RuntimeError("boom"), tools.Unconfirmed("timeout")])
+def test_an_unclear_schedule_is_unknown_not_failed(make, ledger, error):
+    effects = FakeEffects([CALL_BACK])
+    effects.url_errors[RING] = error
+    call, said, clock = make(effects, **CB)
+    _user_says(call, clock, "Ring meg om fem.")
+    assert _receipts(said)[0]["status"] == "unknown"
+    assert next(iter(_rows(ledger).values()))["status"] == tools.UNCONFIRMED
 
 
 def test_a_schedule_the_director_certainly_did_not_take_may_be_asked_again(make):
