@@ -229,6 +229,10 @@ def build_snapshot(agent: dict, context: dict) -> dict:
         "opening_text": context["opening_text"], "language": "nb-NO",
         "provider": PROVIDER, "model": MODEL, "voice": VOICE,
     }
+    from . import agent_live_tools
+    tools = agent_live_tools.frozen_config(profile, context["story"])
+    if tools is not None:                   # opt-in only: a profile without live_tools keeps its exact snapshot
+        snapshot[agent_live_tools.SNAPSHOT_KEY] = tools
     if len(canonical(snapshot)) > SNAPSHOT_BYTES:
         raise CallError(409, CONTEXT_UNAVAILABLE)
     return snapshot
