@@ -61,6 +61,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from datetime import UTC
 from typing import Any
 from urllib.parse import urlencode, urlparse
 from urllib.request import HTTPRedirectHandler
@@ -105,6 +106,9 @@ Act only on what the user actually asks for now:
   cancel_callback.
 - When the user asks what someone is doing or how it is going, use get_agent_status (or read_agent_transcript
   for what they said).
+- When the user asks something you cannot know yourself (e.g. "hva er klart på SolNO-boardet som er tildelt meg?",
+  a repo, an issue, a status in a system), call ask_my_agent with the question and the needed context; the answer
+  comes back later in the call. When the user wants an answer again or the rest of it, call read_result.
 - Never repeat an action in actions_taken unless the user explicitly asks for it again or corrects it.
 - Small talk, greetings and goodbyes need no action: return no function call.
 Team (the only agents you can reach): {team}.
@@ -204,7 +208,12 @@ def frozen_config(profile: dict, story: str) -> dict | None:
             return invalid("callback_on_delegation needs an http callback")
         auto_minutes = _minutes((auto or {}).get("minutes") if isinstance(auto, dict) else None, default)
         auto_minutes = min(max(auto_minutes, low), high)
-    return {"from": sender, "agents": agents, "delegate": delegate, "callback": callback,
+    contact = block.get("contact") if isinstance(block.get("contact"), dict) else {}
+    contact_session = contact.get("session", sender)
+    if not isinstance(contact_session, str) or not _SESSION.fullmatch(contact_session) or contact_session in sessions:
+        return invalid("contact.session")
+    contact_cfg = {"session": contact_session, "name": str(contact.get("name") or "Sandra's own agent")[:60]}
+    return {"from": sender, "agents": agents, "delegate": delegate, "callback": callback, "contact": contact_cfg,
             **({"callback_on_delegation": {"minutes": auto_minutes}} if auto_minutes else {}),
             "callback_minutes": {"default": default, "min": low, "max": high}}
 
@@ -236,6 +245,15 @@ def tools_schema(cfg: dict) -> list[dict]:
         tool("read_agent_transcript", "Read one team member's latest messages without prompting them.",
              {"agent": agent, "limit": {"type": "integer", "minimum": 1, "maximum": 5}}, ["agent"]),
     ]
+    tools.append(tool("ask_my_agent", "Ask your own full agent (shell, gh, skills) to find something out or check "
+                      "something, e.g. the SolNO board, a repo or a status. Its answer comes back into the call in "
+                      "parts. Use it for questions you cannot answer yourself.",
+                      {"question": {"type": "string", "description": "The question, in Norwegian, with the context."}},
+                      ["question"]))
+    tools.append(tool("read_result", "Read an answer that already came back again, or continue it, from the stored "
+                      "text, without asking anyone again. Omit operation_id for the latest; omit from_part to continue.",
+                      {"operation_id": {"type": "string"}, "from_part": {"type": "integer", "minimum": 1},
+                       "verbatim": {"type": "boolean"}}, []))
     if cfg["callback"]["kind"] != "none":
         tools.append(tool("schedule_callback", "Call the user back after some minutes with the team's status. "
                           "At most one call back is pending; asking again returns the one already scheduled.",
@@ -358,8 +376,40 @@ def _find_agent(session: str) -> dict | None:
 class Effects:
     """Everything with an effect outside the call; tests pass their own."""
 
-    def __init__(self, api_key: str = ""):
-        self.api_key = api_key
+    def __init__(self, api_key: str = "", ctx: Any = None):
+        self.api_key, self.ctx = api_key, ctx
+
+    # Oracle's own mechanism for asking an agent (investigate_with_oracle): a durable, silent agent turn
+    def ask(self, delegation_id: str, session: str, request: str, principal: str) -> dict:
+        from . import oracle_delegations
+        if self.ctx is None:
+            raise Unreachable("no server context for an agent turn")
+        return oracle_delegations.dispatch(ctx=self.ctx, delegation_id=delegation_id, session=session,
+                                           request_text=request, authenticated_at_admission=True,
+                                           owner_principal=principal)
+
+    def delegation(self, delegation_id: str) -> dict | None:
+        from . import oracle_delegations
+        return oracle_delegations.get(delegation_id)
+
+    def acknowledge(self, delegation_id: str, principal: str) -> None:
+        from . import oracle_delegations
+        oracle_delegations.acknowledge(delegation_id, owner_principal=principal)
+
+    def member_reply(self, session: str, since: str) -> dict | None:
+        """The member's newest finished reply after ``since`` (ISO), once the member is idle; else None."""
+        from . import agents, message_store
+        agent = _find_agent(session)
+        if agent is None:
+            return None
+        latest = agents.latest_state(agent["agent_id"]) or {}
+        if str(latest.get("kind") or "") in ("thinking", "tool", "spawned"):
+            return None
+        rows = message_store.list_messages(agent_id=agent["agent_id"], limit=20, include_automated=False)
+        replies = [r for r in rows if r["role"] == "assistant" and str(r["text"]).strip()
+                   and str(r.get("timestamp") or "") > since]
+        return {"id": replies[-1]["id"], "text": str(replies[-1]["text"]), "timestamp": replies[-1]["timestamp"]} \
+            if replies else None
 
     def route(self, body: dict) -> dict:
         return _openai_router(self.api_key, body)
@@ -574,6 +624,14 @@ class CallTools:
         self.routes = self.delegations = 0
         self.closed = False
         self.to_reconcile: list[dict] = []
+        # Oracle parity: answers relayed back into the call in parts (oracle_relay), continuable with read_result
+        self.relays: dict[str, Any] = {}
+        self.active_relay = None
+        self.pending_relays: list = []
+        self.asked: dict[str, dict] = {}        # operation id -> {"name"}; answered once relayed
+        self.watching: dict[str, dict] = {}     # member session -> {"name", "since"} after a delegation
+        self.last_output = self.last_append = self.last_poll = 0.0
+        self.relay_part_bytes = RELAY_PART_BYTES
         self.auto_callback_done = False
 
     # -- the lifecycle fence ---------------------------------------------------------------
@@ -625,11 +683,167 @@ class CallTools:
         with self.lock:
             reconcile = bool(self.to_reconcile) and not self.closed and \
                 any(r["due"] <= self.clock() for r in self.to_reconcile)
+            poll = (self.asked or self.watching) and not self.closed and self.clock() - self.last_poll >= POLL_S
+            if poll:
+                self.last_poll = self.clock()
         if reconcile:
             try:
                 self.pool.submit(self._reconcile_safely)
             except RuntimeError:
                 pass
+        if poll:
+            try:
+                self.pool.submit(self._poll_answers_safely)
+            except RuntimeError:
+                pass
+        self._pace_relays()
+
+    # -- answers back into the call (Oracle's relay, reused) --------------------------------
+    def note_output(self) -> None:
+        """The voice model produced audio (it is speaking)."""
+        with self.lock:
+            self.last_output = self.clock()
+
+    def append_rejected(self) -> None:
+        """The provider refused a context append as too long: re-split the active answer smaller and resend."""
+        with self.lock:
+            relay = self.active_relay
+            if relay is None or self.relay_part_bytes <= 200:
+                return
+            self.relay_part_bytes //= 2
+            index = max(relay.next - 1, 0)
+            fresh = _relay(relay.key, relay.label, relay.source, relay.text, relay.request, self.relay_part_bytes)
+            done_text = "".join(relay.chunks[:index])
+            fresh.next = len(_relay(relay.key, relay.label, relay.source, done_text or " ", "", self.relay_part_bytes).chunks) if done_text else 0
+            self.relays[relay.key] = self.active_relay = fresh
+            self.last_append = 0.0
+        log("agentLiveRelayResplit", f"call={self.call_id} key={relay.key} part_bytes={self.relay_part_bytes}")
+
+    def _speak_part(self, relay, *, served=False, resumed=False) -> bool:
+        with self.lock:
+            index = relay.next
+            if index >= relay.total or self.closed:
+                return False
+            relay.next = index + 1
+            relay.sent = max(relay.sent, relay.next)
+            relay.auto += 1
+            relay.sent_at = self.last_append = self.clock()
+            pause_after = relay.auto >= AUTO_PARTS
+        self.speak("commentary", relay.part(index, served=served, resumed=resumed, pause_after=pause_after))
+        return True
+
+    def _start_relay(self, relay, *, start: int = 0, served: bool = False, resumed: bool = False) -> None:
+        with self.lock:
+            self.relays[relay.key] = relay
+            self.active_relay = relay
+            relay.next, relay.auto, relay.held = start, 0, False
+        self._speak_part(relay, served=served, resumed=resumed)
+
+    def _pace_relays(self) -> None:
+        """Oracle's pacing: the next part only once the voice has spoken the last one and gone quiet; a new answer
+        only when nothing is being read, the user is quiet and no route is running. Audio never waits."""
+        now = self.clock()
+        with self.lock:
+            if self.closed:
+                return
+            relay = self.active_relay
+            quiet = now - self.last_output >= QUIET_S and now - self.last_user >= RESULT_SILENCE_S
+            if relay is not None and relay.remaining > 0 and not relay.held and relay.auto < AUTO_PARTS:
+                spoke = self.last_output > relay.sent_at and quiet
+                stalled = self.last_output <= relay.sent_at and now - relay.sent_at > RELAY_STALL_S
+                interrupted = self.last_user > relay.sent_at
+                action = "next" if (spoke or stalled) and not interrupted and not self.routing else None
+            elif self.pending_relays and quiet and not self.routing and now - self.last_append >= APPEND_GAP_S:
+                action = "start"
+            else:
+                action = None
+        if action == "next":
+            self._speak_part(relay)
+        elif action == "start":
+            with self.lock:
+                fresh = self.pending_relays.pop(0)
+            self._start_relay(fresh)
+
+    def _poll_answers_safely(self) -> None:
+        try:
+            self.poll_answers()
+        except Exception as exc:  # noqa: BLE001 - polling never affects the call
+            log_exception("agentLiveAnswersPoll", exc, f"call={self.call_id}")
+
+    def poll_answers(self) -> None:
+        """Finished answers from Sandra's own agent and first replies from members become relays (queued)."""
+        with self.lock:
+            asked, watching = dict(self.asked), dict(self.watching)
+        from . import oracle_delegations
+        for ident, meta in asked.items():
+            row = self.effects.delegation(ident)
+            if not row or row.get("status") not in oracle_delegations.TERMINAL:
+                continue
+            base = oracle_relay_module().result_relay(row, agent=meta["name"])
+            relay = _relay(base.key, base.label, base.source, base.text, base.request, self.relay_part_bytes)
+            with self.lock:
+                self.asked.pop(ident, None)
+                self.pending_relays.append(relay)
+            try:
+                self.effects.acknowledge(ident, self.principal)    # Oracle will not deliver it a second time
+            except Exception as exc:  # noqa: BLE001
+                log_exception("agentLiveAskAcknowledge", exc, ident)
+            log("agentLiveAskAnswered", f"call={self.call_id} op={ident} status={row.get('status')}")
+        for session, meta in watching.items():
+            reply = self.effects.member_reply(session, meta["since"])
+            if not reply:
+                continue
+            relay = _relay("reply:" + str(reply["id"]), f"{meta['name']}'s reply", f"message {reply['id']}",
+                           reply["text"], meta.get("request", ""), self.relay_part_bytes)
+            with self.lock:
+                self.watching.pop(session, None)
+                self.pending_relays.append(relay)
+            log("agentLiveMemberReply", f"call={self.call_id} member={session}")
+
+    def _ask(self, arguments: dict) -> dict:
+        receipt = {"tool": "ask_my_agent"}
+        question = " ".join(str(arguments.get("question") or "").split())
+        if not question:
+            return {**receipt, "status": "refused", "reason": "empty question"}
+        if len(question) > REQUEST_CHARS:
+            return {**receipt, "status": "refused", "reason": "question too long"}
+        contact = self.cfg["contact"]
+        ident = "sandra-" + _digest(self.host_id, self.principal, self.call_id, question, str(time.time_ns()))
+        request = (f"Spørsmål fra {self.name}s Live-samtale med Peter (svar kort og muntlig, på norsk; slå opp det "
+                   f"som trengs med verktøyene dine): {question}")
+        try:
+            row = self._effect(lambda: self.effects.ask(ident, contact["session"], request, self.principal))
+        except CallEnded:
+            raise
+        except Exception as exc:  # noqa: BLE001 - not asked
+            log_exception("agentLiveAsk", exc, f"call={self.call_id}")
+            return {**receipt, "status": "failed", "reason": type(exc).__name__,
+                    "note": "the question could not be sent; say so"}
+        with self.lock:
+            self.asked[ident] = {"name": contact["name"]}
+        return {**receipt, "status": "asked", "operation_id": ident, "regi_status": None,
+                "reason": None if row.get("status") != "failed" else row.get("error"),
+                "note": "say briefly that you are checking (\"jeg sjekker\"); the answer comes back in parts"}
+
+    def _read_result(self, arguments: dict) -> dict:
+        receipt = {"tool": "read_result"}
+        ident, from_part, verbatim = arguments.get("operation_id"), arguments.get("from_part"), arguments.get("verbatim")
+        with self.lock:
+            relay = self.relays.get(ident) if ident else (self.active_relay or (list(self.relays.values())[-1]
+                                                                                if self.relays else None))
+        if relay is None:
+            return {**receipt, "status": "nothing_to_read", "note": "there is no stored answer in this call yet"}
+        if verbatim is not None:
+            relay.verbatim = bool(verbatim)
+        if isinstance(from_part, int) and not isinstance(from_part, bool) and from_part >= 1:
+            start = min(from_part, relay.total) - 1
+        else:
+            start = relay.next
+        if start >= relay.total:
+            self.speak("thinking", relay.status())
+            return {**receipt, "status": "complete", "operation_id": relay.key}
+        self._start_relay(relay, start=start, served=True, resumed=start > 0 and from_part is None)
+        return {**receipt, "status": "reading", "operation_id": relay.key, "minutes": None}
 
     def _reconcile_safely(self) -> None:
         try:
@@ -756,6 +970,10 @@ class CallTools:
                 return self._callback(arguments, explicit=explicit)
             if name == "cancel_callback":
                 return self._cancel_callback()
+            if name == "ask_my_agent":
+                return self._ask(arguments)
+            if name == "read_result":
+                return self._read_result(arguments)
             member = self._member(arguments.get("agent"))
             if member is None:
                 return {"tool": name, "agent": str(arguments.get("agent"))[:64], "status": "refused",
@@ -855,6 +1073,12 @@ class CallTools:
         """The ledger row of this request (and, once regi named the intent, its intent row) plus the receipt."""
         fields = {k: outcome[k] for k in RECEIPT_FIELDS if k in outcome and outcome[k] is not None}
         self.ledger.update(attempt, status=outcome["state"], status_text=outcome["status"], **fields)
+        if outcome["status"] in ("forwarded", "queued_at_regi"):
+            from datetime import datetime
+            with self.lock:                 # Sandra gets the member's reply back in the call (relay)
+                self.watching.setdefault(member["session"], {
+                    "name": member["name"],
+                    "since": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")})
         if outcome.get("intent") and outcome.get("sesjon") is not None:
             key = self._intent_key(member, outcome["intent"])
             self.ledger.claim(key, {"kind": "delegate_intent", "to": member["session"], **self._binding()},
@@ -1070,6 +1294,39 @@ class CallTools:
             return done
         return {**receipt, "status": "refused", "error": reply.get("error") or f"HTTP {code}",
                 "note": "regi did not cancel it; the call back may still come"}
+
+
+# ---- Oracle relay reuse ------------------------------------------------------------------------
+
+POLL_S = 2.0                # how often finished answers are looked for
+QUIET_S = 1.5               # oracle_live_stable.QUIET_AFTER_SECONDS
+RESULT_SILENCE_S = 4.5      # oracle_live_stable.RESULT_RELEASE_SILENCE_SECONDS
+RELAY_STALL_S = 15.0        # oracle_live_stable.RELAY_STALL_SECONDS
+APPEND_GAP_S = 4.0          # oracle_live_stable: at most one new result every 4 s
+AUTO_PARTS = 8              # oracle_relay.AUTO_PARTS: then pause and offer to continue
+# Text bytes per relayed part. Oracle uses 1100 within a 1500-character append; Sandra uses less so a part
+# (header + text) stays far under GPT-Live's 500-token append limit, and halves it if the provider still refuses.
+RELAY_PART_BYTES = 600
+
+
+def oracle_relay_module():
+    from . import oracle_relay
+    return oracle_relay
+
+
+def _relay(key: str, label: str, source: str, text: str, request: str, part_bytes: int):
+    """Oracle's Relay (oracle_relay), with Sandra's smaller part size."""
+    relay_mod = oracle_relay_module()
+
+    class SandraRelay(relay_mod.Relay):
+        def __post_init__(self):
+            chosen, worst = self.verbatim, 0
+            for self.verbatim in (True, False):
+                worst = max(worst, len(self._head(10, 99, served=True, resumed=True, pause_after=True, first=True)))
+            self.verbatim = chosen
+            budget = min(part_bytes, relay_mod.APPEND_CHARS - worst - len(relay_mod.TEXT_MARK))
+            self.chunks = list(relay_mod.context_chunks(self.text, max_bytes=budget)) or [""]
+    return SandraRelay(key=key, label=label, source=source, text=text or "(empty answer)", request=request)
 
 
 # GPT-Live refuses a context append over 500 tokens (observed 20:06: "Context append text must not exceed 500
