@@ -384,8 +384,10 @@ def undelivered(
         """SELECT * FROM oracle_delegations
             WHERE delivered_at IS NULL
               AND owner_principal = ?
-              AND delegation_id NOT LIKE 'sandra-%'
-              -- Agent Live asks are relayed only into their own call
+              -- An Agent Live ask (agent_live_tools) is relayed only into its own call; only that exact id
+              -- shape with its request text is held back, so no Oracle call's own result is ever hidden.
+              AND NOT (delegation_id GLOB 'sandra-' || replace(hex(zeroblob(24)), '00', '[0-9a-f]')
+                       AND request_text LIKE 'Spørsmål fra %Live-samtale%')
               AND status IN ('completed', 'failed', 'cancelled')
             ORDER BY updated_at, delegation_id
             LIMIT ?""",
