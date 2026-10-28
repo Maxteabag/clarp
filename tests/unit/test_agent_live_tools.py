@@ -1518,10 +1518,13 @@ def _answered(make, routing=False):
     return call, said, clock, effects, ident
 
 
-def test_a_finished_answer_starts_at_the_first_short_pause_even_while_a_route_runs(make):
-    call, said, clock, effects, ident = _answered(make, routing=True)       # Peter: "hallo?" => a route is running
-    call.last_user = clock.now - 1.1                                        # he paused 1.1 s
-    call.last_output = clock.now - 0.9                                      # Sandra paused 0.9 s
+def test_a_finished_answer_keeps_oracles_windows(make):
+    call, said, clock, effects, ident = _answered(make, routing=True)
+    call.last_user, call.last_output = clock.now - 1.1, clock.now - 0.9     # a short pause, a route running
+    call.tick()
+    assert not any("Fjorten saker." in t for _k, t in said)
+    call.routing = False
+    call.last_user, call.last_output = clock.now - 4.6, clock.now - 1.6     # Oracle's 4.5 s / 1.5 s, no route
     call.tick()
     assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
 
@@ -1534,7 +1537,7 @@ def test_a_chatty_user_gets_the_answer_after_six_seconds_at_the_next_voice_pause
         call.tick()
     assert not any("Fjorten saker." in t for _k, t in said)
     clock.now += 1.5                                                        # still talking, 6.5 s waited, voice paused
-    call.last_user, call.last_output = clock.now - 0.2, clock.now - 0.9
+    call.last_user, call.last_output = clock.now - 0.2, clock.now - 1.6
     call.tick()
     assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
 
