@@ -614,6 +614,7 @@ class CallTools:
         self.pending_relays: list = []
         self.asked: dict[str, dict] = {}        # operation id -> {"name"}; answered once relayed
         self.last_output = self.last_append = self.last_poll = self.last_wait_log = 0.0
+        self.last_input = self.last_input_frame = 0.0
         self.relay_part_bytes = RELAY_PART_BYTES
         self.speaking = threading.Lock()
         self.auto_callback_done = False
@@ -688,6 +689,23 @@ class CallTools:
         with self.lock:
             self.last_output = self.clock()
 
+    def note_input(self, audible: bool) -> None:
+        """One chunk of the user's microphone audio arrived (``audible``: Oracle's PCM test says it is speech)."""
+        with self.lock:
+            now = self.clock()
+            self.last_input_frame = now
+            if audible:
+                self.last_input = now
+
+    def _user_quiet_for(self, now: float) -> float:
+        """How long the user has been quiet, by BOTH the transcript and the microphone audio. A gap in the audio
+        (no chunks arriving) is not silence: while chunks are stale this is 0. Before any audio arrived (no
+        microphone yet) only the transcript counts."""
+        since = now - max(self.last_user, self.last_input)
+        if self.last_input_frame and now - self.last_input_frame > INPUT_STALE_S:
+            return 0.0
+        return since
+
     def append_rejected(self) -> None:
         """The provider refused a context append as too long. Every relay append is already at most NOTE_BYTES
         UTF-8 bytes (<= 500 tokens) by construction, so nothing is re-split smaller (a smaller limit could leave a
@@ -752,10 +770,12 @@ class CallTools:
         self._speak_part(relay, served=served, resumed=resumed)
 
     def _pace_relays(self) -> None:
-        """Oracle's pacing and windows: an answer starts when the voice has been quiet QUIET_S, the user
-        RESULT_SILENCE_S and no route runs; after START_FALLBACK_S waiting it starts at the next pause of the voice
-        (QUIET_S) once the user has paused FALLBACK_USER_S, even if a route runs; never while the user speaks. While an answer waits, why is logged every
-        WAIT_LOG_S. Audio never waits."""
+        """Pacing of answers. Parts of an answer being read: Oracle's rules. A FINISHED answer starts when the voice
+        has been quiet START_OUTPUT_S and the user START_USER_S (a running route does not block it); after
+        START_FALLBACK_S waiting it starts at the next voice pause once the user has been quiet FALLBACK_USER_S.
+        "The user is quiet" needs both the transcript and the microphone audio (Oracle's PCM test) to be quiet,
+        and microphone chunks to be arriving: a gap in the audio or a late transcript never counts as a pause.
+        While an answer waits, why is logged every WAIT_LOG_S. Audio never waits."""
         now = self.clock()
         waiting = None
         with self.lock:
@@ -763,9 +783,10 @@ class CallTools:
                 return
             relay = self.active_relay
             quiet = now - self.last_output >= QUIET_S and now - self.last_user >= RESULT_SILENCE_S
-            voice_paused = now - self.last_output >= QUIET_S
-            user_quiet = now - self.last_user >= RESULT_SILENCE_S
-            pause = voice_paused and user_quiet and not self.routing
+            voice_paused = now - self.last_output >= START_OUTPUT_S
+            quiet_for = self._user_quiet_for(now)
+            user_quiet = quiet_for >= START_USER_S
+            pause = voice_paused and user_quiet
             gap_ok = now - self.last_append >= APPEND_GAP_S
             action = None
             if relay is not None and getattr(relay, "unsent", False) and relay.remaining > 0:
@@ -778,14 +799,15 @@ class CallTools:
             elif self.pending_relays:
                 head = self.pending_relays[0]
                 waited = now - getattr(head, "adopted_at", now)
-                fallback = waited >= START_FALLBACK_S and voice_paused and now - self.last_user >= FALLBACK_USER_S
+                fallback = waited >= START_FALLBACK_S and voice_paused and quiet_for >= FALLBACK_USER_S
                 if gap_ok and (pause or fallback):
                     action = "start"
                 elif now - self.last_wait_log >= WAIT_LOG_S:
                     self.last_wait_log = now
+                    stale = bool(self.last_input_frame) and now - self.last_input_frame > INPUT_STALE_S
                     why = ("append_gap" if not gap_ok else "voice_speaking" if not voice_paused
-                           else "user_speaking" if not user_quiet else "routing")
-                    waiting = (head.key, round(waited, 1), why, round(now - self.last_user, 1),
+                           else "user_audio_stale" if stale else "user_speaking")
+                    waiting = (head.key, round(waited, 1), why, round(quiet_for, 1),
                                round(now - self.last_output, 1), self.routing)
         if waiting:
             log("agentLiveRelayWaiting", f"call={self.call_id} key={waiting[0]} waited_s={waiting[1]} reason={waiting[2]} "
@@ -1349,8 +1371,11 @@ QUIET_S = 1.5               # oracle_live_stable.QUIET_AFTER_SECONDS
 RESULT_SILENCE_S = 4.5      # oracle_live_stable.RESULT_RELEASE_SILENCE_SECONDS
 RELAY_STALL_S = 15.0        # oracle_live_stable.RELAY_STALL_SECONDS
 APPEND_GAP_S = 4.0          # oracle_live_stable: at most one new result every 4 s
-START_FALLBACK_S = 6.0      # waited this long: start at the next short pause even if a route runs...
-FALLBACK_USER_S = 0.5       # ...but never while the user is speaking: the user quiet at least this long
+START_USER_S = 1.0          # a finished answer starts when the user has been quiet this long (transcript AND mic)...
+START_OUTPUT_S = 0.8        # ...and the voice this long (audible output only); a running route does not block it
+START_FALLBACK_S = 6.0      # waited this long: start at the next voice pause...
+FALLBACK_USER_S = 0.5       # ...once the user has been quiet at least this long; never while the user speaks
+INPUT_STALE_S = 0.5         # no microphone chunk for this long: the user's state is unknown, never "quiet"
 WAIT_LOG_S = 3.0            # while an answer waits, log why this often
 AUTO_PARTS = 8              # oracle_relay.AUTO_PARTS: then pause and offer to continue
 # Text bytes per relayed part. Oracle uses 1100 within a 1500-character append; Sandra uses less so a part

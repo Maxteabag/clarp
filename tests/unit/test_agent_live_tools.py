@@ -1518,15 +1518,72 @@ def _answered(make, routing=False):
     return call, said, clock, effects, ident
 
 
-def test_a_finished_answer_keeps_oracles_windows(make):
+def test_a_finished_answer_starts_at_a_short_pause_even_while_a_route_runs(make):
     call, said, clock, effects, ident = _answered(make, routing=True)
-    call.last_user, call.last_output = clock.now - 1.1, clock.now - 0.9     # a short pause, a route running
+    call.last_user, call.last_output = clock.now - 0.9, clock.now - 0.9     # the user only 0.9 s quiet
     call.tick()
     assert not any("Fjorten saker." in t for _k, t in said)
-    call.routing = False
-    call.last_user, call.last_output = clock.now - 4.6, clock.now - 1.6     # Oracle's 4.5 s / 1.5 s, no route
+    call.last_user = clock.now - 1.1                                        # 1.0 s user / 0.8 s voice, a route running
     call.tick()
     assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+def _mic(call, clock, seconds, audible, transcript_every=None):
+    """The phone sends a microphone chunk every 0.1 s; the transcript (if any) arrives only every N s."""
+    for step in range(int(round(seconds * 10))):
+        clock.now += 0.1
+        call.note_input(audible)
+        if transcript_every and step % int(transcript_every * 10) == 0:
+            call.observe({"type": "session.input_transcript.delta", "delta": "og så "})
+        call.last_output = clock.now - 2.0                                  # the voice is quiet throughout
+        call.tick()
+
+
+def test_continuous_speech_with_a_sparse_late_transcript_never_starts_an_answer(make):
+    call, said, clock, effects, ident = _answered(make)
+    _mic(call, clock, 10.0, audible=True, transcript_every=3.0)             # 10 s of speech, transcript every 3 s
+    assert not any("Fjorten saker." in t for _k, t in said) and effects.acked == []
+
+
+def test_a_real_half_second_pause_after_six_seconds_starts_the_answer(make):
+    call, said, clock, effects, ident = _answered(make)
+    _mic(call, clock, 6.5, audible=True)
+    assert not any("Fjorten saker." in t for _k, t in said)
+    _mic(call, clock, 0.6, audible=False)                                   # a real pause: quiet chunks for 0.6 s
+    assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+def test_a_gap_in_the_microphone_audio_is_not_a_pause(make):
+    call, said, clock, effects, ident = _answered(make)
+    _mic(call, clock, 6.5, audible=True)
+    for _ in range(30):                                                     # 3 s without any chunk (network lag)
+        clock.now += 0.1
+        call.last_output = clock.now - 2.0
+        call.tick()
+    assert not any("Fjorten saker." in t for _k, t in said) and effects.acked == []
+
+
+def test_the_socket_reports_the_users_microphone_speech_to_the_tools():
+    import array
+    import base64 as _b64
+    import threading as _threading
+    from lib import agent_ring_live_socket as sock
+
+    heard = []
+
+    class Tools:
+        def note_input(self, audible):
+            heard.append(audible)
+
+    s = object.__new__(sock.LiveSocket)
+    s.closed, s.stop = _threading.Event(), _threading.Event()
+    s.admitted, s.forwarding, s.tools = True, True, Tools()
+    s.upstream_send = lambda event: True
+    quiet = _b64.b64encode(array.array("h", [0] * 480).tobytes()).decode()
+    speech = _b64.b64encode(array.array("h", [3000, -3000] * 240).tobytes()).decode()
+    for audio in (quiet, speech, quiet):
+        s.client({"type": "session.input_audio.append", "audio": audio})
+    assert heard == [False, True, False]
 
 
 def test_a_chatty_user_without_pauses_gets_no_start_and_a_short_pause_after_six_seconds_starts_it(make):
