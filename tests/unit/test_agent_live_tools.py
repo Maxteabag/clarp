@@ -1503,3 +1503,83 @@ def test_a_finished_answer_is_relayed_while_the_provider_streams_silence(make):
     for _ in range(12):                                          # silence only: note_output is never called
         clock.now += 1.0; call.tick()
     assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+# ---- save_transcript ---------------------------------------------------------------------------
+
+def test_save_transcript_is_on_only_when_the_profile_says_true():
+    assert _config(save_transcript=True)["save_transcript"] is True
+    assert "save_transcript" not in _config() and "save_transcript" not in _config(save_transcript="yes")
+
+
+def test_without_the_flag_no_transcript_is_written(make, ledger):
+    call, said, clock = make(FakeEffects([BOARD_Q]))
+    _user_says(call, clock, "Hva er klart?")
+    call.close()
+    assert not (ledger.path.parent / "transcripts").exists()
+
+
+def test_the_transcript_is_written_as_it_happens_and_saved_whole_when_the_call_closes(make, ledger):
+    import stat
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects, save_transcript=True)
+    folder = ledger.path.parent / "transcripts"
+    _user_says(call, clock, "Hva er klart ")
+    call.observe({"type": "session.input_transcript.delta", "delta": "på boardet?"})
+    call.observe({"type": "session.output_transcript.delta", "delta": "Jeg sjekker."})
+    partial = folder / "call-1.jsonl"
+    lines = [json.loads(x) for x in partial.read_text().splitlines()]          # already on disk, before the close
+    assert stat.S_IMODE(partial.stat().st_mode) == 0o600 and stat.S_IMODE(folder.stat().st_mode) == 0o700
+    assert [x["kind"] for x in lines].count("text") == 3 and any(x["kind"] == "receipt" for x in lines)
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    clock.now += tools.APPEND_GAP_S
+    call.poll_answers()                                                    # answered: a pacing entry
+    call.close()
+    doc = json.loads((folder / "call-1.json").read_text())
+    assert not partial.exists() and stat.S_IMODE((folder / "call-1.json").stat().st_mode) == 0o600
+    assert doc["call_id"] == "call-1" and doc["principal"] == "device_phone" and doc["agent_session"] == "rk-sander-0001"
+    assert [(f["role"], f["text"]) for f in doc["fragments"]] == [("user", "Hva er klart på boardet?"),
+                                                                    ("assistant", "Jeg sjekker.")]
+    assert all(f["at"] <= f["end"] for f in doc["fragments"])
+    assert doc["receipts"][0]["tool"] == "ask_my_agent" and doc["receipts"][0]["status"] == "asked"
+    assert "agentLiveAskAnswered" in {p["event"] for p in doc["pacing"]}
+    assert "audio" not in json.dumps(doc).lower().replace("audio never", "")
+
+
+def test_a_crash_keeps_everything_said_so_far(make, ledger):
+    call, said, clock = make(FakeEffects(), save_transcript=True)
+    for word in ("Hei ", "Sandra, ", "ring meg."):
+        call.observe({"type": "session.input_transcript.delta", "delta": word})
+    # no close(): the process died
+    lines = [json.loads(x) for x in (ledger.path.parent / "transcripts" / "call-1.jsonl").read_text().splitlines()]
+    assert "".join(x["text"] for x in lines if x["kind"] == "text") == "Hei Sandra, ring meg."
+
+
+def test_without_a_retention_setting_no_transcript_is_ever_deleted(make, ledger):
+    import os as _os
+    folder = ledger.path.parent / "transcripts"
+    folder.mkdir(mode=0o700)
+    old = folder / "alv_old.json"
+    old.write_text("{}")
+    past = time.time() - 400 * 24 * 3600
+    _os.utime(old, (past, past))
+    call, said, clock = make(FakeEffects(), save_transcript=True)
+    call.observe({"type": "session.input_transcript.delta", "delta": "Hei"})
+    call.close()
+    assert old.exists() and (folder / "call-1.json").exists()
+    assert "transcript_keep_days" not in _config(save_transcript=True)
+
+
+def test_with_transcript_keep_days_older_files_are_deleted_when_a_call_starts(make, ledger):
+    import os as _os
+    folder = ledger.path.parent / "transcripts"
+    folder.mkdir(mode=0o700)
+    old, new, partial = folder / "alv_old.json", folder / "alv_new.json", folder / "alv_crash.jsonl"
+    for path in (old, new, partial):
+        path.write_text("{}")
+    past = time.time() - 15 * 24 * 3600
+    _os.utime(old, (past, past)); _os.utime(partial, (past, past))
+    make(FakeEffects(), save_transcript=True, transcript_keep_days=14)
+    assert new.exists() and not old.exists() and not partial.exists()
+    assert "transcript_keep_days" not in _config(save_transcript=True, transcript_keep_days=0)
