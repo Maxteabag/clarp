@@ -1363,8 +1363,40 @@ def test_the_socket_reports_whether_a_tool_note_was_actually_sent():
     assert s.tool_context("commentary", "del 1") is True and len(up.frames) == 1
     s.stop.set()
     assert s.tool_context("commentary", "del 2") is False and len(up.frames) == 1   # stopped/retired: refused
-    s.stop.clear(); s.closed.set()
+    s.stop.clear()
+    retired = {"now": True}
+    original = sock.live.retired
+    sock.live.retired = lambda call_id: retired["now"] or original(call_id)
+    try:
+        assert s.tool_context("commentary", "del 2") is False and len(up.frames) == 1   # retired: effect False
+    finally:
+        sock.live.retired = original
+
+    class Broken(Up):
+        def send(self, raw):
+            raise OSError("socket gone")
+    s.upstream = Broken()
+    with pytest.raises(OSError):                                       # a send error is never reported as sent
+        s.tool_context("commentary", "del 2")
+    s.upstream = up
+    s.closed.set()
     assert s.tool_context("commentary", "del 2") is False and len(up.frames) == 1
+
+
+def test_a_send_error_keeps_the_part_unsent_and_the_answer_unacknowledged(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    call.poll_answers()
+
+    def broken(kind, text):
+        raise OSError("socket gone")
+    call.speak = broken
+    _quiet(call, clock)
+    relay = call.active_relay
+    assert relay.next == 0 and relay.sent == 0 and relay.unsent and effects.acked == []
 
 
 def test_a_live_call_relays_the_answer_through_the_socket_and_acknowledges_after_the_append(opted_in, call,
