@@ -1503,3 +1503,51 @@ def test_a_finished_answer_is_relayed_while_the_provider_streams_silence(make):
     for _ in range(12):                                          # silence only: note_output is never called
         clock.now += 1.0; call.tick()
     assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+
+def _answered(make, routing=False):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    clock.now += tools.APPEND_GAP_S
+    call.poll_answers()
+    call.routing = routing
+    return call, said, clock, effects, ident
+
+
+def test_a_finished_answer_keeps_oracles_windows(make):
+    call, said, clock, effects, ident = _answered(make, routing=True)
+    call.last_user, call.last_output = clock.now - 1.1, clock.now - 0.9     # a short pause, a route running
+    call.tick()
+    assert not any("Fjorten saker." in t for _k, t in said)
+    call.routing = False
+    call.last_user, call.last_output = clock.now - 4.6, clock.now - 1.6     # Oracle's 4.5 s / 1.5 s, no route
+    call.tick()
+    assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+def test_a_chatty_user_without_pauses_gets_no_start_and_a_short_pause_after_six_seconds_starts_it(make):
+    call, said, clock, effects, ident = _answered(make, routing=True)
+    for _ in range(9):                                                      # Peter talks without pauses for 9 s
+        clock.now += 1.0
+        call.last_user, call.last_output = clock.now - 0.1, clock.now - 1.6  # the voice is quiet, Peter is not
+        call.tick()
+    assert not any("Fjorten saker." in t for _k, t in said) and effects.acked == []
+    clock.now += 0.6                                                        # a short pause (0.6 s) after 6 s waited
+    call.tick()
+    assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+def test_a_waiting_answer_logs_why_every_three_seconds(make, monkeypatch):
+    logged = []
+    monkeypatch.setattr(tools, "log", lambda event, text: logged.append((event, text)))
+    call, said, clock, effects, ident = _answered(make)
+    for _ in range(4):                                                      # 4 s with the voice speaking
+        clock.now += 1.0
+        call.last_user, call.last_output = clock.now - 0.1, clock.now - 0.1
+        call.tick()
+    waits = [t for e, t in logged if e == "agentLiveRelayWaiting"]
+    assert 1 <= len(waits) <= 2 and "reason=voice_speaking" in waits[0] and "waited_s=" in waits[0]
