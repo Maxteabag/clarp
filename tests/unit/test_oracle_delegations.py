@@ -475,10 +475,16 @@ def test_steered_followup_failure_tracks_original_turn(tmp_path):
     assert oracle_delegations.get("steered")["error"] == "connection lost"
 
 
-def test_agent_live_asks_are_never_offered_to_another_call(tmp_path):
+def test_agent_live_asks_are_never_offered_to_another_call_and_oracles_own_results_always_are(tmp_path):
     agent = _agent(tmp_path)
-    for ident in ("sandra-abc", "oracle-own"):
+    sandra = "Spørsmål fra Sandras Live-samtale med Peter (svar kort): hva er klart?"
+    rows = [("sandra-" + "a1" * 12, sandra),                         # Sandra's ask: held for its own call
+            ("sandra-" + "a1" * 12 + "x", sandra),                   # not Sandra's id shape: offered
+            ("sandra-" + "b2" * 12, "Investigate the failure"),      # Oracle's own text: offered
+            ("sandra-trip", "Book the trip"), ("oracle-own", "Investigate")]
+    for ident, text in rows:
         oracle_delegations.begin(delegation_id=ident, trace_id="t-" + ident, client_msg_id=ident,
-                                 agent_id=agent["agent_id"], session="theo", request_text=ident)
+                                 agent_id=agent["agent_id"], session="theo", request_text=text)
         oracle_delegations.complete_for_trace(trace_id="t-" + ident, message_id="m-" + ident, text="Svar")
-    assert [row["delegation_id"] for row in oracle_delegations.undelivered()] == ["oracle-own"]
+    offered = {row["delegation_id"] for row in oracle_delegations.undelivered()}
+    assert offered == {ident for ident, _ in rows[1:]}

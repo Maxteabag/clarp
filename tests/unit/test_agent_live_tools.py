@@ -1118,6 +1118,8 @@ def test_ask_my_agent_uses_oracles_delegation_to_the_contact_and_says_she_checks
     _user_says(call, clock, "Hva er klart på boardet mitt?")
     [(ident, session, request, principal)] = effects.asks
     assert session == "rk-sander-0001" and principal == "device_phone" and "SolNO-boardet" in request
+    # exactly the shape oracle_delegations.undelivered() holds back for this call (and only that shape)
+    assert re.fullmatch(r"sandra-[0-9a-f]{24}", ident) and re.match(r"Spørsmål fra .*Live-samtale", request)
     receipt = _receipts(said)[0]
     assert receipt["status"] == "asked" and receipt["operation_id"] == ident and "jeg sjekker" in receipt["note"]
 
