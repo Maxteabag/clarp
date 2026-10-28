@@ -701,6 +701,8 @@ class LiveSocket:
                     return self.fail("live_call_stale", "stale")
                 self.forwarding = True
             self.upstream_send({"type": "session.input_audio.append", "audio": audio})
+            if self.tools is not None:
+                self.tools.note_input(_audible(audio))   # the user's speech activity, from the audio itself
         elif kind == "agent_live.client_ready":
             if not self._same_call(event):
                 return self.fail("live_call_stale", "stale")
