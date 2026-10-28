@@ -1608,3 +1608,64 @@ def test_a_waiting_answer_logs_why_every_three_seconds(make, monkeypatch):
         call.tick()
     waits = [t for e, t in logged if e == "agentLiveRelayWaiting"]
     assert 1 <= len(waits) <= 2 and "reason=voice_speaking" in waits[0] and "waited_s=" in waits[0]
+
+
+# ---- save_transcript ---------------------------------------------------------------------------
+
+def test_save_transcript_is_on_only_when_the_profile_says_true():
+    assert _config(save_transcript=True)["save_transcript"] is True
+    assert "save_transcript" not in _config() and "save_transcript" not in _config(save_transcript="yes")
+
+
+def test_without_the_flag_no_transcript_is_written(make, ledger):
+    call, said, clock = make(FakeEffects([BOARD_Q]))
+    _user_says(call, clock, "Hva er klart?")
+    call.close()
+    assert not (ledger.path.parent / "transcripts").exists()
+
+
+def test_the_transcript_is_written_as_it_happens_and_saved_whole_when_the_call_closes(make, ledger):
+    import stat
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects, save_transcript=True)
+    folder = ledger.path.parent / "transcripts"
+    _user_says(call, clock, "Hva er klart ")
+    call.observe({"type": "session.input_transcript.delta", "delta": "på boardet?"})
+    call.observe({"type": "session.output_transcript.delta", "delta": "Jeg sjekker."})
+    partial = folder / "call-1.jsonl"
+    lines = [json.loads(x) for x in partial.read_text().splitlines()]          # already on disk, before the close
+    assert stat.S_IMODE(partial.stat().st_mode) == 0o600 and stat.S_IMODE(folder.stat().st_mode) == 0o700
+    assert [x["kind"] for x in lines].count("text") == 3 and any(x["kind"] == "receipt" for x in lines)
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    clock.now += tools.APPEND_GAP_S
+    call.poll_answers(); clock.now += 2; call.tick()                       # answered + relayed: pacing entries
+    call.close()
+    doc = json.loads((folder / "call-1.json").read_text())
+    assert not partial.exists() and stat.S_IMODE((folder / "call-1.json").stat().st_mode) == 0o600
+    assert doc["call_id"] == "call-1" and doc["principal"] == "device_phone" and doc["agent_session"] == "rk-sander-0001"
+    assert [(f["role"], f["text"]) for f in doc["fragments"]] == [("user", "Hva er klart på boardet?"),
+                                                                    ("assistant", "Jeg sjekker.")]
+    assert all(f["at"] <= f["end"] for f in doc["fragments"])
+    assert doc["receipts"][0]["tool"] == "ask_my_agent" and doc["receipts"][0]["status"] == "asked"
+    assert {p["event"] for p in doc["pacing"]} >= {"agentLiveAskAnswered", "agentLiveRelayStart"}
+    assert "audio" not in json.dumps(doc).lower().replace("audio never", "")
+
+
+def test_a_crash_keeps_everything_said_so_far(make, ledger):
+    call, said, clock = make(FakeEffects(), save_transcript=True)
+    for word in ("Hei ", "Sandra, ", "ring meg."):
+        call.observe({"type": "session.input_transcript.delta", "delta": word})
+    # no close(): the process died
+    lines = [json.loads(x) for x in (ledger.path.parent / "transcripts" / "call-1.jsonl").read_text().splitlines()]
+    assert "".join(x["text"] for x in lines if x["kind"] == "text") == "Hei Sandra, ring meg."
+
+
+def test_transcripts_older_than_fourteen_days_are_deleted(tmp_path):
+    import os as _os
+    old, new, partial = tmp_path / "alv_old.json", tmp_path / "alv_new.json", tmp_path / "alv_crash.jsonl"
+    for path in (old, new, partial):
+        path.write_text("{}")
+    past = time.time() - 15 * 24 * 3600
+    _os.utime(old, (past, past)); _os.utime(partial, (past, past))
+    assert tools.prune_transcripts(tmp_path) == 2 and new.exists() and not old.exists() and not partial.exists()
