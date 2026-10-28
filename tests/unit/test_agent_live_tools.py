@@ -1235,18 +1235,16 @@ def test_a_members_transcript_is_never_relayed_automatically_after_a_delegation(
     assert len(said) == n and not hasattr(tools.Effects, "member_reply")   # not bound to the intent: never relayed
 
 
-def test_a_refused_append_resplits_the_answer_smaller():
+def test_a_refused_append_never_shrinks_the_relay_below_its_bound():
     effects = FakeEffects()
     call = tools.CallTools(_snapshot(), "call-1", lambda k, x: None, effects=effects, executor=Inline(),
                            principal="device_phone", ledger=tools.Ledger(__import__("pathlib").Path("/dev/null")))
-    relay = tools._relay("k", "answer", "src", LONG_ANSWER, "", tools.RELAY_PART_BYTES)
+    relay = tools._relay("k", "Æøå🙂" * 40, "src " + "🙂" * 40, LONG_ANSWER, "Spørsmål 🙂 " * 200, tools.RELAY_PART_BYTES)
     call.relays["k"] = call.active_relay = relay
     relay.next = 2
-    call.append_rejected()
-    assert call.relay_part_bytes < tools.RELAY_PART_BYTES and call.active_relay.total > relay.total
-    assert all(len(call.active_relay.part(i, served=True, resumed=True, pause_after=True).encode("utf-8"))
-               <= call.relay_part_bytes for i in range(call.active_relay.total))
-
+    for _ in range(5):
+        call.append_rejected()
+    assert call.relay_part_bytes == tools.RELAY_PART_BYTES and call.active_relay is relay and relay.next == 2
 
 
 def test_the_ask_note_tells_sandra_to_say_she_is_checking():
