@@ -808,17 +808,30 @@ class CallTools:
         if len(question) > REQUEST_CHARS:
             return {**receipt, "status": "refused", "reason": "question too long"}
         contact = self.cfg["contact"]
-        ident = "sandra-" + _digest(self.host_id, self.principal, self.call_id, question, str(time.time_ns()))
+        # One id per (call, question): the same question in this call is never sent twice (Oracle admits an id once).
+        ident = ASK_PREFIX + _digest(self.host_id, self.principal, self.call_id, contact["session"], question.lower())
+        with self.lock:
+            known = ident in self.asked or ident in self.relays or \
+                any(r.key.endswith(ident) for r in self.pending_relays)
+        if known:
+            return {**receipt, "status": "already_asked", "operation_id": ident,
+                    "note": "already asked in this call; the answer comes back by itself (read_result replays it)"}
         request = (f"Spørsmål fra {self.name}s Live-samtale med Peter (svar kort og muntlig, på norsk; slå opp det "
                    f"som trengs med verktøyene dine): {question}")
         try:
             row = self._effect(lambda: self.effects.ask(ident, contact["session"], request, self.principal))
         except CallEnded:
             raise
-        except Exception as exc:  # noqa: BLE001 - not asked
+        except Exception as exc:  # noqa: BLE001 - not known whether Oracle admitted it: read it back once
             log_exception("agentLiveAsk", exc, f"call={self.call_id}")
-            return {**receipt, "status": "failed", "reason": type(exc).__name__,
-                    "note": "the question could not be sent; say so"}
+            try:
+                row = self.effects.delegation(ident)
+            except Exception:  # noqa: BLE001
+                return {**receipt, "status": "unknown", "operation_id": ident, "reason": type(exc).__name__,
+                        "note": "not known whether the question went out; not resent; say so"}
+            if not row:
+                return {**receipt, "status": "failed", "reason": type(exc).__name__,
+                        "note": "the question could not be sent; say so"}
         with self.lock:
             self.asked[ident] = {"name": contact["name"]}
         return {**receipt, "status": "asked", "operation_id": ident, "regi_status": None,
@@ -852,9 +865,15 @@ class CallTools:
             log_exception("agentLiveDelegateReconcile", exc, f"call={self.call_id}")
 
     def close(self) -> None:
-        """The call ended: no new effect starts, no route starts, no note is spoken."""
+        """The call ended: no new effect starts, no route starts, no note is spoken, no answer is relayed.
+
+        An answer still on its way belongs to this call only: Oracle's undelivered list never offers Sandra's asks
+        (ASK_PREFIX), so it can never surface in another call."""
         with self.lock:
             self.closed = True
+            dropped, self.asked, self.watching, self.pending_relays = list(self.asked), {}, {}, []
+        if dropped:
+            log("agentLiveAskDropped", f"call={self.call_id} ops={','.join(dropped)} reason=call ended")
         self.pool.shutdown(wait=False, cancel_futures=True)
 
     def _submit(self) -> None:
@@ -1307,6 +1326,7 @@ AUTO_PARTS = 8              # oracle_relay.AUTO_PARTS: then pause and offer to c
 # Text bytes per relayed part. Oracle uses 1100 within a 1500-character append; Sandra uses less so a part
 # (header + text) stays far under GPT-Live's 500-token append limit, and halves it if the provider still refuses.
 RELAY_PART_BYTES = 600
+ASK_PREFIX = "sandra-"   # oracle_delegations.undelivered() never offers these: they belong to their Live call
 
 
 def oracle_relay_module():

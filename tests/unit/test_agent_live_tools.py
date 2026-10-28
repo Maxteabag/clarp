@@ -1186,6 +1186,45 @@ def test_a_failed_ask_is_said_honestly(make):
     assert _receipts(said)[0]["status"] == "failed"
 
 
+def test_an_unclear_ask_that_oracle_admitted_is_watched_not_resent(make):
+    effects = FakeEffects([BOARD_Q])
+    effects.ask_error = TimeoutError("slow")
+    effects.delegation = lambda ident: {"delegation_id": ident, "status": "running"}
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    assert _receipts(said)[0]["status"] == "asked" and len(effects.asks) == 1
+
+
+def test_an_ask_whose_admission_cannot_be_read_back_is_unknown(make):
+    effects = FakeEffects([BOARD_Q])
+    effects.ask_error = TimeoutError("slow")
+    effects.delegation = lambda ident: (_ for _ in ()).throw(OSError("db"))
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    assert _receipts(said)[0]["status"] == "unknown" and len(effects.asks) == 1
+
+
+def test_the_same_question_in_one_call_goes_out_once(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart på boardet mitt?")
+    _user_says(call, clock, "Sjekk boardet mitt igjen.")
+    assert len(effects.asks) == 1 and _receipts(said)[0]["status"] == "already_asked"
+
+
+def test_an_answer_after_the_call_ended_is_never_relayed(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart på boardet mitt?")
+    ident = effects.asks[0][0]
+    call.close()
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.",
+                           "request_text": "Hva er klart?", "session": "rk-sander-0001"}
+    n = len(said)
+    _quiet(call, clock); _quiet(call, clock)
+    assert len(said) == n and ident.startswith(tools.ASK_PREFIX)
+
+
 def test_a_members_reply_after_a_delegation_comes_back_into_the_call(make):
     effects = Regi([ASK], [_v1("forwarded", True, intent_status="sendt")])
     call, said, clock = make(effects, **REGI)
