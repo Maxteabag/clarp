@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -214,6 +215,7 @@ def frozen_config(profile: dict, story: str) -> dict | None:
     contact_cfg = {"session": contact_session, "name": str(contact.get("name") or "Sandra's own agent")[:60]}
     return {"from": sender, "agents": agents, "delegate": delegate, "callback": callback, "contact": contact_cfg,
             **({"callback_on_delegation": {"minutes": auto_minutes}} if auto_minutes else {}),
+            **({"save_transcript": True} if block.get("save_transcript") is True else {}),
             "callback_minutes": {"default": default, "min": low, "max": high}}
 
 
@@ -504,6 +506,92 @@ MAX_DELEGATIONS_PER_CALL = 12
 CLAIMED, DONE, NOT_DONE, UNCONFIRMED, CANCELLED = "claimed", "done", "not_done", "unconfirmed", "cancelled"
 
 
+TRANSCRIPT_KEEP_S = 14 * 24 * 3600
+_CALL_ID = re.compile(r"[A-Za-z0-9_.-]{1,120}")
+
+
+class Transcript:
+    """live_tools.save_transcript: the call's text (no audio), every tool receipt and the pacing log.
+
+    Every entry is appended at once to <call_id>.jsonl (so a crash loses nothing); when the call closes the whole
+    call is written to <call_id>.json (atomically) and the .jsonl is removed. Files are mode 600 in a 700 directory;
+    files older than TRANSCRIPT_KEEP_S are deleted. Writing never affects the call."""
+
+    def __init__(self, directory: pathlib.Path, call_id: str, meta: dict):
+        self.directory, self.meta, self.lock, self.entries, self.done = pathlib.Path(directory), meta, \
+            threading.Lock(), [], False
+        safe = call_id if _CALL_ID.fullmatch(call_id or "") else "call-" + _digest(str(call_id))
+        self.partial, self.final = self.directory / f"{safe}.jsonl", self.directory / f"{safe}.json"
+        self.started = _iso()
+        try:
+            self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            prune_transcripts(self.directory)
+        except OSError as exc:
+            log_exception("agentLiveTranscriptDir", exc, str(self.directory))
+
+    def add(self, kind: str, **fields) -> None:
+        entry = {"at": _iso(), "kind": kind, **fields}
+        with self.lock:
+            if self.done:
+                return
+            self.entries.append(entry)
+            try:
+                fd = os.open(self.partial, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                with os.fdopen(fd, "a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            except OSError as exc:
+                log_exception("agentLiveTranscriptAppend", exc, str(self.partial))
+
+    def document(self) -> dict:
+        fragments = []
+        for entry in self.entries:
+            if entry["kind"] != "text":
+                continue
+            last = fragments[-1] if fragments else None
+            if last and last["role"] == entry["role"]:
+                last["text"] += entry["text"]
+                last["end"] = entry["at"]
+            else:
+                fragments.append({"role": entry["role"], "text": entry["text"], "at": entry["at"], "end": entry["at"]})
+        return {**self.meta, "started": self.started, "ended": _iso(), "fragments": fragments,
+                "receipts": [{"at": e["at"], **e["receipt"]} for e in self.entries if e["kind"] == "receipt"],
+                "pacing": [{"at": e["at"], "event": e["event"], "detail": e["detail"]}
+                           for e in self.entries if e["kind"] == "pacing"]}
+
+    def finish(self) -> None:
+        with self.lock:
+            if self.done:
+                return
+            self.done = True
+            try:
+                tmp = self.final.with_name(self.final.name + ".tmp")
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(self.document(), handle, ensure_ascii=False, indent=1)
+                os.replace(tmp, self.final)
+                self.partial.unlink(missing_ok=True)
+            except OSError as exc:              # the .jsonl stays: nothing is lost
+                log_exception("agentLiveTranscriptFinish", exc, str(self.final))
+
+
+def _iso() -> str:
+    from datetime import UTC, datetime
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def prune_transcripts(directory: pathlib.Path, keep_s: float = TRANSCRIPT_KEEP_S) -> int:
+    """Delete saved transcripts (and leftover partials) older than ``keep_s``."""
+    removed, cutoff = 0, time.time() - keep_s
+    for path in pathlib.Path(directory).glob("*.json*"):
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
 class Ledger:
     """Every delegation and call back as a durable operation, claimed before its effect.
 
@@ -597,6 +685,9 @@ class CallTools:
         self.call_id, self.principal, self.speak, self.clock, self.current = call_id, principal, speak, clock, current
         self.effects = effects or Effects()
         self.ledger = ledger or Ledger()
+        self.transcript = Transcript(self.ledger.path.parent / "transcripts", call_id, {
+            "call_id": call_id, "principal": principal, "agent_session": self.agent_session,
+            "agent": snapshot["profile"]["display_name"] or ""}) if self.cfg.get("save_transcript") else None
         self.pool = executor or concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent-live-tools")
         self.lock = threading.Lock()
         self.fragments: list[dict] = []
@@ -651,6 +742,8 @@ class CallTools:
                     self.revision += 1
                     self.fragments[-1]["revision"] = self.revision
                     self.last_user = self.clock()
+            if self.transcript is not None:
+                self.transcript.add("text", role=role, text=text)
         elif kind == "session.delegation.created":
             with self.lock:
                 if self.closed:
@@ -694,7 +787,7 @@ class CallTools:
         long header no room); the refusal is only logged."""
         with self.lock:
             relay = self.active_relay
-        log("agentLiveRelayAppendRejected", f"call={self.call_id} key={getattr(relay, 'key', None)}")
+        self._log("agentLiveRelayAppendRejected", f"call={self.call_id} key={getattr(relay, 'key', None)}")
 
     def _speak_part(self, relay, *, served=False, resumed=False) -> bool:
         """Append the relay's next part. The cursor advances and Oracle's row is acknowledged ONLY when the socket
@@ -709,7 +802,7 @@ class CallTools:
                 pause_after = relay.auto + 1 >= AUTO_PARTS
             text = relay.part(index, served=served, resumed=resumed, pause_after=pause_after)
             if note_tokens(text) > NOTE_BYTES:                # by construction never; never send an oversized append
-                log("agentLiveRelayOversize", f"call={self.call_id} key={relay.key} bytes={note_tokens(text)}")
+                self._log("agentLiveRelayOversize", f"call={self.call_id} key={relay.key} bytes={note_tokens(text)}")
                 return False
             try:
                 sent = self._effect(lambda: self.speak("commentary", text)) is True
@@ -720,12 +813,12 @@ class CallTools:
                 with self.lock:                               # never replayed automatically, never acknowledged;
                     relay.uncertain, relay.held = index, True  # read_result can send it again on request
                     relay.unsent, self.last_append = False, self.clock()
-                log("agentLiveRelaySendUncertain", f"call={self.call_id} key={relay.key} part={index + 1}")
+                self._log("agentLiveRelaySendUncertain", f"call={self.call_id} key={relay.key} part={index + 1}")
                 return False
             if not sent:                                      # a known drop (e.g. before the drain): retried
                 with self.lock:                               # retried by the pacing once quiet, never hot
                     relay.unsent, self.last_append = True, self.clock()
-                log("agentLiveRelayNotSent", f"call={self.call_id} key={relay.key} part={index + 1}")
+                self._log("agentLiveRelayNotSent", f"call={self.call_id} key={relay.key} part={index + 1}")
                 return False
             with self.lock:
                 relay.unsent, relay.uncertain = False, None
@@ -788,14 +881,14 @@ class CallTools:
                     waiting = (head.key, round(waited, 1), why, round(now - self.last_user, 1),
                                round(now - self.last_output, 1), self.routing)
         if waiting:
-            log("agentLiveRelayWaiting", f"call={self.call_id} key={waiting[0]} waited_s={waiting[1]} reason={waiting[2]} "
+            self._log("agentLiveRelayWaiting", f"call={self.call_id} key={waiting[0]} waited_s={waiting[1]} reason={waiting[2]} "
                 f"since_user_s={waiting[3]} since_voice_s={waiting[4]} routing={waiting[5]}")
         if action == "next":
             self._speak_part(relay)
         elif action == "start":
             with self.lock:
                 fresh = self.pending_relays.pop(0)
-            log("agentLiveRelayStart", f"call={self.call_id} key={fresh.key} "
+            self._log("agentLiveRelayStart", f"call={self.call_id} key={fresh.key} "
                 f"waited_s={round(now - getattr(fresh, 'adopted_at', now), 1)}")
             self._start_relay(fresh)
 
@@ -831,7 +924,7 @@ class CallTools:
                 if self.closed or not self.current() or self.asked.pop(ident, None) is None:
                     return
                 self.pending_relays.append(relay)
-            log("agentLiveAskAnswered", f"call={self.call_id} op={ident} status={row.get('status')}")
+            self._log("agentLiveAskAnswered", f"call={self.call_id} op={ident} status={row.get('status')}")
 
     def _ask(self, arguments: dict) -> dict:
         receipt = {"tool": "ask_my_agent"}
@@ -897,6 +990,12 @@ class CallTools:
         except Exception as exc:  # noqa: BLE001 - a failed check never affects the call
             log_exception("agentLiveDelegateReconcile", exc, f"call={self.call_id}")
 
+    def _log(self, event: str, text: str) -> None:
+        """A pacing/answer decision: to the journal and, when the profile saves transcripts, into this call's file."""
+        log(event, text)
+        if self.transcript is not None:
+            self.transcript.add("pacing", event=event, detail=text)
+
     def close(self) -> None:
         """The call ended: no new effect starts, no route starts, no note is spoken, no answer is relayed.
 
@@ -906,7 +1005,9 @@ class CallTools:
             self.closed = True
             dropped, self.asked, self.pending_relays = list(self.asked), {}, []
         if dropped:
-            log("agentLiveAskDropped", f"call={self.call_id} ops={','.join(dropped)} reason=call ended")
+            self._log("agentLiveAskDropped", f"call={self.call_id} ops={','.join(dropped)} reason=call ended")
+        if self.transcript is not None:
+            self.transcript.finish()
         self.pool.shutdown(wait=False, cancel_futures=True)
 
     def _submit(self) -> None:
@@ -977,6 +1078,9 @@ class CallTools:
             self.routed_revision = max(self.routed_revision, revision)
             self.waiting = False
         receipts += self._auto_callback(receipts)
+        if self.transcript is not None:
+            for receipt in receipts:
+                self.transcript.add("receipt", receipt=receipt)
         if receipts:
             log("agentLiveToolsActions", f"call={self.call_id} " + json.dumps(
                 [{k: r.get(k) for k in ("tool", "agent", "status", "operation_id")} for r in receipts], ensure_ascii=False))
