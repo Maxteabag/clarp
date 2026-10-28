@@ -1366,6 +1366,8 @@ def _line(receipt: dict) -> str:
         parts.append("at " + _cut(receipt["at"], 8))
     if (receipt.get("replaced") or {}).get("minutes"):
         parts.append(f"replaced {receipt['replaced']['minutes']} min")
+    if receipt.get("tool") == "ask_my_agent" and receipt.get("status") == "asked":
+        parts.append("say briefly that you are checking (jeg sjekker); the answer comes later")
     if receipt.get("regi_status") not in (None, "", "venter"):
         parts.append("regi " + _cut(receipt["regi_status"], 24))
     if receipt.get("reason") not in (None, ""):
