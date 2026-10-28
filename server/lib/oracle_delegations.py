@@ -384,6 +384,8 @@ def undelivered(
         """SELECT * FROM oracle_delegations
             WHERE delivered_at IS NULL
               AND owner_principal = ?
+              AND delegation_id NOT LIKE 'sandra-%'
+              -- Agent Live asks are relayed only into their own call
               AND status IN ('completed', 'failed', 'cancelled')
             ORDER BY updated_at, delegation_id
             LIMIT ?""",

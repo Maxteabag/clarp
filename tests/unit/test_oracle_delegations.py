@@ -473,3 +473,12 @@ def test_steered_followup_failure_tracks_original_turn(tmp_path):
     assert oracle_delegations.fail_for_trace("running-trace", "connection lost")
     assert oracle_delegations.get("steered")["status"] == "failed"
     assert oracle_delegations.get("steered")["error"] == "connection lost"
+
+
+def test_agent_live_asks_are_never_offered_to_another_call(tmp_path):
+    agent = _agent(tmp_path)
+    for ident in ("sandra-abc", "oracle-own"):
+        oracle_delegations.begin(delegation_id=ident, trace_id="t-" + ident, client_msg_id=ident,
+                                 agent_id=agent["agent_id"], session="theo", request_text=ident)
+        oracle_delegations.complete_for_trace(trace_id="t-" + ident, message_id="m-" + ident, text="Svar")
+    assert [row["delegation_id"] for row in oracle_delegations.undelivered()] == ["oracle-own"]
