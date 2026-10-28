@@ -689,19 +689,12 @@ class CallTools:
             self.last_output = self.clock()
 
     def append_rejected(self) -> None:
-        """The provider refused a context append as too long: re-split the active answer smaller and resend."""
+        """The provider refused a context append as too long. Every relay append is already at most NOTE_BYTES
+        UTF-8 bytes (<= 500 tokens) by construction, so nothing is re-split smaller (a smaller limit could leave a
+        long header no room); the refusal is only logged."""
         with self.lock:
             relay = self.active_relay
-            if relay is None or self.relay_part_bytes <= RELAY_MIN_BYTES:
-                return
-            self.relay_part_bytes = max(self.relay_part_bytes * 3 // 4, RELAY_MIN_BYTES)
-            index = max(relay.next - 1, 0)
-            fresh = _relay(relay.key, relay.label, relay.source, relay.text, relay.request, self.relay_part_bytes)
-            done_text = "".join(relay.chunks[:index])
-            fresh.next = len(_relay(relay.key, relay.label, relay.source, done_text or " ", "", self.relay_part_bytes).chunks) if done_text else 0
-            self.relays[relay.key] = self.active_relay = fresh
-            self.last_append = 0.0
-        log("agentLiveRelayResplit", f"call={self.call_id} key={relay.key} part_bytes={self.relay_part_bytes}")
+        log("agentLiveRelayAppendRejected", f"call={self.call_id} key={getattr(relay, 'key', None)}")
 
     def _speak_part(self, relay, *, served=False, resumed=False) -> bool:
         """Append the relay's next part. The cursor advances and Oracle's row is acknowledged ONLY when the socket
@@ -1334,7 +1327,6 @@ AUTO_PARTS = 8              # oracle_relay.AUTO_PARTS: then pause and offer to c
 # Text bytes per relayed part. Oracle uses 1100 within a 1500-character append; Sandra uses less so a part
 # (header + text) stays far under GPT-Live's 500-token append limit, and halves it if the provider still refuses.
 RELAY_PART_BYTES = 450   # one whole relay append, header and control text included
-RELAY_MIN_BYTES = 300
 ASK_PREFIX = "sandra-"   # oracle_delegations.undelivered() never offers these: they belong to their Live call
 
 
