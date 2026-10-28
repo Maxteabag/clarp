@@ -1468,3 +1468,38 @@ def test_before_the_opening_is_drained_a_current_call_neither_advances_nor_ackno
     _quiet(call, clock)                                                # drained: sent, then counted and acked
     assert relay.next == 1 and effects.acked == [ident] and len(up.frames) == 1
     assert "Fjorten saker." in json.dumps(up.frames[0], ensure_ascii=False)
+
+
+
+def test_only_audible_output_counts_as_the_voice_speaking_so_a_relay_can_start():
+    import array
+    import base64 as _b64
+    from lib import agent_ring_live_socket as sock
+
+    class Tools:
+        spoke = 0
+
+        def note_output(self):
+            Tools.spoke += 1
+
+    s = object.__new__(sock.LiveSocket)
+    s.tools, s._note_order, s._tools_observe, s._output = Tools(), (lambda k, e: None), (lambda e: None), (lambda d: None)
+    silence = _b64.b64encode(array.array("h", [0] * 480).tobytes()).decode()
+    speech = _b64.b64encode(array.array("h", [3000, -3000] * 240).tobytes()).decode()
+    for _ in range(50):                                          # GPT-Live streams silent frames between turns
+        s.receive({"type": "session.output_audio.delta", "delta": silence})
+    assert Tools.spoke == 0
+    s.receive({"type": "session.output_audio.delta", "delta": speech})
+    s.receive({"type": "session.output_audio.delta", "delta": "not base64!"})
+    assert Tools.spoke == 1
+
+
+def test_a_finished_answer_is_relayed_while_the_provider_streams_silence(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    for _ in range(12):                                          # silence only: note_output is never called
+        clock.now += 1.0; call.tick()
+    assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
