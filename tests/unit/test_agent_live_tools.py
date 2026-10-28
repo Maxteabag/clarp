@@ -163,7 +163,7 @@ def ledger(tmp_path):
 def make(ledger):
     def build(effects, call_id="call-1", principal="device_phone", current=lambda: True, **changes):
         said, clock = [], Clock()
-        call = tools.CallTools(_snapshot(**changes), call_id, lambda kind, text: said.append((kind, text)),
+        call = tools.CallTools(_snapshot(**changes), call_id, lambda kind, text: said.append((kind, text)) or True,
                                effects=effects, clock=clock, executor=Inline(), principal=principal,
                                current=current, ledger=ledger)
         return call, said, clock
@@ -1307,3 +1307,80 @@ def test_the_answer_is_acknowledged_only_once_its_first_part_is_in_the_call(make
     assert call.pending_relays and effects.acked == []              # adopted, not yet delivered
     _quiet(call, clock)
     assert effects.acked == [ident] and any("Fjorten saker." in t for _k, t in said)
+
+
+
+def test_a_part_the_socket_did_not_send_is_neither_counted_nor_acknowledged(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    call.poll_answers()
+    sent = {"ok": False}
+    call.speak = lambda kind, text: sent["ok"] and (said.append((kind, text)) or True)
+    _quiet(call, clock)                                             # dropped (not drained / no upstream)
+    relay = call.active_relay
+    assert relay.next == 0 and relay.sent == 0 and effects.acked == [] and relay.ack == ident
+    sent["ok"] = True
+    _quiet(call, clock)                                             # once quiet: the same part 1 again, now sent
+    assert relay.next == 1 and effects.acked == [ident] and any("Fjorten saker." in t for _k, t in said)
+
+
+def test_a_close_between_the_poll_and_the_append_leaves_the_answer_unacknowledged(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    call.poll_answers()
+    relay = call.pending_relays[0]
+    call.close()
+    assert call._speak_part(relay) is False                         # even a direct append attempt after close
+    assert effects.acked == [] and relay.next == 0 and not any("Fjorten" in t for _k, t in said)
+
+
+def test_the_socket_reports_whether_a_tool_note_was_actually_sent():
+    import threading as _threading
+    from lib import agent_ring_live_socket as sock
+
+    class Up:
+        def __init__(self):
+            self.frames = []
+
+        def send(self, raw):
+            self.frames.append(json.loads(raw))
+
+    s = object.__new__(sock.LiveSocket)
+    s.call_id, s.drained, s.closed, s.stop = "call-x", False, _threading.Event(), _threading.Event()
+    s._fence, s._send_lock, s._state, s.instructions_appends_issued = _threading.Lock(), _threading.Lock(), _threading.Lock(), 0
+    s.upstream = Up()
+    assert s.tool_context("commentary", "del 1") is False             # not drained: dropped
+    s.drained = True
+    up, s.upstream = s.upstream, None
+    assert s.tool_context("commentary", "del 1") is False             # no upstream: dropped
+    s.upstream = up
+    assert s.tool_context("commentary", "del 1") is True and len(up.frames) == 1
+    s.stop.set()
+    assert s.tool_context("commentary", "del 2") is False and len(up.frames) == 1   # stopped/retired: refused
+    s.stop.clear(); s.closed.set()
+    assert s.tool_context("commentary", "del 2") is False and len(up.frames) == 1
+
+
+def test_a_live_call_relays_the_answer_through_the_socket_and_acknowledges_after_the_append(opted_in, call,
+                                                                                            monkeypatch):
+    effects = FakeEffects([BOARD_Q])
+    monkeypatch.setattr(tools, "Effects", lambda key, ctx=None: effects)
+    h, thread = _admitted(call)
+    call.up.push({"type": "session.input_transcript.delta", "delta": "Hva er klart på boardet mitt?"})
+    _wait(lambda: effects.asks)
+    ident = effects.asks[0][0]
+    assert effects.acked == []
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker er klare.",
+                           "request_text": "Hva er klart?", "session": "rk-sander-0001"}
+    _wait(lambda: any("Fjorten saker er klare." in str(f) for f in call.up.of("session.commentary.append")), 20)
+    _wait(lambda: effects.acked == [ident])
+    assert all(len(json.dumps(f["content"], ensure_ascii=False).encode()) <= tools.NOTE_BYTES + 2
+               for f in call.up.of("session.commentary.append"))
+    h.send({"type": "session.close"})
+    thread.join(15)

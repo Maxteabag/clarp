@@ -615,6 +615,7 @@ class CallTools:
         self.asked: dict[str, dict] = {}        # operation id -> {"name"}; answered once relayed
         self.last_output = self.last_append = self.last_poll = 0.0
         self.relay_part_bytes = RELAY_PART_BYTES
+        self.speaking = threading.Lock()
         self.auto_callback_done = False
 
     # -- the lifecycle fence ---------------------------------------------------------------
@@ -703,29 +704,48 @@ class CallTools:
         log("agentLiveRelayResplit", f"call={self.call_id} key={relay.key} part_bytes={self.relay_part_bytes}")
 
     def _speak_part(self, relay, *, served=False, resumed=False) -> bool:
-        with self.lock:
-            index = relay.next
-            if index >= relay.total or self.closed:
+        """Append the relay's next part. The cursor advances and Oracle's row is acknowledged ONLY when the socket
+        reports the append as sent (speak() returned True) in this open, current call; a drop (not drained, no
+        upstream, closed, retired) or an error leaves the part unsent, the cursor where it was and the row
+        unacknowledged. "Sent" means handed to the provider transport, never "heard"."""
+        with self.speaking:                                   # one part at a time (pacing vs read_result)
+            with self.lock:
+                index = relay.next
+                if index >= relay.total or self.closed:
+                    return False
+                pause_after = relay.auto + 1 >= AUTO_PARTS
+            text = relay.part(index, served=served, resumed=resumed, pause_after=pause_after)
+            if note_tokens(text) > NOTE_BYTES:                # by construction never; never send an oversized append
+                log("agentLiveRelayOversize", f"call={self.call_id} key={relay.key} bytes={note_tokens(text)}")
                 return False
-            relay.next = index + 1
-            relay.sent = max(relay.sent, relay.next)
-            relay.auto += 1
-            relay.sent_at = self.last_append = self.clock()
-            pause_after = relay.auto >= AUTO_PARTS
-        text = relay.part(index, served=served, resumed=resumed, pause_after=pause_after)
-        if note_tokens(text) > NOTE_BYTES:                    # by construction never; never send an oversized append
-            log("agentLiveRelayOversize", f"call={self.call_id} key={relay.key} bytes={note_tokens(text)}")
-            return False
-        self.speak("commentary", text)
-        if getattr(relay, "ack", None):
-            ident, relay.ack = relay.ack, None
-            try:                                              # delivered into this call: Oracle never offers it again
-                self._effect(lambda: self.effects.acknowledge(ident, self.principal))
+            try:
+                sent = self._effect(lambda: self.speak("commentary", text)) is True
             except CallEnded:
-                pass
-            except Exception as exc:  # noqa: BLE001
-                log_exception("agentLiveAskAcknowledge", exc, ident)
-        return True
+                sent = False
+            except Exception as exc:  # noqa: BLE001 - not known to be sent: treated as not sent
+                log_exception("agentLiveRelaySend", exc, f"call={self.call_id}")
+                sent = False
+            if not sent:
+                with self.lock:                               # retried by the pacing once quiet, never hot
+                    relay.unsent, self.last_append = True, self.clock()
+                log("agentLiveRelayNotSent", f"call={self.call_id} key={relay.key} part={index + 1}")
+                return False
+            with self.lock:
+                relay.unsent = False
+                relay.next = index + 1
+                relay.sent = max(relay.sent, relay.next)
+                relay.auto += 1
+                relay.sent_at = self.last_append = self.clock()
+            ident = getattr(relay, "ack", None)
+            if ident:
+                try:                                          # its first part is in this call: never offered again
+                    self._effect(lambda: self.effects.acknowledge(ident, self.principal))
+                    relay.ack = None
+                except CallEnded:
+                    pass
+                except Exception as exc:  # noqa: BLE001 - stays unacknowledged; retried with the next part
+                    log_exception("agentLiveAskAcknowledge", exc, ident)
+            return True
 
     def _start_relay(self, relay, *, start: int = 0, served: bool = False, resumed: bool = False) -> None:
         with self.lock:
@@ -743,7 +763,9 @@ class CallTools:
                 return
             relay = self.active_relay
             quiet = now - self.last_output >= QUIET_S and now - self.last_user >= RESULT_SILENCE_S
-            if relay is not None and relay.remaining > 0 and not relay.held and relay.auto < AUTO_PARTS:
+            if relay is not None and getattr(relay, "unsent", False) and relay.remaining > 0:
+                action = "next" if quiet and not self.routing and now - self.last_append >= APPEND_GAP_S else None
+            elif relay is not None and relay.remaining > 0 and not relay.held and relay.auto < AUTO_PARTS:
                 spoke = self.last_output > relay.sent_at and quiet
                 stalled = self.last_output <= relay.sent_at and now - relay.sent_at > RELAY_STALL_S
                 interrupted = self.last_user > relay.sent_at
@@ -1332,6 +1354,7 @@ def _relay(key: str, label: str, source: str, text: str, request: str, part_byte
 
     class SandraRelay(relay_mod.Relay):
         ack: str | None = None
+        unsent: bool = False
 
         def __post_init__(self):
             self.label, self.source = _cut(self.label, 40), _cut(self.source, 40)

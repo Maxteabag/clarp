@@ -209,13 +209,14 @@ class LiveSocket:
         """The tools' lifecycle fence: this socket still owns a live, unretired call."""
         return not (self.closed.is_set() or self.stop.is_set() or self.ending.is_set() or live.retired(self.call_id))
 
-    def tool_context(self, kind: str, text: str) -> None:
-        """A Host note to the voice model, only once the opening was admitted and drained."""
+    def tool_context(self, kind: str, text: str) -> bool:
+        """A Host note to the voice model, only once the opening was admitted and drained. True only when it was
+        handed to the provider transport; False when dropped (not drained, closed, no upstream, retired)."""
         if not self.drained or self.closed.is_set():
             _quiet_note("agentLiveToolNoteDropped", f"call={self.call_id} kind={kind} drained={self.drained}")
-            return
+            return False
         from .oracle_live_wire import LiveWire
-        self.upstream_send(LiveWire("api").context(kind, text))
+        return self.upstream_send(LiveWire("api").context(kind, text))
 
     def _tools_observe(self, event: dict) -> None:
         tools = self.tools
@@ -288,12 +289,13 @@ class LiveSocket:
         """The stop is clean: the provider session actually closed and no effect is still in flight."""
         return self.upstream_closed.is_set() and not self.fence_stuck.is_set()
 
-    def upstream_send(self, event: dict) -> None:
+    def upstream_send(self, event: dict) -> bool:
         # Revocation stops every paid effect at once: no silence, no user audio, no append after a close or
         # fallback retired the call (marked under the ring lock before its save and its stop).
+        # True only when the frame was written to the provider transport.
         upstream = self.upstream
         if upstream is None:
-            return
+            return False
 
         def send():
             with self._send_lock:
@@ -301,7 +303,7 @@ class LiveSocket:
                 if event.get("type") == "session.instructions.append":
                     with self._state:
                         self.instructions_appends_issued += 1
-        self.effect(send)
+        return self.effect(send)
 
     # -- authority on the ring record ---------------------------------------------------
     def _record(self, change) -> bool:
