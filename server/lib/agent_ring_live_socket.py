@@ -201,7 +201,8 @@ class LiveSocket:
         if not self.snapshot.get("live_tools"):
             return
         from .agent_live_tools import CallTools, Effects
-        self.tools = CallTools(self.snapshot, self.call_id, self.tool_context, effects=Effects(api_key),
+        self.tools = CallTools(self.snapshot, self.call_id, self.tool_context,
+                               effects=Effects(api_key, ctx=getattr(self.handler, "ctx", None)),
                                principal=self.principal, current=self.tools_current)
 
     def tools_current(self) -> bool:
@@ -578,6 +579,8 @@ class LiveSocket:
         elif kind == "session.instructions.appended":
             self._admit(event)
         elif kind == "session.output_audio.delta":
+            if self.tools is not None:
+                self.tools.note_output()
             self._output(event.get("delta"))
         elif kind == "session.output_audio.interrupted":
             if self.drained and not self.closed.is_set():
@@ -588,6 +591,11 @@ class LiveSocket:
             self._end_locally("provider_closed")
         elif kind == "error":
             log("agentLiveUpstreamError", f"call={self.call_id} error={json.dumps(event.get('error'))[:300]}")
+            if self.tools is not None and "context append" in json.dumps(event.get("error")).lower():
+                try:
+                    self.tools.append_rejected()
+                except Exception as exc:  # noqa: BLE001 - tools never affect the call
+                    _quiet_log("agentLiveToolsAppendRejected", exc, self.call_id)
             if not self.admitted:
                 self.fail("live_unavailable", "provider_error")
 

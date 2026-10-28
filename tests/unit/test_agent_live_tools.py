@@ -60,6 +60,7 @@ class FakeEffects:
         self.later_error = None
         self.timers: dict[str, str] = {}
         self.post_error = self.prompt_error = None
+        self.asks, self.rows, self.acked, self.replies, self.ask_error = [], {}, [], {}, None
         self.url_errors: dict[str, Exception] = {}
         self.inbox: list[tuple[str, str]] = []      # what really reached members (for reconcile)
         self.recipients = {"device_phone", "device_other"}
@@ -108,6 +109,21 @@ class FakeEffects:
     def stop(self, unit):
         self.stopped.append(unit)
         self.timers[unit] = "absent"
+
+    def ask(self, delegation_id, session, request, principal):
+        self.asks.append((delegation_id, session, request, principal))
+        if self.ask_error is not None:
+            raise self.ask_error
+        return {"delegation_id": delegation_id, "status": "running"}
+
+    def delegation(self, delegation_id):
+        return self.rows.get(delegation_id)
+
+    def acknowledge(self, delegation_id, principal):
+        self.acked.append(delegation_id)
+
+    def member_reply(self, session, since):
+        return self.replies.get(session)
 
     def recipient_ok(self, principal):
         return principal in self.recipients
@@ -1043,7 +1059,7 @@ def opted_in(sander):
 
 def test_a_live_call_routes_the_users_turn_and_tells_the_voice_what_was_done(opted_in, call, monkeypatch):
     effects = FakeEffects([ASK])
-    monkeypatch.setattr(tools, "Effects", lambda key: effects)
+    monkeypatch.setattr(tools, "Effects", lambda key, ctx=None: effects)
     h, thread = _admitted(call)
     call.up.push({"type": "session.input_transcript.delta", "delta": "Sandra, kan Jonas ta sak 182?"})
     _wait(lambda: call.up.of("session.thinking.append"))
@@ -1061,7 +1077,7 @@ def test_a_live_call_routes_the_users_turn_and_tells_the_voice_what_was_done(opt
 
 def test_a_live_call_after_hang_up_starts_no_effect(opted_in, call, monkeypatch):
     effects = FakeEffects([ASK])
-    monkeypatch.setattr(tools, "Effects", lambda key: effects)
+    monkeypatch.setattr(tools, "Effects", lambda key, ctx=None: effects)
     h, thread = _admitted(call)
     call.up.push({"type": "session.input_transcript.delta", "delta": "Ta sak 182, ha det!"})
     h.send({"type": "session.close"})
@@ -1072,7 +1088,7 @@ def test_a_live_call_after_hang_up_starts_no_effect(opted_in, call, monkeypatch)
 
 def test_a_live_call_without_live_tools_never_routes(call, monkeypatch):
     built = []
-    monkeypatch.setattr(tools, "Effects", lambda key: built.append(key))
+    monkeypatch.setattr(tools, "Effects", lambda key, ctx=None: built.append(key))
     h, thread = _admitted(call)
     call.up.push({"type": "session.input_transcript.delta", "delta": "Kan Jonas ta sak 182?"})
     call.up.push({"type": "session.delegation.created", "delegation": {"id": "d1"}})
@@ -1080,3 +1096,111 @@ def test_a_live_call_without_live_tools_never_routes(call, monkeypatch):
     assert built == [] and not call.up.of("session.thinking.append") and not call.up.of("session.commentary.append")
     h.send({"type": "session.close"})
     thread.join(15)
+
+
+
+# ---- Oracle parity: ask my own agent, answers relayed back in parts, read_result ----------------
+
+BOARD_Q = ("ask_my_agent", {"question": "Hva er klart å gjøre på SolNO-boardet som er tildelt Peter?"})
+LONG_ANSWER = ("Tre saker er klare for deg på SolNO-boardet. Først #491, rekkefølge på kalkulatorer i "
+               "tjenestekatalogen, som står i Ready. ") + "Deretter flere detaljer om status og hvem som eier hva. " * 40
+
+
+def _quiet(call, clock, seconds=6.0):
+    clock.now += seconds
+    call.tick()
+
+
+def test_ask_my_agent_uses_oracles_delegation_to_the_contact_and_says_she_checks(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart på boardet mitt?")
+    [(ident, session, request, principal)] = effects.asks
+    assert session == "rk-sander-0001" and principal == "device_phone" and "SolNO-boardet" in request
+    receipt = _receipts(said)[0]
+    assert receipt["status"] == "asked" and receipt["operation_id"] == ident and "jeg sjekker" in receipt["note"]
+
+
+def test_the_contact_is_configurable_and_never_a_team_member():
+    cfg = _config(contact={"session": "rk-sander-0001", "name": "Sandras agent"})
+    assert cfg["contact"] == {"session": "rk-sander-0001", "name": "Sandras agent"}
+    assert _config(contact={"session": "drammen-jonas"}) is None
+
+
+def test_the_answer_is_relayed_into_the_call_in_parts_oracle_style_and_acknowledged(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart på boardet mitt?")
+    ident = effects.asks[0][0]
+    n_before = len(said)
+    _quiet(call, clock)
+    assert len(said) == n_before                                    # nothing until the answer is there
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": LONG_ANSWER,
+                           "request_text": "Hva er klart?", "session": "rk-sander-0001"}
+    _quiet(call, clock)                                             # poll: queued
+    _quiet(call, clock)                                             # quiet: part 1
+    parts = [text for kind, text in said[n_before:] if "part 1 of" in text]
+    assert parts and "Tre saker er klare" in parts[0] and effects.acked == [ident]
+    total = int(parts[0].split("part 1 of ")[1].split(",")[0].split(".")[0])
+    assert total > 1
+    call.note_output(); _quiet(call, clock)                         # spoken + quiet => next part
+    assert any("part 2 of" in text for _k, text in said)
+    for _k, text in said:
+        if " of " in text and "part" in text:
+            assert len(text.encode("utf-8")) <= 1200                # far under the 500-token append limit
+
+
+def test_no_part_is_sent_while_the_user_is_speaking_or_the_voice_has_not_spoken(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": LONG_ANSWER, "session": "x"}
+    _quiet(call, clock); _quiet(call, clock)
+    n = sum("part " in t for _k, t in said)
+    _quiet(call, clock)                                             # the voice has not spoken part 1 yet
+    assert sum("part " in t for _k, t in said) == n
+    call.observe({"type": "session.input_transcript.delta", "delta": "vent litt"})
+    call.note_output(); clock.now += 1.0; call.tick()               # the user just spoke: hold
+    assert sum("part " in t for _k, t in said) == n
+
+
+def test_read_result_replays_or_continues_from_stored_text_without_asking_again(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": LONG_ANSWER, "session": "x"}
+    _quiet(call, clock); _quiet(call, clock)
+    effects.calls = [("read_result", {"from_part": 1})]
+    _user_says(call, clock, "Kan du lese det første igjen?")
+    assert len(effects.asks) == 1                                   # never asked again
+    assert any("part 1 of" in t and "Served from stored text" in t for _k, t in said)
+
+
+def test_a_failed_ask_is_said_honestly(make):
+    effects = FakeEffects([BOARD_Q])
+    effects.ask_error = RuntimeError("no context")
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    assert _receipts(said)[0]["status"] == "failed"
+
+
+def test_a_members_reply_after_a_delegation_comes_back_into_the_call(make):
+    effects = Regi([ASK], [_v1("forwarded", True, intent_status="sendt")])
+    call, said, clock = make(effects, **REGI)
+    _user_says(call, clock, "Ta sak 182.")
+    effects.replies["drammen-jonas"] = {"id": "m1", "text": "Jeg har startet på API-et for sak 182.", "timestamp": "z"}
+    _quiet(call, clock); _quiet(call, clock)
+    assert any("Jonas's reply" in t and "startet på API-et" in t for _k, t in said)
+
+
+def test_a_refused_append_resplits_the_answer_smaller():
+    effects = FakeEffects()
+    call = tools.CallTools(_snapshot(), "call-1", lambda k, x: None, effects=effects, executor=Inline(),
+                           principal="device_phone", ledger=tools.Ledger(__import__("pathlib").Path("/dev/null")))
+    relay = tools._relay("k", "answer", "src", LONG_ANSWER, "", tools.RELAY_PART_BYTES)
+    call.relays["k"] = call.active_relay = relay
+    relay.next = 2
+    call.append_rejected()
+    assert call.relay_part_bytes == tools.RELAY_PART_BYTES // 2 and call.active_relay.total > relay.total
