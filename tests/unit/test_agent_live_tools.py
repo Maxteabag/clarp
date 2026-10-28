@@ -1503,3 +1503,49 @@ def test_a_finished_answer_is_relayed_while_the_provider_streams_silence(make):
     for _ in range(12):                                          # silence only: note_output is never called
         clock.now += 1.0; call.tick()
     assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+
+def _answered(make, routing=False):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    clock.now += tools.APPEND_GAP_S
+    call.poll_answers()
+    call.routing = routing
+    return call, said, clock, effects, ident
+
+
+def test_a_finished_answer_starts_at_the_first_short_pause_even_while_a_route_runs(make):
+    call, said, clock, effects, ident = _answered(make, routing=True)       # Peter: "hallo?" => a route is running
+    call.last_user = clock.now - 1.1                                        # he paused 1.1 s
+    call.last_output = clock.now - 0.9                                      # Sandra paused 0.9 s
+    call.tick()
+    assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+def test_a_chatty_user_gets_the_answer_after_six_seconds_at_the_next_voice_pause(make):
+    call, said, clock, effects, ident = _answered(make, routing=True)
+    for _ in range(5):                                                      # Peter keeps talking, Sandra answers
+        clock.now += 1.0
+        call.last_user, call.last_output = clock.now - 0.2, clock.now - 0.1
+        call.tick()
+    assert not any("Fjorten saker." in t for _k, t in said)
+    clock.now += 1.5                                                        # still talking, 6.5 s waited, voice paused
+    call.last_user, call.last_output = clock.now - 0.2, clock.now - 0.9
+    call.tick()
+    assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+def test_a_waiting_answer_logs_why_every_three_seconds(make, monkeypatch):
+    logged = []
+    monkeypatch.setattr(tools, "log", lambda event, text: logged.append((event, text)))
+    call, said, clock, effects, ident = _answered(make)
+    for _ in range(4):                                                      # 4 s with the voice speaking
+        clock.now += 1.0
+        call.last_user, call.last_output = clock.now - 0.1, clock.now - 0.1
+        call.tick()
+    waits = [t for e, t in logged if e == "agentLiveRelayWaiting"]
+    assert 1 <= len(waits) <= 2 and "reason=voice_speaking" in waits[0] and "waited_s=" in waits[0]
