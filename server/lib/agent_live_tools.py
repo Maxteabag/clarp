@@ -715,16 +715,20 @@ class CallTools:
                 sent = self._effect(lambda: self.speak("commentary", text)) is True
             except CallEnded:
                 sent = False
-            except Exception as exc:  # noqa: BLE001 - not known to be sent: treated as not sent
+            except Exception as exc:  # noqa: BLE001 - the transport failed mid-send: it may or may not be out
                 log_exception("agentLiveRelaySend", exc, f"call={self.call_id}")
-                sent = False
-            if not sent:
+                with self.lock:                               # never replayed automatically, never acknowledged;
+                    relay.uncertain, relay.held = index, True  # read_result can send it again on request
+                    relay.unsent, self.last_append = False, self.clock()
+                log("agentLiveRelaySendUncertain", f"call={self.call_id} key={relay.key} part={index + 1}")
+                return False
+            if not sent:                                      # a known drop (e.g. before the drain): retried
                 with self.lock:                               # retried by the pacing once quiet, never hot
                     relay.unsent, self.last_append = True, self.clock()
                 log("agentLiveRelayNotSent", f"call={self.call_id} key={relay.key} part={index + 1}")
                 return False
             with self.lock:
-                relay.unsent = False
+                relay.unsent, relay.uncertain = False, None
                 relay.next = index + 1
                 relay.sent = max(relay.sent, relay.next)
                 relay.auto += 1
@@ -1346,7 +1350,8 @@ def _relay(key: str, label: str, source: str, text: str, request: str, part_byte
 
     class SandraRelay(relay_mod.Relay):
         ack: str | None = None
-        unsent: bool = False
+        unsent: bool = False            # the last attempt was a known drop: the pacing retries it
+        uncertain: int | None = None    # a send failed mid-way at this part: only read_result sends it again
 
         def __post_init__(self):
             self.label, self.source = _cut(self.label, 40), _cut(self.source, 40)
