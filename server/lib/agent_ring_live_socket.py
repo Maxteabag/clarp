@@ -81,6 +81,15 @@ def _quiet_note(name: str, detail: str) -> None:
         pass
 
 
+def _audible(delta) -> bool:
+    """Oracle's test for speech (oracle_live_stable.audible) on one base64 output chunk; silence is not speech."""
+    from .oracle_live_stable import audible
+    try:
+        return audible(base64.b64decode(delta or ""))
+    except (binascii.Error, ValueError, TypeError):
+        return False
+
+
 class Refused(Exception):
     def __init__(self, code: str, message: str = ""):
         super().__init__(code)
@@ -581,8 +590,8 @@ class LiveSocket:
         elif kind == "session.instructions.appended":
             self._admit(event)
         elif kind == "session.output_audio.delta":
-            if self.tools is not None:
-                self.tools.note_output()
+            if self.tools is not None and _audible(event.get("delta")):
+                self.tools.note_output()        # only real speech: the provider also streams silent frames
             self._output(event.get("delta"))
         elif kind == "session.output_audio.interrupted":
             if self.drained and not self.closed.is_set():
