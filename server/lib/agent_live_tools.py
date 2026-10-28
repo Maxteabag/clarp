@@ -845,10 +845,10 @@ class CallTools:
         self._speak_part(relay, served=served, resumed=resumed)
 
     def _pace_relays(self) -> None:
-        """Oracle's pacing for the parts of an answer being read; a FINISHED answer starts at the first short pause
-        (the user quiet START_USER_S, the voice quiet START_OUTPUT_S), never held back by a route in progress, and
-        after START_FALLBACK_S waiting it starts at the next pause of the voice even if the user keeps talking.
-        While an answer waits, why is logged every WAIT_LOG_S. Audio never waits."""
+        """Oracle's pacing and windows: an answer starts when the voice has been quiet QUIET_S, the user
+        RESULT_SILENCE_S and no route runs; after START_FALLBACK_S waiting it starts at the next pause of the voice
+        (QUIET_S) even if the user keeps talking or a route runs. While an answer waits, why is logged every
+        WAIT_LOG_S. Audio never waits."""
         now = self.clock()
         waiting = None
         with self.lock:
@@ -856,8 +856,9 @@ class CallTools:
                 return
             relay = self.active_relay
             quiet = now - self.last_output >= QUIET_S and now - self.last_user >= RESULT_SILENCE_S
-            voice_paused = now - self.last_output >= START_OUTPUT_S
-            pause = voice_paused and now - self.last_user >= START_USER_S
+            voice_paused = now - self.last_output >= QUIET_S
+            user_quiet = now - self.last_user >= RESULT_SILENCE_S
+            pause = voice_paused and user_quiet and not self.routing
             gap_ok = now - self.last_append >= APPEND_GAP_S
             action = None
             if relay is not None and getattr(relay, "unsent", False) and relay.remaining > 0:
@@ -874,7 +875,8 @@ class CallTools:
                     action = "start"
                 elif now - self.last_wait_log >= WAIT_LOG_S:
                     self.last_wait_log = now
-                    why = ("append_gap" if not gap_ok else "voice_speaking" if not voice_paused else "user_speaking")
+                    why = ("append_gap" if not gap_ok else "voice_speaking" if not voice_paused
+                           else "user_speaking" if not user_quiet else "routing")
                     waiting = (head.key, round(waited, 1), why, round(now - self.last_user, 1),
                                round(now - self.last_output, 1), self.routing)
         if waiting:
@@ -1450,9 +1452,7 @@ QUIET_S = 1.5               # oracle_live_stable.QUIET_AFTER_SECONDS
 RESULT_SILENCE_S = 4.5      # oracle_live_stable.RESULT_RELEASE_SILENCE_SECONDS
 RELAY_STALL_S = 15.0        # oracle_live_stable.RELAY_STALL_SECONDS
 APPEND_GAP_S = 4.0          # oracle_live_stable: at most one new result every 4 s
-START_USER_S = 1.0          # a finished answer starts at the first short pause: the user quiet this long...
-START_OUTPUT_S = 0.8        # ...and the voice quiet this long (audible output only)
-START_FALLBACK_S = 6.0      # waited this long: start at the next pause of the voice even if the user keeps talking
+START_FALLBACK_S = 6.0      # waited this long: start at the next voice pause even if the user talks or a route runs
 WAIT_LOG_S = 3.0            # while an answer waits, log why this often
 AUTO_PARTS = 8              # oracle_relay.AUTO_PARTS: then pause and offer to continue
 # Text bytes per relayed part. Oracle uses 1100 within a 1500-character append; Sandra uses less so a part
