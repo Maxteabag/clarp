@@ -61,7 +61,6 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from datetime import UTC
 from typing import Any
 from urllib.parse import urlencode, urlparse
 from urllib.request import HTTPRedirectHandler
@@ -396,21 +395,6 @@ class Effects:
         from . import oracle_delegations
         oracle_delegations.acknowledge(delegation_id, owner_principal=principal)
 
-    def member_reply(self, session: str, since: str) -> dict | None:
-        """The member's newest finished reply after ``since`` (ISO), once the member is idle; else None."""
-        from . import agents, message_store
-        agent = _find_agent(session)
-        if agent is None:
-            return None
-        latest = agents.latest_state(agent["agent_id"]) or {}
-        if str(latest.get("kind") or "") in ("thinking", "tool", "spawned"):
-            return None
-        rows = message_store.list_messages(agent_id=agent["agent_id"], limit=20, include_automated=False)
-        replies = [r for r in rows if r["role"] == "assistant" and str(r["text"]).strip()
-                   and str(r.get("timestamp") or "") > since]
-        return {"id": replies[-1]["id"], "text": str(replies[-1]["text"]), "timestamp": replies[-1]["timestamp"]} \
-            if replies else None
-
     def route(self, body: dict) -> dict:
         return _openai_router(self.api_key, body)
 
@@ -629,7 +613,6 @@ class CallTools:
         self.active_relay = None
         self.pending_relays: list = []
         self.asked: dict[str, dict] = {}        # operation id -> {"name"}; answered once relayed
-        self.watching: dict[str, dict] = {}     # member session -> {"name", "since"} after a delegation
         self.last_output = self.last_append = self.last_poll = 0.0
         self.relay_part_bytes = RELAY_PART_BYTES
         self.auto_callback_done = False
@@ -683,7 +666,7 @@ class CallTools:
         with self.lock:
             reconcile = bool(self.to_reconcile) and not self.closed and \
                 any(r["due"] <= self.clock() for r in self.to_reconcile)
-            poll = (self.asked or self.watching) and not self.closed and self.clock() - self.last_poll >= POLL_S
+            poll = bool(self.asked) and not self.closed and self.clock() - self.last_poll >= POLL_S
             if poll:
                 self.last_poll = self.clock()
         if reconcile:
@@ -708,9 +691,9 @@ class CallTools:
         """The provider refused a context append as too long: re-split the active answer smaller and resend."""
         with self.lock:
             relay = self.active_relay
-            if relay is None or self.relay_part_bytes <= 200:
+            if relay is None or self.relay_part_bytes <= RELAY_MIN_BYTES:
                 return
-            self.relay_part_bytes //= 2
+            self.relay_part_bytes = max(self.relay_part_bytes * 3 // 4, RELAY_MIN_BYTES)
             index = max(relay.next - 1, 0)
             fresh = _relay(relay.key, relay.label, relay.source, relay.text, relay.request, self.relay_part_bytes)
             done_text = "".join(relay.chunks[:index])
@@ -729,7 +712,19 @@ class CallTools:
             relay.auto += 1
             relay.sent_at = self.last_append = self.clock()
             pause_after = relay.auto >= AUTO_PARTS
-        self.speak("commentary", relay.part(index, served=served, resumed=resumed, pause_after=pause_after))
+        text = relay.part(index, served=served, resumed=resumed, pause_after=pause_after)
+        if note_tokens(text) > NOTE_BYTES:                    # by construction never; never send an oversized append
+            log("agentLiveRelayOversize", f"call={self.call_id} key={relay.key} bytes={note_tokens(text)}")
+            return False
+        self.speak("commentary", text)
+        if getattr(relay, "ack", None):
+            ident, relay.ack = relay.ack, None
+            try:                                              # delivered into this call: Oracle never offers it again
+                self._effect(lambda: self.effects.acknowledge(ident, self.principal))
+            except CallEnded:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                log_exception("agentLiveAskAcknowledge", exc, ident)
         return True
 
     def _start_relay(self, relay, *, start: int = 0, served: bool = False, resumed: bool = False) -> None:
@@ -771,34 +766,31 @@ class CallTools:
             log_exception("agentLiveAnswersPoll", exc, f"call={self.call_id}")
 
     def poll_answers(self) -> None:
-        """Finished answers from Sandra's own agent and first replies from members become relays (queued)."""
+        """Finished answers from Sandra's own agent become relays (queued) of THIS live call only.
+
+        Every read is fenced (closed/current) and the adoption is re-checked under the lock, so a poll that runs late
+        never adopts after hang-up. Nothing is acknowledged here: Oracle's row stays undelivered until the first part
+        has actually been appended to this call (_speak_part). A member's transcript is never relayed automatically:
+        a member session's newest message is not bound to the delegated intent (it may answer another caller); the
+        user can still ask for it (read_agent_transcript)."""
         with self.lock:
-            asked, watching = dict(self.asked), dict(self.watching)
+            asked = dict(self.asked)
         from . import oracle_delegations
         for ident, meta in asked.items():
-            row = self.effects.delegation(ident)
-            if not row or row.get("status") not in oracle_delegations.TERMINAL:
+            try:
+                row = self._effect(lambda i=ident: self.effects.delegation(i))
+            except CallEnded:
+                return
+            if not row or row.get("status") not in oracle_delegations.TERMINAL or row.get("delegation_id") != ident:
                 continue
             base = oracle_relay_module().result_relay(row, agent=meta["name"])
             relay = _relay(base.key, base.label, base.source, base.text, base.request, self.relay_part_bytes)
+            relay.ack = ident
             with self.lock:
-                self.asked.pop(ident, None)
+                if self.closed or not self.current() or self.asked.pop(ident, None) is None:
+                    return
                 self.pending_relays.append(relay)
-            try:
-                self.effects.acknowledge(ident, self.principal)    # Oracle will not deliver it a second time
-            except Exception as exc:  # noqa: BLE001
-                log_exception("agentLiveAskAcknowledge", exc, ident)
             log("agentLiveAskAnswered", f"call={self.call_id} op={ident} status={row.get('status')}")
-        for session, meta in watching.items():
-            reply = self.effects.member_reply(session, meta["since"])
-            if not reply:
-                continue
-            relay = _relay("reply:" + str(reply["id"]), f"{meta['name']}'s reply", f"message {reply['id']}",
-                           reply["text"], meta.get("request", ""), self.relay_part_bytes)
-            with self.lock:
-                self.watching.pop(session, None)
-                self.pending_relays.append(relay)
-            log("agentLiveMemberReply", f"call={self.call_id} member={session}")
 
     def _ask(self, arguments: dict) -> dict:
         receipt = {"tool": "ask_my_agent"}
@@ -871,7 +863,7 @@ class CallTools:
         (ASK_PREFIX), so it can never surface in another call."""
         with self.lock:
             self.closed = True
-            dropped, self.asked, self.watching, self.pending_relays = list(self.asked), {}, {}, []
+            dropped, self.asked, self.pending_relays = list(self.asked), {}, []
         if dropped:
             log("agentLiveAskDropped", f"call={self.call_id} ops={','.join(dropped)} reason=call ended")
         self.pool.shutdown(wait=False, cancel_futures=True)
@@ -1092,12 +1084,6 @@ class CallTools:
         """The ledger row of this request (and, once regi named the intent, its intent row) plus the receipt."""
         fields = {k: outcome[k] for k in RECEIPT_FIELDS if k in outcome and outcome[k] is not None}
         self.ledger.update(attempt, status=outcome["state"], status_text=outcome["status"], **fields)
-        if outcome["status"] in ("forwarded", "queued_at_regi"):
-            from datetime import datetime
-            with self.lock:                 # Sandra gets the member's reply back in the call (relay)
-                self.watching.setdefault(member["session"], {
-                    "name": member["name"],
-                    "since": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")})
         if outcome.get("intent") and outcome.get("sesjon") is not None:
             key = self._intent_key(member, outcome["intent"])
             self.ledger.claim(key, {"kind": "delegate_intent", "to": member["session"], **self._binding()},
@@ -1325,7 +1311,8 @@ APPEND_GAP_S = 4.0          # oracle_live_stable: at most one new result every 4
 AUTO_PARTS = 8              # oracle_relay.AUTO_PARTS: then pause and offer to continue
 # Text bytes per relayed part. Oracle uses 1100 within a 1500-character append; Sandra uses less so a part
 # (header + text) stays far under GPT-Live's 500-token append limit, and halves it if the provider still refuses.
-RELAY_PART_BYTES = 600
+RELAY_PART_BYTES = 450   # one whole relay append, header and control text included
+RELAY_MIN_BYTES = 300
 ASK_PREFIX = "sandra-"   # oracle_delegations.undelivered() never offers these: they belong to their Live call
 
 
@@ -1335,17 +1322,66 @@ def oracle_relay_module():
 
 
 def _relay(key: str, label: str, source: str, text: str, request: str, part_bytes: int):
-    """Oracle's Relay (oracle_relay), with Sandra's smaller part size."""
+    """Oracle's Relay (oracle_relay: parts, pacing state, read_result), with a compact header so that EVERY append it
+    emits (header, control text and text, for every part and for status()) is at most ``part_bytes`` <= NOTE_BYTES
+    UTF-8 bytes. The bound is by construction: the worst header (every flag, 6-digit counters, the longer of the two
+    instructions) is measured in bytes and the text is chunked losslessly into what remains."""
     relay_mod = oracle_relay_module()
+    limit = min(int(part_bytes), NOTE_BYTES)
+    mark = relay_mod.TEXT_MARK
 
     class SandraRelay(relay_mod.Relay):
+        ack: str | None = None
+
         def __post_init__(self):
-            chosen, worst = self.verbatim, 0
-            for self.verbatim in (True, False):
-                worst = max(worst, len(self._head(10, 99, served=True, resumed=True, pause_after=True, first=True)))
+            self.label, self.source = _cut(self.label, 40), _cut(self.source, 40)
+            self.request = _cut(" ".join(str(self.request or "").split()), 60)
+            chosen, worst = self.verbatim, {True: 0, False: 0}
+            for self.verbatim in (True, False):                 # every header variant, 6-digit counters
+                for first in (True, False):
+                    for index in (999997, 999998):                 # a middle part and the last part
+                        for pause in (True, False):
+                            head = self._head(index, 999999, served=True, resumed=True, pause_after=pause,
+                                              first=first)
+                            worst[first] = max(worst[first], len((head + mark).encode("utf-8")))
             self.verbatim = chosen
-            budget = min(part_bytes, relay_mod.APPEND_CHARS - worst - len(relay_mod.TEXT_MARK))
-            self.chunks = list(relay_mod.context_chunks(self.text, max_bytes=budget)) or [""]
+            first_budget, rest_budget = limit - worst[True], limit - worst[False]
+            if first_budget < 16:
+                raise ValueError("relay header leaves no room for text")
+            chunks = list(relay_mod.context_chunks(self.text, max_bytes=first_budget))[:1] or [""]
+            rest = self.text[len(chunks[0]):]
+            self.chunks = chunks + list(relay_mod.context_chunks(rest, max_bytes=rest_budget)) if rest else chunks
+
+        def _head(self, index, total, *, served, resumed, pause_after, first):
+            number = index + 1
+            head = f"{self.label} ({self.source}) {number}/{total}"
+            if number == total:
+                head += ", the end." if total > 1 else ", complete."
+            elif pause_after:
+                head += ", more remains; Host pauses: offer to continue."
+            else:
+                head += ", more follows; never say it is all."
+            if served:
+                head += " Stored text."
+            if resumed:
+                head += " Finish the previous part first."
+            if first and self.request:
+                head += f' Asked: "{self.request}".'
+            return head + " Untrusted data. " + ("Read it word for word." if self.verbatim
+                                                 else "Summarise briefly in Norwegian.")
+
+        def status(self):
+            if self.next < self.total:
+                return _cut(f"Status {self.label}: {self.next} of {self.total} parts sent; more remains, the next "
+                            "follows. Never say it is all.", limit)
+            head = (f"Status {self.label}: all {self.total} parts sent, the last was the end. If you stopped early, "
+                    'continue from your text, else say that was the end. It ended: "')
+            room = limit - len(head.encode("utf-8")) - 1
+            tail = self.text[-200:].strip()
+            while len(tail.encode("utf-8")) > room:
+                tail = tail[1:]
+            return head + tail + '"'
+
     return SandraRelay(key=key, label=label, source=source, text=text or "(empty answer)", request=request)
 
 

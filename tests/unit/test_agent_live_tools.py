@@ -9,13 +9,14 @@ repeated and never resent blindly when their outcome is unknown.
 from __future__ import annotations
 
 import json
+import re
 import time
 
 import pytest
-
 from lib import agent_live_tools as tools
 from lib import agent_ring_live as live
 from lib import agent_ring_live_socket as sock
+
 from tests.unit.test_agent_ring_live import _live_ring, sander  # noqa: F401 - sander is a fixture
 from tests.unit.test_agent_rings import PHONE, env  # noqa: F401 - env is a fixture
 
@@ -1046,7 +1047,7 @@ def test_the_real_post_is_loopback_only_never_proxied_or_redirected_and_reads_th
 
 # ---- inside a real Agent Live socket ---------------------------------------------------
 
-from tests.unit.test_agent_ring_live_socket import _admitted, _wait, call  # noqa: E402,F401 - call is a fixture
+from tests.unit.test_agent_ring_live_socket import _admitted, _wait, call  # noqa: F401 - call is a fixture
 
 
 @pytest.fixture
@@ -1139,15 +1140,13 @@ def test_the_answer_is_relayed_into_the_call_in_parts_oracle_style_and_acknowled
                            "request_text": "Hva er klart?", "session": "rk-sander-0001"}
     _quiet(call, clock)                                             # poll: queued
     _quiet(call, clock)                                             # quiet: part 1
-    parts = [text for kind, text in said[n_before:] if "part 1 of" in text]
+    parts = [text for kind, text in said[n_before:] if re.search(r"\) 1/\d+, ", text)]
     assert parts and "Tre saker er klare" in parts[0] and effects.acked == [ident]
-    total = int(parts[0].split("part 1 of ")[1].split(",")[0].split(".")[0])
+    total = int(re.search(r"\) 1/(\d+), ", parts[0]).group(1))
     assert total > 1
     call.note_output(); _quiet(call, clock)                         # spoken + quiet => next part
-    assert any("part 2 of" in text for _k, text in said)
-    for _k, text in said:
-        if " of " in text and "part" in text:
-            assert len(text.encode("utf-8")) <= 1200                # far under the 500-token append limit
+    assert any(f") 2/{total}," in text for _k, text in said)
+    assert all(len(text.encode("utf-8")) <= tools.NOTE_BYTES for _k, text in said)
 
 
 def test_no_part_is_sent_while_the_user_is_speaking_or_the_voice_has_not_spoken(make):
@@ -1175,7 +1174,7 @@ def test_read_result_replays_or_continues_from_stored_text_without_asking_again(
     effects.calls = [("read_result", {"from_part": 1})]
     _user_says(call, clock, "Kan du lese det første igjen?")
     assert len(effects.asks) == 1                                   # never asked again
-    assert any("part 1 of" in t and "Served from stored text" in t for _k, t in said)
+    assert any(re.search(r"\) 1/\d+, ", t) and "Stored text." in t for _k, t in said)
 
 
 def test_a_failed_ask_is_said_honestly(make):
@@ -1225,13 +1224,13 @@ def test_an_answer_after_the_call_ended_is_never_relayed(make):
     assert len(said) == n and ident.startswith(tools.ASK_PREFIX)
 
 
-def test_a_members_reply_after_a_delegation_comes_back_into_the_call(make):
+def test_a_members_transcript_is_never_relayed_automatically_after_a_delegation(make):
     effects = Regi([ASK], [_v1("forwarded", True, intent_status="sendt")])
     call, said, clock = make(effects, **REGI)
     _user_says(call, clock, "Ta sak 182.")
-    effects.replies["drammen-jonas"] = {"id": "m1", "text": "Jeg har startet på API-et for sak 182.", "timestamp": "z"}
+    n = len(said)
     _quiet(call, clock); _quiet(call, clock)
-    assert any("Jonas's reply" in t and "startet på API-et" in t for _k, t in said)
+    assert len(said) == n and not hasattr(tools.Effects, "member_reply")   # not bound to the intent: never relayed
 
 
 def test_a_refused_append_resplits_the_answer_smaller():
@@ -1242,10 +1241,67 @@ def test_a_refused_append_resplits_the_answer_smaller():
     call.relays["k"] = call.active_relay = relay
     relay.next = 2
     call.append_rejected()
-    assert call.relay_part_bytes == tools.RELAY_PART_BYTES // 2 and call.active_relay.total > relay.total
+    assert call.relay_part_bytes < tools.RELAY_PART_BYTES and call.active_relay.total > relay.total
+    assert all(len(call.active_relay.part(i, served=True, resumed=True, pause_after=True).encode("utf-8"))
+               <= call.relay_part_bytes for i in range(call.active_relay.total))
 
 
 
 def test_the_ask_note_tells_sandra_to_say_she_is_checking():
     notes = REAL_HOST_NOTE([{"tool": "ask_my_agent", "status": "asked", "operation_id": "sandra-x"}])
     assert len(notes) == 1 and "jeg sjekker" in notes[0] and tools.note_tokens(notes[0]) <= tools.NOTE_BYTES
+
+
+
+@pytest.mark.parametrize("text", ["ø" * 3000, "🙂" * 900, "Tre saker. " * 300, "x" * 5000])
+def test_every_relay_append_is_at_most_450_utf8_bytes_and_the_text_is_lossless(text):
+    worst_request = "Spørsmål 🙂 " * 200
+    for label in ("Sandras agent's reply", "Æøå🙂" * 40):
+        relay = tools._relay("sandra-" + "f" * 24, label, "operation " + "sandra-" + "f" * 24, text, worst_request,
+                             tools.RELAY_PART_BYTES)
+        assert "".join(relay.chunks) == text
+        for verbatim in (False, True):
+            relay.verbatim = verbatim
+            for i in range(relay.total):
+                for served in (False, True):
+                    for pause in (False, True):
+                        part = relay.part(i, served=served, resumed=True, pause_after=pause)
+                        assert len(part.encode("utf-8")) <= tools.NOTE_BYTES
+            for sent in (0, relay.total):
+                relay.next = sent
+                assert len(relay.status().encode("utf-8")) <= tools.NOTE_BYTES
+
+
+def test_a_late_poll_after_hangup_neither_adopts_nor_acknowledges(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    call.close()
+    call.poll_answers()                                             # a poll that was already queued runs late
+    assert effects.acked == [] and call.pending_relays == []        # Oracle's row stays undelivered
+
+
+def test_a_poll_for_a_call_that_is_no_longer_current_does_nothing(make):
+    effects = FakeEffects([BOARD_Q])
+    live = {"now": True}
+    call, said, clock = make(effects, current=lambda: live["now"])
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    live["now"] = False
+    call.poll_answers()
+    assert effects.acked == [] and call.pending_relays == []
+
+
+def test_the_answer_is_acknowledged_only_once_its_first_part_is_in_the_call(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    call.poll_answers()
+    assert call.pending_relays and effects.acked == []              # adopted, not yet delivered
+    _quiet(call, clock)
+    assert effects.acked == [ident] and any("Fjorten saker." in t for _k, t in said)
