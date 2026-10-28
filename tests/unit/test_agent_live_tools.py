@@ -1414,3 +1414,34 @@ def test_a_live_call_relays_the_answer_through_the_socket_and_acknowledges_after
                for f in call.up.of("session.commentary.append"))
     h.send({"type": "session.close"})
     thread.join(15)
+
+
+def test_before_the_opening_is_drained_a_current_call_neither_advances_nor_acknowledges(make):
+    import threading as _threading
+    from lib import agent_ring_live_socket as sock
+
+    class Up:
+        def __init__(self):
+            self.frames = []
+
+        def send(self, raw):
+            self.frames.append(json.loads(raw))
+
+    s = object.__new__(sock.LiveSocket)                                # the real socket's send path
+    s.call_id, s.drained, s.closed, s.stop = "call-x", False, _threading.Event(), _threading.Event()
+    s._fence, s._send_lock, s._state, s.instructions_appends_issued = _threading.Lock(), _threading.Lock(), _threading.Lock(), 0
+    s.upstream = up = Up()
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)                                  # current() is True throughout
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    call.poll_answers()
+    call.speak = s.tool_context
+    _quiet(call, clock)                                                # pre-drain: dropped by the socket
+    relay = call.active_relay
+    assert relay.next == 0 and relay.sent == 0 and effects.acked == [] and up.frames == []
+    s.drained = True
+    _quiet(call, clock)                                                # drained: sent, then counted and acked
+    assert relay.next == 1 and effects.acked == [ident] and len(up.frames) == 1
+    assert "Fjorten saker." in json.dumps(up.frames[0], ensure_ascii=False)
