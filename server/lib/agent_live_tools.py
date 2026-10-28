@@ -613,7 +613,7 @@ class CallTools:
         self.active_relay = None
         self.pending_relays: list = []
         self.asked: dict[str, dict] = {}        # operation id -> {"name"}; answered once relayed
-        self.last_output = self.last_append = self.last_poll = 0.0
+        self.last_output = self.last_append = self.last_poll = self.last_wait_log = 0.0
         self.relay_part_bytes = RELAY_PART_BYTES
         self.speaking = threading.Lock()
         self.auto_callback_done = False
@@ -752,30 +752,51 @@ class CallTools:
         self._speak_part(relay, served=served, resumed=resumed)
 
     def _pace_relays(self) -> None:
-        """Oracle's pacing: the next part only once the voice has spoken the last one and gone quiet; a new answer
-        only when nothing is being read, the user is quiet and no route is running. Audio never waits."""
+        """Oracle's pacing and windows: an answer starts when the voice has been quiet QUIET_S, the user
+        RESULT_SILENCE_S and no route runs; after START_FALLBACK_S waiting it starts at the next pause of the voice
+        (QUIET_S) once the user has paused FALLBACK_USER_S, even if a route runs; never while the user speaks. While an answer waits, why is logged every
+        WAIT_LOG_S. Audio never waits."""
         now = self.clock()
+        waiting = None
         with self.lock:
             if self.closed:
                 return
             relay = self.active_relay
             quiet = now - self.last_output >= QUIET_S and now - self.last_user >= RESULT_SILENCE_S
+            voice_paused = now - self.last_output >= QUIET_S
+            user_quiet = now - self.last_user >= RESULT_SILENCE_S
+            pause = voice_paused and user_quiet and not self.routing
+            gap_ok = now - self.last_append >= APPEND_GAP_S
+            action = None
             if relay is not None and getattr(relay, "unsent", False) and relay.remaining > 0:
-                action = "next" if quiet and not self.routing and now - self.last_append >= APPEND_GAP_S else None
+                action = "next" if pause and gap_ok else None
             elif relay is not None and relay.remaining > 0 and not relay.held and relay.auto < AUTO_PARTS:
                 spoke = self.last_output > relay.sent_at and quiet
                 stalled = self.last_output <= relay.sent_at and now - relay.sent_at > RELAY_STALL_S
                 interrupted = self.last_user > relay.sent_at
                 action = "next" if (spoke or stalled) and not interrupted and not self.routing else None
-            elif self.pending_relays and quiet and not self.routing and now - self.last_append >= APPEND_GAP_S:
-                action = "start"
-            else:
-                action = None
+            elif self.pending_relays:
+                head = self.pending_relays[0]
+                waited = now - getattr(head, "adopted_at", now)
+                fallback = waited >= START_FALLBACK_S and voice_paused and now - self.last_user >= FALLBACK_USER_S
+                if gap_ok and (pause or fallback):
+                    action = "start"
+                elif now - self.last_wait_log >= WAIT_LOG_S:
+                    self.last_wait_log = now
+                    why = ("append_gap" if not gap_ok else "voice_speaking" if not voice_paused
+                           else "user_speaking" if not user_quiet else "routing")
+                    waiting = (head.key, round(waited, 1), why, round(now - self.last_user, 1),
+                               round(now - self.last_output, 1), self.routing)
+        if waiting:
+            log("agentLiveRelayWaiting", f"call={self.call_id} key={waiting[0]} waited_s={waiting[1]} reason={waiting[2]} "
+                f"since_user_s={waiting[3]} since_voice_s={waiting[4]} routing={waiting[5]}")
         if action == "next":
             self._speak_part(relay)
         elif action == "start":
             with self.lock:
                 fresh = self.pending_relays.pop(0)
+            log("agentLiveRelayStart", f"call={self.call_id} key={fresh.key} "
+                f"waited_s={round(now - getattr(fresh, 'adopted_at', now), 1)}")
             self._start_relay(fresh)
 
     def _poll_answers_safely(self) -> None:
@@ -805,6 +826,7 @@ class CallTools:
             base = oracle_relay_module().result_relay(row, agent=meta["name"])
             relay = _relay(base.key, base.label, base.source, base.text, base.request, self.relay_part_bytes)
             relay.ack = ident
+            relay.adopted_at = self.clock()
             with self.lock:
                 if self.closed or not self.current() or self.asked.pop(ident, None) is None:
                     return
@@ -1327,6 +1349,9 @@ QUIET_S = 1.5               # oracle_live_stable.QUIET_AFTER_SECONDS
 RESULT_SILENCE_S = 4.5      # oracle_live_stable.RESULT_RELEASE_SILENCE_SECONDS
 RELAY_STALL_S = 15.0        # oracle_live_stable.RELAY_STALL_SECONDS
 APPEND_GAP_S = 4.0          # oracle_live_stable: at most one new result every 4 s
+START_FALLBACK_S = 6.0      # waited this long: start at the next short pause even if a route runs...
+FALLBACK_USER_S = 0.5       # ...but never while the user is speaking: the user quiet at least this long
+WAIT_LOG_S = 3.0            # while an answer waits, log why this often
 AUTO_PARTS = 8              # oracle_relay.AUTO_PARTS: then pause and offer to continue
 # Text bytes per relayed part. Oracle uses 1100 within a 1500-character append; Sandra uses less so a part
 # (header + text) stays far under GPT-Live's 500-token append limit, and halves it if the provider still refuses.
@@ -1352,6 +1377,7 @@ def _relay(key: str, label: str, source: str, text: str, request: str, part_byte
         ack: str | None = None
         unsent: bool = False            # the last attempt was a known drop: the pacing retries it
         uncertain: int | None = None    # a send failed mid-way at this part: only read_result sends it again
+        adopted_at: float = 0.0         # when the finished answer was taken into this call
 
         def __post_init__(self):
             self.label, self.source = _cut(self.label, 40), _cut(self.source, 40)
