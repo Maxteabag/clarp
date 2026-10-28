@@ -1394,7 +1394,30 @@ def test_a_send_error_keeps_the_part_unsent_and_the_answer_unacknowledged(make):
     call.speak = broken
     _quiet(call, clock)
     relay = call.active_relay
-    assert relay.next == 0 and relay.sent == 0 and relay.unsent and effects.acked == []
+    assert relay.next == 0 and relay.sent == 0 and relay.uncertain == 0 and relay.held and effects.acked == []
+    call.speak = lambda kind, text: said.append((kind, text)) or True
+    n = len(said)
+    for _ in range(4):
+        _quiet(call, clock, seconds=tools.RELAY_STALL_S + 1)       # an uncertain part is never replayed by itself
+    assert len(said) == n and effects.acked == [] and relay.next == 0
+    assert "Fjorten saker." in relay.text                             # the text is kept
+    effects.calls = [("read_result", {})]
+    _user_says(call, clock, "Les svaret igjen.")                     # on request: sent, counted, acknowledged
+    assert relay.next == 1 and relay.uncertain is None and effects.acked == [ident]
+    assert any("Fjorten saker." in t for _k, t in said[n:])
+
+
+def test_a_known_drop_is_retried_but_a_send_error_is_not(make):
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    ident = effects.asks[0][0]
+    effects.rows[ident] = {"delegation_id": ident, "status": "completed", "result_text": "Fjorten saker.", "session": "x"}
+    call.poll_answers()
+    attempts = []
+    call.speak = lambda kind, text: attempts.append("drop") and False
+    _quiet(call, clock); _quiet(call, clock)
+    assert len(attempts) == 2 and call.active_relay.unsent and call.active_relay.uncertain is None
 
 
 def test_a_live_call_relays_the_answer_through_the_socket_and_acknowledges_after_the_append(opted_in, call,
