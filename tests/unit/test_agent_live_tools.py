@@ -1204,3 +1204,9 @@ def test_a_refused_append_resplits_the_answer_smaller():
     relay.next = 2
     call.append_rejected()
     assert call.relay_part_bytes == tools.RELAY_PART_BYTES // 2 and call.active_relay.total > relay.total
+
+
+
+def test_the_ask_note_tells_sandra_to_say_she_is_checking():
+    notes = REAL_HOST_NOTE([{"tool": "ask_my_agent", "status": "asked", "operation_id": "sandra-x"}])
+    assert len(notes) == 1 and "jeg sjekker" in notes[0] and tools.note_tokens(notes[0]) <= tools.NOTE_BYTES
