@@ -239,6 +239,9 @@ pub struct Engine {
     snapshot_timeout: Duration,
     freshness: roster_freshness::Freshness,
     log_in_flight: HashSet<String>,
+    /// Chats shown from their cached copy: once caught up, the Host's tail
+    /// checks their order (`Conversation::adopt_tail_order`).
+    order_check: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
@@ -364,6 +367,7 @@ impl Engine {
             snapshot_timeout: roster_freshness::snapshot_timeout(),
             freshness: Default::default(),
             log_in_flight: HashSet::new(),
+            order_check: HashSet::new(),
             pending_log_mode: HashMap::new(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
@@ -1128,8 +1132,8 @@ impl Engine {
         let empty = self.conversations.get(session).is_none_or(|c| c.is_empty() && c.latest_revision() == 0);
         if empty && let Some(cache) = &self.transcript_cache {
             let snapshot = cache.load(&self.base_url, session);
-            if !snapshot.is_empty() {
-                self.with_conversation(session, |c| c.restore_cache_snapshot(&snapshot));
+            if !snapshot.is_empty() && self.with_conversation(session, |c| c.restore_cache_snapshot(&snapshot)).unwrap_or(false) {
+                self.order_check.insert(session.to_owned());
             }
         }
         if self.conversations.get(session).is_some_and(|c| c.latest_revision() > 0) {
@@ -1281,6 +1285,12 @@ impl Engine {
         self.schedule_cache_save(session);
         if kind == LoadKind::Delta && json::boolean(object, "has_more") {
             self.request_delta(session);
+        } else if kind == LoadKind::Delta && self.order_check.remove(session) {
+            // A cached copy kept the order it was saved in: once caught up,
+            // the Host's tail puts drifted rows back.
+            self.request_tail(session, false);
+        } else if kind != LoadKind::Delta {
+            self.order_check.remove(session);
         }
         self.continue_pending_log_request(session);
     }
