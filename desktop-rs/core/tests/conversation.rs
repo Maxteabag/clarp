@@ -457,3 +457,44 @@ fn a_row_written_after_a_live_row_goes_below_it() {
     tail.log(json!({"conversation_id": "c", "turns": [{"id": "u-0", "role": "user", "text": "earlier", "revision": 3, "timestamp": "2026-10-03T11:49:00.000Z"}]}), LoadKind::Delta);
     assert_eq!(tail.ids(), ["u-0", "live-1"]);
 }
+
+#[test]
+fn a_failed_send_does_not_pull_later_rows_above_the_sends_after_it() {
+    // Koko on 29 Oct 2026: a send that never filed (25 Oct) kept every later
+    // Host row above it, and every message sent after it below it.
+    let mut h = Harness::new("koko");
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "h1", "role": "assistant", "text": "Earlier", "revision": 1, "timestamp": "2020-01-01T00:00:00.000Z"}]}), LoadKind::Tail);
+    h.optimistic("f", "never filed");
+    h.model.mark_delivery_failed("f");
+    h.sync();
+    h.optimistic("s", "sent");
+    h.log(json!({"conversation_id": "c", "latest_revision": 3, "turns": [
+        {"id": "u-s", "role": "user", "text": "sent", "revision": 2, "timestamp": "2099-01-01T00:00:00.000Z"},
+        {"id": "r1", "role": "assistant", "text": "The answer", "revision": 3, "timestamp": "2099-01-01T00:00:05.000Z"}]}), LoadKind::Delta);
+    assert_eq!(h.ids(), ["h1", "u-f", "u-s", "r1"], "the answer goes below the message it answers");
+}
+
+#[test]
+fn a_tail_load_restores_the_host_order_of_a_cached_chat() {
+    // The cache restored a chat out of order: the answer above its question
+    // and a failed send at the end. The Host's tail puts them back.
+    let mut h = Harness::new("koko");
+    h.log(json!({"conversation_id": "c", "turns": [
+        {"id": "h1", "role": "assistant", "text": "Hi", "revision": 1, "timestamp": "2026-10-25T10:00:00.000Z"},
+        {"id": "r1", "role": "assistant", "text": "Answer", "revision": 4, "timestamp": "2026-10-25T10:02:00.000Z"},
+        {"id": "u-f", "role": "user", "text": "never filed", "revision": 0, "delivery_failed": true, "timestamp": "2026-10-25T10:00:30.000Z"},
+        {"id": "u-1", "role": "user", "text": "Question", "revision": 3, "timestamp": "2026-10-25T10:01:00.000Z"}]}), LoadKind::Tail);
+    h.optimistic("p", "on its way");
+    h.clear();
+    let host = json!({"conversation_id": "c", "latest_revision": 4, "turns": [
+        {"id": "h1", "role": "assistant", "text": "Hi", "revision": 1, "timestamp": "2026-10-25T10:00:00.000Z"},
+        {"id": "u-1", "role": "user", "text": "Question", "revision": 3, "timestamp": "2026-10-25T10:01:00.000Z"},
+        {"id": "r1", "role": "assistant", "text": "Answer", "revision": 4, "timestamp": "2026-10-25T10:02:00.000Z"}]});
+    h.log(host.clone(), LoadKind::Tail);
+    assert_eq!(h.ids(), ["h1", "u-f", "u-1", "r1", "u-p"], "the Host's order, the failed send at its time, the unconfirmed send last");
+    assert_eq!(h.count(|op| matches!(op, Op::Reset(_))), 1);
+    h.clear();
+    h.log(host, LoadKind::Tail);
+    assert_eq!(h.count(|op| matches!(op, Op::Reset(_))), 0, "an order that already is the Host's is left alone");
+}
