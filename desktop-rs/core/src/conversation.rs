@@ -255,6 +255,9 @@ impl Conversation {
             self.prepend_rows(&turns);
         } else {
             self.merge_rows(&turns);
+            if kind == LoadKind::Tail {
+                self.adopt_tail_order(&turns);
+            }
         }
 
         if self.conversation_id != next_id {
@@ -573,6 +576,12 @@ impl Conversation {
             if candidate.kind == "live" && written_after(incoming, candidate) {
                 continue;
             }
+            // A send that never filed stays where it was written: a row the
+            // Host wrote after it goes below it. (It used to pull every later
+            // Host row above it, under every message sent after it.)
+            if candidate.delivery_failed && written_after(incoming, candidate) {
+                continue;
+            }
             if candidate.pending || candidate.delivery_failed || candidate.kind == "live" {
                 return row;
             }
@@ -581,6 +590,48 @@ impl Conversation {
             }
         }
         self.messages.len()
+    }
+
+    /// A tail load of the same chat is the Host's order for its newest rows.
+    /// Rows that drifted from it (a cached chat restored out of order) go
+    /// back where the Host has them; the chat's other durable rows and failed
+    /// sends go by their time among them, and local rows still on their way
+    /// (unconfirmed sends, streaming and activity rows) stay at the end.
+    /// Nothing is reset when the order already is the Host's.
+    fn adopt_tail_order(&mut self, turns: &[Value]) {
+        let ms = |m: &Message| crate::time_format::epoch_ms(&m.timestamp);
+        let tail: Vec<&str> = turns.iter().filter_map(|t| t.get("id").and_then(Value::as_str)).filter(|id| !id.is_empty()).collect();
+        if tail.is_empty() {
+            return;
+        }
+        let in_tail: std::collections::HashSet<&str> = tail.iter().copied().collect();
+        let mut rows: Vec<Message> = tail.iter().filter_map(|id| self.index_of(id).map(|i| self.messages[i].clone())).collect();
+        let mut untimed: Vec<Message> = Vec::new();
+        let mut transient: Vec<Message> = Vec::new();
+        for message in &self.messages {
+            if in_tail.contains(message.id.as_str()) {
+                continue;
+            }
+            if message.pending || message.activity || message.kind == "live" {
+                transient.push(message.clone());
+                continue;
+            }
+            let Some(at) = ms(message) else {
+                untimed.push(message.clone());
+                continue;
+            };
+            // Before the first row written after it; equal times keep their order.
+            let place = rows.iter().position(|r| ms(r).is_some_and(|t| t > at)).unwrap_or(rows.len());
+            rows.insert(place, message.clone());
+        }
+        let mut ordered = untimed;
+        ordered.append(&mut rows);
+        ordered.append(&mut transient);
+        if ordered.iter().map(|m| m.id.as_str()).eq(self.messages.iter().map(|m| m.id.as_str())) {
+            return;
+        }
+        self.reset(ordered);
+        self.emit(Signal::CountChanged);
     }
 
     fn prepend_rows(&mut self, rows: &[Value]) {
