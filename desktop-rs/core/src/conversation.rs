@@ -594,39 +594,38 @@ impl Conversation {
 
     /// A tail load of the same chat is the Host's order for its newest rows.
     /// Rows that drifted from it (a cached chat restored out of order) go
-    /// back where the Host has them; the chat's other durable rows and failed
-    /// sends go by their time among them, and local rows still on their way
-    /// (unconfirmed sends, streaming and activity rows) stay at the end.
-    /// Nothing is reset when the order already is the Host's.
+    /// back: the tail's rows take the Host's order in the places they hold,
+    /// and the chat's other durable rows with a time (older history, failed
+    /// sends) go by their time among them. A row without a time, and local
+    /// rows still on their way (unconfirmed sends, streaming and activity
+    /// rows), keep their place. Nothing is reset when nothing moves.
     fn adopt_tail_order(&mut self, turns: &[Value]) {
         let ms = |m: &Message| crate::time_format::epoch_ms(&m.timestamp);
+        let transient = |m: &Message| m.pending || m.activity || m.kind == "live";
         let tail: Vec<&str> = turns.iter().filter_map(|t| t.get("id").and_then(Value::as_str)).filter(|id| !id.is_empty()).collect();
         if tail.is_empty() {
             return;
         }
         let in_tail: std::collections::HashSet<&str> = tail.iter().copied().collect();
-        let mut rows: Vec<Message> = tail.iter().filter_map(|id| self.index_of(id).map(|i| self.messages[i].clone())).collect();
-        let mut untimed: Vec<Message> = Vec::new();
-        let mut transient: Vec<Message> = Vec::new();
-        for message in &self.messages {
-            if in_tail.contains(message.id.as_str()) {
-                continue;
-            }
-            if message.pending || message.activity || message.kind == "live" {
-                transient.push(message.clone());
-                continue;
-            }
-            let Some(at) = ms(message) else {
-                untimed.push(message.clone());
-                continue;
-            };
-            // Before the first row written after it; equal times keep their order.
-            let place = rows.iter().position(|r| ms(r).is_some_and(|t| t > at)).unwrap_or(rows.len());
-            rows.insert(place, message.clone());
+        // The tail's rows in the Host's order, in the slots they hold.
+        let mut host = tail.iter().filter_map(|id| self.index_of(id).map(|i| self.messages[i].clone()));
+        let mut ordered: Vec<Message> = self
+            .messages
+            .iter()
+            .map(|m| if in_tail.contains(m.id.as_str()) { host.next().unwrap_or_else(|| m.clone()) } else { m.clone() })
+            .collect();
+        // The other durable rows with a time go by their time.
+        let movable = |m: &Message| !in_tail.contains(m.id.as_str()) && !transient(m) && ms(m).is_some();
+        let moving: Vec<Message> = ordered.iter().filter(|m| movable(m)).cloned().collect();
+        ordered.retain(|m| !movable(m));
+        for message in moving {
+            let at = ms(&message);
+            let place = ordered
+                .iter()
+                .position(|r| !transient(r) && ms(r).is_some_and(|t| Some(t) > at))
+                .unwrap_or_else(|| ordered.iter().rposition(|r| !transient(r)).map_or(0, |i| i + 1));
+            ordered.insert(place, message);
         }
-        let mut ordered = untimed;
-        ordered.append(&mut rows);
-        ordered.append(&mut transient);
         if ordered.iter().map(|m| m.id.as_str()).eq(self.messages.iter().map(|m| m.id.as_str())) {
             return;
         }
