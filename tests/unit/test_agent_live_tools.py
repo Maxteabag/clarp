@@ -1503,3 +1503,30 @@ def test_a_finished_answer_is_relayed_while_the_provider_streams_silence(make):
     for _ in range(12):                                          # silence only: note_output is never called
         clock.now += 1.0; call.tick()
     assert any("Fjorten saker." in t for _k, t in said) and effects.acked == [ident]
+
+
+def test_an_answer_interrupted_mid_relay_is_held_so_the_next_answer_in_the_call_is_still_read(make):
+    """Peter's calls 28.10 16:43 and 29.10 09:55: only the first ask_my_agent answer per call was ever appended.
+    The first answer had two parts; the user spoke after part 1, so part 2 waited for 'not interrupted' forever and,
+    as the active relay, blocked every later answer. Like Oracle (oracle_live_stable: held on interrupt), an
+    interrupted relay is held (read_result continues it) and the next answer starts."""
+    effects = FakeEffects([BOARD_Q])
+    call, said, clock = make(effects)
+    _user_says(call, clock, "Hva er klart?")
+    first = effects.asks[0][0]
+    effects.rows[first] = {"delegation_id": first, "status": "completed", "result_text": LONG_ANSWER, "session": "x"}
+    call.poll_answers()
+    _quiet(call, clock)
+    relay = call.active_relay
+    assert relay.next == 1 and relay.remaining > 0 and effects.acked == [first]
+    effects.calls = [("ask_my_agent", {"question": "Kommer de fra GitHub?"})]
+    clock.now += 1.0
+    _user_says(call, clock, "Kommer de fra GitHub?")                  # interrupts after part 1
+    second = effects.asks[1][0]
+    effects.rows[second] = {"delegation_id": second, "status": "completed", "result_text": "Ja, fra tavla.",
+                            "session": "x"}
+    call.poll_answers()
+    for _ in range(10):
+        _quiet(call, clock, 2.0)
+    assert relay.held is True and relay.next == 1
+    assert any("Ja, fra tavla." in t for _k, t in said) and effects.acked == [first, second]
