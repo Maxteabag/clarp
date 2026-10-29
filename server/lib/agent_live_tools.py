@@ -766,6 +766,8 @@ class CallTools:
                 spoke = self.last_output > relay.sent_at and quiet
                 stalled = self.last_output <= relay.sent_at and now - relay.sent_at > RELAY_STALL_S
                 interrupted = self.last_user > relay.sent_at
+                if interrupted:                         # Oracle: an interrupted relay is held (read_result goes
+                    relay.held = True                   # on), so it never blocks the next answer in this call
                 action = "next" if (spoke or stalled) and not interrupted and not self.routing else None
             elif self.pending_relays and quiet and not self.routing and now - self.last_append >= APPEND_GAP_S:
                 action = "start"
