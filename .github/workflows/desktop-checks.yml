@@ -8,9 +8,11 @@ name: Desktop checks (FAFB scratch proof)
 # drawn box (observe + RED), then B2 (GREEN only if M) and B2 against a box
 # that really starts tall (must FAIL). Each step's oracle stops the job on
 # anything unexpected. Artifacts are synthetic (the fake Host) and public.
-# Budget (whole job <= 30 min, every step capped): checkout 1, deps 2,
-# toolchain 1, cache 1, build 12, F-A 2, F-B 3 x 2, stage 1, upload 2 = 28,
-# plus 2 unallocated for the runner's own set-up and post steps. The upload
+# Budget (whole job <= 30 min, every step capped): epoch 1, checkout 1,
+# deps 2, toolchain 1, cache 1, build 10, F-A 2, F-B 3 x 2, stage 1, upload 2
+# = 27, plus 3 unallocated for the runner's own set-up and post steps. Before
+# each proof phase fafb/admit.py admits it only if elapsed + its cap + the
+# 3 min finalization reserve fit (fail-closed, exit 7 = STOP). The upload
 # carries only /tmp/fafb-upload, staged to <= 80 MB before it runs.
 
 on:
@@ -31,6 +33,13 @@ jobs:
       run:
         working-directory: desktop-rs
     steps:
+      - name: Start epoch (the budget's zero)
+        timeout-minutes: 1
+        working-directory: /
+        run: |
+          mkdir -p /tmp/fafb
+          date +%s > /tmp/fafb-epoch
+          cp /tmp/fafb-epoch /tmp/fafb/epoch.txt
       - uses: actions/checkout@v4
         timeout-minutes: 1
         with:
@@ -51,10 +60,10 @@ jobs:
           shared-key: desktop-debug
           save-if: false
       - name: Build once (the app and the host_flow test binary)
-        timeout-minutes: 12
+        timeout-minutes: 10
         run: |
           set -euo pipefail
-          mkdir -p /tmp/fafb
+          python3 fafb/admit.py build 10
           git rev-parse HEAD 'HEAD^{tree}' > /tmp/fafb/source.txt
           cargo build --locked -p clarp-slint > /tmp/fafb/build.log 2>&1
           cargo test --locked -p clarp-engine --test host_flow --no-run >> /tmp/fafb/build.log 2>&1
@@ -63,6 +72,7 @@ jobs:
         timeout-minutes: 2
         run: |
           set -uo pipefail
+          python3 fafb/admit.py fa 2 || exit 7
           ulimit -f 20480
           timeout 100 cargo test --locked -p clarp-engine --test host_flow fafb_ -- --test-threads=1 --nocapture > /tmp/fafb/fa.log 2>&1
           echo "rc=$?" > /tmp/fafb/fa.rc
@@ -71,6 +81,7 @@ jobs:
         timeout-minutes: 2
         run: |
           set -uo pipefail
+          python3 fafb/admit.py b-obs 2 || exit 7
           ulimit -f 40960
           CLARP_FAFB_FRAME=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-obs > /tmp/fafb/b-obs.log 2>&1
           echo "rc=$?" > /tmp/fafb/b-obs.rc
@@ -79,6 +90,7 @@ jobs:
         timeout-minutes: 2
         run: |
           set -uo pipefail
+          python3 fafb/admit.py b-green 2 || exit 7
           ulimit -f 40960
           CLARP_FAFB_FRAME=1 CLARP_FAFB_DRAWN=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-green > /tmp/fafb/b-green.log 2>&1
           echo "rc=$?" > /tmp/fafb/b-green.rc
@@ -87,6 +99,7 @@ jobs:
         timeout-minutes: 2
         run: |
           set -uo pipefail
+          python3 fafb/admit.py b-neg 2 || exit 7
           ulimit -f 40960
           CLARP_FAFB_FRAME=1 CLARP_FAFB_DRAWN=1 CLARP_FAFB_FORCE_TALL=1 timeout 100 slint-app/tests/check.sh send /tmp/fafb/b-neg > /tmp/fafb/b-neg.log 2>&1
           echo "rc=$?" > /tmp/fafb/b-neg.rc
