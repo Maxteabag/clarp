@@ -170,6 +170,39 @@ fn a_chat_opens_from_its_cached_copy_and_asks_only_for_what_is_newer() {
     assert!(asked.iter().all(|r| r["query"]["after_revision"] == cached.to_string()), "only the delta after the cached copy: {asked:?}");
 }
 
+/// A cached copy over a page behind is not walked forward a page at a time
+/// (the chat showed far in the past while it loaded): the latest page
+/// replaces it, and older rows come on scrolling up.
+#[test]
+fn a_chat_cached_over_a_page_behind_opens_at_its_latest_page() {
+    let host = Host::start("cache-far-behind");
+    let cache = host.dir.join("transcripts");
+    let rachel_logs = |host: &Host| host.requests("GET", "/log").into_iter().filter(|r| r["query"]["session"] == "rachel").collect::<Vec<_>>();
+    let cached = {
+        let mut d = Driver::with_transcript_cache(&host.base, &cache);
+        d.connect();
+        d.until("rachel open", |e| e.conversation("rachel").is_some_and(|c| c.rows().len() == 2 && !e.log_pending("rachel")));
+        d.until("rachel cached", |_| std::fs::read_dir(&cache).is_ok_and(|mut files| files.any(|f| f.is_ok_and(|f| f.path().extension().is_some_and(|x| x == "json")))));
+        d.engine.conversation("rachel").unwrap().latest_revision()
+    };
+    let backlog: Vec<_> = (0..250).map(|i| json!({"id": format!("n{i:03}"), "role": if i % 2 == 0 { "user" } else { "assistant" }, "text": format!("turn {i}")})).collect();
+    host.control("/__control/turns", json!({"session": "rachel", "turns": backlog}));
+    let before = rachel_logs(&host).len();
+    let mut d = Driver::with_transcript_cache(&host.base, &cache);
+    d.engine.start();
+    d.until("the latest page", |e| e.conversation("rachel").is_some_and(|c| c.rows().last().is_some_and(|m| m.id == "n249")) && !e.log_pending("rachel"));
+    let rows = d.engine.conversation("rachel").unwrap().rows().iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    assert_eq!(rows.first().map(String::as_str), Some("n150"), "only the latest page: {rows:?}");
+    assert_eq!(rows.len(), 100, "{rows:?}");
+    assert!(d.engine.conversation("rachel").unwrap().has_more(), "older rows load on scrolling up");
+    // One delta after the cached copy, then the latest page: no delta from
+    // inside the backlog (one after the latest, a live update, is fine).
+    let latest = d.engine.conversation("rachel").unwrap().latest_revision();
+    let asked = rachel_logs(&host).split_off(before);
+    let walked = asked.iter().filter_map(|r| r["query"]["after_revision"].as_str()?.parse::<i64>().ok()).filter(|after| *after > cached && *after < latest).count();
+    assert_eq!(walked, 0, "the backlog was walked forward: {asked:?}");
+}
+
 #[test]
 fn message_search_finds_loaded_chats_and_chats_only_the_cache_holds() {
     use clarp_core::message_search::Source;

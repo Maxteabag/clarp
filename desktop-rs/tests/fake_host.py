@@ -1159,6 +1159,12 @@ class Handler(BaseHTTPRequestHandler):
                     limit = int(query.get("limit", "0") or 0)
                     if limit and len(chosen) > limit:
                         chosen, more = chosen[-limit:], True
+                else:
+                    # A backlog of newer rows beyond the limit: the oldest
+                    # first, and more (as the Host pages a delta).
+                    limit = int(query.get("limit", "0") or 0)
+                    if limit and len(chosen) > limit:
+                        chosen, more = chosen[:limit], True
             return self.reply(200, {"conversation_id": cid, "turns": chosen, "latest_revision": latest,
                                     "has_more": more, "missing": False})
         if url.path == "/live":
