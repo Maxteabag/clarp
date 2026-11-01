@@ -362,8 +362,28 @@ class InotifyDispatcher:
             except OSError: pass
             self._inotify = None
 
+    @staticmethod
+    def _wait(fds: list[int], timeout: float | None) -> set[int]:
+        """The fds in ``fds`` that are readable within ``timeout`` seconds (None: wait).
+        poll(2), not select(2): select() rejects any fd >= FD_SETSIZE (1024), and a
+        process with many open files hands the dispatcher fds above that."""
+        import errno, select
+        poller = select.poll()
+        for fd in fds:
+            poller.register(fd, select.POLLIN)
+        events = poller.poll(None if timeout is None else int(timeout * 1000))
+        if any(ev & select.POLLNVAL for _fd, ev in events):
+            raise OSError(errno.EBADF, "a watched fd is not open")
+        return {fd for fd, _ev in events}
+
+    def _wait_failed(self, exc: BaseException, fds: list[int]) -> None:
+        # Closing the fds is how stop() ends a wait; any other failure must not end
+        # the thread silently, or file changes stop arriving with no trace.
+        if not self._stop:
+            log_exception("transcriptWatcherWaitFail", exc, detail=f"fds={len(fds)}")
+
     def _loop(self) -> None:
-        import os, select
+        import os
         # Tick once on startup so any data that landed between watch() and
         # the first inotify event still gets consumed.
         self.pool.tick_all()
@@ -372,9 +392,9 @@ class InotifyDispatcher:
             if self._inotify is not None:
                 fds.append(self._inotify.fileno())
             try:
-                ready, _, _ = select.select(
-                    fds, [], [], 0.25 if self._polling else None)
-            except (OSError, ValueError):
+                ready = self._wait(fds, 0.25 if self._polling else None)
+            except (OSError, ValueError, TypeError) as exc:
+                self._wait_failed(exc, fds)
                 return
             if self._stop:
                 return
@@ -392,8 +412,9 @@ class InotifyDispatcher:
                 continue
             # Let the rest of the burst land; a stop request still ends the wait.
             try:
-                select.select([self._stop_pipe_r], [], [], INOTIFY_COALESCE_SEC)
-            except (OSError, ValueError):
+                self._wait([self._stop_pipe_r], INOTIFY_COALESCE_SEC)
+            except (OSError, ValueError, TypeError) as exc:
+                self._wait_failed(exc, [self._stop_pipe_r])
                 return
             if self._stop:
                 return
