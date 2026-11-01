@@ -34,6 +34,28 @@ impl Host {
         Host { child, base, log, dir }
     }
 
+    /// FAFB scratch proof only (never merged): as start(), with FAFB_* controls
+    /// for the fake host and a release file in its own folder.
+    fn start_env(name: &str, env: &[(&str, &str)]) -> Self {
+        let dir = std::env::temp_dir().join(format!("clarp-engine-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (port, log) = (dir.join("port"), dir.join("host.log"));
+        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fake_host.py");
+        let child = Command::new("/usr/bin/python3")
+            .args([script, "--port-file", port.to_str().unwrap(), "--log", log.to_str().unwrap()])
+            .envs(env.iter().copied())
+            .env("FAFB_SELECT_RELEASE", dir.join("fafb-release"))
+            .spawn()
+            .expect("fake host starts");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while std::fs::read_to_string(&port).map(|p| p.trim().is_empty()).unwrap_or(true) {
+            assert!(Instant::now() < deadline, "fake host did not start");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let base = format!("http://127.0.0.1:{}", std::fs::read_to_string(&port).unwrap().trim());
+        Host { child, base, log, dir }
+    }
+
     fn requests(&self, method: &str, path: &str) -> Vec<serde_json::Value> {
         std::fs::read_to_string(&self.log)
             .unwrap_or_default()
@@ -335,4 +357,69 @@ fn tool_activity_is_explained_in_plain_english_once_asked() {
     let asked = host.requests("POST", "/tool-explanations");
     assert!(asked.len() >= 2, "a pending answer is polled: {asked:?}");
     assert!(d.changes.contains(&Change::Narrator));
+}
+
+
+// ---- FAFB scratch proof only (branch proof/desktop-fafb-20261101, never merged) ----
+
+/// rachel's /log was answered while the fake host holds the /select record.
+fn fafb_held(host: &Host) -> bool {
+    host.requests("FAFB", "log_served").len() == 1
+        && host.requests("FAFB", "select_held").last().is_some_and(|r| r["log_served"] == true)
+        && host.requests("POST", "/select").is_empty()
+}
+
+/// The current test's steps up to its l.102 read.
+fn fafb_opened(host: &Host) -> Driver {
+    let mut d = Driver::new(&host.base);
+    d.engine.start();
+    d.until("live", |e| e.connection_state() == "live" && e.roster().agents().len() == 2);
+    assert!(d.changes.contains(&Change::Connection) && d.changes.contains(&Change::Roster));
+    d.until("rachel's transcript", |e| e.selected_session() == "rachel" && e.conversation("rachel").is_some_and(|c| c.rows().len() == 2));
+    assert!(d.changes.contains(&Change::Selection));
+    d
+}
+
+/// The proposed fix: wait for the record, then the unchanged exact assertion.
+fn fafb_fixed_tail(host: &Host, d: &mut Driver) {
+    d.until("the Host was told rachel is selected", |_| host.requests("POST", "/select").last().is_some_and(|r| r["body"]["session"] == "rachel"));
+    assert_eq!(host.requests("POST", "/select").last().unwrap()["body"]["session"], "rachel");
+    assert!(d.engine.error().is_empty());
+}
+
+#[test]
+#[should_panic(expected = "called `Option::unwrap()` on a `None` value")]
+fn fafb_red_the_current_read_comes_before_the_select_record() {
+    let host = Host::start_env("fafb-red", &[("FAFB_SELECT_GATE", "1")]);
+    let mut d = fafb_opened(&host);
+    d.until("FAFB: /log answered while the /select record is held", |_| fafb_held(&host));
+    eprintln!("FAFB-RED-ORDER log_served=1 select_held=1 select_records=0");
+    assert_eq!(host.requests("POST", "/select").last().unwrap()["body"]["session"], "rachel"); // FAFB-RED-UNWRAP
+}
+
+#[test]
+fn fafb_green_the_fixed_test_waits_for_the_select_record() {
+    let host = Host::start_env("fafb-green", &[("FAFB_SELECT_GATE", "1")]);
+    let mut d = fafb_opened(&host);
+    d.until("FAFB: /log answered while the /select record is held", |_| fafb_held(&host));
+    eprintln!("FAFB-GREEN-ORDER log_served=1 select_held=1 select_records=0");
+    std::fs::write(host.dir.join("fafb-release"), b"go").unwrap();
+    fafb_fixed_tail(&host, &mut d);
+    assert_eq!(host.requests("FAFB", "select_released").last().unwrap()["released"], true);
+}
+
+#[test]
+#[should_panic(expected = "timed out waiting for: the Host was told rachel is selected")]
+fn fafb_neg_a_select_never_recorded_fails_the_fixed_test() {
+    let host = Host::start_env("fafb-neg-drop", &[("FAFB_SELECT_DROP", "1")]);
+    let mut d = fafb_opened(&host);
+    fafb_fixed_tail(&host, &mut d);
+}
+
+#[test]
+#[should_panic(expected = "timed out waiting for: the Host was told rachel is selected")]
+fn fafb_neg_another_session_selected_fails_the_fixed_test() {
+    let host = Host::start_env("fafb-neg-other", &[("FAFB_SELECT_AS", "other")]);
+    let mut d = fafb_opened(&host);
+    fafb_fixed_tail(&host, &mut d);
 }

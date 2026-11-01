@@ -58,6 +58,9 @@ thread_local! {
     static BASELINE: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
     static MID_WANTED: Cell<bool> = const { Cell::new(false) };
     static MID: RefCell<Option<(Rect, Rect)>> = const { RefCell::new(None) };
+    /// FAFB scratch proof only (never merged): the Reduce-Motion send being watched.
+    static FAFB_ARM: RefCell<Option<FafbArm>> = const { RefCell::new(None) };
+    static FAFB_USED: Cell<bool> = const { Cell::new(false) };
     static LANDING: RefCell<Option<(Rect, f32, Option<Rect>)>> = const { RefCell::new(None) };
     static DROPPED: Cell<i32> = const { Cell::new(0) };
     static REVEAL: RefCell<Option<RevealWatch>> = const { RefCell::new(None) };
@@ -128,6 +131,68 @@ fn unexplained() -> usize {
 
 /// Sends what the composer holds (Ctrl+Enter when `queue`) and samples
 /// every frame until `stop_sampling`, saving `shots` on the way.
+// ---- FAFB scratch proof only (branch proof/desktop-fafb-20261101, never merged) ----
+
+struct FafbArm {
+    frames: u64,
+    ticks: i32,
+    sent: Instant,
+    before: Option<String>,
+    captured: bool,
+    samples: usize,
+}
+
+fn fafb(name: &str) -> bool {
+    std::env::var(name).is_ok_and(|v| v == "1")
+}
+
+/// B2: the sampler reads the drawn composer box, the source EMPTY is read from.
+fn fafb_drawn() -> bool {
+    fafb("CLARP_FAFB_DRAWN")
+}
+
+/// The first frame drawn after the watched send: what it drew, beside the
+/// bridge, as the send's first sample.
+fn fafb_after_frame() {
+    let Some(window) = crate::window() else { return };
+    let flight = window.global::<crate::SendFlight>();
+    let armed = FAFB_ARM.with(|a| {
+        let mut slot = a.borrow_mut();
+        let arm = slot.as_mut().filter(|arm| !arm.captured && headless::frames_drawn() > arm.frames)?;
+        arm.captured = true;
+        Some((arm.sent, arm.before.clone(), arm.ticks, arm.frames))
+    });
+    let Some((sent, before, ticks, frames)) = armed else { return };
+    let id = last_own().map(|(id, ..)| id).filter(|id| Some(id) != before.as_ref()).unwrap_or_default();
+    let bridge = flight.get_composer_height();
+    let drawn = composer_box().map(|r| r.3);
+    let phase = flight.get_phase().to_string();
+    let index = SAMPLES.with(|s| s.borrow().len());
+    println!("perf FAFB-FRAME {}", json!({
+        "frame": headless::frames_drawn(), "frames_at_send": frames, "at_ms": sent.elapsed().as_secs_f64() * 1000.0,
+        "flight_id": flight.get_id().to_string(), "row_id": id, "phase": phase, "bridge": bridge, "drawn": drawn,
+        "empty": EMPTY.with(Cell::get), "ticks_since_send": flight.get_fafb_ticks() - ticks, "sample_index": index,
+        "force_tall": flight.get_fafb_force_tall(), "b2": fafb_drawn(),
+    }));
+    let composer = if fafb_drawn() { drawn.unwrap_or(0.0) } else { bridge };
+    let sample = Sample { at: sent.elapsed(), id, phase, progress: flight.get_progress(), flight: None, row: None, status: String::new(), composer, at_end: report().at_end };
+    SAMPLES.with(|s| s.borrow_mut().push(sample));
+}
+
+/// Each sample of the watched send: the bridge and the drawn box side by side.
+fn fafb_sample(flight: &crate::SendFlight, sample: &Sample) {
+    FAFB_ARM.with(|a| {
+        let mut slot = a.borrow_mut();
+        let Some(arm) = slot.as_mut().filter(|arm| arm.samples < 40) else { return };
+        arm.samples += 1;
+        println!("perf FAFB-SAMPLE {}", json!({
+            "at_ms": sample.at.as_secs_f64() * 1000.0, "phase": sample.phase, "row_id": sample.id,
+            "bridge": flight.get_composer_height(), "drawn": composer_box().map(|r| r.3), "composer": sample.composer,
+            "ticks_since_send": flight.get_fafb_ticks() - arm.ticks, "first_frame_captured": arm.captured,
+        }));
+    });
+}
+
 fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
     SAMPLES.with(|s| s.borrow_mut().clear());
     SHOTS.with(|s| *s.borrow_mut() = shots.iter().map(|(ms, name)| (Duration::from_millis(*ms), (*name).to_owned())).collect());
@@ -136,6 +201,18 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
     let before = known;
     let sent = Instant::now();
     SENT_AT.with(|s| s.set(Some(sent)));
+    if fafb("CLARP_FAFB_FRAME")
+        && !FAFB_USED.with(Cell::get)
+        && let Some(window) = crate::window()
+        && window.global::<crate::ChatLook>().get_reduced_motion()
+    {
+        let flight = window.global::<crate::SendFlight>();
+        flight.set_fafb_force_tall(fafb("CLARP_FAFB_FORCE_TALL"));
+        FAFB_USED.with(|u| u.set(true));
+        let arm = FafbArm { frames: headless::frames_drawn(), ticks: flight.get_fafb_ticks(), sent, before: before.clone(), captured: false, samples: 0 };
+        FAFB_ARM.with(|a| *a.borrow_mut() = Some(arm));
+        headless::fafb_set_after_frame(Box::new(fafb_after_frame));
+    }
     if queue {
         headless::press_with(&[Key::Control], Key::Return);
     } else {
@@ -151,7 +228,7 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
             at: sent.elapsed(),
             progress: flight.get_progress(),
             flight: matches!(phase.as_str(), "wait" | "flight" | "settle").then(|| (flight.get_x(), flight.get_y(), flight.get_width(), flight.get_height())),
-            composer: flight.get_composer_height(),
+            composer: if fafb_drawn() { composer_box().map_or(0.0, |r| r.3) } else { flight.get_composer_height() },
             row: if id.is_empty() { None } else { app_now().measured_height(&id).0 },
             status: if id.is_empty() { String::new() } else { status_of(&id) },
             at_end: report().at_end,
@@ -174,6 +251,7 @@ fn send_and_sample(queue: bool, shots: &[(u64, &str)], known: Option<String>) {
             LANDING.with(|l| *l.borrow_mut() = Some((report, flight.get_progress(), bubble)));
         }
         watch_reveal(&flight, &sample.id);
+        fafb_sample(&flight, &sample);
         SAMPLES.with(|s| s.borrow_mut().push(sample));
         let due: Vec<String> = SHOTS.with(|s| {
             let mut shots = s.borrow_mut();
@@ -252,6 +330,12 @@ fn contrast(name: &str, rect: Rect) -> Option<f32> {
 
 fn stop_sampling() -> Vec<Sample> {
     SAMPLER.with(|s| s.borrow_mut().take());
+    FAFB_ARM.with(|a| {
+        let mut slot = a.borrow_mut();
+        if slot.as_ref().is_some_and(|arm| arm.captured) {
+            *slot = None;
+        }
+    });
     SAMPLES.with(|s| s.borrow().clone())
 }
 

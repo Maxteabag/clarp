@@ -140,6 +140,12 @@ impl Platform for Headless {
                 });
                 if drew {
                     LAST_DRAWN.with(|l| l.set(Some(std::time::Instant::now())));
+                    // FAFB scratch proof only: a check's look at the frame just drawn.
+                    FAFB_AFTER_FRAME.with(|f| {
+                        if let Some(after) = f.borrow().as_ref() {
+                            after();
+                        }
+                    });
                 }
             }
             let wait = slint::platform::duration_until_next_timer_update()
@@ -295,6 +301,16 @@ pub fn type_text(text: &str) {
 }
 
 const MARGIN: usize = 8;
+
+thread_local! {
+    /// FAFB scratch proof only (never merged): called after each drawn frame.
+    static FAFB_AFTER_FRAME: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// FAFB scratch proof only: runs `after` after every drawn frame from now on.
+pub fn fafb_set_after_frame(after: Box<dyn Fn()>) {
+    FAFB_AFTER_FRAME.with(|f| *f.borrow_mut() = Some(after));
+}
 
 /// How many frames have been drawn so far.
 pub fn frames_drawn() -> u64 {

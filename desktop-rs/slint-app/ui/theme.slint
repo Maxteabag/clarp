@@ -138,6 +138,10 @@ export global SendFlight {
     in-out property <length> width;
     in-out property <length> height;
     in-out property <length> composer-height;
+    // FAFB scratch proof only (never merged): the send flight Timer's ticks,
+    // and a forced tall composer start under Reduce Motion (a negative control).
+    in-out property <int> fafb-ticks;
+    in-out property <bool> fafb-force-tall;
 }
 
 // A status line that appears (an unsent or failed message's, a queued

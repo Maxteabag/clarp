@@ -296,6 +296,11 @@ export component Pane inherits Rectangle {
             return;
         }
         root.boxing = !ChatLook.reduced-motion;
+        // FAFB negative control only: the drawn box really starts tall.
+        if (SendFlight.fafb-force-tall && ChatLook.reduced-motion) {
+            root.box-from = 66px;
+            root.boxing = true;
+        }
         root.armed = false;
         if (!at-end) {
             return;
@@ -328,6 +333,7 @@ export component Pane inherits Rectangle {
         interval: 16ms;
         running: root.flight-id != "" || root.boxing;
         triggered => {
+            SendFlight.fafb-ticks += 1;
             if (!root.armed) {
                 root.sent-at = animation-tick();
                 root.armed = true;
