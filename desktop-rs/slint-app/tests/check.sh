@@ -15,6 +15,9 @@ case $name in artifacts|artifact-open|scroll-jump|live|row-overlap|frame-budget)
 case $name in artifacts|artifact-keys) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; esac
 # roster-stale lets a slow snapshot time out in 1.5 s, not a minute.
 [ "$name" = roster-stale ] && export CLARP_SNAPSHOT_TIMEOUT_MS=1500
+# ROWS scratch proof only: with CLARP_ROWS_CUSTODY=1 the app's output is also
+# written live to $out/app.partial.log, outside $scratch, so a timeout kill
+# (whose EXIT trap removes $scratch before the final copy) keeps what was logged.
 scratch=$(mktemp -d /var/tmp/clarp-slint-check.XXXXXX)
 trap 'kill "$host" ${third_party:-} 2>/dev/null; wait "$host" ${third_party:-} 2>/dev/null; rm -rf "$scratch"' EXIT
 host_args=(); [ "$name" = startup ] && host_args=(--roster 100)
@@ -121,7 +124,7 @@ CLARP_EXPLORER_FAILURE_OUT="$out" CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY 
     CLARP_TEST_FOREGROUND=1 CLARP_TEST_CLIPBOARD="$scratch/clipboard" \
     CLARP_TEST_TERMINAL_LOG="$scratch/terminal.jsonl" PATH="$scratch/bin:$PATH" \
     timeout "$limit" dbus-run-session --config-file="$PWD/tests/private-bus.conf" -- \
-    "${wrap[@]}" "target/${CLARP_CHECK_PROFILE:-debug}/clarp-slint" --check "$name" --out "$out" 2>&1 | tee -a "$scratch/run.log" | grep -E "^(ok|FAIL|E2E|perf)|panicked"
+    "${wrap[@]}" "target/${CLARP_CHECK_PROFILE:-debug}/clarp-slint" --check "$name" --out "$out" 2>&1 | tee -a "$scratch/run.log" ${CLARP_ROWS_CUSTODY:+"$out/app.partial.log"} | grep -E "^(ok|FAIL|E2E|perf)|panicked"
 done
 # The app's whole log beside the shots, to read when a stage times out.
 cp "$scratch/run.log" "$out/app.log"

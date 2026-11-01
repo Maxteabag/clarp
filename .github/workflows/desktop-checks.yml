@@ -8,10 +8,11 @@ name: Desktop checks (ROWS scratch proof)
 # a composer that really starts tall. walk records; C1 must be GREEN and NEG
 # must FAIL, else the job stops. Synthetic, public.
 # Budget (whole job <= 30 min, every step capped): epoch 1, checkout 1,
-# deps 2, toolchain 1, cache 1, build 10, 3 arms x 3, stage 1, upload 2 = 28,
-# plus 2 unallocated. Each arm's outer `timeout 150` exceeds check.sh's own
-# 120 s app limit, so a hung app is killed INSIDE check.sh, which still copies
-# app.log before its EXIT trap deletes its scratch dir. rows/admit.py admits each phase fail-closed with a 3 min
+# deps 2, toolchain 1, cache 1, build 10, 3 arms x 2, stage 1, upload 2 = 25,
+# plus 5 unallocated (the ROOT-v2 budget; no deadline extension). Timeout
+# custody: CLARP_ROWS_CUSTODY=1 makes check.sh write the app's output live to
+# $out/app.partial.log, outside its scratch dir, so an outer `timeout 100` kill
+# keeps rc (124) + the partial log; the oracle calls that INCOMPLETE (STOP). rows/admit.py admits each phase fail-closed with a 3 min
 # reserve. The upload carries only /tmp/rows-upload, staged to <= 80 MB.
 
 on:
@@ -67,46 +68,46 @@ jobs:
           cargo build --locked -p clarp-slint > /tmp/rows/build.log 2>&1
           sha256sum target/debug/clarp-slint >> /tmp/rows/source.txt
       - name: "ROWS walk: the PR #231 form (observed; correlation only)"
-        timeout-minutes: 3
+        timeout-minutes: 2
         run: |
           set -uo pipefail
-          python3 rows/admit.py walk 3 || exit 7
+          python3 rows/admit.py walk 2 || exit 7
           ulimit -f 40960
           # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
           # before its rc is recorded and the oracle judges it. Only this command runs without -e.
-          # timeout 150 > check.sh's own 120 s app timeout, so app.log survives a hang.
+          # A timeout is INCOMPLETE (STOP), never proof: CLARP_ROWS_CUSTODY keeps the log in $out.
           set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=walk timeout 150 slint-app/tests/check.sh send /tmp/rows/r-walk-1 > /tmp/rows/r-walk-1.log 2>&1
+          CLARP_ROWS_MEASURE=1 CLARP_ROWS_CUSTODY=1 CLARP_ROWS_SAMPLER=walk timeout 100 slint-app/tests/check.sh send /tmp/rows/r-walk-1 > /tmp/rows/r-walk-1.log 2>&1
           rc=$?
           set -e
           echo "rc=$rc" > /tmp/rows/r-walk-1.rc
           python3 rows/oracle.py walk /tmp/rows
       - name: "ROWS C1: bound handle (must be GREEN)"
-        timeout-minutes: 3
+        timeout-minutes: 2
         run: |
           set -uo pipefail
-          python3 rows/admit.py handle 3 || exit 7
+          python3 rows/admit.py handle 2 || exit 7
           ulimit -f 40960
           # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
           # before its rc is recorded and the oracle judges it. Only this command runs without -e.
-          # timeout 150 > check.sh's own 120 s app timeout, so app.log survives a hang.
+          # A timeout is INCOMPLETE (STOP), never proof: CLARP_ROWS_CUSTODY keeps the log in $out.
           set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle timeout 150 slint-app/tests/check.sh send /tmp/rows/r-handle-1 > /tmp/rows/r-handle-1.log 2>&1
+          CLARP_ROWS_MEASURE=1 CLARP_ROWS_CUSTODY=1 CLARP_ROWS_SAMPLER=handle timeout 100 slint-app/tests/check.sh send /tmp/rows/r-handle-1 > /tmp/rows/r-handle-1.log 2>&1
           rc=$?
           set -e
           echo "rc=$rc" > /tmp/rows/r-handle-1.rc
           python3 rows/oracle.py handle /tmp/rows
       - name: "ROWS NEG: C1 against a composer that really starts tall (must FAIL)"
-        timeout-minutes: 3
+        timeout-minutes: 2
         run: |
           set -uo pipefail
-          python3 rows/admit.py neg 3 || exit 7
+          python3 rows/admit.py neg 2 || exit 7
           ulimit -f 40960
           # The runner's shell is `bash -e`: the expected non-zero (a RED) must not end the step
           # before its rc is recorded and the oracle judges it. Only this command runs without -e.
-          # timeout 150 > check.sh's own 120 s app timeout, so app.log survives a hang.
+          # A timeout is INCOMPLETE (STOP), never proof: CLARP_ROWS_CUSTODY keeps the log in $out.
           set +e
-          CLARP_ROWS_MEASURE=1 CLARP_ROWS_SAMPLER=handle CLARP_ROWS_FORCE_TALL=1 timeout 150 slint-app/tests/check.sh send /tmp/rows/r-neg-1 > /tmp/rows/r-neg-1.log 2>&1
+          CLARP_ROWS_MEASURE=1 CLARP_ROWS_CUSTODY=1 CLARP_ROWS_SAMPLER=handle CLARP_ROWS_FORCE_TALL=1 timeout 100 slint-app/tests/check.sh send /tmp/rows/r-neg-1 > /tmp/rows/r-neg-1.log 2>&1
           rc=$?
           set -e
           echo "rc=$rc" > /tmp/rows/r-neg-1.rc

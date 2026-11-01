@@ -157,16 +157,20 @@ fn rows_composer_sample(id: &str, sent: Instant) -> f32 {
     let (height, before, after) = rows_composer();
     let index = ROWS_SAMPLES.with(|n| { n.set(n.get() + 1); n.get() });
     if headless::rows_on() && index == 3001 {
-        rows_line(format!("perf ROWS-CAP {}", json!({"samples_over": 3000})));   // never silent: the oracle fails on it
+        rows_line(format!("perf ROWS-OVERFLOW {}", json!({"samples_over": 3000})));   // never silent: the oracle fails on it
     }
     if headless::rows_on() && index <= 3000 {
-        let (row, pending) = if id.is_empty() { (None, (0, 0)) } else { app_now().measured_height(id) };
+        let (row, progress) = if id.is_empty() { (None, (0, 0)) } else { app_now().measured_height(id) };
+        let own = last_own().filter(|(own_id, ..)| own_id == id);
+        let pane = app_now().active_id();
         let (phase, reduced) = crate::window().map_or((String::new(), false), |w| {
             (w.global::<crate::SendFlight>().get_phase().to_string(), w.global::<crate::ChatLook>().get_reduced_motion())
         });
         rows_line(format!("perf ROWS-SAMPLE {}", json!({
-            "index": index, "at_ms": sent.elapsed().as_secs_f64() * 1000.0, "pane": app_now().active_id(), "row_id": id,
-            "batch": app_now().rows_batch(), "pending": [pending.0, pending.1], "send": ROWS_SEND.with(Cell::get), "row": row,
+            "index": index, "at_ms": sent.elapsed().as_secs_f64() * 1000.0, "pane": pane, "row_id": id,
+            "row_batch": headless::rows_row_batch(&pane, id), "measuring_batch": app_now().rows_batch(),
+            "book_progress": [progress.0, progress.1], "pending": own.as_ref().map(|o| o.1), "failed": own.as_ref().map(|o| o.2),
+            "stage": headless::rows_stage(), "send": ROWS_SEND.with(Cell::get), "row": row,
             "status": if id.is_empty() { String::new() } else { status_of(id) }, "phase": phase, "reduced": reduced,
             "composer": height, "seq_before": before, "seq_after": after, "mode": rows_mode(),
         })));
@@ -360,6 +364,10 @@ fn contrast(name: &str, rect: Rect) -> Option<f32> {
 
 fn stop_sampling() -> Vec<Sample> {
     SAMPLER.with(|s| s.borrow_mut().take());
+    if headless::rows_on() {
+        // The flush is tagged with the stage that stopped sampling (its scope).
+        println!("perf ROWS-FLUSH {}", json!({"stage": headless::rows_stage(), "taken": headless::rows_take_taken()}));
+    }
     for line in ROWS_LINES.with(|l| std::mem::take(&mut *l.borrow_mut())) {
         println!("{line}");
     }
@@ -367,7 +375,7 @@ fn stop_sampling() -> Vec<Sample> {
         println!("perf ROWS-MEASURE {}", json!({"seq": seq, "pane": pane, "batch": batch, "row_id": id, "height": height, "inside": inside, "app_dropped": app_dropped}));
     }
     if headless::rows_events_dropped() > 0 {
-        println!("perf ROWS-CAP {}", json!({"events_dropped": headless::rows_events_dropped()}));
+        println!("perf ROWS-OVERFLOW {}", json!({"events_dropped": headless::rows_events_dropped()}));
     }
     SAMPLES.with(|s| s.borrow().clone())
 }

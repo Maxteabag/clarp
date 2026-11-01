@@ -126,14 +126,16 @@ impl HeightBook {
     /// the blocks inside it are, and again once they are laid out, all
     /// before the window draws: the last report of the batch's frame is
     /// the height, so the batch counts as done only on the next update.
-    pub fn measured(&mut self, batch: i32, id: &str, height: f32, width: f32) {
+    /// (ROWS scratch proof only: returns whether the report was taken.)
+    pub fn measured(&mut self, batch: i32, id: &str, height: f32, width: f32) -> bool {
         if batch != self.batch {
-            return;
+            return false;
         }
         self.at_width(width);
-        let Some(row) = self.asked.get(id) else { return };
+        let Some(row) = self.asked.get(id) else { return false };
         self.heights.insert(row.id.clone(), (row.clone(), height, self.epoch));
         self.reported.insert(row.id.clone());
+        true
     }
 
     /// A row drawn in the chat at `height`: true when that is news (it

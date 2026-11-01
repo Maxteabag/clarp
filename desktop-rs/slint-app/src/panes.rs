@@ -164,10 +164,11 @@ impl App {
     pub fn row_measured(&self, pane: &str, batch: i32, id: &str, height: f32, width: f32) {
         // ROWS scratch proof only: every report, including one the app drops below.
         let borrowed = self.pane_state.try_borrow_mut().is_err();
-        crate::headless::rows_measured(pane, batch, id, height, borrowed);
+        let seq = crate::headless::rows_measured(pane, batch, id, height, borrowed);
         let Ok(mut panes) = self.pane_state.try_borrow_mut() else { return };
         if let Some(pane) = panes.iter_mut().find(|p| p.id == pane) {
-            pane.book.measured(batch, id, height, width);
+            let taken = pane.book.measured(batch, id, height, width);
+            crate::headless::rows_taken(seq, &pane.id, id, batch, taken); // ROWS scratch proof only
             crate::scroll_book::measure_soon();
         }
     }
