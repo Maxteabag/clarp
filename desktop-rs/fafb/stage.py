@@ -18,7 +18,7 @@ import sys
 CAP = 80 * 1024 * 1024
 META = 1024 * 1024    # kept free for RAW-SHA256SUMS' neighbours: OVERFLOW.json and STAGE.json
 # Priority order: verdicts and small logs first, frames last.
-ALLOW = ["source.txt", "*.rc", "*.verdict", "fa.log", "b-obs.log", "b-green.log", "b-neg.log",
+ALLOW = ["source.txt", "*.admission", "*.rc", "*.verdict", "fa.log", "b-obs.log", "b-green.log", "b-neg.log",
          "b-obs/app.log", "b-green/app.log", "b-neg/app.log", "build.log", "b-*/*.png"]
 
 raw, up = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
