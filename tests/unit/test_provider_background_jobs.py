@@ -1,6 +1,7 @@
 """Representative Claude 2.1.283 receipts; no paid model or live processes."""
 import json
 import os
+import sqlite3
 import time
 from datetime import datetime, timezone
 
@@ -755,7 +756,11 @@ def test_the_upgrade_ends_every_long_silent_task_once_and_leaves_recent_ones(cas
     provider.observe(owner, NATIVE, path)
     c = db.conn()
     c.execute('PRAGMA user_version = 119')
-    db_migrations._migrate(c)
+    c.row_factory = None  # the upgrade must not rely on the Host's Row factory
+    try:
+        db_migrations._migrate(c)
+    finally:
+        c.row_factory = sqlite3.Row
     assert c.execute('PRAGMA user_version').fetchone()[0] == db_schema._SCHEMA_VERSION
     assert jobs.get(ident)['terminal_reason'] == 'provider_task_evidence_lost'
     assert jobs.get(recent)['terminal_at'] is None
