@@ -189,6 +189,10 @@ def _migrate(con: sqlite3.Connection) -> None:
         # at 120); renumber in this source before CI, never skip a number.
         if version < 119:
             _migrate_to_v119(con)
+        # 121 is PROVISIONAL: 120 is taken by feat/agent-ring-device-optout (unmerged). If main's
+        # schema moves before this lands, renumber above every source; never reuse a taken number.
+        if 0 < version < 121:  # Data only: a new database has nothing to end.
+            _migrate_to_v121(con)
 
         con.execute(f"PRAGMA user_version = {db_schema._SCHEMA_VERSION}")
         con.execute("COMMIT")
@@ -905,6 +909,18 @@ def _migrate_to_v116(con: sqlite3.Connection) -> None:
     if "allow_paused" not in columns:
         con.execute("ALTER TABLE queued_turns"
                     " ADD COLUMN allow_paused INTEGER NOT NULL DEFAULT 0")
+
+
+def _migrate_to_v121(con: sqlite3.Connection) -> None:
+    """End provider tasks that lost their evidence long ago, once, at upgrade.
+
+    Before the observer learned to end them, a Claude background task with no
+    turn-exit link (launched before the fence, or by a process Clarp did not
+    start) stayed active forever. This applies the observer's rule to every
+    such row now rather than a few per visit. Data only: older code reads the
+    rows as ordinary terminal provider tasks, so a rollback needs nothing."""
+    from .provider_background_jobs import expire_lost_evidence
+    expire_lost_evidence(con, limit=None)
 
 
 def _migrate_to_v119(con: sqlite3.Connection) -> None:

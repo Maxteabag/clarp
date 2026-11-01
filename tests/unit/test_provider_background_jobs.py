@@ -673,3 +673,89 @@ def test_an_unreadable_process_identity_never_closes_a_live_turn(case, monkeypat
     assert provider.reap_exited_turns() == 0
     assert db.conn().execute('SELECT exited_at FROM provider_turns WHERE turn_token=?',
                              (token,)).fetchone()[0] is None
+
+
+DAY = provider.EVIDENCE_LOST_MS
+
+
+def _stale_unknown_task(owner, path, ident, age=DAY + 60_000):
+    """A task last heard of `age` ago with no turn-exit link: launched before
+    the fence, or by a process Clarp did not start."""
+    at = db.now_ms() - age
+    append(path, launch(at), receipt(at + 1))
+    provider.observe(owner, NATIVE, path)
+    job = jobs.get(ident)
+    assert (job['status'], job['metadata']['provider_state']) == ('queued', 'unknown')
+    return at
+
+
+def test_a_task_with_no_evidence_for_a_day_and_no_turn_ends_with_outcome_unknown(case):
+    owner, path, ident = case
+    _stale_unknown_task(owner, path, ident)
+    provider.ProviderJobObserver().poll_once()
+    job = jobs.get(ident)
+    assert (job['status'], job['outcome_state'], job['terminal_reason']) == (
+        'failed', 'unknown', 'provider_task_evidence_lost')
+    assert job['is_terminal'] and not job['can_cancel']
+    assert job['metadata']['stop_basis'] == 'evidence_lost'
+    assert db.conn().execute('SELECT COUNT(*) FROM background_jobs WHERE terminal_at IS NULL'
+                             ).fetchone()[0] == 0
+
+
+def test_a_task_silent_for_less_than_a_day_stays_unknown(case):
+    owner, path, ident = case
+    _stale_unknown_task(owner, path, ident, age=DAY - 60_000)
+    assert provider.sweep_lost_evidence() == 0
+    assert jobs.get(ident)['terminal_at'] is None
+
+
+def test_a_task_of_a_live_turn_is_never_ended_for_silence_only_by_its_exit(case):
+    owner, path, ident = case
+    token = _turn(owner)          # this test process: alive and identifiable
+    _stale_unknown_task(owner, path, ident)
+    provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, token)
+    assert provider.sweep_lost_evidence() == 0
+    assert jobs.get(ident)['terminal_at'] is None
+    provider.turn_exited(token)
+    assert jobs.get(ident)['terminal_reason'] == 'provider_turn_exited_without_result'
+
+
+def test_an_open_turn_without_process_identity_does_not_keep_a_task_forever(case):
+    owner, path, ident = case
+    unverified = provider.new_turn_token()
+    db.conn().execute("INSERT INTO provider_turns(turn_token,agent_id,provider,pid,start_token,started_at)"
+                      " VALUES (?,?,?,?,'',?)", (unverified, owner['agent_id'], 'claude', 999999,
+                                                 db.now_ms() - 2 * DAY))
+    _stale_unknown_task(owner, path, ident)
+    provider.record_task_turn(owner['agent_id'], NATIVE, TOOL, unverified)
+    assert provider.sweep_lost_evidence() == 1
+    assert jobs.get(ident)['terminal_reason'] == 'provider_task_evidence_lost'
+
+
+def test_a_completion_record_imported_after_evidence_was_lost_still_decides(case):
+    owner, path, ident = case
+    at = _stale_unknown_task(owner, path, ident)
+    assert provider.sweep_lost_evidence() == 1
+    append(path, notice('completed', at=at + 2))
+    provider.observe(owner, NATIVE, path)
+    job = jobs.get(ident)
+    assert (job['status'], job['outcome_state'], job['terminal_reason']) == (
+        'succeeded', 'succeeded', 'provider_completed')
+    assert not {'stop_basis', 'evidence_lost_at'} & set(job['metadata'])
+
+
+def test_the_upgrade_ends_every_long_silent_task_once_and_leaves_recent_ones(case):
+    from lib import db_migrations, db_schema
+    owner, path, ident = case
+    _stale_unknown_task(owner, path, ident)
+    recent = provider.job_id(owner['agent_id'], NATIVE, TOOL2)
+    append(path, record('assistant', at=db.now_ms() - 3_600_000, message={'content': [{
+        'type': 'tool_use', 'id': TOOL2, 'name': 'Bash',
+        'input': {'run_in_background': True, 'command': 'sleep 1'}}]}))
+    provider.observe(owner, NATIVE, path)
+    c = db.conn()
+    c.execute('PRAGMA user_version = 119')
+    db_migrations._migrate(c)
+    assert c.execute('PRAGMA user_version').fetchone()[0] == db_schema._SCHEMA_VERSION
+    assert jobs.get(ident)['terminal_reason'] == 'provider_task_evidence_lost'
+    assert jobs.get(recent)['terminal_at'] is None
