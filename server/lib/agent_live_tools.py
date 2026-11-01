@@ -545,9 +545,10 @@ class Transcript:
             self.entries.append(entry)
             try:
                 fd = os.open(self.partial, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-                with os.fdopen(fd, "a", encoding="utf-8") as handle:
-                    handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            except OSError as exc:
+                # default=str and errors="replace": a non-JSON value or a lone surrogate never stops the call
+                with os.fdopen(fd, "a", encoding="utf-8", errors="replace") as handle:
+                    handle.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+            except (OSError, ValueError, TypeError) as exc:
                 log_exception("agentLiveTranscriptAppend", exc, str(self.partial))
 
     def document(self) -> dict:
@@ -571,16 +572,20 @@ class Transcript:
             if self.done:
                 return
             self.done = True
+            tmp = self.final.with_name(self.final.name + ".tmp")
             try:
-                tmp = self.final.with_name(self.final.name + ".tmp")
                 fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(self.document(), handle, ensure_ascii=False, indent=1)
+                with os.fdopen(fd, "w", encoding="utf-8", errors="replace") as handle:
+                    json.dump(self.document(), handle, ensure_ascii=False, indent=1, default=str)
                     handle.flush()
                     os.fsync(handle.fileno())        # the rename below is atomic only for durable contents
                 os.replace(tmp, self.final)
                 self.partial.unlink(missing_ok=True)
-            except OSError as exc:              # the .jsonl stays: nothing is lost
+            except (OSError, ValueError, TypeError) as exc:     # the .jsonl stays: nothing is lost
+                try:
+                    tmp.unlink(missing_ok=True)
+                except OSError:
+                    pass
                 log_exception("agentLiveTranscriptFinish", exc, str(self.final))
 
 
@@ -1001,9 +1006,11 @@ class CallTools:
             dropped, self.asked, self.pending_relays = list(self.asked), {}, []
         if dropped:
             self._log("agentLiveAskDropped", f"call={self.call_id} ops={','.join(dropped)} reason=call ended")
-        if self.transcript is not None:
-            self.transcript.finish()
-        self.pool.shutdown(wait=False, cancel_futures=True)
+        try:
+            if self.transcript is not None:
+                self.transcript.finish()
+        finally:                                # the call's work always stops, whatever the transcript does
+            self.pool.shutdown(wait=False, cancel_futures=True)
 
     def _submit(self) -> None:
         with self.lock:
