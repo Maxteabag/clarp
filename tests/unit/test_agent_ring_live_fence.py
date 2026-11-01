@@ -20,6 +20,7 @@ from tests.unit.test_agent_ring_live import PHONE, sander  # noqa: F401 - sander
 from tests.unit.test_agent_ring_live_hardening import DELTA, _close, _fallback, _provider_ready, _session
 from tests.unit.test_agent_ring_live_socket import (Handler, Upstream, _admitted, _join, _ring_of, _serve, _wait,
                                                      call)  # noqa: F401 - call is a fixture
+from tests.unit.test_agent_ring_live_socket import _live_lifecycle  # noqa: F401 - autouse: no session outlives its test
 from tests.unit.test_agent_rings import env  # noqa: F401 - env is a fixture
 
 

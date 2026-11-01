@@ -22,6 +22,7 @@ the very agent whose terminal is live waits (queued) until the terminal closes.
 """
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 import pty
@@ -29,6 +30,7 @@ import select
 import shutil
 import signal
 import struct
+import sys
 import termios
 import threading
 import json
@@ -169,13 +171,15 @@ def _serve_pty(handler, *, key: str, argv: list[str], cwd: str,
     # Reader: PTY output -> client binary frames. EIO on Linux == child exited.
     def pump_pty() -> None:
         try:
+            wait = _pty_waiter(fd)
             while not stop.is_set():
                 try:
-                    r, _, _ = select.select([fd], [], [], 0.5)
-                except (OSError, ValueError):
+                    if not wait(0.5):
+                        continue
+                except (OSError, ValueError) as e:
+                    if not stop.is_set():
+                        log_exception("terminalPtyWaitFail", e, detail=session)
                     break
-                if fd not in r:
-                    continue
                 try:
                     data = os.read(fd, _READ_CHUNK)
                 except OSError:
@@ -184,6 +188,8 @@ def _serve_pty(handler, *, key: str, argv: list[str], cwd: str,
                     break
                 if not ws_write(ws.binary_frame(data)):
                     break
+        except (OSError, ValueError) as e:  # the wait could not be set up
+            log_exception("terminalPtyWaitFail", e, detail=session)
         finally:
             stop.set()
             # PTY EOF must release a client-frame read already blocked below.
@@ -255,6 +261,28 @@ def _serve_pty(handler, *, key: str, argv: list[str], cwd: str,
             except Exception as e:  # noqa: BLE001
                 log_exception("terminalDrainFail", e, detail=session)
         log("terminalClose", f"session={session} pid={pid}")
+
+
+def _pty_waiter(fd: int):
+    """A wait(timeout) -> readable? for the PTY master.
+
+    Linux waits with poll: select rejects fds >= FD_SETSIZE (1024), which a
+    busy server reaches, and the terminal then showed nothing. macOS poll()
+    does not support devices such as a PTY, so macOS keeps select() and with
+    it the 1024 limit.
+    """
+    if sys.platform == "darwin":
+        return lambda timeout: bool(select.select([fd], [], [], timeout)[0])
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+
+    def wait(timeout: float) -> bool:
+        events = poller.poll(int(timeout * 1000))
+        if any(ev & select.POLLNVAL for _fd, ev in events):
+            raise OSError(errno.EBADF, "PTY fd is not open")
+        return bool(events)
+
+    return wait
 
 
 def _kill(pid: int) -> None:
