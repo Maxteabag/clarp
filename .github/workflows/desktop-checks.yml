@@ -9,7 +9,7 @@ name: Desktop checks
 
 on:
   push:
-    branches-ignore: [main]
+    branches-ignore: [main, diag/basefix-s4]   # diag branch: never run desktop checks on the throwaway base-repair push
     paths:
       - "desktop-rs/**"
       - "static/icon.png"
