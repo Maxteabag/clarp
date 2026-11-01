@@ -72,7 +72,7 @@ def test_a_janitors_decisions_and_artifacts_stay_out_of_updates(fleet):
         [asked["artifact_id"]]
     assert [a["artifact_id"] for a in attention_index.page()["artifacts"]] == [report["artifact_id"]]
     badge = live_activity.badge_attention()
-    assert badge == {"count": 2, "agent_ids": {fleet["mike"]}}
+    assert badge == {"count": 2, "agent_ids": {fleet["mike"]}, "items": [fleet["mike"]] * 2}
     # The Janitor's own chat still has them.
     assert len(artifacts.list_artifacts(session="sam")) == 2
 
@@ -81,7 +81,7 @@ def test_a_janitor_failure_still_reaches_updates(fleet):
     item = _fail_twice(fleet)
     assert item["attention_kind"] == "janitor_failure" and item["agent_id"] == fleet["sam"]
     badge = live_activity.badge_attention()
-    assert badge == {"count": 1, "agent_ids": {fleet["sam"]}}
+    assert badge == {"count": 1, "agent_ids": {fleet["sam"]}, "items": [fleet["sam"]]}
 
 
 def _status(agent_id, session, state):
