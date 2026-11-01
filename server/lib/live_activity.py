@@ -426,9 +426,9 @@ class LiveActivityPusher:
             if parent in self._roster or parent in known:
                 row = self._roster.get(parent) or known[parent]
                 continue
-            from . import agents as agents_db
+            from . import identity
             try:
-                found = agents_db.get_by_agent_id(parent) or agents_db.get_by_session(parent)
+                found = identity.lookup(parent)
             except Exception:  # noqa: BLE001 - an orphan then, never the stream
                 return
             if not found:
