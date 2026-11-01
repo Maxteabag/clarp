@@ -244,6 +244,9 @@ pub struct Engine {
     /// Chats shown from their cached copy: once caught up, the Host's tail
     /// checks their order (`Conversation::adopt_tail_order`).
     order_check: HashSet<String>,
+    // Chats just opened from a cached copy, until their first delta: one
+    // over a page behind is replaced by the latest page, not walked forward.
+    catching_up: HashSet<String>,
     pending_log_mode: HashMap<String, String>,
     transcript_cache: Option<clarp_core::transcript_cache::TranscriptCache>,
     /// Chats with a cache write scheduled, and when each was last written.
@@ -370,6 +373,7 @@ impl Engine {
             freshness: Default::default(),
             log_in_flight: HashSet::new(),
             order_check: HashSet::new(),
+            catching_up: HashSet::new(),
             pending_log_mode: HashMap::new(),
             transcript_cache: config.transcript_cache.clone().map(clarp_core::transcript_cache::TranscriptCache::new),
             cache_save_due: HashSet::new(),
@@ -1139,6 +1143,7 @@ impl Engine {
             }
         }
         if self.conversations.get(session).is_some_and(|c| c.latest_revision() > 0) {
+            self.catching_up.insert(session.to_owned());
             self.request_delta(session);
         } else {
             self.request_tail(session, false);
@@ -1283,6 +1288,17 @@ impl Engine {
     fn apply_log(&mut self, session: &str, object: &Object, kind: LoadKind) {
         self.log_in_flight.remove(session);
         self.ensure_conversation(session);
+        if self.catching_up.remove(session) && kind == LoadKind::Delta && json::boolean(object, "has_more") {
+            // A chat opened from a copy over a page behind: its latest page
+            // replaces it, so it opens at the end. Walking the backlog forward
+            // a page at a time showed the chat far in the past while it
+            // loaded (and every page moved the view); older rows come on
+            // scrolling up, as for a chat opened fresh.
+            self.order_check.remove(session);
+            self.request_tail(session, true);
+            self.continue_pending_log_request(session);
+            return;
+        }
         self.with_conversation(session, |c| c.apply_log(object, kind));
         self.schedule_cache_save(session);
         if kind == LoadKind::Delta && json::boolean(object, "has_more") {
