@@ -167,15 +167,26 @@ def _serve_pty(handler, *, key: str, argv: list[str], cwd: str,
                 return False
 
     # Reader: PTY output -> client binary frames. EIO on Linux == child exited.
+    # poll, not select: select rejects fds >= FD_SETSIZE (1024), which a busy
+    # server reaches, and the terminal then showed nothing.
+    poller = select.poll()
+    poller.register(fd, select.POLLIN)
+
     def pump_pty() -> None:
         try:
             while not stop.is_set():
                 try:
-                    r, _, _ = select.select([fd], [], [], 0.5)
-                except (OSError, ValueError):
+                    events = poller.poll(500)
+                except OSError as e:
+                    if not stop.is_set():
+                        log_exception("terminalPtyWaitFail", e, detail=session)
                     break
-                if fd not in r:
+                if not events:
                     continue
+                if any(ev & select.POLLNVAL for _fd, ev in events):
+                    if not stop.is_set():
+                        log("terminalPtyWaitFail", f"session={session} fd closed")
+                    break
                 try:
                     data = os.read(fd, _READ_CHUNK)
                 except OSError:
